@@ -42,9 +42,26 @@ docker compose up --build
 docker compose exec app python scripts/seed.py
 ```
 
-## Локальный запуск (без Docker)
+## Быстрый запуск без Docker (SQLite dev)
 
-Нужен доступный PostgreSQL. Затем:
+Если PostgreSQL/Docker нет — поднять весь стек на SQLite:
+```powershell
+# backend (порт 8000)
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+$env:AIOS_DATABASE_URL = "sqlite+aiosqlite:///./dev.db"; $env:PYTHONPATH = "."
+python scripts/seed.py                       # создаст dev.db и наполнит демо-сделками
+python -m uvicorn main:app --port 8000
+
+# frontend (порт 3000) — в отдельном окне
+npm --prefix ./frontend install
+npm --prefix ./frontend run dev              # http://localhost:3000 (SSR ходит на :8000)
+```
+В SQLite-режиме таблицы создаются автоматически (минуя Alembic — в SQLite нет схем).
+Источник истины для PostgreSQL — миграции Alembic.
+
+## Локальный запуск на PostgreSQL
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
