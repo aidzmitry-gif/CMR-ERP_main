@@ -446,6 +446,39 @@ async def test_price_engine(session, api):
     assert item["min_price"] == 1450
 
 
+async def test_telegram_bot(session, api):
+    # /help перечисляет встроенные команды и команды модулей
+    r = await api.post("/telegram/webhook", json={"message": {"text": "/help", "chat": {"id": 1}}})
+    assert r.status_code == 200
+    help_text = r.json()["text"]
+    assert "/approvals" in help_text
+    assert "/deals" in help_text  # команда, объявленная модулем sales
+
+    # создаём согласование и видим его в боте
+    deal = (
+        await api.post("/sales/deals", json={"number": "TG-1", "title": "t", "counterparty": "ООО Бот"})
+    ).json()
+    appr = (
+        await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
+    ).json()
+
+    r = await api.post("/telegram/webhook", json={"message": {"text": "/approvals", "chat": {"id": 1}}})
+    assert f"#{appr['id']}" in r.json()["text"]
+
+    # согласуем прямо в боте (human-in-the-loop в Telegram)
+    r = await api.post(
+        "/telegram/webhook", json={"message": {"text": f"/approve {appr['id']}", "chat": {"id": 1}}}
+    )
+    assert "approved" in r.json()["text"]
+
+    decided = (await api.get(f"/approvals?entity_ref=deal:{deal['id']}")).json()
+    assert decided[0]["status"] == "approved"
+
+    # неизвестная команда
+    r = await api.post("/telegram/webhook", json={"message": {"text": "/xyz", "chat": {"id": 1}}})
+    assert "не распознана" in r.json()["text"]
+
+
 async def test_owner_dashboard(session, api):
     # данные для метрик: сделка + согласование на ней
     deal = (

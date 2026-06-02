@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from config.modules import ENABLED_MODULES
-from core.runtime import approval_routes, system_routes
+from core.runtime import approval_routes, system_routes, telegram_routes
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
 from core.services import build_services
@@ -70,10 +70,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
 
-    # системные роуты ядра (/health, /system/modules, /system/events)
+    # системные роуты ядра (/health, /system/modules, /system/events, /system/owner)
     app.include_router(system_routes.router)
     # согласования (human-in-the-loop)
     app.include_router(approval_routes.router)
+    # Telegram-интерфейс (часть 11): команды и согласования в боте
+    app.include_router(telegram_routes.router)
 
     # роуты модулей под их префиксами
     for reg in core.routers:
