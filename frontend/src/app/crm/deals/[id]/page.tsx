@@ -2,22 +2,18 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Calendar,
-  ChevronDown,
   ChevronRight,
-  Filter,
   Flag,
-  MessageCircle,
   Package,
   Pencil,
-  Send,
   Star,
   Target,
   User,
 } from "lucide-react";
-import { FaWhatsapp } from "react-icons/fa";
 import { ChannelButtons } from "@/components/channels";
 import { DealApprovals } from "@/components/deal-approvals";
 import { DealDocuments } from "@/components/deal-documents";
+import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
@@ -91,50 +87,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </button>
         </div>
 
-        {/* Сообщения */}
-        <div className="mt-4 rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 font-semibold text-ink">
-              <MessageCircle size={18} className="text-brand-600" /> Сообщения
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600">
-                Все мессенджеры <ChevronDown size={14} />
-              </button>
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500">
-                <Filter size={14} />
-              </button>
-            </div>
-          </div>
-
-          {d.messages.map((m) => (
-            <div key={m.time} className="mt-3 rounded-xl bg-slate-50 p-3">
-              <div className="flex items-center gap-2 text-sm">
-                <span
-                  className="flex h-5 w-5 items-center justify-center rounded-full"
-                  style={{ backgroundColor: "#25D36622", color: "#25D366" }}
-                >
-                  <FaWhatsapp size={12} />
-                </span>
-                <span className="font-medium text-ink">{m.from}</span>
-                <span className="text-muted">• {m.time}</span>
-              </div>
-              <p className="mt-1.5 text-sm text-slate-600">
-                {m.text} <button className="font-medium text-brand-600">Ещё</button>
-              </p>
-            </div>
-          ))}
-
-          <div className="mt-3 flex items-center gap-2">
-            <input
-              placeholder="Написать сообщение..."
-              className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-brand"
-            />
-            <button className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
-              <Send size={16} />
-            </button>
-          </div>
-        </div>
+        {/* Сообщения (омниканальная переписка, из API) */}
+        <DealMessages dealId={id} />
 
         {/* Документы сделки (счёт/договор/заказ) + запись в 1С */}
         <DealDocuments dealId={id} />

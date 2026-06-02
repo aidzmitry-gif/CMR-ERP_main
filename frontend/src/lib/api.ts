@@ -290,3 +290,37 @@ export async function decideDocument(docId: number, approved: boolean, by: strin
     return false;
   }
 }
+
+export interface DealMsg {
+  id: number;
+  channel: string;
+  direction: string;
+  author: string;
+  text: string;
+  created_at: string;
+}
+
+/** Омниканальная история переписки по сделке (клиент, через /api). */
+export async function fetchMessages(dealId: string): Promise<DealMsg[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/messages`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as DealMsg[];
+  } catch {
+    return [];
+  }
+}
+
+/** Отправить сообщение по сделке (канал + текст). */
+export async function sendMessage(dealId: string, channel: string, text: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel, text, author: "Менеджер", direction: "out" }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

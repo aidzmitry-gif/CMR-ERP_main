@@ -348,6 +348,44 @@ async def test_order_reserves_stock(session, api):
     assert "sales.document.posted" in types
 
 
+async def test_messages_omnichannel(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "MSG-1", "title": "t", "counterparty": "c"})
+    ).json()
+
+    # истории пока нет
+    assert (await api.get(f"/sales/deals/{deal['id']}/messages")).json() == []
+
+    # отправить сообщение по каналу
+    r = await api.post(
+        f"/sales/deals/{deal['id']}/messages",
+        json={"channel": "telegram", "text": "Здравствуйте!", "author": "Менеджер"},
+    )
+    assert r.status_code == 201
+    msg = r.json()
+    assert msg["channel"] == "telegram"
+    assert msg["direction"] == "out"
+    assert msg["text"] == "Здравствуйте!"
+
+    # появилось в истории переписки
+    history = (await api.get(f"/sales/deals/{deal['id']}/messages")).json()
+    assert len(history) == 1
+    assert history[0]["text"] == "Здравствуйте!"
+
+    # сообщение → событие в шину
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.message.sent" in types
+
+    # несуществующая сделка → 404
+    assert (
+        await api.post("/sales/deals/999999/messages", json={"channel": "email", "text": "x"})
+    ).status_code == 404
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 

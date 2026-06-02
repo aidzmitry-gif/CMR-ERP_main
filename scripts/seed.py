@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
 from core.services import build_services
-from modules.sales.models import Activity, Deal, DealItem, KpiTarget
+from modules.sales.models import Activity, Deal, DealItem, KpiTarget, Message
 
 KPI_DATE = date(2026, 6, 2)
 
@@ -101,6 +101,18 @@ async def main() -> None:
             if alfa and "ROLL-5" in by_code and "REBAR-12" in by_code:
                 s.add(DealItem(deal_id=alfa.id, sku_id=by_code["ROLL-5"].id, qty=Decimal("12")))
                 s.add(DealItem(deal_id=alfa.id, sku_id=by_code["REBAR-12"].id, qty=Decimal("8")))
+
+        # Омниканальная переписка по сделке «АльфаМеталл» (ч.10)
+        if (await s.execute(select(Message))).scalars().first() is None:
+            alfa = (
+                await s.execute(select(Deal).where(Deal.number == "CRM-2024-0156"))
+            ).scalars().first()
+            if alfa:
+                s.add_all([
+                    Message(deal_id=alfa.id, channel="whatsapp", direction="in", author="Клиент", text="Добрый день! Уточните сроки поставки листа 5 мм и возможность доставки на следующей неделе."),
+                    Message(deal_id=alfa.id, channel="whatsapp", direction="out", author="Иванов П.П.", text="Здравствуйте! Лист 5 мм есть на складе, отгрузка в течение 2 дней, доставку организуем."),
+                    Message(deal_id=alfa.id, channel="email", direction="out", author="Иванов П.П.", text="Направил коммерческое предложение на почту, спецификация во вложении."),
+                ])
 
         # Цели KPI + активности (План/Факт)
         if (await s.execute(select(KpiTarget))).scalars().first() is None:
