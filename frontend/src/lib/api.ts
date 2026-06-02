@@ -189,10 +189,10 @@ export async function fetchKpis(): Promise<Kpi[]> {
   }
 }
 
-/** Перечитать KPI с клиента (после отметки активности). */
-export async function getKpis(): Promise<Kpi[]> {
+/** Перечитать KPI с клиента за период (после отметки активности / смены периода). */
+export async function getKpis(period = "day"): Promise<Kpi[]> {
   try {
-    const res = await fetch("/api/sales/kpis", { cache: "no-store" });
+    const res = await fetch(`/api/sales/kpis?period=${encodeURIComponent(period)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiKpi[]).map(mapKpi);
   } catch {

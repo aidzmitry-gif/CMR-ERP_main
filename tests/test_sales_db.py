@@ -100,6 +100,31 @@ async def test_kpis(session, api):
     assert item["percent"] == 3
 
 
+async def test_kpis_period_scaling(session, api):
+    from datetime import date
+
+    from modules.sales.models import Activity, KpiTarget
+
+    session.add(KpiTarget(key="calls_p", title="Звонки", target=10, unit="count", icon="phone", tone="indigo", sort_order=1))
+    for _ in range(8):
+        session.add(Activity(kpi_key="calls_p", value=1, date=date(2026, 6, 2)))
+    await session.commit()
+
+    # день: план = дневная цель 10, факт 8 → 80%
+    day = next(x for x in (await api.get("/sales/kpis?period=day")).json() if x["key"] == "calls_p")
+    assert day["target"] == 10
+    assert day["actual"] == 8
+    assert day["percent"] == 80
+
+    # месяц: план масштабируется (10 × 22 = 220), факт тот же → процент ниже
+    month = next(
+        x for x in (await api.get("/sales/kpis?period=month")).json() if x["key"] == "calls_p"
+    )
+    assert month["target"] == 220
+    assert month["actual"] == 8
+    assert month["percent"] == round(8 / 220 * 100)
+
+
 async def test_deal_items(session, api):
     from core.domain.models import Sku
     from modules.sales.models import DealItem

@@ -33,6 +33,14 @@ import { formatMoney } from "@/lib/format";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, Stage } from "@/lib/types";
 
+const PERIODS = [
+  { key: "day", label: "День" },
+  { key: "week", label: "Неделя" },
+  { key: "month", label: "Месяц" },
+  { key: "quarter", label: "Квартал" },
+  { key: "year", label: "Год" },
+];
+
 function pluralDeals(n: number): string {
   const d10 = n % 10;
   const d100 = n % 100;
@@ -107,6 +115,7 @@ export function DealsWorkspace({
 }) {
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
+  const [period, setPeriod] = useState("day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
@@ -152,7 +161,13 @@ export function DealsWorkspace({
 
   async function handleLog(kpiKey: string) {
     if (!(await logActivity(kpiKey))) return;
-    const fresh = await getKpis();
+    const fresh = await getKpis(period);
+    if (fresh.length) setKpis(fresh);
+  }
+
+  async function handlePeriod(p: string) {
+    setPeriod(p);
+    const fresh = await getKpis(p);
     if (fresh.length) setKpis(fresh);
   }
 
@@ -187,9 +202,27 @@ export function DealsWorkspace({
           </button>
         </div>
 
-        {/* План на сегодня */}
+        {/* План / Факт по периодам */}
         <section className="mt-5">
-          <h2 className="mb-3 font-semibold text-ink">План на сегодня</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold text-ink">План / Факт</h2>
+            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
+              {PERIODS.map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => handlePeriod(p.key)}
+                  className={clsx(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    period === p.key
+                      ? "bg-brand-100 text-brand-600"
+                      : "text-slate-500 hover:text-slate-700",
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             {kpis.map((kpi) => (
               <KpiCard key={kpi.id} kpi={kpi} onLog={() => handleLog(kpi.id)} />
