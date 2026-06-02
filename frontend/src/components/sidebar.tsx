@@ -14,6 +14,7 @@ import {
   Wallet,
   Workflow,
 } from "lucide-react";
+import Link from "next/link";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -21,11 +22,12 @@ interface ModuleItem {
   label: string;
   Icon: IconCmp;
   active?: boolean;
-  sub?: { label: string; active?: boolean }[];
+  href?: string;
+  sub?: { label: string; active?: boolean; href?: string }[];
 }
 
 const MODULES: ModuleItem[] = [
-  { label: "Главная", Icon: Home },
+  { label: "Главная", Icon: Home, href: "/crm/owner" },
   {
     label: "CRM",
     Icon: Workflow,
@@ -34,7 +36,7 @@ const MODULES: ModuleItem[] = [
       { label: "Продажи" },
       { label: "Клиенты" },
       { label: "Контакты" },
-      { label: "Сделки", active: true },
+      { label: "Сделки", active: true, href: "/crm/deals" },
     ],
   },
   { label: "Закупки", Icon: ShoppingCart },
@@ -64,34 +66,46 @@ export function Sidebar() {
         <div className="px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
           Модули
         </div>
-        {MODULES.map((m) => (
-          <div key={m.label}>
-            <div
-              className={clsx(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                m.active ? "bg-brand-100 text-brand-600" : "text-slate-600 hover:bg-slate-50",
+        {MODULES.map((m) => {
+          const cls = clsx(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
+            m.active ? "bg-brand-100 text-brand-600" : "text-slate-600 hover:bg-slate-50",
+          );
+          return (
+            <div key={m.label}>
+              {m.href ? (
+                <Link href={m.href} className={cls}>
+                  <m.Icon size={18} />
+                  {m.label}
+                </Link>
+              ) : (
+                <div className={cls}>
+                  <m.Icon size={18} />
+                  {m.label}
+                </div>
               )}
-            >
-              <m.Icon size={18} />
-              {m.label}
-            </div>
-            {m.sub && (
-              <div className="mb-1 mt-1 flex flex-col">
-                {m.sub.map((s) => (
-                  <div
-                    key={s.label}
-                    className={clsx(
+              {m.sub && (
+                <div className="mb-1 mt-1 flex flex-col">
+                  {m.sub.map((s) => {
+                    const scls = clsx(
                       "rounded-lg py-1.5 pl-11 pr-3 text-sm",
                       s.active ? "font-medium text-brand-600" : "text-slate-500 hover:bg-slate-50",
-                    )}
-                  >
-                    {s.label}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                    );
+                    return s.href ? (
+                      <Link key={s.label} href={s.href} className={scls}>
+                        {s.label}
+                      </Link>
+                    ) : (
+                      <div key={s.label} className={scls}>
+                        {s.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       {/* профиль */}

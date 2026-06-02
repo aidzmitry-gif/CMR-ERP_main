@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import AuditLog, OutboxEvent
+from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
 from core.runtime.deps import get_session
 
 router = APIRouter(tags=["system"])
@@ -65,3 +65,30 @@ async def system_audit(session: AsyncSession = Depends(get_session)) -> list[dic
         {"id": a.id, "ts": str(a.ts), "actor": a.actor, "action": a.action, "entity_ref": a.entity_ref}
         for a in rows
     ]
+
+
+@router.get("/system/owner")
+async def system_owner(request: Request, session: AsyncSession = Depends(get_session)) -> dict:
+    """Панель владельца — AI Control Tower без AI (core-8, часть 11).
+
+    Здоровье бизнеса одним взглядом: согласования (ожидают/всего), активность
+    (события и аудит), справочники и состав подключённых модулей с их виджетами.
+    """
+    core = request.app.state.core
+
+    async def _count(model, *where) -> int:
+        query = select(func.count()).select_from(model)
+        for condition in where:
+            query = query.where(condition)
+        return (await session.execute(query)).scalar() or 0
+
+    return {
+        "approvals_pending": await _count(Approval, Approval.status == "pending"),
+        "approvals_total": await _count(Approval),
+        "audit_count": await _count(AuditLog),
+        "events_count": await _count(OutboxEvent),
+        "counterparties": await _count(Counterparty),
+        "skus": await _count(Sku),
+        "modules": core.loaded_modules,
+        "widgets": [{"key": w.key, "title": w.title} for w in core.widgets],
+    }

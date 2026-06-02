@@ -446,6 +446,24 @@ async def test_price_engine(session, api):
     assert item["min_price"] == 1450
 
 
+async def test_owner_dashboard(session, api):
+    # данные для метрик: сделка + согласование на ней
+    deal = (
+        await api.post("/sales/deals", json={"number": "OWN-1", "title": "t", "counterparty": "c"})
+    ).json()
+    await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
+
+    r = await api.get("/system/owner")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["approvals_pending"] >= 1
+    assert d["approvals_total"] >= 1
+    # состав подключённых модулей и их виджеты видны владельцу
+    assert "sales" in d["modules"]
+    assert "integrations" in d["modules"]
+    assert any(w["key"] == "sales_pipeline" for w in d["widgets"])
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 

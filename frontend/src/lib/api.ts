@@ -348,3 +348,36 @@ export async function sendMessage(dealId: string, channel: string, text: string)
     return false;
   }
 }
+
+export interface OwnerMetrics {
+  approvals_pending: number;
+  approvals_total: number;
+  audit_count: number;
+  events_count: number;
+  counterparties: number;
+  skus: number;
+  modules: string[];
+  widgets: { key: string; title: string }[];
+}
+
+export interface OwnerDashboard {
+  metrics: OwnerMetrics;
+  stages: Stage[];
+  kpis: Kpi[];
+}
+
+/** Панель владельца (Control Tower): кросс-модульные метрики + воронка + KPI (SSR). */
+export async function fetchOwnerDashboard(): Promise<OwnerDashboard | null> {
+  try {
+    const [metricsRes, stages, kpis] = await Promise.all([
+      fetch(`${BASE}/system/owner`, { cache: "no-store" }),
+      fetchBoardStages(),
+      fetchKpis(),
+    ]);
+    if (!metricsRes.ok) throw new Error(String(metricsRes.status));
+    const metrics = (await metricsRes.json()) as OwnerMetrics;
+    return { metrics, stages, kpis };
+  } catch {
+    return null;
+  }
+}
