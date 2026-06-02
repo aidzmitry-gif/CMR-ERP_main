@@ -17,12 +17,12 @@ import {
 import { FaWhatsapp } from "react-icons/fa";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
+import { fetchDealDetail } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
-import { getDealDetail } from "@/lib/mock-data";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = getDealDetail(id);
+  const d = await fetchDealDetail(id);
 
   return (
     <div className="mx-auto max-w-md px-4 py-6">

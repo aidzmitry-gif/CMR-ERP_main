@@ -12,6 +12,10 @@ venv/
 env/
 .env
 
+# Локальная dev-БД (SQLite)
+dev.db
+*.sqlite3
+
 # Инструменты
 .pytest_cache/
 .ruff_cache/

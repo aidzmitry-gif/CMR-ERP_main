@@ -13,9 +13,11 @@ import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { Board } from "@/components/kanban/board";
 import { KpiCard } from "@/components/kpi-card";
+import { fetchBoardStages } from "@/lib/api";
 import { KPIS } from "@/lib/mock-data";
 
-export default function DealsPage() {
+export default async function DealsPage() {
+  const stages = await fetchBoardStages();
   return (
     <AppShell crumbs={["CRM", "Сделки"]}>
       <main className="flex-1 overflow-auto p-6">
@@ -66,7 +68,7 @@ export default function DealsPage() {
 
         {/* Канбан */}
         <div className="mt-3">
-          <Board />
+          <Board stages={stages} />
         </div>
 
         {/* Итоги по воронке */}
