@@ -16,12 +16,15 @@ router = APIRouter(tags=["approvals"])
 @router.get("/approvals", response_model=list[ApprovalOut])
 async def list_approvals(
     status: str | None = None,
+    entity_ref: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Список согласований (опционально по статусу: pending/approved/rejected)."""
+    """Список согласований (фильтры: статус и/или сущность, например ``deal:7``)."""
     query = select(Approval).order_by(Approval.id.desc())
     if status:
         query = query.where(Approval.status == status)
+    if entity_ref:
+        query = query.where(Approval.entity_ref == entity_ref)
     return (await session.execute(query)).scalars().all()
 
 

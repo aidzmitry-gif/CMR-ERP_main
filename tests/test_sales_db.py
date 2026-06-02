@@ -202,6 +202,9 @@ async def test_approval_request_and_decide(session, api):
     pending = (await api.get("/approvals?status=pending")).json()
     assert any(a["id"] == appr["id"] for a in pending)
 
+    by_ref = (await api.get(f"/approvals?entity_ref=deal:{deal['id']}")).json()
+    assert len(by_ref) == 1
+
     decided = await api.post(f"/approvals/{appr['id']}/approve", json={"by": "Юрист Юрьев"})
     assert decided.status_code == 200
     assert decided.json()["status"] == "approved"

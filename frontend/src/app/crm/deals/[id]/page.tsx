@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
 import { ChannelButtons } from "@/components/channels";
+import { DealApprovals } from "@/components/deal-approvals";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
@@ -133,6 +134,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </button>
           </div>
         </div>
+
+        {/* Согласования (human-in-the-loop) */}
+        <DealApprovals dealId={id} />
 
         {/* Фокус / Приоритет */}
         <div className="mt-4 grid grid-cols-2 gap-3">

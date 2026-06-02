@@ -189,3 +189,56 @@ export async function logActivity(kpiKey: string, value = 1): Promise<boolean> {
     return false;
   }
 }
+
+export interface Approval {
+  id: number;
+  kind: string;
+  entity_ref: string;
+  subject: string;
+  route: string;
+  status: string;
+  requested_by: string;
+  decided_by: string | null;
+}
+
+/** Согласования по сделке (клиент, через /api). */
+export async function fetchApprovals(params: { entityRef?: string; status?: string } = {}): Promise<Approval[]> {
+  try {
+    const q = new URLSearchParams();
+    if (params.entityRef) q.set("entity_ref", params.entityRef);
+    if (params.status) q.set("status", params.status);
+    const res = await fetch(`/api/approvals?${q.toString()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as Approval[];
+  } catch {
+    return [];
+  }
+}
+
+/** Отправить сделку на согласование. */
+export async function requestApproval(dealId: string, kind: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/request-approval`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, requested_by: "Менеджер" }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Принять решение по согласованию. */
+export async function decideApproval(id: number, approved: boolean, by: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/approvals/${id}/${approved ? "approve" : "reject"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ by }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
