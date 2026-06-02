@@ -7,17 +7,25 @@ async-драйвер sqlite не ругался на «другой loop».
 """
 from __future__ import annotations
 
+import importlib
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import core.domain.models  # noqa: F401  — регистрация таблиц на Base.metadata
-import modules.sales.models  # noqa: F401
+from config.modules import ENABLED_MODULES
 from core.db.base import Base
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 
-SCHEMA_TRANSLATE = {"sales": None}
+for _module in ENABLED_MODULES:
+    try:
+        importlib.import_module(f"modules.{_module}.models")
+    except ModuleNotFoundError:
+        pass
+
+SCHEMA_TRANSLATE = {module: None for module in ENABLED_MODULES}
 
 
 @pytest_asyncio.fixture

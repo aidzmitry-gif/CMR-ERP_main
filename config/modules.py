@@ -7,6 +7,7 @@
 """
 ENABLED_MODULES: list[str] = [
     "sales",
+    "integrations",
     # Подключаются по мере готовности (порядок — см. дорожную карту):
     # "nomenclature",
     # "wms",

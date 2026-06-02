@@ -35,8 +35,12 @@ class Database:
         if self.engine is None:
             engine = create_async_engine(self.url, pool_pre_ping=True, future=True)
             if self.is_sqlite:
-                # в SQLite нет схем — отображаем sales.* в основную БД
-                engine = engine.execution_options(schema_translate_map={"sales": None})
+                # в SQLite нет схем — отображаем схемы модулей в основную БД
+                from config.modules import ENABLED_MODULES
+
+                engine = engine.execution_options(
+                    schema_translate_map={module: None for module in ENABLED_MODULES}
+                )
             self.engine = engine
             self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
 
@@ -46,9 +50,17 @@ class Database:
         assert self.engine is not None
 
         if self.is_sqlite:
-            import core.domain.models  # noqa: F401  — регистрация таблиц
-            import modules.sales.models  # noqa: F401
+            import importlib
+
+            import core.domain.models  # noqa: F401  — регистрация таблиц ядра
+            from config.modules import ENABLED_MODULES
             from core.db.base import Base
+
+            for module in ENABLED_MODULES:
+                try:
+                    importlib.import_module(f"modules.{module}.models")
+                except ModuleNotFoundError:
+                    pass
 
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
