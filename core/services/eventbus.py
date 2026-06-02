@@ -15,7 +15,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import OutboxEvent
+from core.domain.models import AuditLog, OutboxEvent
 
 logger = logging.getLogger("aios.eventbus")
 
@@ -53,6 +53,15 @@ class OutboxEventBus:
             logger.info("relay %s#%d -> %d", event.event_type, event.id, len(self._handlers.get(event.event_type, [])))
             await self.dispatch(event.event_type, event.payload)
             event.processed_at = datetime.now(timezone.utc)
+            # неизменяемый аудит: проекция каждого события
+            session.add(
+                AuditLog(
+                    actor=str(event.payload.get("by") or event.payload.get("actor") or ""),
+                    action=event.event_type,
+                    entity_ref=str(event.payload.get("entity_ref") or ""),
+                    detail=event.payload,
+                )
+            )
         if rows:
             await session.commit()
         return len(rows)

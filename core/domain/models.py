@@ -98,3 +98,16 @@ class Approval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     due_at: Mapped[datetime | None] = mapped_column(DateTime)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class AuditLog(Base):
+    """Неизменяемый журнал аудита — проекция доменных событий (append-only, часть 5)."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    actor: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    action: Mapped[str] = mapped_column(String(128))
+    entity_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    detail: Mapped[dict] = mapped_column(JSON)

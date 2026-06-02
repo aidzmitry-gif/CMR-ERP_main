@@ -9,6 +9,7 @@ from core.domain.models import Approval
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.services.approvals import ApprovalDecision, ApprovalOut
+from core.services.auth import require_permission
 
 router = APIRouter(tags=["approvals"])
 
@@ -51,6 +52,7 @@ async def approve(
     payload: ApprovalDecision,
     core: Core = Depends(get_core),
     session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("sales.deal.approve")),
 ):
     return await _decide(approval_id, True, payload, core, session)
 
@@ -61,5 +63,6 @@ async def reject(
     payload: ApprovalDecision,
     core: Core = Depends(get_core),
     session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("sales.deal.approve")),
 ):
     return await _decide(approval_id, False, payload, core, session)

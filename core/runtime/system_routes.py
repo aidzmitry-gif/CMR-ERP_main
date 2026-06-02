@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import OutboxEvent
+from core.domain.models import AuditLog, OutboxEvent
 from core.runtime.deps import get_session
 
 router = APIRouter(tags=["system"])
@@ -52,4 +52,16 @@ async def system_events(session: AsyncSession = Depends(get_session)) -> list[di
             "processed": e.processed_at is not None,
         }
         for e in rows
+    ]
+
+
+@router.get("/system/audit")
+async def system_audit(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    """Неизменяемый журнал аудита (проекция событий, часть 5)."""
+    rows = (
+        await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(50))
+    ).scalars().all()
+    return [
+        {"id": a.id, "ts": str(a.ts), "actor": a.actor, "action": a.action, "entity_ref": a.entity_ref}
+        for a in rows
     ]

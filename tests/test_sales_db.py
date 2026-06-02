@@ -235,3 +235,56 @@ async def test_approval_escalation(session):
     assert await svc.escalate_once(session) == 1
     await session.refresh(overdue)
     assert overdue.escalation_level == 1
+
+
+async def test_rbac_approve_enforced(session, api):
+    deal = (
+        await api.post("/sales/deals", json={"number": "RB-1", "title": "t", "counterparty": "c"})
+    ).json()
+    appr = (
+        await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
+    ).json()
+
+    # роль без права (латиницей — HTTP-заголовки только ASCII) → 403
+    denied = await api.post(
+        f"/approvals/{appr['id']}/approve", json={"by": "x"}, headers={"X-User-Roles": "guest"}
+    )
+    assert denied.status_code == 403
+
+    # без заголовка пользователь по умолчанию — Админ → 200
+    ok = await api.post(f"/approvals/{appr['id']}/approve", json={"by": "Админ"})
+    assert ok.status_code == 200
+
+
+def test_has_permission_by_role():
+    from core.runtime.contract import Role
+    from core.services.auth import CurrentUser, has_permission
+
+    class _Core:
+        roles = [
+            Role("Менеджер", ("sales.deal.read",)),
+            Role("РОП", ("sales.deal.read", "sales.deal.approve")),
+        ]
+
+    core = _Core()
+    assert has_permission(core, CurrentUser("u", ["Менеджер"]), "sales.deal.approve") is False
+    assert has_permission(core, CurrentUser("u", ["РОП"]), "sales.deal.approve") is True
+    assert has_permission(core, CurrentUser("u", ["Админ"]), "whatever") is True
+
+
+async def test_audit_log_projection(session):
+    from sqlalchemy import select
+
+    from core.domain.models import AuditLog
+    from core.services.eventbus import OutboxEventBus
+
+    bus = OutboxEventBus()
+    bus.emit(session, "test.audit", {"entity_ref": "deal:1", "by": "Иван"})
+    await session.commit()
+    await bus.relay_once(session)
+
+    rows = (await session.execute(select(AuditLog))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].action == "test.audit"
+    assert rows[0].actor == "Иван"
+    assert rows[0].entity_ref == "deal:1"
