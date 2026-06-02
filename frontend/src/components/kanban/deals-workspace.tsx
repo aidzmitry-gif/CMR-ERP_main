@@ -30,6 +30,7 @@ import { DealCard } from "@/components/kanban/deal-card";
 import { KpiCard } from "@/components/kpi-card";
 import { createDeal, updateDealStage, type DealInput } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import { computeFunnel } from "@/lib/funnel";
 import { KPIS } from "@/lib/mock-data";
 import type { Deal, Stage } from "@/lib/types";
 
@@ -219,7 +220,7 @@ export function DealsWorkspace({ initialStages }: { initialStages: Stage[] }) {
           </DragOverlay>
         </DndContext>
 
-        <FunnelTotals />
+        <FunnelTotals data={computeFunnel(stages)} />
       </main>
 
       <ChatsPanel />
