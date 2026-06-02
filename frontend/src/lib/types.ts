@@ -70,6 +70,12 @@ export interface DealMessage {
   text: string;
 }
 
+export interface DealItemView {
+  title: string;
+  lastPrice?: number;
+  minPrice?: number;
+}
+
 export interface DealDetail {
   number: string;
   company: string;
@@ -80,6 +86,6 @@ export interface DealDetail {
   contact: string;
   datetime: string;
   itemsTitle: string;
-  items: string[];
+  items: DealItemView[];
   messages: DealMessage[];
 }

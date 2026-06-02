@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
 from core.services import build_services
-from modules.sales.models import Activity, Deal, DealItem, KpiTarget, Message
+from modules.sales.models import Activity, Deal, DealItem, KpiTarget, Message, PriceQuote
 
 KPI_DATE = date(2026, 6, 2)
 
@@ -113,6 +113,12 @@ async def main() -> None:
                     Message(deal_id=alfa.id, channel="whatsapp", direction="out", author="Иванов П.П.", text="Здравствуйте! Лист 5 мм есть на складе, отгрузка в течение 2 дней, доставку организуем."),
                     Message(deal_id=alfa.id, channel="email", direction="out", author="Иванов П.П.", text="Направил коммерческое предложение на почту, спецификация во вложении."),
                 ])
+
+        # История цен (Price Engine) по позициям сделки «АльфаМеталл» (ч.10)
+        if (await s.execute(select(PriceQuote))).scalars().first() is None:
+            for code, prices in (("ROLL-5", [1500, 1450, 1470]), ("REBAR-12", [1250, 1200])):
+                for p in prices:
+                    s.add(PriceQuote(sku_code=code, counterparty="ООО АльфаМеталл", price=Decimal(str(p))))
 
         # Цели KPI + активности (План/Факт)
         if (await s.execute(select(KpiTarget))).scalars().first() is None:

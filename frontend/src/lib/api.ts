@@ -69,7 +69,9 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
-    const d = (await res.json()) as ApiDeal & { items?: { title: string }[] };
+    const d = (await res.json()) as ApiDeal & {
+      items?: { title: string; last_price: number | null; min_price: number | null }[];
+    };
     return {
       number: d.number,
       company: d.counterparty,
@@ -79,9 +81,13 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
       nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
       contact: d.owner || DEAL_DETAIL.contact,
       datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,
-      // позиции номенклатуры — реальные (из связанных SKU); сообщения пока демо
+      // позиции номенклатуры с ценами клиенту (Price Engine); сообщения — отдельный блок
       itemsTitle: "Номенклатура",
-      items: (d.items ?? []).map((i) => i.title),
+      items: (d.items ?? []).map((i) => ({
+        title: i.title,
+        lastPrice: i.last_price ?? undefined,
+        minPrice: i.min_price ?? undefined,
+      })),
       messages: DEAL_DETAIL.messages,
     };
   } catch {

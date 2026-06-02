@@ -386,6 +386,41 @@ async def test_messages_omnichannel(session, api):
     ).status_code == 404
 
 
+async def test_price_engine(session, api):
+    from core.domain.models import Sku
+    from modules.sales.models import DealItem
+
+    # история котировок по SKU + клиенту
+    for p in (1500, 1450, 1470):
+        r = await api.post(
+            "/sales/prices", json={"sku_code": "PRC-1", "counterparty": "ООО Прайс", "price": p}
+        )
+        assert r.status_code == 201
+
+    info = (
+        await api.get("/sales/prices/PRC-1", params={"counterparty": "ООО Прайс"})
+    ).json()
+    assert info["last_price"] == 1470
+    assert info["min_price"] == 1450
+    assert info["count"] == 3
+
+    # цены клиенту попадают в позиции карточки
+    deal = (
+        await api.post(
+            "/sales/deals", json={"number": "PRC-D", "title": "t", "counterparty": "ООО Прайс"}
+        )
+    ).json()
+    sku = Sku(code="PRC-1", title="Прайс-позиция", unit="т")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=5))
+    await session.commit()
+
+    item = (await api.get(f"/sales/deals/{deal['id']}")).json()["items"][0]
+    assert item["last_price"] == 1470
+    assert item["min_price"] == 1450
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 

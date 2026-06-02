@@ -76,9 +76,19 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </div>
           <ul className="mt-3 space-y-2">
             {d.items.map((item) => (
-              <li key={item} className="flex gap-2 text-sm text-slate-600">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
-                {item}
+              <li key={item.title} className="flex items-start justify-between gap-3 text-sm text-slate-600">
+                <span className="flex gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+                  {item.title}
+                </span>
+                {item.lastPrice != null && (
+                  <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
+                    {item.lastPrice.toLocaleString("ru-RU")} ₽
+                    {item.minPrice != null && item.minPrice < item.lastPrice
+                      ? ` · мин ${item.minPrice.toLocaleString("ru-RU")}`
+                      : ""}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
