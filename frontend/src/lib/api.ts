@@ -1,5 +1,5 @@
-import { DEAL_DETAIL, getDealDetail, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Priority, Stage } from "@/lib/types";
+import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Priority, Stage } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -126,5 +126,38 @@ export async function updateDealStage(id: string, stage: string): Promise<boolea
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+interface ApiKpi {
+  key: string;
+  title: string;
+  target: number;
+  actual: number;
+  percent: number;
+  unit: string;
+  icon: string;
+  tone: string;
+}
+
+/** KPI «План на сегодня» из API; fallback на mock, если бэкенд/данные недоступны. */
+export async function fetchKpis(): Promise<Kpi[]> {
+  try {
+    const res = await fetch(`${BASE}/sales/kpis`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = (await res.json()) as ApiKpi[];
+    if (data.length === 0) return KPIS;
+    return data.map((k) => ({
+      id: k.key,
+      label: k.title,
+      value: k.actual,
+      target: k.target,
+      percent: k.percent,
+      money: k.unit === "money",
+      icon: k.icon as KpiIcon,
+      tone: k.tone as KpiTone,
+    }));
+  } catch {
+    return KPIS;
   }
 }

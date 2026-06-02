@@ -1,12 +1,12 @@
 import { AppShell } from "@/components/app-shell";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
-import { fetchBoardStages } from "@/lib/api";
+import { fetchBoardStages, fetchKpis } from "@/lib/api";
 
 export default async function DealsPage() {
-  const stages = await fetchBoardStages();
+  const [stages, kpis] = await Promise.all([fetchBoardStages(), fetchKpis()]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]}>
-      <DealsWorkspace initialStages={stages} />
+      <DealsWorkspace initialStages={stages} kpis={kpis} />
     </AppShell>
   );
 }

@@ -31,8 +31,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { createDeal, updateDealStage, type DealInput } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { computeFunnel } from "@/lib/funnel";
-import { KPIS } from "@/lib/mock-data";
-import type { Deal, Stage } from "@/lib/types";
+import type { Deal, Kpi, Stage } from "@/lib/types";
 
 function pluralDeals(n: number): string {
   const d10 = n % 10;
@@ -99,7 +98,13 @@ function Column({
   );
 }
 
-export function DealsWorkspace({ initialStages }: { initialStages: Stage[] }) {
+export function DealsWorkspace({
+  initialStages,
+  kpis,
+}: {
+  initialStages: Stage[];
+  kpis: Kpi[];
+}) {
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -179,7 +184,7 @@ export function DealsWorkspace({ initialStages }: { initialStages: Stage[] }) {
         <section className="mt-5">
           <h2 className="mb-3 font-semibold text-ink">План на сегодня</h2>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-            {KPIS.map((kpi) => (
+            {kpis.map((kpi) => (
               <KpiCard key={kpi.id} kpi={kpi} />
             ))}
           </div>

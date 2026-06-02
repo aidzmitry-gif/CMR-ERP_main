@@ -80,3 +80,21 @@ async def test_update_deal_stage(api):
     assert stages["new"]["count"] == 0
 
     assert (await api.patch("/sales/deals/999999", json={"stage": "won"})).status_code == 404
+
+
+async def test_kpis(session, api):
+    from datetime import date
+
+    from modules.sales.models import Activity, KpiTarget
+
+    session.add(KpiTarget(key="calls_all", title="Всего звонков", target=100, unit="count", icon="phone", tone="indigo", sort_order=1))
+    for _ in range(3):
+        session.add(Activity(kpi_key="calls_all", value=1, date=date(2026, 6, 2)))
+    await session.commit()
+
+    r = await api.get("/sales/kpis")
+    assert r.status_code == 200
+    item = next(x for x in r.json() if x["key"] == "calls_all")
+    assert item["actual"] == 3
+    assert item["target"] == 100
+    assert item["percent"] == 3
