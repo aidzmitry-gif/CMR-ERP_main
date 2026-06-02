@@ -5,6 +5,7 @@ from core.runtime.contract import ModuleContract, Permission
 from core.runtime.core import Core
 from modules.integrations import routes
 from modules.integrations.client import OneCClient
+from modules.integrations.registry import RegistryClient
 from modules.integrations.stock import StockService
 
 
@@ -21,6 +22,7 @@ class IntegrationsModule(ModuleContract):
         # этот модуль (§2.4).
         core.services.onec = OneCClient(core.config.onec_base_url)
         core.services.stock = StockService()
+        core.services.registry = RegistryClient()
 
 
 def get_module() -> ModuleContract:

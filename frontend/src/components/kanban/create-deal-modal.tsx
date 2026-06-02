@@ -1,8 +1,8 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useState } from "react";
-import type { DealInput } from "@/lib/api";
+import { type DealInput, lookupCounterparty } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
@@ -40,9 +40,26 @@ export function CreateDealModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unp, setUnp] = useState("");
+  const [looking, setLooking] = useState(false);
+  const [lookupMsg, setLookupMsg] = useState<string | null>(null);
 
   function set<K extends keyof DealInput>(key: K, value: DealInput[K]) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function onLookup() {
+    if (!unp.trim()) return;
+    setLooking(true);
+    setLookupMsg(null);
+    const info = await lookupCounterparty(unp.trim());
+    setLooking(false);
+    if (info) {
+      set("counterparty", info.name);
+      setLookupMsg(`${info.name} · ${info.address} · ${info.status}`);
+    } else {
+      setLookupMsg("По УНП в реестре ничего не найдено");
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -75,6 +92,25 @@ export function CreateDealModal({
           <Field label="Номер">
             <input required value={form.number} onChange={(e) => set("number", e.target.value)} placeholder="CRM-2024-0200" className={INPUT} />
           </Field>
+          <Field label="УНП (поиск в реестре ЕГР)">
+            <div className="flex gap-2">
+              <input
+                value={unp}
+                onChange={(e) => setUnp(e.target.value)}
+                placeholder="191234567"
+                className={INPUT}
+              />
+              <button
+                type="button"
+                onClick={onLookup}
+                disabled={looking}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-sm font-medium text-brand-600 hover:bg-blue-50 disabled:opacity-60"
+              >
+                <Search size={15} /> {looking ? "..." : "Найти"}
+              </button>
+            </div>
+          </Field>
+          {lookupMsg && <p className="-mt-1 text-xs text-slate-500">{lookupMsg}</p>}
           <Field label="Компания">
             <input required value={form.counterparty} onChange={(e) => set("counterparty", e.target.value)} placeholder="ООО ..." className={INPUT} />
           </Field>

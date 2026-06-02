@@ -15,6 +15,7 @@ from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
+from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
 from core.services.temporal import TemporalService
 
@@ -32,10 +33,11 @@ class Services:
     db: Database
     auth: AuthService
     llm: LLMGateway
-    # шлюзы 1С / складских остатков наполняет модуль integrations при register
-    # (часть 6/9); None — модуль не подключён
+    # шлюзы 1С / складских остатков / реестра ЕГР наполняет модуль integrations
+    # при register (часть 6/9/10); None — модуль не подключён
     onec: OneCGateway | None = None
     stock: StockGateway | None = None
+    registry: RegistryGateway | None = None
 
 
 def build_services() -> Services:

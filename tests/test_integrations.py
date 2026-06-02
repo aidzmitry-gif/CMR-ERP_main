@@ -23,6 +23,19 @@ async def test_1c_sync(session, api):
     assert "integration.1c.synced" in types
 
 
+async def test_egr_lookup(api):
+    # известный УНП → карточка контрагента из реестра ЕГР
+    r = await api.get("/integrations/egr/191234567")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["unp"] == "191234567"
+    assert "Аккумулятор" in body["name"]
+    assert body["status"] == "Действующий"
+
+    # неизвестный УНП → 404
+    assert (await api.get("/integrations/egr/000000000")).status_code == 404
+
+
 async def test_two_modules_loaded(api):
     data = (await api.get("/system/modules")).json()
     assert "sales" in data["loaded_modules"]

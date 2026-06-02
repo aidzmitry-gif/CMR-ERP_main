@@ -13,3 +13,12 @@ class StockOut(BaseModel):
     qty_reserved: float
     qty_forecast: float
     price: float
+
+
+class RegistryOut(BaseModel):
+    """Карточка субъекта из реестра ЕГР (обогащение по УНП)."""
+
+    unp: str
+    name: str
+    address: str
+    status: str

@@ -100,6 +100,24 @@ export interface DealInput {
   next_step?: string;
 }
 
+export interface RegistryInfo {
+  unp: string;
+  name: string;
+  address: string;
+  status: string;
+}
+
+/** Подтянуть контрагента по УНП из реестра ЕГР (клиент, через /api). */
+export async function lookupCounterparty(unp: string): Promise<RegistryInfo | null> {
+  try {
+    const res = await fetch(`/api/integrations/egr/${encodeURIComponent(unp)}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as RegistryInfo;
+  } catch {
+    return null;
+  }
+}
+
 /** Создать сделку (клиентский вызов через прокси /api). */
 export async function createDeal(input: DealInput): Promise<Deal | null> {
   try {
