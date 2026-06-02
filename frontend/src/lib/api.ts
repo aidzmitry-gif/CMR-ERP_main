@@ -263,13 +263,27 @@ export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
   }
 }
 
-/** Сформировать документ сделки (счёт/договор/заказ) и записать его в 1С. */
+/** Сформировать документ сделки (счёт/договор/заказ). Договор уходит на согласование. */
 export async function createDocument(dealId: string, kind: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind }),
+      body: JSON.stringify({ kind, requested_by: "Менеджер" }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Решение по документу на согласовании (договор): провести в 1С или отклонить. */
+export async function decideDocument(docId: number, approved: boolean, by: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/documents/${docId}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved, by }),
     });
     return res.ok;
   } catch {

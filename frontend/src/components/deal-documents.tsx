@@ -1,8 +1,8 @@
 "use client";
 
-import { FileText, Plus } from "lucide-react";
+import { Check, FileText, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { createDocument, type DealDoc, fetchDocuments } from "@/lib/api";
+import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
 
 const KINDS = [
   { value: "invoice", label: "Счёт" },
@@ -18,7 +18,9 @@ const KIND_LABEL: Record<string, string> = {
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   draft: { label: "Черновик", cls: "bg-slate-100 text-slate-600" },
+  pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
   posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
+  rejected: { label: "Отклонён", cls: "bg-red-50 text-red-600" },
 };
 
 export function DealDocuments({ dealId }: { dealId: string }) {
@@ -38,6 +40,13 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   async function onCreate() {
     setBusy(true);
     await createDocument(dealId, kind);
+    await refresh();
+    setBusy(false);
+  }
+
+  async function onDecide(docId: number, approved: boolean) {
+    setBusy(true);
+    await decideDocument(docId, approved, "Юрист");
     await refresh();
     setBusy(false);
   }
@@ -87,6 +96,26 @@ export function DealDocuments({ dealId }: { dealId: string }) {
                   {d.onec_ref ? ` · ${d.onec_ref}` : ""}
                 </span>
               </div>
+              {d.status === "pending_approval" && (
+                <div className="flex shrink-0 gap-1.5">
+                  <button
+                    onClick={() => onDecide(d.id, true)}
+                    disabled={busy}
+                    title="Согласовать и провести в 1С"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                  >
+                    <Check size={16} />
+                  </button>
+                  <button
+                    onClick={() => onDecide(d.id, false)}
+                    disabled={busy}
+                    title="Отклонить"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
             </li>
           );
         })}

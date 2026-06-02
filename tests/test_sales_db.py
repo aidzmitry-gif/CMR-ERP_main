@@ -223,6 +223,96 @@ async def test_create_invoice_writes_to_1c(session, api):
     assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice"})).status_code == 404
 
 
+async def test_contract_goes_through_approval(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import Approval, OutboxEvent
+
+    deal = (
+        await api.post(
+            "/sales/deals",
+            json={"number": "CT-1", "title": "Поставка", "counterparty": "ООО Бета", "amount": 12000},
+        )
+    ).json()
+
+    # договор НЕ пишется в 1С сразу — сначала уходит на согласование юристу (ч.4)
+    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
+    assert r.status_code == 201
+    doc = r.json()
+    assert doc["kind"] == "contract"
+    assert doc["number"] == "ДГ-CT-1"
+    assert doc["status"] == "pending_approval"
+    assert doc["onec_ref"] is None
+
+    # на документ создано согласование с маршрутом «Юрист»
+    appr = (
+        await session.execute(
+            select(Approval).where(Approval.entity_ref == f"document:{doc['id']}")
+        )
+    ).scalars().first()
+    assert appr is not None
+    assert appr.kind == "deal.contract"
+    assert appr.route == "Юрист"
+    assert appr.status == "pending"
+
+    # одобрение → документ проводится в 1С
+    d = await api.post(
+        f"/sales/documents/{doc['id']}/decide", json={"approved": True, "by": "Юрист Юрьев"}
+    )
+    assert d.status_code == 200
+    body = d.json()
+    assert body["status"] == "posted"
+    assert body["onec_ref"] == "1С-ДГ-CT-1"
+
+    # связанное согласование закрыто
+    await session.refresh(appr)
+    assert appr.status == "approved"
+
+    # события: создание документа + решение согласования + проведение в 1С
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.document.created" in types
+    assert "approval.approved" in types
+    assert "sales.document.posted" in types
+
+    # повторное решение запрещено — документ уже не на согласовании
+    assert (
+        await api.post(f"/sales/documents/{doc['id']}/decide", json={"approved": True})
+    ).status_code == 409
+
+
+async def test_contract_rejected(session, api):
+    deal = (
+        await api.post(
+            "/sales/deals", json={"number": "CT-2", "title": "t", "counterparty": "ООО Гамма"}
+        )
+    ).json()
+    doc = (
+        await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
+    ).json()
+
+    d = await api.post(f"/sales/documents/{doc['id']}/decide", json={"approved": False, "by": "Юрист"})
+    assert d.status_code == 200
+    assert d.json()["status"] == "rejected"
+    assert d.json()["onec_ref"] is None
+
+
+async def test_decide_document_rbac_enforced(session, api):
+    deal = (
+        await api.post("/sales/deals", json={"number": "CT-3", "title": "t", "counterparty": "c"})
+    ).json()
+    doc = (
+        await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
+    ).json()
+
+    # роль без права согласования (латиницей — заголовки только ASCII) → 403
+    denied = await api.post(
+        f"/sales/documents/{doc['id']}/decide",
+        json={"approved": True},
+        headers={"X-User-Roles": "guest"},
+    )
+    assert denied.status_code == 403
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 
