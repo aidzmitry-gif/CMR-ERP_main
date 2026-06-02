@@ -34,3 +34,9 @@ class Repository(Generic[ModelT]):
         self.session.add(obj)
         await self.session.flush()
         return obj
+
+    async def update(self, obj: ModelT, data: dict) -> ModelT:
+        for key, value in data.items():
+            setattr(obj, key, value)
+        await self.session.flush()
+        return obj

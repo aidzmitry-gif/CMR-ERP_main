@@ -88,3 +88,43 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
     return getDealDetail(id);
   }
 }
+
+export interface DealInput {
+  number: string;
+  title: string;
+  counterparty: string;
+  amount: number;
+  priority: string;
+  stage: string;
+  owner: string;
+  next_step?: string;
+}
+
+/** Создать сделку (клиентский вызов через прокси /api). */
+export async function createDeal(input: DealInput): Promise<Deal | null> {
+  try {
+    const res = await fetch("/api/sales/deals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return mapDeal((await res.json()) as ApiDeal);
+  } catch {
+    return null;
+  }
+}
+
+/** Сменить стадию сделки (drag&drop). */
+export async function updateDealStage(id: string, stage: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

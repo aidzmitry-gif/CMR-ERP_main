@@ -63,3 +63,20 @@ async def test_get_deal_by_id(api):
     assert r.json()["counterparty"] == "ООО Икс"
 
     assert (await api.get("/sales/deals/999999")).status_code == 404
+
+
+async def test_update_deal_stage(api):
+    created = (
+        await api.post("/sales/deals", json={"number": "U1", "title": "t", "counterparty": "c", "stage": "new"})
+    ).json()
+
+    r = await api.patch(f"/sales/deals/{created['id']}", json={"stage": "won"})
+    assert r.status_code == 200
+    assert r.json()["stage"] == "won"
+
+    board = (await api.get("/sales/board")).json()
+    stages = {s["id"]: s for s in board["stages"]}
+    assert stages["won"]["count"] == 1
+    assert stages["new"]["count"] == 0
+
+    assert (await api.patch("/sales/deals/999999", json={"stage": "won"})).status_code == 404
