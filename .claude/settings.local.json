@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//d/6 Проекты/CRM ERP/wishlist/**)",
-      "Read(//d/6 Проекты/**)"
-    ]
-  }
-}

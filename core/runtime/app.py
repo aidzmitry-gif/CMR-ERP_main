@@ -2,6 +2,7 @@
 
 Порядок: построить общие сервисы → создать ядро → загрузить включённые модули
 (они регистрируют свои возможности) → собрать FastAPI и подключить роуты.
+При старте проверяется соединение с БД.
 """
 from __future__ import annotations
 
@@ -36,10 +37,12 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        await services.db.connect()
         await _run_hooks(core.startup_hooks)
         logger.info("Приложение запущено")
         yield
         await _run_hooks(core.shutdown_hooks)
+        await services.db.disconnect()
         logger.info("Приложение остановлено")
 
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)

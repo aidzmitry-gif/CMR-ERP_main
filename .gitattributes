@@ -1,0 +1,9 @@
+# Скрипты для Linux-контейнеров всегда с LF (иначе entrypoint ломается на Windows).
+*.sh text eol=lf
+
+# Бинарные файлы не трогаем.
+*.png binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.pptx binary

@@ -1,14 +1,65 @@
-# Минимальный compose каркаса — только само приложение.
-# В части 1 сюда добавляются postgres (16 + pgvector), redis, keycloak,
-# temporal и minio (см. дорожную карту, Блок А).
+# Локальная среда каркаса (Блок А дорожной карты).
+# Поднимает: postgres (16 + pgvector), redis, keycloak и приложение.
+# Приложение при старте само применяет миграции (alembic upgrade head).
+name: aios
+
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: aios
+      POSTGRES_PASSWORD: aios
+      POSTGRES_DB: aios
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aios -d aios"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: aios
+      KC_DB_PASSWORD: aios
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   app:
     build: .
-    ports:
-      - "8000:8000"
     environment:
       AIOS_ENVIRONMENT: dev
-    # для разработки с авто-перезагрузкой кода:
-    # volumes:
-    #   - .:/app
-    # command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@postgres:5432/aios
+      AIOS_REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
