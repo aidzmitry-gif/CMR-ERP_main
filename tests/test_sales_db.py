@@ -313,6 +313,41 @@ async def test_decide_document_rbac_enforced(session, api):
     assert denied.status_code == 403
 
 
+async def test_order_reserves_stock(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent, Sku
+    from modules.integrations.models import StockItem
+    from modules.sales.models import DealItem
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "OR-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="RSV-1", title="Резервируемое", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=7))
+    session.add(StockItem(sku_code="RSV-1", warehouse="Главный", qty_available=100, qty_reserved=3))
+    await session.commit()
+
+    # заказ проводится в 1С и резервирует остатки по позициям сделки
+    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["kind"] == "order"
+    assert body["status"] == "posted"
+    assert body["onec_ref"] == "1С-ЗК-OR-1"
+
+    item = (
+        await session.execute(select(StockItem).where(StockItem.sku_code == "RSV-1"))
+    ).scalars().first()
+    assert float(item.qty_reserved) == 10  # было 3 + заказано 7
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.stock.reserved" in types
+    assert "sales.document.posted" in types
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 
