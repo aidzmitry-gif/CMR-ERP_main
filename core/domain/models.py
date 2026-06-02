@@ -73,3 +73,28 @@ class OutboxEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Approval(Base):
+    """Запрос на согласование (human-in-the-loop).
+
+    Долгоживущий: висит в БД в ожидании решения человека, переживает рестарт.
+    Маршрутизируется по роли (`route`), эскалируется по таймеру (`due_at`).
+    Это инфраструктурная таблица ядра (часть 4).
+    """
+
+    __tablename__ = "approval"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(64))
+    entity_ref: Mapped[str] = mapped_column(String(64))  # например "deal:7"
+    subject: Mapped[str] = mapped_column(String(255))
+    route: Mapped[str] = mapped_column(String(64))  # роль-согласующий
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    requested_by: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    decided_by: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(String(255))
+    escalation_level: Mapped[int] = mapped_column(default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    due_at: Mapped[datetime | None] = mapped_column(DateTime)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from config.modules import ENABLED_MODULES
-from core.runtime import system_routes
+from core.runtime import approval_routes, system_routes
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
 from core.services import build_services
@@ -30,18 +30,23 @@ async def _run_hooks(hooks) -> None:
             await result
 
 
-async def _relay_loop(services) -> None:
-    """Фоновая доставка событий из outbox (поллинг). В проде — консьюмер Redis Streams."""
+async def _background_loop(services) -> None:
+    """Фоновый цикл: доставка событий из outbox + эскалация согласований.
+
+    В проде доставка — консьюмер Redis Streams, эскалация — таймеры Temporal.
+    """
     while True:
         await asyncio.sleep(2)
         try:
             assert services.db.session_factory is not None
             async with services.db.session_factory() as session:
                 await services.event_bus.relay_once(session)
+            async with services.db.session_factory() as session:
+                await services.approvals.escalate_once(session)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("relay error")
+            logger.exception("background loop error")
 
 
 def create_app() -> FastAPI:
@@ -54,10 +59,10 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
-        relay_task = asyncio.create_task(_relay_loop(services))
+        background_task = asyncio.create_task(_background_loop(services))
         logger.info("Приложение запущено")
         yield
-        relay_task.cancel()
+        background_task.cancel()
         await _run_hooks(core.shutdown_hooks)
         await services.db.disconnect()
         logger.info("Приложение остановлено")
@@ -65,8 +70,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
 
-    # системные роуты ядра (/health, /system/modules)
+    # системные роуты ядра (/health, /system/modules, /system/events)
     app.include_router(system_routes.router)
+    # согласования (human-in-the-loop)
+    app.include_router(approval_routes.router)
 
     # роуты модулей под их префиксами
     for reg in core.routers:

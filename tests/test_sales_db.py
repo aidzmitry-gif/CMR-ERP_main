@@ -179,3 +179,56 @@ async def test_deal_create_emits_outbox(session, api):
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].payload["number"] == "OBX-1"
+
+
+async def test_approval_request_and_decide(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "APR-1", "title": "t", "counterparty": "ООО Згода"})
+    ).json()
+
+    r = await api.post(
+        f"/sales/deals/{deal['id']}/request-approval",
+        json={"kind": "deal.contract", "requested_by": "Менеджер"},
+    )
+    assert r.status_code == 201
+    appr = r.json()
+    assert appr["status"] == "pending"
+    assert appr["route"] == "Юрист"
+
+    pending = (await api.get("/approvals?status=pending")).json()
+    assert any(a["id"] == appr["id"] for a in pending)
+
+    decided = await api.post(f"/approvals/{appr['id']}/approve", json={"by": "Юрист Юрьев"})
+    assert decided.status_code == 200
+    assert decided.json()["status"] == "approved"
+
+    # повторное решение запрещено
+    assert (await api.post(f"/approvals/{appr['id']}/approve", json={})).status_code == 409
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "approval.requested" in types
+    assert "approval.approved" in types
+
+
+async def test_approval_escalation(session):
+    from datetime import datetime
+
+    from core.domain.models import Approval
+    from core.services.approvals import ApprovalService
+    from core.services.eventbus import OutboxEventBus
+
+    svc = ApprovalService(OutboxEventBus())
+    overdue = Approval(
+        kind="deal.contract", entity_ref="deal:1", subject="x", route="Юрист",
+        due_at=datetime(2020, 1, 1),
+    )
+    session.add(overdue)
+    await session.commit()
+
+    assert await svc.escalate_once(session) == 1
+    await session.refresh(overdue)
+    assert overdue.escalation_level == 1

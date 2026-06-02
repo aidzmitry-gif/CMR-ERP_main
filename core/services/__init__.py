@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
 from core.services.config import Settings, get_settings
 from core.services.db import Database
@@ -24,6 +25,7 @@ class Services:
 
     config: Settings
     event_bus: OutboxEventBus
+    approvals: ApprovalService
     temporal: TemporalService
     db: Database
     auth: AuthService
@@ -33,9 +35,11 @@ class Services:
 def build_services() -> Services:
     """Собрать сервисы для текущего окружения."""
     settings = get_settings()
+    event_bus = OutboxEventBus()
     return Services(
         config=settings,
-        event_bus=OutboxEventBus(),
+        event_bus=event_bus,
+        approvals=ApprovalService(event_bus),
         temporal=TemporalService(),
         db=Database(settings),
         auth=AuthService(),
