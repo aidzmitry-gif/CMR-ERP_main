@@ -17,7 +17,7 @@ router = APIRouter(tags=["integrations"])
 @router.post("/1c/sync")
 async def sync(core: Core = Depends(get_core), session: AsyncSession = Depends(get_session)) -> dict:
     """Прочитать данные из 1С и синхронизировать в бизнес-память."""
-    summary = await sync_1c(session, core.event_bus, core.config.onec_base_url)
+    summary = await sync_1c(session, core.event_bus, core.services.onec)
     await session.commit()
     return {"ok": True, **summary}
 

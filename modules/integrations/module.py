@@ -4,6 +4,7 @@ from __future__ import annotations
 from core.runtime.contract import ModuleContract, Permission
 from core.runtime.core import Core
 from modules.integrations import routes
+from modules.integrations.client import OneCClient
 
 
 class IntegrationsModule(ModuleContract):
@@ -14,6 +15,9 @@ class IntegrationsModule(ModuleContract):
     def register(self, core: Core) -> None:
         core.include_router(routes.router, prefix=self.api_prefix)
         core.declare_permissions([Permission("integrations.sync", "Синхронизация с 1С")])
+        # опубликовать 1С-коннектор в фасаде ядра — другие модули пишут/читают
+        # в 1С через core.services.onec, не импортируя этот модуль (§2.4).
+        core.services.onec = OneCClient(core.config.onec_base_url)
 
 
 def get_module() -> ModuleContract:

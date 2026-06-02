@@ -17,6 +17,7 @@ import {
 import { FaWhatsapp } from "react-icons/fa";
 import { ChannelButtons } from "@/components/channels";
 import { DealApprovals } from "@/components/deal-approvals";
+import { DealDocuments } from "@/components/deal-documents";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
@@ -134,6 +135,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </button>
           </div>
         </div>
+
+        {/* Документы сделки (счёт/договор/заказ) + запись в 1С */}
+        <DealDocuments dealId={id} />
 
         {/* Согласования (human-in-the-loop) */}
         <DealApprovals dealId={id} />

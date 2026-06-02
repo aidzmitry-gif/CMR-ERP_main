@@ -181,6 +181,48 @@ async def test_deal_create_emits_outbox(session, api):
     assert rows[0].payload["number"] == "OBX-1"
 
 
+async def test_create_invoice_writes_to_1c(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import AuditLog, OutboxEvent
+    from core.services.eventbus import OutboxEventBus
+
+    deal = (
+        await api.post(
+            "/sales/deals",
+            json={"number": "DOC-1", "title": "Поставка АКБ", "counterparty": "ООО Альфа", "amount": 5000},
+        )
+    ).json()
+
+    # формируем счёт → он записывается в 1С (mock) и помечается posted
+    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert r.status_code == 201
+    doc = r.json()
+    assert doc["kind"] == "invoice"
+    assert doc["number"] == "СЧ-DOC-1"
+    assert doc["status"] == "posted"
+    assert doc["onec_ref"] == "1С-СЧ-DOC-1"
+    assert doc["amount"] == 5000
+
+    # документ виден в карточке сделки
+    detail = (await api.get(f"/sales/deals/{deal['id']}")).json()
+    assert len(detail["documents"]) == 1
+    assert detail["documents"][0]["onec_ref"] == "1С-СЧ-DOC-1"
+
+    # запись в 1С → доменное событие в шину (часть 3) → проекция в audit (часть 5)
+    rows = (await session.execute(select(OutboxEvent))).scalars().all()
+    posted = [e for e in rows if e.event_type == "sales.document.posted"]
+    assert len(posted) == 1
+    assert posted[0].payload["onec_ref"] == "1С-СЧ-DOC-1"
+
+    await OutboxEventBus().relay_once(session)
+    audit = (await session.execute(select(AuditLog))).scalars().all()
+    assert any(a.action == "sales.document.posted" and a.entity_ref == f"deal:{deal['id']}" for a in audit)
+
+    # несуществующая сделка → 404
+    assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice"})).status_code == 404
+
+
 async def test_approval_request_and_decide(session, api):
     from sqlalchemy import select
 

@@ -242,3 +242,37 @@ export async function decideApproval(id: number, approved: boolean, by: string):
     return false;
   }
 }
+
+export interface DealDoc {
+  id: number;
+  kind: string;
+  number: string;
+  status: string;
+  onec_ref: string | null;
+  amount: number;
+}
+
+/** Документы сделки (счета/договоры/заказы) — клиент, через /api. */
+export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/documents`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as DealDoc[];
+  } catch {
+    return [];
+  }
+}
+
+/** Сформировать документ сделки (счёт/договор/заказ) и записать его в 1С. */
+export async function createDocument(dealId: string, kind: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

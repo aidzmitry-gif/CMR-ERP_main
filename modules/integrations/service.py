@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import Counterparty, Sku
-from modules.integrations.client import OneCClient
+from core.services.onec import OneCGateway
 from modules.integrations.models import StockItem
 
 
@@ -20,9 +20,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-async def sync_1c(session: AsyncSession, event_bus, base_url: str = "") -> dict:
-    client = OneCClient(base_url)
-
+async def sync_1c(session: AsyncSession, event_bus, client: OneCGateway) -> dict:
     # Контрагенты (по УНП), в shared kernel
     counterparties = await client.fetch_counterparties()
     known_unp = {u for u in (await session.execute(select(Counterparty.unp))).scalars().all() if u}

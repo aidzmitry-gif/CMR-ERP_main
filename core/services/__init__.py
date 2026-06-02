@@ -14,6 +14,7 @@ from core.services.config import Settings, get_settings
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
 from core.services.litellm import LLMGateway
+from core.services.onec import OneCGateway
 from core.services.temporal import TemporalService
 
 __all__ = ["Services", "build_services"]
@@ -30,6 +31,8 @@ class Services:
     db: Database
     auth: AuthService
     llm: LLMGateway
+    # шлюз 1С наполняет модуль integrations при register (часть 6/9); None — модуль не подключён
+    onec: OneCGateway | None = None
 
 
 def build_services() -> Services:

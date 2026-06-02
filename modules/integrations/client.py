@@ -25,3 +25,14 @@ class OneCClient:
             {"sku_code": "AKB-75", "title": "Аккумулятор 75 А·ч", "warehouse": "Главный", "qty_available": 80, "qty_reserved": 10, "qty_forecast": 150, "price": 120.0},
             {"sku_code": "ROLL-5", "title": "Лист горячекатаный 5 мм Ст3сп5 ГОСТ 19903-2015", "warehouse": "Склад-2", "qty_available": 40, "qty_reserved": 5, "qty_forecast": 60, "price": 1500.0},
         ]
+
+    async def post_document(self, doc_type: str, payload: dict) -> dict:
+        """Записать документ сделки в 1С (счёт/договор/заказ) — часть 9.
+
+        Mock: «1С» возвращает свою ссылку на проведённый документ на основе его
+        номера. При заданном ``base_url`` ``doc_type`` выберет нужный документ
+        1С (``Document_СчётНаОплату`` и т. п.) для реального OData POST, а контракт
+        ответа (``ref``) сохранится.
+        """
+        # TODO(part-9): при base_url — реальный OData POST в документ типа doc_type
+        return {"ref": f"1С-{payload.get('number', '')}", "posted": True}
