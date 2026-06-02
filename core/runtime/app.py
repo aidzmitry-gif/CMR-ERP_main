@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from contextlib import asynccontextmanager
@@ -29,6 +30,20 @@ async def _run_hooks(hooks) -> None:
             await result
 
 
+async def _relay_loop(services) -> None:
+    """Фоновая доставка событий из outbox (поллинг). В проде — консьюмер Redis Streams."""
+    while True:
+        await asyncio.sleep(2)
+        try:
+            assert services.db.session_factory is not None
+            async with services.db.session_factory() as session:
+                await services.event_bus.relay_once(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("relay error")
+
+
 def create_app() -> FastAPI:
     """Собрать и вернуть приложение FastAPI."""
     services = build_services()
@@ -39,8 +54,10 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
+        relay_task = asyncio.create_task(_relay_loop(services))
         logger.info("Приложение запущено")
         yield
+        relay_task.cancel()
         await _run_hooks(core.shutdown_hooks)
         await services.db.disconnect()
         logger.info("Приложение остановлено")

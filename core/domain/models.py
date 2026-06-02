@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -53,3 +55,21 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True)
     full_name: Mapped[str] = mapped_column(String(255))
+
+
+class OutboxEvent(Base):
+    """Журнал доменных событий (transactional outbox).
+
+    Пишется в одной транзакции с изменением состояния (гарантия at-least-once);
+    relay доставляет подписчикам и проставляет ``processed_at`` (часть 3).
+    Это инфраструктурная таблица ядра.
+    """
+
+    __tablename__ = "outbox_event"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime)

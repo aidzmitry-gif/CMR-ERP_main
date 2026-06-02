@@ -140,3 +140,42 @@ async def test_log_activity_increments_kpi(session, api):
     after = next(x for x in (await api.get("/sales/kpis")).json() if x["key"] == "calls_all")
     assert after["actual"] == 2
     assert after["percent"] == 2
+
+
+async def test_outbox_emit_and_relay(session):
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from core.services.eventbus import OutboxEventBus
+
+    bus = OutboxEventBus()
+    seen: list[dict] = []
+    bus.subscribe("test.evt", lambda p: seen.append(p))
+
+    bus.emit(session, "test.evt", {"x": 1})
+    await session.commit()
+
+    rows = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert len(rows) == 1 and rows[0].processed_at is None
+
+    assert await bus.relay_once(session) == 1
+    assert seen == [{"x": 1}]
+    rows = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert rows[0].processed_at is not None
+    # повторный relay — нечего доставлять
+    assert await bus.relay_once(session) == 0
+
+
+async def test_deal_create_emits_outbox(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    await api.post("/sales/deals", json={"number": "OBX-1", "title": "t", "counterparty": "c"})
+    rows = (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.created")
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].payload["number"] == "OBX-1"

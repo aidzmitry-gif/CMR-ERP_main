@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from core.services.auth import AuthService
 from core.services.config import Settings, get_settings
 from core.services.db import Database
-from core.services.eventbus import EventBus, InProcessEventBus
+from core.services.eventbus import OutboxEventBus
 from core.services.litellm import LLMGateway
 from core.services.temporal import TemporalService
 
@@ -23,7 +23,7 @@ class Services:
     """Контейнер общих сервисов, доступных модулям через ядро."""
 
     config: Settings
-    event_bus: EventBus
+    event_bus: OutboxEventBus
     temporal: TemporalService
     db: Database
     auth: AuthService
@@ -35,7 +35,7 @@ def build_services() -> Services:
     settings = get_settings()
     return Services(
         config=settings,
-        event_bus=InProcessEventBus(),
+        event_bus=OutboxEventBus(),
         temporal=TemporalService(),
         db=Database(settings),
         auth=AuthService(),

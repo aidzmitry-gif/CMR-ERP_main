@@ -1,7 +1,12 @@
 """Системные роуты ядра: health-check и интроспекция реестра подключённых модулей."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.domain.models import OutboxEvent
+from core.runtime.deps import get_session
 
 router = APIRouter(tags=["system"])
 
@@ -30,3 +35,21 @@ async def system_modules(request: Request) -> dict:
         "telegram_commands": [c.command for c in core.telegram_commands],
         "widgets": [{"key": w.key, "title": w.title} for w in core.widgets],
     }
+
+
+@router.get("/system/events")
+async def system_events(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    """Последние доменные события — журнал outbox (единый event log, часть 3)."""
+    rows = (
+        await session.execute(select(OutboxEvent).order_by(OutboxEvent.id.desc()).limit(20))
+    ).scalars().all()
+    return [
+        {
+            "id": e.id,
+            "event_type": e.event_type,
+            "version": e.version,
+            "created_at": str(e.created_at),
+            "processed": e.processed_at is not None,
+        }
+        for e in rows
+    ]
