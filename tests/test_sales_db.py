@@ -98,3 +98,25 @@ async def test_kpis(session, api):
     assert item["actual"] == 3
     assert item["target"] == 100
     assert item["percent"] == 3
+
+
+async def test_deal_items(session, api):
+    from core.domain.models import Sku
+    from modules.sales.models import DealItem
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "IT-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="SKU-1", title="Тестовая позиция", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))
+    await session.commit()
+
+    r = await api.get(f"/sales/deals/{deal['id']}")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["title"] == "Тестовая позиция"
+    assert body["items"][0]["qty"] == 2
+    assert body["items"][0]["code"] == "SKU-1"

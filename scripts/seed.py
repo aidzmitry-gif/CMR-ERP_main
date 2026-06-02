@@ -14,9 +14,15 @@ from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
 from core.services import build_services
-from modules.sales.models import Activity, Deal, KpiTarget
+from modules.sales.models import Activity, Deal, DealItem, KpiTarget
 
 KPI_DATE = date(2026, 6, 2)
+
+SKU_DEFS = [
+    ("AKB-60", "Аккумулятор 60 А·ч", "шт"),
+    ("ROLL-5", "Лист горячекатаный 5 мм Ст3сп5 ГОСТ 19903-2015", "т"),
+    ("REBAR-12", "Арматура А500С Ø12 мм ГОСТ 34028-2016", "т"),
+]
 
 
 def _demo_deals() -> list[Deal]:
@@ -66,17 +72,37 @@ async def main() -> None:
     assert services.db.session_factory is not None
 
     async with services.db.session_factory() as s:
+        # Общее ядро: контрагент, пользователь, контакт
         if (await s.execute(select(Counterparty))).scalars().first() is None:
             cp = Counterparty(name="ООО Аккумулятор", unp="191234567")
             s.add(cp)
-            s.add(Sku(code="AKB-60", title="Аккумулятор 60 А·ч", unit="шт"))
             s.add(User(username="manager", full_name="Иван Менеджеров"))
             await s.flush()
             s.add(Contact(counterparty_id=cp.id, full_name="Пётр Петров", phone="+375291234567"))
 
+        # Номенклатура (по коду, идемпотентно)
+        existing_codes = set((await s.execute(select(Sku.code))).scalars().all())
+        for code, title, unit in SKU_DEFS:
+            if code not in existing_codes:
+                s.add(Sku(code=code, title=title, unit=unit))
+        await s.flush()
+
+        # Сделки
         if (await s.execute(select(Deal))).scalars().first() is None:
             s.add_all(_demo_deals())
+            await s.flush()
 
+        # Позиции номенклатуры для сделки «АльфаМеталл»
+        if (await s.execute(select(DealItem))).scalars().first() is None:
+            alfa = (
+                await s.execute(select(Deal).where(Deal.number == "CRM-2024-0156"))
+            ).scalars().first()
+            by_code = {sk.code: sk for sk in (await s.execute(select(Sku))).scalars().all()}
+            if alfa and "ROLL-5" in by_code and "REBAR-12" in by_code:
+                s.add(DealItem(deal_id=alfa.id, sku_id=by_code["ROLL-5"].id, qty=Decimal("12")))
+                s.add(DealItem(deal_id=alfa.id, sku_id=by_code["REBAR-12"].id, qty=Decimal("8")))
+
+        # Цели KPI + активности (План/Факт)
         if (await s.execute(select(KpiTarget))).scalars().first() is None:
             s.add_all(_kpi_targets())
             s.add_all(_activities())

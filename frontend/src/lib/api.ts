@@ -69,7 +69,7 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
-    const d = (await res.json()) as ApiDeal;
+    const d = (await res.json()) as ApiDeal & { items?: { title: string }[] };
     return {
       number: d.number,
       company: d.counterparty,
@@ -79,9 +79,9 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
       nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
       contact: d.owner || DEAL_DETAIL.contact,
       datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,
-      // позиции номенклатуры и сообщения пока демонстрационные
-      itemsTitle: DEAL_DETAIL.itemsTitle,
-      items: DEAL_DETAIL.items,
+      // позиции номенклатуры — реальные (из связанных SKU); сообщения пока демо
+      itemsTitle: "Номенклатура",
+      items: (d.items ?? []).map((i) => i.title),
       messages: DEAL_DETAIL.messages,
     };
   } catch {
