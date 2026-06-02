@@ -140,24 +140,52 @@ interface ApiKpi {
   tone: string;
 }
 
-/** KPI «План на сегодня» из API; fallback на mock, если бэкенд/данные недоступны. */
+function mapKpi(k: ApiKpi): Kpi {
+  return {
+    id: k.key,
+    label: k.title,
+    value: k.actual,
+    target: k.target,
+    percent: k.percent,
+    money: k.unit === "money",
+    icon: k.icon as KpiIcon,
+    tone: k.tone as KpiTone,
+  };
+}
+
+/** KPI «План на сегодня» из API (SSR); fallback на mock. */
 export async function fetchKpis(): Promise<Kpi[]> {
   try {
     const res = await fetch(`${BASE}/sales/kpis`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as ApiKpi[];
-    if (data.length === 0) return KPIS;
-    return data.map((k) => ({
-      id: k.key,
-      label: k.title,
-      value: k.actual,
-      target: k.target,
-      percent: k.percent,
-      money: k.unit === "money",
-      icon: k.icon as KpiIcon,
-      tone: k.tone as KpiTone,
-    }));
+    return data.length ? data.map(mapKpi) : KPIS;
   } catch {
     return KPIS;
+  }
+}
+
+/** Перечитать KPI с клиента (после отметки активности). */
+export async function getKpis(): Promise<Kpi[]> {
+  try {
+    const res = await fetch("/api/sales/kpis", { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as ApiKpi[]).map(mapKpi);
+  } catch {
+    return [];
+  }
+}
+
+/** Отметить факт активности (для роста KPI). */
+export async function logActivity(kpiKey: string, value = 1): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/activities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kpi_key: kpiKey, value }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

@@ -120,3 +120,23 @@ async def test_deal_items(session, api):
     assert body["items"][0]["title"] == "Тестовая позиция"
     assert body["items"][0]["qty"] == 2
     assert body["items"][0]["code"] == "SKU-1"
+
+
+async def test_log_activity_increments_kpi(session, api):
+    from datetime import date
+
+    from modules.sales.models import Activity, KpiTarget
+
+    session.add(KpiTarget(key="calls_all", title="Всего звонков", target=100, unit="count", icon="phone", tone="indigo", sort_order=1))
+    session.add(Activity(kpi_key="calls_all", value=1, date=date(2026, 6, 2)))
+    await session.commit()
+
+    before = next(x for x in (await api.get("/sales/kpis")).json() if x["key"] == "calls_all")
+    assert before["actual"] == 1
+
+    r = await api.post("/sales/activities", json={"kpi_key": "calls_all"})
+    assert r.status_code == 201
+
+    after = next(x for x in (await api.get("/sales/kpis")).json() if x["key"] == "calls_all")
+    assert after["actual"] == 2
+    assert after["percent"] == 2

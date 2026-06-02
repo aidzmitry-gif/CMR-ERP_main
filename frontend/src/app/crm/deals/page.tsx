@@ -6,7 +6,7 @@ export default async function DealsPage() {
   const [stages, kpis] = await Promise.all([fetchBoardStages(), fetchKpis()]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]}>
-      <DealsWorkspace initialStages={stages} kpis={kpis} />
+      <DealsWorkspace initialStages={stages} initialKpis={kpis} />
     </AppShell>
   );
 }

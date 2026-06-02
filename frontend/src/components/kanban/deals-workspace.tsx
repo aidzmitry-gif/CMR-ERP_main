@@ -28,7 +28,7 @@ import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
 import { KpiCard } from "@/components/kpi-card";
-import { createDeal, updateDealStage, type DealInput } from "@/lib/api";
+import { createDeal, getKpis, logActivity, updateDealStage, type DealInput } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, Stage } from "@/lib/types";
@@ -100,12 +100,13 @@ function Column({
 
 export function DealsWorkspace({
   initialStages,
-  kpis,
+  initialKpis,
 }: {
   initialStages: Stage[];
-  kpis: Kpi[];
+  initialKpis: Kpi[];
 }) {
   const [stages, setStages] = useState<Stage[]>(initialStages);
+  const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
@@ -149,6 +150,12 @@ export function DealsWorkspace({
     return true;
   }
 
+  async function handleLog(kpiKey: string) {
+    if (!(await logActivity(kpiKey))) return;
+    const fresh = await getKpis();
+    if (fresh.length) setKpis(fresh);
+  }
+
   function openModal(stageId: string) {
     setModalStage(stageId);
     setModalOpen(true);
@@ -185,7 +192,7 @@ export function DealsWorkspace({
           <h2 className="mb-3 font-semibold text-ink">План на сегодня</h2>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             {kpis.map((kpi) => (
-              <KpiCard key={kpi.id} kpi={kpi} />
+              <KpiCard key={kpi.id} kpi={kpi} onLog={() => handleLog(kpi.id)} />
             ))}
           </div>
         </section>

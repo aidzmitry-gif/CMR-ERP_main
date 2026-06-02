@@ -1,4 +1,4 @@
-import { FileText, Phone, PhoneCall, RussianRuble, Snowflake } from "lucide-react";
+import { FileText, Phone, PhoneCall, Plus, RussianRuble, Snowflake } from "lucide-react";
 import { formatMoney } from "@/lib/format";
 import type { Kpi, KpiIcon, KpiTone } from "@/lib/types";
 
@@ -20,7 +20,7 @@ const TONES: Record<KpiTone, { chip: string; bar: string }> = {
   slate: { chip: "bg-slate-100 text-slate-500", bar: "bg-slate-400" },
 };
 
-export function KpiCard({ kpi }: { kpi: Kpi }) {
+export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
   const Icon = ICONS[kpi.icon];
   const tone = TONES[kpi.tone];
   const value = kpi.money ? formatMoney(kpi.value) : kpi.value;
@@ -28,11 +28,22 @@ export function KpiCard({ kpi }: { kpi: Kpi }) {
 
   return (
     <div className="rounded-xl bg-white p-4 shadow-card">
-      <div className="flex items-center gap-2">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone.chip}`}>
-          <Icon size={16} />
-        </span>
-        <span className="text-xs leading-tight text-muted">{kpi.label}</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone.chip}`}>
+            <Icon size={16} />
+          </span>
+          <span className="text-xs leading-tight text-muted">{kpi.label}</span>
+        </div>
+        {onLog && !kpi.money && (
+          <button
+            onClick={onLog}
+            title="Отметить (+1)"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-brand-600"
+          >
+            <Plus size={15} />
+          </button>
+        )}
       </div>
       <div className="mt-3 text-lg font-semibold text-ink">
         {value} <span className="text-sm font-normal text-muted">/ {target}</span>
