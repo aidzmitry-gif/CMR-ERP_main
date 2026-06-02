@@ -1,48 +1,55 @@
-"""Общее ядро (shared kernel): сущности, нужные всем модулям.
+"""Общее ядро (shared kernel) — ORM-модели сущностей, нужных всем модулям.
 
 Контрагент, контакт, SKU/номенклатура и пользователь живут здесь, и все модули
-читают их через ядро, а не дублируют у себя — это единственная общая точка,
-которую важно не размазать по модулям (§2.4).
-
-На этапе каркаса — лёгкие Pydantic-модели; в части 2 становятся SQLAlchemy-
-моделями со своими миграциями.
+читают их через ядро, а не дублируют у себя (§2.4). Таблицы — в схеме по умолчанию
+(``public``); таблицы модулей живут в собственных схемах.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from core.db.base import Base
 
 
-class Counterparty(BaseModel):
+class Counterparty(Base):
     """Контрагент (клиент или поставщик)."""
 
-    id: int | None = None
-    name: str
-    unp: str | None = None  # УНП — учётный номер плательщика (РБ)
+    __tablename__ = "counterparty"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    unp: Mapped[str | None] = mapped_column(String(32))  # УНП (РБ)
 
 
-class Contact(BaseModel):
+class Contact(Base):
     """Контактное лицо контрагента."""
 
-    id: int | None = None
-    counterparty_id: int | None = None
-    full_name: str
-    phone: str | None = None
-    email: str | None = None
+    __tablename__ = "contact"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"))
+    full_name: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    email: Mapped[str | None] = mapped_column(String(255))
 
 
-class Sku(BaseModel):
+class Sku(Base):
     """Единица номенклатуры (товарная позиция)."""
 
-    id: int | None = None
-    code: str
-    title: str
-    unit: str = "шт"
+    __tablename__ = "sku"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    title: Mapped[str] = mapped_column(String(255))
+    unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
 
 
-class User(BaseModel):
-    """Пользователь системы (сотрудник)."""
+class User(Base):
+    """Пользователь системы (сотрудник). Роли/права — в части 5 (RBAC)."""
 
-    id: int | None = None
-    username: str
-    full_name: str
-    roles: list[str] = []
+    __tablename__ = "app_user"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True)
+    full_name: Mapped[str] = mapped_column(String(255))

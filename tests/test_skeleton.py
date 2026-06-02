@@ -1,4 +1,4 @@
-"""Дымовые тесты каркаса: модуль подключается, роуты живые, событие летит."""
+"""Дымовые тесты каркаса (без БД): модуль подключается, системные роуты живые."""
 from fastapi.testclient import TestClient
 
 from core.runtime.app import create_app
@@ -27,14 +27,3 @@ def test_sales_ping():
     r = client.get("/sales/ping")
     assert r.status_code == 200
     assert r.json()["module"] == "sales"
-
-
-def test_create_deal_publishes_event():
-    r = client.post(
-        "/sales/deals",
-        json={"number": "CRM-TEST-1", "title": "Тест", "counterparty": "ООО Тест"},
-    )
-    assert r.status_code == 201
-    body = r.json()
-    assert body["number"] == "CRM-TEST-1"
-    assert body["id"] is not None
