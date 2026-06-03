@@ -6,7 +6,7 @@ export default function FinancePage() {
     <AppShell crumbs={["ERP", "Финансы"]}>
       <ModuleBoard
         title="Финансы"
-        subtitle="Платежи по сделкам и документам"
+        subtitle="Платежи по сделкам и документам. Оплата помечает счёт в CRM оплаченным."
         endpoint="/finance/payments"
         columns={[
           { key: "ref", label: "Назначение" },
@@ -17,6 +17,9 @@ export default function FinancePage() {
           { key: "ref", label: "Назначение" },
           { key: "amount", label: "Сумма", type: "number", default: 0 },
         ]}
+        statusKey="status"
+        statusFlow={["pending", "paid"]}
+        patchPath="/finance/payments"
       />
     </AppShell>
   );

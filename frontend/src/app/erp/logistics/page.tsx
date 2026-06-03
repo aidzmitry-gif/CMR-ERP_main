@@ -6,7 +6,7 @@ export default function LogisticsPage() {
     <AppShell crumbs={["ERP", "Логистика"]}>
       <ModuleBoard
         title="Логистика"
-        subtitle="Отгрузки и доставки"
+        subtitle="Отгрузки и доставки. Доставка закрывает сделку в CRM успешно."
         endpoint="/logistics/shipments"
         columns={[
           { key: "customer", label: "Получатель" },
@@ -19,6 +19,9 @@ export default function LogisticsPage() {
           { key: "address", label: "Адрес" },
           { key: "carrier", label: "Перевозчик" },
         ]}
+        statusKey="status"
+        statusFlow={["planned", "shipped", "delivered"]}
+        patchPath="/logistics/shipments"
       />
     </AppShell>
   );

@@ -6,7 +6,7 @@ export default function ProductionPage() {
     <AppShell crumbs={["ERP", "Производство"]}>
       <ModuleBoard
         title="Производство"
-        subtitle="Производственные заказы"
+        subtitle="Производственные заказы. Готовность («done») создаёт приход на склад."
         endpoint="/production/orders"
         columns={[
           { key: "product", label: "Продукт" },
@@ -17,6 +17,9 @@ export default function ProductionPage() {
           { key: "product", label: "Продукт" },
           { key: "qty", label: "Кол-во", type: "number", default: 1 },
         ]}
+        statusKey="status"
+        statusFlow={["planned", "in_progress", "done"]}
+        patchPath="/production/orders"
       />
     </AppShell>
   );

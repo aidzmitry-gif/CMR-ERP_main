@@ -85,3 +85,75 @@ async def test_production_completed_emits(session, api):
     assert r.status_code == 200 and r.json()["status"] == "done"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "production.completed" in types
+
+
+# --- обратные связи, замыкающие циклы ---
+
+
+async def test_campaign_creates_leads(session):
+    from modules.sales.events import on_campaign_launched
+    from modules.sales.models import Deal
+
+    await on_campaign_launched({"name": "Весна", "leads": 3}, _ctx(session))
+    await session.commit()
+    leads = (await session.execute(select(Deal).where(Deal.stage == "new"))).scalars().all()
+    assert len([d for d in leads if d.title == "Лид: Весна"]) == 3
+
+
+async def test_payment_paid_marks_document(session):
+    from modules.sales.events import on_payment_paid
+    from modules.sales.models import Deal, DealDocument
+
+    deal = Deal(number="PD-1", title="t", counterparty="c")
+    session.add(deal)
+    await session.flush()
+    doc = DealDocument(deal_id=deal.id, kind="invoice", number="СЧ-PD-1", status="posted")
+    session.add(doc)
+    await session.commit()
+
+    await on_payment_paid({"ref": "СЧ-PD-1"}, _ctx(session))
+    await session.commit()
+    await session.refresh(doc)
+    assert doc.status == "paid"
+
+
+async def test_shipment_delivered_wins_deal(session):
+    from modules.sales.events import on_shipment_delivered
+    from modules.sales.models import Deal
+
+    deal = Deal(number="SD-1", title="t", counterparty="c", stage="prop")
+    session.add(deal)
+    await session.flush()
+    await on_shipment_delivered({"deal_id": deal.id}, _ctx(session))
+    await session.commit()
+    await session.refresh(deal)
+    assert deal.stage == "won"
+
+
+async def test_marketing_launch_emits(session, api):
+    camp = (
+        await api.post(
+            "/marketing/campaigns",
+            json={"name": "К", "channel": "email", "budget": 100, "leads": 5},
+        )
+    ).json()
+    r = await api.post(f"/marketing/campaigns/{camp['id']}/launch")
+    assert r.status_code == 200
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "marketing.campaign.launched" in types
+
+
+async def test_finance_paid_emits(session, api):
+    pay = (await api.post("/finance/payments", json={"ref": "СЧ-X", "amount": 100})).json()
+    r = await api.patch(f"/finance/payments/{pay['id']}", json={"status": "paid"})
+    assert r.status_code == 200
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "finance.payment.paid" in types
+
+
+async def test_logistics_delivered_emits(session, api):
+    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+    r = await api.patch(f"/logistics/shipments/{ship['id']}", json={"status": "delivered"})
+    assert r.status_code == 200
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.shipment.delivered" in types

@@ -29,12 +29,20 @@ export function ModuleBoard({
   endpoint,
   columns,
   fields,
+  statusKey,
+  statusFlow,
+  patchPath,
+  action,
 }: {
   title: string;
   subtitle?: string;
   endpoint: string;
   columns: ColumnDef[];
   fields: FieldDef[];
+  statusKey?: string;
+  statusFlow?: string[];
+  patchPath?: string;
+  action?: { label: string; path: (row: Row) => string };
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
@@ -71,6 +79,26 @@ export function ModuleBoard({
     setForm(blankForm(fields));
     await refresh();
   }
+
+  async function onStatus(row: Row) {
+    if (!statusFlow || !patchPath || !statusKey) return;
+    const cur = String(row[statusKey] ?? "");
+    const next = statusFlow[(statusFlow.indexOf(cur) + 1) % statusFlow.length];
+    await fetch(`/api${patchPath}/${row.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next }),
+    });
+    await refresh();
+  }
+
+  async function onAction(row: Row) {
+    if (!action) return;
+    await fetch(`/api${action.path(row)}`, { method: "POST" });
+    await refresh();
+  }
+
+  const clickableStatus = !!(statusKey && statusFlow && patchPath);
 
   return (
     <main className="flex-1 overflow-auto p-6">
@@ -115,7 +143,11 @@ export function ModuleBoard({
         </div>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xl bg-white shadow-card">
+      {clickableStatus && (
+        <p className="mt-3 text-xs text-muted">Подсказка: кликните по статусу, чтобы сменить его.</p>
+      )}
+
+      <div className="mt-2 overflow-hidden rounded-xl bg-white shadow-card">
         <table className="w-full text-sm">
           <thead className="border-b border-slate-100 text-left text-xs text-muted">
             <tr>
@@ -124,12 +156,13 @@ export function ModuleBoard({
                   {c.label}
                 </th>
               ))}
+              {action && <th className="px-4 py-2.5 font-medium">Действие</th>}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-6 text-center text-muted">
+                <td colSpan={columns.length + (action ? 1 : 0)} className="px-4 py-6 text-center text-muted">
                   Записей пока нет
                 </td>
               </tr>
@@ -138,9 +171,28 @@ export function ModuleBoard({
               <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 {columns.map((c) => (
                   <td key={c.key} className="px-4 py-2.5 text-ink">
-                    {String(row[c.key] ?? "")}
+                    {clickableStatus && c.key === statusKey ? (
+                      <button
+                        onClick={() => onStatus(row)}
+                        className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-brand-100 hover:text-brand-600"
+                      >
+                        {String(row[c.key] ?? "")}
+                      </button>
+                    ) : (
+                      String(row[c.key] ?? "")
+                    )}
                   </td>
                 ))}
+                {action && (
+                  <td className="px-4 py-2.5">
+                    <button
+                      onClick={() => onAction(row)}
+                      className="rounded-lg border border-brand px-3 py-1 text-xs font-medium text-brand-600 hover:bg-blue-50"
+                    >
+                      {action.label}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
