@@ -14,6 +14,31 @@ vi.mock("@/lib/api", () => ({
   fetchChats: vi.fn().mockResolvedValue([]),
   lookupCounterparty: vi.fn().mockResolvedValue(null),
 }));
+// @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({
+    children,
+    onDragStart,
+    onDragEnd,
+  }: {
+    children: React.ReactNode;
+    onDragStart: (e: { active: { id: string } }) => void;
+    onDragEnd: (e: { active: { id: string }; over: { id: string } | null }) => void;
+  }) => (
+    <div>
+      <button data-testid="dnd-start" onClick={() => onDragStart({ active: { id: "1" } })} />
+      <button data-testid="dnd-end" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "won" } })} />
+      <button data-testid="dnd-end-null" onClick={() => onDragEnd({ active: { id: "1" }, over: null })} />
+      {children}
+    </div>
+  ),
+  DragOverlay: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PointerSensor: class {},
+  useSensor: () => ({}),
+  useSensors: () => [],
+  useDraggable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => {}, isDragging: false }),
+  useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
+}));
 
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import * as api from "@/lib/api";
@@ -89,5 +114,18 @@ describe("DealsWorkspace (канбан)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Месяц" }));
     await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("month"));
+  });
+
+  it("drag&drop переносит сделку и сохраняет стадию", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start")); // handleDragStart → activeDeal
+    fireEvent.click(screen.getByTestId("dnd-end")); // handleDragEnd → перенос + сохранение
+    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("1", "won"));
+  });
+
+  it("drag без цели не сохраняет стадию", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-null")); // over=null → ранний выход
+    expect(api.updateDealStage).not.toHaveBeenCalled();
   });
 });

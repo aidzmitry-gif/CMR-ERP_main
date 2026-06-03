@@ -144,4 +144,34 @@ describe("LeadsWorkspace", () => {
     // выбран первый (конвертированный) → в панели ссылка на сделку
     expect(screen.getByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/5");
   });
+
+  it("панель показывает контакты, нецелевой вердикт, распределение и AI-обоснование", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          {
+            ...lead,
+            id: 4,
+            name: "Пётр",
+            company: "ООО Полный",
+            phone: "+375290000000",
+            email: "p@x.by",
+            status: "routed",
+            score: 30,
+            qualification: "non-target",
+            reason: "мало данных",
+            assignedTo: "Сидоров С.С.",
+            funnel: "regular",
+            aiRationale: "AI-пояснение по лиду",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("+375290000000")).toBeInTheDocument();
+    expect(screen.getByText("p@x.by")).toBeInTheDocument();
+    expect(screen.getAllByText(/нецелевой/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Сидоров С\.С\./)).toBeInTheDocument();
+    expect(screen.getByText("AI-пояснение по лиду")).toBeInTheDocument();
+    expect(screen.getByText(/Постоянные/)).toBeInTheDocument(); // воронка regular
+  });
 });
