@@ -10,6 +10,8 @@ import {
   createDocument,
   createLead,
   decideApproval,
+  decideDocument,
+  deleteDealItem,
   fetchApprovals,
   fetchBoardStages,
   fetchChats,
@@ -21,6 +23,8 @@ import {
   fetchKpis,
   fetchLeads,
   fetchMessages,
+  fetchOwnerDashboard,
+  fetchOwnerInsight,
   fetchSkus,
   getKpis,
   logActivity,
@@ -29,7 +33,9 @@ import {
   requestApproval,
   routeLead,
   sendMessage,
+  setPrimaryContact,
   updateDeal,
+  updateDealItem,
   updateDealStage,
 } from "@/lib/api";
 
@@ -195,5 +201,46 @@ describe("api client — документы/сообщения/согласов�
     expect((await fetchEvents())[0].event_type).toBe("sales.deal.created");
     stubFetch([]);
     expect(await fetchChats()).toEqual([]);
+  });
+});
+
+describe("api client — прочие операции и fallback'и", () => {
+  it("updateDealItem / deleteDealItem / setPrimaryContact / decideDocument", async () => {
+    stubFetch({}, true);
+    expect(await updateDealItem(1, 5)).toBe(true);
+    expect(await deleteDealItem(1)).toBe(true);
+    expect(await setPrimaryContact(1)).toBe(true);
+    expect(await decideDocument(1, true, "Юрист")).toBe(true);
+    stubFetch({}, false);
+    expect(await deleteDealItem(1)).toBe(false);
+  });
+
+  it("fetchOwnerInsight: текст при успехе, null при ошибке", async () => {
+    stubFetch({ text: "Инсайт", model: "qwen" });
+    expect(await fetchOwnerInsight()).toBe("Инсайт");
+    stubFetch({}, false);
+    expect(await fetchOwnerInsight()).toBeNull();
+  });
+
+  it("fetchOwnerDashboard собирает метрики/воронку/KPI", async () => {
+    stubFetch({ approvals_pending: 1, approvals_total: 2, modules: ["sales"], widgets: [] });
+    const dash = await fetchOwnerDashboard();
+    expect(dash?.metrics.approvals_pending).toBe(1);
+  });
+
+  it("fetchOwnerDashboard → null при ошибке", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    expect(await fetchOwnerDashboard()).toBeNull();
+  });
+
+  it("fallback'и при сетевой ошибке (mock-данные/пустые)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
+    expect((await fetchDealDetail("1")).number).toBeTruthy(); // mock-карточка
+    expect((await fetchKpis()).length).toBeGreaterThan(0); // mock-KPI
+    expect(await fetchDocuments("1")).toEqual([]);
+    expect(await fetchMessages("1")).toEqual([]);
+    expect(await fetchApprovals()).toEqual([]);
+    expect(await fetchContacts("1")).toEqual([]);
+    expect(await fetchEvents()).toEqual([]);
   });
 });

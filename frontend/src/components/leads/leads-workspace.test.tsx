@@ -89,4 +89,39 @@ describe("LeadsWorkspace", () => {
     expect(dialog).not.toBeNull();
     expect(within(dialog as HTMLElement).getByPlaceholderText("ООО ...")).toBeInTheDocument();
   });
+
+  it("конвертация распределённого лида показывает ссылку на сделку", async () => {
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lead_id: 1,
+      deal_id: 42,
+      number: "CRM-LEAD-1",
+      status: "converted",
+    });
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, status: "routed", assignedTo: "Иванов И.И.", funnel: "new" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "В сделку" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
+    const link = await screen.findByRole("link", { name: /Открыть сделку/ });
+    expect(link).toHaveAttribute("href", "/crm/deals/42");
+  });
+
+  it("приём лида через форму добавляет его в инбокс", async () => {
+    (api.createLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 99,
+      company: "ООО Новый Лид",
+    });
+    render(<LeadsWorkspace initialLeads={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Принять лид/ }));
+    const form = screen.getByText("Принять лид", { selector: "h3" }).closest("form") as HTMLElement;
+    fireEvent.change(within(form).getByPlaceholderText("ООО ..."), {
+      target: { value: "ООО Новый Лид" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Принять" }));
+    await waitFor(() => expect(api.createLead).toHaveBeenCalled());
+    expect((await screen.findAllByText("ООО Новый Лид")).length).toBeGreaterThan(0);
+  });
 });

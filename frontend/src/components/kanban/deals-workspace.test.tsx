@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -16,7 +16,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
+import * as api from "@/lib/api";
 import type { Stage } from "@/lib/types";
+
+const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const stages: Stage[] = [
   {
@@ -54,5 +57,37 @@ describe("DealsWorkspace (канбан)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Создать сделку/ }));
     expect(screen.getByText("Новая сделка")).toBeInTheDocument();
+  });
+
+  it("переключение в режим списка показывает таблицу сделок", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("Список"));
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("CRM-1")).toBeInTheDocument();
+  });
+
+  it("фильтр по приоритету скрывает несоответствующие сделки", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Высокий" }));
+    expect(screen.queryByText("ООО Доска")).toBeNull(); // сделка «Средний» отфильтрована
+  });
+
+  it("отметка KPI вызывает logActivity и перечитывает показатели", async () => {
+    const kpis = [
+      { id: "calls", label: "Звонки", value: 1, target: 40, percent: 3, icon: "phone" as const, tone: "blue" as const },
+    ];
+    mock(api.getKpis).mockResolvedValue(kpis);
+    render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
+    fireEvent.click(screen.getByTitle("Отметить (+1)"));
+    await waitFor(() => expect(api.logActivity).toHaveBeenCalledWith("calls"));
+    expect(api.getKpis).toHaveBeenCalled();
+  });
+
+  it("смена периода перечитывает KPI", async () => {
+    mock(api.getKpis).mockResolvedValue([]);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Месяц" }));
+    await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("month"));
   });
 });
