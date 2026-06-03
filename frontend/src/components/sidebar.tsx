@@ -45,10 +45,10 @@ const MODULES: ModuleItem[] = [
   { label: "Логистика", Icon: Truck, href: "/erp/logistics" },
   { label: "Финансы", Icon: Wallet, href: "/erp/finance" },
   { label: "Маркетинг", Icon: Megaphone, href: "/erp/marketing" },
-  { label: "Сервис и поддержка", Icon: Headphones },
-  { label: "HR", Icon: Users },
-  { label: "Аналитика", Icon: BarChart3 },
-  { label: "IT и настройки", Icon: Settings },
+  { label: "Сервис и поддержка", Icon: Headphones, href: "/erp/service" },
+  { label: "HR", Icon: Users, href: "/erp/hr" },
+  { label: "Аналитика", Icon: BarChart3, href: "/erp/analytics" },
+  { label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
 ];
 
 export function Sidebar() {

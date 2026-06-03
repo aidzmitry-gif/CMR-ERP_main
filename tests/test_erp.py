@@ -49,6 +49,24 @@ async def test_marketing(api):
     assert (await api.get("/marketing/campaigns")).json()[0]["leads"] == 25
 
 
+async def test_service(api):
+    r = await api.post(
+        "/service/tickets", json={"customer": "ООО Клиент", "subject": "Не работает доставка"}
+    )
+    assert r.status_code == 201
+    assert r.json()["status"] == "open"
+    assert (await api.get("/service/tickets")).json()[0]["subject"] == "Не работает доставка"
+
+
+async def test_hr(api):
+    r = await api.post(
+        "/hr/employees",
+        json={"full_name": "Иван Петров", "position": "Менеджер", "department": "Продажи"},
+    )
+    assert r.status_code == 201
+    assert (await api.get("/hr/employees")).json()[0]["full_name"] == "Иван Петров"
+
+
 async def test_erp_modules_loaded(api):
     data = (await api.get("/system/modules")).json()
     for module in (
@@ -60,5 +78,7 @@ async def test_erp_modules_loaded(api):
         "logistics",
         "finance",
         "marketing",
+        "service",
+        "hr",
     ):
         assert module in data["loaded_modules"]
