@@ -64,3 +64,30 @@ jobs:
         with:
           name: coverage-backend
           path: coverage.xml
+
+  frontend:
+    name: Frontend (unit + component, Vitest + RTL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm install
+      - name: Tests with coverage (Vitest + RTL)
+        run: npm run test:coverage
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "### Frontend coverage" >> "$GITHUB_STEP_SUMMARY"
+          { node -e "const s=require('./coverage/coverage-summary.json').total;console.log('Lines: **'+s.lines.pct+'%**, statements: **'+s.statements.pct+'%**, branches: **'+s.branches.pct+'%**')"; } >> "$GITHUB_STEP_SUMMARY" || echo "coverage-summary.json не найден" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/
