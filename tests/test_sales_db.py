@@ -446,6 +446,45 @@ async def test_price_engine(session, api):
     assert item["min_price"] == 1450
 
 
+async def test_ai_draft_reply_unit():
+    from core.services.litellm import LLMGateway
+    from modules.sales.ai import draft_reply
+    from modules.sales.models import Deal, Message
+
+    class _Settings:
+        ai_enabled = True
+        llm_base_url = ""  # mock-режим
+        llm_model = "qwen2.5"
+
+    gateway = LLMGateway(_Settings())
+    deal = Deal(number="AI-1", title="t", counterparty="ООО Клиент")
+    msgs = [Message(deal_id=1, channel="whatsapp", direction="in", text="Когда отгрузка?")]
+
+    draft = await draft_reply(gateway, deal, msgs)
+    assert isinstance(draft, str)
+    assert len(draft) > 0
+
+
+async def test_ai_gateway_disabled_raises():
+    import pytest
+
+    from core.services.litellm import LLMGateway
+
+    gateway = LLMGateway(None)  # ai_enabled отсутствует → выключен
+    assert gateway.enabled is False
+    with pytest.raises(RuntimeError):
+        await gateway.complete("test")
+
+
+async def test_ai_draft_endpoint_disabled(api):
+    deal = (
+        await api.post("/sales/deals", json={"number": "AI-2", "title": "t", "counterparty": "c"})
+    ).json()
+    # AI-слой выключен по умолчанию (feature-flag) → 503
+    r = await api.post(f"/sales/deals/{deal['id']}/ai/draft-reply")
+    assert r.status_code == 503
+
+
 async def test_telegram_bot(session, api):
     # /help перечисляет встроенные команды и команды модулей
     r = await api.post("/telegram/webhook", json={"message": {"text": "/help", "chat": {"id": 1}}})

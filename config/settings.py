@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # базовый URL 1С (OData/REST); пусто — используется mock-источник
     onec_base_url: str = ""
 
+    # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
+    ai_enabled: bool = False
+    # шлюз LLM (LiteLLM/Ollama, OpenAI-совместимый); пусто — mock-режим без модели
+    llm_base_url: str = ""
+    llm_model: str = "qwen2.5"
+
 
 @lru_cache
 def get_settings() -> Settings:

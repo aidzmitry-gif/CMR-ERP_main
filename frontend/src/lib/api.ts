@@ -349,6 +349,17 @@ export async function sendMessage(dealId: string, channel: string, text: string)
   }
 }
 
+/** AI-черновик ответа клиенту (AI-слой, Итерация 1). null — AI выключен / ошибка. */
+export async function aiDraftReply(dealId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/ai/draft-reply`, { method: "POST" });
+    if (!res.ok) return null;
+    return ((await res.json()) as { text: string }).text;
+  } catch {
+    return null;
+  }
+}
+
 export interface OwnerMetrics {
   approvals_pending: number;
   approvals_total: number;

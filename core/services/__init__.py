@@ -51,5 +51,5 @@ def build_services() -> Services:
         temporal=TemporalService(),
         db=Database(settings),
         auth=AuthService(),
-        llm=LLMGateway(),
+        llm=LLMGateway(settings),
     )

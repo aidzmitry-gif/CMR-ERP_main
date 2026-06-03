@@ -1,9 +1,9 @@
 "use client";
 
-import { Mail, MessageCircle, Phone, Send } from "lucide-react";
+import { Mail, MessageCircle, Phone, Send, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FaTelegramPlane, FaViber, FaWhatsapp } from "react-icons/fa";
-import { type DealMsg, fetchMessages, sendMessage } from "@/lib/api";
+import { aiDraftReply, type DealMsg, fetchMessages, sendMessage } from "@/lib/api";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -27,6 +27,8 @@ export function DealMessages({ dealId }: { dealId: string }) {
   const [text, setText] = useState("");
   const [channel, setChannel] = useState("whatsapp");
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<string | null>(null);
 
   async function refresh() {
     setItems(await fetchMessages(dealId));
@@ -44,6 +46,15 @@ export function DealMessages({ dealId }: { dealId: string }) {
     setText("");
     await refresh();
     setBusy(false);
+  }
+
+  async function onAiDraft() {
+    setAiBusy(true);
+    setAiNote(null);
+    const draft = await aiDraftReply(dealId);
+    setAiBusy(false);
+    if (draft) setText(draft);
+    else setAiNote("AI-слой выключен (feature-flag)");
   }
 
   return (
@@ -93,7 +104,18 @@ export function DealMessages({ dealId }: { dealId: string }) {
         })}
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex items-center justify-between">
+        <button
+          onClick={onAiDraft}
+          disabled={aiBusy}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-60"
+        >
+          <Sparkles size={14} /> {aiBusy ? "Генерация…" : "AI-черновик ответа"}
+        </button>
+        {aiNote && <span className="text-xs text-amber-600">{aiNote}</span>}
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
