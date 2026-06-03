@@ -465,6 +465,34 @@ async def test_ai_draft_reply_unit():
     assert len(draft) > 0
 
 
+async def test_ai_assist_unit():
+    from core.services.litellm import LLMGateway
+    from modules.sales.ai import next_step, summarize
+    from modules.sales.models import Deal
+
+    class _Settings:
+        ai_enabled = True
+        llm_base_url = ""
+        llm_model = "qwen2.5"
+
+    gateway = LLMGateway(_Settings())
+    deal = Deal(number="AS-1", title="t", counterparty="c", stage="prop")
+
+    summary = await summarize(gateway, deal, "Позиций: 2, документов: 1.")
+    nxt = await next_step(gateway, deal, "Позиций: 2.")
+    assert len(summary) > 0 and len(nxt) > 0
+    assert summary != nxt  # разный kind → разные mock-ответы
+
+
+async def test_ai_assist_endpoint_disabled(api):
+    deal = (
+        await api.post("/sales/deals", json={"number": "AS-2", "title": "t", "counterparty": "c"})
+    ).json()
+    # AI выключен по умолчанию → 503
+    r = await api.post(f"/sales/deals/{deal['id']}/ai/assist", json={"kind": "summary"})
+    assert r.status_code == 503
+
+
 async def test_ai_gateway_disabled_raises():
     import pytest
 

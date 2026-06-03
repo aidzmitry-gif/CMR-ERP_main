@@ -19,23 +19,44 @@ class LLMGateway:
         self.base_url = getattr(settings, "llm_base_url", "") or ""
         self.model = getattr(settings, "llm_model", "") or ""
 
-    async def complete(self, prompt: str, system: str = "") -> str:
-        """Сгенерировать ответ модели. Требует включённого AI-слоя (feature-flag)."""
+    async def complete(self, prompt: str, system: str = "", kind: str = "") -> str:
+        """Сгенерировать ответ модели. Требует включённого AI-слоя (feature-flag).
+
+        ``kind`` — подсказка типа задачи для mock-режима (реальная модель её
+        игнорирует, понимая задачу из ``system``/``prompt``).
+        """
         if not self.enabled:
             raise RuntimeError("AI-слой выключен (feature-flag ai_enabled)")
         if self.base_url:
             # TODO(ai): реальный OpenAI-совместимый запрос к LiteLLM/Ollama
             return await self._call_model(prompt, system)
-        return self._mock(prompt, system)
+        return self._mock(kind)
 
     async def _call_model(self, prompt: str, system: str) -> str:  # pragma: no cover
         raise NotImplementedError("Реальный LiteLLM подключается на этапе AI-слоя")
 
-    def _mock(self, prompt: str, system: str) -> str:
-        """Детерминированный ответ без модели — чтобы AI-слой работал в деве."""
-        return (
+    # Детерминированные ответы без модели — чтобы AI-слой работал в деве (как 1С-mock).
+    _MOCKS = {
+        "draft": (
             "Здравствуйте! Благодарю за обращение. Уточнил информацию по вашему запросу — "
             "готовы предложить оптимальные условия и сроки поставки. Подготовлю детали "
             "и вернусь с коммерческим предложением. При необходимости согласуем созвон. "
             "С уважением, отдел продаж."
-        )
+        ),
+        "summary": (
+            "Сделка в активной проработке: согласована номенклатура и цены, ведётся "
+            "переписка с клиентом, оформляются документы. Риск — сроки поставки; цена в "
+            "пределах истории по клиенту. Рекомендуется закрыть согласование договора."
+        ),
+        "next_step": (
+            "Следующий шаг: согласовать договор с юристом и выставить счёт, затем "
+            "подтвердить сроки отгрузки с клиентом. Ориентир — закрыть стадию за 3 дня."
+        ),
+        "insight": (
+            "Здоровье бизнеса в норме: воронка наполнена, просроченных согласований нет. "
+            "Точка роста — ускорить переход сделок со стадии КП; следить за планом отгрузки."
+        ),
+    }
+
+    def _mock(self, kind: str) -> str:
+        return self._MOCKS.get(kind, self._MOCKS["draft"])

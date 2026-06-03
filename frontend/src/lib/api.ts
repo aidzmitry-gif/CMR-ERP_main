@@ -360,6 +360,21 @@ export async function aiDraftReply(dealId: string): Promise<string | null> {
   }
 }
 
+/** AI-ассистент сделки: резюме / следующий шаг. null — AI выключен / ошибка. */
+export async function aiAssist(dealId: string, kind: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/ai/assist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { text: string }).text;
+  } catch {
+    return null;
+  }
+}
+
 export interface OwnerMetrics {
   approvals_pending: number;
   approvals_total: number;

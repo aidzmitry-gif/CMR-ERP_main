@@ -11,6 +11,7 @@ import {
   User,
 } from "lucide-react";
 import { ChannelButtons } from "@/components/channels";
+import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
 import { DealDocuments } from "@/components/deal-documents";
 import { DealMessages } from "@/components/deal-messages";
@@ -96,6 +97,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <Pencil size={14} /> Редактировать товар
           </button>
         </div>
+
+        {/* AI-ассистент сделки (резюме / следующий шаг) */}
+        <DealAiAssistant dealId={id} />
 
         {/* Сообщения (омниканальная переписка, из API) */}
         <DealMessages dealId={id} />
