@@ -35,4 +35,13 @@ describe("Topbar", () => {
     fireEvent.click(screen.getByTitle("Помощь"));
     expect(screen.getByText(/AI-First Business OS/)).toBeInTheDocument();
   });
+
+  it("закрывает поповер по клику на подложку", () => {
+    mock(api.fetchEvents).mockResolvedValue([]);
+    const { container } = render(<Topbar crumbs={["CRM"]} />);
+    fireEvent.click(screen.getByTitle("Уведомления"));
+    expect(screen.getByText("Уведомления")).toBeInTheDocument();
+    fireEvent.click(container.querySelector(".fixed.inset-0") as HTMLElement);
+    expect(screen.queryByText("Уведомления")).toBeNull();
+  });
 });

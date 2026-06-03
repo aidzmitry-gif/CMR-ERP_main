@@ -124,4 +124,24 @@ describe("LeadsWorkspace", () => {
     await waitFor(() => expect(api.createLead).toHaveBeenCalled());
     expect((await screen.findAllByText("ООО Новый Лид")).length).toBeGreaterThan(0);
   });
+
+  it("без лидов показывает подсказку выбрать лид", () => {
+    render(<LeadsWorkspace initialLeads={[]} />);
+    expect(screen.getByText(/Выберите лид/)).toBeInTheDocument();
+  });
+
+  it("отображает статусы «В сделке» и «Отклонён»", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 2, status: "converted", dealId: 5 },
+          { ...lead, id: 3, status: "rejected" },
+        ]}
+      />,
+    );
+    expect(screen.getAllByText("В сделке").length).toBeGreaterThan(0);
+    expect(screen.getByText("Отклонён")).toBeInTheDocument();
+    // выбран первый (конвертированный) → в панели ссылка на сделку
+    expect(screen.getByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/5");
+  });
 });

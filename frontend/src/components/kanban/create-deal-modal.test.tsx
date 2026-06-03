@@ -39,4 +39,37 @@ describe("CreateDealModal", () => {
     await waitFor(() => expect(api.lookupCounterparty).toHaveBeenCalledWith("191234567"));
     expect((screen.getByPlaceholderText("ООО ...") as HTMLInputElement).value).toBe("ООО Найдено");
   });
+
+  it("сообщает, если по УНП ничего не найдено", async () => {
+    mock(api.lookupCounterparty).mockResolvedValue(null);
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "000" } });
+    fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
+    expect(await screen.findByText(/ничего не найдено/i)).toBeInTheDocument();
+  });
+
+  it("меняет приоритет, стадию, ответственного и сумму", async () => {
+    const onCreate = vi.fn().mockResolvedValue(true);
+    const twoStages = [
+      stages[0],
+      { id: "won", title: "Закрыто", color: "#000", count: 0, sum: 0, deals: [] },
+    ];
+    render(<CreateDealModal stages={twoStages} defaultStage="new" onClose={() => {}} onCreate={onCreate} />);
+    fireEvent.change(screen.getByPlaceholderText("CRM-2024-0200"), { target: { value: "CRM-F" } });
+    fireEvent.change(screen.getByPlaceholderText("ООО ..."), { target: { value: "ООО Ф" } });
+    fireEvent.change(screen.getByPlaceholderText("Поставка ..."), { target: { value: "Тест" } });
+    fireEvent.change(screen.getByPlaceholderText("Иванов И.И."), { target: { value: "Сидоров" } });
+    const [amount] = screen.getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(amount, { target: { value: "7000" } });
+    const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    fireEvent.change(selects[0], { target: { value: "Высокий" } });
+    fireEvent.change(selects[1], { target: { value: "won" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: "Сидоров", amount: 7000, priority: "Высокий", stage: "won" }),
+      ),
+    );
+  });
 });

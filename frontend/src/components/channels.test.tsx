@@ -18,17 +18,35 @@ describe("channels", () => {
     expect(container.querySelectorAll("span").length).toBeGreaterThanOrEqual(5);
   });
 
-  it("ChannelButtons открывает связь и пишет в историю по основному контакту", async () => {
+  it("ChannelButtons по каждому каналу строит ссылку и пишет в историю", async () => {
     mock(api.fetchContacts).mockResolvedValue([
       { id: 1, full_name: "Анна", phone: "+375290000000", email: "a@b.by", is_primary: true },
     ]);
     mock(api.sendMessage).mockResolvedValue(true);
     render(<ChannelButtons dealId="1" />);
-    expect(await screen.findByText("WhatsApp")).toBeInTheDocument();
+    await screen.findByText("WhatsApp");
 
+    for (const [label, channel] of [
+      ["Позвонить", "phone"],
+      ["WhatsApp", "whatsapp"],
+      ["Viber", "viber"],
+      ["Telegram", "telegram"],
+      ["Email", "email"],
+    ] as const) {
+      fireEvent.click(screen.getByText(label));
+      await waitFor(() =>
+        expect(api.sendMessage).toHaveBeenCalledWith("1", channel, expect.stringContaining(label)),
+      );
+    }
+    expect(globalThis.open).toHaveBeenCalled();
+  });
+
+  it("без контакта ссылка не открывается, но связь фиксируется", async () => {
+    mock(api.fetchContacts).mockResolvedValue([]);
+    mock(api.sendMessage).mockResolvedValue(true);
+    render(<ChannelButtons dealId="2" />);
+    await screen.findByText("Позвонить");
     fireEvent.click(screen.getByText("Позвонить"));
-    await waitFor(() =>
-      expect(api.sendMessage).toHaveBeenCalledWith("1", "phone", expect.stringContaining("Позвонить")),
-    );
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("2", "phone", expect.any(String)));
   });
 });

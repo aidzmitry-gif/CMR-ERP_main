@@ -43,4 +43,19 @@ describe("DealItems", () => {
     fireEvent.click(screen.getByTitle("Удалить позицию"));
     await waitFor(() => expect(api.deleteDealItem).toHaveBeenCalledWith(5));
   });
+
+  it("меняет SKU и количество перед добавлением", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([]);
+    mock(api.fetchSkus).mockResolvedValue([
+      { id: 1, code: "A", title: "АКБ", unit: "шт" },
+      { id: 2, code: "B", title: "Лист", unit: "т" },
+    ]);
+    mock(api.addDealItem).mockResolvedValue(true);
+    render(<DealItems dealId="1" />);
+    await waitFor(() => expect(api.fetchSkus).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4" } });
+    fireEvent.click(screen.getByText("Добавить"));
+    await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 2, 4));
+  });
 });

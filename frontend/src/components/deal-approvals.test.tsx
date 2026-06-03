@@ -33,4 +33,19 @@ describe("DealApprovals", () => {
     fireEvent.click(screen.getByTitle("Согласовать"));
     await waitFor(() => expect(api.decideApproval).toHaveBeenCalledWith(1, true, "Согласующий"));
   });
+
+  it("смена вида согласования и отклонение", async () => {
+    mock(api.fetchApprovals).mockResolvedValue([
+      { id: 2, kind: "deal.discount", entity_ref: "deal:1", subject: "s", route: "РОП", status: "pending", requested_by: "М", decided_by: null },
+    ]);
+    mock(api.requestApproval).mockResolvedValue(true);
+    mock(api.decideApproval).mockResolvedValue(true);
+    render(<DealApprovals dealId="1" />);
+    await screen.findByText(/РОП/);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "payment.large" } });
+    fireEvent.click(screen.getByText("На согласование"));
+    await waitFor(() => expect(api.requestApproval).toHaveBeenCalledWith("1", "payment.large"));
+    fireEvent.click(screen.getByTitle("Отклонить"));
+    await waitFor(() => expect(api.decideApproval).toHaveBeenCalledWith(2, false, "Согласующий"));
+  });
 });

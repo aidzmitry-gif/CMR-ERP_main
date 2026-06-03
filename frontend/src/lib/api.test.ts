@@ -242,5 +242,9 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchApprovals()).toEqual([]);
     expect(await fetchContacts("1")).toEqual([]);
     expect(await fetchEvents()).toEqual([]);
+    expect(await fetchChats()).toEqual([]);
+    expect(await routeLead(1)).toBeNull();
+    expect(await convertLead(1)).toBeNull();
+    expect(await fetchOwnerInsight()).toBeNull();
   });
 });

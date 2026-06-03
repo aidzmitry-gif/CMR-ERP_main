@@ -1,9 +1,26 @@
-"""Добор покрытия backend: guard-ветки обработчиков, резерв склада, sync 1С."""
+"""Добор покрытия backend: guard-ветки обработчиков, резерв склада, sync 1С, загрузчик."""
+import types
 from types import SimpleNamespace
+
+import pytest
 
 
 def _ctx(session):
     return SimpleNamespace(session=session, services=SimpleNamespace())
+
+
+def test_loader_resolve_errors(monkeypatch):
+    from core.runtime import loader
+
+    fake = types.ModuleType("modules.fake.module")
+    monkeypatch.setattr(loader.importlib, "import_module", lambda name: fake)
+    # нет фабрики get_module() → RuntimeError
+    with pytest.raises(RuntimeError):
+        loader._resolve_module("fake")
+    # get_module() вернул не ModuleContract → TypeError
+    fake.get_module = lambda: object()
+    with pytest.raises(TypeError):
+        loader._resolve_module("fake")
 
 
 async def test_payment_paid_guard_branches(session):

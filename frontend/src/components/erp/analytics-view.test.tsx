@@ -14,4 +14,11 @@ describe("AnalyticsView", () => {
     expect(screen.getByText("Платежи")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("3").length).toBeGreaterThan(0));
   });
+
+  it("переживает ошибку загрузки (показывает …)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    render(<AnalyticsView />);
+    expect(screen.getByText("Аналитика")).toBeInTheDocument();
+    expect(screen.getAllByText("…").length).toBeGreaterThan(0);
+  });
 });

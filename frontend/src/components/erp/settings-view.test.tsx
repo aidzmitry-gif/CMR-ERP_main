@@ -27,4 +27,10 @@ describe("SettingsView", () => {
     expect(screen.getByText("sales.deal.read")).toBeInTheDocument();
     expect(screen.getByText(/finance\.payment\.paid/)).toBeInTheDocument();
   });
+
+  it("показывает загрузку при ошибке запроса", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    render(<SettingsView />);
+    expect(await screen.findByText("Загрузка…")).toBeInTheDocument();
+  });
 });

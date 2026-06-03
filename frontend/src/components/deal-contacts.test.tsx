@@ -22,9 +22,19 @@ describe("DealContacts", () => {
 
     fireEvent.click(screen.getByText("Добавить"));
     fireEvent.change(screen.getByPlaceholderText("ФИО контакта"), { target: { value: "Анна Иванова" } });
+    fireEvent.change(screen.getByPlaceholderText("Телефон"), { target: { value: "+375291112233" } });
+    fireEvent.change(screen.getByPlaceholderText("Email"), { target: { value: "anna@x.by" } });
     fireEvent.click(screen.getByText("Сохранить контакт"));
     await waitFor(() =>
-      expect(api.addContact).toHaveBeenCalledWith("1", expect.objectContaining({ full_name: "Анна Иванова", is_primary: true })),
+      expect(api.addContact).toHaveBeenCalledWith(
+        "1",
+        expect.objectContaining({
+          full_name: "Анна Иванова",
+          phone: "+375291112233",
+          email: "anna@x.by",
+          is_primary: true,
+        }),
+      ),
     );
   });
 

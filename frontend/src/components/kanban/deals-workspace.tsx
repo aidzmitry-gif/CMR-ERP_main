@@ -21,6 +21,7 @@ import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
 import { KpiCard } from "@/components/kpi-card";
 import { createDeal, getKpis, logActivity, updateDealStage, type DealInput } from "@/lib/api";
+import { moveDealToStage, recomputeStages } from "@/lib/board";
 import { formatMoney } from "@/lib/format";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, Stage } from "@/lib/types";
@@ -39,14 +40,6 @@ function pluralDeals(n: number): string {
   if (d10 === 1 && d100 !== 11) return "сделка";
   if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "сделки";
   return "сделок";
-}
-
-function recompute(stages: Stage[]): Stage[] {
-  return stages.map((s) => ({
-    ...s,
-    count: s.deals.length,
-    sum: s.deals.reduce((acc, d) => acc + d.amount, 0),
-  }));
 }
 
 function DraggableDeal({ deal }: { deal: Deal }) {
@@ -129,18 +122,7 @@ export function DealsWorkspace({
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
 
-    setStages((prev) => {
-      const source = prev.find((s) => s.deals.some((d) => d.id === dealId));
-      if (!source || source.id === targetStage) return prev;
-      const deal = source.deals.find((d) => d.id === dealId);
-      if (!deal) return prev;
-      const next = prev.map((s) => {
-        if (s.id === source.id) return { ...s, deals: s.deals.filter((d) => d.id !== dealId) };
-        if (s.id === targetStage) return { ...s, deals: [...s.deals, deal] };
-        return s;
-      });
-      return recompute(next);
-    });
+    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
 
     void updateDealStage(dealId, targetStage);
   }
@@ -149,7 +131,7 @@ export function DealsWorkspace({
     const created = await createDeal(input);
     if (!created) return false;
     setStages((prev) =>
-      recompute(prev.map((s) => (s.id === input.stage ? { ...s, deals: [...s.deals, created] } : s))),
+      recomputeStages(prev.map((s) => (s.id === input.stage ? { ...s, deals: [...s.deals, created] } : s))),
     );
     setModalOpen(false);
     return true;

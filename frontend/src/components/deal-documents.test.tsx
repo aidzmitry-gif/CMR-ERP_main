@@ -33,4 +33,19 @@ describe("DealDocuments", () => {
     fireEvent.click(screen.getByTitle("Согласовать и провести в 1С"));
     await waitFor(() => expect(api.decideDocument).toHaveBeenCalledWith(3, true, "Юрист"));
   });
+
+  it("смена типа документа и отклонение", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([
+      { id: 4, kind: "contract", number: "ДГ-2", status: "pending_approval", onec_ref: null, amount: 1 },
+    ]);
+    mock(api.createDocument).mockResolvedValue(true);
+    mock(api.decideDocument).mockResolvedValue(true);
+    render(<DealDocuments dealId="1" />);
+    await screen.findByText(/ДГ-2/);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "order" } });
+    fireEvent.click(screen.getByText("Сформировать"));
+    await waitFor(() => expect(api.createDocument).toHaveBeenCalledWith("1", "order"));
+    fireEvent.click(screen.getByTitle("Отклонить"));
+    await waitFor(() => expect(api.decideDocument).toHaveBeenCalledWith(4, false, "Юрист"));
+  });
 });

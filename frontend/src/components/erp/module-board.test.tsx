@@ -53,4 +53,23 @@ describe("ModuleBoard", () => {
     fireEvent.click(statusBtn);
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
   });
+
+  it("кнопка действия шлёт POST, числовое поле формы редактируется", async () => {
+    render(
+      <ModuleBoard
+        title="Маркетинг"
+        endpoint="/marketing/campaigns"
+        columns={[{ key: "name", label: "Имя" }]}
+        fields={[{ key: "name", label: "Имя" }, { key: "leads", label: "Лиды", type: "number", default: 0 }]}
+        action={{ label: "Запустить", path: (row) => `/marketing/campaigns/${row.id}/launch` }}
+      />,
+    );
+    await screen.findByText("Кампания");
+    fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/launch"))).toBe(true),
+    );
+  });
 });

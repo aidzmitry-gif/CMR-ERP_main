@@ -55,4 +55,25 @@ describe("DealMessages (омниканальный инбокс)", () => {
     const input = screen.getByPlaceholderText("Написать сообщение...") as HTMLInputElement;
     await waitFor(() => expect(input.value).toBe("Черновик ответа клиенту"));
   });
+
+  it("показывает заглушку, если AI вернул null", async () => {
+    mock(api.fetchMessages).mockResolvedValue([]);
+    mock(api.aiDraftReply).mockResolvedValue(null);
+    render(<DealMessages dealId="5" />);
+    await screen.findByText("Переписки пока нет");
+    fireEvent.click(screen.getByText(/AI-черновик ответа/));
+    expect(await screen.findByText(/AI-слой выключен/)).toBeInTheDocument();
+  });
+
+  it("отправляет по выбранному каналу", async () => {
+    mock(api.fetchMessages).mockResolvedValue([]);
+    mock(api.sendMessage).mockResolvedValue(true);
+    render(<DealMessages dealId="6" />);
+    await screen.findByText("Переписки пока нет");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "telegram" } });
+    const input = screen.getByPlaceholderText("Написать сообщение...");
+    fireEvent.change(input, { target: { value: "Привет" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("6", "telegram", "Привет"));
+  });
 });
