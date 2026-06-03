@@ -392,6 +392,17 @@ export interface OwnerDashboard {
   kpis: Kpi[];
 }
 
+/** AI-инсайт по здоровью бизнеса (AI Control Tower). null — AI выключен / ошибка. */
+export async function fetchOwnerInsight(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/system/owner/insight", { cache: "no-store" });
+    if (!res.ok) return null;
+    return ((await res.json()) as { text: string }).text;
+  } catch {
+    return null;
+  }
+}
+
 /** Панель владельца (Control Tower): кросс-модульные метрики + воронка + KPI (SSR). */
 export async function fetchOwnerDashboard(): Promise<OwnerDashboard | null> {
   try {

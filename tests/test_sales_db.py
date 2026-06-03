@@ -546,6 +546,12 @@ async def test_telegram_bot(session, api):
     assert "не распознана" in r.json()["text"]
 
 
+async def test_owner_ai_insight_disabled(api):
+    # AI Control Tower за feature-flag: при выключенном AI → 503
+    r = await api.get("/system/owner/insight")
+    assert r.status_code == 503
+
+
 async def test_owner_dashboard(session, api):
     # данные для метрик: сделка + согласование на ней
     deal = (

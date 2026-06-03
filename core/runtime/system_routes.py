@@ -1,7 +1,7 @@
 """Системные роуты ядра: health-check и интроспекция реестра подключённых модулей."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,3 +92,41 @@ async def system_owner(request: Request, session: AsyncSession = Depends(get_ses
         "modules": core.loaded_modules,
         "widgets": [{"key": w.key, "title": w.title} for w in core.widgets],
     }
+
+
+@router.get("/system/owner/insight")
+async def system_owner_insight(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """AI-инсайт по здоровью бизнеса — AI Control Tower (Итерация 1).
+
+    Под-фича за feature-flag: 503 при выключенном AI. Метрики идут в общий шлюз
+    ``core.services.llm``; AI-действие фиксируется событием ``ai.insight.generated``.
+    """
+    core = request.app.state.core
+    llm = core.services.llm
+    if not llm.enabled:
+        raise HTTPException(status_code=503, detail="AI-слой выключен (feature-flag)")
+
+    async def _count(model, *where) -> int:
+        query = select(func.count()).select_from(model)
+        for condition in where:
+            query = query.where(condition)
+        return (await session.execute(query)).scalar() or 0
+
+    context = (
+        f"Согласований ожидают: {await _count(Approval, Approval.status == 'pending')}. "
+        f"Событий в шине: {await _count(OutboxEvent)}. "
+        f"Контрагентов: {await _count(Counterparty)}."
+    )
+    text = await llm.complete(
+        f"Метрики бизнеса: {context} Дай краткий инсайт и точку роста.",
+        system="Ты — аналитик бизнеса. Дай инсайт по здоровью бизнеса на русском.",
+        kind="insight",
+    )
+    model = llm.model or "mock"
+    core.event_bus.emit(
+        session, "ai.insight.generated", {"actor": "AI", "entity_ref": "owner", "model": model}
+    )
+    await session.commit()
+    return {"text": text, "model": model}

@@ -9,6 +9,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { OwnerAiInsight } from "@/components/owner-ai-insight";
 import { fetchOwnerDashboard } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 
@@ -74,6 +75,8 @@ export default async function OwnerPage() {
           <Metric Icon={FileText} label="Записей аудита" value={String(metrics.audit_count)} tone="bg-slate-100 text-slate-600" />
           <Metric Icon={Users} label="Контрагентов" value={String(metrics.counterparties)} tone="bg-violet-50 text-violet-600" />
         </div>
+
+        <OwnerAiInsight />
 
         <section className="mt-6 rounded-2xl bg-white p-5 shadow-card">
           <h2 className="font-semibold text-ink">Воронка по стадиям</h2>
