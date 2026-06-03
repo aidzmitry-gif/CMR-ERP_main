@@ -253,6 +253,24 @@ export async function fetchChats(): Promise<ChatItem[]> {
   }
 }
 
+export interface SystemEvent {
+  id: number;
+  event_type: string;
+  created_at: string;
+  processed: boolean;
+}
+
+/** Последние доменные события (для уведомлений в шапке). */
+export async function fetchEvents(): Promise<SystemEvent[]> {
+  try {
+    const res = await fetch("/api/system/events", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as SystemEvent[];
+  } catch {
+    return [];
+  }
+}
+
 export interface RegistryInfo {
   unp: string;
   name: string;

@@ -79,7 +79,7 @@ export function Sidebar() {
                   {m.label}
                 </Link>
               ) : (
-                <div className={cls}>
+                <div className={`${cls} cursor-default`} title="Модуль в разработке">
                   <m.Icon size={18} />
                   {m.label}
                 </div>
@@ -96,7 +96,7 @@ export function Sidebar() {
                         {s.label}
                       </Link>
                     ) : (
-                      <div key={s.label} className={scls}>
+                      <div key={s.label} className={`${scls} cursor-default`} title="Раздел в разработке">
                         {s.label}
                       </div>
                     );

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Calendar, ChevronRight, Flag, User } from "lucide-react";
+import { ArrowLeft, Calendar, Flag, User } from "lucide-react";
 import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
@@ -58,10 +58,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <span className="inline-flex items-center gap-2 text-sm text-ink">
             <User size={16} className="text-slate-400" /> {d.contact}
           </span>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink">
+          <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink">
             <Calendar size={15} className="text-brand-600" /> {d.datetime}
-            <ChevronRight size={15} className="text-slate-400" />
-          </button>
+          </span>
         </div>
 
         {/* Контакты контрагента */}
