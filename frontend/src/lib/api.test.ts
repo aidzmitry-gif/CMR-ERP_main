@@ -121,6 +121,17 @@ describe("api client — сделки/доска/KPI", () => {
     expect((await fetchBoardStages()).length).toBeGreaterThan(0);
   });
 
+  it("mapDeal переносит closed_date в closedDate (закрытая сделка)", async () => {
+    stubFetch({
+      stages: [
+        { id: "won", title: "Закрыто", color: "#000", count: 1, sum: 100, deals: [{ ...apiDeal, deal_date: null, closed_date: "10.05.2024" }] },
+      ],
+    });
+    const [won] = await fetchBoardStages();
+    expect(won.deals[0].closedDate).toBe("10.05.2024");
+    expect(won.deals[0].date).toBeUndefined();
+  });
+
   it("fetchDealDetail маппит карточку с позициями", async () => {
     stubFetch({ ...apiDeal, items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
     const detail = await fetchDealDetail("9");
@@ -246,5 +257,32 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await routeLead(1)).toBeNull();
     expect(await convertLead(1)).toBeNull();
     expect(await fetchOwnerInsight()).toBeNull();
+    expect(await createLead({ source: "site" })).toBeNull();
+    expect(await qualifyLead(1)).toBeNull();
+    expect(await aiDraftReply("1")).toBeNull();
+    expect(await aiAssist("1", "summary")).toBeNull();
+  });
+
+  it("все мутаторы возвращают fallback при сетевой ошибке", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
+    const input = { number: "x", title: "t", counterparty: "c", amount: 1, priority: "Средний", stage: "new", owner: "" };
+    expect(await createDeal(input)).toBeNull();
+    expect(await updateDeal("1", {})).toBe(false);
+    expect(await updateDealStage("1", "won")).toBe(false);
+    expect(await logActivity("k")).toBe(false);
+    expect(await addContact("1", { full_name: "x" })).toBe(false);
+    expect(await setPrimaryContact(1)).toBe(false);
+    expect(await addDealItem("1", 1, 1)).toBe(false);
+    expect(await updateDealItem(1, 1)).toBe(false);
+    expect(await deleteDealItem(1)).toBe(false);
+    expect(await createDocument("1", "invoice")).toBe(false);
+    expect(await decideDocument(1, true, "x")).toBe(false);
+    expect(await sendMessage("1", "email", "x")).toBe(false);
+    expect(await requestApproval("1", "deal.contract")).toBe(false);
+    expect(await decideApproval(1, true, "x")).toBe(false);
+    expect(await getKpis()).toEqual([]);
+    expect(await fetchSkus()).toEqual([]);
+    expect(await fetchDealItems("1")).toEqual([]);
+    expect(await lookupCounterparty("191")).toBeNull();
   });
 });

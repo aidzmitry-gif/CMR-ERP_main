@@ -110,6 +110,16 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText(/Нет данных/)).toBeInTheDocument();
   });
 
+  it("OwnerPage с пустыми KPI показывает 0% плана", async () => {
+    mock(api.fetchOwnerDashboard).mockResolvedValue({
+      metrics: { approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0, counterparties: 0, skus: 0, modules: [], widgets: [] },
+      stages: [],
+      kpis: [],
+    });
+    render(await OwnerPage());
+    expect(screen.getByText("0%")).toBeInTheDocument();
+  });
+
   it("ERP-страницы монтируют ModuleBoard", () => {
     for (const Page of [ProcurementPage, ProductionPage, WmsPage, LogisticsPage, FinancePage, MarketingPage, ServicePage, HrPage]) {
       const { unmount } = render(<Page />);
