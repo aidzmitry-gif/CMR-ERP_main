@@ -17,3 +17,7 @@ class ProductionOrderOut(BaseModel):
     product: str
     qty: int
     status: str
+
+
+class StatusUpdate(BaseModel):
+    status: str
