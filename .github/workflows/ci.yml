@@ -5,7 +5,8 @@ on:
   pull_request:
 
 jobs:
-  test:
+  backend:
+    name: Backend (unit + api + integration)
     runs-on: ubuntu-latest
 
     services:
@@ -24,6 +25,7 @@ jobs:
           --health-retries 10
 
     env:
+      # реальный Postgres для integration-слоя (тесты сами берут этот URL)
       AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@localhost:5432/aios
 
     steps:
@@ -35,7 +37,30 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Lint (ruff)
         run: ruff check .
-      - name: Apply migrations
+      - name: Apply migrations (Postgres)
         run: alembic upgrade head
-      - name: Tests
-        run: pytest -q
+      - name: Tests with coverage (unit + api + integration)
+        run: >-
+          pytest -q
+          --cov --cov-branch
+          --cov-report=xml --cov-report=term-missing
+          --cov-fail-under=90
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "### Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          try:
+              root = ET.parse("coverage.xml").getroot()
+              print(f"Line rate: **{float(root.get('line-rate'))*100:.1f}%**, "
+                    f"branch rate: **{float(root.get('branch-rate'))*100:.1f}%**")
+          except Exception as exc:  # pragma: no cover
+              print(f"coverage.xml не прочитан: {exc}")
+          PY
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend
+          path: coverage.xml

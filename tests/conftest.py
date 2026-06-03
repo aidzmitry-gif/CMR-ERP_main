@@ -51,3 +51,30 @@ async def api(session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest_asyncio.fixture
+async def ai_api(session):
+    """API-клиент с включённым AI-слоем (mock-режим шлюза) — для AI-эндпоинтов."""
+    app = create_app()
+
+    async def _override():
+        yield session
+
+    app.dependency_overrides[get_session] = _override
+    app.state.core.services.llm.enabled = True  # включить feature-flag AI для теста
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+def pytest_collection_modifyitems(items) -> None:
+    """Авто-маркировка по слою пирамиды: tests/unit → unit, integration → integration, прочее → api."""
+    for item in items:
+        path = str(item.fspath).replace("\\", "/")
+        if "/tests/unit/" in path:
+            item.add_marker("unit")
+        elif "/tests/integration/" in path:
+            item.add_marker("integration")
+        else:
+            item.add_marker("api")

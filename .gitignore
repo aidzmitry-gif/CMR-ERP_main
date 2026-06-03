@@ -21,6 +21,11 @@ dev.db
 .ruff_cache/
 .mypy_cache/
 
+# Покрытие тестами
+.coverage
+coverage.xml
+htmlcov/
+
 # IDE / ОС
 .idea/
 .vscode/
