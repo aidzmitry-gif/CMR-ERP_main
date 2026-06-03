@@ -25,7 +25,40 @@ async def test_wms(api):
     assert movements[0]["sku_code"] == "AKB-60" and movements[0]["kind"] == "in"
 
 
+async def test_logistics(api):
+    r = await api.post(
+        "/logistics/shipments",
+        json={"customer": "ООО Клиент", "address": "Минск", "carrier": "СДЭК"},
+    )
+    assert r.status_code == 201
+    assert (await api.get("/logistics/shipments")).json()[0]["customer"] == "ООО Клиент"
+
+
+async def test_finance(api):
+    r = await api.post("/finance/payments", json={"ref": "Счёт СЧ-1", "amount": 5000})
+    assert r.status_code == 201
+    assert (await api.get("/finance/payments")).json()[0]["amount"] == 5000
+
+
+async def test_marketing(api):
+    r = await api.post(
+        "/marketing/campaigns",
+        json={"name": "Весна", "channel": "email", "budget": 1000, "leads": 25},
+    )
+    assert r.status_code == 201
+    assert (await api.get("/marketing/campaigns")).json()[0]["leads"] == 25
+
+
 async def test_erp_modules_loaded(api):
     data = (await api.get("/system/modules")).json()
-    for module in ("sales", "integrations", "procurement", "production", "wms"):
+    for module in (
+        "sales",
+        "integrations",
+        "procurement",
+        "production",
+        "wms",
+        "logistics",
+        "finance",
+        "marketing",
+    ):
         assert module in data["loaded_modules"]

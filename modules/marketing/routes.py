@@ -1,0 +1,35 @@
+"""HTTP-API модуля Marketing. Монтируется под префиксом ``/marketing``."""
+from __future__ import annotations
+
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.runtime.deps import get_session
+from modules.marketing.models import Campaign
+from modules.marketing.schemas import CampaignCreate, CampaignOut
+
+router = APIRouter(tags=["marketing"])
+
+
+@router.get("/campaigns", response_model=list[CampaignOut])
+async def list_campaigns(session: AsyncSession = Depends(get_session)):
+    """Маркетинговые кампании."""
+    return (await session.execute(select(Campaign).order_by(Campaign.id.desc()))).scalars().all()
+
+
+@router.post("/campaigns", response_model=CampaignOut, status_code=201)
+async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depends(get_session)):
+    """Создать кампанию."""
+    obj = Campaign(
+        name=payload.name,
+        channel=payload.channel,
+        budget=Decimal(str(payload.budget)),
+        leads=payload.leads,
+    )
+    session.add(obj)
+    await session.commit()
+    await session.refresh(obj)
+    return obj
