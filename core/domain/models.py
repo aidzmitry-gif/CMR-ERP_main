@@ -34,6 +34,7 @@ class Contact(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str | None] = mapped_column(String(255))
+    is_primary: Mapped[bool] = mapped_column(default=False, server_default="false")
 
 
 class Sku(Base):

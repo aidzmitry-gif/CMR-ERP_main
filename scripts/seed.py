@@ -114,6 +114,20 @@ async def main() -> None:
                     Message(deal_id=alfa.id, channel="email", direction="out", author="Иванов П.П.", text="Направил коммерческое предложение на почту, спецификация во вложении."),
                 ])
 
+        # Контакты контрагента «АльфаМеталл» (sales-13)
+        if (await s.execute(select(Contact).where(Contact.is_primary))).scalars().first() is None:
+            alfa_cp = (
+                await s.execute(select(Counterparty).where(Counterparty.name == "ООО АльфаМеталл"))
+            ).scalars().first()
+            if alfa_cp is None:
+                alfa_cp = Counterparty(name="ООО АльфаМеталл", unp="190445566")
+                s.add(alfa_cp)
+                await s.flush()
+            s.add_all([
+                Contact(counterparty_id=alfa_cp.id, full_name="Иван Петров", phone="+375291112233", email="ivanov@alfametall.by", is_primary=True),
+                Contact(counterparty_id=alfa_cp.id, full_name="Светлана Орлова", phone="+375293334455", email="orlova@alfametall.by"),
+            ])
+
         # История цен (Price Engine) по позициям сделки «АльфаМеталл» (ч.10)
         if (await s.execute(select(PriceQuote))).scalars().first() is None:
             for code, prices in (("ROLL-5", [1500, 1450, 1470]), ("REBAR-12", [1250, 1200])):

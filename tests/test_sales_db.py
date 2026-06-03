@@ -171,6 +171,47 @@ async def test_deal_items(session, api):
     assert body["items"][0]["code"] == "SKU-1"
 
 
+async def test_deal_contacts(api):
+    deal = (
+        await api.post(
+            "/sales/deals", json={"number": "CNT-1", "title": "t", "counterparty": "ООО Контактная"}
+        )
+    ).json()
+
+    # контактов пока нет
+    assert (await api.get(f"/sales/deals/{deal['id']}/contacts")).json() == []
+
+    # добавить основной контакт
+    c1 = (
+        await api.post(
+            f"/sales/deals/{deal['id']}/contacts",
+            json={"full_name": "Анна Иванова", "phone": "+375290000000", "is_primary": True},
+        )
+    ).json()
+    assert c1["is_primary"] is True
+    assert c1["full_name"] == "Анна Иванова"
+
+    # второй контакт — не основной
+    c2 = (
+        await api.post(
+            f"/sales/deals/{deal['id']}/contacts", json={"full_name": "Борис Петров"}
+        )
+    ).json()
+    assert c2["is_primary"] is False
+
+    # список: основной первым
+    contacts = (await api.get(f"/sales/deals/{deal['id']}/contacts")).json()
+    assert len(contacts) == 2
+    assert contacts[0]["is_primary"] is True
+
+    # сделать второй основным → у первого снимается
+    r = await api.patch(f"/sales/contacts/{c2['id']}/primary")
+    assert r.status_code == 200 and r.json()["is_primary"] is True
+    contacts = (await api.get(f"/sales/deals/{deal['id']}/contacts")).json()
+    primary = [c for c in contacts if c["is_primary"]]
+    assert len(primary) == 1 and primary[0]["id"] == c2["id"]
+
+
 async def test_deal_items_crud(session, api):
     from core.domain.models import Sku
 

@@ -186,6 +186,52 @@ export async function deleteDealItem(itemId: number): Promise<boolean> {
   }
 }
 
+export interface DealContact {
+  id: number;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  is_primary: boolean;
+}
+
+/** Контакты контрагента сделки (основной — первым). */
+export async function fetchContacts(dealId: string): Promise<DealContact[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as DealContact[];
+  } catch {
+    return [];
+  }
+}
+
+/** Добавить контакт контрагенту сделки. */
+export async function addContact(
+  dealId: string,
+  contact: { full_name: string; phone?: string; email?: string; is_primary?: boolean },
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(contact),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Назначить контакт основным. */
+export async function setPrimaryContact(contactId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/contacts/${contactId}/primary`, { method: "PATCH" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface RegistryInfo {
   unp: string;
   name: string;

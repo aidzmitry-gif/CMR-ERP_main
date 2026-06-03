@@ -11,6 +11,7 @@ import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
+import { DealContacts } from "@/components/deal-contacts";
 import { DealDocuments } from "@/components/deal-documents";
 import { DealItems } from "@/components/deal-items";
 import { DealMessages } from "@/components/deal-messages";
@@ -64,6 +65,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <ChevronRight size={15} className="text-slate-400" />
           </button>
         </div>
+
+        {/* Контакты контрагента */}
+        <DealContacts dealId={id} />
 
         {/* Номенклатура (редактирование позиций) */}
         <DealItems dealId={id} />
