@@ -1,17 +1,11 @@
 import Link from "next/link";
-import {
-  ArrowLeft,
-  Calendar,
-  ChevronRight,
-  Flag,
-  Pencil,
-  User,
-} from "lucide-react";
+import { ArrowLeft, Calendar, ChevronRight, Flag, User } from "lucide-react";
 import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
 import { DealContacts } from "@/components/deal-contacts";
+import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
 import { DealItems } from "@/components/deal-items";
 import { DealMessages } from "@/components/deal-messages";
@@ -38,9 +32,13 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <span className="text-sm text-muted">№ {d.number}</span>
           <div className="flex items-center gap-2">
             <PriorityBadge priority={d.priority} withIcon />
-            <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500">
-              <Pencil size={15} />
-            </button>
+            <DealEditButton
+              dealId={id}
+              title={d.description}
+              amount={d.amount}
+              nextStep={d.nextStep}
+              dealDate={d.dealDate}
+            />
           </div>
         </div>
 

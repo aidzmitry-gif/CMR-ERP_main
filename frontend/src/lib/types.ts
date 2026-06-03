@@ -90,4 +90,5 @@ export interface DealDetail {
   messages: DealMessage[];
   focus: boolean;
   starred: boolean;
+  dealDate: string;
 }

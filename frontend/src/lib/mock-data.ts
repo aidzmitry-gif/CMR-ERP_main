@@ -109,6 +109,7 @@ export function getDealDetail(id: string): DealDetail {
     messages: DEAL_DETAIL.messages,
     focus: false,
     starred: deal.starred ?? false,
+    dealDate: deal.date ?? "",
   };
 }
 
@@ -136,4 +137,5 @@ export const DEAL_DETAIL: DealDetail = {
   ],
   focus: false,
   starred: true,
+  dealDate: "12.05.2024",
 };

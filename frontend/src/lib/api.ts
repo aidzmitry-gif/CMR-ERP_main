@@ -91,6 +91,7 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
       messages: DEAL_DETAIL.messages,
       focus: d.focus,
       starred: d.starred,
+      dealDate: d.deal_date ?? "",
     };
   } catch {
     return getDealDetail(id);
