@@ -68,6 +68,24 @@ async def ai_api(session):
         yield client
 
 
+@pytest_asyncio.fixture
+async def api_no_gateways(session):
+    """API-клиент с отключёнными шлюзами 1С/склад/ЕГР — для защитных 503-веток."""
+    app = create_app()
+
+    async def _override():
+        yield session
+
+    app.dependency_overrides[get_session] = _override
+    core = app.state.core
+    core.services.onec = None
+    core.services.stock = None
+    core.services.registry = None
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
 def pytest_collection_modifyitems(items) -> None:
     """Авто-маркировка по слою пирамиды: tests/unit → unit, integration → integration, прочее → api."""
     for item in items:

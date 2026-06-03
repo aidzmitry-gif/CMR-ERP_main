@@ -92,7 +92,7 @@ describe("страницы (src/app)", () => {
 
   it("OwnerPage показывает метрики при наличии данных", async () => {
     mock(api.fetchOwnerDashboard).mockResolvedValue({
-      metrics: { approvals_pending: 1, approvals_total: 1, audit_count: 0, events_count: 2, counterparties: 3, skus: 0, modules: [], widgets: [] },
+      metrics: { approvals_pending: 1, approvals_total: 1, audit_count: 0, events_count: 2, counterparties: 3, skus: 0, modules: ["sales", "wms"], widgets: [{ key: "w", title: "Воронка продаж" }] },
       stages: [
         { id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] },
         { id: "won", title: "Закрыто", color: "#000", count: 2, sum: 200, deals: [] },
@@ -102,6 +102,8 @@ describe("страницы (src/app)", () => {
     render(await OwnerPage());
     expect(screen.getByText("Панель владельца")).toBeInTheDocument();
     expect(screen.getByText("owner-ai-insight")).toBeInTheDocument();
+    expect(screen.getByText("sales")).toBeInTheDocument(); // мап modules
+    expect(screen.getByText("Воронка продаж")).toBeInTheDocument(); // мап widgets
   });
 
   it("OwnerPage показывает заглушку без данных", async () => {
