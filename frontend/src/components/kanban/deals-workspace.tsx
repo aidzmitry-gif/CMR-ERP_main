@@ -12,16 +12,8 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import clsx from "clsx";
-import {
-  ChevronDown,
-  LayoutGrid,
-  List,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Settings2,
-  SlidersHorizontal,
-} from "lucide-react";
+import { LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
@@ -119,6 +111,10 @@ export function DealsWorkspace({
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
+  const [query, setQuery] = useState("");
+  const [priority, setPriority] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [view, setView] = useState<"board" | "list">("board");
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -176,6 +172,23 @@ export function DealsWorkspace({
     setModalOpen(true);
   }
 
+  // Поиск (номер/контрагент/описание) + фильтр по приоритету
+  const q = query.trim().toLowerCase();
+  const filteredStages = stages.map((s) => {
+    let deals = s.deals;
+    if (q) {
+      deals = deals.filter((d) =>
+        `${d.number} ${d.company} ${d.description ?? ""}`.toLowerCase().includes(q),
+      );
+    }
+    if (priority) deals = deals.filter((d) => d.priority === priority);
+    return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
+  });
+  const flatDeals = filteredStages.flatMap((s) =>
+    s.deals.map((d) => ({ deal: d, stageTitle: s.title })),
+  );
+  const PRIORITIES = ["Высокий", "Средний", "Низкий"];
+
   return (
     <>
       <main className="flex-1 overflow-auto p-6">
@@ -184,23 +197,52 @@ export function DealsWorkspace({
           <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск сделок..."
               className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-brand"
             />
           </div>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          <button
+            onClick={() => setFilterOpen((v) => !v)}
+            className={clsx(
+              "inline-flex items-center gap-2 rounded-lg border bg-white px-3.5 py-2 text-sm font-medium hover:bg-slate-50",
+              priority || filterOpen
+                ? "border-brand text-brand-600"
+                : "border-slate-200 text-slate-600",
+            )}
+          >
             <SlidersHorizontal size={16} /> Фильтры
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            <Settings2 size={16} /> Настроить воронку
+            {priority && <span className="rounded bg-brand-100 px-1.5 text-xs">{priority}</span>}
           </button>
           <button
             onClick={() => openModal(stages[0]?.id ?? "new")}
             className="ml-auto inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
           >
-            <Plus size={16} /> Создать сделку <ChevronDown size={16} />
+            <Plus size={16} /> Создать сделку
           </button>
         </div>
+
+        {/* Фильтр по приоритету */}
+        {filterOpen && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-sm text-muted">Приоритет:</span>
+            {[null, ...PRIORITIES].map((p) => (
+              <button
+                key={p ?? "all"}
+                onClick={() => setPriority(p)}
+                className={clsx(
+                  "rounded-lg px-3 py-1 text-sm font-medium",
+                  priority === p
+                    ? "bg-brand-100 text-brand-600"
+                    : "bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50",
+                )}
+              >
+                {p ?? "Все"}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* План / Факт по периодам */}
         <section className="mt-5">
@@ -233,39 +275,91 @@ export function DealsWorkspace({
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
           <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
-            <button className="rounded-md bg-brand-100 p-1.5 text-brand-600">
+            <button
+              onClick={() => setView("board")}
+              title="Канбан"
+              className={clsx(
+                "rounded-md p-1.5",
+                view === "board" ? "bg-brand-100 text-brand-600" : "text-slate-400 hover:text-slate-600",
+              )}
+            >
               <LayoutGrid size={16} />
             </button>
-            <button className="rounded-md p-1.5 text-slate-400">
+            <button
+              onClick={() => setView("list")}
+              title="Список"
+              className={clsx(
+                "rounded-md p-1.5",
+                view === "list" ? "bg-brand-100 text-brand-600" : "text-slate-400 hover:text-slate-600",
+              )}
+            >
               <List size={16} />
             </button>
           </div>
-          <button className="rounded-lg border border-slate-200 bg-white p-2 text-slate-400">
-            <MoreHorizontal size={16} />
-          </button>
         </div>
 
-        {/* Канбан с drag&drop */}
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
-            {stages.map((stage) => (
-              <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
-                {stage.deals.map((deal) => (
-                  <DraggableDeal key={deal.id} deal={deal} />
+        {view === "board" ? (
+          /* Канбан с drag&drop */
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
+              {filteredStages.map((stage) => (
+                <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
+                  {stage.deals.map((deal) => (
+                    <DraggableDeal key={deal.id} deal={deal} />
+                  ))}
+                </Column>
+              ))}
+            </div>
+            <DragOverlay>
+              {activeDeal ? (
+                <div className="w-[280px] rotate-2">
+                  <DealCard deal={activeDeal} />
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        ) : (
+          /* Список */
+          <div className="mt-3 overflow-hidden rounded-xl bg-white shadow-card">
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-100 text-left text-xs text-muted">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Номер</th>
+                  <th className="px-4 py-2.5 font-medium">Контрагент</th>
+                  <th className="px-4 py-2.5 font-medium">Описание</th>
+                  <th className="px-4 py-2.5 font-medium">Стадия</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Сумма</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flatDeals.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                      Сделок не найдено
+                    </td>
+                  </tr>
+                )}
+                {flatDeals.map(({ deal, stageTitle }) => (
+                  <tr key={deal.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-4 py-2.5">
+                      <Link href={`/crm/deals/${deal.id}`} className="font-medium text-brand-600">
+                        {deal.number}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2.5 text-ink">{deal.company}</td>
+                    <td className="px-4 py-2.5 text-slate-600">{deal.description}</td>
+                    <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-ink">
+                      {formatMoney(deal.amount)}
+                    </td>
+                  </tr>
                 ))}
-              </Column>
-            ))}
+              </tbody>
+            </table>
           </div>
-          <DragOverlay>
-            {activeDeal ? (
-              <div className="w-[280px] rotate-2">
-                <DealCard deal={activeDeal} />
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+        )}
 
-        <FunnelTotals data={computeFunnel(stages)} />
+        <FunnelTotals data={computeFunnel(filteredStages)} />
       </main>
 
       <ChatsPanel />
