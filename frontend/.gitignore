@@ -3,6 +3,10 @@
 /out
 /build
 /coverage
+/test-results
+/playwright-report
+/playwright/.cache
+/e2e.db
 next-env.d.ts
 .env*.local
 *.tsbuildinfo
