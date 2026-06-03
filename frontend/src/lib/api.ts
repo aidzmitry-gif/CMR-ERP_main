@@ -1,5 +1,5 @@
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Priority, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, Priority, Stage } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -552,6 +552,140 @@ export async function aiAssist(dealId: string, kind: string): Promise<string | n
     });
     if (!res.ok) return null;
     return ((await res.json()) as { text: string }).text;
+  } catch {
+    return null;
+  }
+}
+
+interface ApiLead {
+  id: number;
+  source: string;
+  name: string;
+  company: string;
+  phone: string | null;
+  email: string | null;
+  region: string;
+  product: string;
+  message: string;
+  status: string;
+  score: number;
+  qualification: string;
+  reason: string;
+  assigned_to: string;
+  funnel: string;
+  deal_id: number | null;
+}
+
+function mapLead(l: ApiLead): Lead {
+  return {
+    id: l.id,
+    source: l.source,
+    name: l.name,
+    company: l.company,
+    phone: l.phone ?? undefined,
+    email: l.email ?? undefined,
+    region: l.region,
+    product: l.product,
+    message: l.message,
+    status: l.status as LeadStatus,
+    score: l.score,
+    qualification: l.qualification,
+    reason: l.reason,
+    assignedTo: l.assigned_to,
+    funnel: l.funnel,
+    dealId: l.deal_id ?? undefined,
+  };
+}
+
+/** Лиды на приёме (вход воронки) из API (SSR); fallback — пусто. */
+export async function fetchLeads(): Promise<Lead[]> {
+  try {
+    const res = await fetch(`${BASE}/sales/leads`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as ApiLead[]).map(mapLead);
+  } catch {
+    return [];
+  }
+}
+
+export interface LeadInput {
+  source: string;
+  name?: string;
+  company?: string;
+  phone?: string;
+  email?: string;
+  region?: string;
+  product?: string;
+  message?: string;
+}
+
+/** Принять лид из канала (клиент, через /api). */
+export async function createLead(input: LeadInput): Promise<Lead | null> {
+  try {
+    const res = await fetch("/api/sales/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return mapLead((await res.json()) as ApiLead);
+  } catch {
+    return null;
+  }
+}
+
+export interface LeadQualifyResult {
+  id: number;
+  status: LeadStatus;
+  score: number;
+  qualification: string;
+  reason: string;
+  ai_rationale: string | null;
+  model: string | null;
+}
+
+/** Квалифицировать лид (Lead Qualifier): балл + вердикт (+ AI-обоснование, если включён). */
+export async function qualifyLead(id: number): Promise<LeadQualifyResult | null> {
+  try {
+    const res = await fetch(`/api/sales/leads/${id}/qualify`, { method: "POST" });
+    if (!res.ok) return null;
+    return (await res.json()) as LeadQualifyResult;
+  } catch {
+    return null;
+  }
+}
+
+export interface LeadRouteResult {
+  id: number;
+  status: LeadStatus;
+  assigned_to: string;
+  funnel: string;
+}
+
+/** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка). */
+export async function routeLead(id: number): Promise<LeadRouteResult | null> {
+  try {
+    const res = await fetch(`/api/sales/leads/${id}/route`, { method: "POST" });
+    if (!res.ok) return null;
+    return (await res.json()) as LeadRouteResult;
+  } catch {
+    return null;
+  }
+}
+
+export interface LeadConvertResult {
+  lead_id: number;
+  deal_id: number;
+  number: string;
+  status: LeadStatus;
+}
+
+/** Конвертировать распределённый лид в сделку. */
+export async function convertLead(id: number): Promise<LeadConvertResult | null> {
+  try {
+    const res = await fetch(`/api/sales/leads/${id}/convert`, { method: "POST" });
+    if (!res.ok) return null;
+    return (await res.json()) as LeadConvertResult;
   } catch {
     return null;
   }

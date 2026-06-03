@@ -92,12 +92,14 @@ async def test_production_completed_emits(session, api):
 
 async def test_campaign_creates_leads(session):
     from modules.sales.events import on_campaign_launched
-    from modules.sales.models import Deal
+    from modules.sales.models import Lead
 
-    await on_campaign_launched({"name": "Весна", "leads": 3}, _ctx(session))
+    # кампания питает приём лидов (front-of-funnel), а не создаёт сделки напрямую
+    await on_campaign_launched({"name": "Весна", "leads": 3, "channel": "email"}, _ctx(session))
     await session.commit()
-    leads = (await session.execute(select(Deal).where(Deal.stage == "new"))).scalars().all()
-    assert len([d for d in leads if d.title == "Лид: Весна"]) == 3
+    leads = (await session.execute(select(Lead).where(Lead.status == "new"))).scalars().all()
+    assert len(leads) == 3
+    assert all(lead.source == "email" for lead in leads)
 
 
 async def test_payment_paid_marks_document(session):

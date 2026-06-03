@@ -92,3 +92,25 @@ export interface DealDetail {
   starred: boolean;
   dealDate: string;
 }
+
+export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";
+
+export interface Lead {
+  id: number;
+  source: string; // site|telegram|whatsapp|email|phone|tender
+  name: string;
+  company: string;
+  phone?: string;
+  email?: string;
+  region: string;
+  product: string;
+  message: string;
+  status: LeadStatus;
+  score: number;
+  qualification: string; // "" | "target" | "non-target"
+  reason: string;
+  assignedTo: string;
+  funnel: string; // "" | new | regular | tender | project
+  dealId?: number;
+  aiRationale?: string; // обоснование AI-квалификатора (если AI включён)
+}

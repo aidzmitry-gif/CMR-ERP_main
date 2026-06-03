@@ -34,6 +34,7 @@ const MODULES: ModuleItem[] = [
     active: true,
     sub: [
       { label: "Продажи" },
+      { label: "Лиды", href: "/crm/leads" },
       { label: "Клиенты" },
       { label: "Контакты" },
       { label: "Сделки", active: true, href: "/crm/deals" },

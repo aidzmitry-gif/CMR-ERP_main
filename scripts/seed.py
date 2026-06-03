@@ -14,7 +14,15 @@ from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
 from core.services import build_services
-from modules.sales.models import Activity, Deal, DealItem, KpiTarget, Message, PriceQuote
+from modules.sales.models import (
+    Activity,
+    Deal,
+    DealItem,
+    KpiTarget,
+    Lead,
+    Message,
+    PriceQuote,
+)
 
 KPI_DATE = date(2026, 6, 2)
 
@@ -41,6 +49,25 @@ def _demo_deals() -> list[Deal]:
         Deal(number="CRM-2024-0101", title="Поставка металла", counterparty="ООО РегионСталь", amount=D("2100000"), priority="Высокий", stage="won", owner="Петров П.П.", closed_date="12.05.2024", starred=True),
         Deal(number="CRM-2024-0102", title="Оборудование", counterparty="АО БетаТех", amount=D("3750000"), priority="Средний", stage="won", owner="Иванов И.И.", closed_date="11.05.2024"),
         Deal(number="CRM-2024-0103", title="Комплектующие", counterparty="ООО Стандарт", amount=D("680000"), priority="Низкий", stage="won", owner="Сидоров С.С.", closed_date="10.05.2024"),
+    ]
+
+
+def _demo_leads() -> list[Lead]:
+    """Демо-лиды для приёма (front-of-funnel): разные каналы, регионы, полнота данных."""
+    return [
+        Lead(source="site", name="Сергей Кравцов", company="ООО ТеплоСеть", phone="+375291002030",
+             email="s.kravtsov@teploset.by", region="Минск", product="лист горячекатаный 5 мм",
+             message="Нужен лист 5 мм, объём ~15 т, просьба прислать цену и сроки отгрузки."),
+        Lead(source="tender", name="", company="РУП Гомельэнерго", region="Гомель",
+             product="оборудование для подстанции",
+             message="Тендерная заявка на поставку оборудования, бюджет уточняется."),
+        Lead(source="whatsapp", name="Алексей", phone="+375447778899", region="",
+             product="арматура", message="Почём арматура 12?"),
+        Lead(source="email", name="Отдел снабжения", company="ОАО Машзавод", email="snab@mashzavod.by",
+             region="Могилёв", product="комплектующие",
+             message="Запрос на регулярные поставки комплектующих, рассматриваем долгосрочный договор."),
+        Lead(source="phone", name="Без имени", region="", product="",
+             message="Звонок: интересовались наличием."),
     ]
 
 
@@ -133,6 +160,10 @@ async def main() -> None:
             for code, prices in (("ROLL-5", [1500, 1450, 1470]), ("REBAR-12", [1250, 1200])):
                 for p in prices:
                     s.add(PriceQuote(sku_code=code, counterparty="ООО АльфаМеталл", price=Decimal(str(p))))
+
+        # Лиды на приёме (вход воронки: приём → квалификация → распределение)
+        if (await s.execute(select(Lead))).scalars().first() is None:
+            s.add_all(_demo_leads())
 
         # Цели KPI + активности (План/Факт)
         if (await s.execute(select(KpiTarget))).scalars().first() is None:
