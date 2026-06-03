@@ -253,3 +253,16 @@ def test_database_init_engine_postgres_branch():
     db = Database(SimpleNamespace(database_url="postgresql+psycopg://u:p@h:5432/db"))
     db.init_engine()
     assert db.engine is not None and db.session_factory is not None
+
+
+# --- Core: реестр хуков жизненного цикла ---
+
+
+def test_core_lifecycle_hooks():
+    from core.runtime.core import Core
+
+    core = Core(SimpleNamespace(config=object(), event_bus=object()))
+    core.on_startup(lambda: None)
+    core.on_shutdown(lambda: None)
+    assert len(core.startup_hooks) == 1
+    assert len(core.shutdown_hooks) == 1
