@@ -106,6 +106,84 @@ export interface DealInput {
   next_step?: string;
 }
 
+export interface SkuOption {
+  id: number;
+  code: string;
+  title: string;
+  unit: string;
+}
+
+export interface DealItemFull {
+  id: number;
+  sku_id: number;
+  code: string;
+  title: string;
+  unit: string;
+  qty: number;
+  last_price: number | null;
+  min_price: number | null;
+}
+
+/** Справочник номенклатуры для подбора (клиент, через /api). */
+export async function fetchSkus(): Promise<SkuOption[]> {
+  try {
+    const res = await fetch("/api/sales/skus", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as SkuOption[];
+  } catch {
+    return [];
+  }
+}
+
+/** Позиции номенклатуры сделки (с ценами клиенту). */
+export async function fetchDealItems(dealId: string): Promise<DealItemFull[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/items`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as DealItemFull[];
+  } catch {
+    return [];
+  }
+}
+
+/** Добавить позицию в сделку. */
+export async function addDealItem(dealId: string, skuId: number, qty: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku_id: skuId, qty }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Изменить количество в позиции. */
+export async function updateDealItem(itemId: number, qty: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deal-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qty }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Удалить позицию из сделки. */
+export async function deleteDealItem(itemId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deal-items/${itemId}`, { method: "DELETE" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface RegistryInfo {
   unp: string;
   name: string;

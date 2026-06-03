@@ -4,7 +4,6 @@ import {
   Calendar,
   ChevronRight,
   Flag,
-  Package,
   Pencil,
   Star,
   Target,
@@ -14,6 +13,7 @@ import { ChannelButtons } from "@/components/channels";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
 import { DealDocuments } from "@/components/deal-documents";
+import { DealItems } from "@/components/deal-items";
 import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
@@ -69,34 +69,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </button>
         </div>
 
-        {/* Номенклатура */}
-        <div className="mt-4 rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-2 font-semibold text-ink">
-            <Package size={18} className="text-brand-600" />
-            {d.itemsTitle} <span className="font-medium text-brand-600">({d.items.length} поз.)</span>
-          </div>
-          <ul className="mt-3 space-y-2">
-            {d.items.map((item) => (
-              <li key={item.title} className="flex items-start justify-between gap-3 text-sm text-slate-600">
-                <span className="flex gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
-                  {item.title}
-                </span>
-                {item.lastPrice != null && (
-                  <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
-                    {item.lastPrice.toLocaleString("ru-RU")} ₽
-                    {item.minPrice != null && item.minPrice < item.lastPrice
-                      ? ` · мин ${item.minPrice.toLocaleString("ru-RU")}`
-                      : ""}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-          <button className="mt-3 inline-flex items-center gap-1.5 text-sm text-brand-600">
-            <Pencil size={14} /> Редактировать товар
-          </button>
-        </div>
+        {/* Номенклатура (редактирование позиций) */}
+        <DealItems dealId={id} />
 
         {/* AI-ассистент сделки (резюме / следующий шаг) */}
         <DealAiAssistant dealId={id} />

@@ -147,6 +147,44 @@ async def test_deal_items(session, api):
     assert body["items"][0]["code"] == "SKU-1"
 
 
+async def test_deal_items_crud(session, api):
+    from core.domain.models import Sku
+
+    session.add(Sku(code="IT-CR", title="Позиция CRUD", unit="шт"))
+    await session.commit()
+    skus = (await api.get("/sales/skus")).json()
+    sku_id = next(s["id"] for s in skus if s["code"] == "IT-CR")
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "ITC-1", "title": "t", "counterparty": "c"})
+    ).json()
+
+    # добавить позицию
+    r = await api.post(f"/sales/deals/{deal['id']}/items", json={"sku_id": sku_id, "qty": 3})
+    assert r.status_code == 201
+    item = r.json()
+    assert item["qty"] == 3
+    assert item["code"] == "IT-CR"
+    item_id = item["id"]
+
+    # позиция в списке
+    items = (await api.get(f"/sales/deals/{deal['id']}/items")).json()
+    assert len(items) == 1 and items[0]["id"] == item_id
+
+    # изменить количество
+    r = await api.patch(f"/sales/deal-items/{item_id}", json={"qty": 7})
+    assert r.status_code == 200 and r.json()["qty"] == 7
+
+    # удалить
+    assert (await api.delete(f"/sales/deal-items/{item_id}")).status_code == 204
+    assert (await api.get(f"/sales/deals/{deal['id']}/items")).json() == []
+
+    # несуществующий SKU → 404
+    assert (
+        await api.post(f"/sales/deals/{deal['id']}/items", json={"sku_id": 999999, "qty": 1})
+    ).status_code == 404
+
+
 async def test_log_activity_increments_kpi(session, api):
     from datetime import date
 
