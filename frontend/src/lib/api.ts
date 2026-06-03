@@ -89,6 +89,8 @@ export async function fetchDealDetail(id: string): Promise<DealDetail> {
         minPrice: i.min_price ?? undefined,
       })),
       messages: DEAL_DETAIL.messages,
+      focus: d.focus,
+      starred: d.starred,
     };
   } catch {
     return getDealDetail(id);
@@ -224,6 +226,23 @@ export async function updateDealStage(id: string, stage: string): Promise<boolea
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Частично обновить сделку (фокус/звезда/приоритет/поля). */
+export async function updateDeal(
+  id: string,
+  fields: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
     });
     return res.ok;
   } catch {

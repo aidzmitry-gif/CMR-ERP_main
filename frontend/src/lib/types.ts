@@ -88,4 +88,6 @@ export interface DealDetail {
   itemsTitle: string;
   items: DealItemView[];
   messages: DealMessage[];
+  focus: boolean;
+  starred: boolean;
 }

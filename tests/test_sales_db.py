@@ -65,6 +65,30 @@ async def test_get_deal_by_id(api):
     assert (await api.get("/sales/deals/999999")).status_code == 404
 
 
+async def test_update_deal_flags(api):
+    created = (
+        await api.post("/sales/deals", json={"number": "FLG-1", "title": "t", "counterparty": "c"})
+    ).json()
+    assert created["focus"] is False
+    assert created["starred"] is False
+
+    # фокус / избранное / приоритет — действия в карточке
+    r = await api.patch(
+        f"/sales/deals/{created['id']}",
+        json={"focus": True, "starred": True, "priority": "Высокий"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["focus"] is True
+    assert body["starred"] is True
+    assert body["priority"] == "Высокий"
+
+    # снять фокус, не затронув остальное
+    r2 = (await api.patch(f"/sales/deals/{created['id']}", json={"focus": False})).json()
+    assert r2["focus"] is False
+    assert r2["starred"] is True
+
+
 async def test_update_deal_stage(api):
     created = (
         await api.post("/sales/deals", json={"number": "U1", "title": "t", "counterparty": "c", "stage": "new"})

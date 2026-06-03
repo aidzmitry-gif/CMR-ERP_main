@@ -5,11 +5,10 @@ import {
   ChevronRight,
   Flag,
   Pencil,
-  Star,
-  Target,
   User,
 } from "lucide-react";
 import { ChannelButtons } from "@/components/channels";
+import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
 import { DealDocuments } from "@/components/deal-documents";
@@ -40,9 +39,6 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <PriorityBadge priority={d.priority} withIcon />
             <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500">
               <Pencil size={15} />
-            </button>
-            <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-400">
-              <Star size={15} />
             </button>
           </div>
         </div>
@@ -84,15 +80,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         {/* Согласования (human-in-the-loop) */}
         <DealApprovals dealId={id} />
 
-        {/* Фокус / Приоритет */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <button className="flex items-center justify-center gap-2 rounded-xl bg-blue-50 py-3 font-medium text-brand-600">
-            <Target size={18} /> Фокус
-          </button>
-          <button className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 py-3 font-medium text-amber-600">
-            <Flag size={18} /> Приоритет
-          </button>
-        </div>
+        {/* Фокус / Приоритет / Избранное (интерактив через PATCH) */}
+        <DealActions dealId={id} focus={d.focus} starred={d.starred} priority={d.priority} />
 
         {/* Каналы */}
         <div className="mt-5">

@@ -107,6 +107,8 @@ export function getDealDetail(id: string): DealDetail {
     itemsTitle: DEAL_DETAIL.itemsTitle,
     items: DEAL_DETAIL.items,
     messages: DEAL_DETAIL.messages,
+    focus: false,
+    starred: deal.starred ?? false,
   };
 }
 
@@ -132,4 +134,6 @@ export const DEAL_DETAIL: DealDetail = {
       text: "Добрый день! Хотел уточнить сроки поставки листа 5 мм и возможность доставки на следующий ...",
     },
   ],
+  focus: false,
+  starred: true,
 };
