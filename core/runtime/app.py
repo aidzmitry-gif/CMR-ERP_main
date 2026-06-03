@@ -18,6 +18,7 @@ from core.runtime import approval_routes, system_routes, telegram_routes
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
 from core.services import build_services
+from core.services.eventbus import EventContext
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("aios.app")
@@ -40,7 +41,7 @@ async def _background_loop(services) -> None:
         try:
             assert services.db.session_factory is not None
             async with services.db.session_factory() as session:
-                await services.event_bus.relay_once(session)
+                await services.event_bus.relay_once(session, EventContext(session, services))
             async with services.db.session_factory() as session:
                 await services.approvals.escalate_once(session)
         except asyncio.CancelledError:

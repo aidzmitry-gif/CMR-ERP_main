@@ -484,6 +484,54 @@ async def test_ai_assist_unit():
     assert summary != nxt  # разный kind → разные mock-ответы
 
 
+async def test_ai_event_handler(session):
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from core.services.eventbus import EventContext, OutboxEventBus
+    from core.services.litellm import LLMGateway
+    from modules.sales.events import on_incoming_message_ai
+
+    class _Settings:
+        ai_enabled = True
+        llm_base_url = ""
+        llm_model = "qwen2.5"
+
+    bus = OutboxEventBus()
+    services = SimpleNamespace(llm=LLMGateway(_Settings()), event_bus=bus)
+    ctx = EventContext(session=session, services=services)
+
+    # входящее сообщение клиента → AI реагирует и предлагает черновик
+    await on_incoming_message_ai({"deal_id": 7, "direction": "in", "channel": "whatsapp"}, ctx)
+    await session.commit()
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "ai.draft.suggested" in types
+    before = len(types)
+
+    # исходящее сообщение AI не триггерит
+    await on_incoming_message_ai({"deal_id": 7, "direction": "out"}, ctx)
+    await session.commit()
+    after = len((await session.execute(select(OutboxEvent))).scalars().all())
+    assert after == before
+
+
+async def test_dispatch_ctx_backward_compat(session):
+    from core.services.eventbus import EventContext, OutboxEventBus
+
+    bus = OutboxEventBus()
+    seen1: list = []
+    seen2: list = []
+    bus.subscribe("e", lambda p: seen1.append(p))  # обработчик с 1 параметром
+    bus.subscribe("e", lambda p, ctx: seen2.append((p, ctx)))  # обработчик с ctx
+    ctx = EventContext(session=session, services=object())
+
+    await bus.dispatch("e", {"x": 1}, ctx)
+    assert seen1 == [{"x": 1}]  # старый контракт цел
+    assert seen2 == [({"x": 1}, ctx)]  # новый получил контекст
+
+
 async def test_ai_assist_endpoint_disabled(api):
     deal = (
         await api.post("/sales/deals", json={"number": "AS-2", "title": "t", "counterparty": "c"})

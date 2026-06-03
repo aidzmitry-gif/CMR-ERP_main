@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -18,6 +19,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.domain.models import AuditLog, OutboxEvent
 
 logger = logging.getLogger("aios.eventbus")
+
+
+@dataclass
+class EventContext:
+    """Контекст доставки события обработчику: relay-сессия + фасад сервисов ядра.
+
+    Передаётся обработчикам, объявившим второй параметр (напр. AI-агенты, которым
+    нужен доступ к шлюзу LLM и шине). Обработчики с одним параметром (только
+    ``payload``) продолжают работать без изменений (§2.5 — AI как обработчик событий).
+    """
+
+    session: AsyncSession
+    services: object
+
+
+def _wants_ctx(handler: Callable) -> bool:
+    """Принимает ли обработчик контекст (второй параметр)?"""
+    try:
+        return len(inspect.signature(handler).parameters) >= 2
+    except (ValueError, TypeError):
+        return False
 
 
 class OutboxEventBus:
@@ -33,14 +55,18 @@ class OutboxEventBus:
         """Записать событие в outbox в текущей транзакции (без немедленной доставки)."""
         session.add(OutboxEvent(event_type=event_type, version=version, payload=payload))
 
-    async def dispatch(self, event_type: str, payload: dict) -> None:
-        """Вызвать подписчиков события (используется relay)."""
+    async def dispatch(self, event_type: str, payload: dict, ctx: "EventContext | None" = None) -> None:
+        """Вызвать подписчиков события (используется relay).
+
+        Обработчик с двумя параметрами получает ``ctx`` (сессия + сервисы), с
+        одним — только ``payload`` (обратная совместимость).
+        """
         for handler in self._handlers.get(event_type, []):
-            result = handler(payload)
+            result = handler(payload, ctx) if _wants_ctx(handler) else handler(payload)
             if inspect.isawaitable(result):
                 await result
 
-    async def relay_once(self, session: AsyncSession) -> int:
+    async def relay_once(self, session: AsyncSession, ctx: "EventContext | None" = None) -> int:
         """Доставить необработанные события подписчикам и пометить processed_at."""
         rows = (
             await session.execute(
@@ -51,7 +77,7 @@ class OutboxEventBus:
         ).scalars().all()
         for event in rows:
             logger.info("relay %s#%d -> %d", event.event_type, event.id, len(self._handlers.get(event.event_type, [])))
-            await self.dispatch(event.event_type, event.payload)
+            await self.dispatch(event.event_type, event.payload, ctx)
             event.processed_at = datetime.now(timezone.utc)
             # неизменяемый аудит: проекция каждого события
             session.add(
