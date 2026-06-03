@@ -476,6 +476,19 @@ async def test_order_reserves_stock(session, api):
     assert "sales.document.posted" in types
 
 
+async def test_chats(api):
+    deal = (
+        await api.post("/sales/deals", json={"number": "CH-1", "title": "t", "counterparty": "ООО Чат"})
+    ).json()
+    await api.post(
+        f"/sales/deals/{deal['id']}/messages", json={"channel": "whatsapp", "text": "Привет из чата"}
+    )
+    chats = (await api.get("/sales/chats")).json()
+    assert any(
+        c["deal_id"] == deal["id"] and c["last_text"] == "Привет из чата" for c in chats
+    )
+
+
 async def test_messages_omnichannel(session, api):
     from sqlalchemy import select
 

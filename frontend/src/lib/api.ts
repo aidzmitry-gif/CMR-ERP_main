@@ -233,6 +233,26 @@ export async function setPrimaryContact(contactId: number): Promise<boolean> {
   }
 }
 
+export interface ChatItem {
+  deal_id: number;
+  number: string;
+  company: string;
+  last_text: string;
+  channel: string;
+  direction: string;
+}
+
+/** Диалоги для панели «Чаты и дела» (сделки с последним сообщением). */
+export async function fetchChats(): Promise<ChatItem[]> {
+  try {
+    const res = await fetch("/api/sales/chats", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as ChatItem[];
+  } catch {
+    return [];
+  }
+}
+
 export interface RegistryInfo {
   unp: string;
   name: string;
