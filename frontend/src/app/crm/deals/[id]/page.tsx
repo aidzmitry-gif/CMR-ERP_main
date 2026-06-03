@@ -87,7 +87,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
         {/* Каналы */}
         <div className="mt-5">
-          <ChannelButtons />
+          <ChannelButtons dealId={id} />
         </div>
       </div>
     </div>
