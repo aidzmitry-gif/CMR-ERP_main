@@ -148,3 +148,13 @@ async def test_lead_requalify_keeps_routed_status(api):
     # повторная квалификация: статус не «new» → не откатывается на qualified
     r = await api.post(f"/sales/leads/{lead['id']}/qualify")
     assert r.status_code == 200 and r.json()["status"] == "routed"
+
+
+async def test_kpis_without_activities(session, api):
+    from modules.sales.models import KpiTarget
+
+    session.add(KpiTarget(key="solo", title="Одинокий", target=10, unit="count", icon="phone", tone="blue", sort_order=1))
+    await session.commit()
+    # есть цель, но нет ни одной активности → max(date)=None, ветка без запроса фактов
+    item = next(i for i in (await api.get("/sales/kpis")).json() if i["key"] == "solo")
+    assert item["actual"] == 0 and item["percent"] == 0
