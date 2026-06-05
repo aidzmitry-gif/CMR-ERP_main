@@ -73,16 +73,16 @@ async def test_procurement_received_emits(session, api):
     req = (
         await api.post("/procurement/requests", json={"supplier": "S", "item": "Болт", "qty": 10})
     ).json()
-    r = await api.patch(f"/procurement/requests/{req['id']}", json={"status": "received"})
-    assert r.status_code == 200 and r.json()["status"] == "received"
+    r = await api.patch(f"/procurement/requests/{req['id']}", json={"stage": "qc"})
+    assert r.status_code == 200 and r.json()["stage"] == "qc"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "procurement.received" in types
 
 
 async def test_production_completed_emits(session, api):
     order = (await api.post("/production/orders", json={"product": "Рама", "qty": 3})).json()
-    r = await api.patch(f"/production/orders/{order['id']}", json={"status": "done"})
-    assert r.status_code == 200 and r.json()["status"] == "done"
+    r = await api.patch(f"/production/orders/{order['id']}", json={"stage": "done"})
+    assert r.status_code == 200 and r.json()["stage"] == "done"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "production.completed" in types
 

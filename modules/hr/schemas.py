@@ -19,3 +19,32 @@ class EmployeeOut(BaseModel):
     position: str
     department: str
     status: str
+
+
+class CandidateCreate(BaseModel):
+    name: str = ""
+    position: str = ""
+    salary: float = 0
+    recruiter: str = ""
+    priority: str = "Средний"
+    stage: str = "new"
+    next_step: str = ""
+    number: str = ""
+
+
+class CandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    number: str
+    name: str
+    position: str
+    salary: float
+    recruiter: str
+    priority: str
+    stage: str
+    next_step: str
+
+
+class StageUpdate(BaseModel):
+    stage: str

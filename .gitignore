@@ -34,3 +34,6 @@ Thumbs.db
 
 # Локальные настройки Claude Code
 .claude/settings.local.json
+
+# Локальные референсы из архива (не часть проекта)
+.refs_voronki/

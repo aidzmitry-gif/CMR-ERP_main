@@ -60,9 +60,9 @@ async def test_lead_route_after_convert_conflicts(api):
 
 async def test_module_patch_404(api):
     assert (
-        await api.patch("/procurement/requests/999999", json={"status": "received"})
+        await api.patch("/procurement/requests/999999", json={"stage": "qc"})
     ).status_code == 404
-    assert (await api.patch("/production/orders/999999", json={"status": "done"})).status_code == 404
+    assert (await api.patch("/production/orders/999999", json={"stage": "done"})).status_code == 404
     assert (
         await api.patch("/logistics/shipments/999999", json={"status": "delivered"})
     ).status_code == 404
@@ -70,13 +70,13 @@ async def test_module_patch_404(api):
     assert (await api.post("/marketing/campaigns/999999/launch")).status_code == 404
 
 
-async def test_module_non_terminal_status_no_event(api):
-    # PATCH в промежуточный статус не эмитит «терминальное» событие (ветка else)
+async def test_module_non_terminal_stage_no_event(api):
+    # PATCH в промежуточную стадию не эмитит «терминальное» событие (ветка else)
     req = (
         await api.post("/procurement/requests", json={"supplier": "S", "item": "X", "qty": 1})
     ).json()
-    r = await api.patch(f"/procurement/requests/{req['id']}", json={"status": "ordered"})
-    assert r.status_code == 200 and r.json()["status"] == "ordered"
+    r = await api.patch(f"/procurement/requests/{req['id']}", json={"stage": "sourcing"})
+    assert r.status_code == 200 and r.json()["stage"] == "sourcing"
 
     pay = (await api.post("/finance/payments", json={"ref": "СЧ-Z", "amount": 10})).json()
     r2 = await api.patch(f"/finance/payments/{pay['id']}", json={"status": "processing"})

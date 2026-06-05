@@ -1,25 +1,24 @@
 import { AppShell } from "@/components/app-shell";
-import { ModuleBoard } from "@/components/erp/module-board";
+import { FunnelBoard } from "@/components/funnel/funnel-board";
+import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
 
 export default function WmsPage() {
   return (
     <AppShell crumbs={["ERP", "Склад"]}>
-      <ModuleBoard
+      <FunnelBoard
         title="Склад"
-        subtitle="Движения по складу (приход/расход)"
-        endpoint="/wms/movements"
-        columns={[
-          { key: "sku_code", label: "SKU" },
-          { key: "warehouse", label: "Склад" },
-          { key: "kind", label: "Тип" },
-          { key: "qty", label: "Кол-во" },
-        ]}
+        subtitle="Воронка операций: поступление → приёмка → контроль → размещение → отгрузка."
+        boardPath="/wms/board"
+        createPath="/wms/ops"
+        patchPath="/wms/ops"
         fields={[
-          { key: "sku_code", label: "SKU" },
-          { key: "warehouse", label: "Склад", default: "Главный" },
-          { key: "kind", label: "Тип (in/out)", default: "in" },
-          { key: "qty", label: "Кол-во", type: "number", default: 1 },
+          { key: "counterparty", label: "Контрагент" },
+          { key: "title", label: "Описание" },
+          { key: "items_count", label: "Позиций", type: "number", default: 0 },
+          { key: "amount", label: "Сумма, ₽", type: "number", default: 0 },
         ]}
+        showActions
+        {...FUNNEL_EXTRAS.wms}
       />
     </AppShell>
   );

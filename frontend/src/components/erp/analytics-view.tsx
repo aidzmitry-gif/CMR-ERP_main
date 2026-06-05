@@ -4,14 +4,17 @@ import { useEffect, useState } from "react";
 
 const SOURCES = [
   { label: "Сделки", endpoint: "/sales/deals" },
-  { label: "Заявки на закупку", endpoint: "/procurement/requests" },
-  { label: "Произв. заказы", endpoint: "/production/orders" },
-  { label: "Движения склада", endpoint: "/wms/movements" },
+  { label: "Закупки", endpoint: "/procurement/requests" },
+  { label: "Произв. наряды", endpoint: "/production/orders" },
+  { label: "Складские операции", endpoint: "/wms/ops" },
   { label: "Отгрузки", endpoint: "/logistics/shipments" },
   { label: "Платежи", endpoint: "/finance/payments" },
   { label: "Кампании", endpoint: "/marketing/campaigns" },
   { label: "Обращения", endpoint: "/service/tickets" },
-  { label: "Сотрудники", endpoint: "/hr/employees" },
+  { label: "Кандидаты", endpoint: "/hr/candidates" },
+  { label: "Документы офиса", endpoint: "/office/docs" },
+  { label: "Юр. дела", endpoint: "/legal/cases" },
+  { label: "Курсы обучения", endpoint: "/knowledge/courses" },
 ];
 
 export function AnalyticsView() {

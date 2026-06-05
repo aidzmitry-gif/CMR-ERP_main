@@ -14,6 +14,9 @@ vi.mock("@/components/erp/module-board", () => ({
     return <div>board:{title}</div>;
   },
 }));
+vi.mock("@/components/funnel/funnel-board", () => ({
+  FunnelBoard: ({ title }: { title: string }) => <div>funnel:{title}</div>,
+}));
 vi.mock("@/components/erp/analytics-view", () => ({ AnalyticsView: () => <div>analytics-view</div> }));
 vi.mock("@/components/erp/settings-view", () => ({ SettingsView: () => <div>settings-view</div> }));
 vi.mock("@/components/kanban/deals-workspace", () => ({ DealsWorkspace: () => <div>deals-workspace</div> }));
@@ -57,6 +60,9 @@ import ProductionPage from "@/app/erp/production/page";
 import ServicePage from "@/app/erp/service/page";
 import SettingsPage from "@/app/erp/settings/page";
 import WmsPage from "@/app/erp/wms/page";
+import OfficePage from "@/app/erp/office/page";
+import LegalPage from "@/app/erp/legal/page";
+import KnowledgePage from "@/app/erp/knowledge/page";
 import * as api from "@/lib/api";
 import { redirect } from "next/navigation";
 
@@ -122,8 +128,16 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText("0%")).toBeInTheDocument();
   });
 
-  it("ERP-страницы монтируют ModuleBoard", () => {
-    for (const Page of [ProcurementPage, ProductionPage, WmsPage, LogisticsPage, FinancePage, MarketingPage, ServicePage, HrPage]) {
+  it("ERP-воронки монтируют FunnelBoard", () => {
+    for (const Page of [ProcurementPage, ProductionPage, WmsPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
+      const { unmount } = render(<Page />);
+      expect(screen.getByText(/^funnel:/)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("ERP-таблицы монтируют ModuleBoard", () => {
+    for (const Page of [LogisticsPage, FinancePage, MarketingPage, ServicePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^board:/)).toBeInTheDocument();
       unmount();

@@ -16,4 +16,7 @@ ENABLED_MODULES: list[str] = [
     "marketing",
     "service",
     "hr",
+    "office",
+    "legal",
+    "knowledge",
 ]

@@ -114,3 +114,68 @@ export interface Lead {
   dealId?: number;
   aiRationale?: string; // обоснование AI-квалификатора (если AI включён)
 }
+
+// --- Универсальная воронка ERP-модулей (закупки, производство, склад, HR и др.) ---
+
+export interface FunnelCard {
+  id: number;
+  code: string;
+  title: string;
+  subtitle: string;
+  flag: string;
+  amount: number | null;
+  priority: string;
+  status_tag: string;
+  owner: string;
+  date: string;
+  progress: number | null;
+  next_step: string;
+  insight: string;
+  score?: string;
+  state?: string;
+  action?: string;
+  details?: { k: string; v: string }[];
+  tags: string[];
+}
+
+export interface FunnelStage {
+  id: string;
+  title: string;
+  color: string;
+  count: number;
+  sum: number;
+  cards: FunnelCard[];
+}
+
+export type FunnelTone = "blue" | "indigo" | "green" | "cyan" | "slate" | "amber" | "violet" | "red";
+
+/** Верхняя плитка «План/Факт» воронки (как в референсах). */
+export interface FunnelKpi {
+  label: string;
+  value: string;
+  target?: string; // «40» → отрисуется как «/ 40»
+  note: string; // подпись снизу, напр. «80% от плана»
+  percent: number; // заполнение прогресс-бара (0–100)
+  tone: FunnelTone;
+}
+
+/** Элемент правой панели (AI-лента / чаты / дедлайны). */
+export interface FunnelPanelItem {
+  title: string;
+  text: string;
+  badge?: number;
+  tone?: "ai" | "alert" | "info" | "ok";
+}
+
+export interface FunnelPanel {
+  title: string;
+  items: FunnelPanelItem[];
+  tabs?: string[]; // под-вкладки панели (напр. «Лента · Поставщики · Задачи»)
+}
+
+/** Метрика нижних итогов с трендом-дельтой. */
+export interface FunnelSummaryMetric {
+  label: string;
+  value: string;
+  delta?: string; // «+12%» / «−0.3%»
+}

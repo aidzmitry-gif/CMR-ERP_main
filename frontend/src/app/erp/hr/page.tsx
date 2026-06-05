@@ -1,24 +1,25 @@
 import { AppShell } from "@/components/app-shell";
-import { ModuleBoard } from "@/components/erp/module-board";
+import { FunnelBoard } from "@/components/funnel/funnel-board";
+import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
 
 export default function HrPage() {
   return (
-    <AppShell crumbs={["ERP", "HR"]}>
-      <ModuleBoard
-        title="HR"
-        subtitle="Сотрудники"
-        endpoint="/hr/employees"
-        columns={[
-          { key: "full_name", label: "ФИО" },
-          { key: "position", label: "Должность" },
-          { key: "department", label: "Отдел" },
-          { key: "status", label: "Статус" },
-        ]}
+    <AppShell crumbs={["ERP", "HR · Подбор"]}>
+      <FunnelBoard
+        title="HR · Подбор персонала"
+        subtitle="Воронка подбора: от новой вакансии до найма."
+        boardPath="/hr/board"
+        createPath="/hr/candidates"
+        patchPath="/hr/candidates"
+        showSum={false}
         fields={[
-          { key: "full_name", label: "ФИО" },
+          { key: "name", label: "Кандидат" },
           { key: "position", label: "Должность" },
-          { key: "department", label: "Отдел" },
+          { key: "salary", label: "Зарплата, ₽", type: "number", default: 0 },
         ]}
+        showChannels
+        showFocusPills
+        {...FUNNEL_EXTRAS.hr}
       />
     </AppShell>
   );
