@@ -16,3 +16,6 @@
 [submodule "modules/finance"]
 	path = modules/finance
 	url = https://github.com/aidzmitry-gif/fin-7.git
+[submodule "modules/marketing"]
+	path = modules/marketing
+	url = https://github.com/aidzmitry-gif/MAR-8.git
