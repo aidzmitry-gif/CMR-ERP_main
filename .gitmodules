@@ -19,3 +19,6 @@
 [submodule "modules/marketing"]
 	path = modules/marketing
 	url = https://github.com/aidzmitry-gif/MAR-8.git
+[submodule "modules/service"]
+	path = modules/service
+	url = https://github.com/aidzmitry-gif/SER-POD-9.git
