@@ -1,3 +1,6 @@
 [submodule "modules/sales"]
 	path = modules/sales
 	url = https://github.com/aidzmitry-gif/CRM.git
+[submodule "modules/procurement"]
+	path = modules/procurement
+	url = https://github.com/aidzmitry-gif/ZAK-3.git
