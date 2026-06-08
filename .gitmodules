@@ -22,3 +22,6 @@
 [submodule "modules/service"]
 	path = modules/service
 	url = https://github.com/aidzmitry-gif/SER-POD-9.git
+[submodule "modules/hr"]
+	path = modules/hr
+	url = https://github.com/aidzmitry-gif/HR-10.git
