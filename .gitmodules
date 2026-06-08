@@ -10,3 +10,6 @@
 [submodule "modules/wms"]
 	path = modules/wms
 	url = https://github.com/aidzmitry-gif/SKL-5.git
+[submodule "modules/logistics"]
+	path = modules/logistics
+	url = https://github.com/aidzmitry-gif/LOG-6.git
