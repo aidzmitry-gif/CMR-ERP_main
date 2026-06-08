@@ -7,3 +7,6 @@
 [submodule "modules/production"]
 	path = modules/production
 	url = https://github.com/aidzmitry-gif/PRO-4.git
+[submodule "modules/wms"]
+	path = modules/wms
+	url = https://github.com/aidzmitry-gif/SKL-5.git
