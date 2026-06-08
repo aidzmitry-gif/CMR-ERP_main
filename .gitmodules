@@ -13,3 +13,6 @@
 [submodule "modules/logistics"]
 	path = modules/logistics
 	url = https://github.com/aidzmitry-gif/LOG-6.git
+[submodule "modules/finance"]
+	path = modules/finance
+	url = https://github.com/aidzmitry-gif/fin-7.git
