@@ -9,10 +9,7 @@ vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
 vi.mock("@/components/erp/module-board", () => ({
-  ModuleBoard: ({ title, action }: { title: string; action?: { path: (row: { id: number }) => string } }) => {
-    if (action) action.path({ id: 1 }); // вызвать билдер пути действия (для покрытия)
-    return <div>board:{title}</div>;
-  },
+  ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
 vi.mock("@/components/funnel/funnel-board", () => ({
   FunnelBoard: ({ title }: { title: string }) => <div>funnel:{title}</div>,

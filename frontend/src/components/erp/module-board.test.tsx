@@ -61,7 +61,7 @@ describe("ModuleBoard", () => {
         endpoint="/marketing/campaigns"
         columns={[{ key: "name", label: "Имя" }]}
         fields={[{ key: "name", label: "Имя" }, { key: "leads", label: "Лиды", type: "number", default: 0 }]}
-        action={{ label: "Запустить", path: (row) => `/marketing/campaigns/${row.id}/launch` }}
+        action={{ label: "Запустить", path: "/marketing/campaigns/{id}/launch" }}
       />,
     );
     await screen.findByText("Кампания");

@@ -42,7 +42,7 @@ export function ModuleBoard({
   statusKey?: string;
   statusFlow?: string[];
   patchPath?: string;
-  action?: { label: string; path: (row: Row) => string };
+  action?: { label: string; path: string };
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
@@ -94,7 +94,8 @@ export function ModuleBoard({
 
   async function onAction(row: Row) {
     if (!action) return;
-    await fetch(`/api${action.path(row)}`, { method: "POST" });
+    const path = action.path.replace(/\{(\w+)\}/g, (_, k) => String(row[k] ?? ""));
+    await fetch(`/api${path}`, { method: "POST" });
     await refresh();
   }
 

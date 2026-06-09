@@ -20,7 +20,7 @@ export default function MarketingPage() {
           { key: "budget", label: "Бюджет", type: "number", default: 0 },
           { key: "leads", label: "Лиды", type: "number", default: 0 },
         ]}
-        action={{ label: "Запустить", path: (row) => `/marketing/campaigns/${row.id}/launch` }}
+        action={{ label: "Запустить", path: "/marketing/campaigns/{id}/launch" }}
       />
     </AppShell>
   );
