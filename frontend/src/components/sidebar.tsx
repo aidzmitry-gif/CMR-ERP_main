@@ -59,6 +59,8 @@ const MODULES: ModuleItem[] = [
       { label: "РОП · Планирование", href: "/crm/rop/planning" },
       { label: "РОП · Темп", href: "/crm/rop/pace" },
       { label: "РОП · Деньги · дебиторка", href: "/crm/rop/cash" },
+      { label: "РОП · Активность", href: "/crm/rop/activity" },
+      { label: "РОП · Этапы воронки", href: "/crm/rop/stages" },
       { label: "РОП · Ревью проигрышей", href: "/crm/rop/loss-review" },
     ],
   },

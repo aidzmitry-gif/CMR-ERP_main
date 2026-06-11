@@ -250,7 +250,7 @@ export interface PlanCard {
 export const planCards: PlanCard[] = [
   { label: "Контракты · июнь (подписать)", value: "193 000 / 300 000 BYN", percent: 64, gap: "разрыв 107 000 · прогноз закрытия / план контрактов", tone: "amber" },
   { label: "Прибыль по отгрузке · июнь", value: "54 000 / 60 000 BYN", note: "текущие к отгрузке 42к + быстрые 12к", percent: 90, gap: "разрыв 6 000 · маржа по отгрузкам месяца", tone: "green" },
-  { label: "Поступление денег · июнь", value: "205 000 / 250 000 BYN", percent: 82, gap: "разрыв 45 000 · платёжный календарь (≠ отгрузке)", tone: "green" },
+  { label: "Поступление денег · июнь", value: "215 000 / 250 000 BYN", percent: 86, gap: "разрыв 35 000 · платёжный календарь (≠ отгрузке)", tone: "green" },
   { label: "Под контракты · эшелон", value: "480 000 BYN", note: "отгрузка Q3–Q4 · контракты подписаны", percent: 100, gap: "в прибыль июнь не входят, в контракты — да", tone: "violet", accent: true },
 ];
 export const planCardsNote =
@@ -443,3 +443,98 @@ export const profitLeversManagers: ManagerLever[] = [
 ];
 export const velocityFooter = "Sales velocity: +10% к трём рычагам и −10% к циклу → +47% скорости.";
 export const paceAiFootnote = "AI-рекомендации, прогноз прибыли и флаг утечки — ИИ, Итерация 1.";
+
+// ===================== ДЕНЬГИ · ДЕБИТОРКА (DSO / старение) =====================
+// Деньги — отдельная плоскость от прибыли: отгрузили с прибылью ≠ получили оплату.
+// Завязано на нити других экранов: ХимПром 140к/18дн (Обзор), поступления 215к/250к и
+// к дате 52к/71к (Темп) — числа сходятся.
+
+/** KPI-полоса дебиторки (переиспользуем форму RopKpi). */
+export const cashKpis: RopKpi[] = [
+  { label: "Дебиторка всего", value: "312 000 BYN", sub: "к получению" },
+  { label: "Просрочено", value: "191 000 BYN", sub: "61% дебиторки", tone: "red" },
+  { label: "DSO (средний срок)", value: "34 дн", sub: "цель ≤ 30", tone: "amber" },
+  { label: "Поступило к дате", value: "52 000 BYN", sub: "план 71к · −19к", tone: "amber" },
+  { label: "Прогноз месяца", value: "215 000 BYN", sub: "план 250к · −35к", tone: "amber" },
+  { label: "Просрочка 60+ дн", value: "9 000 BYN", sub: "в юр. отдел", tone: "red" },
+];
+
+export interface AgingBucket {
+  bucket: string;
+  amount: number;
+  tone: Tone;
+}
+
+/** Корзины старения по дням просрочки (сумма = 312к). */
+export const aging: AgingBucket[] = [
+  { bucket: "Не просрочено", amount: 121000, tone: "green" },
+  { bucket: "Просрочка 1–30 дн", amount: 140000, tone: "amber" },
+  { bucket: "Просрочка 31–60 дн", amount: 42000, tone: "red" },
+  { bucket: "Просрочка 60+ дн", amount: 9000, tone: "red" },
+];
+export const agingNote = "61% дебиторки просрочено — высоко. Главный риск — ХимПром 140к (1–30 дн).";
+
+export interface Debtor {
+  name: string;
+  amount: string;
+  status: string;
+  statusTone: Tone;
+  owner: string;
+  action?: string;
+}
+
+/** Топ дебиторов (привязаны к клиентам Обзора). */
+export const debtors: Debtor[] = [
+  { name: "ООО ХимПром", amount: "140 000 BYN", status: "просрочка 18 дн", statusTone: "red", owner: "Дмитрий", action: "Эскалация" },
+  { name: "ИП СтройКомплекс", amount: "42 000 BYN", status: "просрочка 41 дн", statusTone: "red", owner: "Мария", action: "Претензия" },
+  { name: "ООО Тернопарк", amount: "18 000 BYN", status: "срок сегодня", statusTone: "amber", owner: "Анна", action: "Напомнить" },
+  { name: "ООО «Сатурн»", amount: "16 000 BYN", status: "в срок (−3 дн)", statusTone: "green", owner: "Анна" },
+  { name: "Бранд-Маркет", amount: "9 000 BYN", status: "просрочка 62 дн → юр.", statusTone: "red", owner: "Сергей", action: "В юр. отдел" },
+];
+
+export interface CalendarWeek {
+  week: string;
+  amount: string;
+  state: string;
+  tone: Tone;
+  percent: number;
+}
+
+/** Платёжный календарь — недельные поступления (сумма = прогноз 215к). */
+export const calendar: CalendarWeek[] = [
+  { week: "Неделя 1 · 3–9 июн", amount: "52 000 / 71 000", state: "собрано · −19к", tone: "amber", percent: 73 },
+  { week: "Неделя 2 · 10–16 июн", amount: "60 000", state: "ожидается", tone: "slate", percent: 100 },
+  { week: "Неделя 3 · 17–23 июн", amount: "55 000", state: "ожидается", tone: "slate", percent: 92 },
+  { week: "Неделя 4 · 24–30 июн", amount: "48 000", state: "ожидается", tone: "slate", percent: 80 },
+];
+export const calendarNote =
+  "Прогноз месяца 215 000 / 250 000 BYN (−35к). Добрать — ускорить оплату ХимПром и СтройКомплекс.";
+
+export interface ManagerDso {
+  name: string;
+  debt: string;
+  overdue: string;
+  dso: string;
+  tone: Tone;
+  note: string;
+}
+
+/** DSO по менеджерам (сумма долга = 312к, просрочка = 191к). */
+export const managerDso: ManagerDso[] = [
+  { name: "Анна А.", debt: "60 000", overdue: "0", dso: "24 дн", tone: "green", note: "собирает в срок" },
+  { name: "Дмитрий Д.", debt: "165 000", overdue: "140 000", dso: "44 дн", tone: "red", note: "ХимПром 140к завис — контроль до отгрузки" },
+  { name: "Мария М.", debt: "50 000", overdue: "42 000", dso: "38 дн", tone: "red", note: "СтройКомплекс — претензия" },
+  { name: "Сергей С.", debt: "37 000", overdue: "9 000", dso: "33 дн", tone: "amber", note: "Бранд-Маркет → юр. отдел" },
+];
+export const managerDsoTotal = { debt: "312 000", overdue: "191 000", dso: "34 дн" };
+
+/** Дисциплина платежей — правила РОПа. */
+export const cashDiscipline: string[] = [
+  "Предоплата ≥ 30% по новым клиентам",
+  "Стоп-отгрузка при просрочке > 30 дн",
+  "Кредитный лимит на клиента — по истории платежей",
+  "Эскалация в юр. отдел при просрочке > 60 дн",
+  "Контроль оплаты до отгрузки для крупных (ХимПром 140к)",
+];
+export const cashDisciplineNote =
+  "Деньги — отдельная плоскость от прибыли: можно отгрузить с прибылью и не получить оплату. DSO ≤ 30 дн держит оборотку.";

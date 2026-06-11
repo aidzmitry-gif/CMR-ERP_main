@@ -8,10 +8,17 @@ const TABS: { key: string; label: string; href?: string }[] = [
   { key: "overview", label: "Обзор РОП", href: "/crm/rop" },
   { key: "planning", label: "Планирование", href: "/crm/rop/planning" },
   { key: "pace", label: "Темп", href: "/crm/rop/pace" },
+  { key: "cash", label: "Деньги", href: "/crm/rop/cash" },
+  { key: "activity", label: "Активность", href: "/crm/rop/activity" },
+  { key: "stages", label: "Этапы", href: "/crm/rop/stages" },
   { key: "loss", label: "Ревью проигрышей", href: "/crm/rop/loss-review" },
 ];
 
-export function RopTabs({ active }: { active: "overview" | "planning" | "pace" | "loss" }) {
+export function RopTabs({
+  active,
+}: {
+  active: "overview" | "planning" | "pace" | "cash" | "activity" | "stages" | "loss";
+}) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-slate-200">
       {TABS.map((t) => {
