@@ -63,18 +63,21 @@ ruff check .                      # линт (line-length 100, py312, isort)
   такого модуля = коммит в его репозиторий + обновление указателя в суперпроекте.
   Клонирование/CI — с `--recurse-submodules`.
 - **Источник истины схемы PostgreSQL — миграции Alembic.** В SQLite-режиме таблицы
-  создаются автоматически (в SQLite нет схем) — это только для dev.
+  создаются автоматически (в SQLite нет схем) — это только для dev. `create_all` **не мигрирует**
+  существующий файл: если модели изменились, старая `dev.db` падает (напр. `no such column …`).
+  Лечение — удалить `dev.db` и пересоздать (`Remove-Item .\dev.db; python scripts/seed.py`).
 - Настройки — Pydantic Settings, env-префикс `AIOS_`, файл `.env` ([config/settings.py](config/settings.py)).
 - AI-слой за feature-flag `AIOS_AI_ENABLED` (по умолчанию выкл, mock-режим).
 - Путь проекта содержит пробелы и кириллическую «С» в «Сlaude» — **всегда заключать в кавычки**.
 - Coverage гоняется с `concurrency = ["thread","greenlet"]` (async-мост SQLAlchemy) — не трогать.
 - Тест-маркеры: `unit` (без I/O), `api` (httpx ASGI на SQLite), `integration` (Postgres через testcontainers).
 
+
 <!-- cloude-code-toolbox:mcp-skills-awareness-begin -->
 
 ### MCP & Skills awareness (Cloude Code ToolBox)
 
-_Last synced: 2026-06-11T10:45:28.828Z._
+_Last synced: 2026-06-11T17:06:06.355Z._
 
 - **Full report:** `.claude/cloude-code-toolbox-mcp-skills-awareness.md` in this workspace (auto-overwritten on each scan). Use it as ground truth for configured servers and skill folders.
 - **MCP:** For **live tools** in Claude Code, enable the matching server via `/mcp`. Servers are configured in `~/.claude.json` (user) and `.mcp.json` (project).
