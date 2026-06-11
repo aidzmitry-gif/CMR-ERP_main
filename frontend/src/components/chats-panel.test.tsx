@@ -31,4 +31,32 @@ describe("ChatsPanel (Чаты и дела)", () => {
     render(<ChatsPanel />);
     expect(await screen.findByText("Диалогов пока нет")).toBeInTheDocument();
   });
+
+  it("рендерит аватарку контрагента (инициалы) в свёрнутой рейке", async () => {
+    mock(api.fetchChats).mockResolvedValue([
+      { deal_id: 7, number: "CRM-7", company: "ООО Чат", last_text: "Привет", channel: "tg", direction: "in" },
+    ]);
+    render(<ChatsPanel />);
+    // Свёрнутая рейка всегда показывает аватарку — инициалы видны без раскрытия.
+    expect(await screen.findByText("ОЧ")).toBeInTheDocument();
+  });
+
+  it("показывает красный бейдж непрочитанных, когда unread > 0", async () => {
+    mock(api.fetchChats).mockResolvedValue([
+      { deal_id: 8, number: "CRM-8", company: "Гамма", last_text: "?", channel: "wa", direction: "in", unread: 3 },
+    ]);
+    render(<ChatsPanel />);
+    const badge = await screen.findByTitle("Непрочитанных: 3");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("3");
+  });
+
+  it("не показывает бейдж, когда поле unread отсутствует", async () => {
+    mock(api.fetchChats).mockResolvedValue([
+      { deal_id: 9, number: "CRM-9", company: "ООО Дельта", last_text: "ok", channel: "wa", direction: "out" },
+    ]);
+    render(<ChatsPanel />);
+    await screen.findByText("ОД");
+    expect(screen.queryByTitle(/Непрочитанных/)).not.toBeInTheDocument();
+  });
 });
