@@ -175,17 +175,17 @@ export interface LossQueueItem {
 
 /** Очередь «условно проиграна» — ждут разбора РОПа. */
 export const lossQueue: LossQueueItem[] = [
-  { id: "alfa", name: "ООО АльфаМеталл", amount: "1,75 млн BYN", reason: "Цена выше конкурента", wait: "ждёт 6 ч · проверить сегодня", waitTone: "red", selected: true },
-  { id: "energo", name: "ООО Энергия", amount: "3,2 млн BYN", reason: "Сроки поставки", wait: "ждут 1 день", waitTone: "slate" },
-  { id: "stroy", name: "ИП СтройКомплекс", amount: "1,25 млн BYN", reason: "Нет товара в наличии", wait: "ждут 4 ч", waitTone: "slate" },
-  { id: "gamma", name: "Гамма-Трейд", amount: "180 000 BYN", reason: "Нет ответа клиента", wait: "ждут 2 дня · просрочка проверки", waitTone: "red" },
+  { id: "promsnab", name: "ООО ПромСнаб", amount: "58 000 BYN", reason: "Цена выше конкурента", wait: "ждёт 6 ч · проверить сегодня", waitTone: "red", selected: true },
+  { id: "energoblok", name: "ООО Энергоблок", amount: "84 000 BYN", reason: "Сроки поставки", wait: "ждут 1 день", waitTone: "slate" },
+  { id: "tehkomplekt", name: "ИП ТехКомплект", amount: "41 000 BYN", reason: "Нет товара в наличии", wait: "ждут 4 ч", waitTone: "slate" },
+  { id: "orbita", name: "Орбита-Трейд", amount: "12 000 BYN", reason: "Нет ответа клиента", wait: "ждут 2 дня · просрочка проверки", waitTone: "red" },
 ];
 export const lossQueueNorm = "Норматив: разобрать в течение 24 часов";
 
-/** Разбор выбранной сделки (АльфаМеталл). */
+/** Разбор выбранной сделки (ПромСнаб). */
 export const lossReview = {
-  name: "ООО АльфаМеталл",
-  amount: "1,75 млн BYN",
+  name: "ООО ПромСнаб",
+  amount: "58 000 BYN",
   meta: "Проиграна на этапе «Согласование» · менеджер Дмитрий · была в работе 22 дня",
   reason: "Цена выше конкурента (−8%)",
   competitor: "Конкурент: МеталлТорг",
@@ -233,3 +233,213 @@ export const improvements: Improvement[] = [
   { text: "Раньше выявлять ЛПР (квалификация)", owner: "Квал", status: "в работе", statusTone: "amber" },
 ];
 export const improvementsNote = "Замыкаем цикл: разбор → действие → проверка на следующих сделках.";
+
+// ===================== ПЛАНИРОВАНИЕ (ёмкость) =====================
+
+export interface PlanCard {
+  label: string;
+  value: string;
+  note?: string;
+  gap: string;
+  percent: number;
+  tone: Tone;
+  accent?: boolean;
+}
+
+/** Три плоскости плана + эшелон под контракты. */
+export const planCards: PlanCard[] = [
+  { label: "Контракты · июнь (подписать)", value: "193 000 / 300 000 BYN", percent: 64, gap: "разрыв 107 000 · прогноз закрытия / план контрактов", tone: "amber" },
+  { label: "Прибыль по отгрузке · июнь", value: "54 000 / 60 000 BYN", note: "текущие к отгрузке 42к + быстрые 12к", percent: 90, gap: "разрыв 6 000 · маржа по отгрузкам месяца", tone: "green" },
+  { label: "Поступление денег · июнь", value: "205 000 / 250 000 BYN", percent: 82, gap: "разрыв 45 000 · платёжный календарь (≠ отгрузке)", tone: "green" },
+  { label: "Под контракты · эшелон", value: "480 000 BYN", note: "отгрузка Q3–Q4 · контракты подписаны", percent: 100, gap: "в прибыль июнь не входят, в контракты — да", tone: "violet", accent: true },
+];
+export const planCardsNote =
+  "План по контрактам 300к (подписать) шире плана выручки 280к в Обзоре — контракты включают отгрузки будущих периодов (эшелон).";
+
+export interface CapacityRow {
+  name: string;
+  plan: string;
+  forecast: string;
+  gap: string;
+  gapTone: Tone;
+  pipeline: string;
+  pipelineTone?: Tone;
+  win: string;
+  winTone?: Tone;
+  verdict: string;
+  verdictTone: Tone;
+  verdictNote: string;
+  stage: string;
+  coaching: string;
+}
+
+/** Хватает ли воронки каждому менеджеру под план. */
+export const capacity: CapacityRow[] = [
+  { name: "Анна А.", plan: "90 000", forecast: "72 000", gap: "18 000", gapTone: "green", pipeline: "80 000", win: "28%", verdict: "Хватает воронки", verdictTone: "green", verdictNote: "новые не нужны — дожимать текущие", stage: "Конверсия в норме по этапам", coaching: "фокус: удержание скорости" },
+  { name: "Дмитрий Д.", plan: "75 000", forecast: "60 000", gap: "15 000", gapTone: "amber", pipeline: "70 000", win: "26%", verdict: "Почти хватает", verdictTone: "amber", verdictNote: "дожать + 1 новая для буфера", stage: "Этап: КП → Переговоры (слабый)", coaching: "ценностное КП + аналоги" },
+  { name: "Мария М.", plan: "70 000", forecast: "33 000", gap: "37 000", gapTone: "red", pipeline: "45 000", win: "22%", verdict: "Нужно +4 новых (~140к)", verdictTone: "blue", verdictNote: "воронки мало, чтобы закрыть разрыв", stage: "Этап: Квалификация (теряет рано)", coaching: "BANT, скрипт discovery" },
+  { name: "Сергей С.", plan: "65 000", forecast: "28 000", gap: "37 000", gapTone: "red", pipeline: "100 000", pipelineTone: "red", win: "12%", winTone: "red", verdict: "Не брать новые", verdictTone: "red", verdictNote: "воронки много, конверсия низкая — чинить", stage: "Этап: Переговоры → Договор", coaching: "возражения + разбор звонков" },
+];
+
+/** Итоговая строка таблицы ёмкости — сумма столбцов (сходится с картой «Контракты»). */
+export const capacityTotal = { plan: "300 000", forecast: "193 000", gap: "107 000", pipeline: "295 000" };
+export const capacityNote =
+  "«Воронка взвеш.» — квалифицированный пайплайн под план; полный пайплайн «в работе» (290к и т.д.) — в Обзоре. Прогноз = обязательство закрытия по менеджеру.";
+
+export interface PlanAction {
+  who: string;
+  text: string;
+  tone: Tone;
+}
+
+/** План действий отдела на месяц. */
+export const planActions: PlanAction[] = [
+  { who: "Анна", text: "дожать 2 сделки в «Договор» (32 000) к 20.06", tone: "green" },
+  { who: "Дмитрий", text: "+1 новая + ускорить отгрузку «Тернопарк» в июнь", tone: "amber" },
+  { who: "Мария", text: "+4 сделки в воронку (закрепить разбор причин проигрышей) + коучинг квалификации", tone: "blue" },
+  { who: "Сергей", text: "стоп на новые; ревизия воронки 100 000 + разбор 5 звонков", tone: "red" },
+  { who: "Отдел", text: "добрать прибыль +6 000: ускорить отгрузки готовых сделок", tone: "teal" },
+  { who: "Деньги", text: "закрыть дебиторку «ХимПром» (18 дн) для поступления", tone: "red" },
+];
+export const planRule =
+  "Правило: разрыв ÷ Win% = нужная воронка. Меньше — берём новые; больше при низком Win — чиним конверсию.";
+export const planNorm = "Норма покрытия 3–4× к плану, но с поправкой на конверсию по этапам.";
+
+export interface Lever {
+  title: string;
+  text: string;
+}
+
+/** Рычаги конверсии по этапам воронки. */
+export const conversionLevers: Lever[] = [
+  { title: "Квалификация", text: "BANT/чек-лист, скрипт выявления потребности, отсев нецелевых" },
+  { title: "КП / презентация", text: "ценностное КП, расчёт выгоды, кейсы, аналоги, демо" },
+  { title: "Переговоры / цена", text: "плейбук возражений по цене, срочность, выход на ЛПР" },
+  { title: "Скорость / дожатие", text: "SLA на следующий шаг, разбор звонков, ролевые игры" },
+];
+export const leversNote = "Коучинг — по записям звонков, привязанным к слабому этапу. A/B-тест скриптов там, где просадка против нормы.";
+
+// ===================== ТЕМП (пульс · прибыль · скорость) =====================
+
+export interface PaceMeter {
+  label: string;
+  state: string;
+  stateTone: Tone;
+  percent: number;
+  toDate: string;
+  forecast: string;
+  note?: string;
+  noteTone?: Tone;
+}
+
+export const paceHeader = "Сегодня · день 6 из 21 · неделя 2";
+export const paceBadge = "Прибыль в графике, выручка отстаёт";
+
+/** Дневной пульс: контракты / прибыль / деньги. */
+export const paceMeters: PaceMeter[] = [
+  { label: "Контракты", state: "Отставание", stateTone: "amber", percent: 21, toDate: "к дате 62к · план 86к (−24к)", forecast: "прогноз 244к (−56к)" },
+  { label: "Прибыль (отгрузка)", state: "В графике", stateTone: "green", percent: 30, toDate: "к дате 18к · план 17к (+1к)", forecast: "маржа 11% · план 14% (−3пп)", note: "рычаг прибыли", noteTone: "amber" },
+  { label: "Деньги", state: "Отставание", stateTone: "amber", percent: 21, toDate: "к дате 52к · план 71к (−19к)", forecast: "прогноз 215к (−35к)" },
+];
+
+export interface VelocityCell {
+  label: string;
+  value: string;
+  badge?: string;
+  badgeTone?: Tone;
+  accent?: boolean;
+}
+
+/** Sales velocity — пять рычагов прибыли. */
+export const velocity = {
+  formula: "Открытых 48 × Конверсия 24% × Чек 35 000 × Маржа 11% ÷ Цикл 24 дн",
+  result: "≈ 1 850 BYN прибыли / день",
+  cells: [
+    { label: "Открытых сделок", value: "48" },
+    { label: "Конверсия (win)", value: "24%", badge: "рычаг", badgeTone: "blue" },
+    { label: "Средний чек", value: "35 000" },
+    { label: "Маржа", value: "11%", badge: "главный рычаг", badgeTone: "red", accent: true },
+    { label: "Цикл сделки", value: "24 дн", badge: "длинный", badgeTone: "amber" },
+  ] as VelocityCell[],
+  highlight:
+    "+3пп маржи (перестать скидывать) и +5пп конверсии → +45% прибыли на новых сделках.",
+  note:
+    "Самый дешёвый рычаг — маржа: ценностные продажи дают +2–4пп маржи и до −12% скидок, влияя сразу на все рычаги.",
+};
+
+export interface AiRec {
+  n: number;
+  text: string;
+  badge: string;
+}
+
+export const aiHeader = "ИИ-рекомендации к темпу · приоритет действий для прибыли";
+export const aiForecast =
+  "Прогноз прибыли 39к → при марже 13% и закрытии 2 фокусных → 58к. ИИ расставит действия по влиянию на прибыль:";
+
+/** Рекомендации ассистента РОП (Итерация 1). */
+export const aiRecs: AiRec[] = [
+  { n: 1, text: "Поднять пол по марже: 3 сделки Сергея со скидкой >10% → пересогласовать", badge: "+маржа ~2пп" },
+  { n: 2, text: "Апсейл и бандлы к 5 текущим клиентам → назначить Марии", badge: "+средний чек" },
+  { n: 3, text: "Контроль оплаты «ХимПром» (дебиторка 18 дн) до отгрузки", badge: "+деньги" },
+];
+
+export interface MarginBar {
+  label: string;
+  value: string;
+  valueTone: Tone;
+  percent: number;
+  tone: Tone;
+}
+
+/** Маржа и утечки. */
+export const marginAvg: MarginBar = { label: "Средняя маржа", value: "11% · план 14% (−3пп)", valueTone: "amber", percent: 78, tone: "amber" };
+export const marginMix: MarginBar = { label: "Маржинальный микс (высокомаржинальные SKU)", value: "35% · цель 50%", valueTone: "amber", percent: 35, tone: "amber" };
+export const discountLeak = {
+  value: "−18 000 BYN/мес (−6пп маржи)",
+  note: "70% сделок закрываются со скидкой — высоко; режем через аппрув и «пол» по марже",
+};
+
+export interface ManagerMargin {
+  name: string;
+  margin: string;
+  percent: number;
+  tone: Tone;
+}
+
+/** Маржа по менеджерам. */
+export const managerMargins: ManagerMargin[] = [
+  { name: "Анна А.", margin: "14%", percent: 80, tone: "green" },
+  { name: "Дмитрий Д.", margin: "12%", percent: 68, tone: "amber" },
+  { name: "Мария М.", margin: "11%", percent: 62, tone: "amber" },
+  { name: "Сергей С.", margin: "8%", percent: 45, tone: "red" },
+];
+export const managerMarginsNote = "Сергей «покупает» сделки скидкой — главный источник утечки.";
+export const leakageNote =
+  "В опте 10%+ прибыли утекает в бесконтрольных скидках и случайном миксе заказов — лечится правилами «что такое хорошая сделка», замером и разбором отклонений.";
+
+/** Рычаги прибыли — отдел. */
+export const profitLeversDept: string[] = [
+  "Ценностные продажи вместо скидок (выгода/ROI)",
+  "Жёсткий аппрув скидок РОПом + «пол» по марже",
+  "Апсейл / кросс-сейл / бандлы — выше средний чек",
+  "Маржинальный микс — двигать высокомаржинальные SKU и аналоги",
+  "Квалификация (MEDDIC) — меньше слитого цикла",
+];
+
+export interface ManagerLever {
+  name: string;
+  badge: string;
+  badgeTone: Tone;
+  text: string;
+}
+
+/** Рычаги прибыли — по менеджерам. */
+export const profitLeversManagers: ManagerLever[] = [
+  { name: "Сергей С.", badge: "маржа 8–12%", badgeTone: "red", text: "удержание цены, разбор где скинул зря, тренинг по марже" },
+  { name: "Мария М.", badge: "выше чек", badgeTone: "amber", text: "апсейл и кросс-сейл к текущим клиентам, бандлы" },
+  { name: "Дмитрий Д.", badge: "меньше торга", badgeTone: "amber", text: "ценностное КП с расчётом выгоды — меньше скидывает на КП→Переговоры" },
+  { name: "Анна А.", badge: "крупные/проектные", badgeTone: "green", text: "высокомаржинальные сделки + наставник по удержанию цены" },
+];
+export const velocityFooter = "Sales velocity: +10% к трём рычагам и −10% к циклу → +47% скорости.";
+export const paceAiFootnote = "AI-рекомендации, прогноз прибыли и флаг утечки — ИИ, Итерация 1.";

@@ -6,12 +6,12 @@ import Link from "next/link";
 const TABS: { key: string; label: string; href?: string }[] = [
   { key: "kanban", label: "Канбан", href: "/crm/deals" },
   { key: "overview", label: "Обзор РОП", href: "/crm/rop" },
-  { key: "planning", label: "Планирование" },
-  { key: "pace", label: "Темп" },
+  { key: "planning", label: "Планирование", href: "/crm/rop/planning" },
+  { key: "pace", label: "Темп", href: "/crm/rop/pace" },
   { key: "loss", label: "Ревью проигрышей", href: "/crm/rop/loss-review" },
 ];
 
-export function RopTabs({ active }: { active: "overview" | "loss" }) {
+export function RopTabs({ active }: { active: "overview" | "planning" | "pace" | "loss" }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-slate-200">
       {TABS.map((t) => {

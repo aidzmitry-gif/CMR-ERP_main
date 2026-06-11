@@ -56,6 +56,8 @@ const MODULES: ModuleItem[] = [
       { label: "Контакты" },
       { label: "Сделки", href: "/crm/deals" },
       { label: "РОП · Обзор", href: "/crm/rop" },
+      { label: "РОП · Планирование", href: "/crm/rop/planning" },
+      { label: "РОП · Темп", href: "/crm/rop/pace" },
       { label: "РОП · Ревью проигрышей", href: "/crm/rop/loss-review" },
     ],
   },
