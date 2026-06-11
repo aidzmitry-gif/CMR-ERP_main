@@ -1,0 +1,47 @@
+import clsx from "clsx";
+import Link from "next/link";
+
+/** Под-навигация раздела РОП. Построенные экраны кликабельны, остальные — заглушки
+ * («скоро», как пункты-заглушки в сайдбаре). «Канбан» ведёт на доску сделок CRM. */
+const TABS: { key: string; label: string; href?: string }[] = [
+  { key: "kanban", label: "Канбан", href: "/crm/deals" },
+  { key: "overview", label: "Обзор РОП", href: "/crm/rop" },
+  { key: "planning", label: "Планирование" },
+  { key: "pace", label: "Темп" },
+  { key: "loss", label: "Ревью проигрышей", href: "/crm/rop/loss-review" },
+];
+
+export function RopTabs({ active }: { active: "overview" | "loss" }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 border-b border-slate-200">
+      {TABS.map((t) => {
+        if (!t.href) {
+          return (
+            <span
+              key={t.key}
+              title="Раздел в разработке"
+              className="cursor-default px-3 py-2 text-sm text-slate-300"
+            >
+              {t.label}
+              <span className="ml-1 align-super text-[9px]">скоро</span>
+            </span>
+          );
+        }
+        const isActive = t.key === active;
+        return (
+          <Link
+            key={t.key}
+            href={t.href}
+            className={clsx(
+              "relative px-3 py-2 text-sm",
+              isActive ? "font-semibold text-brand-600" : "text-slate-500 hover:text-slate-700",
+            )}
+          >
+            {t.label}
+            {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-brand-600" />}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}

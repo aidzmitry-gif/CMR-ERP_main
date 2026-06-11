@@ -55,6 +55,8 @@ const MODULES: ModuleItem[] = [
       { label: "Клиенты" },
       { label: "Контакты" },
       { label: "Сделки", href: "/crm/deals" },
+      { label: "РОП · Обзор", href: "/crm/rop" },
+      { label: "РОП · Ревью проигрышей", href: "/crm/rop/loss-review" },
     ],
   },
   {
@@ -179,7 +181,10 @@ interface SidebarProps {
 export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}) {
   const pathname = usePathname() || "";
   const router = useRouter();
-  const crmActive = pathname.startsWith("/crm/deals") || pathname.startsWith("/crm/leads");
+  const crmActive =
+    pathname.startsWith("/crm/deals") ||
+    pathname.startsWith("/crm/leads") ||
+    pathname.startsWith("/crm/rop");
 
   // dev-выход: чистим cookie сессии и уводим на экран входа
   async function logout() {
