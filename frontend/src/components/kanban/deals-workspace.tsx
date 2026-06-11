@@ -14,7 +14,7 @@ import {
 import clsx from "clsx";
 import { LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
@@ -110,6 +110,10 @@ export function DealsWorkspace({
   const [view, setView] = useState<"board" | "list">("board");
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // Стабильный id для DndContext: dnd-kit иначе сидит aria-describedby модульным
+  // счётчиком, который расходится между SSR и клиентом → ошибка гидрации. useId
+  // даёт одинаковое значение на сервере и при гидрации.
+  const dndId = useId();
 
   function handleDragStart(e: DragStartEvent) {
     const id = String(e.active.id);
@@ -282,7 +286,7 @@ export function DealsWorkspace({
 
         {view === "board" ? (
           /* Канбан с drag&drop */
-          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
               {filteredStages.map((stage) => (
                 <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
