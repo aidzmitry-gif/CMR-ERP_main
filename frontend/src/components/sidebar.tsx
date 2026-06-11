@@ -43,6 +43,7 @@ const MODULES: ModuleItem[] = [
   {
     label: "CRM",
     Icon: Workflow,
+    href: "/crm/deals",
     sub: [
       { label: "Продажи" },
       { label: "Лиды", href: "/crm/leads" },
