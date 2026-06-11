@@ -20,6 +20,18 @@ export interface Deal {
   actionDate?: string;
   itemsLabel?: string;
   itemsCount?: number;
+  // Сделки 2.0 (SALES-43/44): вероятность, прогноз, история стадий, причина отказа.
+  probability?: number; // 0..100; если не задана — дефолт по стадии (SALES-44)
+  expectedCloseDate?: string; // ожидаемая дата закрытия (SALES-44)
+  stageChangedAt?: string; // ISO-дата входа в текущую стадию — для «дней в стадии» (SALES-43)
+  lostReasonCode?: string; // код причины отказа из справочника (SALES-40)
+  lostComment?: string; // комментарий менеджера при отказе (SALES-40)
+}
+
+/** Причина отказа (SALES-40): код + человекочитаемый заголовок для выпадашки. */
+export interface LossReason {
+  code: string;
+  title: string;
 }
 
 export interface Stage {

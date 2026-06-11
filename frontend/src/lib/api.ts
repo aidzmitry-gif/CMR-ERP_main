@@ -1,5 +1,6 @@
+import { ensureLostStage } from "@/lib/board";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, Priority, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -25,6 +26,12 @@ interface ApiDeal {
   closed_date: string | null;
   focus: boolean;
   starred: boolean;
+  // Сделки 2.0 — дополнения DealRead (SALES-40/43/44); бэкенд может их не прислать (старый контракт).
+  probability?: number | null;
+  expected_close_date?: string | null;
+  stage_changed_at?: string | null;
+  lost_reason_code?: string | null;
+  lost_comment?: string | null;
 }
 
 interface ApiStage {
@@ -49,25 +56,34 @@ function mapDeal(d: ApiDeal): Deal {
     closedDate: d.closed_date ?? undefined,
     nextStep: d.next_step ?? undefined,
     starred: d.starred,
+    // Сделки 2.0: вероятность/прогноз (SALES-44), история стадий (SALES-43), причина отказа (SALES-40)
+    probability: d.probability ?? undefined,
+    expectedCloseDate: d.expected_close_date ?? undefined,
+    stageChangedAt: d.stage_changed_at ?? undefined,
+    lostReasonCode: d.lost_reason_code ?? undefined,
+    lostComment: d.lost_comment ?? undefined,
   };
 }
 
-/** Доска сделок из API; при недоступности бэкенда — fallback на mock. */
+/** Доска сделок из API; при недоступности бэкенда — fallback на mock.
+ * В обоих случаях гарантируем колонку «отказ» (SALES-40) через {@link ensureLostStage}. */
 export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
   try {
     const res = await fetch(`${BASE}/sales/board`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
-    return data.stages.map((s) => ({
-      id: s.id,
-      title: s.title,
-      color: s.color,
-      count: s.count,
-      sum: s.sum,
-      deals: s.deals.map(mapDeal),
-    }));
+    return ensureLostStage(
+      data.stages.map((s) => ({
+        id: s.id,
+        title: s.title,
+        color: s.color,
+        count: s.count,
+        sum: s.sum,
+        deals: s.deals.map(mapDeal),
+      })),
+    );
   } catch {
-    return STAGES;
+    return ensureLostStage(STAGES);
   }
 }
 
@@ -335,6 +351,33 @@ export async function updateDeal(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(fields),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Справочник причин отказа (SALES-40) для выпадашки модалки.
+ * При недоступности бэка — пусто; вызывающий код берёт локальный fallback (`LOSS_REASONS`). */
+export async function fetchLossReasons(): Promise<LossReason[]> {
+  try {
+    const res = await fetch("/api/sales/loss-reasons", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as LossReason[];
+  } catch {
+    return [];
+  }
+}
+
+/** Закрыть сделку в отказ (SALES-40): причина обязательна, комментарий — опционально.
+ * Fire-and-forget, как updateDealStage: UI обновляется оптимистично, бэк — best-effort. */
+export async function loseDeal(id: string, reasonCode: string, comment?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${id}/lose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason_code: reasonCode, comment }),
     });
     return res.ok;
   } catch {

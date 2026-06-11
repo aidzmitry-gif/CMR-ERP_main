@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { moveDealToStage, recomputeStages } from "@/lib/board";
+import {
+  LOST_STAGE,
+  STAGE_PROBABILITY,
+  STUCK_DAYS,
+  daysInStage,
+  ensureLostStage,
+  isStuck,
+  moveDealToStage,
+  probabilityFor,
+  recomputeStages,
+  stageWeightedSum,
+  weightedAmount,
+} from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
 
-const deal = (id: string, amount: number): Deal => ({
+const deal = (id: string, amount: number, extra: Partial<Deal> = {}): Deal => ({
   id,
   number: `N-${id}`,
   company: "ООО",
@@ -11,6 +23,7 @@ const deal = (id: string, amount: number): Deal => ({
   amount,
   priority: "Средний",
   owner: "o",
+  ...extra,
 });
 const stage = (id: string, deals: Deal[]): Stage => ({ id, title: id, color: "#000", count: deals.length, sum: 0, deals });
 
@@ -40,5 +53,96 @@ describe("moveDealToStage", () => {
 
   it("возвращает прежний массив для несуществующей сделки", () => {
     expect(moveDealToStage(stages, "999", "won")).toBe(stages);
+  });
+});
+
+describe("ensureLostStage (SALES-40)", () => {
+  it("добавляет стадию «отказ» в конец, если её нет (fallback без бэка)", () => {
+    const next = ensureLostStage([stage("new", []), stage("won", [])]);
+    expect(next).toHaveLength(3);
+    const last = next[next.length - 1];
+    expect(last.id).toBe("lost");
+    expect(last.title).toBe(LOST_STAGE.title);
+    expect(last.color).toBe("#EF4444");
+    expect(last.deals).toEqual([]);
+  });
+
+  it("идемпотентна: не дублирует стадию, если она уже пришла с бэка", () => {
+    const withLost = [stage("new", []), { ...LOST_STAGE, count: 0, sum: 0, deals: [] }];
+    expect(ensureLostStage(withLost)).toBe(withLost);
+  });
+});
+
+describe("probabilityFor (SALES-44)", () => {
+  it("берёт дефолт по стадии, если probability не задана", () => {
+    expect(probabilityFor(deal("1", 100), "new")).toBe(STAGE_PROBABILITY.new);
+    expect(probabilityFor(deal("1", 100), "appr")).toBe(75);
+  });
+
+  it("уважает явно заданную probability, включая 0", () => {
+    expect(probabilityFor(deal("1", 100, { probability: 90 }), "new")).toBe(90);
+    expect(probabilityFor(deal("1", 100, { probability: 0 }), "new")).toBe(0);
+  });
+
+  it("0 для неизвестной стадии без явной вероятности", () => {
+    expect(probabilityFor(deal("1", 100), "unknown")).toBe(0);
+  });
+});
+
+describe("weightedAmount / stageWeightedSum (SALES-44)", () => {
+  it("взвешенная сумма сделки = amount × probability / 100", () => {
+    expect(weightedAmount(deal("1", 1_000_000, { probability: 50 }), "prop")).toBe(500_000);
+    expect(weightedAmount(deal("1", 1_000_000), "appr")).toBe(750_000); // дефолт 75%
+  });
+
+  it("взвешенная сумма стадии суммирует по всем сделкам", () => {
+    const s = stage("prop", [
+      deal("1", 1_000_000, { probability: 50 }), // 500 000
+      deal("2", 400_000), // дефолт prop=50 → 200 000
+    ]);
+    expect(stageWeightedSum(s)).toBe(700_000);
+  });
+});
+
+describe("daysInStage (SALES-43)", () => {
+  const NOW = Date.parse("2026-06-11T12:00:00Z");
+
+  it("считает целые дни от stage_changed_at", () => {
+    expect(daysInStage("2026-06-07T12:00:00Z", NOW)).toBe(4);
+    expect(daysInStage("2026-06-10T12:00:00Z", NOW)).toBe(1);
+    expect(daysInStage("2026-06-11T00:00:00Z", NOW)).toBe(0);
+  });
+
+  it("null, если дата неизвестна или неразборчива", () => {
+    expect(daysInStage(undefined, NOW)).toBeNull();
+    expect(daysInStage("не-дата", NOW)).toBeNull();
+  });
+
+  it("не уходит в минус для будущей даты", () => {
+    expect(daysInStage("2026-06-20T12:00:00Z", NOW)).toBe(0);
+  });
+});
+
+describe("isStuck (SALES-43)", () => {
+  const NOW = Date.parse("2026-06-11T12:00:00Z");
+  const old = "2026-06-06T12:00:00Z"; // 5 дней
+  const recent = "2026-06-10T12:00:00Z"; // 1 день
+
+  it("висяк: открытая стадия без движения ≥ порога", () => {
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "new", NOW)).toBe(true);
+    expect(STUCK_DAYS).toBe(4);
+  });
+
+  it("не висяк, если в стадии меньше порога", () => {
+    expect(isStuck(deal("1", 100, { stageChangedAt: recent }), "new", NOW)).toBe(false);
+  });
+
+  it("терминальные стадии (won/lost) никогда не висяки", () => {
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "won", NOW)).toBe(false);
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "lost", NOW)).toBe(false);
+  });
+
+  it("не висяк без даты входа в стадию", () => {
+    expect(isStuck(deal("1", 100), "new", NOW)).toBe(false);
   });
 });

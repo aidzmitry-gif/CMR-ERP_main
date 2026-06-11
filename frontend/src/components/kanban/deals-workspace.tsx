@@ -12,19 +12,48 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import clsx from "clsx";
-import { LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { Clock, LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
+import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import { KpiCard } from "@/components/kpi-card";
-import { createDeal, getKpis, logActivity, updateDealStage, type DealInput } from "@/lib/api";
-import { moveDealToStage, recomputeStages } from "@/lib/board";
+import {
+  createDeal,
+  fetchLossReasons,
+  getKpis,
+  logActivity,
+  loseDeal,
+  updateDealStage,
+  type DealInput,
+} from "@/lib/api";
+import {
+  daysInStage,
+  isStuck,
+  LOSS_REASONS,
+  moveDealToStage,
+  probabilityFor,
+  recomputeStages,
+  stageWeightedSum,
+  weightedAmount,
+} from "@/lib/board";
 import { formatMoney } from "@/lib/format";
 import { computeFunnel } from "@/lib/funnel";
-import type { Deal, Kpi, Stage } from "@/lib/types";
+import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
+
+/** Бейджи/плашки Сделки 2.0, вычисляемые для карточки из стадии и текущего времени. */
+type CardExtras = {
+  days: number | null;
+  stuck: boolean;
+  probability: number;
+  weighted: number;
+  lostReasonTitle?: string;
+  wonResult: boolean;
+  onLose?: () => void;
+};
 
 const PERIODS = [
   { key: "day", label: "День" },
@@ -42,11 +71,11 @@ function pluralDeals(n: number): string {
   return "сделок";
 }
 
-function DraggableDeal({ deal }: { deal: Deal }) {
+function DraggableDeal({ deal, extras }: { deal: Deal; extras: CardExtras }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: deal.id });
   return (
     <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? "opacity-40" : ""}>
-      <DealCard deal={deal} />
+      <DealCard deal={deal} {...extras} />
     </div>
   );
 }
@@ -61,6 +90,8 @@ function Column({
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
+  // Взвешенная сумма по колонке (SALES-44) — только для рабочих стадий с карточками.
+  const showWeighted = stage.id !== "won" && stage.id !== "lost" && stage.deals.length > 0;
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
       <div className="overflow-hidden rounded-xl bg-white shadow-card">
@@ -70,6 +101,11 @@ function Column({
           <div className="mt-0.5 text-xs text-muted">
             {stage.count} {pluralDeals(stage.count)} · {formatMoney(stage.sum)}
           </div>
+          {showWeighted && (
+            <div className="mt-0.5 text-[11px] font-semibold text-brand-700">
+              взвешенно: {formatMoney(stageWeightedSum(stage))}
+            </div>
+          )}
         </div>
       </div>
       <div
@@ -108,6 +144,20 @@ export function DealsWorkspace({
   const [priority, setPriority] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
+  const [stuckOnly, setStuckOnly] = useState(false);
+  const [now, setNow] = useState<number | null>(null);
+  const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
+  const [losing, setLosing] = useState<{ dealId: string; label: string } | null>(null);
+
+  // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
+  // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
+  // и фильтр висяков ничего не показывают. Заодно тянем актуальный справочник причин отказа.
+  useEffect(() => {
+    setNow(Date.now());
+    void fetchLossReasons().then((reasons) => {
+      if (reasons.length) setLossReasons(reasons);
+    });
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   // Стабильный id для DndContext: dnd-kit иначе сидит aria-describedby модульным
@@ -120,11 +170,51 @@ export function DealsWorkspace({
     setActiveDeal(stages.flatMap((s) => s.deals).find((d) => d.id === id) ?? null);
   }
 
+  function findDeal(id: string): { deal: Deal; stageId: string } | null {
+    for (const s of stages) {
+      const deal = s.deals.find((d) => d.id === id);
+      if (deal) return { deal, stageId: s.id };
+    }
+    return null;
+  }
+
+  /** Открыть модалку отказа (SALES-40): причина обязательна, без неё сделку не слить. */
+  function openLose(dealId: string) {
+    const found = findDeal(dealId);
+    if (!found) return;
+    setLosing({ dealId, label: `№ ${found.deal.number} · ${found.deal.company}` });
+  }
+
+  /** Подтвердить отказ: помечаем сделку (причина/коммент/вероятность 0) и двигаем в «отказ». */
+  function confirmLose(reasonCode: string, comment?: string) {
+    const dealId = losing?.dealId;
+    if (!dealId) return;
+    setStages((prev) => {
+      const tagged = prev.map((s) => ({
+        ...s,
+        deals: s.deals.map((d) =>
+          d.id === dealId ? { ...d, lostReasonCode: reasonCode, lostComment: comment, probability: 0 } : d,
+        ),
+      }));
+      return moveDealToStage(tagged, dealId, "lost");
+    });
+    void loseDeal(dealId, reasonCode, comment);
+    setLosing(null);
+  }
+
   function handleDragEnd(e: DragEndEvent) {
     setActiveDeal(null);
     const dealId = String(e.active.id);
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
+
+    // Перетаскивание в «отказ» обязано спросить причину (SALES-40): не двигаем и не дёргаем
+    // бэк, пока менеджер не выберет причину в модалке. Внутри самой колонки «отказ» — ничего.
+    if (targetStage === "lost") {
+      const found = findDeal(dealId);
+      if (found && found.stageId !== "lost") openLose(dealId);
+      return;
+    }
 
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
 
@@ -158,7 +248,7 @@ export function DealsWorkspace({
     setModalOpen(true);
   }
 
-  // Поиск (номер/контрагент/описание) + фильтр по приоритету
+  // Поиск (номер/контрагент/описание) + фильтр по приоритету + «только висяки» (SALES-43)
   const q = query.trim().toLowerCase();
   const filteredStages = stages.map((s) => {
     let deals = s.deals;
@@ -168,8 +258,25 @@ export function DealsWorkspace({
       );
     }
     if (priority) deals = deals.filter((d) => d.priority === priority);
+    if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
     return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
   });
+
+  const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
+
+  /** Вычислить бейджи/плашки Сделки 2.0 для карточки по её стадии и текущему времени. */
+  function cardExtras(deal: Deal, stageId: string): CardExtras {
+    const code = deal.lostReasonCode;
+    return {
+      days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
+      stuck: now != null && isStuck(deal, stageId, now),
+      probability: probabilityFor(deal, stageId),
+      weighted: weightedAmount(deal, stageId),
+      lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
+      wonResult: stageId === "won",
+      onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
+    };
+  }
   const flatDeals = filteredStages.flatMap((s) =>
     s.deals.map((d) => ({ deal: d, stageTitle: s.title })),
   );
@@ -200,6 +307,15 @@ export function DealsWorkspace({
           >
             <SlidersHorizontal size={16} /> Фильтры
             {priority && <span className="rounded bg-brand-100 px-1.5 text-xs">{priority}</span>}
+          </button>
+          <button
+            onClick={() => setStuckOnly((v) => !v)}
+            className={clsx(
+              "inline-flex items-center gap-2 rounded-lg border bg-white px-3.5 py-2 text-sm font-medium hover:bg-slate-50",
+              stuckOnly ? "border-amber-400 text-amber-700" : "border-slate-200 text-slate-600",
+            )}
+          >
+            <Clock size={16} /> Только висяки
           </button>
           <button
             onClick={() => openModal(stages[0]?.id ?? "new")}
@@ -291,7 +407,7 @@ export function DealsWorkspace({
               {filteredStages.map((stage) => (
                 <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
                   {stage.deals.map((deal) => (
-                    <DraggableDeal key={deal.id} deal={deal} />
+                    <DraggableDeal key={deal.id} deal={deal} extras={cardExtras(deal, stage.id)} />
                   ))}
                 </Column>
               ))}
@@ -356,6 +472,15 @@ export function DealsWorkspace({
           defaultStage={modalStage}
           onClose={() => setModalOpen(false)}
           onCreate={handleCreate}
+        />
+      )}
+
+      {losing && (
+        <LoseDealModal
+          dealLabel={losing.label}
+          reasons={lossReasons}
+          onCancel={() => setLosing(null)}
+          onConfirm={confirmLose}
         />
       )}
     </>

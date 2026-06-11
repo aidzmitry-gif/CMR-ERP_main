@@ -13,6 +13,8 @@ vi.mock("@/lib/api", () => ({
   updateDealStage: vi.fn().mockResolvedValue(true),
   fetchChats: vi.fn().mockResolvedValue([]),
   lookupCounterparty: vi.fn().mockResolvedValue(null),
+  loseDeal: vi.fn().mockResolvedValue(true),
+  fetchLossReasons: vi.fn().mockResolvedValue([]),
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
@@ -28,6 +30,7 @@ vi.mock("@dnd-kit/core", () => ({
     <div>
       <button data-testid="dnd-start" onClick={() => onDragStart({ active: { id: "1" } })} />
       <button data-testid="dnd-end" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "won" } })} />
+      <button data-testid="dnd-end-lost" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "lost" } })} />
       <button data-testid="dnd-end-null" onClick={() => onDragEnd({ active: { id: "1" }, over: null })} />
       {children}
     </div>
@@ -58,6 +61,7 @@ const stages: Stage[] = [
     ],
   },
   { id: "won", title: "Закрыто: Успешно", color: "#000", count: 0, sum: 0, deals: [] },
+  { id: "lost", title: "Закрыто: Отказ", color: "#EF4444", count: 0, sum: 0, deals: [] },
 ];
 
 beforeEach(() => vi.clearAllMocks());
@@ -127,5 +131,35 @@ describe("DealsWorkspace (канбан)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByTestId("dnd-end-null")); // over=null → ранний выход
     expect(api.updateDealStage).not.toHaveBeenCalled();
+  });
+
+  // --- Сделки 2.0 ---
+
+  it("тулбар содержит фильтр «Только висяки» (SALES-43)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.getByRole("button", { name: /Только висяки/ })).toBeInTheDocument();
+  });
+
+  it("шапка рабочей колонки показывает взвешенную сумму (SALES-44)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    // сделка amount=100 в стадии new (дефолт 10%) → взвешенно 10 ₽
+    expect(screen.getByText(/взвешенно:/)).toBeInTheDocument();
+  });
+
+  it("перетаскивание в «отказ» открывает модалку причины, не двигая сделку (SALES-40)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    expect(screen.getByText("Закрыть сделку в отказ")).toBeInTheDocument();
+    expect(api.updateDealStage).not.toHaveBeenCalled(); // отказ не сохраняет стадию напрямую
+  });
+
+  it("подтверждение отказа закрывает модалку, проставляет причину и зовёт loseDeal (SALES-40)", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    await waitFor(() => expect(api.loseDeal).toHaveBeenCalledWith("1", "price", undefined));
+    expect(screen.queryByText("Закрыть сделку в отказ")).toBeNull(); // модалка закрылась
+    expect(screen.getByText(/Причина: Дорого/)).toBeInTheDocument(); // плашка причины на карточке
   });
 });
