@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_model: str = "qwen2.5"
 
+    # Рассылка перевозчикам о тендере (Логистика). По умолчанию канал только логирует
+    # (MVP); реальная доставка включается, когда заданы SMTP/Telegram (за конфигом).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "no-reply@aios.local"
+    smtp_tls: bool = True
+    telegram_bot_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
