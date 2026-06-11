@@ -20,10 +20,9 @@ import {
   Wallet,
   Workflow,
 } from "lucide-react";
+import { LogOut } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-
-import { ROLE_COOKIE, type RoleInfo } from "@/lib/access";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -157,8 +156,8 @@ const MODULES: ModuleItem[] = [
   { slug: "it", label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
 ];
 
-function roleInitials(title: string): string {
-  return title
+function initials(name: string): string {
+  return name
     .replace(/[«».·/]/g, " ")
     .split(/\s+/)
     .filter(Boolean)
@@ -172,19 +171,19 @@ interface SidebarProps {
   // доступные UI-слаги модулей для текущей роли; null/undefined → показывать все
   // (backend недоступен или standalone-рендер). Источник — матрица config/access.py.
   allowedSlugs?: string[] | null;
-  role?: string;
+  userName?: string;
   roleTitle?: string;
-  roles?: RoleInfo[];
 }
 
-export function Sidebar({ allowedSlugs, role, roleTitle, roles = [] }: SidebarProps = {}) {
+export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}) {
   const pathname = usePathname() || "";
   const router = useRouter();
   const crmActive = pathname.startsWith("/crm/deals") || pathname.startsWith("/crm/leads");
 
-  // dev-переключатель роли: пишем cookie и перезапрашиваем серверные компоненты
-  function switchRole(next: string) {
-    document.cookie = `${ROLE_COOKIE}=${encodeURIComponent(next)}; path=/; max-age=31536000`;
+  // dev-выход: чистим cookie сессии и уводим на экран входа
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
     router.refresh();
   }
 
@@ -254,32 +253,27 @@ export function Sidebar({ allowedSlugs, role, roleTitle, roles = [] }: SidebarPr
         })}
       </nav>
 
-      {/* профиль + dev-переключатель роли (заменится реальным логином Keycloak, часть 5) */}
-      <div className="border-t border-slate-200 px-4 py-3">
-        <div className="flex items-center gap-3">
+      {/* профиль вошедшего сотрудника + выход (dev-логин; реальный — Keycloak, часть 5) */}
+      {userName && (
+        <div className="flex items-center gap-3 border-t border-slate-200 px-4 py-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white">
-            {roleInitials(roleTitle ?? "—")}
+            {initials(userName)}
           </span>
-          <div className="leading-tight">
-            <div className="text-xs uppercase tracking-wide text-slate-400">Роль (dev)</div>
-            <div className="text-sm font-medium text-ink">{roleTitle ?? "—"}</div>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-sm font-medium text-ink">{userName}</div>
+            <div className="truncate text-xs text-muted">{roleTitle ?? "—"}</div>
           </div>
-        </div>
-        {roles.length > 0 && (
-          <select
-            aria-label="Переключить роль (dev)"
-            value={role ?? ""}
-            onChange={(e) => switchRole(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700"
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Выйти"
+            title="Выйти"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600"
           >
-            {roles.map((r) => (
-              <option key={r.slug} value={r.slug}>
-                {r.title}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+            <LogOut size={16} />
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

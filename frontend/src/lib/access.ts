@@ -7,8 +7,28 @@ const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 /** Имя cookie с текущей dev-ролью. */
 export const ROLE_COOKIE = "aios_role";
-/** Роль по умолчанию (полный доступ) — пока пользователь не выбрал другую. */
+/** Имя cookie с логином вошедшего сотрудника (dev-логин). */
+export const USER_COOKIE = "aios_user";
+/** Роль по умолчанию (полный доступ) — fallback, если роль в cookie отсутствует. */
 export const DEFAULT_ROLE = "director";
+
+export interface UserInfo {
+  username: string;
+  full_name: string;
+  role: string;
+  role_title: string;
+}
+
+/** Список сотрудников для экрана входа (dev-логин). Источник — backend `/system/users`. */
+export async function fetchUsers(): Promise<UserInfo[]> {
+  try {
+    const res = await fetch(`${BASE}/system/users`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return ((await res.json()) as { users: UserInfo[] }).users;
+  } catch {
+    return [];
+  }
+}
 
 export interface RoleInfo {
   slug: string;

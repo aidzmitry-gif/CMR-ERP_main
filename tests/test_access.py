@@ -10,6 +10,7 @@ from config.access import (
     allowed_slugs,
     is_package_allowed,
     is_slug_allowed,
+    user_by_username,
 )
 from core.runtime.app import create_app
 
@@ -70,3 +71,37 @@ def test_system_routes_always_open():
     # системные роуты открыты даже для ограниченной роли
     assert client.get("/health", headers={"X-User-Roles": "sales"}).status_code == 200
     assert client.get("/system/access", headers={"X-User-Roles": "sales"}).status_code == 200
+
+
+# --- dev-логин: сотрудники → роль ---
+def test_user_resolves_to_role():
+    u = user_by_username("makarov")
+    assert u is not None and u["role"] == "sales"
+    assert user_by_username("ryazanov")["role"] == "sales_head"
+    assert user_by_username("нет-такого") is None
+
+
+def test_system_users_endpoint():
+    r = client.get("/system/users")
+    assert r.status_code == 200
+    users = r.json()["users"]
+    director = next(u for u in users if u["username"] == "kharkovich_d")
+    assert director["role"] == "director"
+    assert director["role_title"] == "Директор"
+    # у каждого сотрудника есть ФИО и название роли
+    assert all(u.get("full_name") and u.get("role_title") for u in users)
+
+
+# --- dev-логин: сотрудники → роль ---
+def test_system_users_lists_employees():
+    r = client.get("/system/users")
+    assert r.status_code == 200
+    users = {u["username"]: u for u in r.json()["users"]}
+    assert users["ryazanov"]["role"] == "sales_head"
+    assert users["ryazanov"]["role_title"] == "Продажи · РОП"
+    assert users["makarov"]["role"] == "sales"
+
+
+def test_user_by_username_resolves_role():
+    assert user_by_username("geniseva")["role"] == "procurement"
+    assert user_by_username("nope") is None

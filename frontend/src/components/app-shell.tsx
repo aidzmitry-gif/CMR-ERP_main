@@ -1,8 +1,9 @@
-import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
-import { DEFAULT_ROLE, fetchAccess, ROLE_COOKIE } from "@/lib/access";
+import { fetchAccess } from "@/lib/access";
+import { currentRole, currentUserName } from "@/lib/role-server";
 
 export async function AppShell({
   crumbs,
@@ -11,17 +12,20 @@ export async function AppShell({
   crumbs: string[];
   children: React.ReactNode;
 }) {
-  // текущая dev-роль из cookie (по умолчанию — полный доступ); матрицу берём с backend
-  const role = (await cookies()).get(ROLE_COOKIE)?.value ?? DEFAULT_ROLE;
+  // гейт: без dev-логина уводим на /login
+  const userName = await currentUserName();
+  if (!userName) redirect("/login");
+
+  // текущая роль из cookie; матрицу доступных модулей берём с backend
+  const role = await currentRole();
   const access = await fetchAccess(role);
   // backend недоступен → не прячем ничего (allowedSlugs=null), чтобы UI не «ослеп»
   const allowedSlugs = access ? access.matrix[role] ?? [] : null;
-  const roles = access?.roles ?? [];
-  const roleTitle = roles.find((r) => r.slug === role)?.title ?? role;
+  const roleTitle = access?.roles.find((r) => r.slug === role)?.title ?? role;
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar allowedSlugs={allowedSlugs} role={role} roleTitle={roleTitle} roles={roles} />
+      <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar crumbs={crumbs} />
         <div className="flex flex-1 overflow-hidden">{children}</div>

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES
+from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_titles
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
@@ -32,6 +32,12 @@ async def system_access(request: Request) -> dict:
         "roles": [{"slug": s, "title": ROLE_TITLES.get(s, s)} for s in ROLE_ORDER],
         "current_roles": roles_from_request(request),
     }
+
+
+@router.get("/system/users")
+async def system_users() -> dict:
+    """Список сотрудников для dev-логина (логин → ФИО + роль). Единый источник — config/access.py."""
+    return {"users": users_with_titles()}
 
 
 @router.get("/system/modules")

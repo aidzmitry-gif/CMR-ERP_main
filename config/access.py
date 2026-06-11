@@ -64,6 +64,32 @@ ROLE_ORDER: list[str] = [
     "procurement", "warehouse", "logistics", "production", "finance", "hr",
 ]
 
+# Сотрудники компании (dev-логин). Единый источник: логин (ASCII) → ФИО + роль.
+# Реальные люди из согласованной матрицы доступа. Пароля нет — это dev-вход (смена личности,
+# не защита): настоящая аутентификация (Keycloak OIDC/MFA) — часть 5.
+USERS: list[dict[str, str]] = [
+    {"username": "kharkovich_d", "full_name": "Харькович Д.С.", "role": "director"},
+    {"username": "kharkovich_s", "full_name": "Харькович С.Д.", "role": "commercial"},
+    {"username": "shlyakhtina", "full_name": "Шляхтина Т.В.", "role": "assistant"},
+    {"username": "ryazanov", "full_name": "Рязанов Е.В.", "role": "sales_head"},
+    {"username": "makarov", "full_name": "Макаров", "role": "sales"},
+    {"username": "karchevskaya", "full_name": "Карчевская", "role": "sales"},
+    {"username": "kadurin", "full_name": "Кадурин", "role": "sales"},
+    {"username": "maltsev", "full_name": "Мальцев", "role": "sales"},
+    {"username": "kravets", "full_name": "Кравец", "role": "sales_cli"},
+    {"username": "sarnatskaya", "full_name": "Сарнацкая", "role": "sales_cli"},
+    {"username": "geniseva", "full_name": "Генисева А.А.", "role": "procurement"},
+    {"username": "korneychuk", "full_name": "Корнейчук Я.В.", "role": "warehouse"},
+    {"username": "matskevich", "full_name": "Мацкевич Е.М.", "role": "logistics"},
+    {"username": "dym", "full_name": "Дым", "role": "production"},
+    {"username": "korovkin", "full_name": "Коровкин", "role": "production"},
+    {"username": "semenyuk", "full_name": "Семенюк", "role": "production"},
+    {"username": "samedov", "full_name": "Самедов", "role": "production"},
+    {"username": "rusinovich", "full_name": "Русинович", "role": "production"},
+    {"username": "zhukovskaya", "full_name": "Жуковская О.Н.", "role": "finance"},
+    {"username": "vedernikova", "full_name": "Ведерникова Д.В.", "role": "hr"},
+]
+
 # UI-слаг модуля → имя backend-пакета модуля (modules/<pkg>). Только реально существующие
 # модули; `home`/`analytics`/`it` сюда не входят — у них нет HTTP-API для защиты.
 SLUG_TO_PACKAGE: dict[str, str] = {
@@ -116,3 +142,13 @@ def is_package_allowed(package: str, roles: Iterable[str]) -> bool:
     if slug is None:
         return True
     return is_slug_allowed(slug, roles)
+
+
+def user_by_username(username: str) -> dict[str, str] | None:
+    """Найти сотрудника по логину (dev-логин). None — нет такого."""
+    return next((u for u in USERS if u["username"] == username), None)
+
+
+def users_with_titles() -> list[dict[str, str]]:
+    """Список сотрудников с названием роли — для экрана входа (dev)."""
+    return [{**u, "role_title": ROLE_TITLES.get(u["role"], u["role"])} for u in USERS]

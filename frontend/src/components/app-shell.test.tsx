@@ -5,18 +5,18 @@ vi.mock("@/components/sidebar", () => ({ Sidebar: () => <div data-testid="sideba
 vi.mock("@/components/topbar", () => ({
   Topbar: ({ crumbs }: { crumbs: string[] }) => <div data-testid="topbar">{crumbs.join("/")}</div>,
 }));
-// серверные зависимости AppShell: cookie текущей роли и загрузка матрицы доступа
-vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
-vi.mock("@/lib/access", () => ({
-  ROLE_COOKIE: "aios_role",
-  DEFAULT_ROLE: "director",
-  fetchAccess: async () => null,
+// серверные зависимости AppShell: dev-сессия (логин/роль), редирект-гейт и матрица доступа
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("@/lib/role-server", () => ({
+  currentUserName: async () => "Харькович Д.С.",
+  currentRole: async () => "director",
 }));
+vi.mock("@/lib/access", () => ({ fetchAccess: async () => null }));
 
 import { AppShell } from "@/components/app-shell";
 
 describe("AppShell", () => {
-  it("рендерит сайдбар, топбар с крошками и контент", async () => {
+  it("рендерит сайдбар, топбар с крошками и контент (вошедший пользователь)", async () => {
     // AppShell — async server component: вызываем как функцию и рендерим результат
     const ui = await AppShell({ crumbs: ["CRM", "Лиды"], children: <div>содержимое страницы</div> });
     render(ui);
