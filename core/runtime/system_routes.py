@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
+from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
 
 router = APIRouter(tags=["system"])
@@ -15,6 +17,21 @@ router = APIRouter(tags=["system"])
 async def health() -> dict:
     """Проверка живости приложения."""
     return {"status": "ok"}
+
+
+@router.get("/system/access")
+async def system_access(request: Request) -> dict:
+    """Матрица доступа ролей к модулям (единый источник — ``config/access.py``).
+
+    Фронт использует это, чтобы спрятать недоступные модули в сайдбаре и нарисовать
+    dev-переключатель роли. ``current_roles`` — роли текущего запроса (заголовок
+    ``X-User-Roles``); по ним фронт считает доступные модули без знания матрицы.
+    """
+    return {
+        "matrix": ACCESS_MATRIX,
+        "roles": [{"slug": s, "title": ROLE_TITLES.get(s, s)} for s in ROLE_ORDER],
+        "current_roles": roles_from_request(request),
+    }
 
 
 @router.get("/system/modules")

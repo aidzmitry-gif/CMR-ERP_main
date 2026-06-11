@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Прокси на бэкенд FastAPI (понадобится при подключении к API).
-  async rewrites() {
-    return [{ source: "/api/:path*", destination: "http://localhost:8000/:path*" }];
-  },
+  // Прокси на backend — в route-handler'е `src/app/api/[...path]/route.ts`
+  // (там же проброс dev-роли в заголовок X-User-Roles). Rewrite больше не нужен.
 };
 
 export default nextConfig;

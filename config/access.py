@@ -1,0 +1,118 @@
+"""Матрица доступа ролей к модулям — **единый источник истины**.
+
+Здесь живёт финальная матрица «роль → список модулей» (UI-слаги). Её потребляют:
+- backend-ограничение (`core/runtime/access.py`) — отдаёт 403 на роуты чужих модулей;
+- фронт (`/system/access`) — прячет недоступные пункты сайдбара и рисует dev-переключатель роли.
+
+Слаги модулей здесь — **UI-слаги** (как в сайдбаре): `crm`, `procurement`, … Часть из них
+не совпадает с именем backend-пакета модуля (`crm` ↔ пакет `sales`); сопоставление — в
+``SLUG_TO_PACKAGE``. Слаги `home`/`analytics`/`it` не имеют backend-модуля (фронтовые/системные).
+
+Реального логина пока нет (Keycloak — часть 5): текущая роль приходит заголовком
+``X-User-Roles`` (dev). Роли ``director``/``commercial`` и суперроль ``Админ`` — полный доступ.
+"""
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+# --- Финальная матрица: роль → модули (UI-слаги). Источник — согласованная матрица доступа. ---
+ACCESS_MATRIX: dict[str, list[str]] = {
+    "director": [
+        "home", "crm", "procurement", "production", "wms", "logistics", "finance",
+        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+        "analytics", "it",
+    ],
+    "commercial": [
+        "home", "crm", "procurement", "production", "wms", "logistics", "finance",
+        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+        "analytics", "it",
+    ],
+    "assistant": ["home", "procurement", "logistics", "office", "knowledge"],
+    "sales_head": ["home", "crm", "marketing", "service", "knowledge", "analytics"],
+    "sales": ["home", "crm", "service", "knowledge"],
+    "sales_cli": ["home", "crm", "service", "knowledge"],
+    "procurement": ["home", "procurement", "logistics", "knowledge"],
+    "warehouse": ["home", "wms", "logistics", "knowledge"],
+    "logistics": ["home", "wms", "logistics", "knowledge"],
+    "production": ["home", "production", "wms", "knowledge"],
+    "finance": ["home", "logistics", "office", "knowledge"],
+    "hr": [
+        "home", "crm", "procurement", "production", "wms", "logistics", "finance",
+        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+    ],
+}
+
+# --- Человекочитаемые названия ролей (для dev-переключателя и подвала сайдбара). ---
+ROLE_TITLES: dict[str, str] = {
+    "director": "Директор",
+    "commercial": "Коммерческий директор",
+    "assistant": "Помощник руководителя",
+    "sales_head": "Продажи · РОП",
+    "sales": "Продажи",
+    "sales_cli": "Продажи · работа с клиентами",
+    "procurement": "Закупки",
+    "warehouse": "Склад",
+    "logistics": "Логистика",
+    "production": "Производство",
+    "finance": "Финансы / офис",
+    "hr": "Кадры (HR)",
+}
+
+# Порядок ролей в переключателе (как в матрице, сверху вниз).
+ROLE_ORDER: list[str] = [
+    "director", "commercial", "assistant", "sales_head", "sales", "sales_cli",
+    "procurement", "warehouse", "logistics", "production", "finance", "hr",
+]
+
+# UI-слаг модуля → имя backend-пакета модуля (modules/<pkg>). Только реально существующие
+# модули; `home`/`analytics`/`it` сюда не входят — у них нет HTTP-API для защиты.
+SLUG_TO_PACKAGE: dict[str, str] = {
+    "crm": "sales",
+    "procurement": "procurement",
+    "production": "production",
+    "wms": "wms",
+    "logistics": "logistics",
+    "finance": "finance",
+    "crypto": "crypto",
+    "marketing": "marketing",
+    "service": "service",
+    "hr": "hr",
+    "office": "office",
+    "legal": "legal",
+    "knowledge": "knowledge",
+}
+# Обратное сопоставление: пакет модуля → UI-слаг (для backend-ограничения по префиксу роута).
+PACKAGE_TO_SLUG: dict[str, str] = {pkg: slug for slug, pkg in SLUG_TO_PACKAGE.items()}
+
+# Роли с полным доступом ко всему (минуя матрицу). `Админ` — dev-суперюзер по умолчанию.
+SUPER_ROLES: frozenset[str] = frozenset({"Админ", "director", "commercial"})
+
+
+def allowed_slugs(roles: Iterable[str]) -> set[str]:
+    """Множество доступных UI-слагов для набора ролей (объединение по матрице)."""
+    granted: set[str] = set()
+    for role in roles:
+        granted.update(ACCESS_MATRIX.get(role, ()))
+    return granted
+
+
+def is_super(roles: Iterable[str]) -> bool:
+    """Есть ли у набора ролей полный доступ (Админ/Директор/Коммерческий)."""
+    return bool(SUPER_ROLES.intersection(roles))
+
+
+def is_slug_allowed(slug: str, roles: Iterable[str]) -> bool:
+    """Доступен ли UI-слаг модуля данным ролям (суперроли — всегда да)."""
+    roles = list(roles)
+    return is_super(roles) or slug in allowed_slugs(roles)
+
+
+def is_package_allowed(package: str, roles: Iterable[str]) -> bool:
+    """Доступен ли backend-пакет модуля данным ролям.
+
+    Пакеты без UI-слага (инфраструктура, напр. ``integrations``) — не ограничиваются.
+    """
+    slug = PACKAGE_TO_SLUG.get(package)
+    if slug is None:
+        return True
+    return is_slug_allowed(slug, roles)

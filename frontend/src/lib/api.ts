@@ -4,6 +4,13 @@ import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, Priorit
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
 
+// SSR-фетчи ходят на BASE напрямую, минуя /api-прокси, поэтому роль надо пробросить
+// заголовком вручную (роль читает серверный хелпер `role-server.ts` из cookie). На клиенте
+// (вызовы через /api/*) роль добавляет прокси `app/api/[...path]/route.ts`.
+function roleHeaders(roles?: string): Record<string, string> | undefined {
+  return roles ? { "X-User-Roles": roles } : undefined;
+}
+
 interface ApiDeal {
   id: number;
   number: string;
@@ -46,9 +53,9 @@ function mapDeal(d: ApiDeal): Deal {
 }
 
 /** Доска сделок из API; при недоступности бэкенда — fallback на mock. */
-export async function fetchBoardStages(): Promise<Stage[]> {
+export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
   try {
-    const res = await fetch(`${BASE}/sales/board`, { cache: "no-store" });
+    const res = await fetch(`${BASE}/sales/board`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
     return data.stages.map((s) => ({
@@ -65,9 +72,9 @@ export async function fetchBoardStages(): Promise<Stage[]> {
 }
 
 /** Детальная карточка сделки из API; fallback — mock по id. */
-export async function fetchDealDetail(id: string): Promise<DealDetail> {
+export async function fetchDealDetail(id: string, roles?: string): Promise<DealDetail> {
   try {
-    const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store" });
+    const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
       items?: { title: string; last_price: number | null; min_price: number | null }[];
@@ -360,9 +367,9 @@ function mapKpi(k: ApiKpi): Kpi {
 }
 
 /** KPI «План на сегодня» из API (SSR); fallback на mock. */
-export async function fetchKpis(): Promise<Kpi[]> {
+export async function fetchKpis(roles?: string): Promise<Kpi[]> {
   try {
-    const res = await fetch(`${BASE}/sales/kpis`, { cache: "no-store" });
+    const res = await fetch(`${BASE}/sales/kpis`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as ApiKpi[];
     return data.length ? data.map(mapKpi) : KPIS;
@@ -598,9 +605,9 @@ function mapLead(l: ApiLead): Lead {
 }
 
 /** Лиды на приёме (вход воронки) из API (SSR); fallback — пусто. */
-export async function fetchLeads(): Promise<Lead[]> {
+export async function fetchLeads(roles?: string): Promise<Lead[]> {
   try {
-    const res = await fetch(`${BASE}/sales/leads`, { cache: "no-store" });
+    const res = await fetch(`${BASE}/sales/leads`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiLead[]).map(mapLead);
   } catch {
@@ -720,12 +727,12 @@ export async function fetchOwnerInsight(): Promise<string | null> {
 }
 
 /** Панель владельца (Control Tower): кросс-модульные метрики + воронка + KPI (SSR). */
-export async function fetchOwnerDashboard(): Promise<OwnerDashboard | null> {
+export async function fetchOwnerDashboard(roles?: string): Promise<OwnerDashboard | null> {
   try {
     const [metricsRes, stages, kpis] = await Promise.all([
-      fetch(`${BASE}/system/owner`, { cache: "no-store" }),
-      fetchBoardStages(),
-      fetchKpis(),
+      fetch(`${BASE}/system/owner`, { cache: "no-store", headers: roleHeaders(roles) }),
+      fetchBoardStages(roles),
+      fetchKpis(roles),
     ]);
     if (!metricsRes.ok) throw new Error(String(metricsRes.status));
     const metrics = (await metricsRes.json()) as OwnerMetrics;

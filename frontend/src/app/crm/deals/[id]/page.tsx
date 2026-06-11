@@ -12,10 +12,11 @@ import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import { currentRole } from "@/lib/role-server";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = await fetchDealDetail(id);
+  const d = await fetchDealDetail(id, await currentRole());
 
   return (
     <div className="mx-auto max-w-md px-4 py-6">

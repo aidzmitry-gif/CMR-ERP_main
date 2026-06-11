@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from config.modules import ENABLED_MODULES
 from core.runtime import approval_routes, system_routes, telegram_routes
+from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
 from core.services import build_services
@@ -81,5 +82,8 @@ def create_app() -> FastAPI:
     # роуты модулей под их префиксами
     for reg in core.routers:
         app.include_router(reg.router, prefix=reg.prefix)
+
+    # ограничение доступа к модулям по матрице ролей (config/access.py)
+    app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
 
     return app

@@ -6,7 +6,10 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/crm/deals" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/crm/deals",
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 import { Sidebar } from "@/components/sidebar";
 

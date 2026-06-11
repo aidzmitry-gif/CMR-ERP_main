@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
+vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director" }));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));

@@ -6,6 +6,7 @@ import {
   Boxes,
   Box,
   ClipboardList,
+  Coins,
   Factory,
   GraduationCap,
   Headphones,
@@ -20,7 +21,9 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+
+import { ROLE_COOKIE, type RoleInfo } from "@/lib/access";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -30,6 +33,8 @@ interface SubItem {
 }
 
 interface ModuleItem {
+  // UI-слаг модуля = ключ матрицы доступа (config/access.py); по нему прячем недоступное
+  slug: string;
   label: string;
   Icon: IconCmp;
   href?: string;
@@ -39,8 +44,9 @@ interface ModuleItem {
 // Подразделы модулей — как в референсах: у активного модуля раскрывается подменю.
 // Первый пункт ведёт на страницу-воронку, остальные — заглушки (раздел в разработке).
 const MODULES: ModuleItem[] = [
-  { label: "Главная", Icon: Home, href: "/crm/owner" },
+  { slug: "home", label: "Главная", Icon: Home, href: "/crm/owner" },
   {
+    slug: "crm",
     label: "CRM",
     Icon: Workflow,
     href: "/crm/deals",
@@ -53,6 +59,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "procurement",
     label: "Закупки",
     Icon: ShoppingCart,
     href: "/erp/procurement",
@@ -66,6 +73,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "production",
     label: "Производство",
     Icon: Factory,
     href: "/erp/production",
@@ -79,6 +87,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "wms",
     label: "Склад",
     Icon: Boxes,
     href: "/erp/wms",
@@ -90,11 +99,13 @@ const MODULES: ModuleItem[] = [
       { label: "Инвентаризация" },
     ],
   },
-  { label: "Логистика", Icon: Truck, href: "/erp/logistics" },
-  { label: "Финансы", Icon: Wallet, href: "/erp/finance" },
-  { label: "Маркетинг", Icon: Megaphone, href: "/erp/marketing" },
-  { label: "Сервис и поддержка", Icon: Headphones, href: "/erp/service" },
+  { slug: "logistics", label: "Логистика", Icon: Truck, href: "/erp/logistics" },
+  { slug: "finance", label: "Финансы", Icon: Wallet, href: "/erp/finance" },
+  { slug: "crypto", label: "Криптовалюты", Icon: Coins, href: "/erp/crypto" },
+  { slug: "marketing", label: "Маркетинг", Icon: Megaphone, href: "/erp/marketing" },
+  { slug: "service", label: "Сервис и поддержка", Icon: Headphones, href: "/erp/service" },
   {
+    slug: "hr",
     label: "HR",
     Icon: Users,
     href: "/erp/hr",
@@ -107,6 +118,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "office",
     label: "Офис-менеджер",
     Icon: ClipboardList,
     href: "/erp/office",
@@ -118,6 +130,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "legal",
     label: "Юр. отдел",
     Icon: Scale,
     href: "/erp/legal",
@@ -129,6 +142,7 @@ const MODULES: ModuleItem[] = [
     ],
   },
   {
+    slug: "knowledge",
     label: "База знаний",
     Icon: GraduationCap,
     href: "/erp/knowledge",
@@ -139,25 +153,13 @@ const MODULES: ModuleItem[] = [
       { label: "Достижения" },
     ],
   },
-  { label: "Аналитика", Icon: BarChart3, href: "/erp/analytics" },
-  { label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
+  { slug: "analytics", label: "Аналитика", Icon: BarChart3, href: "/erp/analytics" },
+  { slug: "it", label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
 ];
 
-// Пользователь/роль в подвале меню зависит от активного модуля (как в референсах).
-const USERS: { prefix: string; name: string; role: string }[] = [
-  { prefix: "/erp/procurement", name: "Иван Петров", role: "Руководитель закупок" },
-  { prefix: "/erp/production", name: "Сидоров А.С.", role: "Начальник производства" },
-  { prefix: "/erp/wms", name: "Сидоров С.С.", role: "Заведующий складом" },
-  { prefix: "/erp/hr", name: "Соколова А.", role: "HR-менеджер" },
-  { prefix: "/erp/office", name: "Ольга Кравцова", role: "Офис-менеджер" },
-  { prefix: "/erp/legal", name: "Ирина Петрова", role: "Юрисконсульт" },
-  { prefix: "/erp/knowledge", name: "Иван Петров", role: "Сотрудник" },
-];
-const DEFAULT_USER = { name: "Иван Петров", role: "Администратор" };
-
-function userInitials(name: string): string {
-  return name
-    .replace(/[«».]/g, " ")
+function roleInitials(title: string): string {
+  return title
+    .replace(/[«».·/]/g, " ")
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -166,13 +168,31 @@ function userInitials(name: string): string {
     .toUpperCase();
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  // доступные UI-слаги модулей для текущей роли; null/undefined → показывать все
+  // (backend недоступен или standalone-рендер). Источник — матрица config/access.py.
+  allowedSlugs?: string[] | null;
+  role?: string;
+  roleTitle?: string;
+  roles?: RoleInfo[];
+}
+
+export function Sidebar({ allowedSlugs, role, roleTitle, roles = [] }: SidebarProps = {}) {
   const pathname = usePathname() || "";
+  const router = useRouter();
   const crmActive = pathname.startsWith("/crm/deals") || pathname.startsWith("/crm/leads");
-  const user = USERS.find((u) => pathname.startsWith(u.prefix)) ?? DEFAULT_USER;
+
+  // dev-переключатель роли: пишем cookie и перезапрашиваем серверные компоненты
+  function switchRole(next: string) {
+    document.cookie = `${ROLE_COOKIE}=${encodeURIComponent(next)}; path=/; max-age=31536000`;
+    router.refresh();
+  }
+
+  const visible =
+    allowedSlugs == null ? MODULES : MODULES.filter((m) => allowedSlugs.includes(m.slug));
 
   function moduleActive(m: ModuleItem): boolean {
-    if (m.label === "CRM") return crmActive;
+    if (m.slug === "crm") return crmActive;
     return !!m.href && pathname === m.href;
   }
 
@@ -190,7 +210,7 @@ export function Sidebar() {
         <div className="px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
           Модули
         </div>
-        {MODULES.map((m) => {
+        {visible.map((m) => {
           const active = moduleActive(m);
           const cls = clsx(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
@@ -234,15 +254,31 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* профиль */}
-      <div className="flex items-center gap-3 border-t border-slate-200 px-4 py-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white">
-          {userInitials(user.name)}
-        </span>
-        <div className="leading-tight">
-          <div className="text-sm font-medium text-ink">{user.name}</div>
-          <div className="text-xs text-muted">{user.role}</div>
+      {/* профиль + dev-переключатель роли (заменится реальным логином Keycloak, часть 5) */}
+      <div className="border-t border-slate-200 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white">
+            {roleInitials(roleTitle ?? "—")}
+          </span>
+          <div className="leading-tight">
+            <div className="text-xs uppercase tracking-wide text-slate-400">Роль (dev)</div>
+            <div className="text-sm font-medium text-ink">{roleTitle ?? "—"}</div>
+          </div>
         </div>
+        {roles.length > 0 && (
+          <select
+            aria-label="Переключить роль (dev)"
+            value={role ?? ""}
+            onChange={(e) => switchRole(e.target.value)}
+            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700"
+          >
+            {roles.map((r) => (
+              <option key={r.slug} value={r.slug}>
+                {r.title}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
     </aside>
   );
