@@ -6,11 +6,12 @@ import { useState } from "react";
 import { LogisticsAudit } from "@/components/erp/logistics-audit";
 import { LogisticsDelivery } from "@/components/erp/logistics-delivery";
 import { LogisticsFleet } from "@/components/erp/logistics-fleet";
+import { LogisticsInsights } from "@/components/erp/logistics-insights";
 import { LogisticsScorecard } from "@/components/erp/logistics-scorecard";
 import { LogisticsTariffs } from "@/components/erp/logistics-tariffs";
 import { LogisticsTender } from "@/components/erp/logistics-tender";
 
-type TabKey = "delivery" | "tariffs" | "fleet" | "tender" | "scorecard" | "audit";
+type TabKey = "delivery" | "tariffs" | "fleet" | "tender" | "scorecard" | "audit" | "insights";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "delivery", label: "Доставка" },
@@ -19,6 +20,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "tender", label: "Тендер" },
   { key: "scorecard", label: "Scorecard" },
   { key: "audit", label: "Аудит" },
+  { key: "insights", label: "Экономия" },
 ];
 
 const PANELS: Record<TabKey, () => React.ReactNode> = {
@@ -28,6 +30,7 @@ const PANELS: Record<TabKey, () => React.ReactNode> = {
   tender: () => <LogisticsTender />,
   scorecard: () => <LogisticsScorecard />,
   audit: () => <LogisticsAudit />,
+  insights: () => <LogisticsInsights />,
 };
 
 export function LogisticsTabs() {

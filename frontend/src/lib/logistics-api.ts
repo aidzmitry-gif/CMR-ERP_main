@@ -243,6 +243,9 @@ export interface Invite {
   carrier_code: string;
   channel: string;
   status: string;
+  token?: string;          // секрет публичной ссылки на подачу ставки
+  notified_at?: string | null;
+  detail?: string;         // результат уведомления (журнал рассылки)
 }
 
 export interface Bid extends DomainBid {
@@ -276,6 +279,7 @@ export interface BroadcastResult {
   rfq_id: number;
   status: string;
   invited: number;
+  notified?: number;       // фактически уведомлено по контакту (без skip)
   carriers: string[];
 }
 
@@ -287,3 +291,41 @@ export const awardRfq = (id: number, carrierCode?: string) =>
     carrierCode ? { carrier_code: carrierCode } : {},
     null,
   );
+
+// ─────────────────────────────── Аналитика стоимости (cost-insights) ───────────────────────────────
+
+export interface ZoneCostInsight {
+  zone_code: string;
+  zone_name: string;
+  carriers: number;
+  cheapest_carrier: string;
+  cheapest_carrier_name: string;
+  cheapest_total: number;
+  avg_total: number;
+  max_total: number;
+  spread_pct: number;
+}
+
+export interface TenderSaving {
+  rfq_number: string;
+  route: string;
+  carrier: string;
+  baseline: number;
+  awarded: number;
+  saved: number;
+  saved_pct: number;
+}
+
+export interface CostInsights {
+  reference_weight_kg: number;
+  zones: ZoneCostInsight[];
+  potential_savings: number;
+  best_savings_zone: string;
+  tender_savings_total: number;
+  tenders: TenderSaving[];
+  audit_to_recover: number;
+  recommendations: string[];
+}
+
+export const fetchCostInsights = (weightKg = 30) =>
+  getJson<CostInsights | null>(`/logistics/cost-insights?weight_kg=${weightKg}`, null);

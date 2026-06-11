@@ -12,6 +12,7 @@ import {
   fetchRfqs,
   seedRfq,
   type Bid,
+  type BroadcastResult,
   type Invite,
   type Rfq,
 } from "@/lib/logistics-api";
@@ -34,6 +35,7 @@ export function LogisticsTender() {
   const [selected, setSelected] = useState<number | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [bids, setBids] = useState<Bid[]>([]);
+  const [lastBroadcast, setLastBroadcast] = useState<BroadcastResult | null>(null);
 
   async function loadRfqs() {
     const list = await fetchRfqs();
@@ -66,9 +68,10 @@ export function LogisticsTender() {
   async function onBroadcast() {
     if (selected == null) return;
     setBusy(true);
-    await broadcastRfq(selected);
+    const res = await broadcastRfq(selected);
     await openRfq(selected);
     await loadRfqs();
+    setLastBroadcast(res);
     setBusy(false);
   }
 
@@ -198,6 +201,34 @@ export function LogisticsTender() {
                 </table>
               </div>
             </>
+          )}
+
+          {invites.length > 0 && (
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-muted">Рассылка приглашений</span>
+                {lastBroadcast && (
+                  <span className="text-xs text-emerald-600">
+                    уведомлено {lastBroadcast.notified ?? 0} из {lastBroadcast.invited}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1">
+                {invites.map((inv) => (
+                  <div key={inv.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-600">{inv.carrier_code}</span>
+                    <div className="flex items-center gap-1.5">
+                      <Pill text={inv.channel} tone={inv.channel === "none" ? "slate" : "blue"} />
+                      <Pill
+                        text={inv.status}
+                        tone={inv.status === "responded" ? "emerald" : inv.status === "sent" ? "blue" : "slate"}
+                      />
+                      {inv.token && <span className="text-slate-400" title="публичная ссылка на ставку">ссылка …{inv.token.slice(-6)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </Card>
       ) : (
