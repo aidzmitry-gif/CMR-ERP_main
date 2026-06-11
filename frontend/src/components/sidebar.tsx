@@ -78,6 +78,7 @@ const MODULES: ModuleItem[] = [
     href: "/erp/production",
     sub: [
       { label: "Канбан цеха", href: "/erp/production" },
+      { label: "Нормы и нормативы", href: "/erp/production/norms" },
       { label: "Наряды · заказы" },
       { label: "Маршруты" },
       { label: "Спецификации · BOM" },
