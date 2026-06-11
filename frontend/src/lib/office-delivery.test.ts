@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canRequestCarrier,
   CARRIER_THRESHOLD_KG,
   classifyTracking,
   DEMO_DELIVERIES,
+  eligibleCarriers,
+  OFFICE_CARRIERS,
   officeDocToDelivery,
   officeStageToTracking,
   parseWeightKg,
@@ -149,5 +152,34 @@ describe("office-delivery · officeDocToDelivery (маппинг /office/docs)",
     expect(d.carrier).toBeUndefined();
     expect(d.destination).toBeUndefined();
     expect(d.stage).toBe("new");
+    expect(d.officeStage).toBe("ready");   // сырая стадия сохранена для гарда заявки
+  });
+});
+
+describe("office-delivery · eligibleCarriers (гард heavy)", () => {
+  it("тяжёлый груз (≥300 кг) → только перевозчики с heavy", () => {
+    const eligible = eligibleCarriers(OFFICE_CARRIERS, "1 200 кг");
+    expect(eligible.length).toBeGreaterThan(0);
+    expect(eligible.every((c) => c.heavy)).toBe(true);
+    expect(eligible.map((c) => c.id)).toContain("dellin");
+    expect(eligible.map((c) => c.id)).not.toContain("cdek"); // не heavy
+  });
+
+  it("лёгкий груз (<300 кг) → любой перевозчик", () => {
+    expect(eligibleCarriers(OFFICE_CARRIERS, "50 кг")).toHaveLength(OFFICE_CARRIERS.length);
+  });
+});
+
+describe("office-delivery · canRequestCarrier (стадия ready)", () => {
+  const base: Delivery = { id: 1, code: "Д-1", company: "X", weight: "500 кг", amount: 0, stage: "new" };
+
+  it("живой документ: заявка только на стадии ready", () => {
+    expect(canRequestCarrier({ ...base, officeStage: "ready" })).toBe(true);
+    expect(canRequestCarrier({ ...base, officeStage: "shipped" })).toBe(false);
+    expect(canRequestCarrier({ ...base, officeStage: "paid" })).toBe(false);
+  });
+
+  it("демо-данные (без officeStage) → разрешено", () => {
+    expect(canRequestCarrier(base)).toBe(true);
   });
 });

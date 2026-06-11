@@ -28,6 +28,8 @@ export interface Delivery {
   eta?: string;
   /** Город назначения. */
   destination?: string;
+  /** Сырая стадия документа office (ready/shipped/…) — для живых данных; demo — undefined. */
+  officeStage?: string;
 }
 
 export interface DeliverySummary {
@@ -105,8 +107,45 @@ export function summarizeDeliveries(list: Delivery[]): DeliverySummary {
   );
 }
 
-/** Преднабор перевозчиков для модалки «Заявка перевозчику». */
-export const CARRIERS: string[] = ["ПЭК", "Деловые Линии", "СДЭК", "Байкал Сервис", "GTD"];
+/** Перевозчик из справочника office (GET /office/carriers). */
+export interface OfficeCarrier {
+  id: string;
+  name: string;
+  type: string;
+  rating: number;
+  eta: string;
+  price_from: number;
+  zone: string;
+  heavy: boolean; // берёт тяжёлый груз (≥300 кг)
+}
+
+/** Зеркало office/carriers.py — фолбэк модалки, если /office/carriers недоступен. */
+export const OFFICE_CARRIERS: OfficeCarrier[] = [
+  { id: "cdek", name: "СДЭК", type: "Экспресс-доставка", rating: 4.8, eta: "1–2 дня", price_from: 45, zone: "вся РБ", heavy: false },
+  { id: "evropochta", name: "Европочта", type: "Курьер · сеть ПВЗ", rating: 4.6, eta: "1–3 дня", price_from: 28, zone: "вся РБ", heavy: false },
+  { id: "belpochta", name: "Белпочта", type: "Посылки · EMS", rating: 4.2, eta: "2–4 дня", price_from: 18, zone: "вся РБ", heavy: false },
+  { id: "dellin", name: "Деловые Линии", type: "Сборный груз · LTL", rating: 4.7, eta: "1–2 дня", price_from: 95, zone: "вся РБ", heavy: true },
+  { id: "dpd", name: "DPD", type: "Экспресс · палеты", rating: 4.5, eta: "1–2 дня", price_from: 52, zone: "вся РБ", heavy: true },
+  { id: "own", name: "Свой транспорт", type: "Тент 5 т · день в день", rating: 4.9, eta: "день в день", price_from: 0, zone: "Минск + область", heavy: true },
+];
+
+/**
+ * Перевозчики, пригодные под вес отгрузки: тяжёлый груз (≥300 кг) могут везти
+ * только перевозчики с флагом `heavy`; лёгкий — любой.
+ */
+export function eligibleCarriers(carriers: OfficeCarrier[], rawWeight: string | number): OfficeCarrier[] {
+  if (!requiresCarrierRequest(rawWeight)) return carriers;
+  return carriers.filter((c) => c.heavy);
+}
+
+/**
+ * Можно ли оформить заявку перевозчику для отгрузки. Заявка валидна только для
+ * документа на стадии «Готово к отгрузке» (office stage `ready`); для демо-данных
+ * (без `officeStage`) разрешаем — это локальный прототип без backend.
+ */
+export function canRequestCarrier(d: Delivery): boolean {
+  return d.officeStage === undefined || d.officeStage === "ready";
+}
 
 // ─────────── Маппинг документа офис-менеджера (API /office/docs) в строку доставки ───────────
 
@@ -151,6 +190,7 @@ export function officeDocToDelivery(doc: OfficeDocApi): Delivery {
     carrier: doc.delivery || undefined,
     destination: doc.region || undefined,
     eta: doc.op_date ?? undefined,
+    officeStage: doc.stage,
   };
 }
 

@@ -7,9 +7,11 @@ import { useEffect, useState } from "react";
 import { OfficeDelivery } from "@/components/erp/office-delivery";
 import {
   DEMO_DELIVERIES,
+  OFFICE_CARRIERS,
   officeDocToDelivery,
   summarizeDeliveries,
   type Delivery,
+  type OfficeCarrier,
   type OfficeDocApi,
 } from "@/lib/office-delivery";
 
@@ -61,6 +63,7 @@ export function OfficeView({
 }) {
   const [tab, setTab] = useState<Tab>("docs");
   const [deliveries, setDeliveries] = useState<Delivery[]>(initialDeliveries);
+  const [carriers, setCarriers] = useState<OfficeCarrier[]>(OFFICE_CARRIERS);
 
   // Живые отгрузки офиса (через /api-прокси): показывают реальный трекинг из логистики
   // (связка Блок 3). При недоступном/пустом backend остаются демо-данные — UI не падает.
@@ -81,8 +84,43 @@ export function OfficeView({
     };
   }, []);
 
-  function assignCarrier(id: number, carrier: string) {
-    setDeliveries((prev) => prev.map((d) => (d.id === id ? { ...d, carrier } : d)));
+  // Справочник перевозчиков office (реальные id для заявки); фолбэк — OFFICE_CARRIERS.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/office/carriers", { cache: "no-store" });
+        if (!res.ok) return;
+        const list = (await res.json()) as OfficeCarrier[];
+        if (alive && list.length > 0) setCarriers(list);
+      } catch {
+        /* фолбэк на OFFICE_CARRIERS */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function assignCarrier(id: number, carrierId: string) {
+    const name = carriers.find((c) => c.id === carrierId)?.name ?? carrierId;
+    setDeliveries((prev) => prev.map((d) => (d.id === id ? { ...d, carrier: name } : d)));
+    // живой документ (есть officeStage) → оформляем заявку перевозчику на backend
+    const d = deliveries.find((x) => x.id === id);
+    if (d?.officeStage) {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/office/docs/${id}/carrier-request`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ carrier: carrierId, region: d.destination ?? "" }),
+          });
+          if (!res.ok) console.error("office carrier-request:", res.status);
+        } catch (e) {
+          console.error("office carrier-request failed", e);
+        }
+      })();
+    }
   }
 
   const needCarrier = summarizeDeliveries(deliveries).needCarrierRequest;
@@ -106,7 +144,7 @@ export function OfficeView({
       <div className="flex flex-1 overflow-hidden">
         <div className={tab === "docs" ? "contents" : "hidden"}>{board}</div>
         <div className={tab === "delivery" ? "contents" : "hidden"}>
-          <OfficeDelivery deliveries={deliveries} onAssignCarrier={assignCarrier} />
+          <OfficeDelivery deliveries={deliveries} carriers={carriers} onAssignCarrier={assignCarrier} />
         </div>
       </div>
     </div>

@@ -6,13 +6,15 @@ import { useState } from "react";
 
 import { formatByn, formatNumber } from "@/lib/format";
 import {
+  canRequestCarrier,
   CARRIER_THRESHOLD_KG,
-  CARRIERS,
   classifyTracking,
+  eligibleCarriers,
   parseWeightKg,
   requiresCarrierRequest,
   summarizeDeliveries,
   type Delivery,
+  type OfficeCarrier,
   type TrackingTone,
 } from "@/lib/office-delivery";
 
@@ -45,15 +47,18 @@ function StageBadge({ stage }: { stage: Delivery["stage"] }) {
 /** Модалка «Заявка перевозчику» — открывается только для тяжёлых отгрузок (гард ≥300 кг). */
 function CarrierRequestModal({
   delivery,
+  carriers,
   onClose,
   onSubmit,
 }: {
   delivery: Delivery;
+  carriers: OfficeCarrier[];
   onClose: () => void;
-  onSubmit: (carrier: string) => void;
+  onSubmit: (carrierId: string) => void;
 }) {
   const kg = parseWeightKg(delivery.weight);
-  const [carrier, setCarrier] = useState(CARRIERS[0]);
+  const eligible = eligibleCarriers(carriers, delivery.weight);
+  const [carrier, setCarrier] = useState(eligible[0]?.id ?? "");
   const [eta, setEta] = useState(delivery.eta ?? "");
   const [comment, setComment] = useState("");
 
@@ -96,9 +101,10 @@ function CarrierRequestModal({
               onChange={(e) => setCarrier(e.target.value)}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
             >
-              {CARRIERS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {eligible.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.heavy ? " · тяжёлые" : ""} · от {c.price_from} BYN
                 </option>
               ))}
             </select>
@@ -135,7 +141,8 @@ function CarrierRequestModal({
           </button>
           <button
             onClick={() => onSubmit(carrier)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            disabled={!carrier}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
           >
             <Send size={16} /> Отправить заявку
           </button>
@@ -152,10 +159,12 @@ function CarrierRequestModal({
  */
 export function OfficeDelivery({
   deliveries,
+  carriers,
   onAssignCarrier,
 }: {
   deliveries: Delivery[];
-  onAssignCarrier: (id: number, carrier: string) => void;
+  carriers: OfficeCarrier[];
+  onAssignCarrier: (id: number, carrierId: string) => void;
 }) {
   const [modalFor, setModalFor] = useState<Delivery | null>(null);
   const s = summarizeDeliveries(deliveries);
@@ -233,12 +242,16 @@ export function OfficeDelivery({
                       {d.carrier}
                     </span>
                   ) : requiresCarrierRequest(d.weight) ? (
-                    <button
-                      onClick={() => setModalFor(d)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
-                    >
-                      <Truck size={14} /> Заявка перевозчику
-                    </button>
+                    canRequestCarrier(d) ? (
+                      <button
+                        onClick={() => setModalFor(d)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+                      >
+                        <Truck size={14} /> Заявка перевозчику
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted">заявка — на стадии «Готово к отгрузке»</span>
+                    )
                   ) : (
                     <span className="text-xs text-muted">курьер / самовывоз</span>
                   )}
@@ -252,9 +265,10 @@ export function OfficeDelivery({
       {modalFor && (
         <CarrierRequestModal
           delivery={modalFor}
+          carriers={carriers}
           onClose={() => setModalFor(null)}
-          onSubmit={(carrier) => {
-            onAssignCarrier(modalFor.id, carrier);
+          onSubmit={(carrierId) => {
+            onAssignCarrier(modalFor.id, carrierId);
             setModalFor(null);
           }}
         />
