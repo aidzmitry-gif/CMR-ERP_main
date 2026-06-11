@@ -1,0 +1,207 @@
+// Чистая доменная логика логистики (без зависимостей от React/fetch) — тестируется
+// отдельно (logistics-domain.test.ts). Деньги здесь — голые числа; форматирование в
+// BYN делает слой компонентов через `formatByn`.
+
+/** Округление до 2 знаков; нормализует −0 → 0 (важно для строгого toBe в тестах). */
+function round2(value: number): number {
+  const r = Math.round(value * 100) / 100;
+  return r === 0 ? 0 : r;
+}
+
+// ─────────────────────────────── Тарифы ───────────────────────────────
+
+export interface TariffRates {
+  price_w5: number;
+  price_w10: number;
+  price_w30: number;
+  over30_per_kg: number;
+  pickup_fee: number;
+  cod_pct: number;
+  insurance_pct: number;
+}
+
+/** Цена за вес по весовой вилке тарифа (без сборов). */
+export function tariffWeightPrice(rates: TariffRates, weightKg: number): number {
+  if (weightKg <= 0) return 0;
+  if (weightKg <= 5) return rates.price_w5;
+  if (weightKg <= 10) return rates.price_w10;
+  if (weightKg <= 30) return rates.price_w30;
+  return round2(rates.price_w30 + (weightKg - 30) * rates.over30_per_kg);
+}
+
+export interface QuoteOptions {
+  /** объявленная ценность груза — база для страховки */
+  declaredValue?: number;
+  /** наложенный платёж (COD) */
+  cod?: boolean;
+}
+
+/** Полная котировка: фрахт (вес + забор) + страховка + COD-наценка. */
+export function quoteTariff(rates: TariffRates, weightKg: number, opts: QuoteOptions = {}): number {
+  const freight = tariffWeightPrice(rates, weightKg) + rates.pickup_fee;
+  const insurance = opts.declaredValue ? (opts.declaredValue * rates.insurance_pct) / 100 : 0;
+  const cod = opts.cod ? (freight * rates.cod_pct) / 100 : 0;
+  return round2(freight + insurance + cod);
+}
+
+// ─────────────────────────────── Тендер (ставки) ───────────────────────────────
+
+export interface Bid {
+  carrier_code: string;
+  carrier: string;
+  price: number;
+  eta_days: number;
+}
+
+/** Лучшая ставка: минимальная цена, при равенстве — меньший срок. null для пустого списка. */
+export function bestBid<T extends Bid>(bids: T[]): T | null {
+  if (bids.length === 0) return null;
+  return bids.reduce((best, b) =>
+    b.price < best.price || (b.price === best.price && b.eta_days < best.eta_days) ? b : best,
+  );
+}
+
+/** Копия списка, отсортированная по цене ↑, затем по сроку ↑ (исходный массив не мутируется). */
+export function rankBids<T extends Bid>(bids: T[]): T[] {
+  return [...bids].sort((a, b) => a.price - b.price || a.eta_days - b.eta_days);
+}
+
+/** Экономия от конкуренции: разрыв между худшей и лучшей ценой (0, если ставок < 2). */
+export function bidSavings(bids: Bid[]): number {
+  if (bids.length < 2) return 0;
+  const prices = bids.map((b) => b.price);
+  return round2(Math.max(...prices) - Math.min(...prices));
+}
+
+// ─────────────────────────────── Scorecard перевозчика ───────────────────────────────
+
+export interface ScoreMetrics {
+  otd_pct: number;
+  otif_pct: number;
+  damage_free_pct: number;
+  billing_accuracy_pct: number;
+  claims_ratio_pct: number;
+}
+
+const SCORE_WEIGHTS = { otd: 0.35, otif: 0.25, damage: 0.15, billing: 0.15, claims: 0.1 };
+
+/** Взвешенная оценка 0..100 (claims инвертируется: меньше претензий → выше балл). */
+export function computeScorecardScore(m: ScoreMetrics): number {
+  const score =
+    m.otd_pct * SCORE_WEIGHTS.otd +
+    m.otif_pct * SCORE_WEIGHTS.otif +
+    m.damage_free_pct * SCORE_WEIGHTS.damage +
+    m.billing_accuracy_pct * SCORE_WEIGHTS.billing +
+    (100 - m.claims_ratio_pct) * SCORE_WEIGHTS.claims;
+  return Math.round(score * 10) / 10;
+}
+
+export type Grade = "A" | "B" | "C";
+
+/** Грейд по баллу: ≥90 → A, ≥75 → B, иначе C. */
+export function scoreGrade(score: number): Grade {
+  if (score >= 90) return "A";
+  if (score >= 75) return "B";
+  return "C";
+}
+
+// ─────────────────────────────── Аудит счетов ───────────────────────────────
+
+export interface AuditItem {
+  invoice_amount: number;
+  expected_amount: number;
+}
+
+/** Отклонение счёта от ожидаемого: > 0 — переплата (к возврату). */
+export function auditVariance(invoice: number, expected: number): number {
+  return round2(invoice - expected);
+}
+
+export interface AuditSummary {
+  checked: number;
+  discrepancies: number;
+  toRecover: number;
+}
+
+/** Свод аудита: сколько проверено, сколько расхождений, сколько к возврату (только переплаты). */
+export function auditSummary(items: AuditItem[]): AuditSummary {
+  let discrepancies = 0;
+  let toRecover = 0;
+  for (const it of items) {
+    const v = auditVariance(it.invoice_amount, it.expected_amount);
+    if (v !== 0) discrepancies += 1;
+    if (v > 0) toRecover = round2(toRecover + v);
+  }
+  return { checked: items.length, discrepancies, toRecover };
+}
+
+// ─────────────────────────────── Доставки (сводка) ───────────────────────────────
+
+export interface ShipmentLike {
+  status: string;
+  tracking_status?: string;
+}
+
+export interface ShipmentsSummary {
+  total: number;
+  delivered: number;
+  inTransit: number;
+  atCustoms: number;
+}
+
+/** Группировка доставок по статусу/трекингу для дашборда (fallback, когда /dashboard недоступен). */
+export function summarizeShipments(items: ShipmentLike[]): ShipmentsSummary {
+  let delivered = 0;
+  let inTransit = 0;
+  let atCustoms = 0;
+  for (const s of items) {
+    if (s.status === "delivered") delivered += 1;
+    else if (s.tracking_status === "at_customs") atCustoms += 1;
+    else if (s.status !== "planned") inTransit += 1;
+  }
+  return { total: items.length, delivered, inTransit, atCustoms };
+}
+
+// ─────────────────────────────── Парк (допуск транспорта) ───────────────────────────────
+
+export interface VehicleLike {
+  capacity_kg: number;
+  temp_control: boolean;
+}
+
+export interface CargoReq {
+  weight_kg: number;
+  needs_temp?: boolean;
+}
+
+/** Подходит ли ТС под груз: вес ≤ грузоподъёмности и (не нужен холод | есть рефрижератор). */
+export function vehicleFits(vehicle: VehicleLike, req: CargoReq): boolean {
+  if (req.weight_kg > vehicle.capacity_kg) return false;
+  if (req.needs_temp && !vehicle.temp_control) return false;
+  return true;
+}
+
+// ─────────────────────────────── Статусы тендера ───────────────────────────────
+
+const RFQ_FLOW = ["draft", "sent", "collecting", "negotiation", "awarded", "contracted"] as const;
+
+const RFQ_LABELS: Record<string, string> = {
+  draft: "Черновик",
+  sent: "Разослан",
+  collecting: "Сбор ставок",
+  negotiation: "Переговоры",
+  awarded: "Победитель выбран",
+  contracted: "Законтрактован",
+};
+
+/** Следующий статус тендера по цепочке; финал и неизвестные значения остаются на месте. */
+export function nextRfqStatus(status: string): string {
+  const i = RFQ_FLOW.indexOf(status as (typeof RFQ_FLOW)[number]);
+  if (i === -1 || i === RFQ_FLOW.length - 1) return status;
+  return RFQ_FLOW[i + 1];
+}
+
+/** Русская подпись статуса тендера; неизвестное значение возвращается как есть. */
+export function rfqStatusLabel(status: string): string {
+  return RFQ_LABELS[status] ?? status;
+}
