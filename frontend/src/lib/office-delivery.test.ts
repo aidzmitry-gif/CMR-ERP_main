@@ -4,6 +4,8 @@ import {
   CARRIER_THRESHOLD_KG,
   classifyTracking,
   DEMO_DELIVERIES,
+  officeDocToDelivery,
+  officeStageToTracking,
   parseWeightKg,
   requiresCarrierRequest,
   summarizeDeliveries,
@@ -115,5 +117,37 @@ describe("office-delivery · DEMO_DELIVERIES", () => {
     for (const d of DEMO_DELIVERIES) {
       expect(classifyTracking(d.stage).label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("office-delivery · officeDocToDelivery (маппинг /office/docs)", () => {
+  it("стадия трекинга — по тексту статуса доставки, затем по стадии документа", () => {
+    expect(officeStageToTracking("shipped", "Доставка: В пути · Минск → Гомель")).toBe("in_transit");
+    expect(officeStageToTracking("docs", "Доставлено, закрываем документы")).toBe("delivered");
+    expect(officeStageToTracking("ready", "")).toBe("new");
+    expect(officeStageToTracking("paid", "")).toBe("delivered");
+    expect(officeStageToTracking("zzz", "")).toBe("new"); // неизвестная стадия → не падает
+  });
+
+  it("маппит документ API в строку доставки", () => {
+    const d = officeDocToDelivery({
+      id: 7, number: "ДОК-2026-0007", company: "ООО Альфа", amount: 5000,
+      delivery: "СДЭК", docs_status: "Доставка: В пути", stage: "shipped",
+      region: "Гомель", weight: "420", op_date: "2026-06-15",
+    });
+    expect(d).toMatchObject({
+      id: 7, code: "ДОК-2026-0007", company: "ООО Альфа", amount: 5000,
+      carrier: "СДЭК", stage: "in_transit", destination: "Гомель", weight: "420", eta: "2026-06-15",
+    });
+  });
+
+  it("пустой перевозчик/регион → undefined (а не пустая строка)", () => {
+    const d = officeDocToDelivery({
+      id: 1, number: "Д-1", company: "X", amount: 0, delivery: "", docs_status: "",
+      stage: "ready", region: "", weight: "", op_date: null,
+    });
+    expect(d.carrier).toBeUndefined();
+    expect(d.destination).toBeUndefined();
+    expect(d.stage).toBe("new");
   });
 });

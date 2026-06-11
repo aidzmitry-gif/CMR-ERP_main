@@ -2,10 +2,16 @@
 
 import clsx from "clsx";
 import { FileText, Truck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { OfficeDelivery } from "@/components/erp/office-delivery";
-import { DEMO_DELIVERIES, summarizeDeliveries, type Delivery } from "@/lib/office-delivery";
+import {
+  DEMO_DELIVERIES,
+  officeDocToDelivery,
+  summarizeDeliveries,
+  type Delivery,
+  type OfficeDocApi,
+} from "@/lib/office-delivery";
 
 type Tab = "docs" | "delivery";
 
@@ -55,6 +61,25 @@ export function OfficeView({
 }) {
   const [tab, setTab] = useState<Tab>("docs");
   const [deliveries, setDeliveries] = useState<Delivery[]>(initialDeliveries);
+
+  // Живые отгрузки офиса (через /api-прокси): показывают реальный трекинг из логистики
+  // (связка Блок 3). При недоступном/пустом backend остаются демо-данные — UI не падает.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/office/docs", { cache: "no-store" });
+        if (!res.ok) return;
+        const mapped = ((await res.json()) as OfficeDocApi[]).map(officeDocToDelivery);
+        if (alive && mapped.length > 0) setDeliveries(mapped);
+      } catch {
+        /* fallback на initialDeliveries (демо) */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   function assignCarrier(id: number, carrier: string) {
     setDeliveries((prev) => prev.map((d) => (d.id === id ? { ...d, carrier } : d)));

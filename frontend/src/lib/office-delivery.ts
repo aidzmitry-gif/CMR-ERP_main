@@ -108,6 +108,52 @@ export function summarizeDeliveries(list: Delivery[]): DeliverySummary {
 /** Преднабор перевозчиков для модалки «Заявка перевозчику». */
 export const CARRIERS: string[] = ["ПЭК", "Деловые Линии", "СДЭК", "Байкал Сервис", "GTD"];
 
+// ─────────── Маппинг документа офис-менеджера (API /office/docs) в строку доставки ───────────
+
+/** Документ офис-менеджера из API (подмножество полей для трекинга доставки). */
+export interface OfficeDocApi {
+  id: number;
+  number: string;
+  company: string;
+  amount: number;
+  delivery: string;      // назначенный перевозчик
+  docs_status: string;   // текст статуса доставки (пишется логистикой через события)
+  stage: string;         // ready/shipped/docs/await_pay/paid
+  region?: string;
+  weight?: string;
+  op_date?: string | null;
+}
+
+/**
+ * Стадия трекинга из стадии документа и текста статуса доставки.
+ * Приоритет — тексту из логистики (`docs_status`: «…В пути…», «Доставлено…»),
+ * затем по стадии документа офиса. Неизвестное → «Создана» (без падения).
+ */
+export function officeStageToTracking(stage: string, docsStatus = ""): TrackingStage {
+  const s = (docsStatus || "").toLowerCase();
+  if (s.includes("доставлен")) return "delivered";
+  if (s.includes("задерж") || s.includes("проблем")) return "delayed";
+  if (s.includes("пути") || s.includes("трансп")) return "in_transit";
+  if (stage === "paid" || stage === "await_pay" || stage === "docs") return "delivered";
+  if (stage === "shipped") return "in_transit";
+  return "new";
+}
+
+/** Маппинг документа офис-менеджера (API) в строку секции «Доставка». */
+export function officeDocToDelivery(doc: OfficeDocApi): Delivery {
+  return {
+    id: doc.id,
+    code: doc.number,
+    company: doc.company,
+    weight: doc.weight ?? "",
+    amount: doc.amount ?? 0,
+    stage: officeStageToTracking(doc.stage, doc.docs_status),
+    carrier: doc.delivery || undefined,
+    destination: doc.region || undefined,
+    eta: doc.op_date ?? undefined,
+  };
+}
+
 /** Демо-данные: доска работает без backend (по скоупу — db: none, build на crypto ломается). */
 export const DEMO_DELIVERIES: Delivery[] = [
   { id: 1, code: "0156", company: "ООО МеталлПром", weight: "1 200 кг", amount: 184_500, stage: "packed", destination: "Минск", eta: "12.06" },
