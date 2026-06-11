@@ -13,13 +13,27 @@ const stage = (id: string, count: number, sum: number): Stage => ({
 });
 
 describe("computeFunnel", () => {
-  it("разделяет активные и закрытые стадии и считает конверсию", () => {
+  it("разделяет активные и закрытые стадии и считает конверсию (win rate)", () => {
     const f = computeFunnel([stage("new", 3, 300), stage("qual", 1, 200), stage("won", 1, 100)]);
     expect(f.activeCount).toBe(4);
     expect(f.activeSum).toBe(500);
     expect(f.wonCount).toBe(1);
     expect(f.wonSum).toBe(100);
-    expect(f.conversion).toBeCloseTo((1 / 5) * 100);
+    expect(f.lostCount).toBe(0);
+    expect(f.conversion).toBeCloseTo(100); // win rate = won/(won+lost) = 1/1
+  });
+
+  it("исключает lost из «в работе» и считает win rate won/(won+lost)", () => {
+    const f = computeFunnel([
+      stage("new", 2, 200),
+      stage("won", 3, 300),
+      stage("lost", 1, 100),
+    ]);
+    expect(f.activeCount).toBe(2); // lost НЕ в работе
+    expect(f.activeSum).toBe(200);
+    expect(f.lostCount).toBe(1);
+    expect(f.lostSum).toBe(100);
+    expect(f.conversion).toBeCloseTo((3 / 4) * 100); // 75% = 3 won / (3 won + 1 lost)
   });
 
   it("конверсия 0 при пустой воронке", () => {

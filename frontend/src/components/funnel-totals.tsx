@@ -7,7 +7,8 @@ export function FunnelTotals({ data }: { data: FunnelData }) {
     { label: "Сумма в работе", value: formatMoney(data.activeSum) },
     { label: "Выиграно сделок", value: String(data.wonCount) },
     { label: "Сумма выигранных", value: formatMoney(data.wonSum) },
-    { label: "Конверсия", value: `${data.conversion.toFixed(1)}%` },
+    { label: "Проиграно сделок", value: String(data.lostCount) },
+    { label: "Конверсия (win rate)", value: `${data.conversion.toFixed(1)}%` },
   ];
 
   return (
@@ -16,7 +17,7 @@ export function FunnelTotals({ data }: { data: FunnelData }) {
         <h3 className="font-semibold text-ink">Итоги по воронке</h3>
         <span className="text-xs text-muted">По всем сделкам</span>
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {items.map((t) => (
           <div key={t.label}>
             <div className="text-xs text-muted">{t.label}</div>
