@@ -90,6 +90,8 @@ const MODULES: ModuleItem[] = [
       { label: "Выработка и оценка", href: "/erp/production/vyrabotka" },
       { label: "ОТК · Контроль", href: "/erp/production/otk" },
       { label: "Спецификации · BOM", href: "/erp/production/bom" },
+      { label: "Планирование · план/факт", href: "/erp/production/planning" },
+      { label: "Аналитика производства", href: "/erp/production/analytics" },
       { label: "Наряды · заказы" },
       { label: "Маршруты" },
       { label: "Оборудование" },
