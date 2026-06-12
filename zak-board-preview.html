@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Закупки · Воронка закупок — превью</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Те же кастомные токены, что в Tailwind-конфиге проекта (canvas/ink/muted/brand/shadow-card).
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#f6f7f9",
+            ink: "#0f172a",
+            muted: "#64748b",
+            brand: { DEFAULT: "#2563eb", 100: "#dbeafe", 600: "#2563eb" },
+          },
+          boxShadow: { card: "0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+        },
+      },
+    };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    /* ── Панель чатов поставщиков (рейка → раскрытие по hover, overlay) ──
+       Эталон взаимодействия один на все экраны закупок. Свёрнутая рейка ~68px:
+       только аватарка + красный бейдж непрочитанных; при наведении плавно
+       раскрывается до 320px ПОВЕРХ контента (без reflow), показывает имя
+       контрагента, канал (WeChat/email) и последнее сообщение. */
+    .chatrail{position:fixed;top:0;right:0;height:100vh;width:68px;z-index:40;
+      background:#fff;border-left:1px solid #e2e8f0;transition:width .22s ease;overflow:hidden;
+      box-shadow:-8px 0 24px rgba(15,23,42,.04)}
+    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(15,23,42,.10)}
+    .chatrail .lbl{opacity:0;transition:opacity .18s ease;white-space:nowrap}
+    .chatrail:hover .lbl{opacity:1}
+    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid #f1f5f9}
+    .chatrow{display:flex;align-items:center;gap:.6rem;padding:9px 14px;cursor:pointer}
+    .chatrow:hover{background:#f8fafc}
+    .av{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:9999px;
+      display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff}
+    .badge{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9999px;
+      background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
+    .ch-flag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:9999px;line-height:1.4}
+  </style>
+</head>
+<body class="bg-canvas text-ink">
+  <!-- ⚠️ Статичный снимок будущего Next.js-экрана /crm/procurement/board. 9 стадий из stages.py. Демо-данные, BYN/¥. Навигация по вкладкам работает. -->
+
+  <!-- ============ ПАНЕЛЬ ЧАТОВ ПОСТАВЩИКОВ (right rail) ============ -->
+  <aside class="chatrail">
+    <div class="head">
+      <span class="text-lg">💬</span>
+      <span class="lbl text-sm font-semibold text-ink">Переписка с поставщиками</span>
+    </div>
+
+    <!-- AI-сводка над списком (видна при раскрытии) -->
+    <div class="lbl px-3.5 py-2 text-[11px] text-violet-600 bg-violet-50/60 border-b border-violet-100">
+      ✦ ИИ ведёт 7 диалогов · 3 черновика ответа ждут отправки
+    </div>
+
+    <!-- Поставщик 1 — WeChat -->
+    <div class="chatrow">
+      <span class="av" style="background:#0ea5e9">深<span class="badge">2</span></span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Shenzhen Hangxin 深圳航芯</span>
+          <span class="ch-flag bg-emerald-50 text-emerald-600">WeChat</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">价格已更新到 ¥3.85/шт · обновил цену по чипам</span>
+      </span>
+    </div>
+
+    <!-- Поставщик 2 — email -->
+    <div class="chatrow">
+      <span class="av" style="background:#6366f1">YX<span class="badge">1</span></span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Yuxin Electronics</span>
+          <span class="ch-flag bg-blue-50 text-blue-600">email</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">PI attached, lead time 25 days</span>
+      </span>
+    </div>
+
+    <!-- Продавец (внутр.) -->
+    <div class="chatrow">
+      <span class="av" style="background:#f59e0b">ИП<span class="badge">3</span></span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Иванов П. · продавец</span>
+          <span class="ch-flag bg-amber-50 text-amber-700">внутр.</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">Клиент ждёт срок по партии конденсаторов</span>
+      </span>
+    </div>
+
+    <!-- Поставщик 3 — 1688 -->
+    <div class="chatrow">
+      <span class="av" style="background:#ef4444">阿</span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">阿里巴巴 商家 (1688)</span>
+          <span class="ch-flag bg-orange-50 text-orange-600">1688</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">新报价: 50000шт @ ¥0.42</span>
+      </span>
+    </div>
+
+    <!-- Поставщик 4 — Taobao -->
+    <div class="chatrow">
+      <span class="av" style="background:#14b8a6">淘</span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Taobao 店铺 · разъёмы</span>
+          <span class="ch-flag bg-rose-50 text-rose-600">Taobao</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">现货充足 · в наличии, готов к отгрузке</span>
+      </span>
+    </div>
+
+    <!-- Поставщик 5 -->
+    <div class="chatrow">
+      <span class="av" style="background:#8b5cf6">SZ</span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Suzhou Precision</span>
+          <span class="ch-flag bg-blue-50 text-blue-600">email</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">QC report ready, photos sent</span>
+      </span>
+    </div>
+
+    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-slate-400">
+      ИИ переводит, отвечает по шаблону и поднимает важное наверх. Канал, тон и история — в карточке диалога.
+    </div>
+  </aside>
+
+  <!-- ============ ОСНОВНОЙ КОНТЕНТ (с отступом под рейку) ============ -->
+  <div class="mx-auto max-w-[1180px] space-y-4 p-6 pr-[92px]">
+
+    <!-- Заголовок -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Закупки · воронка</h1>
+      <p class="mt-1 text-sm text-muted">
+        Канбан 9 стадий: от потребности до оприходования. Заявки под конкретные сделки и пополнение склада в одном потоке.
+      </p>
+    </div>
+
+    <!-- Вкладки закупок (Воронка активна) -->
+    <div class="flex flex-wrap gap-1.5 text-[13px]">
+      <a href="zak-cockpit-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Обзор</a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Запросы цены</a>
+      <span class="rounded-full bg-brand px-3 py-1.5 font-semibold text-white shadow-card">Воронка</span>
+      <a href="zak-shipment-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Машины</a>
+      <a href="zak-ai-comms-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">AI-переписка</a>
+      <a href="zak-price-monitor-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Мониторинг цен</a>
+      <a href="zak-landed-cost-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Себестоимость</a>
+    </div>
+
+    <!-- Сводная полоса -->
+    <div class="grid gap-3 sm:grid-cols-4 text-[12px]">
+      <div class="rounded-xl bg-white p-3 shadow-card">
+        <div class="text-slate-400 text-[10px] font-semibold uppercase tracking-wide">Всего заявок</div>
+        <div class="mt-1 text-xl font-bold text-ink">23</div>
+        <div class="text-muted">в работе</div>
+      </div>
+      <div class="rounded-xl bg-white p-3 shadow-card">
+        <div class="text-slate-400 text-[10px] font-semibold uppercase tracking-wide">Под сделки</div>
+        <div class="mt-1 text-xl font-bold text-brand-600">14</div>
+        <div class="text-muted">привязаны к CRM</div>
+      </div>
+      <div class="rounded-xl bg-white p-3 shadow-card">
+        <div class="text-slate-400 text-[10px] font-semibold uppercase tracking-wide">Пополнение</div>
+        <div class="mt-1 text-xl font-bold text-ink">9</div>
+        <div class="text-muted">склад / резерв</div>
+      </div>
+      <div class="rounded-xl bg-white p-3 shadow-card">
+        <div class="text-slate-400 text-[10px] font-semibold uppercase tracking-wide">Заморожены / блок</div>
+        <div class="mt-1 text-xl font-bold text-amber-600">2</div>
+        <div class="text-muted">ждут согласования</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ КАНБАН-ДОСКА (горизонтальный скролл, выходит за max-w) ============ -->
+  <div class="overflow-x-auto px-6 pb-4 pr-[92px]">
+    <div class="flex gap-3" style="width:max-content">
+
+      <!-- ── Колонка 1: Потребность (#3B82F6) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#3B82F6"></span>
+          <span class="text-[12px] font-semibold text-ink">Потребность</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · BYN 4 040</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-blue-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Конденсатор 470мкФ 25В</div>
+            <div class="mt-1 text-[11px] text-muted">5 000 шт · BYN ~2 600</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2287</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">Иванов П. · ZPR-2026-041</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-blue-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Чип ESP32-C3-WROOM-02</div>
+            <div class="mt-1 text-[11px] text-muted">1 000 шт · BYN ~1 440</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">автозаявка · мин. остаток</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 2: Поиск поставщиков (#8B5CF6) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#8B5CF6"></span>
+          <span class="text-[12px] font-semibold text-ink">Поиск поставщиков</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">3 · BYN 8 240</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-violet-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Реле SRD-05VDC 10A</div>
+            <div class="mt-1 text-[11px] text-muted">1 200 шт · BYN ~1 440</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2290</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">Петрова А. · ZPR-2026-042</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-violet-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Разъём USB-C 24pin SMD</div>
+            <div class="mt-1 text-[11px] text-muted">20 000 шт · BYN ~4 800</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2291</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">Сидоров К. · ZPR-2026-043</div>
+          </div>
+          <!-- Карточка 3 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-violet-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Резистор 10кОм 1% 0.25W</div>
+            <div class="mt-1 text-[11px] text-muted">100 000 шт · BYN ~2 000</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">автозаявка · Ковалёв А.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 3: Переговоры (#F59E0B) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#F59E0B"></span>
+          <span class="text-[12px] font-semibold text-ink">Переговоры</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · ¥38 000</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-amber-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Конденсатор 100мкФ 16В</div>
+            <div class="mt-1 text-[11px] text-muted">10 000 шт · Yuxin ¥0.12</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2288</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">ведёт ИИ · WeChat</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-amber-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Диод 1N4007</div>
+            <div class="mt-1 text-[11px] text-muted">50 000 шт · Hangxin ¥0.06</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">ведёт ИИ · просит скидку 5%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 4: Анализ поставщика (#06B6D4) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#06B6D4"></span>
+          <span class="text-[12px] font-semibold text-ink">Анализ поставщика</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">2</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-cyan-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Транзистор BC547</div>
+            <div class="mt-1 text-[11px] text-muted">5 000 шт · Suzhou Precision</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2285</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">企信宝 проверка · ИИ</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-cyan-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Дроссель 100мкГн SMD</div>
+            <div class="mt-1 text-[11px] text-muted">2 000 шт · Suzhou Precision</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">сравнение: 2 поставщика</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 5: Согласование (#EC4899) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#EC4899"></span>
+          <span class="text-[12px] font-semibold text-ink">Согласование</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">1 · BYN 2 400</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-pink-200 ring-1 ring-amber-300">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Модуль ESP8266-12F</div>
+            <div class="mt-1 text-[11px] text-muted">800 шт · BYN 2 400</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2280</span>
+              <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">ждёт руков.</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">Сидоров К. · 2-й день</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 6: Заказ / PO (#14B8A6) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#14B8A6"></span>
+          <span class="text-[12px] font-semibold text-ink">Заказ / PO</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · ¥5 300</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-teal-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">STM32F103C8T6</div>
+            <div class="mt-1 text-[11px] text-muted">1 000 шт · Hangxin ¥3.85</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2278</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">PO отправлен · 10 июн</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-teal-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">LED 5мм красный</div>
+            <div class="mt-1 text-[11px] text-muted">20 000 шт · 1688 ¥0.07</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">PO в 1688 · авт. ответ</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 7: Производство (#6366F1) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#6366F1"></span>
+          <span class="text-[12px] font-semibold text-ink">Производство</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">3 · ¥68 400</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-indigo-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Конд. алюм. 1000мкФ 35В</div>
+            <div class="mt-1 text-[11px] text-muted">8 000 шт · ¥0.38/шт</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-015</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">ETA склад Китай 20 июн</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-indigo-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Реле 24VDC SPDT 10A</div>
+            <div class="mt-1 text-[11px] text-muted">600 шт · ¥4.80/шт</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-015</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">ETA склад Китай 20 июн</div>
+          </div>
+          <!-- Карточка 3 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-indigo-200 ring-1 ring-emerald-300">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Трансформатор ТП-20</div>
+            <div class="mt-1 text-[11px] text-muted">100 шт · ¥36/шт</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-014</span>
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">готов → QC</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">поставщик уведомил ИИ</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 8: Приёмка / QC (#F97316) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#F97316"></span>
+          <span class="text-[12px] font-semibold text-ink">Приёмка / QC</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">1 · BYN 980</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-orange-200">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Разъём DB9 9pin Male</div>
+            <div class="mt-1 text-[11px] text-muted">500 шт · MO-2026-014</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2275</span>
+            </div>
+            <div class="mt-1 text-[10px] text-muted">вскрытие партии ✓ · QC протокол</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Колонка 9: Завершено (#22C55E) ── -->
+      <div class="w-52 flex-shrink-0">
+        <div class="flex items-center gap-2 mb-2.5">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#22C55E"></span>
+          <span class="text-[12px] font-semibold text-ink">Завершено</span>
+          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · этот мес.</span>
+        </div>
+        <div class="space-y-2">
+          <!-- Карточка 1 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-green-200 opacity-75">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Фотоэлемент FD-1</div>
+            <div class="mt-1 text-[11px] text-muted">300 шт · MO-2026-013</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">оприходован ✓</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">10 июн · landed cost записан</div>
+          </div>
+          <!-- Карточка 2 -->
+          <div class="rounded-xl bg-white p-3 shadow-card cursor-pointer hover:ring-1 hover:ring-green-200 opacity-75">
+            <div class="text-[12px] font-semibold text-ink leading-tight">Кабель HDMI 2м</div>
+            <div class="mt-1 text-[11px] text-muted">200 шт · MO-2026-013</div>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">оприходован ✓</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-400">8 июн · landed cost записан</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ AI-плашка (снизу, в max-w-контейнере) ============ -->
+  <div class="mx-auto max-w-[1180px] space-y-4 px-6 pb-6 pr-[92px]">
+    <div class="rounded-2xl border border-dashed border-violet-300 bg-violet-50 p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="flex items-center gap-2">
+          <span class="text-violet-500">✦</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-violet-600">ИИ-помощник закупщика · сводка по воронке</span>
+        </span>
+        <span class="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">Итерация 1 · ИИ (позже)</span>
+      </div>
+      <div class="mt-3 space-y-2">
+        <div class="flex items-start justify-between gap-3">
+          <span class="text-sm text-violet-700">
+            <span class="font-semibold">1 ·</span> В «Переговорах» 2 позиции у одного поставщика (Hangxin) — объединить в один PO: скидка за объём ~7%, экономия ≈ 1 200 р.
+          </span>
+          <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">−7% цена</span>
+        </div>
+        <div class="flex items-start justify-between gap-3">
+          <span class="text-sm text-violet-700">
+            <span class="font-semibold">2 ·</span> «Производство» → Трансформатор ТП-20 (MO-014) готов у поставщика, QC ещё не назначен — риск задержки машины MO-014 (таможня Минск через 2 дня).
+          </span>
+          <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">срочно → QC</span>
+        </div>
+        <div class="flex items-start justify-between gap-3">
+          <span class="text-sm text-violet-700">
+            <span class="font-semibold">3 ·</span> 3 заявки («Потребность» + «Поиск») могут войти в MO-016 (сбор открыт до 20 июн) — добавить сейчас, иначе следующая машина через 14 дней.
+          </span>
+          <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">→ MO-016</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-xs text-slate-400">Превью-снимок для просмотра процесса. Стадии — из stages.py (9 стадий). Демо-данные (BYN/¥). Работает навигация по вкладкам и наведение на панель чатов справа.</p>
+  </div>
+
+</body>
+</html>
