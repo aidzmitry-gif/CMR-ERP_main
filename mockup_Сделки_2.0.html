@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Прототип «Сделки 2.0»</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand50:#EFF5FF; --brand100:#EAF1FF; --brand700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --s-new:#3B82F6; --s-qual:#8B5CF6; --s-prop:#F59E0B; --s-appr:#14B8A6; --s-won:#22C55E; --s-lost:#EF4444;
+    --card:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+    --pop:0 8px 24px rgba(16,24,40,.10);
+    --line:#E5E7EB;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#d8dce3;color:var(--ink);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .app{display:flex;min-height:100vh}
+  /* sidebar */
+  .side{width:210px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;flex:0 0 auto}
+  .side .logo{padding:16px;font-weight:700;font-size:15px;border-bottom:1px solid var(--line)}
+  .side .logo small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+  .nav{padding:8px;display:flex;flex-direction:column;gap:2px}
+  .nav a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;color:#374151;text-decoration:none;font-weight:500;font-size:13px}
+  .nav a.active{background:var(--brand100);color:var(--brand700)}
+  .nav a:hover:not(.active){background:#F3F4F6}
+  .nav .dot{width:7px;height:7px;border-radius:50%}
+  .side .role{margin-top:auto;border-top:1px solid var(--line);padding:12px;font-size:12px;color:var(--muted)}
+  .side .role b{color:var(--ink)}
+  /* center column */
+  .center{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;gap:10px;padding:12px 20px;background:#fff;border-bottom:1px solid var(--line)}
+  .crumb{color:var(--muted);font-size:13px}
+  .crumb b{color:var(--ink)}
+  .top .spacer{flex:1}
+  .switchNew{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#374151;background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 10px;cursor:pointer;user-select:none}
+  .switchNew input{accent-color:var(--brand)}
+  .body{flex:1;display:flex;overflow:hidden}
+  main{flex:1;min-width:0;overflow:auto;padding:20px}
+  /* toolbar */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .search{position:relative;flex:1;min-width:220px;max-width:380px}
+  .search input{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 12px 9px 32px;font-size:13px;outline:none}
+  .search svg{position:absolute;left:9px;top:9px;color:#9CA3AF}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font-size:13px;font-weight:500;color:#374151;cursor:pointer}
+  .btn:hover{background:#F9FAFB}
+  .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .btn-primary:hover{background:var(--brand700)}
+  .btn-sm{padding:5px 9px;font-size:12px;border-radius:8px}
+  /* section heading */
+  h2.sec{font-size:15px;font-weight:600;margin:22px 0 0}
+  .muted{color:var(--muted)}
+  .seg{display:inline-flex;gap:2px;border:1px solid var(--line);background:#fff;border-radius:9px;padding:3px}
+  .seg button{border:0;background:transparent;border-radius:7px;padding:5px 10px;font-size:12px;font-weight:500;color:#6B7280;cursor:pointer}
+  .seg button.on{background:var(--brand100);color:var(--brand700)}
+  /* plan header (SALES-47) */
+  .planbar{margin-top:12px;background:#fff;border-radius:14px;box-shadow:var(--card);padding:14px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .planbar .who{font-weight:600}
+  .planbar .who small{display:block;color:var(--muted);font-weight:500;font-size:12px}
+  .status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;font-size:12px;font-weight:600}
+  .st-draft{background:#F3F4F6;color:#6B7280}
+  .st-pending{background:#FEF3C7;color:#B45309}
+  .st-approved{background:#DCFCE7;color:#15803D}
+  .st-rejected{background:#FEE2E2;color:#B91C1C}
+  /* kpi grid */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:14px}
+  @media(max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  .kpi{background:#fff;border-radius:12px;box-shadow:var(--card);padding:14px;position:relative}
+  .kpi .h{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+  .kpi .ico{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .kpi .lab{font-size:11px;color:var(--muted);line-height:1.25}
+  .kpi .plus{width:24px;height:24px;border-radius:7px;border:0;background:transparent;color:#9CA3AF;cursor:pointer;font-size:16px}
+  .kpi .plus:hover{background:#F3F4F6;color:var(--brand)}
+  .kpi .val{margin-top:12px;font-size:17px;font-weight:600}
+  .kpi .val .t{font-size:13px;font-weight:400;color:var(--muted)}
+  .kpi .bar{height:6px;border-radius:999px;background:#F3F4F6;margin-top:9px;overflow:hidden}
+  .kpi .bar i{display:block;height:100%;border-radius:999px}
+  .kpi .pc{font-size:11px;color:var(--muted);margin-top:6px}
+  .kpi.edit .val,.kpi.edit .plus{display:none}
+  .kpi .editrow{display:none;margin-top:10px;align-items:center;gap:6px}
+  .kpi.edit .editrow{display:flex}
+  .kpi .editrow input{width:90px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:13px}
+  .kpi .editrow span{font-size:11px;color:var(--muted)}
+  .ico.blue{background:#DBEAFE;color:#2563EB}.ico.indigo{background:#E0E7FF;color:#4F46E5}
+  .ico.green{background:#DCFCE7;color:#16A34A}.ico.cyan{background:#CFFAFE;color:#0891B2}.ico.slate{background:#F1F5F9;color:#64748B}
+  .bar i.blue{background:#3B82F6}.bar i.indigo{background:#6366F1}.bar i.green{background:#22C55E}.bar i.cyan{background:#06B6D4}.bar i.slate{background:#94A3B8}
+  /* board */
+  .boardwrap{margin-top:18px}
+  .board{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px}
+  .col{width:288px;flex:0 0 auto;display:flex;flex-direction:column;gap:12px}
+  .colhead{background:#fff;border-radius:12px;box-shadow:var(--card);overflow:hidden}
+  .colhead .strip{height:4px}
+  .colhead .in{padding:11px 14px}
+  .colhead .t{font-weight:600}
+  .colhead .m{font-size:11px;color:var(--muted);margin-top:2px}
+  .colhead .w{font-size:11px;color:var(--brand700);font-weight:600;margin-top:1px}
+  .col .stack{display:flex;flex-direction:column;gap:12px;min-height:40px}
+  .addcard{display:flex;align-items:center;justify-content:center;gap:6px;border:1px dashed #CBD5E1;border-radius:12px;padding:10px;color:#64748B;font-size:12px;font-weight:500;background:transparent;cursor:pointer}
+  .addcard:hover{background:#fff}
+  /* deal card */
+  .card{background:#fff;border-radius:12px;box-shadow:var(--card);padding:13px;cursor:pointer;transition:box-shadow .15s;border:1px solid transparent}
+  .card:hover{box-shadow:var(--pop)}
+  .card .ct{display:flex;align-items:center;justify-content:space-between}
+  .card .num{font-size:11px;color:var(--muted)}
+  .pri{font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px}
+  .pri-h{background:#FEE2E2;color:#B91C1C}.pri-m{background:#FEF3C7;color:#B45309}.pri-l{background:#E5E7EB;color:#4B5563}
+  .card .co{font-weight:600;margin-top:7px}
+  .card .desc{font-size:12px;color:var(--muted)}
+  .card .amt{font-weight:600;margin-top:7px}
+  .card .amt .w{font-size:11px;font-weight:600;color:var(--brand700);background:var(--brand50);border-radius:6px;padding:1px 6px;margin-left:4px}
+  .days{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#6B7280;background:#F3F4F6;border-radius:999px;padding:2px 7px}
+  .days.warn{background:#FEF3C7;color:#B45309}
+  .task{margin-top:8px;font-size:11px;border-radius:8px;padding:7px 9px;background:#F8FAFC;color:#475569;display:flex;align-items:center;gap:6px}
+  .task.due{background:#FEF9E7;color:#92400E}
+  .task.over{background:#FEE2E2;color:#B91C1C;font-weight:600}
+  .card .ow{display:flex;align-items:center;justify-content:space-between;margin-top:9px;font-size:11px;color:var(--muted)}
+  .card .lose{border:0;background:transparent;color:#B91C1C;font-size:11px;font-weight:600;cursor:pointer;padding:2px 4px;border-radius:6px;opacity:.0;transition:opacity .15s}
+  .card:hover .lose{opacity:1}
+  .card .lose:hover{background:#FEE2E2}
+  .reasonchip{display:inline-block;font-size:10px;font-weight:600;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:2px 7px;margin-top:7px}
+  .wonchip{display:inline-block;font-size:10px;font-weight:600;color:#15803D;background:#DCFCE7;border-radius:6px;padding:2px 7px;margin-top:7px}
+  /* chats panel — сворачивается в рейку, раскрывается по наведению */
+  aside.chats{width:68px;flex:0 0 68px;position:relative;z-index:30}
+  .chatsInner{position:absolute;top:0;right:0;bottom:0;width:68px;background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;transition:width .18s ease}
+  aside.chats:hover .chatsInner,aside.chats.open .chatsInner{width:300px;box-shadow:var(--pop)}
+  .chatsTop{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .chatsTop h3{font-size:14px;font-weight:600;margin:0;opacity:0;transition:opacity .12s}
+  aside.chats:hover .chatsTop h3,aside.chats.open .chatsTop h3{opacity:1}
+  .chatsTop .ic{width:34px;height:34px;border-radius:9px;background:var(--brand100);color:var(--brand700);display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-size:15px}
+  .chatlist{flex:1;overflow:hidden}
+  .chat{display:flex;align-items:center;gap:11px;padding:10px 16px;border-bottom:1px solid #F3F4F6;cursor:pointer}
+  .chat:hover{background:#F9FAFB}
+  .chat .av{position:relative;width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#6366F1);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:0 0 auto}
+  .chat .av .badge{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#EF4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
+  .chat .meta{min-width:0;flex:1;white-space:nowrap;opacity:0;transition:opacity .12s}
+  aside.chats:hover .chat .meta,aside.chats.open .chat .meta{opacity:1}
+  .chat .nm{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis}
+  .chat .tx{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+  /* overlay + modal */
+  .ovl{position:fixed;inset:0;background:rgba(16,24,40,.35);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+  .ovl.open{display:flex}
+  .modal{background:#fff;border-radius:16px;box-shadow:var(--pop);width:100%;max-width:420px;overflow:hidden}
+  .modal .mh{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line)}
+  .modal .mh b{font-size:15px}
+  .modal .mb{padding:18px}
+  .modal .mf{padding:14px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+  .x{border:0;background:transparent;font-size:20px;color:#9CA3AF;cursor:pointer;line-height:1}
+  label.fl{display:block;font-size:12px;font-weight:600;color:#374151;margin:0 0 6px}
+  select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;outline:none}
+  textarea{margin-top:12px;resize:vertical;min-height:64px}
+  /* drawer (peek) */
+  .ovl.right{align-items:stretch;justify-content:flex-end}
+  .drawer{background:#fff;width:100%;max-width:430px;height:100%;overflow:auto;box-shadow:var(--pop);display:flex;flex-direction:column}
+  .drawer .dh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:18px;border-bottom:1px solid var(--line)}
+  .drawer .dh .sub{font-size:12px;color:var(--muted)}
+  .drawer .dh h3{margin:2px 0 0;font-size:18px}
+  .drawer .db{padding:18px;display:flex;flex-direction:column;gap:16px}
+  .drawer .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .block{border:1px solid var(--line);border-radius:12px;padding:12px}
+  .block .bt{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9CA3AF;margin-bottom:8px}
+  .pillrow{display:flex;gap:8px;flex-wrap:wrap}
+  .pill{font-size:12px;border-radius:8px;padding:4px 9px;background:#F3F4F6;color:#475569}
+  /* NEW highlighting */
+  [data-new]{position:relative}
+  body.show-new [data-new]{outline:1.5px dashed var(--brand);outline-offset:3px;border-radius:10px}
+  body.show-new [data-new]::after{content:attr(data-new);position:absolute;top:-9px;left:8px;background:var(--brand);color:#fff;font-size:9px;font-weight:700;letter-spacing:.02em;padding:1px 6px;border-radius:6px;z-index:5;white-space:nowrap;box-shadow:var(--card)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:12px;padding:12px 14px;margin-top:4px;font-size:12px;color:#1E3A8A}
+  .legend b{color:#1E40AF}
+  .legend .k{display:inline-flex;align-items:center;gap:6px}
+  .legend .code{background:var(--brand);color:#fff;font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- sidebar -->
+  <div class="side">
+    <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+    <nav class="nav">
+      <a class="active" href="#"><span class="dot" style="background:var(--brand)"></span> Сделки</a>
+      <a href="#"><span class="dot" style="background:#8B5CF6"></span> Лиды</a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Чаты и дела</a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Контрагенты</a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Аналитика</a>
+    </nav>
+    <div class="role">Вы вошли как<br><b>Иванов И.И.</b> · Менеджер</div>
+  </div>
+
+  <!-- center -->
+  <div class="center">
+    <div class="top">
+      <span class="crumb">CRM / <b>Сделки</b></span>
+      <span class="spacer"></span>
+      <label class="switchNew"><input type="checkbox" id="newToggle" onchange="document.body.classList.toggle('show-new',this.checked)"> Подсветить новое (NEW)</label>
+    </div>
+
+    <div class="body">
+      <main>
+        <!-- легенда что нового -->
+        <div class="legend">
+          <span class="k"><b>Что я добавлю:</b></span>
+          <span class="k"><span class="code">SALES-40</span> стадия «Отказ» + причины</span>
+          <span class="k"><span class="code">SALES-41</span> задачи на карточке + просрочка</span>
+          <span class="k"><span class="code">SALES-43</span> дней в стадии / висяки</span>
+          <span class="k"><span class="code">SALES-44</span> вероятность + взвеш. сумма</span>
+          <span class="k"><span class="code">SALES-47</span> личный план + согласование РОПа</span>
+        </div>
+
+        <!-- toolbar (существующее) -->
+        <div class="toolbar" style="margin-top:14px">
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            <input placeholder="Поиск сделок..." />
+          </div>
+          <button class="btn">⚙ Фильтры</button>
+          <button class="btn btn-primary" style="margin-left:auto">＋ Создать сделку</button>
+        </div>
+
+        <!-- ПЛАН / ФАКТ + личный план (SALES-47) -->
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <h2 class="sec">План / Факт</h2>
+          <div class="seg" id="periodSeg">
+            <button data-p="day" class="on">День</button>
+            <button data-p="week">Неделя</button>
+            <button data-p="month">Месяц</button>
+            <button data-p="quarter">Квартал</button>
+            <button data-p="year">Год</button>
+          </div>
+        </div>
+
+        <div class="planbar" data-new="SALES-47 · личный план + согласование">
+          <div class="who">Мой план · <span id="planPeriodLabel">сегодня, 11 июня</span><small>Иванов И.И. — личные цели продавца</small></div>
+          <span class="status st-pending" id="planStatus">● На согласовании у РОПа</span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn btn-sm" id="editBtn" onclick="toggleEdit()">✎ Редактировать план</button>
+          <button class="btn btn-sm btn-primary" id="submitBtn" onclick="submitPlan()" style="display:none">Отправить РОПу на согласование</button>
+          <button class="btn btn-sm" id="ropBtn" onclick="ropApprove()" title="имитация действия РОПа">🧑‍💼 РОП согласовал</button>
+        </div>
+
+        <div class="kpis" id="kpis">
+          <!-- заполняется JS -->
+        </div>
+
+        <!-- ДОСКА -->
+        <div class="boardwrap">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+            <div class="seg"><button class="on">▦ Канбан</button><button>☰ Список</button></div>
+          </div>
+          <div class="board" id="board"><!-- колонки из JS --></div>
+        </div>
+      </main>
+
+      <!-- чаты: свёрнуты в рейку (аватар + счётчик непрочитанных), раскрываются по наведению -->
+      <aside class="chats" data-new="Чаты: рейка + счётчик непрочитанных, раскрытие по наведению">
+        <div class="chatsInner">
+          <div class="chatsTop"><span class="ic">💬</span><h3>Чаты и дела</h3></div>
+          <div class="chatlist">
+            <div class="chat"><span class="av">СМ<span class="badge">2</span></span><div class="meta"><div class="nm">СтройМеталл</div><div class="tx">Когда отгрузка по счёту?</div></div></div>
+            <div class="chat"><span class="av">ГА<span class="badge">1</span></span><div class="meta"><div class="nm">ГомельАгро</div><div class="tx">Жду КП по профлисту</div></div></div>
+            <div class="chat"><span class="av">ТЗ<span class="badge">3</span></span><div class="meta"><div class="nm">ТД Запад</div><div class="tx">Пришлите реквизиты для договора</div></div></div>
+            <div class="chat"><span class="av">МС</span><div class="meta"><div class="nm">МинскСтрой</div><div class="tx">Согласовали цену, готовим договор</div></div></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- LOSE MODAL (SALES-40) -->
+<div class="ovl" id="loseOvl">
+  <div class="modal" data-new="SALES-40 · причина отказа обязательна">
+    <div class="mh"><b>Закрыть сделку в отказ</b><button class="x" onclick="closeLose()">×</button></div>
+    <div class="mb">
+      <div class="muted" style="font-size:12px;margin-bottom:12px" id="loseDealName">№ CRM-1043 · ГомельАгро</div>
+      <label class="fl">Причина отказа <span style="color:#EF4444">*</span></label>
+      <select id="loseReason">
+        <option value="">— выберите причину —</option>
+        <option>Дорого / не прошли по цене</option>
+        <option>Ушёл к конкуренту</option>
+        <option>Нет потребности сейчас</option>
+        <option>Не дозвонились / нет ответа</option>
+        <option>Не тот срок поставки</option>
+        <option>Нет товара на складе</option>
+        <option>Другое</option>
+      </select>
+      <textarea id="loseComment" placeholder="Комментарий (необязательно)"></textarea>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeLose()">Отмена</button>
+      <button class="btn btn-primary" style="background:#DC2626;border-color:#DC2626" onclick="confirmLose()">Закрыть в отказ</button>
+    </div>
+  </div>
+</div>
+
+<!-- DEAL DRAWER / side-peek (опционально, SALES-48) -->
+<div class="ovl right" id="drawerOvl" onclick="if(event.target===this)closeDrawer()">
+  <div class="drawer" data-new="SALES-48 · side-peek (опционально)">
+    <div class="dh">
+      <div><div class="sub">Детали · <span id="dNum">№ CRM-1041</span></div><h3 id="dCo">СтройМеталл</h3><div class="sub" id="dDesc">Арматура А500С, 12 т</div></div>
+      <button class="x" onclick="closeDrawer()">×</button>
+    </div>
+    <div class="db">
+      <div class="row">
+        <span class="pri pri-h">Высокий</span>
+        <b id="dAmt">1 250 000 ₽</b>
+        <span class="pill" id="dProb">10% · ≈ 125 000 ₽ взвеш.</span>
+        <span class="muted" id="dOwner">· Иванов И.И.</span>
+      </div>
+      <div class="block" data-new="SALES-41 · задачи">
+        <div class="bt">Задачи</div>
+        <div class="task over">⏰ Перезвонить клиенту · просрочено на 1 день</div>
+        <div class="task" style="margin-top:8px">📄 Отправить КП · завтра 12:00</div>
+        <button class="btn btn-sm" style="margin-top:10px">＋ Задача</button>
+      </div>
+      <div class="block" data-new="SALES-43 · история стадий">
+        <div class="bt">Движение по воронке · 3 дн. в стадии</div>
+        <div class="pillrow">
+          <span class="pill">Новая заявка · 09.06</span>
+          <span class="pill">Квалификация · 11.06</span>
+        </div>
+      </div>
+      <div class="block">
+        <div class="bt">Номенклатура</div>
+        <div class="pillrow"><span class="pill">Арматура А500С · 12 т · 1 250 000 ₽</span></div>
+      </div>
+      <div class="block">
+        <div class="bt">Переписка</div>
+        <div class="muted" style="font-size:12px">WhatsApp · «Когда отгрузка по счёту?»</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- данные ---------- */
+const periods = {
+  day:    {label:"сегодня, 11 июня",  mult:1},
+  week:   {label:"неделя · 9–15 июня", mult:5},
+  month:  {label:"июнь 2026",          mult:22},
+  quarter:{label:"II квартал 2026",    mult:65},
+  year:   {label:"2026 год",           mult:250},
+};
+// факт/план на ДЕНЬ (база); для других периодов план = базовый_план*mult, факт ~ пропорция
+const kpiDefs = [
+  {key:"calls_key", lab:"Звонки ключевым", ico:"blue",   icon:"📞", fact:9,  plan:12,  money:false},
+  {key:"calls_all", lab:"Всего звонков",   ico:"indigo", icon:"☎",  fact:22, plan:30,  money:false},
+  {key:"revenue",   lab:"Сумма отгрузки",  ico:"green",  icon:"₽",  fact:280000, plan:400000, money:true},
+  {key:"cold",      lab:"Холодные звонки", ico:"cyan",   icon:"❄",  fact:14, plan:20,  money:false},
+  {key:"requests",  lab:"Обработка заявок",ico:"slate",  icon:"📄", fact:5,  plan:8,   money:false},
+];
+
+const stages = [
+  {id:"new",  t:"Новая заявка",        c:"var(--s-new)"},
+  {id:"qual", t:"Квалификация",        c:"var(--s-qual)"},
+  {id:"prop", t:"Коммерческое предл.", c:"var(--s-prop)"},
+  {id:"appr", t:"Согласование",        c:"var(--s-appr)"},
+  {id:"won",  t:"Закрыто: Успешно",    c:"var(--s-won)"},
+  {id:"lost", t:"Закрыто: Отказ",      c:"var(--s-lost)", isNew:true},
+];
+
+let deals = [
+  {n:"CRM-1041", co:"СтройМеталл",  desc:"Арматура А500С, 12 т",   amt:1250000, pri:"h", stage:"new",  prob:10, owner:"Иванов И.И.",  days:2, task:{t:"📞 Перезвонить · сегодня 15:00", s:"due"}},
+  {n:"CRM-1043", co:"ГомельАгро",   desc:"Профлист С8, 800 м²",    amt:480000,  pri:"m", stage:"qual", prob:30, owner:"Петров П.П.",  days:5, task:{t:"📄 Отправить КП · просрочено", s:"over"}},
+  {n:"CRM-1039", co:"МинскСтрой",   desc:"Балка двутавровая 20Б1", amt:3200000, pri:"h", stage:"prop", prob:50, owner:"Иванов И.И.",  days:1, task:{t:"💬 Согласовать цену · завтра", s:""}},
+  {n:"CRM-1031", co:"ТД Запад",     desc:"Труба профильная 40×40", amt:2100000, pri:"m", stage:"appr", prob:75, owner:"Сидоров С.С.", days:3, task:{t:"✍ Подписать договор · 13.06", s:""}},
+  {n:"CRM-1020", co:"БелПром",      desc:"Лист г/к 4 мм, 6 т",     amt:1800000, pri:"m", stage:"won",  prob:100,owner:"Петров П.П.",  won:true},
+  {n:"CRM-1014", co:"АльфаСтрой",   desc:"Уголок 63×63, 3 т",      amt:650000,  pri:"l", stage:"lost", prob:0,  owner:"Иванов И.И.",  reason:"Дорого / не прошли по цене"},
+];
+
+/* ---------- форматирование ---------- */
+const money = v => new Intl.NumberFormat("ru-RU").format(Math.round(v)) + " ₽";
+const num   = v => new Intl.NumberFormat("ru-RU").format(Math.round(v));
+
+/* ---------- состояние ---------- */
+let period = "day";
+let editing = false;
+let planStatusState = "pending"; // draft|pending|approved|rejected
+
+/* ---------- рендер KPI ---------- */
+function renderKpis(){
+  const m = periods[period].mult;
+  const host = document.getElementById("kpis");
+  host.innerHTML = "";
+  kpiDefs.forEach(k=>{
+    const plan = k.plan*m;
+    const fact = Math.round(k.fact*m*0.78); // факт ~78% от плана для демо
+    const pc = Math.min(100, Math.round(fact/plan*100));
+    const valTxt = k.money ? money(fact) : num(fact);
+    const tgtTxt = k.money ? money(plan) : num(plan);
+    const el = document.createElement("div");
+    el.className = "kpi"+(editing?" edit":"");
+    el.innerHTML = `
+      <div class="h">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="ico ${k.ico}">${k.icon}</span><span class="lab">${k.lab}</span>
+        </div>
+        ${k.money?"":'<button class="plus" title="Отметить (+1)">＋</button>'}
+      </div>
+      <div class="val">${valTxt} <span class="t">/ ${tgtTxt}</span></div>
+      <div class="editrow">цель: <input type="number" value="${plan}"> <span>${k.money?'₽':'шт'}</span></div>
+      <div class="bar"><i class="${k.ico}" style="width:${pc}%"></i></div>
+      <div class="pc">${pc}% выполнено</div>`;
+    host.appendChild(el);
+  });
+  document.getElementById("planPeriodLabel").textContent = periods[period].label;
+}
+
+/* ---------- рендер доски ---------- */
+function renderBoard(){
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  stages.forEach(s=>{
+    const list = deals.filter(d=>d.stage===s.id);
+    const sum = list.reduce((a,d)=>a+d.amt,0);
+    const weighted = list.reduce((a,d)=>a+d.amt*(d.prob||0)/100,0);
+    const col = document.createElement("div");
+    col.className="col";
+    const wLine = (s.id!=="won"&&s.id!=="lost"&&list.length) ? `<div class="w" data-new="SALES-44">взвешенно: ${money(weighted)}</div>`:"";
+    col.innerHTML = `
+      <div class="colhead" ${s.isNew?'data-new="SALES-40 · стадия Отказ"':''}>
+        <div class="strip" style="background:${s.c}"></div>
+        <div class="in"><div class="t">${s.t}</div><div class="m">${list.length} · ${money(sum)}</div>${wLine}</div>
+      </div>
+      <div class="stack"></div>
+      <button class="addcard">＋ Добавить сделку</button>`;
+    const stack = col.querySelector(".stack");
+    list.forEach(d=>stack.appendChild(card(d)));
+    board.appendChild(col);
+  });
+}
+
+function card(d){
+  const el = document.createElement("div");
+  el.className="card";
+  el.onclick = ()=>openDrawer(d);
+  const priCls = d.pri==="h"?"pri-h":d.pri==="m"?"pri-m":"pri-l";
+  const priTxt = d.pri==="h"?"Высокий":d.pri==="m"?"Средний":"Низкий";
+  const daysBadge = d.days!=null ? `<span class="days ${d.days>=4?'warn':''}" data-new="SALES-43">🕒 ${d.days} дн.</span>`:"";
+  const weighted = d.prob? `<span class="w" data-new="SALES-44">${d.prob}% · ≈ ${money(d.amt*d.prob/100)}</span>`:"";
+  let mid = "";
+  if(d.task) mid = `<div class="task ${d.task.s}" data-new="SALES-41">${d.task.t}</div>`;
+  else if(d.reason) mid = `<span class="reasonchip" data-new="SALES-40">Причина: ${d.reason}</span>`;
+  else if(d.won) mid = `<span class="wonchip">✓ Сделка выиграна</span>`;
+  const loseBtn = (d.stage!=="won"&&d.stage!=="lost") ? `<button class="lose" data-new="SALES-40" onclick="event.stopPropagation();openLose('${d.n}','${d.co}')">✕ Отказ</button>`:"";
+  el.innerHTML = `
+    <div class="ct"><span class="num">№ ${d.n}</span>
+      <span style="display:flex;gap:6px;align-items:center"><span class="pri ${priCls}">${priTxt}</span>${daysBadge}</span></div>
+    <div class="co">${d.co}</div>
+    <div class="desc">${d.desc}</div>
+    <div class="amt">${money(d.amt)} ${weighted}</div>
+    ${mid}
+    <div class="ow"><span>👤 ${d.owner}</span>${loseBtn}</div>`;
+  return el;
+}
+
+/* ---------- интеракции ---------- */
+document.getElementById("periodSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  [...e.currentTarget.children].forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); period=b.dataset.p; renderKpis();
+});
+
+function setPlanStatus(s){
+  planStatusState=s;
+  const el=document.getElementById("planStatus");
+  const map={draft:["st-draft","● Черновик"],pending:["st-pending","● На согласовании у РОПа"],
+             approved:["st-approved","✓ Согласовано РОПом"],rejected:["st-rejected","✕ Отклонено РОПом"]};
+  el.className="status "+map[s][0]; el.textContent=map[s][1];
+}
+function toggleEdit(){
+  editing=!editing; renderKpis();
+  document.getElementById("editBtn").textContent = editing?"✓ Готово":"✎ Редактировать план";
+  document.getElementById("submitBtn").style.display = editing?"inline-flex":"none";
+  if(editing) setPlanStatus("draft");
+}
+function submitPlan(){ editing=false; renderKpis();
+  document.getElementById("editBtn").textContent="✎ Редактировать план";
+  document.getElementById("submitBtn").style.display="none";
+  setPlanStatus("pending");
+}
+function ropApprove(){ setPlanStatus( planStatusState==="approved"?"pending":"approved" ); }
+
+/* lose modal */
+let loseTarget=null;
+function openLose(n,co){ loseTarget=n; document.getElementById("loseDealName").textContent=`№ ${n} · ${co}`;
+  document.getElementById("loseReason").value=""; document.getElementById("loseComment").value="";
+  document.getElementById("loseOvl").classList.add("open"); }
+function closeLose(){ document.getElementById("loseOvl").classList.remove("open"); }
+function confirmLose(){
+  const r=document.getElementById("loseReason").value;
+  if(!r){ document.getElementById("loseReason").style.borderColor="#EF4444"; return; }
+  document.getElementById("loseReason").style.borderColor="";
+  const d=deals.find(x=>x.n===loseTarget);
+  if(d){ d.stage="lost"; d.reason=r; d.task=null; d.prob=0; }
+  closeLose(); renderBoard();
+}
+
+/* drawer */
+function openDrawer(d){
+  document.getElementById("dNum").textContent="№ "+d.n;
+  document.getElementById("dCo").textContent=d.co;
+  document.getElementById("dDesc").textContent=d.desc;
+  document.getElementById("dAmt").textContent=money(d.amt);
+  document.getElementById("dProb").textContent=(d.prob||0)+"% · ≈ "+money(d.amt*(d.prob||0)/100)+" взвеш.";
+  document.getElementById("dOwner").textContent="· "+d.owner;
+  document.getElementById("drawerOvl").classList.add("open");
+}
+function closeDrawer(){ document.getElementById("drawerOvl").classList.remove("open"); }
+
+/* init */
+setPlanStatus("pending");
+renderKpis();
+renderBoard();
+</script>
+</body>
+</html>
