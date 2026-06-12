@@ -210,6 +210,62 @@ export async function deleteDealItem(itemId: number): Promise<boolean> {
   }
 }
 
+// --- Задачи по сделке (SALES-41) ---
+
+export interface DealTaskView {
+  id: number;
+  deal_id: number;
+  title: string;
+  kind: string;
+  assignee_id: number | null;
+  due_at: string | null;
+  status: string; // open | done | canceled
+  result: string | null;
+  overdue: boolean;
+}
+
+/** Задачи сделки (открытые — первыми; overdue — флаг просрочки). */
+export async function fetchDealTasks(dealId: string): Promise<DealTaskView[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/tasks`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as DealTaskView[];
+  } catch {
+    return [];
+  }
+}
+
+/** Поставить задачу по сделке. */
+export async function createDealTask(
+  dealId: string,
+  task: { title: string; kind?: string; due_at?: string | null },
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(task),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Отметить задачу выполненной. */
+export async function completeDealTask(taskId: number, result?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "done", result: result ?? "" }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface DealContact {
   id: number;
   full_name: string;

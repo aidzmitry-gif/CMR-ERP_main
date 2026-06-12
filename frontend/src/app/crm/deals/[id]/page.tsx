@@ -8,6 +8,7 @@ import { DealContacts } from "@/components/deal-contacts";
 import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
 import { DealItems } from "@/components/deal-items";
+import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { fetchDealDetail } from "@/lib/api";
@@ -69,6 +70,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
         {/* Номенклатура (редактирование позиций) */}
         <DealItems dealId={id} />
+
+        {/* Задачи по сделке (SALES-41) */}
+        <DealTasks dealId={id} />
 
         {/* AI-ассистент сделки (резюме / следующий шаг) */}
         <DealAiAssistant dealId={id} />
