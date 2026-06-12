@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Закупки · превью экранов</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[920px] p-8">
+    <h1 class="text-2xl font-bold">Закупки (ZAK) — превью экранов процесса</h1>
+    <p class="mt-1 text-sm text-muted">
+      Статичные снимки экранов модуля закупок (демо-данные, BYN; китайские инвойсы — CNY/$). Сквозной процесс:
+      запрос цены от продавца → уточнение у поставщика → закупка под сделку/пополнение → сбор машины (Китай → Минск) →
+      приёмка и себестоимость → в прайс. На каждом экране справа — панель переписки с поставщиками (WeChat/email/1688),
+      которую ведёт ИИ. Клик по карточке открывает экран; внутри сверху — вкладки.
+    </p>
+
+    <div class="mt-6 grid gap-3 sm:grid-cols-2">
+      <a href="zak-cockpit-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40 sm:col-span-2">
+        <div class="text-sm font-semibold text-ink">1 · Обзор / Cockpit <span class="ml-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">эталон</span></div>
+        <div class="mt-1 text-[13px] text-muted">KPI закупок, машины в пути (вехи Китай→Минск), запросы цены без ответа, проверка контрагентов, ИИ-помощник. Справа — панель чатов с поставщиками.</div>
+      </a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">2 · Запросы цены <span class="ml-1 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-600">sales ↔ закупки</span></div>
+        <div class="mt-1 text-[13px] text-muted">Продавец просит цену на товар, которого нет в наличии → закупщик уточняет у поставщика → отдаёт цену + срок доставки обратно продавцу.</div>
+      </a>
+      <a href="zak-board-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">3 · Воронка закупок</div>
+        <div class="mt-1 text-[13px] text-muted">Канбан 9 стадий: Потребность → Поиск → Переговоры → Анализ → Согласование → PO → Производство → Приёмка/QC → Готово. Под сделки + пополнение склада.</div>
+      </a>
+      <a href="zak-shipment-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">4 · Планирование машины <span class="ml-1 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">логистика</span></div>
+        <div class="mt-1 text-[13px] text-muted">График сбора машины с вехами: выкуп · производство · склад Китай · проверка · отправка · таможня Минск · склад Минск. Заявки собираются в машины заранее.</div>
+      </a>
+      <a href="zak-ai-comms-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">5 · AI-переписка с поставщиками <span class="ml-1 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-600">центр — ИИ</span></div>
+        <div class="mt-1 text-[13px] text-muted">WeChat / email: ИИ переводит, отвечает по шаблону, ведёт переговоры по цене, делает аналитику бесед и готовит документы для закупки/импорта.</div>
+      </a>
+      <a href="zak-price-monitor-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">6 · Мониторинг цен + контрагенты</div>
+        <div class="mt-1 text-[13px] text-muted">Контроль цен на 1688 / Taobao / Alibaba по постоянно закупаемым товарам, алерты на рост, поиск аналогов; проверка надёжности китайских контрагентов.</div>
+      </a>
+      <a href="zak-landed-cost-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40 sm:col-span-2">
+        <div class="text-sm font-semibold text-ink">7 · Себестоимость / Landed Cost <span class="ml-1 inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">база для прайса</span></div>
+        <div class="mt-1 text-[13px] text-muted">Предварительная (для расчёта цены продажи) и итоговая (на приёмке) себестоимость: инвойс + фрахт + таможня + сертификация + логистика, распределённые на номенклатуру → landed cost единицы.</div>
+      </a>
+    </div>
+
+    <p class="mt-6 text-xs text-slate-400">Превью-снимки для просмотра процесса; кнопки и формы внутри не активны, работает навигация по вкладкам/карточкам и панель чатов (наведение).</p>
+  </div>
+</body>
+</html>
