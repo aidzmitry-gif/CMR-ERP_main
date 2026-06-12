@@ -72,6 +72,7 @@ const MODULES: ModuleItem[] = [
     sub: [
       { label: "Воронка закупок", href: "/erp/procurement" },
       { label: "Поставщики" },
+      { label: "Претензии поставщикам", href: "/erp/procurement/claims" },
       { label: "Номенклатура · SKU" },
       { label: "Документы" },
       { label: "AI-агенты" },
