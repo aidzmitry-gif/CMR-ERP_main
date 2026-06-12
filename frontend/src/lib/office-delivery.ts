@@ -194,7 +194,7 @@ export function officeDocToDelivery(doc: OfficeDocApi): Delivery {
   };
 }
 
-/** Демо-данные: доска работает без backend (по скоупу — db: none, build на crypto ломается). */
+/** Демо-данные: доска работает без backend (фолбэк, если /office/docs недоступен). */
 export const DEMO_DELIVERIES: Delivery[] = [
   { id: 1, code: "0156", company: "ООО МеталлПром", weight: "1 200 кг", amount: 184_500, stage: "packed", destination: "Минск", eta: "12.06" },
   { id: 2, code: "0151", company: "ПАО ХимПром", weight: "320 кг", amount: 96_400, stage: "in_transit", carrier: "Деловые Линии", destination: "Гомель", eta: "11.06" },

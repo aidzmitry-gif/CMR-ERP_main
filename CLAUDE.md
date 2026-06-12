@@ -9,7 +9,7 @@ async SQLAlchemy 2; frontend — Next.js (см. [frontend/CLAUDE.md](frontend/CL
 - `core/runtime/` — `contract.py` (`ModuleContract`), `core.py` (реестр+фасад `Core`),
   `loader.py` (импорт по `ENABLED_MODULES`), `app.py` (фабрика `create_app`), `deps.py`.
 - `core/services/` — общие сервисы (`db`, `eventbus`, `approvals`, `temporal`, `auth`,
-  `litellm`, `onec`, `stock`, `crypto`). Многие — заглушки с устойчивым контрактом; их
+  `litellm`, `onec`, `stock`). Многие — заглушки с устойчивым контрактом; их
   наполняют по частям дорожной карты, **вызывающий код не меняется**.
 - `core/db/` — `base.py` (`DeclarativeBase`), `repository.py` (базовый CRUD).
 - `core/domain/` — shared kernel ORM (контрагент, контакт, SKU, пользователь, outbox, audit).

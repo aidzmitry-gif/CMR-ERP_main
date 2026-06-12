@@ -22,7 +22,6 @@ export const MODULES: ModuleDef[] = [
   { slug: "wms", label: "Склад" },
   { slug: "logistics", label: "Логистика" },
   { slug: "finance", label: "Финансы" },
-  { slug: "crypto", label: "Криптовалюты" },
   { slug: "marketing", label: "Маркетинг" },
   { slug: "service", label: "Сервис" },
   { slug: "hr", label: "HR (кадры)" },
@@ -106,7 +105,7 @@ export const DEFAULT_MATRIX: Record<string, string[]> = {
   finance: ["home", "logistics", "office", "knowledge"],
   hr: [
     "home", "crm", "procurement", "production", "wms", "logistics", "finance",
-    "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+    "marketing", "service", "hr", "office", "legal", "knowledge",
   ],
 };
 

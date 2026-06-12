@@ -6,7 +6,6 @@ import {
   Boxes,
   Box,
   ClipboardList,
-  Coins,
   Factory,
   GraduationCap,
   Headphones,
@@ -111,7 +110,6 @@ const MODULES: ModuleItem[] = [
   },
   { slug: "logistics", label: "Логистика", Icon: Truck, href: "/erp/logistics" },
   { slug: "finance", label: "Финансы", Icon: Wallet, href: "/erp/finance" },
-  { slug: "crypto", label: "Криптовалюты", Icon: Coins, href: "/erp/crypto" },
   { slug: "marketing", label: "Маркетинг", Icon: Megaphone, href: "/erp/marketing" },
   { slug: "service", label: "Сервис и поддержка", Icon: Headphones, href: "/erp/service" },
   {

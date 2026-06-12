@@ -19,12 +19,12 @@ from collections.abc import Iterable
 ACCESS_MATRIX: dict[str, list[str]] = {
     "director": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
-        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+        "marketing", "service", "hr", "office", "legal", "knowledge",
         "analytics", "it",
     ],
     "commercial": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
-        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+        "marketing", "service", "hr", "office", "legal", "knowledge",
         "analytics", "it",
     ],
     "assistant": ["home", "procurement", "logistics", "office", "knowledge"],
@@ -38,7 +38,7 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "finance": ["home", "logistics", "office", "knowledge"],
     "hr": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
-        "crypto", "marketing", "service", "hr", "office", "legal", "knowledge",
+        "marketing", "service", "hr", "office", "legal", "knowledge",
     ],
 }
 
@@ -99,7 +99,6 @@ SLUG_TO_PACKAGE: dict[str, str] = {
     "wms": "wms",
     "logistics": "logistics",
     "finance": "finance",
-    "crypto": "crypto",
     "marketing": "marketing",
     "service": "service",
     "hr": "hr",

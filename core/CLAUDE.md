@@ -33,7 +33,6 @@ shared-kernel ORM и переиспользуемые механизмы (кан
 - `temporal.py`, `auth.py`, `litellm.py` — заглушки процессов/авторизации/LLM (части 4/5/Итерация 1).
 - **Шлюзы-Protocol, наполняемые модулями** (если модуль выключен — поле `None`, потребители отдают 503):
   - `onec.py` `OneCGateway`, `stock.py` `StockGateway`, `registry.py` `RegistryGateway` ← модуль `integrations`.
-  - `crypto.py` `CryptoGateway` ← модуль `crypto`.
   - `llm.py`/`litellm.py` `LLMGateway` (AI за feature-flag `AIOS_AI_ENABLED`).
 
 ## Общий канбан (`core/runtime/funnel.py`)
