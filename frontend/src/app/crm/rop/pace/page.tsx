@@ -13,6 +13,7 @@ import {
   managerMarginsNote,
   marginAvg,
   marginMix,
+  marginPendingNote,
   paceAiFootnote,
   paceBadge,
   paceHeader,
@@ -64,7 +65,7 @@ export default function RopPacePage() {
 
           {/* Sales velocity */}
           <Card>
-            <Caption>Скорость сделок (sales velocity) и рычаги прибыли</Caption>
+            <Caption>Скорость сделок (sales velocity) · оборот в день</Caption>
             <p className="mt-2 break-words text-sm text-ink">
               {velocity.formula} ={" "}
               <span className="font-bold text-teal-700">{velocity.result}</span>
@@ -121,9 +122,13 @@ export default function RopPacePage() {
 
           {/* Маржа/утечка + рычаги прибыли */}
           <div className="grid gap-4 lg:grid-cols-2">
-            {/* Маржа и скидочная утечка */}
+            {/* Маржа (ждёт себестоимости) и измеримая скидка от прайса */}
             <Card>
-              <Caption>Маржа и скидочная утечка</Caption>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Caption>Маржа и скидки</Caption>
+                <Tag tone="violet">demo · ждёт себестоимости</Tag>
+              </div>
+              <p className="mt-2 text-[12px] text-violet-500">{marginPendingNote}</p>
 
               <div className="mt-3">
                 <div className="flex items-center justify-between text-sm">
@@ -136,8 +141,10 @@ export default function RopPacePage() {
               <hr className="my-3 border-slate-100" />
 
               <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-ink">Скидочная утечка</span>
-                <span className="font-semibold text-red-600">{discountLeak.value}</span>
+                <span className="font-medium text-ink">
+                  Скидка от прайса <span className="text-[11px] font-normal text-teal-600">· измеримо</span>
+                </span>
+                <span className="font-semibold text-amber-600">{discountLeak.value}</span>
               </div>
               <p className="mt-1 text-[12px] text-muted">{discountLeak.note}</p>
 

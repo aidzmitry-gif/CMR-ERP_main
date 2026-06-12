@@ -338,7 +338,7 @@ export const paceBadge = "Прибыль в графике, выручка от�
 /** Дневной пульс: контракты / прибыль / деньги. */
 export const paceMeters: PaceMeter[] = [
   { label: "Контракты", state: "Отставание", stateTone: "amber", percent: 21, toDate: "к дате 62к · план 86к (−24к)", forecast: "прогноз 244к (−56к)" },
-  { label: "Прибыль (отгрузка)", state: "В графике", stateTone: "green", percent: 30, toDate: "к дате 18к · план 17к (+1к)", forecast: "маржа 11% · план 14% (−3пп)", note: "рычаг прибыли", noteTone: "amber" },
+  { label: "Прибыль (отгрузка)", state: "В графике", stateTone: "green", percent: 30, toDate: "к дате 18к · план 17к (+1к)", forecast: "маржа 11% · план 14% (−3пп)", note: "демо · ждёт себестоимости", noteTone: "violet" },
   { label: "Деньги", state: "Отставание", stateTone: "amber", percent: 21, toDate: "к дате 52к · план 71к (−19к)", forecast: "прогноз 215к (−35к)" },
 ];
 
@@ -350,21 +350,22 @@ export interface VelocityCell {
   accent?: boolean;
 }
 
-/** Sales velocity — пять рычагов прибыли. */
+/** Sales velocity — оборот/день. Маржа УБРАНА из формулы до подключения
+ *  себестоимости (landed cost): прибыль/день нельзя считать честно без неё,
+ *  поэтому velocity считает ОБОРОТ. Маржа вернётся рычагом после Price Engine. */
 export const velocity = {
-  formula: "Открытых 48 × Конверсия 24% × Чек 35 000 × Маржа 11% ÷ Цикл 24 дн",
-  result: "≈ 1 850 BYN прибыли / день",
+  formula: "Открытых 48 × Конверсия 24% × Чек 35 000 ÷ Цикл 24 дн",
+  result: "≈ 16 800 BYN оборота / день",
   cells: [
     { label: "Открытых сделок", value: "48" },
-    { label: "Конверсия (win)", value: "24%", badge: "рычаг", badgeTone: "blue" },
-    { label: "Средний чек", value: "35 000" },
-    { label: "Маржа", value: "11%", badge: "главный рычаг", badgeTone: "red", accent: true },
+    { label: "Конверсия (win)", value: "24%", badge: "рычаг", badgeTone: "blue", accent: true },
+    { label: "Средний чек", value: "35 000", badge: "рычаг", badgeTone: "blue" },
     { label: "Цикл сделки", value: "24 дн", badge: "длинный", badgeTone: "amber" },
   ] as VelocityCell[],
   highlight:
-    "+3пп маржи (перестать скидывать) и +5пп конверсии → +45% прибыли на новых сделках.",
+    "+5пп конверсии и −10% к циклу → +34% оборота/день на текущей воронке.",
   note:
-    "Самый дешёвый рычаг — маржа: ценностные продажи дают +2–4пп маржи и до −12% скидок, влияя сразу на все рычаги.",
+    "Прибыль/день вернётся в velocity после подключения себестоимости (landed cost из закупок). Пока честно считаем ОБОРОТ, а не прибыль.",
 };
 
 export interface AiRec {
@@ -396,8 +397,8 @@ export interface MarginBar {
 export const marginAvg: MarginBar = { label: "Средняя маржа", value: "11% · план 14% (−3пп)", valueTone: "amber", percent: 78, tone: "amber" };
 export const marginMix: MarginBar = { label: "Маржинальный микс (высокомаржинальные SKU)", value: "35% · цель 50%", valueTone: "amber", percent: 35, tone: "amber" };
 export const discountLeak = {
-  value: "−18 000 BYN/мес (−6пп маржи)",
-  note: "70% сделок закрываются со скидкой — высоко; режем через аппрув и «пол» по марже",
+  value: "70% сделок со скидкой · ср. −9% от прайса",
+  note: "Скидка от прайса измерима сейчас и в зоне РОПа (аппрув + «пол»). Перевод в потерю маржи (≈−6пп) — после подключения себестоимости.",
 };
 
 export interface ManagerMargin {
@@ -417,6 +418,8 @@ export const managerMargins: ManagerMargin[] = [
 export const managerMarginsNote = "Сергей «покупает» сделки скидкой — главный источник утечки.";
 export const leakageNote =
   "В опте 10%+ прибыли утекает в бесконтрольных скидках и случайном миксе заказов — лечится правилами «что такое хорошая сделка», замером и разбором отклонений.";
+export const marginPendingNote =
+  "Маржа, утечка маржи и микс считаются от себестоимости (landed cost из закупок) — методика ценообразования в работе. Сейчас это демо-ориентир; живым станет после Price Engine. Измеримы уже сейчас: скидка от прайса и оборот.";
 
 /** Рычаги прибыли — отдел. */
 export const profitLeversDept: string[] = [
