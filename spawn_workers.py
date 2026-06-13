@@ -68,6 +68,12 @@ WORKERS_STATE_FILE = COORD_DIR / ".workers-state.json"
 STANDARDS_DOC = COORD_DIR / "worker-engineering-standards.md"
 EMPTY_MCP_FILE = COORD_DIR / ".empty-mcp.json"
 
+# Fleet memory (Crawl tier): a single curated pitfalls list injected into every
+# worker prompt so workers don't re-hit sharp edges past workers already paid for.
+# Plain file, no ranking — the orchestrator curates it after `integrate` (DISTILL).
+MEMORY_DIR = COORD_DIR / "memory"
+PITFALLS_FILE = MEMORY_DIR / "pitfalls.md"
+
 VENV_PY = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
@@ -387,11 +393,37 @@ KARPATHY 5-STEP — ЭТО ЦИКЛ: Think → Test → Validate → Wire → Re
 
 Ты в собственном окне. Работай автономно. Никогда не вызывай AskUserQuestion —
 вместо этого пиши NEEDS-ORCHESTRATOR-ANSWER в status-файл.
+
+ПАМЯТЬ ФЛОТА: если по ходу наткнулся на НЕОЧЕВИДНЫЕ грабли, которые стоили тебе
+итераций и пригодятся другим воркерам — добавь в status-файл секцию
+`## PITFALLS-DISCOVERED` с записями `СИМПТОМ → причина → ЛЕЧЕНИЕ` (по одной на строку,
+маркером `-`). Только переиспользуемое, НЕ привязанное к твоей конкретной задаче.
+Нечего добавить — секцию не пиши. (Оркестратор соберёт их в общий список при интеграции.)
+
 Status-файл заканчивается баннером STATE: COMPLETE / BLOCKED / NEEDS-ORCHESTRATOR-ANSWER.
 
-=== ТВОЯ ЗАДАЧА ===
-
 """
+
+# Task header — separated from _PREAMBLE so fleet memory (_memory_block) can be
+# injected between the standards contract and the worker's actual task.
+_TASK_HEADER = "=== ТВОЯ ЗАДАЧА ===\n\n"
+
+
+def _memory_block() -> str:
+    """Crawl-tier fleet memory: the curated pitfalls list, wrapped for the prompt.
+    Injected into every worker prompt (RETRIEVE) so workers skip sharp edges past
+    workers already paid for. Returns '' if the file is absent/empty — graceful
+    no-op, so removing the file simply turns the feature off."""
+    try:
+        body = PITFALLS_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if not body:
+        return ""
+    return (
+        "=== ИЗВЕСТНЫЕ ГРАБЛИ ПРОЕКТА (PITFALLS — учти ПЕРЕД работой) ===\n\n"
+        f"{body}\n\n"
+    )
 
 
 # ─── spawn ──────────────────────────────────────────────────────────────────────
@@ -547,14 +579,18 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
     for name in names:
         try:
             raw = _validate_first_msg(name)
-            message = _PREAMBLE + raw
+            mem = _memory_block()
+            message = _PREAMBLE + mem + _TASK_HEADER + raw
             if dry_run:
                 wt = _worktree_path(name)
                 exists = "exists" if wt.is_dir() else f"would create from {BASE_BRANCH}"
                 print(f"[dry-run:spawn:{name}] worktree {wt} ({exists}); "
-                      f"prompt {len(message)} chars; perm={perm}; model={model}; "
-                      f"cli={claude_cli}")
+                      f"prompt {len(message)} chars (pitfalls {len(mem)}); "
+                      f"perm={perm}; model={model}; cli={claude_cli}")
                 continue
+            if mem:
+                print(f"[spawn:{name}] memory: pitfalls injected ({len(mem)} chars) "
+                      f"from coordination/memory/pitfalls.md")
             wt = _ensure_worktree(name)
             _copy_into_worktree(STANDARDS_DOC, wt, "coordination/worker-engineering-standards.md")
             _copy_into_worktree(_scope_path(name), wt, f"coordination/{name}-scope.md")
@@ -959,6 +995,79 @@ def cmd_tail(name: str, n: int) -> int:
     return 0
 
 
+# ─── fleet memory: DISTILL (auto-harvest worker-discovered pitfalls) ────────────
+
+PITFALLS_SIZE_WARN = 9000  # injected into EVERY prompt — warn past this to prune.
+
+
+def _extract_pitfalls_section(status_text: str) -> list[str]:
+    """Pull entries from a worker's `## PITFALLS-DISCOVERED` status section.
+    Each `-`/`*`/`N.` bullet (with its continuation lines) becomes one entry.
+    Returns [] if the section is absent."""
+    if not status_text:
+        return []
+    out: list[str] = []
+    cur = ""
+    in_sec = False
+    for ln in status_text.splitlines():
+        stripped = ln.strip()
+        if stripped.startswith("#"):  # any header toggles section membership
+            if cur.strip():
+                out.append(cur.strip())
+                cur = ""
+            in_sec = "pitfalls-discovered" in stripped.lower().replace(" ", "-")
+            continue
+        if not in_sec:
+            continue
+        if re.match(r"[-*]\s+|\d+[.)]\s+", stripped):  # new bullet
+            if cur.strip():
+                out.append(cur.strip())
+            cur = re.sub(r"^[-*]\s+|^\d+[.)]\s+", "", stripped)
+        elif stripped:  # continuation of the current bullet
+            cur = (cur + " " + stripped).strip()
+    if cur.strip():
+        out.append(cur.strip())
+    return [e for e in out if len(e) > 8]
+
+
+def _pitfall_sig(s: str) -> str:
+    """Dedup signature: lowercased alphanumerics (RU+EN), first 60 chars."""
+    return re.sub(r"[^0-9a-zа-яё]+", "", s.lower())[:60]
+
+
+def _harvest_pitfalls(name: str, status_text: str) -> int:
+    """Append worker-discovered pitfalls to the fleet memory file, deduped against
+    what's already there. Best-effort — never raises into integrate. Returns the
+    number of NEW entries written."""
+    entries = _extract_pitfalls_section(status_text)
+    if not entries:
+        return 0
+    try:
+        existing = PITFALLS_FILE.read_text(encoding="utf-8") if PITFALLS_FILE.is_file() else ""
+    except OSError:
+        existing = ""
+    existing_sigs = {_pitfall_sig(l) for l in existing.splitlines() if l.strip()}
+    new: list[str] = []
+    for e in entries:
+        sig = _pitfall_sig(e)
+        if sig and sig not in existing_sigs:
+            new.append(e)
+            existing_sigs.add(sig)
+    if not new:
+        return 0
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    block = (f"\n## Авто-добавлено воркером {name} ({stamp})\n\n"
+             + "".join(f"- {e}\n" for e in new))
+    try:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        with PITFALLS_FILE.open("a", encoding="utf-8") as f:
+            f.write(block)
+    except OSError as e:
+        print(f"[integrate:{name}] warn: could not write pitfalls: {e}", file=sys.stderr)
+        return 0
+    return len(new)
+
+
 # ─── integrate ──────────────────────────────────────────────────────────────────
 
 
@@ -1055,6 +1164,22 @@ def cmd_integrate(name: str, dry_run: bool) -> int:
     if not smoke_ok:
         print(smoke_out, file=sys.stderr)
         print("  (to undo: git reset --hard HEAD~1)", file=sys.stderr)
+
+    # DISTILL (auto): harvest worker-discovered pitfalls into fleet memory + commit.
+    harvested = _harvest_pitfalls(name, _read_status_text(name, wt, branch))
+    if harvested:
+        rel = "coordination/memory/pitfalls.md"
+        _git(["add", "--", rel], cwd=REPO_ROOT)
+        _git_run(["commit", "-q", "-m",
+                  f"chore(memory): harvest {harvested} pitfall(s) from {name}"], cwd=REPO_ROOT)
+        print(f"[integrate:{name}] memory: +{harvested} pitfall(s) harvested -> {rel}")
+        try:
+            size = PITFALLS_FILE.stat().st_size
+        except OSError:
+            size = 0
+        if size > PITFALLS_SIZE_WARN:
+            print(f"[integrate:{name}] ⚠ pitfalls.md is {size} bytes (injected into EVERY "
+                  f"prompt) — consider pruning stale entries.", file=sys.stderr)
 
     _clear_worker_state(name)
     _write_report(name, wt, branch, unique, method, smoke_ok, smoke_out)
