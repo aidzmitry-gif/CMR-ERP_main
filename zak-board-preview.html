@@ -45,6 +45,11 @@
       box-shadow:-12px 0 40px rgba(15,23,42,.18);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
       z-index:60;display:flex;flex-direction:column}
     .drw.show{transform:translateX(0)}
+    /* компактное превью (один клик) — узкий слайд-овер */
+    .drw2{position:fixed;top:0;right:0;height:100vh;width:380px;max-width:92vw;background:#fff;
+      box-shadow:-12px 0 40px rgba(15,23,42,.18);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+      z-index:60;display:flex;flex-direction:column}
+    .drw2.show{transform:translateX(0)}
     .card{cursor:pointer}
     .card:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)}
     .card:active{transform:scale(.995)}
@@ -482,17 +487,40 @@
     <p class="text-xs text-slate-400">Превью-снимок. Стадии — из stages.py (9 стадий). Демо-данные (BYN/¥). Двойной клик по карточке — полная карточка заявки.</p>
   </div>
 
-  <!-- ============ СЛАЙД-ОВЕР: КАРТОЧКА ЗАЯВКИ ============ -->
-  <div class="ovl" id="ovl" onclick="closeZak()"></div>
+  <!-- ============ ОВЕРЛЕЙ (общий) ============ -->
+  <div class="ovl" id="ovl" onclick="closeAll()"></div>
+
+  <!-- ============ КОМПАКТНОЕ ПРЕВЬЮ (ОДИН клик) ============ -->
+  <aside class="drw2" id="drw2">
+    <div class="border-b border-slate-100 p-4">
+      <div class="flex items-center justify-between">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Превью заявки</span>
+        <div class="flex gap-1.5">
+          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-brand-600 hover:bg-slate-50" title="Открыть полный вид" onclick="goFull()">⤢ Полный вид</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Закрыть" onclick="closeAll()">✕</button>
+        </div>
+      </div>
+      <h2 class="mt-2 text-[15px] font-bold text-ink leading-tight" id="c-title">—</h2>
+      <div class="mt-0.5 text-[12px] text-muted" id="c-sub">—</div>
+      <div class="mt-2 flex flex-wrap gap-1.5" id="c-chips"></div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4" id="c-body"></div>
+    <div class="border-t border-slate-100 p-3">
+      <button class="w-full rounded-lg bg-brand py-2.5 text-[13px] font-semibold text-white" onclick="goFull()">Открыть полную карточку →</button>
+      <div class="mt-1.5 text-center text-[10px] text-slate-400">или двойной клик по карточке</div>
+    </div>
+  </aside>
+
+  <!-- ============ ПОЛНЫЙ ВИД (ДВОЙНОЙ клик) ============ -->
   <aside class="drw" id="drw">
     <!-- шапка -->
     <div class="border-b border-slate-100 p-5">
       <div class="flex items-center justify-between">
         <span class="text-[12px] text-muted" id="z-num">ZPR-2026-041</span>
         <div class="flex gap-1.5">
+          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-50" title="Свернуть в превью" onclick="backToCompact()">← Превью</button>
           <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Редактировать">✎</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Открыть на странице">⤢</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Закрыть" onclick="closeZak()">✕</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Закрыть" onclick="closeAll()">✕</button>
         </div>
       </div>
       <h2 class="mt-2 text-lg font-bold text-ink" id="z-title">Конденсатор 470мкФ 25В</h2>
@@ -702,31 +730,79 @@
       return h;
     }
 
-    function openZak(key){
-      const d=Z[key]; if(!d) return;
+    let _lastKey=null;
+
+    function chipsFor(d){
+      const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 text-blue-600':'bg-slate-100 text-slate-500';
+      return `<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">● ${STAGES[d.stageIdx]}</span>
+        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${srcColor}">${d.source}</span>`;
+    }
+
+    // ── компактное превью (ОДИН клик) ──
+    function buildCompact(d){
+      const best=(d.suppliers||[]).find(s=>s.best)||(d.suppliers||[])[0];
+      let h='';
+      h+=`<div class="flex items-baseline gap-2 mb-1"><span class="text-xl font-bold text-ink">${d.qty}</span><span class="text-[12px] text-muted">· ${d.budget}</span></div>`;
+      h+=stepper(d.stageIdx);
+      if(best){
+        h+=`<div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Лучший поставщик (по TCO)</div>
+          <div class="mt-1 text-[13px] font-semibold text-ink">${best.n}</div>
+          <div class="mt-1.5 grid grid-cols-2 gap-y-1 text-[12px]">
+            <span class="text-muted">Цена</span><span class="text-right font-medium">${best.price}</span>
+            <span class="text-muted">Срок</span><span class="text-right font-medium">${best.lead}</span>
+            <span class="text-muted">Брак</span><span class="text-right font-medium">${best.defect}</span>
+            <span class="text-muted">Себестоимость</span><span class="text-right font-bold text-ink">${best.landed}</span>
+          </div>
+        </div>`;
+      }
+      if(d.verdict){ h+=`<div class="mt-2.5 rounded-lg bg-violet-50 border border-violet-100 p-2.5 text-[12px] text-violet-700"><span class="font-semibold text-violet-600">✦ ИИ:</span> ${d.verdict}</div>`; }
+      h+=`<div class="mt-3 text-[11px] text-slate-400">Полное сравнение поставщиков, качество, отношения, переписка и документы — в полном виде.</div>`;
+      return h;
+    }
+
+    function openCompact(key){
+      const d=Z[key]; if(!d) return; _lastKey=key;
+      document.getElementById('c-title').textContent=d.title;
+      document.getElementById('c-sub').textContent=d.sub;
+      document.getElementById('c-chips').innerHTML=chipsFor(d);
+      document.getElementById('c-body').innerHTML=buildCompact(d);
+      document.getElementById('c-body').scrollTop=0;
+      document.getElementById('drw').classList.remove('show');
+      document.getElementById('ovl').classList.add('show');
+      document.getElementById('drw2').classList.add('show');
+    }
+
+    // ── полный вид (ДВОЙНОЙ клик) ──
+    function openFull(key){
+      const d=Z[key]; if(!d) return; _lastKey=key;
       document.getElementById('z-num').textContent=d.num;
       document.getElementById('z-title').textContent=d.title;
       document.getElementById('z-sub').textContent=d.sub;
-      const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 text-blue-600':'bg-slate-100 text-slate-500';
-      document.getElementById('z-chips').innerHTML=
-        `<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">● ${STAGES[d.stageIdx]}</span>
-         <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${srcColor}">${d.source}</span>`;
+      document.getElementById('z-chips').innerHTML=chipsFor(d);
       document.getElementById('z-body').innerHTML=buildBody(d);
       document.getElementById('z-body').scrollTop=0;
+      document.getElementById('drw2').classList.remove('show');
       document.getElementById('ovl').classList.add('show');
       document.getElementById('drw').classList.add('show');
     }
-    function closeZak(){
+
+    function goFull(){ if(_lastKey) openFull(_lastKey); }
+    function backToCompact(){ if(_lastKey) openCompact(_lastKey); }
+    function closeAll(){
       document.getElementById('ovl').classList.remove('show');
       document.getElementById('drw').classList.remove('show');
+      document.getElementById('drw2').classList.remove('show');
     }
-    // клик и двойной клик по карточке открывают заявку (как сделка в CRM)
+
+    // 1 клик → превью, 2 клика → полный вид (как в отделе продаж)
+    let _ct=null;
     document.querySelectorAll('.card[data-z]').forEach(c=>{
       const k=c.getAttribute('data-z');
-      c.addEventListener('dblclick',()=>openZak(k));
-      c.addEventListener('click',()=>openZak(k));
+      c.addEventListener('click',()=>{ if(_ct) return; _ct=setTimeout(()=>{ _ct=null; openCompact(k); },230); });
+      c.addEventListener('dblclick',()=>{ if(_ct){ clearTimeout(_ct); _ct=null; } openFull(k); });
     });
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeZak(); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeAll(); });
   </script>
 </body>
 </html>
