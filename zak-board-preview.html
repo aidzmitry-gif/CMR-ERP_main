@@ -53,6 +53,9 @@
     .card{cursor:pointer}
     .card:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)}
     .card:active{transform:scale(.995)}
+    /* переключатель поставщиков в переписке */
+    .zth-pill{font-size:11px;font-weight:600;padding:4px 9px;border-radius:9999px;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer}
+    .zth-pill.zth-on{background:#2563eb;color:#fff;border-color:#2563eb}
   </style>
 </head>
 <body class="bg-canvas text-ink">
@@ -649,6 +652,52 @@
       hdmi:{num:"ZPR-2026-017",title:"Кабель HDMI 2м",sub:"200 шт · пополнение · завершено",stageIdx:8,source:"пополнение",qty:"200 шт",budget:"—",suppliers:[{n:"1688 商家",price:"¥8.00",lead:"22 дн",defect:"1.5%",rel:"Осторожно",landed:"BYN 11.2",best:true}],verdict:"Оприходован 8 июн, landed cost записан.",landed:{invoice:"¥8.00 / шт",over:"+20%",unit:"BYN 11.2 / шт",batch:"BYN 2 240",price:"BYN 16.5"},quality:{spec:"HDMI 2.0, 2м",checks:["QC пройден ✓ (брак 1.0% < AQL)"],defectHist:"1688: брак 1.5%",warranty:"—"},rel:{status:"Осторожно",years:"2 года",vol:"¥40к / год",otd:"85%",trend:"на контроле",frame:"разовые"},ai:[{t:"Поставщик OTD 85% — рассмотреть замену для постоянной позиции",b:"отношения"}]},
     };
 
+    // ── Переписка по поставщикам + договор/условия (демо, для ключевых заявок) ──
+    const baseTerms={incoterms:"FOB Shenzhen",currency:"CNY (¥) · оплата по курсу НБ РБ на дату платежа",pay:"предоплата 30% / 70% против копии B/L",lead:"22 дня после предоплаты",moq:"5 000 шт",packing:"антистатик, короба по 1000 шт, маркировка по ТЗ",quality:"AQL 2.5 · сертификат COC · замена брака за счёт поставщика",penalty:"0.1%/день за просрочку, не более 10% суммы",warranty:"12 мес",fm:"форс-мажор по правилам ICC",arb:"арбитраж CIETAC (Шэньчжэнь)"};
+
+    Z.cap470.threads=[
+      {sup:"Shenzhen Hangxin",ch:"WeChat",rel:"Надёжный",price:"¥0.50 · 22 дн · брак 0.4%",msgs:[
+        {d:"in",t:"470uF 25V 现货, ¥0.50, MOQ 5000, 22天",m:"перевод ИИ: в наличии ¥0.50, MOQ 5000, 22 дня"},
+        {d:"out",t:"Нужен образец 5 шт на тест ESR + фото партии",m:"ИИ · отправлено"},
+        {d:"in",t:"没问题, 明天发样品",m:"перевод ИИ: без проблем, завтра отправим образец"}]},
+      {sup:"Yuxin Electronics",ch:"email",rel:"Осторожно",price:"¥0.46 · 28 дн · брак 2.1%",msgs:[
+        {d:"in",t:"PI attached: ¥0.46/pc, lead 28 days",m:"перевод ИИ: ¥0.46/шт, срок 28 дней"},
+        {d:"out",t:"Прошлая партия брак 2.1% — какие гарантии качества?",m:"ИИ"}]},
+      {sup:"阿里巴巴 商家 (1688)",ch:"1688",rel:"Не проверен",price:"¥0.44 · 30 дн",msgs:[
+        {d:"in",t:"¥0.44, 30天发货",m:"перевод ИИ: ¥0.44, отгрузка 30 дней"},
+        {d:"out",t:"Сначала проверка 企信宝 — предоплату не вносим",m:"ИИ · контроль риска"}]}];
+    Z.cap470.contract={template:"Разовый договор поставки (импорт CN)",status:"черновик ИИ",terms:{...baseTerms,moq:"5 000 шт"}};
+    Z.cap470.docs=[{n:"Запрос образца (Hangxin)",st:"posted",lbl:"отправлен"},{n:"Proforma Invoice — черновик",st:"pending",lbl:"ожидается"}];
+
+    Z.cap100.threads=[
+      {sup:"Yuxin Electronics",ch:"WeChat",rel:"Осторожно",price:"¥0.118 · 25 дн · брак 1.5%",msgs:[
+        {d:"in",t:"10000个 ¥0.12, 可以 ¥0.118 预付30%",m:"перевод ИИ: 10000 шт ¥0.12, можем ¥0.118 при предоплате 30%"},
+        {d:"out",t:"Целимся в ¥0.115, подтвердите срок 25 дней",m:"черновик ИИ · на ревью"}]},
+      {sup:"Shenzhen Hangxin",ch:"WeChat",rel:"Надёжный",price:"¥0.13 · 22 дн · брак 0.4%",msgs:[
+        {d:"in",t:"100uF 16V ¥0.13, 质量稳定",m:"перевод ИИ: ¥0.13, качество стабильное"},
+        {d:"out",t:"Дороже Yuxin, но держим как запасной (брак ниже)",m:"ИИ · заметка"}]}];
+    Z.cap100.contract={template:"Разовый договор поставки (импорт CN)",status:"на согласовании условий",terms:{...baseTerms,moq:"10 000 шт",lead:"25 дней после предоплаты",pay:"предоплата 30% / 70% против B/L"}};
+    Z.cap100.docs=[{n:"PI (Yuxin) — проект",st:"pending",lbl:"на согласовании"}];
+
+    Z.bc547.threads=[
+      {sup:"Suzhou Precision",ch:"email",rel:"Надёжный",price:"¥0.18 · 24 дн · брак 0.3%",msgs:[
+        {d:"in",t:"BC547 ¥0.18, COC сертификат прилагаем",m:"перевод ИИ: ¥0.18, сертификат COC есть"},
+        {d:"out",t:"Берём, пришлите образец 10 шт",m:"ИИ"}]},
+      {sup:"Новый поставщик (1688)",ch:"1688",rel:"Риск",price:"¥0.15 · 30 дн · не проверен",msgs:[
+        {d:"in",t:"¥0.15 最低价!",m:"перевод ИИ: ¥0.15, самая низкая цена!"},
+        {d:"out",t:"企信宝: <1 года, жалобы → ОТКЛОНЕНО, предоплату не вносим",m:"ИИ · контроль риска"}]}];
+    Z.bc547.contract={template:"Договор на пробную партию + рамочный (после QC)",status:"черновик ИИ",terms:{...baseTerms,moq:"5 000 шт",lead:"24 дня",quality:"AQL 2.5 · COC · 100% входной контроль первой партии"}};
+
+    Z.stm32.threads=[
+      {sup:"Shenzhen Hangxin",ch:"WeChat",rel:"Надёжный",price:"¥3.85 · 22 дн · брак 0.4%",msgs:[
+        {d:"out",t:"PO-2026-031 подтверждён, 1000 шт @ ¥3.85",m:"ИИ"},
+        {d:"in",t:"已确认, 22天交货, 防伪标签",m:"перевод ИИ: подтверждено, 22 дня, с защитной маркировкой"}]}];
+    Z.stm32.contract={template:"Рамочный договор поставки 2026 (фикс-цена на топ-SKU)",status:"подписан",terms:{...baseTerms,moq:"1 000 шт",lead:"22 дня после предоплаты",quality:"AQL 2.5 · защита от контрафакта · замена брака",warranty:"12 мес + защита от подделок"}};
+    Z.stm32.docs=[{n:"Договор РД-2026-007 (рамочный)",st:"posted",lbl:"подписан"},{n:"Счёт-проформа PI-031 (Hangxin)",st:"posted",lbl:"получен"},{n:"PO-2026-031",st:"posted",lbl:"отправлен"}];
+
+    Z.esp8266.contract={template:"Рамочный договор поставки 2026",status:"подписан",terms:{...baseTerms,moq:"800 шт",lead:"22 дня"}};
+    Z.trafo.contract={template:"Договор поставки (критичная позиция, с инспекцией)",status:"подписан",terms:{...baseTerms,moq:"100 шт",lead:"30 дней",quality:"инспекция перед отгрузкой ОБЯЗАТЕЛЬНА · тест под нагрузкой · AQL 1.5",warranty:"24 мес"}};
+
     function stepper(idx){
       let s='<div class="flex gap-1 mt-3">';
       for(let i=0;i<9;i++){ const c=i<idx?'bg-brand':i===idx?'bg-amber-400':'bg-slate-200'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
@@ -710,16 +759,39 @@
           <div class="mt-1 text-[11px] text-muted">Соглашение: <span class="text-ink">${d.rel.frame}</span></div>`);
       }
 
-      // переписка
-      if(d.msgs){
-        const m=d.msgs.map(x=>`<div class="${x.d==='out'?'ml-auto bg-brand text-white':'bg-slate-100 text-ink'} max-w-[85%] rounded-xl px-3 py-2 text-[12px] mb-1.5">${x.t}<div class="text-[10px] mt-0.5 ${x.d==='out'?'text-blue-100':'text-slate-400'}">${x.m}</div></div>`).join('');
-        h+=sec("Переписка (ведёт ИИ)",`<div class="flex flex-col">${m}</div>`,'<a class="text-brand-600" href="zak-ai-comms-preview.html">открыть →</a>');
+      // переписка — по поставщикам (переключатель) либо один тред
+      const renderMsgs = arr => arr.map(x=>`<div class="${x.d==='out'?'ml-auto bg-brand text-white':'bg-slate-100 text-ink'} max-w-[88%] rounded-xl px-3 py-2 text-[12px] mb-1.5">${x.t}<div class="text-[10px] mt-0.5 ${x.d==='out'?'text-blue-100':'text-slate-400'}">${x.m}</div></div>`).join('');
+      if(d.threads){
+        const pills=d.threads.map((t,i)=>`<button class="zth-pill ${i===0?'zth-on':''}" onclick="zThread(this,${i})">${t.sup} <span class="inline-flex items-center rounded-full px-1 py-0.5 text-[8px] font-bold ${relColor(t.rel)}">${t.rel}</span></button>`).join('');
+        const panels=d.threads.map((t,i)=>`<div class="zth-panel" data-i="${i}" style="${i?'display:none':''}"><div class="mb-1.5 flex items-center justify-between text-[11px]"><span class="font-semibold text-ink">${t.sup}</span><span class="text-muted">${t.ch} · ${t.price}</span></div><div class="flex flex-col">${renderMsgs(t.msgs)}</div></div>`).join('');
+        h+=sec("Переписка по поставщикам (ведёт ИИ)",`<div data-threads><div class="flex flex-wrap gap-1.5 mb-2.5">${pills}</div>${panels}</div>`,'<a class="text-brand-600" href="zak-ai-comms-preview.html">все диалоги →</a>');
+      } else if(d.msgs){
+        h+=sec("Переписка (ведёт ИИ)",`<div class="flex flex-col">${renderMsgs(d.msgs)}</div>`,'<a class="text-brand-600" href="zak-ai-comms-preview.html">открыть →</a>');
       }
 
-      // документы
+      // документы по сделке (счёт поставщика, договор, спецификация, ДТ…)
       if(d.docs){
         const dd=d.docs.map(x=>`<div class="flex items-center justify-between py-1.5 text-[12px]"><span class="text-ink">📄 ${x.n}</span><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${x.st==='posted'?'bg-emerald-50 text-emerald-700':'bg-amber-50 text-amber-700'}">${x.lbl}</span></div>`).join('');
-        h+=sec("Документы",dd);
+        h+=sec("Документы по сделке",dd,'＋ загрузить');
+      }
+
+      // договор с поставщиком + все условия (шаблон)
+      if(d.contract){
+        const c=d.contract, t=c.terms;
+        const stColor = c.status==='подписан'?'bg-emerald-50 text-emerald-700':c.status.indexOf('согласован')>=0?'bg-amber-50 text-amber-700':'bg-violet-50 text-violet-600';
+        const row=(k,v)=>`<div class="flex justify-between gap-3 py-1 border-t border-slate-50 text-[12px]"><span class="text-muted shrink-0">${k}</span><span class="text-right font-medium text-ink">${v}</span></div>`;
+        h+=sec("Договор с поставщиком · условия",
+          `<div class="flex items-center justify-between gap-2 mb-2">
+             <span class="text-[12px] font-semibold text-ink">${c.template}</span>
+             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${stColor}">${c.status}</span>
+           </div>
+           ${row('Incoterms',t.incoterms)}${row('Валюта / оплата',t.currency)}${row('Условия оплаты',t.pay)}${row('Срок поставки',t.lead)}${row('MOQ',t.moq)}${row('Упаковка / маркировка',t.packing)}${row('Качество',t.quality)}${row('Штрафы',t.penalty)}${row('Гарантия',t.warranty)}${row('Форс-мажор',t.fm)}${row('Арбитраж',t.arb)}
+           <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+             <span class="text-[10px] text-slate-400 mr-1">Шаблон:</span>
+             <span class="zth-pill zth-on">Рамочный</span><span class="zth-pill">Разовый</span><span class="zth-pill">Пробная партия</span>
+           </div>
+           <div class="mt-2 text-[11px] text-violet-600">✦ ИИ заполняет договор по реквизитам поставщика (УНП/банк) и подставляет согласованные в переписке условия (цена, срок, AQL).</div>`,
+          '＋ сформировать');
       }
 
       // ИИ-рекомендации
@@ -789,6 +861,12 @@
 
     function goFull(){ if(_lastKey) openFull(_lastKey); }
     function backToCompact(){ if(_lastKey) openCompact(_lastKey); }
+    // переключатель поставщиков в блоке переписки
+    function zThread(btn,i){
+      const w=btn.closest('[data-threads]'); if(!w) return;
+      w.querySelectorAll('.zth-pill').forEach((p,j)=>p.classList.toggle('zth-on', j===i));
+      w.querySelectorAll('.zth-panel').forEach(p=>p.style.display=(+p.dataset.i===i)?'':'none');
+    }
     function closeAll(){
       document.getElementById('ovl').classList.remove('show');
       document.getElementById('drw').classList.remove('show');
