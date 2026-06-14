@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Архив документов — безвозвратное удаление (вне CRM)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --bad:#EF4444; --ok:#22C55E; --warn:#F59E0B;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding-bottom:60px}
+  .backbar{background:#fff;border-bottom:1px solid #EEF0F2;padding:11px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  .backbar a{color:var(--brand-700);font-weight:600;text-decoration:none;background:var(--brand-50);border-radius:8px;padding:7px 13px;font-size:13px}
+  .backbar .crumb{color:var(--muted);font-size:13px}
+  .wrap{max-width:1000px;margin:24px auto;padding:0 22px}
+  h1{font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px}
+  .sub{color:var(--muted);margin:6px 0 18px;font-size:13.5px;line-height:1.5}
+  .gate{background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;gap:12px;align-items:flex-start}
+  .gate .ic{font-size:22px}
+  .gate b{color:#B45309}
+  .gate .who{margin-top:7px;font-size:12.5px;color:#92400e;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .gate .who .pill{background:#fff;border:1px solid #FED7AA;border-radius:7px;padding:3px 9px;font-weight:600}
+  .card{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
+  .ch{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EEF0F2}
+  .ch .t{font-weight:700;font-size:15px}
+  .ch .cnt{font-size:12.5px;color:var(--muted)}
+  .row{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid #F6F7F9}
+  .row:last-child{border-bottom:none}
+  .row.gone{opacity:.4}
+  .dn{font-weight:600}
+  .dn .ver{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 5px;margin-left:5px}
+  .meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .kindbadge{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;background:#F1F5F9;color:#475569;white-space:nowrap}
+  .acts{display:flex;gap:8px}
+  .btn{border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;background:#fff;color:#475467;white-space:nowrap}
+  .btn.restore:hover{border-color:var(--ok);color:#15803D}
+  .btn.purge{border:none;background:var(--bad);color:#fff}
+  .btn.purge:hover{filter:brightness(.95)}
+  .empty{padding:34px;text-align:center;color:#9aa3b0}
+  .foot{max-width:1000px;margin:16px auto 0;padding:0 22px;font-size:12px;color:#9aa3b0;line-height:1.6}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;pointer-events:none;max-width:80vw;text-align:center}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <div class="backbar"><a href="sales-2.0-index.html">← К списку макетов</a><span class="crumb">Архив документов · <b>вне CRM</b> · безвозвратное удаление</span></div>
+
+  <div class="wrap">
+    <h1>🗄️ Архив документов</h1>
+    <div class="sub">Сюда попадают документы и версии, <b>помеченные на удаление</b> в карточках сделок. В самой CRM удалить документ нельзя — только пометить. Безвозвратное удаление выполняется здесь.</div>
+
+    <div class="gate">
+      <div class="ic">🔒</div>
+      <div>
+        <div>Доступ к безвозвратному удалению — <b>только у ответственного за архив</b>. Этот модуль <b>не входит в CRM</b>: менеджеры и РОП сюда не имеют доступа (разделение полномочий, защита от потери документов и подмены истории).</div>
+        <div class="who"><span>Сейчас вошёл:</span><span class="pill">👤 Архивариус · Кузнецова Л.</span><span class="pill">роль: doc_admin</span><span class="pill">действия логируются</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="t">Помечено на удаление</span><span class="cnt" id="cnt">—</span></div>
+      <div id="list"></div>
+    </div>
+    <div class="foot">Каждое безвозвратное удаление пишется в журнал аудита (кто, что, когда, основание) и необратимо. Восстановление снимает пометку и возвращает документ в карточку сделки.</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  // демо: документы/версии, помеченные на удаление в карточках сделок
+  let ITEMS = [
+    {id:1, n:"Счёт СЧ-0461 (черновик)", kind:"Счёт на оплату", ver:1, deal:"CRM-1024", client:"Автопарк №7", by:"Сидоров К.", at:"14.06.2026 11:20", reason:"ошибка в позициях, выставлен новый"},
+    {id:2, n:"КП-0288 — годовая поставка", kind:"Коммерческое предложение", ver:1, deal:"CRM-1024", client:"Автопарк №7", by:"Петрова А.", at:"13.06.2026 16:05", reason:"устаревшие цены"},
+    {id:3, n:"Договор ДГ-0118 — годовая поставка", kind:"Договор · версия", ver:1, deal:"CRM-1029", client:"ОАО «Белтранс»", by:"Сидоров К.", at:"12.06.2026 09:40", reason:"черновик до правок юриста"},
+  ];
+
+  function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._t); window._t=setTimeout(()=>t.classList.remove('show'),3200); }
+
+  function render(){
+    const list=document.getElementById('list');
+    document.getElementById('cnt').textContent = ITEMS.length ? `${ITEMS.length} док./версий` : '0';
+    if(!ITEMS.length){ list.innerHTML='<div class="empty">✓ Нет документов, помеченных на удаление</div>'; return; }
+    list.innerHTML = ITEMS.map(it=>`
+      <div class="row" data-id="${it.id}">
+        <div>
+          <div class="dn">${it.n} <span class="ver">v${it.ver}</span></div>
+          <div class="meta">${it.deal} · ${it.client} · пометил ${it.by} · ${it.at}<br>основание: ${it.reason}</div>
+        </div>
+        <span class="kindbadge">${it.kind}</span>
+        <div class="acts">
+          <button class="btn restore" onclick="restore(${it.id})">♻ Восстановить</button>
+          <button class="btn purge" onclick="purge(${it.id})">🗑 Удалить безвозвратно</button>
+        </div>
+      </div>`).join('');
+  }
+  function restore(id){ const it=ITEMS.find(x=>x.id===id); ITEMS=ITEMS.filter(x=>x.id!==id); render(); toast('♻ Восстановлено: '+(it?it.n:'')+' — пометка снята, документ вернулся в сделку'); }
+  function purge(id){ const it=ITEMS.find(x=>x.id===id);
+    if(!confirm('Удалить безвозвратно?\n\n'+(it?it.n:'')+'\nДействие необратимо и будет записано в журнал аудита.')) return;
+    ITEMS=ITEMS.filter(x=>x.id!==id); render(); toast('🗑 Удалено безвозвратно: '+(it?it.n:'')+' · записано в журнал аудита');
+  }
+  render();
+</script>
+</body>
+</html>

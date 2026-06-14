@@ -231,6 +231,17 @@
   .doc .st{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;flex-shrink:0}
   .st.posted{background:#DCFCE7;color:#15803D}.st.pending{background:#FEF3C7;color:#92400E}.st.paid{background:#DBEAFE;color:#1D4ED8}.st.draft{background:#F1F5F9;color:#475569}
   .doc-acts{display:flex;gap:5px;flex-shrink:0}
+  .doc.deldoc{opacity:.6;background:#FFFBFB}
+  .doc.deldoc .dn{text-decoration:line-through}
+  .ver-badge{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 5px;margin-left:5px}
+  .dbtn.dis{color:#B91C1C;background:#FEF2F2;border-color:#FECACA;cursor:not-allowed}
+  .doc-hist{margin-top:6px;font-size:11.5px;grid-column:1 / -1}
+  .doc-hist summary{cursor:pointer;color:var(--muted);user-select:none}
+  .hver{display:flex;justify-content:space-between;gap:8px;padding:4px 0 4px 16px;color:#475467}
+  .hver.hdel{opacity:.5;text-decoration:line-through}
+  .hver .hact{cursor:pointer;color:var(--brand-700);font-weight:600;flex-shrink:0;text-decoration:none}
+  .doc-note{font-size:11.5px;color:#5b6573;background:#F8FAFC;border:1px solid #EEF0F2;border-radius:9px;padding:9px 11px;margin-bottom:11px;line-height:1.55}
+  .doc-note a{color:var(--brand-700);font-weight:600}
   .dbtn{height:28px;min-width:28px;padding:0 8px;border-radius:7px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:#475467}
   .dbtn.send{background:var(--brand);border-color:var(--brand);color:#fff}
   .dbtn:hover{filter:brightness(.97)}
@@ -686,7 +697,7 @@ const DEALS = {
       {t:"Согласовать договор у юриста",m:"выполнено 02.06",kind:"Документ",done:true}
     ],
     docs:[
-      {n:"Договор ДГ-0118 — годовая поставка",kind:"Договор",st:"posted",lbl:"подписан",sent:true,steps:["отправлен","просмотрен","подписан"]},
+      {n:"Договор ДГ-0118 — годовая поставка",kind:"Договор",st:"posted",lbl:"подписан",sent:true,steps:["отправлен","просмотрен","подписан"],ver:2,history:[{ver:1,lbl:"черновик (до правок юриста)",ts:"30.05.2026",del:false}]},
       {n:"Счёт СЧ-0420",kind:"Счёт на оплату",st:"paid",lbl:"оплачен",sent:true,steps:["отправлен","просмотрен","оплачен"]},
       {n:"Заказ-наряд ЗН-0207 — комплектация и отгрузка",kind:"Заказ-наряд",st:"pending",lbl:"в работе",sent:true,steps:["создан","в работе","выполнен"]},
       {n:"ТТН (отгрузка) — формирует логистика",kind:"Накладная",st:"pending",lbl:"при отгрузке",sent:false,steps:[]}
@@ -1156,16 +1167,14 @@ function closeCtrPrev(){ document.getElementById('ctrPrevOv').classList.remove('
 
 function docsHtml(d){
   let rows='';
-  const ALLSTEPS = ["отправлен","просмотрен","подписан","оплачен"];
   d.docs.forEach((dc,i)=>{
+    const del = !!dc.del, ver = dc.ver||1, hist = dc.history||[];
     const sendLabel = dc.sent ? '✉ Отправить ещё' : '✉ Отправить';
+    const nm = dc.n.replace(/'/g,"\\'");
     let flow='';
     if(dc.steps && dc.steps.length){
-      // показываем путь: пройденные шаги done, плюс следующий ожидаемый бледным
-      const seq = dc.steps;
-      flow = '<div class="dflow">';
-      seq.forEach((s,i)=>{ flow += (i?'<span class="arr">→</span>':'') + `<span class="ds done">✓ ${s}</span>`; });
-      // следующий ожидаемый шаг (если документ ещё не оплачен/подписан финально)
+      const seq = dc.steps; flow = '<div class="dflow">';
+      seq.forEach((s,k)=>{ flow += (k?'<span class="arr">→</span>':'') + `<span class="ds done">✓ ${s}</span>`; });
       const last = seq[seq.length-1];
       const nextMap = {"отправлен":"просмотрен","просмотрен": (dc.kind==="Счёт на оплату"?"оплачен":"подписан")};
       const nxt = nextMap[last];
@@ -1174,24 +1183,37 @@ function docsHtml(d){
     } else if(!dc.sent){
       flow = '<div class="dflow"><span class="ds">черновик</span><span class="arr">→</span><span class="ds">отправить</span></div>';
     }
-    rows+=`<div class="doc">
-      <div class="doc-main"><div class="dn">${dc.n}</div><div class="dt2">${dc.kind}</div></div>
-      <span class="st ${dc.st}">${dc.lbl}</span>
+    const sendBtn = del
+      ? `<span class="dbtn dis" title="Помечен на удаление — отправка запрещена" onclick="blockSend()">🚫 Отправка</span>`
+      : `<span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${sendLabel}</span>`;
+    const markBtn = del
+      ? `<span class="dbtn" title="Снять пометку на удаление" onclick="unmarkDoc(${i})">♻</span>`
+      : `<span class="dbtn" title="Пометить на удаление" onclick="markDoc(${i})">🗑</span>`;
+    let histHtml='';
+    if(hist.length){
+      let hr=''; hist.forEach((h,vi)=>{ hr+=`<div class="hver ${h.del?'hdel':''}"><span>v${h.ver} · ${h.lbl} · ${h.ts}</span><span class="hact" onclick="${h.del?`unmarkVer(${i},${vi})`:`markVer(${i},${vi})`}">${h.del?'♻ снять':'🗑 на удаление'}</span></div>`; });
+      histHtml=`<details class="doc-hist"><summary>История версий (${hist.length})</summary>${hr}</details>`;
+    }
+    rows+=`<div class="doc ${del?'deldoc':''}">
+      <div class="doc-main"><div class="dn">${dc.n} <span class="ver-badge">v${ver}</span></div><div class="dt2">${dc.kind}${del?' · 🗑 помечен на удаление':''}</div></div>
+      <span class="st ${del?'draft':dc.st}">${del?'на удалении':dc.lbl}</span>
       <div class="doc-acts">
-        <span class="dbtn" title="Просмотр" onclick="docPreview('${dc.kind}','${dc.n.replace(/'/g,"\\'")}')">👁</span>
-        <span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${sendLabel}</span>
-        <span class="dbtn" title="Редактировать" onclick="editDoc(${i})">✎</span>
-        <span class="dbtn" title="Скачать PDF" onclick="docDownload('${dc.n.replace(/'/g,"\\'")}')">⬇</span>
-        <span class="dbtn" title="Удалить" onclick="delDoc(${i})">✕</span>
+        <span class="dbtn" title="Просмотр" onclick="docPreview('${dc.kind}','${nm}')">👁</span>
+        ${sendBtn}
+        <span class="dbtn" title="Изменить (создать новую версию)" onclick="editDoc(${i})">✎</span>
+        <span class="dbtn" title="Скачать PDF" onclick="docDownload('${nm}')">⬇</span>
+        ${markBtn}
       </div>
       ${flow}
+      ${histHtml}
       <div class="send-ch">
         <span class="lbl">Канал:</span>
-        <span class="ch" onclick="sendDoc('Email','${dc.n}')">✉ Email</span><span class="ch" onclick="sendDoc('WhatsApp','${dc.n}')">🟢 WhatsApp</span><span class="ch" onclick="sendDoc('Telegram','${dc.n}')">✈ Telegram</span><span class="ch" onclick="sendDoc('ЭДО / 1С','${dc.n}')">🧾 ЭДО / 1С</span><span class="ch" onclick="sendDoc('ссылка на подпись','${dc.n}')">🔗 Ссылка на подпись</span>
+        <span class="ch" onclick="sendDoc('Email','${nm}')">✉ Email</span><span class="ch" onclick="sendDoc('WhatsApp','${nm}')">🟢 WhatsApp</span><span class="ch" onclick="sendDoc('Telegram','${nm}')">✈ Telegram</span><span class="ch" onclick="sendDoc('ЭДО / 1С','${nm}')">🧾 ЭДО / 1С</span><span class="ch" onclick="sendDoc('ссылка на подпись','${nm}')">🔗 Ссылка на подпись</span>
       </div>
     </div>`;
   });
-  return `<div class="doc-gen">
+  const note = `<div class="doc-note">📋 Документы здесь <b>не удаляются</b> — их можно <b>пометить на удаление</b> (🗑). Помеченный документ нельзя отправить. Правка (✎) создаёт <b>новую версию</b>, прежняя сохраняется в истории. Безвозвратное удаление — только в модуле <a href="sales-docs-purge.html" target="_blank">«Архив документов» (вне CRM, по доступу)</a>.</div>`;
+  return note + `<div class="doc-gen">
       <button onclick="openInvoice()">＋ Счёт</button><button onclick="openContract()">＋ Договор</button><button onclick="openQuote()">＋ КП</button><button onclick="openAct()">＋ Акт</button><button onclick="addWorkOrder()">＋ Заказ-наряд</button>
     </div>${rows}`;
 }
@@ -1386,16 +1408,27 @@ function docPreview(kind, name){
   else if(/Счёт/i.test(kind)){ _docKind='invoice'; invoiceItems=dealItemsToInvoice(d); invPreview(); }
   else { toast(`👁 ${name} — предпросмотр (формируется смежным отделом)`); }
 }
+/* правка = новая версия: прежняя уходит в историю */
 function editDoc(i){
   const d=DEALS[currentKey]; const dc=d.docs[i]; if(!dc) return;
+  if(dc.del){ toast('Документ помечен на удаление — снимите пометку, чтобы редактировать'); return; }
+  dc.history = dc.history || []; dc.ver = dc.ver || 1;
+  dc.history.unshift({ver:dc.ver, lbl:dc.lbl, ts:'14.06.2026', del:false});
+  dc.ver++;
   if(/Договор/i.test(dc.kind)) openContract();
   else if(/КП|Коммерч/i.test(dc.kind)) openQuote();
   else if(/Акт/i.test(dc.kind)) openAct();
   else if(/Счёт/i.test(dc.kind)) openInvoice();
   else if(/Заказ-наряд/i.test(dc.kind)) woPreview(false);
-  else toast('Этот документ формируется смежным отделом — правка там');
+  render(currentKey);
+  toast(`✎ Создана версия v${dc.ver} · прежняя v${dc.ver-1} сохранена в истории`);
 }
-function delDoc(i){ const d=DEALS[currentKey]; const n=d.docs[i]?d.docs[i].n:''; d.docs.splice(i,1); render(currentKey); toast('Документ удалён: '+n); }
+/* пометки на удаление (мягкое удаление; безвозвратно — в модуле «Архив документов») */
+function markDoc(i){ DEALS[currentKey].docs[i].del=true; render(currentKey); toast('🗑 Помечен на удаление · отправка заблокирована'); }
+function unmarkDoc(i){ DEALS[currentKey].docs[i].del=false; render(currentKey); toast('♻ Пометка на удаление снята'); }
+function blockSend(){ toast('🚫 Нельзя отправить — документ помечен на удаление'); }
+function markVer(i,vi){ DEALS[currentKey].docs[i].history[vi].del=true; render(currentKey); toast('🗑 Версия помечена на удаление'); }
+function unmarkVer(i,vi){ DEALS[currentKey].docs[i].history[vi].del=false; render(currentKey); toast('♻ Пометка с версии снята'); }
 /* ── заказ-наряд: предпросмотр перед созданием ── */
 let _woView=false;
 function nextWoNum(d){ const ns=(d.docs||[]).map(x=>{const m=/ЗН-(\d+)/.exec(x.n||'');return m?+m[1]:0;}); return 'ЗН-'+String(Math.max(207,...ns)+1).padStart(4,'0'); }
