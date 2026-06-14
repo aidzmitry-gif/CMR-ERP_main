@@ -20,6 +20,9 @@
 
 Блокировка = stderr с причиной + exit 2 (Claude увидит причину и не выполнит вызов).
 Разрешение = exit 0 без вывода. Блоки логируются в coordination/.tg-guard-denied.jsonl.
+ИСКЛЮЧЕНИЕ (не блок): на `git commit` хук добавляет НЕблокирующее напоминание про
+стандарт ревью (/code-review → /simplify) через hookSpecificOutput.additionalContext —
+коммит выполняется в любом случае.
 
 Установка — в ~/.claude/settings.json (глобально, покрывает воркеры/B/интерактив).
 Готовый блок — в coordination/TG-BRIDGE.md.
@@ -103,6 +106,24 @@ _STRICT_BASH = [
     (re.compile(r"(?i)\brm\s+(-\w*r\w*f|-\w*f\w*r)\b"), "rm -rf (строгий тир)"),
 ]
 
+# ── Напоминание (НЕ блок): на `git commit` подсказать стандарт ревью ──────────────
+_GIT_COMMIT = re.compile(r"(?i)\bgit\s+commit\b")
+_GIT_COMMIT_NOOP = re.compile(r"(?i)\bgit\s+commit\b[^\n]*\s-(-help|h)\b")
+_REVIEW_REMINDER = (
+    "Перед этим коммитом — стандарт ревью (CLAUDE.md): если в этой задаче ещё не "
+    "прогонял, запусти /code-review (баги/корректность), затем /simplify (чистка по "
+    "«лестнице лени»). Это НЕблокирующее напоминание — коммит выполнится в любом случае."
+)
+
+
+def _remind_review(command: str) -> None:
+    """На `git commit` впрыснуть в контекст Claude напоминание про ревью. Не блокирует."""
+    if not _GIT_COMMIT.search(command) or _GIT_COMMIT_NOOP.search(command):
+        return
+    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                  "additionalContext": _REVIEW_REMINDER}}
+    print(json.dumps(out, ensure_ascii=False))
+
 
 def _deny(reason: str, tool: str, detail: str) -> None:
     rec = {"ts": time.time(), "tool": tool, "reason": reason,
@@ -163,6 +184,7 @@ def main() -> int:
         cmd = ti.get("command") or ""
         if cmd:
             _check_bash(cmd)
+            _remind_review(cmd)
     elif tool in ("Edit", "Write", "MultiEdit", "Read"):
         _check_file(tool, ti.get("file_path") or "")
     elif tool == "NotebookEdit":
