@@ -282,7 +282,7 @@
           <span>· <b style="color:#047857">Свободно</b> — доступно к продаже (ATP)</span>
         </div>
       </div></div>
-      <div class="dv-f"><span class="dv-note" id="smCnt" style="color:#6B7280">Выбрано: 0 · доступно со всех складов</span><button class="btn-sec" onclick="closeStockMore()">Отмена</button><button class="btn-send" onclick="closeStockMore()">Добавить в заказ</button></div>
+      <div class="dv-f"><span class="dv-note" id="smCnt" style="color:#6B7280">Выбрано: 0 · доступно со всех складов</span><button class="btn-sec" onclick="closeStockMore()">Отмена</button><button class="btn-send" onclick="confirmStockMore()">Добавить в заказ</button></div>
     </div>
   </div>
 
@@ -476,7 +476,7 @@ const VIEWS = {
           <div class="repeat">
             <div class="ofs-h" style="color:#047857"><span class="n" style="background:#047857">↻</span> Повторить прошлый заказ</div>
             <div class="rt">Последний: <b>АКБ 6СТ-190 × 38</b> — 41 800 Br · 12.03.2026<br>Частота ~90 дн · клиент в цикле</div>
-            <button class="btn-rep">↻ Повторить заказ (подставить позиции)</button>
+            <button class="btn-rep" onclick="repeatOrder()">↻ Повторить заказ (подставить позиции)</button>
           </div>
           <div class="ofs-h"><span class="n">📦</span> Товар со склада <span style="font-weight:600;color:#9aa3b0;text-transform:none">(ATP · реквизиты есть)</span></div>
           <div class="ministock">
@@ -745,43 +745,97 @@ function qtyMark(inp){
 }
 function closeStockMore(){ document.getElementById('stockMoreOv').classList.remove('show'); }
 
-/* ── предпросмотр счёта / договора ── */
-const INVOICE_HTML = `<div class="paper">
-  <div class="pp-h">
-    <div><div class="pp-org">ООО «Энерго-Дисконт»</div><div class="pp-sub">УНП 191000111 · г. Минск · р/с BY24 ALFA 3012 …</div></div>
-    <div class="pp-no">СЧЁТ № СЧ-0462<br>от 14.06.2026</div>
-  </div>
-  <div class="pp-parties">
-    <div><b>Поставщик:</b> ООО «Энерго-Дисконт», УНП 191000111</div>
-    <div><b>Покупатель:</b> ОАО «Белтранс», УНП 190283746, г. Гомель</div>
-  </div>
-  <table class="pp-t">
-    <thead><tr><th>№</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead>
-    <tbody>
-      <tr><td>1</td><td>АКБ 6СТ-190 (Зубр)</td><td class="r">38</td><td class="r">1 100</td><td class="r">41 800</td></tr>
-    </tbody>
-  </table>
-  <div class="pp-tot">Итого: 41 800 Br · в т.ч. НДС 20%: 6 967 Br</div>
-  <div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026. Основание — счёт-договор.</div>
-</div>`;
-const CONTRACT_HTML = `<div class="paper">
-  <div class="pp-title">ДОГОВОР ПОСТАВКИ № ДГ-0125</div>
-  <div class="pp-date">г. Минск · 14.06.2026</div>
-  <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111), и <b>Покупатель:</b> ОАО «Белтранс» (УНП 190283746), заключили настоящий договор о нижеследующем.</p>
-  <p><b>1. Предмет договора.</b> Поставщик обязуется поставить аккумуляторные батареи согласно спецификации (счёт № СЧ-0462), а Покупатель — принять и оплатить.</p>
-  <p><b>2. Сумма и порядок расчётов.</b> Общая сумма — 41 800 Br, в т.ч. НДС 20%. Форма оплаты — предоплата 100%.</p>
-  <p><b>3. Условия поставки.</b> Резерв товара до 19.06.2026. Доставка по согласованию. Гарантия 24 мес.</p>
-  <div class="pp-sign"><div>Поставщик ______________ /Сидоров К.А./</div><div>Покупатель ______________ /Ткачёв В.А./</div></div>
-</div>`;
+/* ── предпросмотр счёта / договора (строятся из заказа динамически) ── */
+function fmt(n){ return Math.round(n).toLocaleString('ru-RU').replace(/,/g,' '); }
+function toast(msg){
+  let t=document.getElementById('toast');
+  if(!t){ t=document.createElement('div'); t.id='toast';
+    t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center';
+    document.body.appendChild(t); }
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3200);
+}
+/* покупатель: новый клиент (если подтянули реквизиты) либо текущий клиент */
+function buyerLine(){
+  const rl=document.getElementById('reqLive');
+  if(rl && rl.textContent.includes('Стартлайн')) return 'ООО «Стартлайн», УНП '+((document.getElementById('unpLive')||{}).value||'191234567')+', г. Минск';
+  const rb=document.getElementById('reqBox');
+  if(rb && rb.textContent.includes('Стартлайн')) return 'ООО «Стартлайн», УНП '+((document.getElementById('unpIn')||{}).value||'191234567')+', г. Минск';
+  return 'ОАО «Белтранс», УНП 190283746, г. Гомель';
+}
+/* отмеченные строки заказа (.ministock активного состояния) */
+function orderRows(){
+  const ms=document.querySelector('.ministock'); if(!ms) return [];
+  return [...ms.querySelectorAll('.ms-row')].filter(r=>{ const cb=r.querySelector('input[type=checkbox]'); return cb && cb.checked; })
+    .map(r=>({
+      name: r.querySelector('.nm').childNodes[0].textContent.trim(),
+      price: parseInt((r.querySelector('.pr').textContent||'').replace(/[^\d]/g,''))||0,
+      qty: parseInt((r.querySelector('.q')||{}).value)||0
+    })).filter(x=>x.qty>0);
+}
+/* добавить выбранное из пикера в заказ (.ministock) */
+function confirmStockMore(){
+  const ms=document.querySelector('.ministock'); if(!ms){ closeStockMore(); return; }
+  const groups=[];
+  [...document.querySelectorAll('#smRows tbody tr')].forEach(tr=>{
+    const pn=tr.querySelector('.pname');
+    if(pn){ const cb=tr.querySelector('input[type=checkbox]');
+      groups.push({checked:!!(cb&&cb.checked), name:pn.childNodes[0].textContent.trim(),
+        price:parseInt(((tr.querySelector('.price')||{}).textContent||'').replace(/[^\d]/g,''))||0, qty:0, free:0}); }
+    const q=tr.querySelector('input.q');
+    if(q && groups.length){ const g=groups[groups.length-1]; g.qty+=parseInt(q.value)||0; g.free+=parseInt(q.dataset.free)||0; }
+  });
+  let added=0;
+  groups.forEach(g=>{
+    if(!g.checked || g.qty<=0) return;
+    const ex=[...ms.querySelectorAll('.ms-row')].find(r=>r.querySelector('.nm').childNodes[0].textContent.trim()===g.name);
+    if(ex){ const qi=ex.querySelector('.q'); qi.value=(parseInt(qi.value)||0)+g.qty; if(!ex.querySelector('input[type=checkbox]').checked) ex.querySelector('input[type=checkbox]').checked=true; }
+    else { const def=g.qty>g.free?g.qty-g.free:0; const row=document.createElement('div'); row.className='ms-row';
+      row.innerHTML=`<input type="checkbox" checked><div class="nm">${g.name}<small>${def?('● под заказ: дефицит '+def+' шт → в закупку'):('● свободно '+g.free)}</small></div><div class="pr">${fmt(g.price)} Br</div><input class="q" value="${g.qty}">`;
+      ms.appendChild(row); }
+    added++;
+  });
+  closeStockMore();
+  if(added) toast(`✓ Добавлено в заказ: ${added} поз. — нажмите «Проверить и отправить счёт»`);
+  else toast('Отметьте товар галочкой и укажите количество');
+}
+/* «Повторить прошлый заказ» — отметить повторную позицию */
+function repeatOrder(){
+  const ms=document.querySelector('.ministock'); if(!ms) return;
+  const first=ms.querySelector('.ms-row'); if(first){ first.querySelector('input[type=checkbox]').checked=true; }
+  toast('↻ Позиции прошлого заказа подставлены — проверьте количество');
+}
 function previewInvoice(){
+  const items=orderRows();
+  let body='', sub=0;
+  items.forEach((it,i)=>{ const s=it.price*it.qty; sub+=s;
+    body+=`<tr><td>${i+1}</td><td>${it.name}</td><td class="r">${it.qty}</td><td class="r">${fmt(it.price)}</td><td class="r">${fmt(s)}</td></tr>`; });
+  if(!items.length) body='<tr><td colspan="5" style="text-align:center;color:#9aa3b0;padding:14px">Отметьте товары галочкой в колонке «Заказ»</td></tr>';
+  const vat=Math.round(sub*20/120);
+  document.getElementById('docViewBody').innerHTML = `<div class="paper">
+    <div class="pp-h"><div><div class="pp-org">ООО «Энерго-Дисконт»</div><div class="pp-sub">УНП 191000111 · г. Минск · р/с BY24 ALFA 3012 …</div></div><div class="pp-no">СЧЁТ № СЧ-0462<br>от 14.06.2026</div></div>
+    <div class="pp-parties"><div><b>Поставщик:</b> ООО «Энерго-Дисконт», УНП 191000111</div><div><b>Покупатель:</b> ${buyerLine()}</div></div>
+    <table class="pp-t"><thead><tr><th>№</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${body}</tbody></table>
+    <div class="pp-tot">Итого: ${fmt(sub)} Br · в т.ч. НДС 20%: ${fmt(vat)} Br</div>
+    <div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026. Основание — счёт-договор.</div>
+  </div>`;
   document.getElementById('docViewTitle').textContent = 'Счёт — предпросмотр перед отправкой';
-  document.getElementById('docViewBody').innerHTML = INVOICE_HTML;
   document.getElementById('docViewSend').textContent = '✉ Отправить счёт';
   document.getElementById('docViewOv').classList.add('show');
 }
 function previewContract(){
+  const items=orderRows();
+  const sub=items.reduce((a,it)=>a+it.price*it.qty,0);
+  document.getElementById('docViewBody').innerHTML = `<div class="paper">
+    <div class="pp-title">ДОГОВОР ПОСТАВКИ № ДГ-0125</div>
+    <div class="pp-date">г. Минск · 14.06.2026</div>
+    <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111), и <b>Покупатель:</b> ${buyerLine()}, заключили настоящий договор о нижеследующем.</p>
+    <p><b>1. Предмет договора.</b> Поставщик обязуется поставить аккумуляторные батареи согласно спецификации (счёт № СЧ-0462), а Покупатель — принять и оплатить.</p>
+    <p><b>2. Сумма и порядок расчётов.</b> Общая сумма — ${fmt(sub)} Br, в т.ч. НДС 20%. Форма оплаты — предоплата 100%.</p>
+    <p><b>3. Условия поставки.</b> Резерв товара до 19.06.2026. Доставка по согласованию. Гарантия 24 мес.</p>
+    <div class="pp-sign"><div>Поставщик ______________ /Сидоров К.А./</div><div>Покупатель ______________ /________/</div></div>
+  </div>`;
   document.getElementById('docViewTitle').textContent = 'Договор — предпросмотр перед отправкой';
-  document.getElementById('docViewBody').innerHTML = CONTRACT_HTML;
   document.getElementById('docViewSend').textContent = '✉ Отправить на подпись';
   document.getElementById('docViewOv').classList.add('show');
 }
