@@ -212,6 +212,12 @@
   .task .tt{font-size:13px}.task.done .tt{text-decoration:line-through;color:#9aa3b0}
   .task .meta{font-size:11px;color:var(--muted);margin-top:2px}
   .task .kind{font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;background:#F1F5F9;color:#475569;margin-left:auto;flex-shrink:0}
+  .task .t-act{opacity:0;cursor:pointer;color:#9aa3b0;font-size:12px;padding:0 2px;flex-shrink:0}
+  .task:hover .t-act{opacity:1}
+  .task .t-act:hover{color:var(--ink)}
+  .task.editing{align-items:stretch}
+  .task .te-name{width:100%;border:1px solid #E5E7EB;border-radius:7px;padding:6px 8px;font-size:13px}
+  .task .te-due{border:1px solid #E5E7EB;border-radius:7px;padding:5px 7px;font-size:12px}
 
   /* документы */
   .doc-gen{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
@@ -273,7 +279,9 @@
   .reply .chs{display:flex;gap:5px}
   .reply .chs span{width:30px;height:30px;border:1px solid #E5E7EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer}
 
-  .linked{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:7px 0;border-top:1px solid #F6F7F9}
+  .linked{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:7px 8px;margin:0 -8px;border-top:1px solid #F6F7F9;cursor:pointer;border-radius:7px}
+  .linked:hover{background:var(--brand-50)}
+  .linked .ln-go{color:var(--brand-700);font-weight:600}
   .linked:first-of-type{border-top:none}
 
   /* следующий шаг */
@@ -667,6 +675,7 @@ const DEALS = {
     docs:[
       {n:"Договор ДГ-0118 — годовая поставка",kind:"Договор",st:"posted",lbl:"подписан",sent:true,steps:["отправлен","просмотрен","подписан"]},
       {n:"Счёт СЧ-0420",kind:"Счёт на оплату",st:"paid",lbl:"оплачен",sent:true,steps:["отправлен","просмотрен","оплачен"]},
+      {n:"Заказ-наряд ЗН-0207 — комплектация и отгрузка",kind:"Заказ-наряд",st:"pending",lbl:"в работе",sent:true,steps:["создан","в работе","выполнен"]},
       {n:"ТТН (отгрузка) — формирует логистика",kind:"Накладная",st:"pending",lbl:"при отгрузке",sent:false,steps:[]}
     ],
     timeline:[
@@ -738,7 +747,8 @@ const DEALS = {
     docs:[
       {n:"КП-0288 — годовая поставка",kind:"Коммерческое предложение",st:"posted",lbl:"просмотрено",sent:true,steps:["отправлен","просмотрен"]},
       {n:"Счёт СЧ-0461 (черновик)",kind:"Счёт на оплату",st:"draft",lbl:"не отправлен",sent:false,steps:[]},
-      {n:"Договор ДГ-0124 (проект, рамочный)",kind:"Договор",st:"draft",lbl:"не отправлен",sent:false,steps:[]}
+      {n:"Договор ДГ-0124 (проект, рамочный)",kind:"Договор",st:"draft",lbl:"не отправлен",sent:false,steps:[]},
+      {n:"Заказ-наряд (черновик)",kind:"Заказ-наряд",st:"draft",lbl:"не сформирован",sent:false,steps:[]}
     ],
     timeline:[
       {type:"call", t:"📞 Входящий звонок · 6:48 · нейтральный", m:"Лагун О. → Сидоров К. · 08.06 — см. блок «Звонки»", pin:true},
@@ -1167,7 +1177,7 @@ function docsHtml(d){
     </div>`;
   });
   return `<div class="doc-gen">
-      <button onclick="openInvoice()">＋ Счёт</button><button onclick="openContract()">＋ Договор</button><button onclick="openQuote()">＋ КП</button><button onclick="openAct()">＋ Акт</button>
+      <button onclick="openInvoice()">＋ Счёт</button><button onclick="openContract()">＋ Договор</button><button onclick="openQuote()">＋ КП</button><button onclick="openAct()">＋ Акт</button><button onclick="addWorkOrder()">＋ Заказ-наряд</button>
     </div>${rows}`;
 }
 
@@ -1281,9 +1291,46 @@ function nextStage(){ const d=DEALS[currentKey];
   d.timeline.unshift({type:'stage',t:`Стадия → ${STAGES[d.stageIdx]}`,m:'Вы · только что',pin:false});
   render(currentKey); toast(`✓ Стадия → «${STAGES[d.stageIdx]}»`);
 }
+function fmtDate(d){ if(!d) return ''; const p=d.split('-'); return p.length===3 ? `${p[2]}.${p[1]}.${p[0]}` : d; }
+function taskHtml(t,i){
+  if(t._edit){
+    return `<div class="task editing">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+        <input class="te-name" value="${(t.t||'').replace(/"/g,'&quot;')}" placeholder="Что нужно сделать" autofocus>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:11px;color:var(--muted)">Крайний срок</label>
+          <input type="date" class="te-due" value="${t.due||''}">
+          <button class="btn primary sm" onclick="saveTask(this)">✓ Сохранить</button>
+          <button class="btn sm" onclick="cancelTask(this,${i})">Отмена</button>
+        </div>
+      </div></div>`;
+  }
+  const meta = t.due ? `⏰ срок: ${fmtDate(t.due)}` : (t.m||'');
+  return `<div class="task ${t.done?'done':''}">
+    <div class="cb" onclick="toggleTask(${i})" title="Отметить выполненной">${t.done?'✓':''}</div>
+    <div style="flex:1;min-width:0"><div class="tt">${t.t||'—'}</div><div class="meta">${meta}</div></div>
+    <span class="kind">${t.kind}</span>
+    <span class="t-act" onclick="editTask(${i})" title="Изменить">✎</span>
+    <span class="t-act" onclick="delTask(${i})" title="Удалить">✕</span>
+  </div>`;
+}
 function quickTask(){ const d=DEALS[currentKey];
-  d.tasks.unshift({t:'Новая задача — уточните формулировку',m:'на сегодня',kind:'Ручная',done:false});
-  render(currentKey); toast('✓ Задача добавлена — отредактируйте в блоке «Задачи»');
+  d.tasks.unshift({t:'',due:'',kind:'Ручная',done:false,_edit:true,_new:true});
+  render(currentKey);
+  const inp=document.querySelector('#blk-tasks .te-name'); if(inp) inp.focus();
+}
+function toggleTask(i){ const d=DEALS[currentKey]; d.tasks[i].done=!d.tasks[i].done; render(currentKey); }
+function editTask(i){ DEALS[currentKey].tasks[i]._edit=true; render(currentKey); const inp=document.querySelector('#blk-tasks .te-name'); if(inp){ inp.focus(); inp.select(); } }
+function delTask(i){ const d=DEALS[currentKey]; d.tasks.splice(i,1); render(currentKey); toast('Задача удалена'); }
+function saveTask(btn){ const d=DEALS[currentKey]; const row=btn.closest('.task');
+  const rows=[...document.querySelectorAll('#blk-tasks .task')]; const i=rows.indexOf(row); if(i<0) return;
+  const name=(row.querySelector('.te-name').value||'').trim(); const due=row.querySelector('.te-due').value;
+  const t=d.tasks[i]; t.t=name||'Без названия'; t.due=due; delete t.m; delete t._edit; delete t._new;
+  render(currentKey); toast('✓ Задача сохранена'+(due?` · срок ${fmtDate(due)}`:''));
+}
+function cancelTask(btn,i){ const d=DEALS[currentKey]; const t=d.tasks[i];
+  if(t && t._new){ d.tasks.splice(i,1); } else if(t){ delete t._edit; }
+  render(currentKey);
 }
 function rejectDeal(){ const d=DEALS[currentKey];
   d.timeline.unshift({type:'stage',t:'⛔ Сделка переведена в «Отказ»',m:'Вы · только что',pin:true});
@@ -1321,6 +1368,12 @@ function aiChip(kind){ if(kind==='kp'){ openQuote(); return; } toast(kind==='mai
 function attachRec(){ toast('🔗 Привязка записи звонка к сделке'); }
 function replySend(ch){ toast(`Ответ отправлен · ${ch}`); }
 function sendDoc(ch,name){ const d=document.querySelectorAll('.send-ch.show'); d.forEach(x=>x.classList.remove('show')); toast(`✓ ${name} отправлен · ${ch}`); }
+function addWorkOrder(){ const d=DEALS[currentKey];
+  d.docs.unshift({n:'Заказ-наряд ЗН-0208 (черновик)',kind:'Заказ-наряд',st:'draft',lbl:'не сформирован',sent:false,steps:[]});
+  render(currentKey); toast('✓ Заказ-наряд создан (черновик) — в блоке «Документы»');
+  const blk=document.getElementById('blk-docs'); if(blk) blk.scrollIntoView({block:'center'});
+}
+function openLinkedDeal(name){ toast('Открываю сделку: '+name); location.href='sales-card-full.html'; }
 
 /* ── блоки: показать/скрыть ── */
 function hideBlock(id){ hidden.add(id); applyHidden(); buildMenu(); }
@@ -1341,9 +1394,9 @@ function render(key, btn){
   document.getElementById('crumb').textContent = d.num.replace('№ ','');
 
   let items=''; d.items.forEach(it=>{ items+=`<div class="ir"><div class="nm">${it.n}<small>${it.sub}</small></div><div class="num2">${it.q}</div><div class="num2">${it.sum}</div><div class="pf">${it.pf}</div></div>`; });
-  let tasks=''; d.tasks.forEach(t=>{ tasks+=`<div class="task ${t.done?'done':''}"><div class="cb">${t.done?'✓':''}</div><div style="flex:1;min-width:0"><div class="tt">${t.t}</div><div class="meta">${t.m}</div></div><span class="kind">${t.kind}</span></div>`; });
+  let tasks=''; d.tasks.forEach((t,i)=>{ tasks+=taskHtml(t,i); });
   const docs = docsHtml(d);
-  let linked=''; d.linked.forEach(l=>{ linked+=`<div class="linked"><span>${l.n}</span><span><b>${l.sum}</b> <span class="st ${l.st}">${l.lbl}</span></span></div>`; });
+  let linked=''; d.linked.forEach(l=>{ linked+=`<div class="linked" onclick="openLinkedDeal('${l.n.replace(/'/g,"\\'")}')" title="Открыть сделку"><span class="ln-go">↗ ${l.n}</span><span><b>${l.sum}</b> <span class="st ${l.st}">${l.lbl}</span></span></div>`; });
 
   const regBlock = d.reg ? `<div class="panel" id="blk-reg">
     <div class="ph">★ Постоянный клиент · допродажа <span class="x" onclick="hideBlock('reg')" title="Скрыть блок">✕</span></div>

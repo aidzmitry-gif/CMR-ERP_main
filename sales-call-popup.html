@@ -322,7 +322,7 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён'); show('done')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
           <span onclick="location.href='sales-card-full.html'">📋 Открыть сделку</span>
@@ -368,7 +368,7 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён'); show('done')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
           <span onclick="show('live')">➕ Создать сделку</span>
@@ -409,10 +409,10 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён'); show('done')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
-          <span onclick="toast('➕ Лид создан из звонка')">➕ Создать лид</span>
+          <span onclick="toast('➕ Лид создан'); show('livenew')">➕ Создать лид</span>
           <span onclick="toast('🚫 Номер помечен как спам')">🚫 Это спам</span>
           <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
         </div>
