@@ -715,7 +715,7 @@ function renderStock(filter){
       const free = w.on - w.res, low = free<=3;
       body += `<tr class="${wi===0?'grp-first':''}">`;
       if(wi===0){
-        body += `<td rowspan="${whs.length}"><input type="checkbox" onchange="smCount()"></td>
+        body += `<td rowspan="${whs.length}"><input type="checkbox" onchange="smPick(this)"></td>
           <td rowspan="${whs.length}" class="pname">${p.sku}<small>Σ свободно ${totFree} · ${whs.length>1?whs.length+' склада':'1 склад'}</small></td>`;
       }
       body += `<td class="wh">🏬 ${w.name}</td>
@@ -738,6 +738,12 @@ function openStockMore(){
   document.getElementById('stockMoreOv').classList.add('show');
 }
 function smCount(){ const n=document.querySelectorAll('#smRows input[type=checkbox]:checked').length; document.getElementById('smCnt').textContent='Выбрано: '+n+' поз.'; }
+/* отметка галочки сразу проставляет кол-во 1 (чтобы добавлялось без ручного ввода) */
+function smPick(cb){
+  const tr=cb.closest('tr'); const q=tr?tr.querySelector('input.q'):null;
+  if(q){ if(cb.checked && (parseInt(q.value)||0)===0){ q.value=1; } if(!cb.checked){ q.value=0; } qtyMark(q); }
+  smCount();
+}
 function qtyMark(inp){
   const q=parseInt(inp.value)||0, free=parseInt(inp.dataset.free)||0;
   if(q>free){ inp.style.borderColor='#F59E0B'; inp.style.background='#FFFBEB'; inp.title=`Под заказ: дефицит ${q-free} шт → в закупку`; }
@@ -787,7 +793,9 @@ function confirmStockMore(){
   });
   let added=0;
   groups.forEach(g=>{
-    if(!g.checked || g.qty<=0) return;
+    if(!g.checked && g.qty<=0) return;   // не отмечено и без количества — пропуск
+    if(g.qty<=0) g.qty=1;                 // отмечено галочкой без кол-ва → 1 шт
+
     const ex=[...ms.querySelectorAll('.ms-row')].find(r=>r.querySelector('.nm').childNodes[0].textContent.trim()===g.name);
     if(ex){ const qi=ex.querySelector('.q'); qi.value=(parseInt(qi.value)||0)+g.qty; if(!ex.querySelector('input[type=checkbox]').checked) ex.querySelector('input[type=checkbox]').checked=true; }
     else { const def=g.qty>g.free?g.qty-g.free:0; const row=document.createElement('div'); row.className='ms-row';
