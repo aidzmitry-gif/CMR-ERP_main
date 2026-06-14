@@ -12,6 +12,9 @@ vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director" }));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
+vi.mock("@/components/erp/logistics-tabs", () => ({
+  LogisticsTabs: () => <div>logistics-tabs</div>,
+}));
 vi.mock("@/components/funnel/funnel-board", () => ({
   FunnelBoard: ({ title }: { title: string }) => <div>funnel:{title}</div>,
 }));
@@ -39,6 +42,9 @@ vi.mock("@/lib/api", () => ({
     nextStep: "Звонок", contact: "Иван", datetime: "x", itemsTitle: "Номенклатура", items: [],
     messages: [], focus: false, starred: false, dealDate: "12.05.2024",
   }),
+  fetchDealTasks: vi.fn().mockResolvedValue([]),
+  createDealTask: vi.fn().mockResolvedValue(undefined),
+  completeDealTask: vi.fn().mockResolvedValue(true),
   fetchOwnerDashboard: vi.fn(),
 }));
 
@@ -135,11 +141,16 @@ describe("страницы (src/app)", () => {
   });
 
   it("ERP-таблицы монтируют ModuleBoard", () => {
-    for (const Page of [LogisticsPage, FinancePage, MarketingPage, ServicePage]) {
+    for (const Page of [FinancePage, MarketingPage, ServicePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^board:/)).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("LogisticsPage монтирует вкладки логистики", () => {
+    render(<LogisticsPage />);
+    expect(screen.getByText("logistics-tabs")).toBeInTheDocument();
   });
 
   it("ERP analytics и settings монтируют свои view", () => {
