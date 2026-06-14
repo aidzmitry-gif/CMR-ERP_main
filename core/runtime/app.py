@@ -18,6 +18,7 @@ from core.runtime import approval_routes, system_routes, telegram_routes
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
+from core.runtime.reference_registry import register_system_references
 from core.services import build_services
 from core.services.eventbus import EventContext
 
@@ -56,6 +57,9 @@ def create_app() -> FastAPI:
     services = build_services()
     core = Core(services)
     load_modules(core, ENABLED_MODULES)
+    # системные справочники ядра (public): единицы, валюты+курсы, страны, банки, НДС,
+    # контрагенты, контакты, номенклатура, сотрудники — в реестр-витрину «Справочники».
+    register_system_references(core)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

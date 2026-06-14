@@ -15,7 +15,7 @@ from typing import Awaitable, Callable
 
 from fastapi import APIRouter
 
-from core.runtime.contract import Permission, Role, TelegramCommand, Widget
+from core.runtime.contract import Permission, Reference, Role, TelegramCommand, Widget
 from core.services import Services
 
 logger = logging.getLogger("aios.core")
@@ -42,6 +42,12 @@ class RegisteredEvent:
     handler: Callable
 
 
+@dataclass
+class RegisteredReference:
+    module: str
+    reference: Reference
+
+
 class Core:
     """Реестр возможностей модулей и фасад к общим сервисам."""
 
@@ -57,6 +63,7 @@ class Core:
         self.roles: list[Role] = []
         self.telegram_commands: list[TelegramCommand] = []
         self.widgets: list[Widget] = []
+        self.references: list[RegisteredReference] = []
         self.startup_hooks: list[Callable[[], Awaitable | None]] = []
         self.shutdown_hooks: list[Callable[[], Awaitable | None]] = []
         self.loaded_modules: list[str] = []
@@ -107,6 +114,15 @@ class Core:
     def register_widget(self, widget: Widget) -> None:
         """Зарегистрировать виджет панели владельца."""
         self.widgets.append(widget)
+
+    def register_reference(self, reference: Reference) -> None:
+        """Зарегистрировать справочник в реестре-витрине «Справочники».
+
+        Данные остаются у владельца; реестр хранит только метаданные — для UI,
+        прав (RBAC) и каталога AI. Атрибутируется текущему модулю автоматически
+        (``self._module``), как и остальные регистрации.
+        """
+        self.references.append(RegisteredReference(self._module, reference))
 
     def on_startup(self, hook: Callable) -> None:
         """Хук, вызываемый при старте приложения."""

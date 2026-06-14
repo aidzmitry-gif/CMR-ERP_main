@@ -13,6 +13,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
+from core.domain.reference import Bank, Country, Currency, CurrencyRate, Unit, VatRate
 from core.services import build_services
 from modules.hr.models import Candidate
 from modules.knowledge.models import Course
@@ -237,6 +238,54 @@ async def main() -> None:
     assert services.db.session_factory is not None
 
     async with services.db.session_factory() as s:
+        # Системные справочники ядра (reference data): единицы, валюты+курсы, страны, банки, НДС.
+        # Историчные (курс/НДС) — версии SCD2: текущая = end_date None.
+        if (await s.execute(select(Unit))).scalars().first() is None:
+            s.add_all([
+                Unit(code="шт", title="Штука"),
+                Unit(code="кг", title="Килограмм"),
+                Unit(code="м", title="Метр"),
+                Unit(code="т", title="Тонна"),
+            ])
+        if (await s.execute(select(Currency))).scalars().first() is None:
+            s.add_all([
+                Currency(code="BYN", title="Белорусский рубль"),
+                Currency(code="USD", title="Доллар США"),
+                Currency(code="EUR", title="Евро"),
+            ])
+        if (await s.execute(select(CurrencyRate))).scalars().first() is None:
+            s.add_all([
+                CurrencyRate(currency_code="USD", rate=Decimal("3.18"),
+                             start_date=date(2026, 1, 1), end_date=date(2026, 5, 1)),
+                CurrencyRate(currency_code="USD", rate=Decimal("3.25"),
+                             start_date=date(2026, 5, 1), end_date=date(2026, 6, 10)),
+                CurrencyRate(currency_code="USD", rate=Decimal("3.21"),
+                             start_date=date(2026, 6, 10), end_date=None),
+                CurrencyRate(currency_code="EUR", rate=Decimal("3.46"),
+                             start_date=date(2026, 1, 1), end_date=None),
+            ])
+        if (await s.execute(select(Country))).scalars().first() is None:
+            s.add_all([
+                Country(code="BY", title="Беларусь"),
+                Country(code="RU", title="Россия"),
+                Country(code="CN", title="Китай"),
+            ])
+        if (await s.execute(select(Bank))).scalars().first() is None:
+            s.add_all([
+                Bank(code="153001749", title="ОАО «Приорбанк»", swift="PJCBBY2X"),
+                Bank(code="153001270", title="ОАО «АСБ Беларусбанк»", swift="AKBBBY2X"),
+            ])
+        if (await s.execute(select(VatRate))).scalars().first() is None:
+            s.add_all([
+                VatRate(code="НДС20", title="НДС 20%", rate=Decimal("20.00"),
+                        start_date=date(2024, 1, 1), end_date=None),
+                VatRate(code="НДС10", title="НДС 10%", rate=Decimal("10.00"),
+                        start_date=date(2024, 1, 1), end_date=None),
+                VatRate(code="НДС0", title="Без НДС (0%)", rate=Decimal("0.00"),
+                        start_date=date(2024, 1, 1), end_date=None),
+            ])
+        await s.flush()
+
         # Общее ядро: контрагент, пользователь, контакт
         if (await s.execute(select(Counterparty))).scalars().first() is None:
             cp = Counterparty(name="ООО Аккумулятор", unp="191234567")

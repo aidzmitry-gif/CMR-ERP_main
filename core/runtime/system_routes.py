@@ -60,6 +60,64 @@ async def system_modules(request: Request) -> dict:
     }
 
 
+@router.get("/system/references")
+async def system_references(request: Request) -> dict:
+    """Каталог справочников, сгруппированный по отделам (реестр-витрина «Справочники»).
+
+    Один источник для трёх целей: вкладка «Справочники» (UI-дерево + таблица), права
+    на справочник (RBAC) и каталог для AI. Данные остаются у владельца (``owner_schema``),
+    реестр отдаёт только метаданные.
+    """
+    core = request.app.state.core
+    by_dept: dict[str, list[dict]] = {}
+    for rr in core.references:
+        r = rr.reference
+        by_dept.setdefault(r.department, []).append(
+            {
+                "key": r.key,
+                "title": r.title,
+                "module": rr.module,
+                "endpoint": r.endpoint,
+                "owner_schema": r.owner_schema,
+                "columns": [c.__dict__ for c in r.columns],
+                "permissions": list(r.permissions),
+                "archivable": r.archivable,
+                "versioned": r.versioned,
+                "ai_exposed": r.ai_exposed,
+                "description": r.description,
+            }
+        )
+    return {"departments": by_dept}
+
+
+@router.get("/system/references/ai-catalog")
+async def system_references_ai_catalog(request: Request) -> dict:
+    """Узкий каталог только ``ai_exposed`` — машинный «что есть и как точно запросить».
+
+    AI-агент берёт отсюда точные поля и эндпоинты, чтобы делать структурные запросы
+    (не угадывать и не использовать эмбеддинги для точных значений).
+    """
+    core = request.app.state.core
+    return {
+        "references": [
+            {
+                "key": rr.reference.key,
+                "title": rr.reference.title,
+                "endpoint": rr.reference.endpoint,
+                "owner_schema": rr.reference.owner_schema,
+                "versioned": rr.reference.versioned,
+                "columns": [
+                    {"name": c.name, "type": c.type, "semantic": c.semantic}
+                    for c in rr.reference.columns
+                ],
+                "description": rr.reference.description,
+            }
+            for rr in core.references
+            if rr.reference.ai_exposed
+        ]
+    }
+
+
 @router.get("/system/events")
 async def system_events(session: AsyncSession = Depends(get_session)) -> list[dict]:
     """Последние доменные события — журнал outbox (единый event log, часть 3)."""

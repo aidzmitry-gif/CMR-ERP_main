@@ -52,6 +52,40 @@ class Widget:
     source: str = ""  # идентификатор источника данных, наполняется позже
 
 
+@dataclass(frozen=True)
+class ReferenceColumn:
+    """Колонка справочника — для универсальной таблицы UI и каталога AI."""
+
+    name: str  # машинное имя поля: "code", "title", "rate", ...
+    label: str  # подпись по умолчанию (RU)
+    type: str = "string"  # string|number|bool|date|enum|ref
+    label_i18n: dict[str, str] | None = None  # {"en": "...", "by": "..."}
+    editable: bool = True
+    semantic: str = ""  # описание поля для AI: что оно значит
+
+
+@dataclass(frozen=True)
+class Reference:
+    """Справочник, регистрируемый модулем (или ядром) в реестре-витрине.
+
+    Это **метаданные**: сами данные живут у владельца (`owner_schema`) и читаются
+    по `endpoint`. Один контракт закрывает три цели — вкладку «Справочники» (UI),
+    права на справочник (RBAC) и каталог «что есть и как точно запросить» для AI.
+    """
+
+    key: str  # уникальный ключ: "sales.reject_reasons"
+    title: str  # "Причины отказа"
+    department: str  # группа в дереве: "Система" | "Продажи" | ...
+    owner_schema: str  # схема-владелец данных: "public" | "sales"
+    endpoint: str  # CRUD-эндпоинт владельца: "/system/refs/currencies"
+    columns: tuple[ReferenceColumn, ...] = ()
+    permissions: tuple[str, ...] = ()  # RBAC: ("refs.view", "refs.edit")
+    archivable: bool = True  # архив вместо жёсткого удаления
+    versioned: bool = False  # True → историчность SCD2 (effective-dated)
+    ai_exposed: bool = False  # попадает в каталог для AI-агента
+    description: str = ""  # человекочитаемое назначение
+
+
 class ModuleContract(ABC):
     """Базовый класс модуля-плагина.
 

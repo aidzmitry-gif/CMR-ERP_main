@@ -46,6 +46,10 @@ class Sku(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True)
     title: Mapped[str] = mapped_column(String(255))
     unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
+    # переменные характеристики (цвет/размер/тех.параметры) — JSONB, не EAV.
+    # На масштабе каталога: «горячие» атрибуты выносятся в типизированные колонки,
+    # хвост остаётся здесь; фасетный поиск млн+ SKU — через внешний search-движок.
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class User(Base):
