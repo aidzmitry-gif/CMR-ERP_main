@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Доступ AI к справочникам (semantic layer + MCP) — превью</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Хлебная крошка -->
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <!-- Заголовок -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Как AI работает со справочниками</h1>
+      <p class="mt-1 text-sm text-muted">Структурный доступ (SQL/MCP) для точности и историчности; эмбеддинги — только нечёткий поиск.</p>
+    </div>
+
+    <!-- Инфо-полоса -->
+    <div class="rounded-2xl bg-brand-100/60 p-4 text-sm text-slate-700 shadow-card">
+      AI берёт точные значения <span class="font-semibold">структурно</span> поверх semantic-слоя · историчность учитывается <span class="font-semibold">(на дату)</span> · pgvector — только «похоже на…», <span class="font-semibold">не для точных полей</span>.
+    </div>
+
+    <!-- Основной грид -->
+    <div class="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+
+      <!-- ЛЕВО: Каталог для AI -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Каталог для AI</div>
+          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🤖 ai_exposed</span>
+        </div>
+        <div class="mt-1 font-mono text-[11px] text-slate-500">GET /references/ai-catalog</div>
+
+        <div class="mt-4 space-y-3">
+          <!-- Контрагенты -->
+          <div class="border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>★</span><span>Контрагенты</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/counterparties</div>
+            <p class="mt-1 text-[12px] text-muted">Эталонные карточки клиентов и поставщиков (golden record).</p>
+          </div>
+
+          <!-- Номенклатура -->
+          <div class="border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>★</span><span>Номенклатура</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/skus</div>
+            <p class="mt-1 text-[12px] text-muted">Товары и SKU с артикулами и единицами учёта.</p>
+          </div>
+
+          <!-- Единицы измерения -->
+          <div class="border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>Единицы измерения</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/units</div>
+            <p class="mt-1 text-[12px] text-muted">Базовые и производные единицы, коэффициенты пересчёта.</p>
+          </div>
+
+          <!-- Валюты и курсы -->
+          <div class="border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>🕘</span><span>Валюты и курсы</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/currencies</div>
+            <p class="mt-1 text-[12px] text-muted">Версионные курсы НБ РБ — значение на любую дату.</p>
+          </div>
+
+          <!-- Ставки НДС -->
+          <div class="border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>🕘</span><span>Ставки НДС</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/vat-rates</div>
+            <p class="mt-1 text-[12px] text-muted">Интервалы действия ставок — ставка на дату документа.</p>
+          </div>
+
+          <!-- Категории -->
+          <div>
+            <div class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+              <span>🤖</span><span>🌳</span><span>Категории</span>
+            </div>
+            <div class="mt-0.5 font-mono text-[11px] text-slate-500">/refs/categories</div>
+            <p class="mt-1 text-[12px] text-muted">Иерархический классификатор номенклатуры (дерево).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ПРАВО: Цепочка ответа -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Цепочка ответа</div>
+        <p class="mt-1 text-[12px] text-muted">От вопроса пользователя до точного значения с учётом истории.</p>
+
+        <div class="mt-4 space-y-4">
+
+          <!-- Шаг 1: Вопрос -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-[13px] font-semibold text-white">1</div>
+            <div class="flex-1">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Вопрос пользователя</div>
+              <div class="mt-2 rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">
+                «Какой НДС действовал у отгрузки ООО «Ромашка» 15 мая и какой у неё УНП?»
+              </div>
+            </div>
+          </div>
+
+          <!-- Шаг 2: MCP-tool call -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-[13px] font-semibold text-white">2</div>
+            <div class="flex-1">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Вызов инструментов</div>
+              <div class="mt-2 rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">MCP-tool call</div>
+                <pre class="mt-2 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">{ "tool": "reference.query", "ref": "vat_rates", "as_of": "2026-05-15" }</pre>
+                <pre class="mt-2 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">{ "tool": "reference.query", "ref": "counterparties", "match": { "title": "Ромашка" } }</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- Шаг 3: Сгенерированный SQL -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-[13px] font-semibold text-white">3</div>
+            <div class="flex-1">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Структурный запрос</div>
+              <div class="mt-2 rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Сгенерированный SQL</div>
+                <pre class="mt-2 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">SELECT rate FROM public.ref_vat_rate
+WHERE code='НДС'
+  AND start_date &lt;= DATE '2026-05-15'
+  AND (end_date IS NULL OR end_date &gt; DATE '2026-05-15');</pre>
+                <pre class="mt-2 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">SELECT unp FROM public.counterparty
+WHERE title ILIKE '%Ромашка%' AND is_active;</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- Шаг 4: Результат -->
+          <div class="flex gap-3">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[13px] font-semibold text-white">4</div>
+            <div class="flex-1">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Результат</div>
+              <div class="mt-2 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                <div class="flex flex-wrap gap-2">
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">УНП 191234567</span>
+                  <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">НДС на 15.05.2026 = 25%</span>
+                  <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">историческая ставка</span>
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">текущая 20%</span>
+                </div>
+                <p class="mt-3 text-[12px] text-emerald-700">★ Точно, с учётом истории — значение взято из эталонной записи на дату отгрузки, а не текущее.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Нижний ряд: два слоя -->
+    <div class="grid gap-4 lg:grid-cols-2">
+
+      <!-- Semantic / metrics-слой (светлая) -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Semantic / metrics-слой</div>
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">точка входа AI</span>
+        </div>
+        <p class="mt-1 text-[12px] text-muted">AI ходит сюда за определениями сущностей и метрик, не в сырую схему.</p>
+
+        <div class="mt-4 divide-y divide-slate-50 text-sm">
+          <div class="py-2.5">
+            <div class="font-semibold text-ink">Контрагент</div>
+            <p class="text-[12px] text-muted">Эталонная карточка (golden record) по natural key УНП + код ERP; алиасы и id 1С склеены.</p>
+          </div>
+          <div class="py-2.5">
+            <div class="font-semibold text-ink">Отгрузка</div>
+            <p class="text-[12px] text-muted">Расходный документ движения товара контрагенту с датой проводки.</p>
+          </div>
+          <div class="py-2.5">
+            <div class="font-semibold text-ink">Действующая ставка</div>
+            <p class="text-[12px] text-muted">Значение SCD2 на дату: <span class="font-mono text-[12px] text-slate-500">start_date ≤ дата &lt; end_date</span> (текущая — «по» пусто).</p>
+          </div>
+          <div class="py-2.5">
+            <div class="font-semibold text-ink">Активная запись</div>
+            <p class="text-[12px] text-muted">Не в архиве (<span class="font-mono text-[12px] text-slate-500">is_active</span>); удаления нет — только 🗃 архив с аудитом.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- pgvector — вторично (тёмная) -->
+      <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">pgvector — вторично</div>
+          <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">не для точных значений</span>
+        </div>
+        <p class="mt-2 text-[12px] text-slate-400">Только нечёткий поиск названий и дедуп похожих записей.</p>
+
+        <div class="mt-4 space-y-3 text-sm">
+          <div class="rounded-xl bg-black/30 p-3">
+            <div class="font-semibold text-slate-200">Где помогает</div>
+            <p class="mt-1 text-[12px] text-slate-400">«Ромашка» ↔ «ООО Ромашка» ↔ «Romashka» — поиск похожих и склейка дублей в golden record.</p>
+          </div>
+          <div class="rounded-xl bg-black/30 p-3">
+            <div class="font-semibold text-slate-200">Границы</div>
+            <p class="mt-1 text-[12px] text-slate-400">При фильтрации (на дату, по статусу) recall падает — вектора не дают точных значений полей.</p>
+          </div>
+          <div class="rounded-xl bg-black/30 p-3">
+            <div class="font-semibold text-slate-200">Масштаб</div>
+            <p class="mt-1 text-[12px] text-slate-400">Выделенная vector DB — только при высоком QPS/большом объёме; иначе pgvector в PostgreSQL 16.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Низ: пояснение -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Почему так</div>
+      <p class="mt-2 text-sm text-slate-700">
+        Структурный доступ (SQL/MCP поверх semantic-слоя) даёт <span class="font-semibold">точность</span> и <span class="font-semibold">историчность</span> — значения берутся на дату из эталонных записей. Вектора — лишь «похоже на…» для поиска и дедупа. Граф знаний (KG) для этого <span class="font-semibold">не обязателен</span>.
+      </p>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные, BYN. Концепция: coordination/db-and-reference-data-concept.md (v3).</p>
+
+  </div>
+</body>
+</html>

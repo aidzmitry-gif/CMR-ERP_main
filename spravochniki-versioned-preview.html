@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Версионный справочник: курсы валют (SCD2) — превью</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Хлебная крошка -->
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <!-- Заголовок страницы -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Курсы валют — история по датам</h1>
+      <p class="mt-1 text-sm text-muted">Версии не перезаписываются; документ видит курс на свою дату.</p>
+    </div>
+
+    <!-- Карточка-шапка -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-semibold text-ink">Курс USD → BYN</h2>
+          <span title="версионный справочник (история по датам)">🕘</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">схема: public</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600">/refs/currency_rates</span>
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">версионный · SCD2</span>
+        </div>
+      </div>
+      <p class="mt-3 text-[13px] text-muted">Эталонный курс белорусского рубля за 1 доллар США. Каждое изменение создаёт новую версию с собственным периодом действия — прошлые значения сохраняются для документов прошедших дат.</p>
+    </div>
+
+    <!-- Карточка «Периоды действия» -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Периоды действия</div>
+      <h3 class="mt-1 text-sm font-semibold text-ink">Таймлайн версий курса</h3>
+
+      <div class="mt-5">
+        <!-- Полосы -->
+        <div class="flex items-stretch gap-1.5">
+          <!-- 3.18 -->
+          <div class="flex flex-col" style="width:30%">
+            <div class="flex h-12 items-center justify-center rounded-lg bg-slate-200 text-sm font-semibold text-slate-600">3.18</div>
+            <div class="mt-1.5 text-center text-[11px] text-muted">01.01.2026 – 01.05.2026</div>
+          </div>
+          <!-- 3.25 -->
+          <div class="flex flex-col" style="width:14%">
+            <div class="flex h-12 items-center justify-center rounded-lg bg-slate-300 text-sm font-semibold text-slate-700">3.25</div>
+            <div class="mt-1.5 text-center text-[11px] text-muted">01.05.2026 – 10.06.2026</div>
+          </div>
+          <!-- 3.21 текущая -->
+          <div class="flex flex-col" style="width:28%">
+            <div class="flex h-12 items-center justify-center gap-1.5 rounded-lg bg-brand text-sm font-semibold text-white shadow-card">3.21 <span class="text-[11px] font-normal opacity-90">текущая</span></div>
+            <div class="mt-1.5 text-center text-[11px] font-medium text-brand-600">с 10.06.2026 →</div>
+          </div>
+          <!-- 3.30 запланирована -->
+          <div class="flex flex-col" style="width:28%">
+            <div class="flex h-12 items-center justify-center gap-1.5 rounded-lg border border-dashed bg-amber-50 text-sm font-semibold text-amber-700 ring-1 ring-amber-300 ring-inset">3.30 <span class="text-[11px] font-normal opacity-90">план</span></div>
+            <div class="mt-1.5 text-center text-[11px] text-amber-700">с 01.07.2026</div>
+          </div>
+        </div>
+
+        <!-- Легенда -->
+        <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
+          <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded bg-slate-200"></span> архивные версии</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded bg-brand"></span> текущая (действует сейчас)</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded border border-dashed border-amber-300 bg-amber-50"></span> запланирована</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Карточка-таблица «Версии» -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Версии</div>
+          <h3 class="mt-1 text-sm font-semibold text-ink">История значений (SCD Type 2)</h3>
+        </div>
+        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">4 версии</span>
+      </div>
+
+      <div class="mt-4 overflow-hidden rounded-xl ring-1 ring-slate-100">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th class="px-3 py-2 font-semibold">Значение, BYN/USD</th>
+              <th class="px-3 py-2 font-semibold">Действует с</th>
+              <th class="px-3 py-2 font-semibold">по</th>
+              <th class="px-3 py-2 font-semibold">Статус</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <!-- 3.30 запланирована -->
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">3.30</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">01.07.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">—</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">запланирована</span></td>
+            </tr>
+            <!-- 3.21 активна -->
+            <tr class="bg-brand-100/30 hover:bg-brand-100/40">
+              <td class="px-3 py-2.5 font-mono text-[13px] font-semibold text-ink">3.21</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">10.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">— <span class="text-[11px] not-italic">(текущая)</span></td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активна</span></td>
+            </tr>
+            <!-- 3.25 архив -->
+            <tr class="text-slate-400 hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-mono text-[13px]">3.25</td>
+              <td class="px-3 py-2.5 font-mono text-[13px]">01.05.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[13px]">10.06.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">🗃 архив</span></td>
+            </tr>
+            <!-- 3.18 архив -->
+            <tr class="text-slate-400 hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-mono text-[13px]">3.18</td>
+              <td class="px-3 py-2.5 font-mono text-[13px]">01.01.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[13px]">01.05.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">🗃 архив</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 text-[12px] text-muted">Текущая версия — та, где «по» пусто (<span class="font-mono">end_date IS NULL</span>). Архивные строки приглушены и не редактируются.</p>
+    </div>
+
+    <!-- Две колонки: Новая версия + Предпросмотр -->
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+
+      <!-- Карточка «Новая версия» -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Новая версия</div>
+        <h3 class="mt-1 text-sm font-semibold text-ink">Добавить значение курса</h3>
+
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="mb-1 block text-[12px] font-medium text-slate-600">Значение (BYN за 1 USD)</label>
+            <div class="rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="например, 3.27" value="" />
+            </div>
+          </div>
+          <div>
+            <label class="mb-1 block text-[12px] font-medium text-slate-600">Действует с (дата)</label>
+            <div class="rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="дд.мм.гггг" value="" />
+            </div>
+          </div>
+          <p class="text-[12px] text-muted">Предыдущая версия закроется автоматически этой датой; интервал полуоткрытый <span class="font-mono">[с, …)</span>.</p>
+          <div class="pt-1">
+            <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Добавить версию</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Карточка «Предпросмотр на дату» -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Предпросмотр на дату</div>
+        <h3 class="mt-1 text-sm font-semibold text-ink">Какой курс увидит документ</h3>
+
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="mb-1 block text-[12px] font-medium text-slate-600">Дата документа</label>
+            <div class="rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="15.05.2026" />
+            </div>
+          </div>
+
+          <div class="rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-100">
+            <div class="text-[12px] text-emerald-700">Документ на эту дату видит курс</div>
+            <div class="mt-0.5 text-lg font-bold text-emerald-700">3.25 <span class="text-sm font-medium">BYN/USD</span></div>
+            <div class="mt-0.5 text-[11px] text-emerald-700/80">версия действовала 01.05.2026 – 10.06.2026 (по не включительно)</div>
+          </div>
+
+          <div class="rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+            <div class="flex items-center justify-between">
+              <span class="text-[12px] text-muted">Ещё пример: <span class="font-mono text-slate-600">12.06.2026</span></span>
+              <span class="text-sm font-semibold text-ink">→ 3.21 <span class="text-[12px] font-medium text-muted">BYN/USD</span></span>
+            </div>
+            <div class="mt-0.5 text-[11px] text-muted">попадает в текущую версию (с 10.06.2026)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Тёмная карточка «как видит AI / запрос» -->
+    <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Как берётся курс на дату (structured)</div>
+      <p class="mt-2 text-[13px] text-slate-400">AI и документы получают точное значение структурным запросом поверх semantic-слоя — не через эмбеддинги. Полуоткрытый интервал гарантирует ровно одну версию на любую дату.</p>
+      <pre class="mt-3 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">SELECT rate
+FROM   public.currency_rates
+WHERE  base = 'USD' AND quote = 'BYN'
+  AND  valid_from &lt;= :doc_date            -- действует с
+  AND  (valid_to IS NULL OR :doc_date &lt; valid_to)  -- по (полуоткрыто)
+LIMIT  1;
+-- :doc_date = 2026-05-15  →  rate = 3.25</pre>
+    </div>
+
+    <!-- Пояснение SCD2 -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Как это устроено</div>
+      <ul class="mt-2 space-y-1.5 text-[13px] text-muted">
+        <li class="flex gap-2"><span class="text-slate-400">🕘</span><span>Текущая версия = «по» пусто (<span class="font-mono">end_date IS NULL</span>); прошлые версии не перезаписываются, а закрываются датой начала следующей.</span></li>
+        <li class="flex gap-2"><span class="text-slate-400">◷</span><span>Интервал действия полуоткрытый <span class="font-mono">[действует с, по)</span> — дата «по» в период уже не входит, поэтому версии стыкуются без перекрытий и зазоров.</span></li>
+        <li class="flex gap-2"><span class="text-slate-400">🗃</span><span>SCD Type 2 ведётся вручную (триггер/сервис-слой), т.к. стек — PostgreSQL 16; нативные temporal-таблицы (<span class="font-mono">FOR PORTION OF</span>) появляются в PG18/19.</span></li>
+      </ul>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные, BYN. Концепция: coordination/db-and-reference-data-concept.md (v3).</p>
+
+  </div>
+</body>
+</html>

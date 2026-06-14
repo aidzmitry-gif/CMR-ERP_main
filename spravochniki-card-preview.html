@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Карточка контрагента (golden record) — превью</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Хлебная крошка -->
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <!-- Заголовок страницы -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Контрагент — карточка записи</h1>
+      <p class="mt-1 text-sm text-muted">Мастер-данные контрагентов (golden record). Владелец — shared-kernel, схема <span class="font-mono">public</span>. Справочник лишь отображает данные владельца; редактирование пишется в аудит, удаление заменено архивом.</p>
+    </div>
+
+    <!-- Карточка-шапка -->
+    <div class="rounded-2xl bg-white p-5 shadow-card space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-lg font-bold text-ink">ОАО «БелАвтоТех»</h2>
+            <span class="text-brand" title="Мастер-данные (golden record)">★</span>
+            <span class="font-mono text-[13px] text-slate-500">CP-000231</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">схема: <span class="font-mono">public</span></span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">/refs/counterparties</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🤖 в каталоге AI</span>
+            <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">права: <span class="font-mono">refs.view · refs.edit</span></span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Сохранить</button>
+          <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">В архив</button>
+        </div>
+      </div>
+
+      <!-- Таб-бар -->
+      <div class="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+        <span class="rounded-full bg-brand-100 px-3 py-1 text-[13px] font-semibold text-brand-600">Реквизиты</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Адреса</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Банковские счета</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Контакты</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Алиасы и источники</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">История</span>
+      </div>
+    </div>
+
+    <!-- Двухколоночный grid -->
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+
+      <!-- ЛЕВО — форма Реквизиты -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Реквизиты</p>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+
+          <div class="sm:col-span-2">
+            <label class="text-[12px] text-slate-500">Полное наименование</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="Открытое акционерное общество «БелАвтоТех»" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">Краткое наименование</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="ОАО «БелАвтоТех»" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">УНП</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent font-mono text-sm outline-none placeholder:text-slate-400" value="100045678" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">Тип</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="Клиент + Поставщик" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">Отрасль</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="Автокомпоненты и запчасти" />
+            </div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <label class="text-[12px] text-slate-500">Юр. адрес</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="220073, г. Минск, ул. Скрыганова, д. 14, оф. 305" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">Телефон</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="+375 17 388-21-40" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[12px] text-slate-500">e-mail</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="office@belavtotech.by" />
+            </div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <label class="text-[12px] text-slate-500">Ответственный менеджер</label>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" value="А. Петров" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ПРАВО — sidebar -->
+      <div class="space-y-4">
+
+        <!-- Golden record -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Golden record</p>
+          <p class="mt-2 flex items-center gap-1.5 text-sm font-semibold text-ink">★ <span>Собрана из 3 источников</span></p>
+          <div class="mt-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">ERP-native · CP-000231</span>
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">эталон</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">↧ 1С · ID 0000-0231</span>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">alias</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">Bitrix24 · 14502</span>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">alias</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-500">🗃 Слит дубль · CP-000777</span>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">архив</span>
+            </div>
+          </div>
+          <p class="mt-3 text-[11px] text-slate-400">Единый эталон; именно на него ссылаются документы (сделки, заказы, счета).</p>
+        </div>
+
+        <!-- Слияние -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Слияние</p>
+          <button class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Объединить с дублем…</button>
+          <p class="mt-3 text-[12px] text-muted">последнее слияние: <span class="font-mono">CP-000777</span> → 05.06.2026 · обратимо</p>
+        </div>
+
+        <!-- Качество данных -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Качество данных</p>
+          <div class="mt-3 flex items-center justify-between text-sm">
+            <span class="text-slate-500">Заполненность</span>
+            <span class="font-semibold text-ink">92%</span>
+          </div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div class="h-full rounded-full bg-emerald-500" style="width:92%"></div>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">УНП ✓</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Банковский счёт ✓</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Контакт ✓</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- История изменений (аудит) -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">История изменений (аудит) 🕘</p>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th class="px-3 py-2 font-semibold">Поле</th>
+              <th class="px-3 py-2 font-semibold">Было</th>
+              <th class="px-3 py-2 font-semibold">Стало</th>
+              <th class="px-3 py-2 font-semibold">Кто</th>
+              <th class="px-3 py-2 font-semibold">Когда</th>
+              <th class="px-3 py-2 font-semibold">Источник</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Тип</td>
+              <td class="px-3 py-2.5 text-slate-500">Клиент</td>
+              <td class="px-3 py-2.5">Клиент + Поставщик</td>
+              <td class="px-3 py-2.5">А. Петров</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">10.06.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">ручная</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Телефон</td>
+              <td class="px-3 py-2.5 text-slate-500">—</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">+375 17 388-21-40</td>
+              <td class="px-3 py-2.5">М. Иванова</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">08.06.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">ручная</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Запись объединена</td>
+              <td class="px-3 py-2.5 text-slate-500">—</td>
+              <td class="px-3 py-2.5">← <span class="font-mono text-[13px] text-slate-500">CP-000777</span></td>
+              <td class="px-3 py-2.5">система</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">05.06.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">MDM</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Создано из 1С</td>
+              <td class="px-3 py-2.5 text-slate-500">—</td>
+              <td class="px-3 py-2.5">Новая запись</td>
+              <td class="px-3 py-2.5">система</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06.2026</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">↧ 1С</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Низ: пояснение -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Как устроена эта запись</p>
+      <p class="mt-2 text-sm text-muted">★ Это <span class="font-medium text-ink">golden record</span> — единая эталонная запись контрагента. Дубли (1С, Bitrix24, слитый <span class="font-mono">CP-000777</span>) сохранены как алиасы и источники, merge обратим. Документы ссылаются только на эталон. Все правки фиксируются в аудите, а вместо удаления запись уходит 🗃 в архив. Справочник — витрина над владельцем (shared-kernel, схема <span class="font-mono">public</span>), а не второе хранилище.</p>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные, BYN. Концепция: coordination/db-and-reference-data-concept.md (v3).</p>
+
+  </div>
+</body>
+</html>

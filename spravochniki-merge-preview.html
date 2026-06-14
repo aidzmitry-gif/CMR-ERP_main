@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Дедупликация и слияние дублей (MDM) — превью</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Хлебная крошка -->
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <!-- Заголовок -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Дедупликация — слияние дублей</h1>
+      <p class="mt-1 text-sm text-muted">Единая эталонная запись (golden record), слияние обратимо.</p>
+    </div>
+
+    <!-- Инфо-полоса -->
+    <div class="rounded-2xl bg-brand-100/60 px-4 py-2.5 text-[12px] text-slate-700">
+      Правила: <span class="font-semibold">УНП совпал</span> → авто-кандидат · <span class="font-semibold">имя+адрес похожи</span> → на проверку человеком · слияние обратимо (unmerge) · исходники сохраняются как алиасы.
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+      <!-- Левая колонка: кандидаты на слияние -->
+      <div class="lg:col-span-1">
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Кандидаты на слияние (4)</div>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">очередь</span>
+          </div>
+
+          <div class="mt-3 space-y-3">
+
+            <!-- Кластер 1 — открытый -->
+            <div class="rounded-xl ring-2 ring-brand bg-brand-100/30 p-3">
+              <div class="flex items-center justify-between">
+                <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">100% · УНП</span>
+                <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">открыт</span>
+              </div>
+              <div class="mt-2 text-sm font-semibold text-ink">ООО «Старт»</div>
+              <div class="mt-1 space-y-0.5 text-[12px] text-slate-500">
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001045</span> <span class="text-slate-400">·</span> ★ эталон</div>
+                <div><span class="font-mono text-[13px] text-slate-500">CP-000777</span> <span class="text-slate-400">·</span> ↧ из 1С</div>
+              </div>
+              <button class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Разобрать</button>
+            </div>
+
+            <!-- Кластер 2 -->
+            <div class="rounded-xl ring-1 ring-slate-200 bg-white p-3">
+              <div class="flex items-center justify-between">
+                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">87% · имя+город</span>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">на проверку</span>
+              </div>
+              <div class="mt-2 text-sm font-semibold text-ink">ЧУП «Белтехника»</div>
+              <div class="mt-1 space-y-0.5 text-[12px] text-slate-500">
+                <div><span class="font-mono text-[13px] text-slate-500">CP-000913</span> <span class="text-slate-400">·</span> Минск</div>
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001210</span> <span class="text-slate-400">·</span> Минск</div>
+              </div>
+              <button class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Разобрать</button>
+            </div>
+
+            <!-- Кластер 3 -->
+            <div class="rounded-xl ring-1 ring-slate-200 bg-white p-3">
+              <div class="flex items-center justify-between">
+                <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">100% · УНП</span>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">авто-кандидат</span>
+              </div>
+              <div class="mt-2 text-sm font-semibold text-ink">ОАО «Прогресс-Сервис»</div>
+              <div class="mt-1 space-y-0.5 text-[12px] text-slate-500">
+                <div><span class="font-mono text-[13px] text-slate-500">CP-000452</span> <span class="text-slate-400">·</span> ★ эталон</div>
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001388</span> <span class="text-slate-400">·</span> ↧ из 1С</div>
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001401</span> <span class="text-slate-400">·</span> Bitrix</div>
+              </div>
+              <button class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Разобрать</button>
+            </div>
+
+            <!-- Кластер 4 -->
+            <div class="rounded-xl ring-1 ring-slate-200 bg-white p-3">
+              <div class="flex items-center justify-between">
+                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">81% · имя+город</span>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">на проверку</span>
+              </div>
+              <div class="mt-2 text-sm font-semibold text-ink">ИП Ковалёв А. С.</div>
+              <div class="mt-1 space-y-0.5 text-[12px] text-slate-500">
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001102</span> <span class="text-slate-400">·</span> Гомель</div>
+                <div><span class="font-mono text-[13px] text-slate-500">CP-001455</span> <span class="text-slate-400">·</span> Гомель</div>
+              </div>
+              <button class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Разобрать</button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Правая колонка: разбор кластера -->
+      <div class="lg:col-span-2 space-y-4">
+
+        <!-- Основная карточка: разбор кластера -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Разбор кластера</div>
+              <div class="mt-1 text-base font-semibold text-ink">ООО «Старт»</div>
+            </div>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">100% · УНП</span>
+          </div>
+
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th class="px-3 py-2 font-semibold">Поле</th>
+                  <th class="px-3 py-2 font-semibold">
+                    Запись A
+                    <span class="ml-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] normal-case tracking-normal text-blue-700">★ эталон · <span class="font-mono">CP-001045</span></span>
+                  </th>
+                  <th class="px-3 py-2 font-semibold">
+                    Запись B
+                    <span class="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] normal-case tracking-normal text-slate-600">↧ 1С · <span class="font-mono">CP-000777</span></span>
+                  </th>
+                  <th class="px-3 py-2 font-semibold">Эталонное значение</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+
+                <!-- Наименование — совпадает -->
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-3 py-2.5 text-slate-500">Наименование</td>
+                  <td class="px-3 py-2.5">ООО «Старт»</td>
+                  <td class="px-3 py-2.5">ООО «Старт»</td>
+                  <td class="px-3 py-2.5">
+                    <div class="flex items-center gap-2">
+                      <span class="text-brand">◉</span>
+                      <span>ООО «Старт»</span>
+                      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">совпадает</span>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- УНП — совпадает, emerald -->
+                <tr class="bg-emerald-50/40 hover:bg-emerald-50/60">
+                  <td class="px-3 py-2.5 text-slate-500">УНП</td>
+                  <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">191234567</td>
+                  <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">191234567</td>
+                  <td class="px-3 py-2.5">
+                    <div class="flex items-center gap-2">
+                      <span class="text-brand">◉</span>
+                      <span class="font-mono text-[13px] text-slate-500">191234567</span>
+                      <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">ключ · совпадает</span>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Юр. адрес — различаются, amber -->
+                <tr class="bg-amber-50 hover:bg-amber-100/60">
+                  <td class="px-3 py-2.5 text-slate-500">Юр. адрес</td>
+                  <td class="px-3 py-2.5">г. Минск, пр-т Независимости, 58, оф. 412</td>
+                  <td class="px-3 py-2.5">220012, г. Минск, пр. Независимости, д. 58</td>
+                  <td class="px-3 py-2.5">
+                    <div class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <span class="text-brand">◉</span>
+                        <span>г. Минск, пр-т Независимости, 58, оф. 412</span>
+                      </div>
+                      <div class="flex items-center gap-2 text-slate-400">
+                        <span>○</span>
+                        <span>220012, г. Минск, пр. Независимости, д. 58</span>
+                      </div>
+                      <span class="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">различаются</span>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Телефон — у B пусто -->
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-3 py-2.5 text-slate-500">Телефон</td>
+                  <td class="px-3 py-2.5">+375 17 388-12-40</td>
+                  <td class="px-3 py-2.5 text-slate-400">—</td>
+                  <td class="px-3 py-2.5">
+                    <div class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <span class="text-brand">◉</span>
+                        <span>+375 17 388-12-40</span>
+                      </div>
+                      <span class="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">непустое выбрано</span>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Менеджер -->
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-3 py-2.5 text-slate-500">Менеджер</td>
+                  <td class="px-3 py-2.5">Иванова О. П.</td>
+                  <td class="px-3 py-2.5">Сидоров В. М.</td>
+                  <td class="px-3 py-2.5">
+                    <div class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <span class="text-brand">◉</span>
+                        <span>Иванова О. П.</span>
+                      </div>
+                      <div class="flex items-center gap-2 text-slate-400">
+                        <span>○</span>
+                        <span>Сидоров В. М.</span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Правило выживания (survivorship) -->
+          <div class="mt-4 rounded-xl bg-slate-50 p-3">
+            <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Правило выживания (survivorship)</div>
+            <p class="mt-1 text-[13px] text-slate-600">
+              при конфликте — <span class="font-semibold">непустое</span> &gt; <span class="font-semibold">более свежее</span> &gt; <span class="font-semibold">из приоритетного источника</span>
+              <span class="ml-1 font-mono text-[12px] text-slate-500">(ERP &gt; 1С &gt; Bitrix)</span>.
+            </p>
+          </div>
+
+          <!-- Ряд кнопок -->
+          <div class="mt-4 flex flex-wrap items-center gap-2">
+            <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Слить в эталон</button>
+            <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Это не дубль</button>
+            <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Отложить</button>
+            <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">↶ слияние обратимо (unmerge)</span>
+          </div>
+        </div>
+
+        <!-- Тёмная карточка: как решает движок -->
+        <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Как решает движок</div>
+          <pre class="mt-3 rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">rule  unp_exact            : unp(A) == unp(B)                 -> score 1.00 -> auto_merge_candidate
+rule  name_city_fuzzy      : trigram(name) &gt; 0.80 AND city_match -> score 0.87 -> manual_review
+rule  email_or_phone_match : email == email OR phone == phone   -> score 0.92 -> auto_merge_candidate
+
+survivorship: pick(non_empty) &gt; pick(most_recent) &gt; pick(source_priority: ERP &gt; 1C &gt; Bitrix)
+result:       golden_record(CP-001045); aliases += [CP-000777]; merge_reversible = true</pre>
+          <p class="mt-3 text-[12px] text-slate-400">
+            Детерминированные ключи (УНП) — автоматически; нечёткое имя — ML-скоринг, итог подтверждает человек.
+          </p>
+        </div>
+
+      </div>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные, BYN. Концепция: coordination/db-and-reference-data-concept.md (v3).</p>
+
+  </div>
+</body>
+</html>

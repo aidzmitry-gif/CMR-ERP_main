@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Справочники · превью экранов</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[960px] p-8">
+    <h1 class="text-2xl font-bold">Справочники — превью экранов</h1>
+    <p class="mt-1 text-sm text-muted">
+      Статичные снимки экранов вкладки «Справочники» (registry pattern). Демо-данные, BYN.
+      Концепция — <span class="font-mono text-[12px]">coordination/db-and-reference-data-concept.md</span> (v3).
+    </p>
+
+    <!-- Легенда значков -->
+    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+      <span>Значки:</span>
+      <span>★ мастер-данные (golden record)</span>
+      <span>🕘 версионный (история по датам)</span>
+      <span>🌳 иерархия</span>
+      <span>🤖 в каталоге для AI</span>
+      <span>↧ адаптер 1С</span>
+    </div>
+
+    <div class="mt-6 grid gap-3 sm:grid-cols-2">
+
+      <a href="spravochniki-preview.html" class="rounded-2xl bg-white p-4 shadow-card ring-1 ring-brand/20 hover:ring-2 hover:ring-brand/40 sm:col-span-2">
+        <div class="text-sm font-semibold text-ink">1 · Единый реестр <span class="ml-1 inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-semibold text-brand-600">главная вкладка</span></div>
+        <div class="mt-1 text-[13px] text-muted">Дерево по отделам · универсальная таблица справочника (контрагенты) · версионный блок · «как видит AI». Витрина поверх данных владельца.</div>
+      </a>
+
+      <a href="spravochniki-card-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">2 · Карточка контрагента <span class="ml-1 text-brand-600">★</span></div>
+        <div class="mt-1 text-[13px] text-muted">Эталонная запись (golden record): реквизиты, алиасы-источники (1С / Bitrix), вкладки, история-аудит.</div>
+      </a>
+
+      <a href="spravochniki-merge-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">3 · Дедупликация / слияние</div>
+        <div class="mt-1 text-[13px] text-muted">MDM в ядре: кандидаты-дубли со score, сравнение бок-о-бок, survivorship, merge/unmerge.</div>
+      </a>
+
+      <a href="spravochniki-versioned-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">4 · Версионный справочник <span class="ml-1">🕘</span></div>
+        <div class="mt-1 text-[13px] text-muted">Курсы валют по датам (SCD2): полосы периодов, «новая версия с даты», предпросмотр на дату.</div>
+      </a>
+
+      <a href="spravochniki-hierarchy-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">5 · Иерархия <span class="ml-1">🌳</span></div>
+        <div class="mt-1 text-[13px] text-muted">Дерево категорий номенклатуры: adjacency list (parent_id) + путь ltree, панель узла.</div>
+      </a>
+
+      <a href="spravochniki-import-1c-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">6 · Импорт из 1С <span class="ml-1">↧</span></div>
+        <div class="mt-1 text-[13px] text-muted">Входной адаптер: мастер маппинга полей → предпросмотр и конфликты (новый/обновление/дубль→merge) → импорт.</div>
+      </a>
+
+      <a href="spravochniki-ai-preview.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">7 · Доступ AI <span class="ml-1">🤖</span></div>
+        <div class="mt-1 text-[13px] text-muted">Semantic layer + MCP-tool → структурный SQL → точный ответ с историчностью. Границы pgvector.</div>
+      </a>
+
+    </div>
+
+    <p class="mt-6 text-xs text-slate-400">Превью-снимки для просмотра; формы и кнопки внутри не активны, работает навигация по карточкам и крошкам «← Все экраны».</p>
+  </div>
+</body>
+</html>
