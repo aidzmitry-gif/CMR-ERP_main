@@ -24,6 +24,12 @@
 стандарт ревью (/code-review → /simplify) через hookSpecificOutput.additionalContext —
 коммит выполняется в любом случае.
 
+САМОЗАЩИТА (узкая): запись/удаление гарда или settings.json блокируется только когда
+глагол записи (>, >>, tee, Set-Content/Out-File/Add-Content, sed -i, rm/del/Remove-Item)
+ЦЕЛИТ в имя файла (см. _GUARD_WRITE). Простое упоминание имени — `cat`, `wc`, `ls`,
+`git log/add/commit` с именем в сообщении/выводе — НЕ блокируется (раньше блокировалось
+ложно: имя-подстрока + любой `>`).
+
 Установка — в ~/.claude/settings.json (глобально, покрывает воркеры/B/интерактив).
 Готовый блок — в coordination/TG-BRIDGE.md.
 """
@@ -53,7 +59,8 @@ _SECRET_FILE = re.compile(
     """,
 )
 
-# Защита самого гарда и конфигурации хуков от отключения агентом.
+# Имена защищаемых файлов (для файл-инструментов Edit/Write/MultiEdit — это путь цели,
+# поэтому достаточно совпадения подстрокой). Для Bash используется узкий _GUARD_WRITE.
 _GUARD_FILES = re.compile(
     r"""(?ix)
     claude_guard_hook\.py
@@ -106,6 +113,22 @@ _STRICT_BASH = [
     (re.compile(r"(?i)\brm\s+(-\w*r\w*f|-\w*f\w*r)\b"), "rm -rf (строгий тир)"),
 ]
 
+# ── Самозащита для Bash: глагол ЗАПИСИ/удаления, целящий в гард/settings.json ─────
+# Узко: глагол-записи стоит ПЕРЕД именем файла (между ними нет |;&), поэтому простое
+# упоминание имени в commit-сообщении, git log, cat/wc/ls НЕ ловится. Список глаголов
+# и набор файлов тот же, что был, — меняется только точность (не трогаем Move/Copy,
+# чтобы не закрывать легитимный путь обслуживания самого гарда).
+_GUARD_WRITE = re.compile(
+    r"""(?ix)
+    (?: >>? | \btee\b | \bSet-Content\b | \bOut-File\b | \bAdd-Content\b
+      | \bsed\s+-i | \brm\b | \bdel\b | \bRemove-Item\b | \bri\b )
+    [^|;&\n]*?
+    ( claude_guard_hook\.py
+      | [\\/]?\.claude[\\/]settings\.json
+      | \.claude\.json )
+    """,
+)
+
 # ── Напоминание (НЕ блок): на `git commit` подсказать стандарт ревью ──────────────
 _GIT_COMMIT = re.compile(r"(?i)\bgit\s+commit\b")
 _GIT_COMMIT_NOOP = re.compile(r"(?i)\bgit\s+commit\b[^\n]*\s-(-help|h)\b")
@@ -153,10 +176,9 @@ def _check_bash(command: str) -> None:
             r"(?i)\b(cat|type|more|less|head|tail|Get-Content|gc|scp|"
             r"curl|wget|Invoke-RestMethod|irm|base64|openssl)\b", command):
         _deny("чтение/выгрузка секрета (.env/.ssh/ключи/.claude.json)", "Bash", command)
-    if _GUARD_FILES.search(command) and re.search(
-            r"(?i)(>|>>|Set-Content|Out-File|Add-Content|tee|sed\s+-i|\brm\b|\bdel\b|Remove-Item)",
-            command):
-        _deny("попытка изменить/удалить сам гард или settings.json", "Bash", command)
+    # Самозащита: только реальная запись/удаление, целящая в гард/settings.json.
+    if _GUARD_WRITE.search(command):
+        _deny("запись/удаление в сам гард или settings.json", "Bash", command)
 
 
 def _check_file(tool: str, path: str) -> None:
