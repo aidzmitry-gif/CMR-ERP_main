@@ -58,6 +58,7 @@ export const ROLES: RoleDef[] = [
   { slug: "production", title: "Производство" },
   { slug: "finance", title: "Финансы / офис" },
   { slug: "hr", title: "Кадры (HR)" },
+  { slug: "controller", title: "Контролёр" },
 ];
 
 /** Сотрудник (dev-логин). Снимок config/access.py::USERS. */
@@ -107,7 +108,52 @@ export const DEFAULT_MATRIX: Record<string, string[]> = {
     "home", "crm", "procurement", "production", "wms", "logistics", "finance",
     "marketing", "service", "hr", "office", "legal", "knowledge",
   ],
+  // Сквозная диспетчерская/SLA-роль над задачами всех модулей (контролёр-кокпит).
+  // Сейчас эти функции выполняет HR — отсюда близкий, но более узкий набор.
+  controller: [
+    "home", "crm", "procurement", "production", "wms", "logistics",
+    "service", "office", "knowledge", "analytics",
+  ],
 };
+
+/** Роль с полным доступом (администратор) — имеет любые системные функции по умолчанию. */
+export function isSuperRole(role: string): boolean {
+  return ROLES.find((r) => r.slug === role)?.superRole === true;
+}
+
+/**
+ * Системная функция (спец-право) сверх доступа к модулям. Не «видеть раздел», а
+ * «иметь право выполнить операцию» — напр. безвозвратное удаление помеченных объектов.
+ */
+export interface SpecialPermission {
+  slug: string;
+  title: string;
+  description: string;
+  /** Деструктивная/необратимая операция — выделяем в UI и выдаём осознанно. */
+  danger?: boolean;
+}
+
+// Системные функции. Первая — администраторская операция «Удаление помеченных
+// объектов»: безвозвратная зачистка объектов с пометкой на удаление после
+// проверки ссылочной целостности (паттерн «пометка → удаление помеченных», как в 1С).
+export const SPECIAL_PERMISSIONS: SpecialPermission[] = [
+  {
+    slug: "purge_marked",
+    title: "Удаление помеченных объектов",
+    description:
+      "Безвозвратно удалять объекты, помеченные на удаление, после проверки ссылочной " +
+      "целостности. Администраторская операция — выдавать точечно.",
+    danger: true,
+  },
+];
+
+// Какие роли (сверх администраторов) получают функцию по умолчанию: роль → слаги функций.
+// Администраторы (супер-роли director/commercial и backend-роль «Админ») имеют все
+// системные функции всегда, поэтому здесь их не перечисляем.
+export const DEFAULT_SPECIAL_BY_ROLE: Record<string, string[]> = {};
+
+// Поимённая выдача функции отдельным сотрудникам сверх их роли: логин → слаги функций.
+export const DEFAULT_SPECIAL_BY_USER: Record<string, string[]> = {};
 
 /** Сгруппировать сотрудников по роли (для подписи под названием роли). */
 export function employeesByRole(employees: Employee[]): Record<string, Employee[]> {

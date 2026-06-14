@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Матрица доступа — CRM/ERP</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#111c34; --panel2:#0c1628; --line:#243149;
+    --ink:#e8eef9; --muted:#8295b4; --brand:#3b82f6; --ok:#22c55e; --okbg:#103024;
+    --lock:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+  .wrap{max-width:1280px;margin:0 auto;padding:24px 20px 80px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:14px}
+  .legend b{color:var(--ink);font-weight:600}
+  .chip{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:14px;height:14px;border-radius:4px;display:inline-block}
+  .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap}
+  thead th{position:sticky;top:0;z-index:3;background:var(--panel2);
+    padding:10px 8px;font-weight:600;vertical-align:bottom;text-align:center;color:var(--ink)}
+  thead th .m{display:inline-block;writing-mode:vertical-rl;transform:rotate(180deg);
+    max-height:120px;line-height:1.1;font-size:12px;color:#c7d3e8}
+  th.rolehead{writing-mode:initial;text-align:left}
+  .rolecol{position:sticky;left:0;z-index:2;background:var(--panel);min-width:230px;
+    padding:8px 12px;text-align:left;border-right:2px solid var(--line)}
+  thead .rolecol{z-index:4;background:var(--panel2)}
+  .rolename{font-weight:600;font-size:13px}
+  .roleppl{color:var(--muted);font-size:11px;margin-top:2px;white-space:normal;max-width:230px}
+  .cnt{color:var(--muted);font-size:11px;font-weight:500}
+  td.cell{padding:0;text-align:center;cursor:pointer;width:42px;height:40px;user-select:none}
+  td.cell .box{width:24px;height:24px;border-radius:6px;margin:0 auto;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;background:#0a1322;transition:.08s;color:transparent}
+  td.cell:hover .box{border-color:var(--brand)}
+  td.cell.on .box{background:var(--okbg);border-color:var(--ok);color:var(--ok)}
+  td.cell.locked{cursor:not-allowed}
+  td.cell.locked .box{background:#2a2208;border-color:var(--lock);color:var(--lock)}
+  tr.role:hover td{background:rgba(59,130,246,.06)}
+  tr.role:hover .rolecol{background:#16223c}
+  .rowbtns{display:flex;gap:6px;margin-top:6px}
+  .rowbtns button{font-size:10px;color:var(--muted);background:#0a1322;border:1px solid var(--line);
+    border-radius:5px;padding:2px 7px;cursor:pointer}
+  .rowbtns button:hover{color:var(--ink);border-color:var(--brand)}
+  .bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel2);border-top:1px solid var(--line);
+    padding:12px 20px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+  .btn{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:10px 18px;
+    font-size:14px;font-weight:600;cursor:pointer}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn:hover{filter:brightness(1.08)}
+  .toast{color:var(--ok);font-size:13px;min-width:120px}
+  dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;
+    max-width:680px;width:92%;padding:0}
+  dialog::backdrop{background:rgba(2,6,16,.7)}
+  .dlghead{padding:14px 18px;border-bottom:1px solid var(--line);font-weight:600;display:flex;
+    justify-content:space-between;align-items:center}
+  .dlghead button{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer}
+  textarea{width:100%;height:300px;background:#0a1322;color:#cfe0ff;border:none;
+    padding:16px 18px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+  .dlgfoot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Матрица доступа сотрудников — CRM/ERP</h1>
+  <p class="sub">Нажимай на квадратики, чтобы включить/выключить доступ роли к модулю. Внизу — «Сохранить и скопировать»: пришли результат в чат.</p>
+
+  <div class="legend">
+    <span class="chip"><span class="dot" style="background:var(--okbg);border:1px solid var(--ok)"></span> <b>есть доступ</b></span>
+    <span class="chip"><span class="dot" style="background:#0a1322;border:1px solid var(--line)"></span> нет доступа</span>
+    <span class="chip"><span class="dot" style="background:#2a2208;border:1px solid var(--lock)"></span> директор — всегда всё (заблокировано)</span>
+  </div>
+
+  <div class="tablewrap">
+    <table id="grid"></table>
+  </div>
+</div>
+
+<div class="bar">
+  <button class="btn ghost" onclick="resetDefault()">Сбросить к предложенному</button>
+  <button class="btn" onclick="openExport()">💾 Сохранить и скопировать</button>
+  <span class="toast" id="toast"></span>
+</div>
+
+<dialog id="exp">
+  <div class="dlghead"><span>Результат — скопируй и пришли в чат</span><button onclick="document.getElementById('exp').close()">×</button></div>
+  <textarea id="expText" readonly></textarea>
+  <div class="dlgfoot">
+    <button class="btn ghost" onclick="document.getElementById('exp').close()">Закрыть</button>
+    <button class="btn" onclick="copyText()">Копировать в буфер</button>
+  </div>
+</dialog>
+
+<script>
+// ——— Модули (столбцы) ———
+const MODULES = [
+  ["home","Главная"],["crm","CRM (продажи)"],["procurement","Закупки"],["production","Производство"],
+  ["wms","Склад"],["logistics","Логистика"],["finance","Финансы"],["crypto","Криптовалюты"],
+  ["marketing","Маркетинг"],["service","Сервис"],["hr","HR (кадры)"],["office","Офис-менеджер"],
+  ["legal","Юр. отдел"],["knowledge","База знаний"],["analytics","Аналитика"],["it","IT и настройки"],
+];
+
+// ——— Роли (строки) ———
+const ROLES = [
+  {id:"director",  name:"Директор", ppl:"Харькович Д.С.", locked:true},
+  {id:"commercial",name:"Коммерческий директор", ppl:"Харькович С.Д. (полный доступ)"},
+  {id:"assistant", name:"Помощник руководителя", ppl:"Шляхтина Т.В."},
+  {id:"sales_head",name:"Продажи · РОП", ppl:"Рязанов Е.В."},
+  {id:"sales",     name:"Продажи", ppl:"Макаров, Карчевская, Кадурин, Мальцев"},
+  {id:"sales_cli", name:"Продажи · работа с клиентами", ppl:"Кравец, Сарнацкая"},
+  {id:"procurement",name:"Закупки", ppl:"Генисева А.А."},
+  {id:"warehouse", name:"Склад", ppl:"Корнейчук Я.В."},
+  {id:"logistics", name:"Логистика", ppl:"Мацкевич Е.М."},
+  {id:"production",name:"Производство", ppl:"Дым, Коровкин, Семенюк, Самедов, Русинович"},
+  {id:"finance",   name:"Финансы / офис", ppl:"Жуковская О.Н."},
+  {id:"hr",        name:"Кадры (HR)", ppl:"Ведерникова Д.В."},
+  {id:"controller",name:"Контролёр", ppl:"— (сквозная диспетчерская/SLA, пока ведёт HR)"},
+];
+
+// ——— Предложенный доступ по умолчанию ———
+const ALL = MODULES.map(m=>m[0]);
+const DEFAULT = {
+  director:   ALL,
+  commercial: ALL,
+  assistant:  ["home","crm","office","knowledge","analytics"],
+  sales_head: ["home","crm","marketing","knowledge","analytics"],
+  sales:      ["home","crm","marketing","knowledge"],
+  sales_cli:  ["home","crm","service","knowledge"],
+  procurement:["home","procurement","wms","knowledge"],
+  warehouse:  ["home","wms","knowledge"],
+  logistics:  ["home","wms","logistics","knowledge"],
+  production: ["home","production","wms","knowledge"],
+  finance:    ["home","finance","office","crypto","analytics","knowledge"],
+  hr:         ["home","hr","knowledge"],
+  controller: ["home","crm","procurement","production","wms","logistics","service","office","analytics","knowledge"],
+};
+
+let state = {};
+function loadDefault(){ state = {}; for(const r of ROLES) state[r.id] = new Set(DEFAULT[r.id]); }
+
+function render(){
+  const t = document.getElementById("grid");
+  let html = "<thead><tr><th class='rolecol rolehead'>Роль / сотрудники</th>";
+  for(const [,label] of MODULES) html += `<th><span class="m">${label}</span></th>`;
+  html += "</tr></thead><tbody>";
+  for(const r of ROLES){
+    const cnt = state[r.id].size;
+    html += `<tr class="role" data-role="${r.id}">`;
+    html += `<td class="rolecol"><div class="rolename">${r.name} <span class="cnt">· ${cnt}</span></div>`+
+            `<div class="roleppl">${r.ppl}</div>`+
+            (r.locked?"":`<div class="rowbtns"><button onclick="setRow('${r.id}',true)">все</button>`+
+              `<button onclick="setRow('${r.id}',false)">очистить</button></div>`)+
+            `</td>`;
+    for(const [mid] of MODULES){
+      const on = state[r.id].has(mid);
+      const lk = r.locked;
+      html += `<td class="cell ${on?'on':''} ${lk?'locked':''}" data-role="${r.id}" data-mod="${mid}">`+
+              `<div class="box">✓</div></td>`;
+    }
+    html += "</tr>";
+  }
+  html += "</tbody>";
+  t.innerHTML = html;
+  t.querySelectorAll("td.cell:not(.locked)").forEach(td=>{
+    td.addEventListener("click",()=>{
+      const ro=td.dataset.role, mo=td.dataset.mod;
+      if(state[ro].has(mo)) state[ro].delete(mo); else state[ro].add(mo);
+      render();
+    });
+  });
+}
+function setRow(id,on){ state[id] = on ? new Set(ALL) : new Set(); render(); }
+function resetDefault(){ loadDefault(); render(); toast("Сброшено к предложенному"); }
+
+function buildExport(){
+  const modName = Object.fromEntries(MODULES);
+  let out = "МАТРИЦА ДОСТУПА — финальный вариант\n";
+  out += "====================================\n\n";
+  for(const r of ROLES){
+    const ids = ALL.filter(m=>state[r.id].has(m));
+    const isAll = ids.length===ALL.length;
+    const names = isAll ? "ВСЁ (все модули)" : ids.map(i=>modName[i]).join(", ");
+    out += `• ${r.name} (${r.ppl}):\n    ${names || "— нет доступа —"}\n\n`;
+  }
+  out += "----- машиночитаемо (JSON) -----\n";
+  const obj = {}; for(const r of ROLES) obj[r.id]=ALL.filter(m=>state[r.id].has(m));
+  out += JSON.stringify(obj,null,1);
+  return out;
+}
+function openExport(){
+  document.getElementById("expText").value = buildExport();
+  document.getElementById("exp").showModal();
+}
+function copyText(){
+  const ta=document.getElementById("expText"); ta.select();
+  navigator.clipboard.writeText(ta.value).then(()=>toast("Скопировано в буфер ✓"));
+}
+let tt;
+function toast(m){ const e=document.getElementById("toast"); e.textContent=m;
+  clearTimeout(tt); tt=setTimeout(()=>e.textContent="",2500); }
+
+loadDefault(); render();
+</script>
+</body>
+</html>
