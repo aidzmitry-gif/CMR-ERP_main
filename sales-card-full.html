@@ -71,10 +71,10 @@
   .stg .nd{position:relative;z-index:1;width:17px;height:17px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:9px;background:#E5E7EB;color:#fff;font-weight:700}
   .stg.done .nd{background:var(--brand)}.stg.done .ln{background:var(--brand)}
   .stg.cur .nd{background:var(--warn);box-shadow:0 0 0 3px rgba(245,158,11,.18)}
-  .stg .tl{font-size:9px;margin-top:4px;line-height:1.15;color:#9aa3b0;padding:0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stg .tl{font-size:10px;margin-top:4px;line-height:1.15;color:#9aa3b0;padding:0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stg.done .tl,.stg.cur .tl{color:var(--ink);font-weight:600}
   .stg .dt{display:none}
-  .stg.cur .dt{display:block;font-size:9px;color:#B45309;font-weight:700;margin-top:1px}
+  .stg.cur .dt{display:block;font-size:10px;color:#B45309;font-weight:700;margin-top:1px}
 
   /* ── СЕТКА ── */
   .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
@@ -1434,7 +1434,7 @@ function render(key, btn){
       </div>
 
       <div class="panel" id="blk-tasks">
-        <div class="ph">✅ Задачи и следующие шаги <span class="add">＋ задача</span><span class="x" onclick="hideBlock('tasks')" title="Скрыть блок">✕</span></div>
+        <div class="ph">✅ Задачи и следующие шаги <span class="add" onclick="quickTask()">＋ задача</span><span class="x" onclick="hideBlock('tasks')" title="Скрыть блок">✕</span></div>
         <div class="pb">${tasks}</div>
       </div>
 

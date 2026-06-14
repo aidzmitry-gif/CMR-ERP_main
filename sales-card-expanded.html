@@ -192,9 +192,9 @@
     <div class="row1">
       <span class="num" style="color:var(--muted)" id="d-num">№ CRM-1029</span>
       <div class="hbtns">
-        <button class="icon-btn" title="В избранное" id="d-star">☆</button>
-        <button class="icon-btn" title="Редактировать">✎</button>
-        <button class="icon-btn" title="Открыть на странице">⤢</button>
+        <button class="icon-btn" title="В избранное" id="d-star" onclick="favStar(this)">☆</button>
+        <button class="icon-btn" title="Редактировать" onclick="toast('✎ Режим редактирования')">✎</button>
+        <button class="icon-btn" title="Открыть на странице" onclick="location.href='sales-card-full.html'">⤢</button>
         <button class="icon-btn" title="Закрыть" onclick="closeDrawer()">✕</button>
       </div>
     </div>
@@ -210,9 +210,9 @@
   <div class="dr-body" id="d-body"><!-- заполняется JS --></div>
 
   <div class="dr-foot">
-    <button class="btn primary">→ Следующая стадия</button>
-    <button class="btn">✎ Задача</button>
-    <button class="btn danger">✕ Отказ</button>
+    <button class="btn primary" onclick="toast('→ Стадия продвинута')">→ Следующая стадия</button>
+    <button class="btn" onclick="toast('✎ Задача поставлена')">✎ Задача</button>
+    <button class="btn danger" onclick="toast('✕ Сделка переведена в «Отказ»')">✕ Отказ</button>
   </div>
 </aside>
 
@@ -361,6 +361,15 @@
     document.getElementById('drawer').classList.remove('show');
   }
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDrawer(); });
+  function toast(msg){
+    let t=document.getElementById('toast');
+    if(!t){ t=document.createElement('div'); t.id='toast';
+      t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center';
+      document.body.appendChild(t); }
+    t.textContent=msg; t.style.opacity='1';
+    clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3000);
+  }
+  function favStar(btn){ const on=btn.textContent.trim()==='★'; btn.textContent=on?'☆':'★'; toast(on?'Убрано из избранного':'★ В избранном'); }
 </script>
 </body>
 </html>

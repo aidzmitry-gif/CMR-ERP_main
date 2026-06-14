@@ -193,6 +193,16 @@
     document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     render(b.dataset.f);
   });
+  function toast(msg){
+    let t=document.getElementById('toast');
+    if(!t){ t=document.createElement('div'); t.id='toast';
+      t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center';
+      document.body.appendChild(t); }
+    t.textContent=msg; t.style.opacity='1';
+    clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3000);
+  }
+  // действия по клиенту (делегировано — работает и после ре-рендера)
+  document.addEventListener('click', e=>{ const b=e.target.closest('.abtn'); if(b) toast('Действие: '+b.textContent.trim().replace(/\s+/g,' ')); });
   render('all');
 </script>
 </body>

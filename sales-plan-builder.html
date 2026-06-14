@@ -188,7 +188,7 @@
   <div class="foot">
     <div class="fl">Источники и калькулятор считаются вживую. План можно поднять выше — взять обязательство добрать.</div>
     <div class="plan-in"><label>План на июль (вал. приб.)</label><input id="planInput" value="0"></div>
-    <button class="send" id="sendBtn">Отправить РОПу</button>
+    <button class="send" id="sendBtn" onclick="document.getElementById('planStatus').textContent='✓ План отправлен РОПу на согласование'; this.disabled=true; this.textContent='Отправлено ✓'">Отправить РОПу</button>
     <span class="status" id="planStatus"></span>
   </div>
 

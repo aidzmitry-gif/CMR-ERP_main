@@ -322,12 +322,12 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
           <span onclick="location.href='sales-card-full.html'">📋 Открыть сделку</span>
-          <span>↪ Переадресовать</span>
-          <span>📝 Заметка</span>
+          <span onclick="toast('↪ Переадресация коллеге')">↪ Переадресовать</span>
+          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Событие телефонии · резолв клиента по номеру · поднятие за &lt;1 сек (SSE)</div>
@@ -368,12 +368,12 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
-          <span>➕ Создать сделку</span>
-          <span>👤 Открыть клиента</span>
-          <span>📝 Заметка</span>
+          <span onclick="show('live')">➕ Создать сделку</span>
+          <span onclick="location.href='sales-card-full.html'">👤 Открыть клиента</span>
+          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Резолв по номеру → карточка клиента · сделок не найдено</div>
@@ -409,12 +409,12 @@ const VIEWS = {
 
         <div class="cp-actions">
           <button class="accept" onclick="show('live')">✅ Принять</button>
-          <button class="decline">✕ Отклонить</button>
+          <button class="decline" onclick="toast('✕ Звонок отклонён')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
-          <span>➕ Создать лид</span>
-          <span>🚫 Это спам</span>
-          <span>📝 Заметка</span>
+          <span onclick="toast('➕ Лид создан из звонка')">➕ Создать лид</span>
+          <span onclick="toast('🚫 Номер помечен как спам')">🚫 Это спам</span>
+          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Реквизиты по УНП тянутся из ЕГР · договор формируется по шаблону автоматически</div>

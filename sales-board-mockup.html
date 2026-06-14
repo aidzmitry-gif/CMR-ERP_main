@@ -787,7 +787,7 @@
       <div class="r1">
         <span class="num" id="dk-num">№ —</span>
         <div class="hb">
-          <button class="ibtn" title="В избранное">☆</button>
+          <button class="ibtn" title="В избранное" onclick="favDeal(this)">☆</button>
           <button class="ibtn" title="Открыть целиком" onclick="goFull()">⤢</button>
           <button class="ibtn" title="Закрыть" onclick="closeAll()">✕</button>
         </div>
@@ -798,9 +798,9 @@
     </div>
     <div class="dbody" id="dk-body"></div>
     <div class="dfoot">
-      <button class="fbtn primary">→ Следующая стадия</button>
-      <button class="fbtn">✎ Задача</button>
-      <button class="fbtn danger">✕ Отказ</button>
+      <button class="fbtn primary" onclick="drawerStage()">→ Следующая стадия</button>
+      <button class="fbtn" onclick="drawerTask()">✎ Задача</button>
+      <button class="fbtn danger" onclick="drawerReject()">✕ Отказ</button>
     </div>
   </aside>
 
@@ -1113,7 +1113,7 @@
         ${d.res?`<div class="kv"><span class="k">Результат</span><span class="v">${d.res}</span></div>`:''}
       </div>
       <div class="sec"><h3>Связаться</h3>
-        <div class="channels"><div class="chbtn">📞</div><div class="chbtn">🟢</div><div class="chbtn">✈</div><div class="chbtn">✉</div></div>
+        <div class="channels"><div class="chbtn" onclick="chCh('Звонок')">📞</div><div class="chbtn" onclick="chCh('WhatsApp')">🟢</div><div class="chbtn" onclick="chCh('Telegram')">✈</div><div class="chbtn" onclick="chCh('Email')">✉</div></div>
       </div>
       <div class="sec"><div class="open-hint">Задачи, позиции, переписка и документы — в полном виде. Двойной клик по карточке или ⤢</div></div>`;
     document.getElementById('dk-body').scrollTop = 0;
@@ -1168,6 +1168,19 @@
     document.getElementById('drawer').classList.remove('show');
     document.getElementById('full').classList.remove('show');
   }
+  function toast(msg){
+    let t=document.getElementById('toast');
+    if(!t){ t=document.createElement('div'); t.id='toast';
+      t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center';
+      document.body.appendChild(t); }
+    t.textContent=msg; t.style.opacity='1';
+    clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3000);
+  }
+  function favDeal(btn){ const on=btn.textContent.trim()==='★'; btn.textContent=on?'☆':'★'; toast(on?'Убрано из избранного':'★ В избранном'); }
+  function drawerStage(){ toast('→ Стадия продвинута (полная логика — в карточке сделки)'); }
+  function drawerTask(){ toast('✎ Задача поставлена по сделке'); }
+  function drawerReject(){ toast('✕ Сделка переведена в «Отказ»'); }
+  function chCh(ch){ toast('Связь · '+ch); }
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAll(); });
 
   /* ════════ Фильтр «Только висяки» ════════ */
