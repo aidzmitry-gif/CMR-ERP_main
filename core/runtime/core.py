@@ -124,6 +124,16 @@ class Core:
         """
         self.references.append(RegisteredReference(self._module, reference))
 
+    def register_owned_reference(self, owner: str, reference: Reference) -> None:
+        """Зарегистрировать справочник от имени конкретного владельца.
+
+        Публичный путь для регистрации ВНЕ контекста загрузчика модулей (например,
+        системные справочники самого ядра, ``owner="core"``, в bootstrap'е приложения).
+        Атрибутирует запись напрямую, не трогая ``_current`` и не добавляя владельца
+        в ``loaded_modules``.
+        """
+        self.references.append(RegisteredReference(owner, reference))
+
     def on_startup(self, hook: Callable) -> None:
         """Хук, вызываемый при старте приложения."""
         self.startup_hooks.append(hook)

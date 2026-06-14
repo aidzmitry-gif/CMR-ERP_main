@@ -174,14 +174,10 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
 
 
 def register_system_references(core: Core) -> None:
-    """Зарегистрировать системные справочники ядра, атрибутировав их модулю ``core``.
+    """Зарегистрировать системные справочники ядра от имени владельца ``core``.
 
-    Не добавляет ``core`` в ``loaded_modules`` — только проставляет владельца записи.
+    Идёт публичным путём ``Core.register_owned_reference`` — без приватного ``_current``
+    и без добавления ``core`` в ``loaded_modules``.
     """
-    previous = core._current
-    core._current = "core"
-    try:
-        for reference in SYSTEM_REFERENCES:
-            core.register_reference(reference)
-    finally:
-        core._current = previous
+    for reference in SYSTEM_REFERENCES:
+        core.register_owned_reference("core", reference)

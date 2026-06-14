@@ -65,3 +65,24 @@ def test_register_reference_is_attributed_to_current_module():
     last = core.references[-1]
     assert last.module == "demo"
     assert last.reference.key == "demo.thing"
+
+
+def test_register_owned_reference_attributes_owner_without_loaded_modules():
+    """Публичный путь регистрации владельцем — без приватного _current и без loaded_modules."""
+    app = create_app()
+    core = app.state.core
+    before = list(core.loaded_modules)
+    core.register_owned_reference(
+        "core",
+        Reference(
+            key="core.demo",
+            title="Демо",
+            department="Система",
+            owner_schema="public",
+            endpoint="/system/refs/demo",
+        ),
+    )
+    last = core.references[-1]
+    assert last.module == "core"
+    assert last.reference.key == "core.demo"
+    assert core.loaded_modules == before  # владелец-ядро не попал в loaded_modules
