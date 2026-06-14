@@ -133,7 +133,7 @@ def _check_bash(command: str) -> None:
             r"curl|wget|Invoke-RestMethod|irm|base64|openssl)\b", command):
         _deny("чтение/выгрузка секрета (.env/.ssh/ключи/.claude.json)", "Bash", command)
     if _GUARD_FILES.search(command) and re.search(
-            r"(?i)(>|>>|Set-Content|Out-File|Add-Content|tee|sed\s+-i|rm|del|Remove-Item)",
+            r"(?i)(>|>>|Set-Content|Out-File|Add-Content|tee|sed\s+-i|\brm\b|\bdel\b|Remove-Item)",
             command):
         _deny("попытка изменить/удалить сам гард или settings.json", "Bash", command)
 
