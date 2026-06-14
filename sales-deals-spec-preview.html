@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SALES 2.0 — обзор изменений</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+  /* ── Nav ── */
+  nav { background: #1e293b; border-bottom: 1px solid #334155;
+        padding: 12px 24px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  nav h1 { font-size: 15px; font-weight: 700; color: #f8fafc; margin-right: 16px; }
+  nav button { background: #334155; border: none; color: #94a3b8; padding: 6px 14px;
+               border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; }
+  nav button.active, nav button:hover { background: #3b82f6; color: #fff; }
+
+  /* ── Sections ── */
+  .section { display: none; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .section.active { display: block; }
+
+  h2 { font-size: 20px; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+
+  /* ── Kanban ── */
+  .kanban { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 12px; }
+  .col { min-width: 148px; max-width: 148px; }
+  .col-header { border-radius: 8px 8px 0 0; padding: 10px 12px 8px;
+                font-size: 12px; font-weight: 600; color: #fff; line-height: 1.3; }
+  .col-body { background: #1e293b; border: 1px solid #334155; border-top: none;
+              border-radius: 0 0 8px 8px; padding: 10px; min-height: 80px; }
+  .col-num { font-size: 20px; font-weight: 800; color: #f8fafc; }
+  .col-label { font-size: 11px; color: #64748b; margin-top: 2px; }
+  .col-badge { display: inline-block; background: #0f172a; border-radius: 4px;
+               padding: 2px 7px; font-size: 11px; color: #94a3b8; margin-top: 6px; }
+  .col-sep { width: 2px; background: #334155; border-radius: 2px; align-self: stretch;
+             margin: 0 2px; flex-shrink: 0; }
+  .sep-label { writing-mode: vertical-lr; font-size: 10px; color: #475569;
+               text-align: center; padding: 8px 0; transform: rotate(180deg); }
+
+  /* ── Flow diagram ── */
+  .flow { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+  .flow-node { background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+               padding: 10px 14px; font-size: 13px; position: relative; }
+  .flow-node .id { font-size: 11px; color: #64748b; font-family: monospace; }
+  .flow-node .title { font-weight: 600; color: #f8fafc; margin-top: 2px; }
+  .flow-node .prob { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+  .flow-node.terminal { border-style: dashed; }
+  .flow-arrow { color: #475569; font-size: 20px; align-self: center; flex-shrink: 0; }
+  .flow-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+              align-self: center; }
+
+  /* ── Two-step loss ── */
+  .loss-flow { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; margin-top: 8px; }
+  .step-box { background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+              padding: 16px; flex: 1; min-width: 200px; }
+  .step-box h4 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .step-box p { font-size: 12px; color: #94a3b8; line-height: 1.5; }
+  .step-num { display: inline-flex; align-items: center; justify-content: center;
+              width: 22px; height: 22px; border-radius: 50%; font-size: 12px;
+              font-weight: 700; margin-right: 6px; flex-shrink: 0; }
+  .step-arrow { display: flex; align-items: center; color: #475569; font-size: 22px; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px; }
+  th { background: #1e293b; color: #94a3b8; text-align: left; padding: 9px 12px;
+       font-weight: 600; border-bottom: 1px solid #334155; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  tr:hover td { background: #1e293b44; }
+  code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+         background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #7dd3fc; }
+
+  /* ── Badges ── */
+  .badge { display: inline-block; border-radius: 5px; padding: 2px 9px;
+           font-size: 11px; font-weight: 600; }
+  .badge-blue   { background: #1e40af33; color: #60a5fa; border: 1px solid #1e40af55; }
+  .badge-green  { background: #14532d33; color: #4ade80; border: 1px solid #14532d55; }
+  .badge-red    { background: #7f1d1d33; color: #f87171; border: 1px solid #7f1d1d55; }
+  .badge-orange { background: #7c2d1233; color: #fb923c; border: 1px solid #7c2d1255; }
+  .badge-gray   { background: #1e293b; color: #64748b; border: 1px solid #334155; }
+  .badge-new    { background: #1e3a5f33; color: #93c5fd; border: 1px solid #1e3a5f88; }
+
+  /* ── Grid cards ── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+  .card h4 { font-size: 13px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+  .card .meta { font-size: 11px; color: #64748b; margin-bottom: 8px; }
+  .card ul { list-style: none; }
+  .card ul li { font-size: 12px; color: #94a3b8; padding: 3px 0;
+                border-bottom: 1px solid #0f172a; display: flex; gap: 6px; }
+  .card ul li:last-child { border: none; }
+  .req { color: #f87171; font-size: 10px; align-self: center; }
+
+  /* ── Migration info ── */
+  .mig { background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+         padding: 16px; margin-bottom: 12px; }
+  .mig-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .mig-num { background: #3b82f6; color: #fff; padding: 4px 10px; border-radius: 6px;
+             font-size: 12px; font-weight: 700; font-family: monospace; }
+  .mig-title { font-size: 14px; font-weight: 600; color: #f8fafc; }
+  .mig pre { background: #0f172a; border-radius: 6px; padding: 12px; font-size: 11px;
+             color: #7dd3fc; font-family: 'SF Mono', monospace; overflow-x: auto;
+             line-height: 1.6; }
+
+  /* ── Color dot ── */
+  .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+         vertical-align: middle; margin-right: 6px; flex-shrink: 0; }
+
+  /* ── Summary bar ── */
+  .summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  .sum-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+              padding: 14px 20px; flex: 1; min-width: 140px; }
+  .sum-card .num { font-size: 28px; font-weight: 800; color: #f8fafc; }
+  .sum-card .lbl { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+  hr { border: none; border-top: 1px solid #1e293b; margin: 20px 0; }
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+
+<nav>
+  <h1>SALES 2.0</h1>
+  <button class="active" onclick="show('funnel')">Воронка</button>
+  <button onclick="show('loss')">Закрытие в отказ</button>
+  <button onclick="show('reasons')">Причины отказа</button>
+  <button onclick="show('plan')">План / Факт</button>
+  <button onclick="show('migrations')">Миграции</button>
+</nav>
+
+<!-- ════════════════ ВОРОНКА ════════════════ -->
+<div id="tab-funnel" class="section active">
+  <h2>Воронка продаж — 12 стадий</h2>
+  <p class="subtitle">9 продажных стадий + 3 терминальных · Источник истины: stages.py · Валюта: BYN</p>
+
+  <div class="summary">
+    <div class="sum-card"><div class="num">9</div><div class="lbl">продажных стадий</div></div>
+    <div class="sum-card"><div class="num">3</div><div class="lbl">терминальных</div></div>
+    <div class="sum-card"><div class="num">12</div><div class="lbl">итого в STAGES</div></div>
+    <div class="sum-card"><div class="num">2-шаг</div><div class="lbl">закрытие в отказ</div></div>
+  </div>
+
+  <!-- Kanban columns -->
+  <div class="kanban">
+    <div class="col">
+      <div class="col-header" style="background:#3B82F6">Новая заявка</div>
+      <div class="col-body">
+        <div class="col-num">—</div>
+        <div class="col-label">обязательных полей</div>
+        <span class="col-badge"><code>new</code></span>
+        <div class="col-label" style="margin-top:6px">prob 5%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#6366F1">Взят в работу</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:13px;margin-top:4px">Имя + тел.</div>
+        <span class="col-badge"><code>in_work</code></span>
+        <div class="col-label" style="margin-top:6px">prob 10%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#8B5CF6">Квалифицирован</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:11px;margin-top:4px">ЛПР · Бюджет · Квалиф.</div>
+        <span class="col-badge"><code>qual</code></span>
+        <div class="col-label" style="margin-top:6px">prob 20%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#F59E0B">Встреча назначена</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Дата встречи</div>
+        <span class="col-badge"><code>meeting</code></span>
+        <div class="col-label" style="margin-top:6px">prob 35%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#F97316">Цена запрошена</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Позиции сделки</div>
+        <span class="col-badge"><code>price_req</code></span>
+        <div class="col-label" style="margin-top:6px">prob 45%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#EAB308">Есть цена</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Сумма + дата</div>
+        <span class="col-badge"><code>price_ready</code></span>
+        <div class="col-label" style="margin-top:6px">prob 55%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#14B8A6">Счёт отправлен</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Invoice posted</div>
+        <span class="col-badge"><code>invoice_sent</code></span>
+        <div class="col-label" style="margin-top:6px">prob 70%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#06B6D4">Счёт защищён</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Close date</div>
+        <span class="col-badge"><code>invoice_appr</code></span>
+        <div class="col-label" style="margin-top:6px">prob 80%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#10B981">Договор / Предоплата</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Contract posted</div>
+        <span class="col-badge"><code>contract</code></span>
+        <div class="col-label" style="margin-top:6px">prob 90%</div>
+      </div>
+    </div>
+
+    <div class="col-sep"><div class="sep-label">терминалы</div></div>
+
+    <div class="col">
+      <div class="col-header" style="background:#FB923C">Условный отказ</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">Ждёт РОПа</div>
+        <span class="col-badge"><code>cond_lost</code></span>
+        <div class="col-label" style="margin-top:6px">prob 5%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#22C55E">Закрыто: Успешно</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">closed_date</div>
+        <span class="col-badge"><code>won</code></span>
+        <div class="col-label" style="margin-top:6px">prob 100%</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-header" style="background:#EF4444">Закрыто: Отказ</div>
+      <div class="col-body">
+        <div class="col-num" style="font-size:12px;margin-top:4px">reason_code!</div>
+        <span class="col-badge"><code>lost</code></span>
+        <div class="col-label" style="margin-top:6px">prob 0%</div>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+  <h2 style="margin-bottom:16px">Обязательные поля по стадии</h2>
+  <table>
+    <thead>
+      <tr><th>id</th><th>Стадия</th><th>Обязательно для перехода</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>new</code></td><td>Новая заявка</td><td><span class="badge badge-gray">нет ограничений</span></td></tr>
+      <tr><td><code>in_work</code></td><td>Взят в работу</td><td>Имя контакта, телефон</td></tr>
+      <tr><td><code>qual</code></td><td>Квалифицирован (ЛПР)</td><td>ЛПР (контакт), бюджет (<code>amount</code>), квалификация, <code>next_step</code></td></tr>
+      <tr><td><code>meeting</code></td><td>Встреча назначена</td><td>Задача с <code>due_at</code> (дата встречи), ответственный</td></tr>
+      <tr><td><code>price_req</code></td><td>Цена запрошена</td><td>Хотя бы одна позиция сделки (<code>deal_item</code>), <code>next_step</code></td></tr>
+      <tr><td><code>price_ready</code></td><td>Есть цена</td><td><code>amount</code> &gt; 0, <code>expected_close_date</code>, <code>next_step</code></td></tr>
+      <tr><td><code>invoice_sent</code></td><td>Счёт отправлен</td><td>Документ <code>invoice</code> в статусе <code>posted</code>, <code>expected_close_date</code></td></tr>
+      <tr><td><code>invoice_appr</code></td><td>Счёт защищён</td><td><code>expected_close_date</code>, подтверждение защиты</td></tr>
+      <tr><td><code>contract</code></td><td>Договор / Предоплата</td><td>Документ <code>contract</code> или <code>invoice→paid</code>, <code>expected_close_date</code></td></tr>
+      <tr><td><code>cond_lost</code></td><td>Условный отказ</td><td>Автоматически создаётся approval-запрос для РОПа</td></tr>
+      <tr><td><code>lost</code></td><td>Закрыто: Отказ</td><td><span class="badge badge-red">lost_reason_code обязателен</span></td></tr>
+      <tr><td><code>won</code></td><td>Закрыто: Успешно</td><td><code>closed_date</code> = today (ставится автоматически)</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════════ ЗАКРЫТИЕ В ОТКАЗ ════════════════ -->
+<div id="tab-loss" class="section">
+  <h2>Двухшаговое закрытие в отказ</h2>
+  <p class="subtitle">Менеджер не может самостоятельно закрыть сделку в «Отказ» — нужно согласование РОПа</p>
+
+  <div class="loss-flow">
+    <div class="step-box" style="border-color:#6366F155">
+      <h4><span class="step-num" style="background:#6366F133;color:#818cf8">1</span>Менеджер</h4>
+      <p>Перетаскивает карточку в колонку <strong style="color:#fb923c">«Условный отказ»</strong> (<code>cond_lost</code>).</p>
+      <p style="margin-top:8px">Появляется диалог: <em>«Отправить на согласование РОПа?»</em></p>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step-box" style="border-color:#F59E0B55">
+      <h4><span class="step-num" style="background:#F59E0B33;color:#fbbf24">2</span>Система</h4>
+      <p>Создаёт запрос <code>approvals.request(route="РОП")</code>.</p>
+      <p style="margin-top:8px">Сделка висит в <code>cond_lost</code> (prob 5%, не считается закрытой).</p>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step-box" style="border-color:#22C55E44">
+      <h4><span class="step-num" style="background:#22C55E22;color:#4ade80">3a</span>РОП согласовал</h4>
+      <p>Стадия → <strong style="color:#ef4444">«Закрыто: Отказ»</strong> (<code>lost</code>).</p>
+      <p style="margin-top:8px">Обязателен выбор <code>lost_reason_code</code> из 9 причин.</p>
+      <p style="margin-top:4px">Emit: <code>sales.deal.lost</code></p>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step-box" style="border-color:#3b82f655">
+      <h4><span class="step-num" style="background:#3b82f622;color:#60a5fa">3b</span>РОП отклонил</h4>
+      <p>Сделка <strong>возвращается</strong> на предыдущую стадию.</p>
+      <p style="margin-top:8px">Продавец продолжает работу.</p>
+    </div>
+  </div>
+
+  <hr>
+
+  <h2 style="margin-bottom:12px">API эндпоинты (SALES-40)</h2>
+  <table>
+    <thead><tr><th>Метод</th><th>URL</th><th>Кто</th><th>Что делает</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-blue">POST</span></td>
+        <td><code>/sales/deals/{id}/mark-conditional-lost</code></td>
+        <td>Менеджер</td>
+        <td>→ <code>cond_lost</code> + создаёт approval для РОПа</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-blue">POST</span></td>
+        <td><code>/sales/deals/{id}/lose</code></td>
+        <td>РОП / система</td>
+        <td><code>{reason_code, comment?}</code> → <code>lost</code> + <code>closed_date</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-blue">POST</span></td>
+        <td><code>/sales/deals/{id}/win</code></td>
+        <td>Менеджер / логистика</td>
+        <td>→ <code>won</code> + <code>closed_date</code> + emit <code>sales.deal.won</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-green">GET</span></td>
+        <td><code>/sales/loss-reasons</code></td>
+        <td>Все</td>
+        <td>Список активных причин для выпадашки UI</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════════ ПРИЧИНЫ ОТКАЗА ════════════════ -->
+<div id="tab-reasons" class="section">
+  <h2>Справочник причин отказа</h2>
+  <p class="subtitle">9 кодов · таблица <code>sales.loss_reason</code> · миграции 0031 + 0034</p>
+
+  <div class="summary">
+    <div class="sum-card"><div class="num">7</div><div class="lbl">в миграции 0031</div></div>
+    <div class="sum-card"><div class="num" style="color:#4ade80">+2</div><div class="lbl">в миграции 0034 (новые)</div></div>
+    <div class="sum-card"><div class="num">9</div><div class="lbl">итого причин</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>#</th><th>code</th><th>Название (BYN-рынок)</th><th>Маппинг реальных</th><th>Миграция</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><code>price</code></td>
+        <td>Дорого / не прошли по цене</td>
+        <td>Дорого</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>competitor</code></td>
+        <td>Ушёл к конкуренту</td>
+        <td>Уже работают с другими</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>no_need</code></td>
+        <td>Нет потребности</td>
+        <td>Нет нужды</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>no_answer</code></td>
+        <td>Не дозвонились / нет ответа</td>
+        <td>Нет ответа</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>timing</code></td>
+        <td>Не тот срок поставки</td>
+        <td>Срок доставки слишком долгий</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>no_stock</code></td>
+        <td>Нет товара на складе</td>
+        <td>Нет в наличии</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>other</code></td>
+        <td>Другое</td>
+        <td>Всё остальное</td>
+        <td><span class="badge badge-gray">0031</span></td>
+      </tr>
+      <tr style="background:#14532d11">
+        <td>8</td>
+        <td><code>territory</code></td>
+        <td><strong>Не подходим по территории</strong></td>
+        <td>Работают только локально / другой регион</td>
+        <td><span class="badge badge-new">0034 ★</span></td>
+      </tr>
+      <tr style="background:#14532d11">
+        <td>9</td>
+        <td><code>liquidated</code></td>
+        <td><strong>Контрагент ликвидирован / не работает</strong></td>
+        <td>Компания закрылась</td>
+        <td><span class="badge badge-new">0034 ★</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="font-size:12px;color:#64748b">Поля таблицы: <code>id · code (unique) · title · sort_order · active (bool)</code> — мягкое скрытие через <code>active=false</code> без удаления.</p>
+</div>
+
+<!-- ════════════════ ПЛАН / ФАКТ ════════════════ -->
+<div id="tab-plan" class="section">
+  <h2>Личный план продаж (SALES-47)</h2>
+  <p class="subtitle">Таблица <code>sales.plan_target</code> · 16 метрик · валюта BYN · миграция 0035</p>
+
+  <div class="summary">
+    <div class="sum-card"><div class="num">16</div><div class="lbl">метрик плана</div></div>
+    <div class="sum-card"><div class="num">5</div><div class="lbl">типов периода</div></div>
+    <div class="sum-card"><div class="num">3</div><div class="lbl">статуса (draft→approved)</div></div>
+    <div class="sum-card"><div class="num">BYN</div><div class="lbl">валюта денежных метрик</div></div>
+  </div>
+
+  <h2 style="margin-bottom:12px;font-size:16px">Метрики</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>metric</th><th>Название</th><th>Ед.</th><th>Источник факта</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td><code>calls</code></td><td>Звонки (все)</td><td>шт</td><td><code>activity.kpi_key = "calls"</code></td></tr>
+      <tr><td>2</td><td><code>cold_calls</code></td><td>Холодные звонки</td><td>шт</td><td><code>activity.kpi_key = "cold_calls"</code></td></tr>
+      <tr><td>3</td><td><code>leads</code></td><td>Лиды (входящие заявки)</td><td>шт</td><td><code>lead.created_at</code> за период</td></tr>
+      <tr><td>4</td><td><code>deal_activities</code></td><td>Дела с действующими сделками</td><td>шт</td><td><code>activity.kpi_key = "deal_activities"</code></td></tr>
+      <tr><td>5</td><td><code>new_deals_count</code></td><td>Новые сделки, шт</td><td>шт</td><td><code>deal.created_at</code> за период</td></tr>
+      <tr><td>6</td><td><code>new_deals_amount</code></td><td>Новые сделки, сумма</td><td>BYN</td><td>Σ <code>deal.amount</code> по новым</td></tr>
+      <tr><td>7</td><td><code>invoice_payment_conv</code></td><td>Конверсия счёт → оплата</td><td>%</td><td><code>won / invoice_sent</code> за период</td></tr>
+      <tr><td>8</td><td><code>tenders_count</code></td><td>Тендеры, шт</td><td>шт</td><td><code>activity.kpi_key = "tenders_count"</code></td></tr>
+      <tr><td>9</td><td><code>tenders_amount</code></td><td>Тендеры, сумма</td><td>BYN</td><td><code>activity.kpi_key = "tenders_amount"</code></td></tr>
+      <tr><td>10</td><td><code>won_count</code></td><td>Успешных сделок, шт</td><td>шт</td><td><code>stage=won, closed_date</code> за период</td></tr>
+      <tr><td>11</td><td><code>won_amount</code></td><td>Успешных сделок, сумма</td><td>BYN</td><td>Σ <code>deal.amount</code> по won</td></tr>
+      <tr><td>12</td><td><code>future_won</code></td><td>Успешные → перенесены на будущее</td><td>шт</td><td><code>activity.kpi_key = "future_won"</code></td></tr>
+      <tr><td>13</td><td><code>payments_vat</code></td><td>Оплаты с НДС</td><td>BYN</td><td><code>activity.kpi_key = "payments_vat"</code></td></tr>
+      <tr><td>14</td><td><code>shipments</code></td><td>Отгрузки</td><td>BYN</td><td><code>activity.kpi_key = "shipments"</code></td></tr>
+      <tr><td>15</td><td><code>gross_profit</code></td><td>Прибыль валовая</td><td>BYN</td><td><code>activity.kpi_key = "gross_profit"</code></td></tr>
+      <tr><td>16</td><td><code>avg_deal</code></td><td>Средний чек</td><td>BYN</td><td><code>won_amount / won_count</code> (вычисляемое)</td></tr>
+    </tbody>
+  </table>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap">
+    <div>
+      <h2 style="font-size:15px;margin-bottom:10px">Периоды</h2>
+      <table style="width:auto">
+        <thead><tr><th>period_type</th><th>period_key пример</th></tr></thead>
+        <tbody>
+          <tr><td><code>day</code></td><td><code>2026-06-12</code></td></tr>
+          <tr><td><code>week</code></td><td><code>2026-W24</code></td></tr>
+          <tr><td><code>month</code></td><td><code>2026-06</code></td></tr>
+          <tr><td><code>quarter</code></td><td><code>2026-Q2</code></td></tr>
+          <tr><td><code>year</code></td><td><code>2026</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h2 style="font-size:15px;margin-bottom:10px">Статусы плана</h2>
+      <table style="width:auto">
+        <thead><tr><th>status</th><th>Смысл</th></tr></thead>
+        <tbody>
+          <tr><td><code>draft</code></td><td>Продавец заполняет</td></tr>
+          <tr><td><code>pending_approval</code></td><td>Отправлен РОПу</td></tr>
+          <tr><td><code>approved</code></td><td><span class="badge badge-green">Согласован ✓</span></td></tr>
+          <tr><td><code>rejected</code></td><td><span class="badge badge-red">Отклонён</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h2 style="font-size:15px;margin-bottom:10px">Схема plan_target</h2>
+      <table style="width:auto">
+        <thead><tr><th>Поле</th><th>Тип</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>int PK</td></tr>
+          <tr><td><code>owner_id</code></td><td>int (→ hr.employee)</td></tr>
+          <tr><td><code>metric</code></td><td>str(32)</td></tr>
+          <tr><td><code>period_type</code></td><td>str(8)</td></tr>
+          <tr><td><code>period_key</code></td><td>str(10)</td></tr>
+          <tr><td><code>target</code></td><td>Numeric(14,2) BYN</td></tr>
+          <tr><td><code>status</code></td><td>str(16)</td></tr>
+          <tr><td><code>approved_by</code></td><td>str(128) | null</td></tr>
+          <tr><td><code>approved_at</code></td><td>datetime | null</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ МИГРАЦИИ ════════════════ -->
+<div id="tab-migrations" class="section">
+  <h2>Миграции блока Сделки 2.0</h2>
+  <p class="subtitle">Цепочка: 0031 → 0032 → 0033 → 0034 → 0035</p>
+
+  <div class="mig">
+    <div class="mig-header">
+      <span class="mig-num">0031</span>
+      <span class="mig-title">SALES-40/43/44/49 — основные таблицы и поля сделки</span>
+      <span class="badge badge-gray">уже в БД</span>
+    </div>
+    <pre>+ deal.probability, expected_close_date, created_at, stage_changed_at
++ deal.lost_reason_code, lost_comment
++ message.read_at
++ CREATE TABLE sales.loss_reason (7 записей: price/competitor/no_need/no_answer/timing/no_stock/other)
++ CREATE TABLE sales.deal_stage_event</pre>
+  </div>
+
+  <div class="mig">
+    <div class="mig-header">
+      <span class="mig-num">0032</span>
+      <span class="mig-title">SALES-41 — задачи по сделке</span>
+      <span class="badge badge-gray">уже в БД</span>
+    </div>
+    <pre>+ CREATE TABLE sales.deal_task (id, deal_id, title, kind, assignee_id, due_at, status, result, created_at, done_at)</pre>
+  </div>
+
+  <div class="mig">
+    <div class="mig-header">
+      <span class="mig-num">0033</span>
+      <span class="mig-title">procurement: supplier_claim (другая сессия)</span>
+      <span class="badge badge-gray">уже в БД</span>
+    </div>
+    <pre>+ CREATE TABLE procurement.supplier_claim  (не касается sales)</pre>
+  </div>
+
+  <div class="mig" style="border-color:#22c55e55">
+    <div class="mig-header">
+      <span class="mig-num" style="background:#16a34a">0034</span>
+      <span class="mig-title">SALES-40/47 — territory/liquidated + Activity.owner_id</span>
+      <span class="badge badge-new">★ новая</span>
+    </div>
+    <pre>+ INSERT INTO sales.loss_reason: territory ("Не подходим по территории"), liquidated ("Контрагент ликвидирован")
++ ALTER TABLE sales.activity ADD COLUMN owner_id INTEGER  -- мягкая ссылка на hr.employee</pre>
+  </div>
+
+  <div class="mig" style="border-color:#22c55e55">
+    <div class="mig-header">
+      <span class="mig-num" style="background:#16a34a">0035</span>
+      <span class="mig-title">SALES-47 — таблица plan_target</span>
+      <span class="badge badge-new">★ новая</span>
+    </div>
+    <pre>+ CREATE TABLE sales.plan_target (
+    id             SERIAL PRIMARY KEY,
+    owner_id       INTEGER NOT NULL,       -- hr.employee (мягкая ссылка)
+    metric         VARCHAR(32) NOT NULL,
+    period_type    VARCHAR(8) NOT NULL,    -- day/week/month/quarter/year
+    period_key     VARCHAR(10) NOT NULL,   -- 2026-06-12 / 2026-W24 / 2026-06 / 2026-Q2 / 2026
+    target         NUMERIC(14,2) NOT NULL,
+    status         VARCHAR(16) DEFAULT 'draft',
+    approved_by    VARCHAR(128),
+    approved_at    TIMESTAMP,
+    UNIQUE (owner_id, metric, period_type, period_key)  -- uq_plan_target
+  )</pre>
+  </div>
+
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px;margin-top:8px">
+    <h4 style="color:#f8fafc;margin-bottom:8px">Применить миграции (dev)</h4>
+    <pre style="background:#0f172a;border-radius:6px;padding:12px;font-size:12px;color:#7dd3fc;font-family:monospace">
+# SQLite dev — пересоздать (create_all автоматически подхватит новые модели)
+Remove-Item .\dev.db -ErrorAction SilentlyContinue
+$env:AIOS_DATABASE_URL = "sqlite+aiosqlite:///./dev.db"
+$env:PYTHONPATH = "."
+python scripts/seed.py
+
+# Postgres (сервер) — alembic
+alembic upgrade head</pre>
+  </div>
+</div>
+
+<script>
+function show(tab) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

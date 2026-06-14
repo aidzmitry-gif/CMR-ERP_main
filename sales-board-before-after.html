@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сделки 2.0 — До / После</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-pop:0 8px 24px rgba(16,24,40,.10);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:var(--ink);font-size:14px}
+
+  /* верхняя панель управления сравнением */
+  .topbar{position:sticky;top:0;z-index:100;background:#0f172a;border-bottom:1px solid #1e293b;
+       padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .topbar h1{color:#f8fafc;font-size:15px;font-weight:700}
+  .topbar .seg{display:flex;gap:3px;background:#1e293b;border:1px solid #334155;border-radius:9px;padding:3px}
+  .topbar .seg button{border:none;background:none;color:#94a3b8;padding:6px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
+  .topbar .seg button.active{background:var(--brand);color:#fff}
+  .topbar .legend{margin-left:auto;color:#64748b;font-size:12px;display:flex;gap:14px;flex-wrap:wrap}
+  .topbar .legend b{color:#cbd5e1}
+
+  .stage-wrap{padding:18px;display:flex;gap:18px;justify-content:center;align-items:flex-start}
+  .frame{background:var(--canvas);border-radius:14px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.4);width:100%;max-width:1180px}
+  .frame .frame-label{background:#1e293b;color:#fff;font-size:13px;font-weight:700;padding:8px 16px;display:flex;align-items:center;gap:8px}
+  .frame .frame-label .tag{font-size:11px;font-weight:600;border-radius:6px;padding:2px 9px}
+  .tag.bad{background:#7f1d1d;color:#fca5a5}
+  .tag.good{background:#14532d;color:#86efac}
+
+  /* режим «рядом» — две колонки, уменьшенные */
+  .stage-wrap.side{gap:14px}
+  .stage-wrap.side .frame{max-width:49%}
+  .stage-wrap.side .scaled{transform-origin:top left}
+
+  /* ── общий стиль приложения ── */
+  .screen{display:flex;height:780px;overflow:hidden}
+  .side-nav{width:180px;background:#fff;border-right:1px solid #EAECEF;flex-shrink:0;padding:14px 10px;font-size:13px}
+  .side-nav .logo{font-weight:800;font-size:14px;padding:4px 8px 14px}
+  .side-nav .logo small{display:block;font-weight:500;color:#9aa3b0;font-size:10px;margin-top:2px}
+  .nav-item{padding:8px 10px;border-radius:8px;color:#475467;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  .nav-item .d{width:7px;height:7px;border-radius:50%;background:#cbd5e1}
+  .nav-item.active .d{background:var(--brand)}
+  .side-nav .foot{position:absolute;bottom:14px;font-size:11px;color:#9aa3b0}
+
+  .content{flex:1;overflow:auto;padding:18px 20px;position:relative}
+  .crumb{font-size:13px;color:#9aa3b0;margin-bottom:14px}
+  .crumb b{color:var(--ink)}
+
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .search{position:relative;flex:1;min-width:200px;max-width:340px}
+  .search input{width:100%;border:1px solid #E5E7EB;background:#fff;border-radius:8px;padding:8px 12px 8px 32px;font-size:13px;outline:none}
+  .search::before{content:"🔍";position:absolute;left:10px;top:7px;font-size:12px;opacity:.5}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid #E5E7EB;background:#fff;border-radius:8px;padding:8px 13px;font-size:13px;font-weight:500;color:#475467;cursor:pointer}
+  .btn.warn{border-color:#FCD34D;color:#B45309}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;margin-left:auto}
+
+  .periods{display:flex;gap:2px;border:1px solid #E5E7EB;border-radius:9px;padding:3px;background:#fff}
+  .periods button{border:none;background:none;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer}
+  .periods button.active{background:var(--brand-100);color:var(--brand-700)}
+
+  /* карточки сделок (общие) */
+  .board{display:flex;gap:13px;overflow-x:auto;padding-bottom:8px}
+  .col{width:262px;flex-shrink:0;display:flex;flex-direction:column;gap:11px}
+  .col-head{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
+  .col-head .stripe{height:4px}
+  .col-head .ch{padding:10px 13px}
+  .col-head .ch-title{font-weight:600;font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
+  .col-head .ch-title .n{font-size:11px;color:#9aa3b0;font-weight:600;background:#F4F5F7;border-radius:6px;padding:1px 7px}
+  .col-head .ch-meta{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .col-head .ch-w{font-size:11px;font-weight:600;color:var(--brand-700);margin-top:2px}
+  .card{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:12px;cursor:pointer}
+  .card:hover{box-shadow:var(--shadow-pop)}
+  .c-top{display:flex;justify-content:space-between;align-items:center}
+  .num{font-size:11px;color:var(--muted)}
+  .c-badges{display:flex;gap:5px;align-items:center}
+  .pri{font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 6px}
+  .pri.high{background:#FEE2E2;color:#B91C1C}.pri.mid{background:#FEF3C7;color:#92400E}.pri.low{background:#E0E7FF;color:#3730A3}
+  .days{font-size:9.5px;font-weight:600;border-radius:99px;padding:1px 6px;background:#F1F3F5;color:#64748b}
+  .days.stuck{background:#FEF3C7;color:#B45309}
+  .star{font-size:12px;color:#CBD5E1}.star.on{color:#F59E0B}
+  .company{font-weight:600;margin-top:7px;font-size:13.5px}
+  .desc{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .money-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .money{font-weight:700;font-size:14px}
+  .wbadge{background:var(--brand-50);color:var(--brand-700);border-radius:6px;padding:2px 6px;font-size:10.5px;font-weight:600}
+  .next{font-size:11.5px;color:var(--muted);margin-top:8px}
+  .next.alert{background:#FEF2F2;color:#B91C1C;border-radius:7px;padding:5px 8px}
+  .next.todo{background:#FFFBEB;color:#92400E;border-radius:7px;padding:5px 8px}
+  .owner{font-size:11px;color:var(--muted);margin-top:8px;display:flex;justify-content:space-between}
+  .res{display:inline-block;border-radius:6px;padding:2px 8px;font-size:9.5px;font-weight:700;margin-top:8px}
+  .res.won{background:#DCFCE7;color:#15803D}.res.lost{background:#FEE2E2;color:#B91C1C}.res.cond{background:#FFEDD5;color:#C2410C}.res.exec{background:#DBEAFE;color:#1D4ED8}
+  .add{display:flex;align-items:center;justify-content:center;gap:5px;border:1px dashed #CBD5E1;border-radius:12px;padding:9px;font-size:11.5px;color:#94a3b8;cursor:pointer}
+  .col-sep{display:flex;align-items:stretch;flex-shrink:0}.col-sep .ln{width:2px;background:#E5E7EB;border-radius:2px;margin:0 1px}
+
+  /* ════ BEFORE: 5 больших KPI-карточек ════ */
+  .b-banner{background:#EEF4FF;border:1px solid #DBE6FF;border-radius:12px;padding:10px 14px;font-size:11.5px;color:#3730A3;margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .b-banner .pill{background:var(--brand);color:#fff;border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700}
+  .pf-head{display:flex;justify-content:space-between;align-items:center;margin:6px 0 12px}
+  .pf-head h2{font-size:15px;font-weight:700}
+  .myplan{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start}
+  .myplan .mp-l .t{font-weight:700;font-size:14px}
+  .myplan .mp-l .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .myplan .mp-l .ok{display:inline-block;margin-top:8px;border:1px solid #E5E7EB;border-radius:7px;padding:3px 9px;font-size:11px;color:#475467}
+  .myplan .mp-badge{background:#FEF3C7;color:#92400E;border-radius:99px;padding:3px 11px;font-size:11px;font-weight:600}
+  .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
+  .kpi{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:14px}
+  .kpi .k-top{display:flex;justify-content:space-between;align-items:flex-start}
+  .kpi .k-ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .kpi .k-lbl{font-size:11px;color:var(--muted);line-height:1.25;margin-left:8px;flex:1}
+  .kpi .k-val{font-size:18px;font-weight:700;margin-top:12px}
+  .kpi .k-val small{font-size:12px;font-weight:400;color:#9aa3b0}
+  .kpi .k-bar{height:5px;border-radius:99px;background:#EEF0F2;overflow:hidden;margin-top:8px}
+  .kpi .k-bar span{display:block;height:100%;border-radius:99px}
+  .kpi .k-pct{font-size:11px;color:var(--muted);margin-top:6px}
+
+  /* ════ AFTER: sticky-скорборд строкой ════ */
+  .scoreboard{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:13px 15px;margin-bottom:8px;position:sticky;top:0;z-index:20}
+  .sb-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+  .sb-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px}
+  .sb-title .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.15)}
+  .sb-sub{font-size:11.5px;color:var(--muted);font-weight:400}
+  .sb-row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr}
+  .cell{padding:3px 13px;border-left:1px solid #F1F3F5}
+  .cell:first-child{border-left:none;padding-left:3px}
+  .cell .lbl{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .cell .val{font-size:16px;font-weight:700;margin-top:4px;line-height:1.1}
+  .cell .val .plan{font-size:11px;font-weight:400;color:#9aa3b0}
+  .cell.headline .val{font-size:22px}
+  .cell .bar{height:4px;border-radius:99px;background:#EEF0F2;overflow:hidden;margin-top:7px}
+  .cell .bar span{display:block;height:100%;border-radius:99px}
+  .cell .pct{font-size:10px;margin-top:5px;font-weight:600;display:flex;align-items:center;gap:4px}
+  .cell .pct .dot{width:5px;height:5px;border-radius:50%}
+  .pipeline{display:flex;align-items:center;gap:14px;background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:9px 14px;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+  .pipeline .k{font-size:11px;color:var(--muted)}.pipeline b{color:var(--ink)}
+  .pipeline .sep{width:1px;height:16px;background:#ECEEF1}
+  .pipeline .chip{margin-left:auto;background:var(--brand-50);color:var(--brand-700);border-radius:7px;padding:3px 9px;font-weight:600;font-size:11.5px}
+  .view-sw{display:flex;justify-content:flex-end;margin-bottom:10px}
+  .seg2{display:flex;gap:2px;border:1px solid #E5E7EB;border-radius:9px;padding:3px;background:#fff}
+  .seg2 button{border:none;background:none;width:28px;height:26px;border-radius:7px;color:#9aa3b0;cursor:pointer}
+  .seg2 button.active{background:var(--brand-100);color:var(--brand-700)}
+
+  .diffnote{margin:16px 0 4px;font-size:11.5px;color:#9aa3b0;display:flex;gap:7px}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+
+<div class="topbar">
+  <h1>Сделки 2.0</h1>
+  <div class="seg" id="modeSeg">
+    <button data-m="before">До</button>
+    <button data-m="after">После</button>
+    <button data-m="side" class="active">Рядом</button>
+  </div>
+  <div class="legend">
+    <span><b>До:</b> 5 KPI-карточек посередине, уезжают при скролле · ₽ · 6 стадий</span>
+    <span><b>После:</b> sticky-строка план/факт · BYN · 9 стадий + прогноз</span>
+  </div>
+</div>
+
+<div class="stage-wrap side" id="stageWrap">
+
+  <!-- ══════════════ BEFORE ══════════════ -->
+  <div class="frame" id="frame-before">
+    <div class="frame-label">До изменений <span class="tag bad">сейчас в проде</span></div>
+    <div class="screen">
+      <div class="side-nav">
+        <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+        <div class="nav-item active"><span class="d"></span>Сделки</div>
+        <div class="nav-item"><span class="d"></span>Лиды</div>
+        <div class="nav-item"><span class="d"></span>Чаты и дела</div>
+        <div class="nav-item"><span class="d"></span>Контрагенты</div>
+        <div class="nav-item"><span class="d"></span>Аналитика</div>
+      </div>
+      <div class="content">
+        <div class="crumb">CRM / <b>Сделки</b></div>
+        <div class="toolbar">
+          <div class="search"><input placeholder="Поиск сделок..."></div>
+          <button class="btn">⚙ Фильтры</button>
+          <button class="btn primary">＋ Создать сделку</button>
+        </div>
+
+        <div class="pf-head">
+          <h2>План / Факт</h2>
+          <div class="periods"><button class="active">День</button><button>Неделя</button><button>Месяц</button><button>Квартал</button><button>Год</button></div>
+        </div>
+
+        <!-- личный план -->
+        <div class="myplan">
+          <div class="mp-l">
+            <div class="t">Мой план · сегодня, 11 июня</div>
+            <div class="s">Иванов И.И. — личные цели продавца</div>
+            <div class="ok">👤 РОП согласовал</div>
+          </div>
+          <div class="mp-badge">● На согласовании у РОПа</div>
+        </div>
+
+        <!-- 5 больших KPI-карточек -->
+        <div class="kpi-grid">
+          <div class="kpi"><div class="k-top"><span class="k-ic" style="background:#EFF6FF;color:#2563EB">📞</span><span class="k-lbl">Звонки ключевым</span></div>
+            <div class="k-val">7 <small>/ 12</small></div><div class="k-bar"><span style="width:58%;background:#3B82F6"></span></div><div class="k-pct">58% выполнено</div></div>
+          <div class="kpi"><div class="k-top"><span class="k-ic" style="background:#EEF2FF;color:#4F46E5">☎</span><span class="k-lbl">Всего звонков</span></div>
+            <div class="k-val">17 <small>/ 30</small></div><div class="k-bar"><span style="width:57%;background:#6366F1"></span></div><div class="k-pct">57% выполнено</div></div>
+          <div class="kpi"><div class="k-top"><span class="k-ic" style="background:#ECFDF5;color:#059669">₽</span><span class="k-lbl">Сумма отгрузки</span></div>
+            <div class="k-val">218 400 ₽ <small>/ 400 000 ₽</small></div><div class="k-bar"><span style="width:55%;background:#10B981"></span></div><div class="k-pct">55% выполнено</div></div>
+          <div class="kpi"><div class="k-top"><span class="k-ic" style="background:#ECFEFF;color:#0891B2">❄</span><span class="k-lbl">Холодные звонки</span></div>
+            <div class="k-val">11 <small>/ 20</small></div><div class="k-bar"><span style="width:55%;background:#06B6D4"></span></div><div class="k-pct">55% выполнено</div></div>
+          <div class="kpi"><div class="k-top"><span class="k-ic" style="background:#F8FAFC;color:#64748B">📄</span><span class="k-lbl">Обработка заявок</span></div>
+            <div class="k-val">4 <small>/ 8</small></div><div class="k-bar"><span style="width:50%;background:#94A3B8"></span></div><div class="k-pct">50% выполнено</div></div>
+        </div>
+
+        <div class="view-sw"><div class="seg2"><button class="active">▦</button><button>≡</button></div></div>
+
+        <!-- воронка 6 стадий, ₽ -->
+        <div class="board">
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#3B82F6"></div><div class="ch"><div class="ch-title">Новая заявка <span class="n">1</span></div><div class="ch-meta">1 · 1 250 000 ₽</div><div class="ch-w">взвешенно: 125 000 ₽</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1041</span><div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 2 дн</span></div></div>
+              <div class="company">СтройМеталл</div><div class="desc">Арматура A500C, 12 т</div>
+              <div class="money-row"><span class="money">1 250 000 ₽</span><span class="wbadge">10% · ≈ 125 000 ₽</span></div>
+              <div class="next alert">📞 Перезвонить · сегодня 15:00</div><div class="owner"><span>👤 Иванов И.И.</span></div></div>
+            <div class="add">＋ Добавить сделку</div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#8B5CF6"></div><div class="ch"><div class="ch-title">Квалификация <span class="n">1</span></div><div class="ch-meta">1 · 480 000 ₽</div><div class="ch-w">взвешенно: 144 000 ₽</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1043</span><div class="c-badges"><span class="pri mid">Средний</span><span class="days">🕒 5 дн</span></div></div>
+              <div class="company">ГомельАгро</div><div class="desc">Профлист C8, 800 м²</div>
+              <div class="money-row"><span class="money">480 000 ₽</span><span class="wbadge">30% · ≈ 144 000 ₽</span></div>
+              <div class="next alert">📋 Отправить КП · просрочено</div><div class="owner"><span>👤 Петров П.П.</span></div></div>
+            <div class="add">＋ Добавить сделку</div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#F59E0B"></div><div class="ch"><div class="ch-title">Коммерческое предл. <span class="n">1</span></div><div class="ch-meta">1 · 3 200 000 ₽</div><div class="ch-w">взвешенно: 1 600 000 ₽</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1039</span><div class="c-badges"><span class="pri mid">Средний</span></div></div>
+              <div class="company">МинскСтрой</div><div class="desc">Балка двутавровая 20Б</div>
+              <div class="money-row"><span class="money">3 200 000 ₽</span><span class="wbadge">50% · ≈ 1.6 млн</span></div>
+              <div class="next todo">💬 Согласовать цену</div><div class="owner"><span>👤 Иванов И.И.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#14B8A6"></div><div class="ch"><div class="ch-title">Согласование <span class="n">0</span></div><div class="ch-meta">0 · 0 ₽</div></div></div>
+            <div class="add">＋ Добавить сделку</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ AFTER ══════════════ -->
+  <div class="frame" id="frame-after">
+    <div class="frame-label">После — предложение РОПа <span class="tag good">макет</span></div>
+    <div class="screen">
+      <div class="side-nav">
+        <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+        <div class="nav-item active"><span class="d"></span>Сделки</div>
+        <div class="nav-item"><span class="d"></span>Лиды</div>
+        <div class="nav-item"><span class="d"></span>Постоянные клиенты</div>
+        <div class="nav-item"><span class="d"></span>РОП</div>
+        <div class="nav-item"><span class="d"></span>Контрагенты</div>
+      </div>
+      <div class="content">
+        <div class="crumb">CRM / <b>Сделки</b></div>
+        <div class="toolbar">
+          <div class="search"><input placeholder="Поиск сделок..."></div>
+          <button class="btn">⚙ Фильтры</button>
+          <button class="btn warn">🕒 Висяки</button>
+          <button class="btn primary">＋ Создать</button>
+        </div>
+
+        <!-- sticky-скорборд строкой -->
+        <div class="scoreboard">
+          <div class="sb-head">
+            <div class="sb-title"><span class="pulse"></span>План / Факт <span class="sb-sub">— Июнь 2026 · согласован РОПом</span></div>
+            <div class="periods"><button>День</button><button>Неделя</button><button class="active">Месяц</button><button>Квартал</button><button>Год</button></div>
+          </div>
+          <div class="sb-row">
+            <div class="cell headline"><div class="lbl">Выручка (отгрузки)</div><div class="val">642 000 <span class="plan">/ 700 000 Br</span></div><div class="bar"><span style="width:92%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>92%</div></div>
+            <div class="cell"><div class="lbl">Оплаты с НДС</div><div class="val">588 000<span class="plan"> / 680к</span></div><div class="bar"><span style="width:86%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>86%</div></div>
+            <div class="cell"><div class="lbl">Прибыль</div><div class="val">151 000<span class="plan"> / 165к</span></div><div class="bar"><span style="width:91%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>91%</div></div>
+            <div class="cell"><div class="lbl">Новые сделки</div><div class="val">84<span class="plan"> / 95</span></div><div class="bar"><span style="width:88%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>88%</div></div>
+            <div class="cell"><div class="lbl">Успешные</div><div class="val">31<span class="plan"> / 40</span></div><div class="bar"><span style="width:78%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>78%</div></div>
+            <div class="cell"><div class="lbl">Конв. счёт→опл</div><div class="val">68%<span class="plan"> / 75%</span></div><div class="bar"><span style="width:68%;background:var(--bad)"></span></div><div class="pct" style="color:var(--bad)"><span class="dot" style="background:var(--bad)"></span>91%</div></div>
+            <div class="cell"><div class="lbl">Звонки</div><div class="val">712<span class="plan"> / 800</span></div><div class="bar"><span style="width:89%;background:var(--warn)"></span></div><div class="pct" style="color:var(--warn)"><span class="dot" style="background:var(--warn)"></span>89%</div></div>
+            <div class="cell"><div class="lbl">Средний чек</div><div class="val">17 400<span class="plan"> / 15к</span></div><div class="bar"><span style="width:100%;background:var(--ok)"></span></div><div class="pct" style="color:var(--ok)"><span class="dot" style="background:var(--ok)"></span>116%</div></div>
+          </div>
+        </div>
+
+        <!-- pipeline -->
+        <div class="pipeline">
+          <span><span class="k">В работе:</span> <b>47</b> сделок</span><div class="sep"></div>
+          <span><span class="k">Pipeline:</span> <b>312 400 Br</b></span><div class="sep"></div>
+          <span><span class="k">Прогноз:</span> <b style="color:var(--brand-700)">≈ 168 200 Br</b></span><div class="sep"></div>
+          <span><span class="k">Висяки &gt;7д:</span> <b style="color:#B45309">6</b></span>
+          <span class="chip">Закроем месяц на ~92% плана</span>
+        </div>
+
+        <div class="view-sw"><div class="seg2"><button class="active">▦</button><button>≡</button></div></div>
+
+        <!-- воронка 9 стадий, BYN -->
+        <div class="board">
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#3B82F6"></div><div class="ch"><div class="ch-title">Новая заявка <span class="n">8</span></div><div class="ch-meta">8 · 96 200 Br</div><div class="ch-w">взвешенно: 4 810 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1042</span><div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span></div></div>
+              <div class="company">ТД «ВольтАвто»</div><div class="desc">АКБ 6СТ-190, 12 шт</div>
+              <div class="money-row"><span class="money">18 400 Br</span><span class="wbadge">5% · ≈ 920</span></div>
+              <div class="next">След: перезвонить, уточнить ЛПР</div><div class="owner"><span>👤 Орлов И.</span></div></div>
+            <div class="add">＋ Добавить</div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#6366F1"></div><div class="ch"><div class="ch-title">Взят в работу <span class="n">6</span></div><div class="ch-meta">6 · 84 500 Br</div><div class="ch-w">взвешенно: 8 450 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1038</span><div class="c-badges"><span class="pri high">Высокий</span><span class="days stuck">🕒 9 дн</span></div></div>
+              <div class="company">СТО «Гранд»</div><div class="desc">АКБ + зарядные</div>
+              <div class="money-row"><span class="money">22 100 Br</span><span class="wbadge">10% · ≈ 2 210</span></div>
+              <div class="next">След: квалифицировать ЛПР</div><div class="owner"><span>👤 Петрова А.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#8B5CF6"></div><div class="ch"><div class="ch-title">Квалифицирован <span class="n">5</span></div><div class="ch-meta">5 · 112 000 Br</div><div class="ch-w">взвешенно: 22 400 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1029</span><div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 2 дн</span></div></div>
+              <div class="company">ОАО «Белтранс»</div><div class="desc">Парк 40 ед.</div>
+              <div class="money-row"><span class="money">46 800 Br</span><span class="wbadge">20% · ≈ 9 360</span></div>
+              <div class="next">След: встреча с гл.инж.</div><div class="owner"><span>👤 Сидоров К.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#F59E0B"></div><div class="ch"><div class="ch-title">Встреча <span class="n">4</span></div><div class="ch-meta">4 · 98 300 Br</div><div class="ch-w">взвешенно: 34 405 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-1024</span><div class="c-badges"><span class="pri high">Высокий</span></div></div>
+              <div class="company">Автопарк №7</div><div class="desc">АКБ на год</div>
+              <div class="money-row"><span class="money">54 000 Br</span><span class="wbadge">35% · ≈ 18 900</span></div>
+              <div class="next">След: встреча 13.06 11:00</div><div class="owner"><span>👤 Сидоров К.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#10B981"></div><div class="ch"><div class="ch-title">Договор/Предоплата <span class="n">3</span></div><div class="ch-meta">3 · 89 600 Br</div><div class="ch-w">взвешенно: 80 640 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-0985</span><div class="c-badges"><span class="pri high">Высокий</span></div></div>
+              <div class="company">РУП «Белводхоз»</div><div class="desc">Предоплата 50%</div>
+              <div class="money-row"><span class="money">52 400 Br</span><span class="wbadge">90% · ≈ 47 160</span></div>
+              <div class="res exec">→ передать в исполнение</div><div class="owner"><span>👤 Петрова А.</span></div></div>
+          </div>
+          <div class="col-sep"><div class="ln"></div></div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#FB923C"></div><div class="ch"><div class="ch-title">Условный отказ <span class="n">2</span></div><div class="ch-meta">ждёт РОПа</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-0977</span><div class="c-badges"><span class="pri low">Низкий</span></div></div>
+              <div class="company">ЧТУП «АвтоМир»</div><div class="desc">Дорого, ушли думать</div>
+              <div class="money-row"><span class="money">12 800 Br</span></div>
+              <div class="res cond">⏳ ждёт решения РОПа</div><div class="owner"><span>👤 Орлов И.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#22C55E"></div><div class="ch"><div class="ch-title">Успешно <span class="n">11</span></div><div class="ch-meta">11 · 214 800 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-0962</span><div class="c-badges"><span class="pri mid">Средний</span></div></div>
+              <div class="company">ОАО «Нафтан»</div><div class="desc">АКБ промышл., 24 шт</div>
+              <div class="money-row"><span class="money">68 200 Br</span></div>
+              <div class="res won">✓ Выиграна</div><div class="owner"><span>👤 Сидоров К.</span></div></div>
+          </div>
+          <div class="col">
+            <div class="col-head"><div class="stripe" style="background:#EF4444"></div><div class="ch"><div class="ch-title">Отказ <span class="n">7</span></div><div class="ch-meta">7 · 98 400 Br</div></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-0955</span><div class="c-badges"><span class="pri low">Низкий</span></div></div>
+              <div class="company">ИП Левченко</div>
+              <div class="money-row"><span class="money">8 600 Br</span></div>
+              <div class="res lost">Причина: Конкурент</div><div class="owner"><span>👤 Орлов И.</span></div></div>
+            <div class="card"><div class="c-top"><span class="num">№ CRM-0948</span><div class="c-badges"><span class="pri low">Низкий</span></div></div>
+              <div class="company">ООО «СтройБаза»</div>
+              <div class="money-row"><span class="money">5 400 Br</span></div>
+              <div class="res lost">Причина: Ликвидирован</div><div class="owner"><span>👤 Петрова А.</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const wrap = document.getElementById('stageWrap');
+  const before = document.getElementById('frame-before');
+  const after = document.getElementById('frame-after');
+  document.getElementById('modeSeg').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    const m = b.dataset.m;
+    wrap.classList.toggle('side', m==='side');
+    before.style.display = (m==='before'||m==='side') ? '' : 'none';
+    after.style.display  = (m==='after' ||m==='side') ? '' : 'none';
+  });
+</script>
+</body>
+</html>

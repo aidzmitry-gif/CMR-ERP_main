@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>План валовой прибыли по месяцам — загрузка машин/товаров</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
+  h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
+
+  /* сводка по месяцам сверху */
+  .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  @media(max-width:1000px){.sum{grid-template-columns:repeat(2,1fr)}}
+  .mcard{background:#fff;border-radius:13px;box-shadow:var(--shadow-card);padding:15px 16px;border-top:3px solid var(--c,#2563EB)}
+  .mcard .mn{font-weight:800;font-size:15px}
+  .mcard .ml{font-size:11px;color:var(--muted);margin-top:8px}
+  .mcard .gp{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-top:2px}
+  .mcard .mrg{font-size:11.5px;font-weight:700;color:#047857;margin-top:2px}
+  .mcard .small{display:flex;justify-content:space-between;font-size:11.5px;color:#64748b;margin-top:7px}
+  .mcard .load{height:6px;border-radius:99px;background:#EEF0F2;overflow:hidden;margin-top:9px}
+  .mcard .load span{display:block;height:100%;border-radius:99px}
+  .mcard .loadl{font-size:10.5px;color:#9aa3b0;margin-top:4px}
+
+  /* колонки месяцев */
+  .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px}
+  .col{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:12px}
+  .col-head{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
+  .col-head .stripe{height:4px}
+  .ch{padding:11px 14px}
+  .ch .ct{font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .ch .ct .n{font-size:11px;color:#9aa3b0;font-weight:600;background:#F4F5F7;border-radius:6px;padding:1px 8px}
+  .ch .cm{font-size:12px;color:var(--muted);margin-top:3px}
+  .ch .cgp{font-size:12px;font-weight:700;color:#047857;margin-top:2px}
+
+  .ship{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:12px}
+  .ship .s-top{display:flex;align-items:center;gap:8px}
+  .ship .truck{width:30px;height:30px;border-radius:8px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+  .ship .s-id{font-weight:700;font-size:12.5px}
+  .ship .s-id small{display:block;color:#9aa3b0;font-weight:400;font-size:11px}
+  .st{margin-left:auto;font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .st.transit{background:#FFFBEB;color:#B45309}.st.plan{background:#EFF6FF;color:#2563EB}.st.done{background:#DCFCE7;color:#15803D}
+  .ship .goods{margin-top:9px;font-size:12px}
+  .ship .goods .g{display:flex;justify-content:space-between;color:#475467;padding:3px 0}
+  .ship .fin{display:flex;justify-content:space-between;margin-top:9px;padding-top:9px;border-top:1px solid #F1F3F5;font-size:12px}
+  .ship .fin .b{text-align:center;flex:1}
+  .ship .fin .b .l{font-size:9.5px;color:#9aa3b0}
+  .ship .fin .b .v{font-weight:700;font-size:12.5px;margin-top:1px}
+  .ship .fin .b .v.gp{color:#047857}
+  .note{margin-top:16px;font-size:12px;color:#9aa3b0;display:flex;gap:8px}
+  .note b{color:var(--ink)}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+  <h1>План валовой прибыли по месяцам</h1>
+  <div class="sub">Какие машины и товары в каком месяце · плановая валовая прибыль и загрузка · BYN · маржа = продажа − landed cost (из закупок)</div>
+
+  <!-- сводка по месяцам -->
+  <div class="sum">
+    <div class="mcard" style="--c:#2563EB">
+      <div class="mn">Июнь 2026</div>
+      <div class="ml">Валовая прибыль (план)</div>
+      <div class="gp">63 200 Br</div>
+      <div class="mrg">маржа 34% · выручка 186 000</div>
+      <div class="small"><span>Себестоимость 122 800</span><span>4 машины</span></div>
+      <div class="load"><span style="width:88%;background:var(--ok)"></span></div>
+      <div class="loadl">загрузка ~88% · ещё есть место</div>
+    </div>
+    <div class="mcard" style="--c:#6366F1">
+      <div class="mn">Июль 2026</div>
+      <div class="ml">Валовая прибыль (план)</div>
+      <div class="gp">71 500 Br</div>
+      <div class="mrg">маржа 36% · выручка 198 000</div>
+      <div class="small"><span>Себестоимость 126 500</span><span>5 машин</span></div>
+      <div class="load"><span style="width:100%;background:var(--warn)"></span></div>
+      <div class="loadl">загрузка 100% · нужна ещё машина</div>
+    </div>
+    <div class="mcard" style="--c:#14B8A6">
+      <div class="mn">Август 2026</div>
+      <div class="ml">Валовая прибыль (план)</div>
+      <div class="gp">42 800 Br</div>
+      <div class="mrg">маржа 33% · выручка 130 000</div>
+      <div class="small"><span>Себестоимость 87 200</span><span>3 машины</span></div>
+      <div class="load"><span style="width:54%;background:#3B82F6"></span></div>
+      <div class="loadl">загрузка ~54% · добирать сделками</div>
+    </div>
+    <div class="mcard" style="--c:#94A3B8">
+      <div class="mn">Сентябрь+</div>
+      <div class="ml">Валовая прибыль (план)</div>
+      <div class="gp">28 400 Br</div>
+      <div class="mrg">маржа 31% · выручка 92 000</div>
+      <div class="small"><span>Себестоимость 63 600</span><span>2 машины</span></div>
+      <div class="load"><span style="width:30%;background:#94A3B8"></span></div>
+      <div class="loadl">формируется</div>
+    </div>
+  </div>
+
+  <!-- колонки месяцев с машинами -->
+  <div class="board">
+
+    <!-- Июнь -->
+    <div class="col">
+      <div class="col-head"><div class="stripe" style="background:#2563EB"></div>
+        <div class="ch"><div class="ct">Июнь <span class="n">4 машины</span></div>
+          <div class="cm">выручка 186 000 · с/с 122 800</div>
+          <div class="cgp">▲ вал. прибыль 63 200 Br (34%)</div></div></div>
+
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0418 · AB 7421-7<small>прибытие 18.06</small></div><span class="st transit">в пути</span></div>
+        <div class="goods"><div class="g"><span>АКБ 6СТ-190 · Белтранс</span><span>38 шт</span></div><div class="g"><span>АКБ 6СТ-225 · Минскэлектро</span><span>14 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">61 200</div></div><div class="b"><div class="l">С/с</div><div class="v">38 400</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">22 800</div></div></div>
+      </div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0421 · AB 9012-3<small>прибытие 24.06</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ промышл. · Нафтан</span><span>24 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">68 200</div></div><div class="b"><div class="l">С/с</div><div class="v">45 800</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">22 400</div></div></div>
+      </div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0409 · AB 5567-1<small>доставлено 06.06</small></div><span class="st done">доставлено</span></div>
+        <div class="goods"><div class="g"><span>АКБ + ЗУ · Белводхоз</span><span>30 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">56 600</div></div><div class="b"><div class="l">С/с</div><div class="v">38 600</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">18 000</div></div></div>
+      </div>
+    </div>
+
+    <!-- Июль -->
+    <div class="col">
+      <div class="col-head"><div class="stripe" style="background:#6366F1"></div>
+        <div class="ch"><div class="ct">Июль <span class="n">5 машин</span></div>
+          <div class="cm">выручка 198 000 · с/с 126 500</div>
+          <div class="cgp">▲ вал. прибыль 71 500 Br (36%)</div></div></div>
+
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0430 · план<small>перезаказ Белтранс ~05.07</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ 6СТ-190 + 2 ЗУ</span><span>42 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">52 000</div></div><div class="b"><div class="l">С/с</div><div class="v">32 800</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">19 200</div></div></div>
+      </div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0433 · план<small>Автопарк №7 ~12.07</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ годовой объём</span><span>45 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">54 000</div></div><div class="b"><div class="l">С/с</div><div class="v">34 500</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">19 500</div></div></div>
+      </div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0436 · план<small>тендер МЧС ~20.07</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ для МЧС</span><span>60 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">92 000</div></div><div class="b"><div class="l">С/с</div><div class="v">59 200</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">32 800</div></div></div>
+      </div>
+    </div>
+
+    <!-- Август -->
+    <div class="col">
+      <div class="col-head"><div class="stripe" style="background:#14B8A6"></div>
+        <div class="ch"><div class="ct">Август <span class="n">3 машины</span></div>
+          <div class="cm">выручка 130 000 · с/с 87 200</div>
+          <div class="cgp">▲ вал. прибыль 42 800 Br (33%)</div></div></div>
+
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0450 · прогноз<small>перезаказ Белводхоз ~27.07→08</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ + ЗУ</span><span>30 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">52 400</div></div><div class="b"><div class="l">С/с</div><div class="v">35 000</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">17 400</div></div></div>
+      </div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0455 · прогноз<small>Минскэлектро ~02.08</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ промышл.</span><span>14 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">38 900</div></div><div class="b"><div class="l">С/с</div><div class="v">26 400</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">12 500</div></div></div>
+      </div>
+    </div>
+
+    <!-- Сентябрь+ -->
+    <div class="col">
+      <div class="col-head"><div class="stripe" style="background:#94A3B8"></div>
+        <div class="ch"><div class="ct">Сентябрь+ <span class="n">2 машины</span></div>
+          <div class="cm">выручка 92 000 · с/с 63 600</div>
+          <div class="cgp">▲ вал. прибыль 28 400 Br (31%)</div></div></div>
+      <div class="ship">
+        <div class="s-top"><div class="truck">🚚</div><div class="s-id">прогноз по циклу<small>формируется из перезаказов</small></div><span class="st plan">план</span></div>
+        <div class="goods"><div class="g"><span>АКБ (по периодичности клиентов)</span><span>~50 шт</span></div></div>
+        <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">92 000</div></div><div class="b"><div class="l">С/с</div><div class="v">63 600</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">28 400</div></div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note"><span>🔗</span><span>Месяц поставки = ETA рейса (из логистики). Себестоимость (landed cost) — из закупок, маржа = продажа − с/с. Так РОП/директор видят <b>плановую валовую прибыль помесячно</b> и <b>загрузку машин</b> заранее, и могут добирать сделками недозагруженные месяцы.</span></div>
+</body>
+</html>

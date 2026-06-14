@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сделки 2.0 — все макеты</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);padding:32px;font-size:14px}
+  h1{font-size:24px;font-weight:800}
+  .sub{color:var(--muted);font-size:14px;margin:6px 0 26px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;max-width:1100px}
+  a.card{display:block;background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow-card);
+    padding:18px 18px 16px;text-decoration:none;color:inherit;transition:.15s;position:relative;overflow:hidden}
+  a.card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.10);border-color:var(--brand-100)}
+  .card .ic{width:42px;height:42px;border-radius:11px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:12px}
+  .card .t{font-weight:700;font-size:15px;line-height:1.3}
+  .card .d{color:var(--muted);font-size:12.5px;margin-top:6px;line-height:1.45}
+  .card .tag{position:absolute;top:14px;right:14px;font-size:10.5px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:7px;padding:3px 8px}
+  .note{margin-top:28px;font-size:12.5px;color:#9aa3b0;max-width:1100px;line-height:1.6}
+  .note b{color:var(--ink)}
+</style>
+</head>
+<body>
+  <h1>Сделки 2.0 — все макеты</h1>
+  <div class="sub">Кликни по карточке, чтобы открыть экран. Это самодостаточные HTML-демо (работают офлайн). Бэкенд по ним ещё не написан.</div>
+
+  <div class="grid">
+    <a class="card" href="sales-board-mockup.html">
+      <span class="tag">главная</span>
+      <div class="ic">🗂️</div>
+      <div class="t">Доска сделок</div>
+      <div class="d">Sticky-скорборд План/Факт + индикатор темпа, несколько воронок (новые / постоянные / тендеры), 9 стадий с ценой ДО встречи, рейка чатов.</div>
+    </a>
+    <a class="card" href="sales-plan-builder.html">
+      <div class="ic">🧮</div>
+      <div class="t">Конструктор плана продавца</div>
+      <div class="d">План собирается из 3 источников (товар в пути / постоянные / новые) + калькулятор-декомпозиция по действиям и обратный счёт дефицита.</div>
+    </a>
+    <a class="card" href="sales-shipment-status.html">
+      <div class="ic">🚚</div>
+      <div class="t">Сквозной статус машины</div>
+      <div class="d">Весь путь поставщик→склад→клиент. Источник истины — логистика. Внутренний вид vs кабинет клиента (себестоимость скрыта).</div>
+    </a>
+    <a class="card" href="sales-regular-clients.html">
+      <div class="ic">♻️</div>
+      <div class="t">Постоянные клиенты / перезаказ</div>
+      <div class="d">Статусы цикла (в цикле / пора связаться / уходит), KPI удержания, перезаказ и допродажа. Что происходит после продажи.</div>
+    </a>
+    <a class="card" href="sales-margin-by-month.html">
+      <div class="ic">📈</div>
+      <div class="t">Валовая прибыль по месяцам</div>
+      <div class="d">Загрузка машин/товаров помесячно, плановая вал. прибыль и маржа (продажа − landed cost). Видно недозагруженные месяцы.</div>
+    </a>
+    <a class="card" href="sales-card-full.html">
+      <span class="tag">2 клика</span>
+      <div class="ic">📇</div>
+      <div class="t">Карточка сделки (полный экран)</div>
+      <div class="d">Открывается двойным кликом по сделке. AI-ассистент, звонки с транскрибацией, статус машины, оплата, доставка, контакты с кнопками звонка, отправка договора/счёта, хронология. Блоки можно убирать.</div>
+    </a>
+    <a class="card" href="sales-call-popup.html">
+      <span class="tag">телефония</span>
+      <div class="ic">📞</div>
+      <div class="t">Окно входящего звонка (screen-pop)</div>
+      <div class="d">Всплывает при звонке: узнан клиент + сделка + AI-подсказка, либо новый номер → лид. Состояния: разговор, итог звонка, транскрибация. Резерв под счёт.</div>
+    </a>
+    <a class="card" href="sales-card-expanded.html">
+      <div class="ic">🗂️</div>
+      <div class="t">Карточка-слайдовер (1 клик)</div>
+      <div class="d">Быстрый предпросмотр справа по одиночному клику на доске (drawer).</div>
+    </a>
+    <a class="card" href="sales-board-before-after.html">
+      <div class="ic">🔀</div>
+      <div class="t">Доска: До / После</div>
+      <div class="d">Сравнение старого вида доски и нового со скорбордом и темпом.</div>
+    </a>
+    <a class="card" href="sales-deals-spec-preview.html">
+      <div class="ic">📋</div>
+      <div class="t">Обзор изменений SALES 2.0</div>
+      <div class="d">Сводка тикетов и решений по блоку Сделок.</div>
+    </a>
+  </div>
+
+  <div class="note">
+    Файлы лежат в корне проекта рядом с этим index. Чтобы отправить сотруднику — достаточно одного файла (каждый самодостаточный), либо всю папку <b>sales-*.html</b>.
+  </div>
+</body>
+</html>

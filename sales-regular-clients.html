@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Постоянные клиенты — удержание и перезаказ (SALES-48)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px}
+  .app{display:flex;min-height:100vh}
+  .side{width:210px;background:#fff;border-right:1px solid #EAECEF;flex-shrink:0;padding:16px 12px}
+  .logo{font-weight:800;font-size:15px;padding:4px 8px 16px}.logo small{display:block;color:#9aa3b0;font-size:10px;font-weight:500}
+  .nav-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9aa3b0;padding:12px 10px 5px}
+  .nav-item{display:flex;gap:9px;align-items:center;padding:8px 10px;border-radius:8px;color:#475467;font-size:13px;cursor:pointer}
+  .nav-item:hover{background:#F7F8FA}.nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  main{flex:1;padding:22px 26px;overflow:auto}
+  h1{font-size:21px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin-top:3px;margin-bottom:18px}
+
+  /* верхние KPI удержания */
+  .ret-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+  .ret{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:14px 16px}
+  .ret .l{font-size:11.5px;color:var(--muted)}
+  .ret .v{font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-.01em}
+  .ret .d{font-size:11px;margin-top:4px;font-weight:600}
+  .up{color:var(--ok)}.down{color:var(--bad)}
+
+  /* фильтры-статусы */
+  .seg{display:inline-flex;gap:3px;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:3px;margin-bottom:14px}
+  .seg button{border:none;background:none;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer}
+  .seg button.on{background:var(--brand-100);color:var(--brand-700)}
+  .seg button .cnt{font-size:11px;opacity:.7;margin-left:4px}
+
+  /* таблица аккаунтов */
+  .tbl{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{text-align:left;padding:11px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#9aa3b0;font-weight:700;border-bottom:1px solid #EEF0F2;background:#FAFBFC}
+  thead th.r{text-align:right}
+  tbody td{padding:12px 14px;border-bottom:1px solid #F4F5F7;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr{cursor:pointer}tbody tr:hover{background:#FAFBFC}
+  .cell-cli{display:flex;align-items:center;gap:11px}
+  .av{width:38px;height:38px;border-radius:50%;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .cli-nm{font-weight:600}.cli-sub{font-size:11.5px;color:#9aa3b0}
+  .stt{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:99px;padding:3px 10px}
+  .stt.green{background:#ECFDF5;color:#047857}.stt.amber{background:#FFFBEB;color:#B45309}.stt.red{background:#FEF2F2;color:#B91C1C}
+  .stt .dot{width:7px;height:7px;border-radius:50%}
+  .green .dot{background:var(--ok)}.amber .dot{background:var(--warn)}.red .dot{background:var(--bad)}
+  .next-d{font-weight:600}.next-d.soon{color:#B45309}.next-d.over{color:#B91C1C}
+  .trend{font-size:11px;font-weight:700}
+  .money{font-weight:700;text-align:right}
+  .act{display:flex;gap:6px;justify-content:flex-end}
+  .abtn{border:1px solid #E5E7EB;background:#fff;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;color:#475467;white-space:nowrap}
+  .abtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .abtn:hover{filter:brightness(.98)}
+  .gap{font-size:11px;color:#9aa3b0}
+  .hide{display:none}
+
+  .note{margin-top:20px;font-size:12.5px;color:#9aa3b0;display:flex;gap:8px;background:#fff;border:1px solid #EEF0F2;border-radius:10px;padding:12px 14px}
+  .note b{color:var(--ink)}
+
+  /* блок «как это работает» — постпродажный хвост на won */
+  .flow-title{font-size:15px;font-weight:800;margin:26px 0 12px}
+  .flow{display:flex;gap:10px;flex-wrap:wrap}
+  .fnode{background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:13px 15px;flex:1;min-width:200px;box-shadow:var(--shadow-card)}
+  .fnode .ft{font-weight:700;font-size:13px;display:flex;align-items:center;gap:7px}
+  .fnode .fb{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+  .fnode .tag{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;background:#F1F5F9;color:#475569}
+  .farrow{align-self:center;color:#cbd5e1;font-size:20px}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+<div class="app">
+  <aside class="side">
+    <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+    <div class="nav-group">CRM</div>
+    <div class="nav-item">▦ Сделки</div>
+    <div class="nav-item">◔ Лиды</div>
+    <div class="nav-item active">♻ Постоянные клиенты</div>
+    <div class="nav-item">◑ РОП</div>
+    <div class="nav-item">▣ Контрагенты</div>
+  </aside>
+
+  <main>
+    <h1>Постоянные клиенты</h1>
+    <div class="sub">Удержание · периодичность заказов · перезаказ и допродажа · SALES-48 · BYN</div>
+
+    <!-- KPI удержания (то, что важно РОПу после продажи) -->
+    <div class="ret-row">
+      <div class="ret"><div class="l">Постоянных клиентов</div><div class="v">38</div><div class="d up">+3 за месяц</div></div>
+      <div class="ret"><div class="l">Повторная выручка (мес)</div><div class="v">418 200</div><div class="d up">67% всей выручки</div></div>
+      <div class="ret"><div class="l">% удержания</div><div class="v">86%</div><div class="d up">▲ +4 п.п.</div></div>
+      <div class="ret"><div class="l">Пора связаться</div><div class="v" style="color:#B45309">7</div><div class="d">в ближайшие 7 дн</div></div>
+      <div class="ret"><div class="l">Уходят (просрочка)</div><div class="v" style="color:#B91C1C">3</div><div class="d down">риск потери</div></div>
+    </div>
+
+    <!-- фильтр-статусы -->
+    <div class="seg" id="seg">
+      <button class="on" data-f="all">Все <span class="cnt">10</span></button>
+      <button data-f="red">🔴 Уходят <span class="cnt">3</span></button>
+      <button data-f="amber">🟡 Пора связаться <span class="cnt">3</span></button>
+      <button data-f="green">🟢 В цикле <span class="cnt">4</span></button>
+    </div>
+
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr>
+            <th>Клиент</th><th>Статус</th><th>Последний заказ</th><th>Следующий ожидается</th>
+            <th class="r">Средний чек</th><th>Тренд</th><th>Допродажа</th><th class="r">Действие</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span>ℹ️</span>
+      <span>Сортировка по умолчанию — <b>«кому звонить раньше»</b> (просрочка → пора → в цикле). Статус считается из истории: периодичность = медиана интервалов между заказами, ожидаемая дата = последний заказ + интервал. Просрочка → авто-эскалация РОПу.</span>
+    </div>
+
+    <!-- как реализован постпродажный хвост -->
+    <div class="flow-title">Что происходит после продажи (won) — чтобы не забыть</div>
+    <div class="flow">
+      <div class="fnode">
+        <div class="ft">✅ Сделка выиграна <span class="tag">событие sales.deal.won</span></div>
+        <div class="fb">Доставка/оплата прошла. Сейчас на это <b>никто не подписан</b> — добавляем обработчик <b>on_deal_won</b>.</div>
+      </div>
+      <div class="farrow">→</div>
+      <div class="fnode">
+        <div class="ft">👤 Карточка клиента</div>
+        <div class="fb">Обновляется <b>last_order</b>, пересчитывается интервал → <b>дата следующего заказа</b>. Клиент попадает в этот список.</div>
+      </div>
+      <div class="farrow">→</div>
+      <div class="fnode">
+        <div class="ft">🗓 Авто-задачи</div>
+        <div class="fb">+7 дн: «проверить, всё ли ок» (качество). За lead-time до след. заказа: «пора связаться — перезаказ».</div>
+      </div>
+      <div class="farrow">→</div>
+      <div class="fnode">
+        <div class="ft">🔁 Перезаказ</div>
+        <div class="fb">Новая сделка <b>по шаблону прошлой</b> (те же позиции), стартует ближе к концу воронки + подсказка по допродаже.</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  const C=[
+    {av:'СБ',c:'#EF4444',nm:'ООО «СтройБаза»',sub:'Гомель · 11 заказов',st:'red',stt:'Просрочен 12 дн',last:'02.03.2026',int:'~90 дн',next:'просрочен (01.06)',nd:'over',avg:'18 400',trend:'↘ -14%',td:'down',up:'Не берёт ЗУ — повод вернуть'},
+    {av:'НФ',c:'#EF4444',nm:'ОАО «Нафтан»',sub:'Новополоцк · 8 заказов',st:'red',stt:'Просрочен 8 дн',last:'15.03.2026',int:'~120 дн',next:'просрочен (05.06)',nd:'over',avg:'62 800',trend:'↘ -9%',td:'down',up:'Промышленные АКБ + сервис'},
+    {av:'АМ',c:'#EF4444',nm:'ЧТУП «АвтоМир»',sub:'Минск · 6 заказов',st:'red',stt:'Просрочен 5 дн',last:'20.03.2026',int:'~75 дн',next:'просрочен (03.06)',nd:'over',avg:'9 200',trend:'→ стаб.',td:'',up:'Тестеры АКБ'},
+    {av:'БТ',c:'#F59E0B',nm:'ОАО «Белтранс»',sub:'Минск · 7 заказов',st:'amber',stt:'Пора связаться',last:'12.03.2026',int:'~90 дн',next:'через 3 дн (15.06)',nd:'soon',avg:'43 200',trend:'↗ +8%',td:'up',up:'Парк вырос 38→40 → +2 АКБ + 2 ЗУ'},
+    {av:'А7',c:'#F59E0B',nm:'Автопарк №7',sub:'Брест · 5 заказов',st:'amber',stt:'Пора связаться',last:'15.02.2026',int:'~120 дн',next:'через 2 дн (15.06)',nd:'soon',avg:'49 500',trend:'→ стаб.',td:'',up:'Рамочный договор на год'},
+    {av:'ЭМ',c:'#F59E0B',nm:'ТЧУП «Энергомир»',sub:'Витебск · 4 заказа',st:'amber',stt:'Пора связаться',last:'01.03.2026',int:'~100 дн',next:'через 6 дн (18.06)',nd:'soon',avg:'31 600',trend:'↗ +5%',td:'up',up:'Зарядные + стеллаж'},
+    {av:'БВ',c:'#22C55E',nm:'РУП «Белводхоз»',sub:'Минск · 9 заказов',st:'green',stt:'В цикле',last:'28.05.2026',int:'~60 дн',next:'через 34 дн (27.07)',nd:'',avg:'52 400',trend:'↗ +11%',td:'up',up:'—'},
+    {av:'ГС',c:'#22C55E',nm:'СТО «Гранд-Сервис»',sub:'Гомель · 12 заказов',st:'green',stt:'В цикле',last:'30.05.2026',int:'~45 дн',next:'через 19 дн (19.07)',nd:'',avg:'14 800',trend:'→ стаб.',td:'',up:'—'},
+    {av:'МЭ',c:'#22C55E',nm:'УП «Минскэлектро»',sub:'Минск · 6 заказов',st:'green',stt:'В цикле',last:'25.05.2026',int:'~70 дн',next:'через 38 дн (02.08)',nd:'',avg:'38 900',trend:'↗ +6%',td:'up',up:'—'},
+    {av:'ВД',c:'#22C55E',nm:'ОДО «ВодоканалСервис»',sub:'Могилёв · 5 заказов',st:'green',stt:'В цикле',last:'02.06.2026',int:'~90 дн',next:'через 56 дн (31.08)',nd:'',avg:'27 300',trend:'→ стаб.',td:'',up:'—'},
+  ];
+  function trendCls(t){ return t.startsWith('↗')?'up':t.startsWith('↘')?'down':''; }
+  function render(filter){
+    const tb=document.getElementById('rows'); tb.innerHTML='';
+    C.filter(c=>filter==='all'||c.st===filter).forEach(c=>{
+      const tr=document.createElement('tr');
+      const action = c.st==='red'
+        ? `<button class="abtn primary">📞 Связаться</button><button class="abtn">Передать РОПу</button>`
+        : c.st==='amber'
+        ? `<button class="abtn primary">🔁 Перезаказ</button><button class="abtn">📞</button>`
+        : `<button class="abtn">🔁 Перезаказ</button>`;
+      tr.innerHTML=`
+        <td><div class="cell-cli"><div class="av" style="background:${c.c}">${c.av}</div>
+          <div><div class="cli-nm">${c.nm}</div><div class="cli-sub">${c.sub}</div></div></div></td>
+        <td><span class="stt ${c.st}"><span class="dot"></span>${c.stt}</span></td>
+        <td>${c.last}<div class="gap">интервал ${c.int}</div></td>
+        <td><span class="next-d ${c.nd}">${c.next}</span></td>
+        <td class="money">${c.avg} Br</td>
+        <td><span class="trend ${trendCls(c.trend)}">${c.trend}</span></td>
+        <td>${c.up==='—'?'<span class="gap">—</span>':`<span style="font-size:12px;color:#047857">💡 ${c.up}</span>`}</td>
+        <td><div class="act">${action}</div></td>`;
+      tb.appendChild(tr);
+    });
+  }
+  document.getElementById('seg').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    render(b.dataset.f);
+  });
+  render('all');
+</script>
+</body>
+</html>

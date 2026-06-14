@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Конструктор плана продавца — декомпозиция по действиям</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+    --s1:#2563EB; --s2:#10B981; --s3:#F59E0B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding:22px;max-width:1060px;margin:0 auto}
+  h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
+
+  .top{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:18px 20px;margin-bottom:16px;position:sticky;top:0;z-index:5}
+  .top-row{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .metric .l{font-size:11.5px;color:var(--muted)}
+  .metric .v{font-size:24px;font-weight:800;letter-spacing:-.01em;margin-top:2px}
+  .metric .v.assembled{color:var(--brand-700)}
+  .verdict{margin-left:auto;text-align:right}
+  .verdict .badge{display:inline-block;font-size:13px;font-weight:700;border-radius:99px;padding:6px 14px}
+  .verdict .badge.gap{background:#FEF2F2;color:#B91C1C}
+  .verdict .badge.ok{background:#ECFDF5;color:#047857}
+  .verdict .sm{font-size:11.5px;color:#9aa3b0;margin-top:5px}
+  .stack-wrap{position:relative;margin-top:6px}
+  .stack{display:flex;height:24px;border-radius:8px;overflow:hidden;background:#F1F3F5}
+  .stack .seg{height:100%;transition:width .35s ease}
+  .stack .seg.s1{background:var(--s1)}.stack .seg.s2{background:var(--s2)}.stack .seg.s3{background:var(--s3)}
+  .stack .seg.gap{background:repeating-linear-gradient(45deg,#FEE2E2,#FEE2E2 6px,#FECACA 6px,#FECACA 12px)}
+  .target-line{position:absolute;top:-4px;bottom:-4px;width:2px;background:#0f172a}
+  .target-line::after{content:'план РОПа';position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:#0f172a;white-space:nowrap;background:#fff;padding:0 4px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:11px;font-size:11.5px}
+  .legend .it{display:flex;align-items:center;gap:6px;color:#475467}
+  .legend .sw{width:11px;height:11px;border-radius:3px}
+  .legend .sw.s1{background:var(--s1)}.legend .sw.s2{background:var(--s2)}.legend .sw.s3{background:var(--s3)}
+
+  .src{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);margin-bottom:14px;overflow:hidden}
+  .src-h{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid #F1F3F5}
+  .src-h .ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+  .src-h.s1 .ic{background:#EFF5FF}.src-h.s2 .ic{background:#ECFDF5}.src-h.s3 .ic{background:#FFFBEB}
+  .src-h .nm{font-weight:700;font-size:14px}
+  .src-h .badge{font-size:10.5px;font-weight:600;border-radius:6px;padding:2px 8px;background:#F1F5F9;color:#475569;margin-left:6px}
+  .src-h .sub{font-size:11.5px;color:#9aa3b0;margin-top:1px}
+  .bstat{margin-left:auto;display:flex;gap:16px;text-align:right}
+  .bstat .m .l{font-size:9.5px;color:#9aa3b0;text-transform:uppercase;letter-spacing:.02em}
+  .bstat .m .v{font-weight:800;font-size:15px;margin-top:1px}
+  .bstat .m .v.pf{color:#047857}.bstat .m .v.sh{color:var(--brand-700)}
+  @media(max-width:680px){.bstat .m.hideS{display:none}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;padding:8px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.02em;color:#9aa3b0;font-weight:700;background:#FAFBFC}
+  th.r,td.r{text-align:right}
+  td{padding:9px 16px;border-top:1px solid #F4F5F7;vertical-align:middle}
+  tr.off td{opacity:.42}
+  .nm2{font-weight:600}.nm2 small{display:block;color:#9aa3b0;font-weight:400;font-size:11px}
+  .chk{width:17px;height:17px;accent-color:var(--brand);cursor:pointer}
+  .pf{font-weight:700;color:#047857}
+  .when{font-size:11.5px;color:#475467}.when.next{color:#9aa3b0}
+  .prob{font-size:10.5px;font-weight:700;border-radius:5px;padding:1px 6px;background:#EFF5FF;color:var(--brand-700)}
+  .eta{font-weight:700;color:#B45309;background:#FFF7ED;border-radius:6px;padding:2px 8px;font-size:11.5px;white-space:nowrap}
+  tr.grp td{background:#FAFBFC;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.02em;padding:7px 16px;border-top:1px solid #EEF0F2}
+  tr.grp.next td{color:#B45309}
+  .pull{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 6px;cursor:pointer;margin-left:5px}
+  .pin{width:96px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 9px;font-size:13px;text-align:right;outline:none;font-weight:600}
+  .pin:focus{border-color:var(--brand)}
+
+  /* калькулятор новых */
+  .calc{padding:14px 16px}
+  .calc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media(max-width:760px){.calc-grid{grid-template-columns:repeat(2,1fr)}}
+  .fld{background:#FAFBFC;border:1px solid #EEF0F2;border-radius:10px;padding:9px 11px}
+  .fld label{font-size:11px;color:var(--muted);display:block;margin-bottom:5px}
+  .fld label .from{font-size:9.5px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:4px;padding:1px 5px;margin-left:4px}
+  .fld input{width:100%;border:1px solid #E5E7EB;border-radius:7px;padding:7px 9px;font-size:14px;font-weight:700;text-align:right;outline:none}
+  .fld input:focus{border-color:var(--brand)}
+  .calc-out{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #F1F3F5}
+  .out{flex:1;min-width:120px;text-align:center;background:#F0FDF4;border-radius:10px;padding:11px}
+  .out .l{font-size:11px;color:#15803D}
+  .out .v{font-size:20px;font-weight:800;color:#047857;margin-top:2px}
+  .out.rev{background:#EFF6FF}.out.rev .l{color:var(--brand-700)}.out.rev .v{color:var(--brand-700)}
+  .out.cnt{background:#F8FAFC}.out.cnt .l{color:#64748b}.out.cnt .v{color:var(--ink)}
+  .reverse{margin-top:12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 13px;font-size:12.5px;color:#92400E}
+  .reverse b{color:#7C2D12}
+  .reverse.okk{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
+
+  .foot{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .foot .fl{font-size:12.5px;color:var(--muted)}
+  .foot .plan-in{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .foot .plan-in label{font-size:12.5px;color:#475467;font-weight:600}
+  .foot .plan-in input{width:130px;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;font-size:14px;font-weight:700;text-align:right;outline:none}
+  .foot .send{border:none;background:var(--brand);color:#fff;border-radius:10px;padding:11px 18px;font-size:13.5px;font-weight:700;cursor:pointer}
+  .foot .status{font-size:12.5px;font-weight:700;color:#B45309}
+  .note{margin:14px 2px 0;font-size:12px;color:#9aa3b0;display:flex;gap:8px}.note b{color:var(--ink)}
+
+  /* ════ компактный режим (уплотнение) ════ */
+  body{padding:13px;font-size:13px}
+  h1{font-size:17px} .sub{margin:2px 0 11px;font-size:12px}
+  .top{padding:11px 15px;margin-bottom:10px}
+  .top-row{margin-bottom:10px;gap:18px}
+  .metric .v{font-size:19px}
+  .stack{height:17px} .legend{margin-top:8px;gap:12px}
+  .src{margin-bottom:9px}
+  .src-h{padding:8px 14px;gap:9px}
+  .src-h .ic{width:27px;height:27px;font-size:14px}
+  .src-h .nm{font-size:13px} .src-h .sub{font-size:11px}
+  th{padding:5px 14px} td{padding:6px 14px}
+  .nm2 small{font-size:10.5px}
+  .pin{padding:5px 8px;width:88px}
+  .calc{padding:10px 14px} .calc-grid{gap:9px}
+  .fld{padding:6px 9px} .fld label{margin-bottom:3px;font-size:10.5px}
+  .fld input{padding:5px 8px;font-size:13px}
+  .calc-out{margin-top:9px;padding-top:9px;gap:10px}
+  .out{padding:7px} .out .v{font-size:17px}
+  .reverse{margin-top:9px;padding:8px 11px;font-size:12px}
+  .foot{padding:10px 16px;gap:12px}
+  .note{margin-top:9px;font-size:11px}
+  .bstat{gap:13px} .bstat .m .v{font-size:13.5px}
+  .eta{padding:1px 7px;font-size:11px}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+  <h1>Мой план на июль · конструктор + декомпозиция</h1>
+  <div class="sub">План собирается из источников ERP и считается по действиям (заявки маркетинга, звонки, конверсия, средний чек) · валовая прибыль, BYN</div>
+
+  <div class="top">
+    <div class="top-row">
+      <div class="metric"><div class="l">База — согласовано с РОПом</div><div class="v" id="m-base">75 000 Br</div></div>
+      <div class="metric"><div class="l">Собрано из источников</div><div class="v assembled" id="m-asm">0 Br</div></div>
+      <div class="verdict"><span class="badge" id="v-badge">—</span><div class="sm" id="v-sm"></div></div>
+    </div>
+    <div class="stack-wrap"><div class="stack" id="stack"></div><div class="target-line" id="target-line"></div></div>
+    <div class="legend">
+      <span class="it"><span class="sw s1"></span>📦 Под товар</span>
+      <span class="it"><span class="sw s2"></span>♻ Постоянные</span>
+      <span class="it"><span class="sw s3"></span>⚡ Новые (по действиям)</span>
+      <span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#FEE2E2,#FEE2E2 4px,#FECACA 4px,#FECACA 8px)"></span>дефицит</span>
+    </div>
+  </div>
+
+  <!-- 1. под приходящий товар -->
+  <div class="src">
+    <div class="src-h s1"><div class="ic">📦</div>
+      <div><div class="nm">Под приходящий товар <span class="badge">из логистики + закупок</span></div>
+        <div class="sub">Позиции, которые точно приедут в машинах июля</div></div>
+      <div class="bstat" data-block="s1"></div></div>
+    <table><thead><tr><th style="width:34px"></th><th>Товар / под кого</th><th>Придёт</th><th class="r">Выручка</th><th class="r">План, вал. приб.</th></tr></thead>
+      <tbody data-src="committed"></tbody></table>
+  </div>
+
+  <!-- 2. постоянные клиенты — полная база -->
+  <div class="src">
+    <div class="src-h s2"><div class="ic">♻</div>
+      <div><div class="nm">Постоянные клиенты — база <span class="badge">прогноз по периодичности</span></div>
+        <div class="sub" id="reg-sub">— клиентов в базе · ожидаются в июле</div></div>
+      <div class="bstat" data-block="s2"></div></div>
+    <table><thead><tr><th style="width:34px"></th><th>Клиент</th><th>Ожид. заказ</th><th class="r">Ср. чек</th><th class="r">Вер-ть</th><th class="r">План, вал. приб.</th></tr></thead>
+      <tbody data-src="regulars"></tbody></table>
+  </div>
+
+  <!-- 3. новые клиенты — калькулятор по действиям -->
+  <div class="src">
+    <div class="src-h s3"><div class="ic">⚡</div>
+      <div><div class="nm">Новые клиенты — план по действиям <span class="badge">маркетинг + звонки</span></div>
+        <div class="sub">Сколько сделок/прибыли дают заявки и звонки при вашей конверсии и среднем чеке</div></div>
+      <div class="bstat" data-block="s3"></div></div>
+    <div class="calc">
+      <div class="calc-grid">
+        <div class="fld"><label>Заявки от маркетинга, шт/мес <span class="from">маркетинг</span></label><input id="c-leads" value="30"></div>
+        <div class="fld"><label>Конверсия заявка → сделка, %</label><input id="c-leadconv" value="12"></div>
+        <div class="fld"><label>Холодные звонки, шт/мес <span class="from">менеджер</span></label><input id="c-calls" value="150"></div>
+        <div class="fld"><label>Конверсия звонок → сделка, %</label><input id="c-callconv" value="1.5"></div>
+        <div class="fld"><label>Средний чек, Br</label><input id="c-check" value="16000"></div>
+        <div class="fld"><label>Маржа (вал. прибыль), %</label><input id="c-margin" value="34"></div>
+      </div>
+      <div class="calc-out">
+        <div class="out cnt"><div class="l">Сделок (новые)</div><div class="v" id="o-deals">0</div></div>
+        <div class="out rev"><div class="l">Выручка</div><div class="v" id="o-rev">0</div></div>
+        <div class="out"><div class="l">Вал. прибыль</div><div class="v" id="o-pf">0</div></div>
+      </div>
+      <div class="reverse" id="reverse"></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="fl">Источники и калькулятор считаются вживую. План можно поднять выше — взять обязательство добрать.</div>
+    <div class="plan-in"><label>План на июль (вал. приб.)</label><input id="planInput" value="0"></div>
+    <button class="send" id="sendBtn">Отправить РОПу</button>
+    <span class="status" id="planStatus"></span>
+  </div>
+
+  <div class="note"><span>🔗</span><span>Данные: <b>заявки — маркетинг</b>, <b>приход/ETA — логистика</b>, <b>landed cost — закупки</b>, <b>перезаказы и конверсия — история сделок</b>. Калькулятор показывает план новых от активности; обратный счёт — сколько ещё заявок/звонков нужно, чтобы закрыть дефицит до плана РОПа.</span></div>
+
+<script>
+  const BASE = 75000;
+  const fmt = n => Math.round(n).toLocaleString('ru-RU').replace(/,/g,' ')+' Br';
+  const fmtK = n => n>=1000000 ? (n/1000000).toFixed(2).replace('.',',')+' млн' : n>=1000 ? Math.round(n/1000)+'к' : Math.round(n)+'';
+  function setBlockStat(block, count, unit, rev, pf){
+    const el=document.querySelector(`.bstat[data-block="${block}"]`);
+    el.innerHTML=`<div class="m hideS"><div class="l">в плане</div><div class="v">${count} ${unit}</div></div>
+      <div class="m hideS"><div class="l">выручка</div><div class="v">${fmtK(rev)}</div></div>
+      <div class="m"><div class="l">вал. приб.</div><div class="v pf">${fmtK(pf)}</div></div>
+      <div class="m"><div class="l">доля плана</div><div class="v sh">${Math.round(pf/BASE*100)}%</div></div>`;
+  }
+
+  // 1. под приходящий товар (committed)
+  const committed = [
+    {nm:'АКБ 6СТ-190 (перезаказ Белтранс)', sub:'рейс TR-0430 · под CRM-1029', when:'05.07', rev:52000, pf:19200, on:true},
+    {nm:'АКБ годовой объём — Автопарк №7', sub:'рейс TR-0433 · под CRM-1024', when:'12.07', rev:54000, pf:19500, on:false},
+    {nm:'АКБ для МЧС (тендер)', sub:'рейс TR-0436 · быстрый приход', when:'20.07', rev:92000, pf:32800, on:false},
+  ];
+  // 2. постоянные — полная база (julyExp: ожидается в июле)
+  const regulars = [
+    {nm:'ТЧУП «Энергомир»', cadence:'цикл ~100 дн · посл. 09.04', when:'~18.07', julyExp:true, check:31600, prob:80, pf:12200, on:true},
+    {nm:'СТО «Гранд-Сервис»', cadence:'цикл ~45 дн · посл. 30.05', when:'~15.07', julyExp:true, check:14800, prob:85, pf:5400, on:false},
+    {nm:'РУП «Белводхоз»', cadence:'цикл ~60 дн · посл. 28.05', when:'~27.07', julyExp:true, check:52400, prob:70, pf:17400, on:false},
+    {nm:'ОАО «Нафтан»', cadence:'цикл ~120 дн · посл. 15.03', when:'~10.07', julyExp:true, check:62800, prob:65, pf:19000, on:false},
+    {nm:'УП «Минскэлектро»', cadence:'цикл ~70 дн · посл. 25.05', when:'~28.07', julyExp:true, check:38900, prob:75, pf:12500, on:false},
+    {nm:'ЧТУП «АвтоМир»', cadence:'цикл ~75 дн · посл. 06.05', when:'~20.07', julyExp:true, check:9200, prob:50, pf:2800, on:false},
+    {nm:'ОДО «ВодоканалСервис»', cadence:'цикл ~90 дн · посл. 02.06', when:'~31.08', julyExp:false, check:27300, prob:60, pf:9000, on:false},
+    {nm:'ИП Ковальчук', cadence:'цикл ~50 дн · посл. 12.06', when:'~01.08', julyExp:false, check:3200, prob:55, pf:1100, on:false},
+  ];
+
+  function renderCommitted(){
+    const tb=document.querySelector('tbody[data-src="committed"]'); tb.innerHTML='';
+    committed.forEach((r,i)=>{
+      const tr=document.createElement('tr'); if(!r.on) tr.className='off';
+      tr.innerHTML=`<td><input type="checkbox" class="chk" data-t="committed" data-i="${i}" ${r.on?'checked':''}></td>
+        <td><div class="nm2">${r.nm}<small>${r.sub}</small></div></td>
+        <td><span class="eta">🚚 придёт ${r.when}</span></td>
+        <td class="r">${fmt(r.rev)}</td>
+        <td class="r"><input class="pin" data-pf="committed" data-i="${i}" value="${r.pf}"></td>`;
+      tb.appendChild(tr);
+    });
+  }
+  function regRow(r,i){
+    const pull = r.julyExp ? '' : `<span class="pull">↗ подтянуть раньше</span>`;
+    return `<tr class="${r.on?'':'off'}">
+      <td><input type="checkbox" class="chk" data-t="regulars" data-i="${i}" ${r.on?'checked':''}></td>
+      <td><div class="nm2">${r.nm} ${pull}<small>${r.cadence}</small></div></td>
+      <td><span class="when ${r.julyExp?'':'next'}">${r.when}</span></td>
+      <td class="r">${fmt(r.check)}</td>
+      <td class="r"><span class="prob">${r.prob}%</span></td>
+      <td class="r"><input class="pin" data-pf="regulars" data-i="${i}" value="${r.pf}"></td></tr>`;
+  }
+  function renderRegulars(){
+    const tb=document.querySelector('tbody[data-src="regulars"]');
+    const idx = regulars.map((r,i)=>({r,i}));
+    const july = idx.filter(x=>x.r.julyExp), other = idx.filter(x=>!x.r.julyExp);
+    let h = `<tr class="grp"><td colspan="6">🟢 Ожидаются в июле — ${july.length}</td></tr>`;
+    july.forEach(({r,i})=> h+=regRow(r,i));
+    h += `<tr class="grp next"><td colspan="6">⏳ Вне июля — ${other.length} · можно предложить раньше (акция/допродажа)</td></tr>`;
+    other.forEach(({r,i})=> h+=regRow(r,i));
+    tb.innerHTML = h;
+    document.getElementById('reg-sub').textContent=`${regulars.length} клиентов в базе · ${july.length} ждём в июле, ${other.length} — позже`;
+  }
+
+  function num(id){ return parseFloat(document.getElementById(id).value)||0; }
+
+  function recompute(){
+    // источник 1
+    let s1=0, c1=0, r1=0; committed.forEach(r=>{ if(r.on){ s1+=r.pf; r1+=r.rev; c1++; } });
+    // источник 2
+    let s2=0, c2=0, r2=0; regulars.forEach(r=>{ if(r.on){ s2+=r.pf; r2+=r.check; c2++; } });
+    // источник 3 — калькулятор
+    const leads=num('c-leads'), lc=num('c-leadconv'), calls=num('c-calls'), cc=num('c-callconv'), check=num('c-check'), margin=num('c-margin');
+    const dealsLeads=leads*lc/100, dealsCalls=calls*cc/100, deals=dealsLeads+dealsCalls;
+    const rev=deals*check, s3=rev*margin/100;
+    document.getElementById('o-deals').textContent=deals.toFixed(1);
+    document.getElementById('o-rev').textContent=fmt(rev);
+    document.getElementById('o-pf').textContent=fmt(s3);
+
+    setBlockStat('s1', c1, 'поз', r1, s1);
+    setBlockStat('s2', c2, 'клиент.', r2, s2);
+    setBlockStat('s3', deals.toFixed(1), 'сдел.', rev, s3);
+
+    const asm=s1+s2+s3;
+    document.getElementById('m-asm').textContent=fmt(asm);
+
+    // стек
+    const scale=Math.max(asm,BASE), stack=document.getElementById('stack'); stack.innerHTML='';
+    [['s1',s1],['s2',s2],['s3',s3]].forEach(([c,v])=>{ if(v>0){ const d=document.createElement('div'); d.className='seg '+c; d.style.width=(v/scale*100)+'%'; stack.appendChild(d);} });
+    if(asm<BASE){ const g=document.createElement('div'); g.className='seg gap'; g.style.width=((BASE-asm)/scale*100)+'%'; stack.appendChild(g); }
+    document.getElementById('target-line').style.left=(BASE/scale*100)+'%';
+
+    // вердикт
+    const diff=asm-BASE, b=document.getElementById('v-badge'), sm=document.getElementById('v-sm');
+    if(diff>=0){ b.className='badge ok'; b.textContent='✓ План набран'; sm.textContent=`перекрывают базу на ${fmt(diff)}`; }
+    else { b.className='badge gap'; b.textContent=`Дефицит ${fmt(-diff)}`; sm.textContent=`собрано ${Math.round(asm/BASE*100)}% базы`; }
+
+    // обратный счёт по новым
+    const rv=document.getElementById('reverse');
+    const perDeal=check*margin/100; // прибыль с одной новой сделки
+    if(diff>=0){
+      rv.className='reverse okk';
+      rv.innerHTML=`✓ Источники закрывают план. Текущая активность (${leads} заявок + ${calls} звонков) даёт ${deals.toFixed(0)} новых сделок — этого хватает.`;
+    } else {
+      const need=(-diff)/perDeal;                 // ещё сделок
+      const needLeads=Math.ceil(need/(lc/100));    // или столько заявок
+      const needCalls=Math.ceil(need/(cc/100));    // или столько звонков
+      rv.className='reverse';
+      rv.innerHTML=`Чтобы закрыть дефицит <b>${fmt(-diff)}</b> при ср. чеке ${fmt(check)} и марже ${margin}% нужно ещё <b>~${need.toFixed(1)} новых сделок</b> → это <b>+${needLeads} заявок</b> от маркетинга <b>или +${needCalls} звонков</b> (или комбинация). Подними цифры в калькуляторе.`;
+    }
+
+    document.getElementById('planInput').value=fmt(Math.round(asm/1000)*1000);
+  }
+
+  document.addEventListener('change', e=>{
+    if(e.target.classList.contains('chk')){
+      const t=e.target.dataset.t, i=+e.target.dataset.i;
+      (t==='committed'?committed:regulars)[i].on=e.target.checked;
+      e.target.closest('tr').classList.toggle('off',!e.target.checked);
+      recompute();
+    }
+  });
+  document.addEventListener('input', e=>{
+    if(e.target.classList.contains('pin')){
+      const t=e.target.dataset.pf, i=+e.target.dataset.i;
+      (t==='committed'?committed:regulars)[i].pf=parseFloat(e.target.value)||0;
+      recompute();
+    }
+    if(e.target.id && e.target.id.startsWith('c-')) recompute();
+  });
+  document.getElementById('sendBtn').addEventListener('click', ()=>{
+    document.getElementById('planStatus').textContent='● Отправлено — на согласовании у РОПа';
+    document.getElementById('sendBtn').style.display='none';
+  });
+
+  renderCommitted(); renderRegulars(); recompute();
+</script>
+</body>
+</html>

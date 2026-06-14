@@ -1,0 +1,1619 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сделки 2.0 — доска (макет РОПа)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-pop:0 8px 24px rgba(16,24,40,.10);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+       background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ── Sidebar (заглушка, чтобы передать контекст приложения) ── */
+  .side{width:230px;background:#fff;border-right:1px solid #EAECEF;flex-shrink:0;padding:18px 14px}
+  .side .logo{font-weight:800;font-size:16px;color:var(--ink);padding:6px 10px 18px;display:flex;gap:8px;align-items:center}
+  .side .logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .nav-group{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#9aa3b0;padding:14px 10px 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:#475467;font-size:13.5px;cursor:pointer}
+  .nav-item:hover{background:#F7F8FA}
+  .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  .nav-item .ic{width:18px;height:18px;opacity:.7}
+
+  /* ── Main ── */
+  main{flex:1;overflow:auto;padding:22px 24px;min-width:0}
+
+  /* ════════════ ПРАВАЯ РЕЙКА ЧАТОВ (SALES-49, сворачиваемая) ════════════ */
+  .chats{position:relative;width:72px;flex-shrink:0;border-left:1px solid #EAECEF;background:#fff;z-index:30}
+  .chats-inner{position:absolute;top:0;right:0;height:100%;width:72px;background:#fff;
+       transition:width .22s cubic-bezier(.4,0,.2,1);overflow:hidden;box-shadow:none;border-left:1px solid #EAECEF}
+  .chats:hover .chats-inner{width:308px;box-shadow:-12px 0 28px rgba(16,24,40,.10)}
+  .chats-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;white-space:nowrap}
+  .chats-head .ttl{font-weight:700;font-size:14px;opacity:0;transition:opacity .18s}
+  .chats:hover .chats-head .ttl{opacity:1}
+  .chats-head .ico{width:40px;display:flex;justify-content:center;flex-shrink:0;font-size:17px;color:var(--muted)}
+  .chats-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9aa3b0;
+       padding:8px 16px 4px;opacity:0;transition:opacity .18s;white-space:nowrap}
+  .chats:hover .chats-group{opacity:1}
+  .chat-row{display:flex;align-items:center;gap:11px;padding:8px 16px;cursor:pointer;white-space:nowrap}
+  .chat-row:hover{background:#F7F8FA}
+  .avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+       font-weight:700;font-size:14px;color:#fff;position:relative}
+  .avatar .unread{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:99px;background:var(--bad);
+       color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #fff}
+  .chat-meta{min-width:0;opacity:0;transition:opacity .18s}
+  .chats:hover .chat-meta{opacity:1}
+  .chat-meta .nm{font-weight:600;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+  .chat-meta .last{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:200px}
+  .chats-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:#cbd5e1;opacity:0;transition:opacity .18s}
+  .chats:hover .chats-hint{opacity:1}
+
+  .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:18px}
+  .search{position:relative;min-width:240px;flex:1;max-width:380px}
+  .search input{width:100%;border:1px solid #E5E7EB;background:#fff;border-radius:8px;
+       padding:9px 12px 9px 34px;font-size:13.5px;outline:none}
+  .search input:focus{border-color:var(--brand)}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#9aa3b0}
+  .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #E5E7EB;background:#fff;
+       border-radius:8px;padding:9px 14px;font-size:13.5px;font-weight:500;color:#475467;cursor:pointer}
+  .btn:hover{background:#F9FAFB}
+  .btn.warn{border-color:#FCD34D;color:#B45309}
+  .btn.warn.on{background:#F59E0B;border-color:#F59E0B;color:#fff}
+  .col.dim{opacity:.45}
+  .col-empty-note{font-size:11.5px;color:#cbd5e1;text-align:center;padding:14px 0}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;margin-left:auto}
+  .btn.primary:hover{background:var(--brand-700)}
+
+  /* ════════════ SCOREBOARD ПЛАН/ФАКТ ════════════ */
+  .scoreboard{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);
+       padding:14px 16px;margin-bottom:8px;position:sticky;top:0;z-index:20}
+  .sb-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .sb-title{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px}
+  .sb-title .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.15)}
+  .sb-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:4px}
+  .periods{display:flex;gap:2px;border:1px solid #E5E7EB;border-radius:9px;padding:3px;background:#fff}
+  .periods button{border:none;background:none;padding:5px 12px;border-radius:7px;font-size:12.5px;
+       font-weight:500;color:var(--muted);cursor:pointer}
+  .periods button.active{background:var(--brand-100);color:var(--brand-700)}
+
+  /* строка метрик */
+  .sb-row{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;gap:0}
+  .cell{padding:4px 16px;border-left:1px solid #F1F3F5;position:relative}
+  .cell:first-child{border-left:none;padding-left:4px}
+  .cell .lbl{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:5px;white-space:nowrap}
+  .cell .val{font-size:18px;font-weight:700;color:var(--ink);margin-top:5px;line-height:1.1;letter-spacing:-.01em}
+  .cell .val .plan{font-size:12.5px;font-weight:400;color:#9aa3b0}
+  .cell.headline .val{font-size:26px}
+  .cell .unit{font-size:11px;color:#9aa3b0;font-weight:400}
+  .bar{position:relative;height:6px;border-radius:99px;background:#EEF0F2;overflow:hidden;margin-top:8px}
+  .bar > span{display:block;height:100%;border-radius:99px;transition:width .5s ease}
+  .pace-mark{position:absolute;top:-1px;bottom:-1px;width:2px;background:#0f172a;opacity:.5;z-index:2}
+  .pct{font-size:11px;margin-top:5px;font-weight:600;display:flex;align-items:center;gap:5px}
+  .dot{width:6px;height:6px;border-radius:50%}
+  .trend{font-size:10.5px;color:#9aa3b0;font-weight:500}
+  .proj{font-size:10.5px;color:#64748b;margin-top:3px}
+  .proj b{font-weight:700}.proj .pp{font-weight:700}
+  .proj .pp.ok{color:#047857}.proj .pp.warn{color:#B45309}.proj .pp.bad{color:#B91C1C}
+
+  /* бейдж темпа в шапке скорборда («идём по плану или нет») */
+  .pace-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:99px;padding:4px 11px;margin-left:10px}
+  .pace-badge.ahead{background:#ECFDF5;color:#047857}
+  .pace-badge.ontrack{background:#FFFBEB;color:#B45309}
+  .pace-badge.behind{background:#FEF2F2;color:#B91C1C}
+  .pace-badge .el{font-weight:400;opacity:.75}
+
+  /* pipeline-полоса под скорбордом */
+  .pipeline{display:flex;align-items:center;gap:18px;background:#fff;border-radius:12px;
+       box-shadow:var(--shadow-card);padding:11px 16px;margin-bottom:16px;font-size:13px}
+  .pipeline .pl-item{display:flex;align-items:center;gap:7px;color:#475467}
+  .pipeline .pl-item b{color:var(--ink);font-weight:700}
+  .pipeline .pl-sep{width:1px;height:18px;background:#ECEEF1}
+  .pipeline .pl-key{font-size:11.5px;color:var(--muted)}
+  .pipeline .chip{margin-left:auto;background:var(--brand-50);color:var(--brand-700);
+       border-radius:7px;padding:4px 10px;font-weight:600;font-size:12.5px}
+
+  /* ════════════ KANBAN ════════════ */
+  .view-switch{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .seg.funnel-seg button{width:auto;height:auto;padding:6px 12px;font-size:12.5px;white-space:nowrap}
+  .seg.funnel-seg button.on,.seg.funnel-seg button.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  .vs-left{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+  /* баннер планирования (за 5 раб. дней до конца месяца) */
+  .plan-banner{display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,#FFF7ED,#FEFCE8);
+       border:1px solid #FED7AA;border-radius:12px;padding:11px 16px;margin-bottom:12px;font-size:13px;color:#92400E}
+  .plan-banner .pb-ic{font-size:18px}
+  .plan-banner b{color:#7C2D12}
+  .plan-banner .pb-btn{margin-left:auto;border:none;background:var(--brand);color:#fff;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .plan-banner .pb-btn:hover{background:var(--brand-700)}
+  .plan-banner .pb-status{font-weight:700;font-size:12.5px}
+  .plan-banner .pb-status.pending{color:#B45309}.plan-banner .pb-status.approved{color:#047857}
+
+  /* таблица планирования */
+  .plan-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .plan-tbl th{text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:#9aa3b0;font-weight:700;border-bottom:1px solid #EEF0F2}
+  .plan-tbl th.r,.plan-tbl td.r{text-align:right}
+  .plan-tbl td{padding:8px 10px;border-bottom:1px solid #F4F5F7}
+  .plan-tbl tr:last-child td{border-bottom:none}
+  .plan-tbl .mname{font-weight:600}
+  .plan-tbl .proj-cell{font-weight:700}
+  .plan-tbl .proj-cell.ok{color:#047857}.plan-tbl .proj-cell.warn{color:#B45309}.plan-tbl .proj-cell.bad{color:#B91C1C}
+  .plan-tbl input{width:110px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 9px;font-size:13px;text-align:right;outline:none}
+  .plan-tbl input:focus{border-color:var(--brand)}
+  .plan-hint{font-size:12px;color:#9aa3b0;margin:4px 0 12px}
+
+  /* общий вид «Все вместе» — воронки секциями */
+  .board.stacked{display:block}
+  .funnel-sec{margin-bottom:18px}
+  .fs-title{display:flex;align-items:center;gap:9px;font-weight:700;font-size:14px;margin:4px 2px 10px;padding-left:10px;border-left:3px solid var(--c,#2563EB)}
+  .fs-title .fs-sub{font-size:12px;color:#9aa3b0;font-weight:400}
+  .subboard{display:flex;gap:13px;overflow-x:auto;padding-bottom:8px}
+  .subboard::-webkit-scrollbar{height:8px}.subboard::-webkit-scrollbar-thumb{background:#D6DAE0;border-radius:99px}
+  .subboard .col{width:262px;flex-shrink:0}
+  .seg{display:flex;gap:2px;border:1px solid #E5E7EB;border-radius:9px;padding:3px;background:#fff}
+  .seg button{border:none;background:none;width:30px;height:28px;border-radius:7px;color:#9aa3b0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .seg button.active{background:var(--brand-100);color:var(--brand-700)}
+
+  .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px}
+  .board::-webkit-scrollbar{height:8px}
+  .board::-webkit-scrollbar-thumb{background:#D6DAE0;border-radius:99px}
+  .col{width:284px;flex-shrink:0;display:flex;flex-direction:column;gap:12px}
+  .col-head{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
+  .col-head .stripe{height:4px}
+  .col-head .ch-body{padding:11px 14px}
+  .col-head .ch-title{font-weight:600;color:var(--ink);font-size:14px;display:flex;align-items:center;justify-content:space-between}
+  .col-head .ch-title .n{font-size:12px;color:#9aa3b0;font-weight:600;background:#F4F5F7;border-radius:6px;padding:1px 8px}
+  .col-head .ch-meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .col-head .ch-weight{font-size:11.5px;font-weight:600;color:var(--brand-700);margin-top:2px}
+
+  .card{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:13px;cursor:pointer;transition:box-shadow .15s}
+  .card:hover{box-shadow:var(--shadow-pop)}
+  .card .c-top{display:flex;align-items:center;justify-content:space-between}
+  .card .num{font-size:11.5px;color:var(--muted)}
+  .c-badges{display:flex;align-items:center;gap:6px}
+  .pri{font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px}
+  .pri.high{background:#FEE2E2;color:#B91C1C}
+  .pri.mid{background:#FEF3C7;color:#92400E}
+  .pri.low{background:#E0E7FF;color:#3730A3}
+  .days{font-size:10px;font-weight:600;border-radius:99px;padding:1px 7px;background:#F1F3F5;color:#64748b}
+  .days.stuck{background:#FEF3C7;color:#B45309}
+  .star{color:#CBD5E1;font-size:13px}
+  .star.on{color:#F59E0B}
+  /* бейдж действия «сегодня/завтра» (виден и в стадийном канбане) */
+  .act-badge{font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 6px;white-space:nowrap}
+  .act-badge.today{background:#FEE2E2;color:#B91C1C}
+  .act-badge.tom{background:#FEF3C7;color:#B45309}
+  .card.act-today{box-shadow:inset 3px 0 0 #EF4444, var(--shadow-card)}
+  .card.act-tom{box-shadow:inset 3px 0 0 #F59E0B, var(--shadow-card)}
+  .card.act-today:hover,.card.act-tom:hover{box-shadow:inset 3px 0 0 currentColor, var(--shadow-pop)}
+  .card .company{font-weight:600;color:var(--ink);margin-top:8px;font-size:14px}
+  .card .desc{font-size:12px;color:var(--muted);margin-top:1px}
+  .money-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px}
+  .money{font-weight:700;color:var(--ink);font-size:14.5px}
+  .wbadge{background:var(--brand-50);color:var(--brand-700);border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600}
+  .next{font-size:12px;color:var(--muted);margin-top:9px}
+  .next b{color:#475467;font-weight:500}
+  .owner{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:9px}
+  .res{display:inline-block;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;margin-top:9px}
+  .res.won{background:#DCFCE7;color:#15803D}
+  .res.lost{background:#FEE2E2;color:#B91C1C}
+  .res.cond{background:#FFEDD5;color:#C2410C}
+  .add-card{display:flex;align-items:center;justify-content:center;gap:6px;border:1px dashed #CBD5E1;
+       border-radius:12px;padding:10px;font-size:12px;font-weight:500;color:#94a3b8;cursor:pointer;background:transparent}
+  .add-card:hover{background:#fff}
+
+  .col-sep{display:flex;align-items:center;flex-shrink:0}
+  .col-sep .ln{width:2px;background:#E5E7EB;border-radius:2px;height:90%;margin:0 2px}
+
+  .hint{font-size:12px;color:#9aa3b0;margin:18px 2px 4px;display:flex;gap:7px;align-items:flex-start}
+
+  /* ════════ overlay + drawer (1 клик) + fullscreen (2 клика) ════════ */
+  .ov{position:fixed;inset:0;background:rgba(15,23,42,.40);opacity:0;pointer-events:none;transition:opacity .2s;z-index:60}
+  .ov.show{opacity:1;pointer-events:auto}
+
+  .drawer{position:fixed;top:0;right:0;height:100vh;width:460px;max-width:94vw;background:#fff;
+       box-shadow:-12px 0 40px rgba(15,23,42,.20);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+       z-index:70;display:flex;flex-direction:column}
+  .drawer.show{transform:translateX(0)}
+  .dh{padding:16px 20px;border-bottom:1px solid #EEF0F2}
+  .dh .r1{display:flex;justify-content:space-between;align-items:center}
+  .dh .num{font-size:12px;color:var(--muted)}
+  .dh .hb{display:flex;gap:7px}
+  .ibtn{width:30px;height:30px;border-radius:8px;border:1px solid #E5E7EB;background:#fff;color:#64748b;cursor:pointer;font-size:14px}
+  .ibtn:hover{background:#F8FAFC}
+  .dh h1{font-size:20px;font-weight:800;margin-top:8px;line-height:1.15}
+  .dh .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .dh .chips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+  .pchip{font-size:11px;font-weight:600;border-radius:7px;padding:3px 9px}
+  .pchip.stage{background:#FFF7ED;color:#C2410C}.pchip.prob{background:var(--brand-50);color:var(--brand-700)}
+  .pchip.days{background:#F1F5F9;color:#475569}.pchip.days.stuck{background:#FEF3C7;color:#B45309}
+  .dbody{overflow-y:auto;padding:0 20px 20px;flex:1}
+  .sec{padding:15px 0;border-bottom:1px solid #F1F3F5}.sec:last-child{border-bottom:none}
+  .sec h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:#9aa3b0;font-weight:700;margin-bottom:10px}
+  .amt{font-size:28px;font-weight:800;letter-spacing:-.02em}
+  .amt-sub{font-size:12.5px;color:var(--muted);margin-top:3px}.amt-sub b{color:var(--brand-700)}
+  .stepper{display:flex;gap:3px;margin-top:12px}
+  .stp{flex:1;height:6px;border-radius:99px;background:#EEF0F2}.stp.done{background:var(--brand)}.stp.cur{background:var(--warn)}
+  .stp-l{display:flex;justify-content:space-between;font-size:10px;color:#9aa3b0;margin-top:6px}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0}.kv .k{color:var(--muted)}.kv .v{font-weight:500}
+  .open-hint{font-size:11.5px;color:#94a3b8;background:#F8FAFC;border:1px dashed #E2E8F0;border-radius:9px;padding:9px 11px;text-align:center}
+  .dfoot{border-top:1px solid #EEF0F2;padding:12px 20px;display:flex;gap:8px}
+  .fbtn{flex:1;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;background:#fff;color:#475467}
+  .fbtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .fbtn.danger{flex:0 0 auto;padding:10px 13px;border-color:#FECACA;color:#B91C1C}
+  .channels{display:flex;gap:8px}
+  .chbtn{width:34px;height:34px;border-radius:9px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;background:#fff}
+
+  /* fullscreen «проваливание» в сделку */
+  .full{position:fixed;inset:0;background:var(--canvas);transform:scale(.98);opacity:0;pointer-events:none;
+       transition:opacity .2s,transform .2s;z-index:80;overflow:auto}
+  .full.show{opacity:1;transform:scale(1);pointer-events:auto}
+  .full-top{position:sticky;top:0;background:#fff;border-bottom:1px solid #EAECEF;padding:12px 22px;display:flex;align-items:center;gap:12px;z-index:2}
+  .full-top .back{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;font-weight:500}
+  .full-top .back:hover{color:var(--ink)}
+  .full-top .crumb2{font-size:13px;color:#9aa3b0}.full-top .crumb2 b{color:var(--ink)}
+  .full-wrap{max-width:760px;margin:22px auto;padding:0 22px;display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+  .fcard{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:20px}
+  .fcard h1{font-size:24px;font-weight:800}
+  .fcard .fsub{color:var(--muted);margin-top:2px}
+  .fcard .famt{font-size:26px;font-weight:800;margin-top:14px}
+  .frow{display:flex;justify-content:space-between;font-size:13.5px;padding:8px 0;border-top:1px solid #F4F5F7}
+  .frow .k{color:var(--muted)}
+  .ftask{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid #F6F7F9}.ftask:first-child{border-top:none}
+  .ftask .cb{width:18px;height:18px;border-radius:6px;border:2px solid #CBD5E1;flex-shrink:0;margin-top:1px}
+  .ftask.done .cb{background:var(--ok);border-color:var(--ok);color:#fff;font-size:12px;text-align:center;line-height:15px}
+  .ftask .tt{font-size:13px}.ftask.done .tt{text-decoration:line-through;color:#9aa3b0}
+  .ftask .mt{font-size:11px;color:var(--muted);margin-top:2px}.ftask .mt.over{color:#B91C1C;font-weight:600}
+  .secttl{font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:#9aa3b0;font-weight:700;margin:18px 0 9px}
+
+  /* ════════ модалки настройки (создать сделку / воронка / карточка / фильтры) ════════ */
+  .modal-ov{position:fixed;inset:0;background:rgba(15,23,42,.42);display:none;align-items:flex-start;justify-content:center;z-index:90;padding:48px 16px;overflow:auto}
+  .modal-ov.show{display:flex}
+  .modal{background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.28);width:520px;max-width:96vw}
+  .modal.wide{width:600px}
+  .m-head{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid #EEF0F2}
+  .m-head h2{font-size:17px;font-weight:800}
+  .m-head .x{width:30px;height:30px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;cursor:pointer;color:#64748b;font-size:14px}
+  .m-body{padding:18px 20px;max-height:64vh;overflow:auto}
+  .m-foot{display:flex;gap:9px;justify-content:flex-end;padding:14px 20px;border-top:1px solid #EEF0F2}
+  .fld{margin-bottom:13px}
+  .fld label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:5px}
+  .fld input,.fld select,.fld textarea{width:100%;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;font-size:13.5px;outline:none;font-family:inherit}
+  .fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--brand)}
+  .fld-row{display:flex;gap:11px}.fld-row .fld{flex:1}
+  .mbtn{border-radius:9px;padding:9px 16px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;background:#fff;color:#475467}
+  .mbtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .mbtn.ghost{background:none}
+
+  /* редактор воронки — строки стадий */
+  .stage-edit{display:flex;align-items:center;gap:9px;padding:8px;border:1px solid #EEF0F2;border-radius:10px;margin-bottom:8px;background:#FAFBFC}
+  .stage-edit .grip{color:#cbd5e1;cursor:grab;font-size:15px}
+  .stage-edit input[type=color]{width:30px;height:30px;border:none;border-radius:7px;padding:0;cursor:pointer;background:none}
+  .stage-edit input[type=text]{flex:1;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;font-size:13px;outline:none}
+  .stage-edit .ord{display:flex;flex-direction:column;gap:1px}
+  .stage-edit .ord button{width:22px;height:15px;border:1px solid #E5E7EB;background:#fff;border-radius:5px;cursor:pointer;font-size:9px;line-height:1;color:#64748b;padding:0}
+  .stage-edit .del{width:30px;height:30px;border:1px solid #FECACA;color:#B91C1C;background:#fff;border-radius:8px;cursor:pointer;font-size:13px}
+  .stage-edit .term{font-size:10px;font-weight:700;color:#9aa3b0;background:#F1F5F9;border-radius:5px;padding:2px 7px}
+  .add-stage{width:100%;border:1px dashed #CBD5E1;border-radius:10px;padding:10px;color:#64748b;background:none;cursor:pointer;font-size:13px;font-weight:600}
+
+  /* настройка полей карточки / фильтр-параметры — чекбоксы */
+  .chk{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #EEF0F2;border-radius:10px;margin-bottom:7px;cursor:pointer;font-size:13.5px}
+  .chk:hover{background:#FAFBFC}
+  .chk input{width:17px;height:17px;accent-color:var(--brand);cursor:pointer}
+  .chk .desc2{font-size:11.5px;color:#9aa3b0;margin-left:auto}
+  .filter-ctl{margin:6px 0 4px 27px;display:none}
+  .filter-ctl.on{display:block}
+  .filter-ctl .fld-row{margin-top:4px}
+  .seg-mini{display:inline-flex;gap:4px;flex-wrap:wrap}
+  .seg-mini button{border:1px solid #E5E7EB;background:#fff;border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer;color:#475467}
+  .seg-mini button.on{background:var(--brand-100);border-color:var(--brand);color:var(--brand-700);font-weight:600}
+
+  /* плотность карточек */
+  .board.compact .card{padding:9px}
+  .board.compact .company{margin-top:4px;font-size:13px}
+  .board.compact .money-row,.board.compact .next,.board.compact .owner{margin-top:5px}
+
+  /* ════════ окно чата (клик по диалогу в рейке) ════════ */
+  .chat-row{position:relative}
+  .chatwin{position:fixed;bottom:0;right:84px;width:340px;height:480px;max-height:80vh;background:#fff;
+       border-radius:14px 14px 0 0;box-shadow:0 -8px 40px rgba(15,23,42,.22);display:none;flex-direction:column;z-index:55;overflow:hidden}
+  .chatwin.show{display:flex}
+  .cw-head{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid #EEF0F2;background:#fff}
+  .cw-av{width:36px;height:36px;border-radius:50%;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .cw-id{min-width:0;flex:1}
+  .cw-id .nm{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cw-id .st{font-size:11px;color:#16a34a}
+  .cw-x{width:28px;height:28px;border:none;background:#F1F5F9;border-radius:7px;cursor:pointer;color:#64748b;font-size:13px}
+  .cw-body{flex:1;overflow-y:auto;padding:14px 13px;background:#F8FAFC;display:flex;flex-direction:column;gap:8px}
+  .bub{font-size:12.5px;padding:8px 11px;border-radius:12px;max-width:82%;line-height:1.4;position:relative}
+  .bub.in{background:#fff;border:1px solid #EEF0F2;align-self:flex-start;border-bottom-left-radius:4px}
+  .bub.out{background:var(--brand);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+  .bub .bm{font-size:9.5px;margin-top:4px;opacity:.6}
+  .cw-day{align-self:center;font-size:10px;color:#9aa3b0;background:#EEF1F4;border-radius:99px;padding:2px 10px;margin:2px 0}
+  .cw-chan{display:flex;gap:5px;padding:8px 11px 0}
+  .cw-chan button{border:1px solid #E5E7EB;background:#fff;border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;color:#64748b}
+  .cw-chan button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:600}
+  .cw-compose{display:flex;gap:8px;align-items:flex-end;padding:9px 11px 11px;border-top:1px solid #EEF0F2;background:#fff}
+  .cw-compose textarea{flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;font-size:12.5px;resize:none;height:38px;max-height:90px;outline:none;font-family:inherit}
+  .cw-compose textarea:focus{border-color:var(--brand)}
+  .cw-send{width:38px;height:38px;border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:16px;cursor:pointer;flex-shrink:0}
+  .cw-send:hover{background:var(--brand-700)}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+<div class="app">
+
+  <!-- Sidebar заглушка -->
+  <aside class="side">
+    <div class="logo"><span class="mark">A</span> AI-First OS</div>
+    <div class="nav-group">CRM</div>
+    <div class="nav-item active">▦ Сделки</div>
+    <div class="nav-item">◔ Лиды</div>
+    <div class="nav-item">◑ РОП</div>
+    <div class="nav-group">ERP</div>
+    <div class="nav-item">▣ Производство</div>
+    <div class="nav-item">⛓ Закупки</div>
+    <div class="nav-item">⚖ Финансы</div>
+  </aside>
+
+  <main>
+    <!-- Тулбар -->
+    <div class="toolbar">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Поиск сделок...">
+      </div>
+      <button class="btn" id="filterBtn">⚙ Фильтры</button>
+      <button class="btn warn" id="stuckBtn">🕒 Только висяки</button>
+      <button class="btn" id="funnelBtn">▦ Воронка</button>
+      <button class="btn" id="cardBtn">🃏 Карточка</button>
+      <button class="btn primary" id="createBtn">＋ Создать сделку</button>
+    </div>
+
+    <!-- баннер: пора планировать следующий месяц -->
+    <div class="plan-banner" id="planBanner">
+      <span class="pb-ic">📋</span>
+      <span>До конца июня — <b>5 рабочих дней</b>. Пора составить личный план на <b>июль</b> и согласовать с РОПом.</span>
+      <button class="pb-btn" id="planBtn">Составить план на июль</button>
+      <span class="pb-status" id="planStatus"></span>
+    </div>
+
+    <!-- ════════ СКОРБОРД ПЛАН/ФАКТ (sticky, всегда перед глазами) ════════ -->
+    <section class="scoreboard">
+      <div class="sb-head">
+        <div class="sb-title">
+          <span class="pulse"></span> План / Факт
+          <span class="sb-sub" id="sb-sub">— Июнь 2026 · план продаж согласован РОПом</span>
+          <span class="pace-badge" id="pace-badge"></span>
+        </div>
+        <div class="periods" id="periods">
+          <button data-p="day">День</button>
+          <button data-p="week">Неделя</button>
+          <button data-p="month" class="active">Месяц</button>
+          <button data-p="quarter">Квартал</button>
+          <button data-p="year">Год</button>
+        </div>
+      </div>
+
+      <div class="sb-row" id="sb-row"><!-- заполняется JS --></div>
+    </section>
+
+    <!-- Pipeline / прогноз -->
+    <div class="pipeline">
+      <div class="pl-item"><span class="pl-key">В работе:</span> <b id="pl-count">47</b> сделок</div>
+      <div class="pl-sep"></div>
+      <div class="pl-item"><span class="pl-key">Сумма pipeline:</span> <b id="pl-sum">312 400 Br</b></div>
+      <div class="pl-sep"></div>
+      <div class="pl-item"><span class="pl-key">Взвешенный прогноз:</span> <b id="pl-weight" style="color:var(--brand-700)">≈ 168 200 Br</b></div>
+      <div class="pl-sep"></div>
+      <div class="pl-item"><span class="pl-key">Висяки &gt;7 дн:</span> <b style="color:#B45309">6</b></div>
+      <span class="chip">Закроем месяц на ~92% плана</span>
+    </div>
+
+    <!-- Переключатель вида -->
+    <div class="view-switch">
+      <div class="vs-left">
+        <div class="seg funnel-seg" id="funnelSeg">
+          <button data-fn="all" class="on">▦ Все вместе</button>
+          <button data-fn="new">Новые</button>
+          <button data-fn="repeat">♻ Постоянные</button>
+          <button data-fn="tender">📑 Тендеры</button>
+        </div>
+        <div class="seg funnel-seg" id="groupSeg">
+          <button data-g="stage" class="active">▦ По стадиям</button>
+          <button data-g="dates">📅 По датам действий</button>
+        </div>
+      </div>
+      <div class="seg">
+        <button class="active" title="Канбан">▦</button>
+        <button title="Список">≡</button>
+      </div>
+    </div>
+
+    <!-- ════════ ВОРОНКА 9 СТАДИЙ ════════ -->
+    <div class="board">
+
+      <!-- new -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#3B82F6"></div>
+          <div class="ch-body">
+            <div class="ch-title">Новая заявка <span class="n">8</span></div>
+            <div class="ch-meta">8 сделок · 96 200 Br</div>
+            <div class="ch-weight">взвешенно: 4 810 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1042</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star">★</span></div></div>
+          <div class="company">ТД «ВольтАвто»</div><div class="desc">АКБ 6СТ-190, 12 шт</div>
+          <div class="money-row"><span class="money">18 400 Br</span><span class="wbadge">5% · ≈ 920 Br</span></div>
+          <div class="next">След. шаг: <b>перезвонить, уточнить ЛПР</b></div>
+          <div class="owner"><span>👤 Орлов И.</span><span>📅 12.06</span></div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1041</span>
+            <div class="c-badges"><span class="pri mid">Средний</span><span class="days">🕒 2 дн</span><span class="star">★</span></div></div>
+          <div class="company">АвтоТрейд Минск</div><div class="desc">Тяговые АКБ, запрос</div>
+          <div class="money-row"><span class="money">9 800 Br</span><span class="wbadge">5% · ≈ 490 Br</span></div>
+          <div class="next">След. шаг: <b>отправить каталог</b></div>
+          <div class="owner"><span>👤 Орлов И.</span><span>📅 11.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- in_work -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#6366F1"></div>
+          <div class="ch-body">
+            <div class="ch-title">Взят в работу <span class="n">6</span></div>
+            <div class="ch-meta">6 сделок · 84 500 Br</div>
+            <div class="ch-weight">взвешенно: 8 450 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1038</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days stuck">🕒 9 дн</span><span class="star on">★</span></div></div>
+          <div class="company">СТО «Гранд-Сервис»</div><div class="desc">АКБ + зарядные, опт</div>
+          <div class="money-row"><span class="money">22 100 Br</span><span class="wbadge">10% · ≈ 2 210 Br</span></div>
+          <div class="next">След. шаг: <b>квалифицировать ЛПР</b></div>
+          <div class="owner"><span>👤 Петрова А.</span><span>📅 03.06</span></div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1035</span>
+            <div class="c-badges"><span class="pri low">Низкий</span><span class="days">🕒 3 дн</span><span class="star">★</span></div></div>
+          <div class="company">ИП Ковальчук</div><div class="desc">Розница, АКБ легковые</div>
+          <div class="money-row"><span class="money">3 200 Br</span><span class="wbadge">10% · ≈ 320 Br</span></div>
+          <div class="next">След. шаг: <b>выяснить объём</b></div>
+          <div class="owner"><span>👤 Петрова А.</span><span>📅 09.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- qual -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#8B5CF6"></div>
+          <div class="ch-body">
+            <div class="ch-title">Квалифицирован <span class="n">5</span></div>
+            <div class="ch-meta">5 сделок · 112 000 Br</div>
+            <div class="ch-weight">взвешенно: 22 400 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1029</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 2 дн</span><span class="star on">★</span></div></div>
+          <div class="company">ОАО «Белтранс»</div><div class="desc">Парк 40 ед., АКБ 6СТ-190</div>
+          <div class="money-row"><span class="money">46 800 Br</span><span class="wbadge">20% · ≈ 9 360 Br</span></div>
+          <div class="next">След. шаг: <b>назначить встречу с гл.инж.</b></div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 10.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- price_req -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#F97316"></div>
+          <div class="ch-body">
+            <div class="ch-title">Цена запрошена <span class="n">3</span></div>
+            <div class="ch-meta">3 сделки · 71 200 Br</div>
+            <div class="ch-weight">взвешенно: 32 040 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1018</span>
+            <div class="c-badges"><span class="pri mid">Средний</span><span class="days">🕒 2 дн</span><span class="star">★</span></div></div>
+          <div class="company">ТЧУП «Энергомир»</div><div class="desc">Тяговые АКБ, 8 шт</div>
+          <div class="money-row"><span class="money">31 600 Br</span><span class="wbadge">45% · ≈ 14 220 Br</span></div>
+          <div class="next">След. шаг: <b>посчитать цену из закупки</b></div>
+          <div class="owner"><span>👤 Петрова А.</span><span>📅 12.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- price_ready -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#EAB308"></div>
+          <div class="ch-body">
+            <div class="ch-title">Есть цена <span class="n">4</span></div>
+            <div class="ch-meta">4 сделки · 88 700 Br</div>
+            <div class="ch-weight">взвешенно: 48 785 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1009</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days stuck">🕒 8 дн</span><span class="star on">★</span></div></div>
+          <div class="company">ООО «ТрансЛогик»</div><div class="desc">АКБ + ЗУ, КП готово</div>
+          <div class="money-row"><span class="money">42 300 Br</span><span class="wbadge">55% · ≈ 23 265 Br</span></div>
+          <div class="next">След. шаг: <b>выставить счёт</b></div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 04.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- meeting -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#F59E0B"></div>
+          <div class="ch-body">
+            <div class="ch-title">Встреча назначена <span class="n">4</span></div>
+            <div class="ch-meta">4 сделки · 98 300 Br</div>
+            <div class="ch-weight">взвешенно: 34 405 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-1024</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star on">★</span></div></div>
+          <div class="company">Автопарк №7</div><div class="desc">Поставка АКБ на год</div>
+          <div class="money-row"><span class="money">54 000 Br</span><span class="wbadge">35% · ≈ 18 900 Br</span></div>
+          <div class="next">След. шаг: <b>встреча 13.06, 11:00</b></div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 13.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- invoice_sent -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#14B8A6"></div>
+          <div class="ch-body">
+            <div class="ch-title">Счёт отправлен <span class="n">3</span></div>
+            <div class="ch-meta">3 сделки · 76 400 Br</div>
+            <div class="ch-weight">взвешенно: 53 480 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0998</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 3 дн</span><span class="star on">★</span></div></div>
+          <div class="company">УП «Минскэлектро»</div><div class="desc">Счёт СЧ-0421 на 38 900</div>
+          <div class="money-row"><span class="money">38 900 Br</span><span class="wbadge">70% · ≈ 27 230 Br</span></div>
+          <div class="next">След. шаг: <b>защитить счёт у снабжения</b></div>
+          <div class="owner"><span>👤 Орлов И.</span><span>📅 09.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- invoice_appr -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#06B6D4"></div>
+          <div class="ch-body">
+            <div class="ch-title">Счёт защищён <span class="n">2</span></div>
+            <div class="ch-meta">2 сделки · 64 100 Br</div>
+            <div class="ch-weight">взвешенно: 51 280 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0991</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star on">★</span></div></div>
+          <div class="company">ОАО «Гомсельмаш»</div><div class="desc">Защищён, ждём оплату</div>
+          <div class="money-row"><span class="money">41 200 Br</span><span class="wbadge">80% · ≈ 32 960 Br</span></div>
+          <div class="next">След. шаг: <b>контроль оплаты до 16.06</b></div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 12.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- contract -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#10B981"></div>
+          <div class="ch-body">
+            <div class="ch-title">Договор / Предоплата <span class="n">3</span></div>
+            <div class="ch-meta">3 сделки · 89 600 Br</div>
+            <div class="ch-weight">взвешенно: 80 640 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0985</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 2 дн</span><span class="star on">★</span></div></div>
+          <div class="company">РУП «Белводхоз»</div><div class="desc">Договор подписан, предоплата 50%</div>
+          <div class="money-row"><span class="money">52 400 Br</span><span class="wbadge">90% · ≈ 47 160 Br</span></div>
+          <div class="res cond" style="background:#DBEAFE;color:#1D4ED8">→ передать в исполнение</div>
+          <div class="owner"><span>👤 Петрова А.</span><span>📅 10.06</span></div>
+        </div>
+        <div class="add-card">＋ Добавить сделку</div>
+      </div>
+
+      <!-- разделитель: терминалы -->
+      <div class="col-sep"><div class="ln"></div></div>
+
+      <!-- cond_lost -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#FB923C"></div>
+          <div class="ch-body">
+            <div class="ch-title">Условный отказ <span class="n">2</span></div>
+            <div class="ch-meta">на согласовании РОПа</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0977</span>
+            <div class="c-badges"><span class="pri low">Низкий</span><span class="days">🕒 1 дн</span><span class="star">★</span></div></div>
+          <div class="company">ЧТУП «АвтоМир»</div><div class="desc">Дорого, ушли думать</div>
+          <div class="money-row"><span class="money">12 800 Br</span></div>
+          <div class="res cond">⏳ ждёт решения РОПа</div>
+          <div class="owner"><span>👤 Орлов И.</span><span>📅 12.06</span></div>
+        </div>
+      </div>
+
+      <!-- won -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#22C55E"></div>
+          <div class="ch-body">
+            <div class="ch-title">Закрыто: Успешно <span class="n">11</span></div>
+            <div class="ch-meta">11 сделок · 214 800 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0962</span>
+            <div class="c-badges"><span class="pri mid">Средний</span><span class="star on">★</span></div></div>
+          <div class="company">ОАО «Нафтан»</div><div class="desc">АКБ промышленные, 24 шт</div>
+          <div class="money-row"><span class="money">68 200 Br</span></div>
+          <div class="res won">✓ Сделка выиграна</div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 08.06</span></div>
+        </div>
+      </div>
+
+      <!-- lost -->
+      <div class="col">
+        <div class="col-head">
+          <div class="stripe" style="background:#EF4444"></div>
+          <div class="ch-body">
+            <div class="ch-title">Закрыто: Отказ <span class="n">7</span></div>
+            <div class="ch-meta">7 сделок · 98 400 Br</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0955</span>
+            <div class="c-badges"><span class="pri low">Низкий</span><span class="star">★</span></div></div>
+          <div class="company">ИП Левченко</div><div class="desc">—</div>
+          <div class="money-row"><span class="money">8 600 Br</span></div>
+          <div class="res lost">Причина: Ушёл к конкуренту</div>
+          <div class="owner"><span>👤 Орлов И.</span><span>📅 07.06</span></div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="num">№ CRM-0948</span>
+            <div class="c-badges"><span class="pri low">Низкий</span><span class="star">★</span></div></div>
+          <div class="company">ООО «СтройБаза»</div><div class="desc">—</div>
+          <div class="money-row"><span class="money">5 400 Br</span></div>
+          <div class="res lost">Причина: Контрагент ликвидирован</div>
+          <div class="owner"><span>👤 Петрова А.</span><span>📅 05.06</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="hint">
+      <span>ℹ️</span>
+      <span><b>1 клик</b> по карточке — быстрый расширенный вид справа · <b>2 клика</b> — открыть сделку целиком.
+      Скорборд «План / Факт» закреплён сверху (sticky). «Светофор» метрик: 🟢 ≥100% · 🟡 70–99% · 🔴 &lt;70%.</span>
+    </div>
+
+  </main>
+
+  <!-- ════ Правая рейка чатов (свёрнута; наведи курсор — раскроется поверх доски) ════ -->
+  <aside class="chats">
+    <div class="chats-inner">
+      <div class="chats-head"><span class="ico">💬</span><span class="ttl">Чаты и дела</span></div>
+
+      <div class="chats-group">Клиенты</div>
+      <div class="chat-row" data-chat="beltrans">
+        <div class="avatar" style="background:#2563EB">БТ<span class="unread">3</span></div>
+        <div class="chat-meta"><div class="nm">ОАО «Белтранс»</div><div class="last">Когда подъедете на осмотр парка?</div></div>
+      </div>
+      <div class="chat-row" data-chat="park7">
+        <div class="avatar" style="background:#F59E0B">А7<span class="unread">1</span></div>
+        <div class="chat-meta"><div class="nm">Автопарк №7</div><div class="last">Жду предложение по году</div></div>
+      </div>
+      <div class="chat-row" data-chat="minskelektro">
+        <div class="avatar" style="background:#14B8A6">МЭ</div>
+        <div class="chat-meta"><div class="nm">УП «Минскэлектро»</div><div class="last">Счёт передали на оплату</div></div>
+      </div>
+      <div class="chat-row" data-chat="voltavto">
+        <div class="avatar" style="background:#8B5CF6">ВА<span class="unread">2</span></div>
+        <div class="chat-meta"><div class="nm">ТД «ВольтАвто»</div><div class="last">Интересуют АКБ на 12 машин</div></div>
+      </div>
+
+      <div class="chats-group">Коллеги</div>
+      <div class="chat-row" data-chat="rop">
+        <div class="avatar" style="background:#0EA5E9">СК</div>
+        <div class="chat-meta"><div class="nm">Сидоров К. · РОП</div><div class="last">Согласовал план на июнь</div></div>
+      </div>
+      <div class="chat-row" data-chat="petrova">
+        <div class="avatar" style="background:#64748B">ПА</div>
+        <div class="chat-meta"><div class="nm">Петрова А.</div><div class="last">Передай контакт по Гомелю</div></div>
+      </div>
+
+      <div class="chats-hint">наведи — раскрыть</div>
+    </div>
+  </aside>
+
+  <!-- ════ окно чата (открывается по клику на диалог) ════ -->
+  <div class="chatwin" id="chatwin">
+    <div class="cw-head">
+      <div class="cw-av" id="cw-av">БТ</div>
+      <div class="cw-id"><div class="nm" id="cw-nm">—</div><div class="st" id="cw-st">● онлайн · WhatsApp</div></div>
+      <button class="cw-x" onclick="closeChat()">✕</button>
+    </div>
+    <div class="cw-body" id="cw-body"></div>
+    <div class="cw-chan" id="cw-chan">
+      <button class="on" data-ch="WhatsApp">WhatsApp</button>
+      <button data-ch="Telegram">Telegram</button>
+      <button data-ch="Email">Email</button>
+      <button data-ch="Звонок">☎ Звонок</button>
+    </div>
+    <div class="cw-compose">
+      <textarea id="cw-input" placeholder="Написать сообщение…"></textarea>
+      <button class="cw-send" id="cw-send" title="Отправить">➤</button>
+    </div>
+  </div>
+
+  <!-- overlay + drawer (1 клик) -->
+  <div class="ov" id="ov" onclick="closeAll()"></div>
+  <aside class="drawer" id="drawer">
+    <div class="dh">
+      <div class="r1">
+        <span class="num" id="dk-num">№ —</span>
+        <div class="hb">
+          <button class="ibtn" title="В избранное">☆</button>
+          <button class="ibtn" title="Открыть целиком" onclick="goFull()">⤢</button>
+          <button class="ibtn" title="Закрыть" onclick="closeAll()">✕</button>
+        </div>
+      </div>
+      <h1 id="dk-company">—</h1>
+      <div class="sub" id="dk-desc">—</div>
+      <div class="chips" id="dk-chips"></div>
+    </div>
+    <div class="dbody" id="dk-body"></div>
+    <div class="dfoot">
+      <button class="fbtn primary">→ Следующая стадия</button>
+      <button class="fbtn">✎ Задача</button>
+      <button class="fbtn danger">✕ Отказ</button>
+    </div>
+  </aside>
+
+  <!-- fullscreen «проваливание» в сделку (2 клика) -->
+  <div class="full" id="full">
+    <div class="full-top">
+      <span class="back" onclick="closeAll()">← К сделкам</span>
+      <span class="crumb2">CRM / Сделки / <b id="f-num">—</b></span>
+    </div>
+    <div class="full-wrap" id="f-wrap"></div>
+  </div>
+
+  <!-- ════ Модалка: Создать сделку ════ -->
+  <div class="modal-ov" id="m-create">
+    <div class="modal">
+      <div class="m-head"><h2>Новая сделка</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body">
+        <div class="fld"><label>Контрагент</label><input id="c-company" placeholder="ООО «…»"></div>
+        <div class="fld"><label>Описание / что нужно</label><input id="c-desc" placeholder="АКБ 6СТ-190, 12 шт"></div>
+        <div class="fld-row">
+          <div class="fld"><label>Сумма, BYN</label><input id="c-amount" type="number" placeholder="0"></div>
+          <div class="fld"><label>Стадия</label><select id="c-stage"></select></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld"><label>Приоритет</label><select id="c-pri"><option value="mid">Средний</option><option value="high">Высокий</option><option value="low">Низкий</option></select></div>
+          <div class="fld"><label>Ответственный</label><select id="c-owner"><option>Орлов И.</option><option>Петрова А.</option><option>Сидоров К.</option></select></div>
+        </div>
+        <div class="fld"><label>Следующий шаг</label><input id="c-next" placeholder="перезвонить, уточнить ЛПР"></div>
+      </div>
+      <div class="m-foot"><button class="mbtn ghost" data-close>Отмена</button><button class="mbtn primary" id="c-save">Создать</button></div>
+    </div>
+  </div>
+
+  <!-- ════ Модалка: Настроить воронку ════ -->
+  <div class="modal-ov" id="m-funnel">
+    <div class="modal wide">
+      <div class="m-head"><h2>Настройка воронки</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body">
+        <p style="font-size:12.5px;color:#9aa3b0;margin-bottom:12px">Перетаскивайте порядок стрелками, меняйте цвет и название, добавляйте/удаляйте стадии. Терминальные стадии (Успех/Отказ/Условный отказ) удалять нельзя.</p>
+        <div id="stage-list"></div>
+        <button class="add-stage" id="addStage">＋ Добавить стадию</button>
+      </div>
+      <div class="m-foot"><button class="mbtn ghost" data-close>Закрыть</button><button class="mbtn primary" id="funnel-save">Применить к доске</button></div>
+    </div>
+  </div>
+
+  <!-- ════ Модалка: Настроить карточку ════ -->
+  <div class="modal-ov" id="m-card">
+    <div class="modal">
+      <div class="m-head"><h2>Поля карточки</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body" id="card-fields">
+        <label class="chk"><input type="checkbox" data-f="pri" checked> Приоритет <span class="desc2">бейдж</span></label>
+        <label class="chk"><input type="checkbox" data-f="days" checked> Дни в стадии <span class="desc2">висяки</span></label>
+        <label class="chk"><input type="checkbox" data-f="star" checked> Избранное ★</label>
+        <label class="chk"><input type="checkbox" data-f="wbadge" checked> Вероятность · взвешенно</label>
+        <label class="chk"><input type="checkbox" data-f="next" checked> Следующий шаг</label>
+        <label class="chk"><input type="checkbox" data-f="owner" checked> Ответственный + дата</label>
+        <div class="fld" style="margin-top:14px"><label>Плотность</label>
+          <div class="seg-mini" id="density"><button class="on" data-d="comfort">Комфорт</button><button data-d="compact">Компактно</button></div>
+        </div>
+      </div>
+      <div class="m-foot"><button class="mbtn primary" data-close>Готово</button></div>
+    </div>
+  </div>
+
+  <!-- ════ Модалка: Личный план на следующий месяц → РОПу ════ -->
+  <div class="modal-ov" id="m-plan">
+    <div class="modal wide">
+      <div class="m-head"><h2>Мой план на июль · согласование с РОПом</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body">
+        <div class="plan-hint">Учтите согласованный план июня и текущий темп. «Прогноз факта» — куда выходите при нынешнем темпе. Поставьте цель на июль и отправьте РОПу.</div>
+        <table class="plan-tbl">
+          <thead><tr>
+            <th>Показатель</th><th class="r">План июня</th><th class="r">Факт сейчас</th>
+            <th class="r">Прогноз факта</th><th class="r">План июля</th>
+          </tr></thead>
+          <tbody id="plan-rows"></tbody>
+        </table>
+      </div>
+      <div class="m-foot">
+        <button class="mbtn ghost" data-close>Сохранить черновик</button>
+        <button class="mbtn primary" id="plan-submit">Отправить РОПу на согласование</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ Модалка: Фильтры (сборные параметры) ════ -->
+  <div class="modal-ov" id="m-filter">
+    <div class="modal">
+      <div class="m-head"><h2>Фильтры</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body">
+        <p style="font-size:12.5px;color:#9aa3b0;margin-bottom:12px">Включите нужные параметры — фильтр соберётся из них.</p>
+
+        <label class="chk"><input type="checkbox" data-flt="owner"> Ответственный</label>
+        <div class="filter-ctl" data-for="owner"><div class="fld"><select id="flt-owner"><option value="">Любой</option><option>Орлов И.</option><option>Петрова А.</option><option>Сидоров К.</option></select></div></div>
+
+        <label class="chk"><input type="checkbox" data-flt="pri"> Приоритет</label>
+        <div class="filter-ctl" data-for="pri"><div class="seg-mini" id="flt-pri"><button data-v="high">Высокий</button><button data-v="mid">Средний</button><button data-v="low">Низкий</button></div></div>
+
+        <label class="chk"><input type="checkbox" data-flt="amount"> Сумма, BYN</label>
+        <div class="filter-ctl" data-for="amount"><div class="fld-row"><div class="fld"><label>от</label><input id="flt-min" type="number" placeholder="0"></div><div class="fld"><label>до</label><input id="flt-max" type="number" placeholder="∞"></div></div></div>
+
+        <label class="chk"><input type="checkbox" data-flt="stuck"> Только висяки</label>
+        <label class="chk"><input type="checkbox" data-flt="reg"> Только постоянные клиенты</label>
+      </div>
+      <div class="m-foot"><button class="mbtn ghost" id="flt-reset">Сбросить</button><button class="mbtn primary" id="flt-apply">Применить</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Метрики скорборда: на каждый период свои факт/план (BYN, демо) ──
+  // headline=true — крупная ячейка. money=true — формат BYN.
+  // el = % прошедшего времени периода (для метки темпа «где должен быть»)
+  const PERIODS = {
+    day:     { el:55, sub:"— 12 июня 2026 · сегодня", pl:{count:5,sum:"38 200 Br",weight:"≈ 19 400 Br",stuck:1,chip:"День в графике (~104%)"} },
+    week:    { el:70, sub:"— Неделя 24 (09–15.06) · план согласован", pl:{count:18,sum:"142 600 Br",weight:"≈ 74 800 Br",stuck:3,chip:"Прогноз недели: ~103% плана"} },
+    month:   { el:40, sub:"— Июнь 2026 · план продаж согласован РОПом", pl:{count:47,sum:"312 400 Br",weight:"≈ 168 200 Br",stuck:6,chip:"Прогноз закрытия: ~105% плана"} },
+    quarter: { el:81, sub:"— II квартал 2026 (апр–июн)", pl:{count:131,sum:"884 100 Br",weight:"≈ 491 300 Br",stuck:14,chip:"Прогноз квартала: ~86% — отстаём"} },
+    year:    { el:45, sub:"— 2026 год", pl:{count:512,sum:"3 240 000 Br",weight:"≈ 1 760 000 Br",stuck:38,chip:"Прогноз года: ~111% плана"} },
+  };
+
+  // факт/план по метрикам для каждого периода. [факт, план, формат, единица]
+  const DATA = {
+    day: [   // прошло ~55% дня
+      ["Выручка (отгрузки)", 24000, 42000, "money", "", true],
+      ["Оплаты с НДС", 21000, 40000, "money"],
+      ["Прибыль валовая", 5000, 9000, "money"],
+      ["Новые сделки", 3, 6, "num", "шт"],
+      ["Успешные", 2, 3, "num", "шт"],
+      ["Конв. счёт→оплата", 71, 75, "pct"],
+      ["Звонки (хол.)", 23, 40, "num", "из них 13 хол."],
+      ["Средний чек", 15600, 14000, "money"],
+    ],
+    week: [  // прошло ~70% недели
+      ["Выручка (отгрузки)", 126000, 175000, "money", "", true],
+      ["Оплаты с НДС", 115000, 168000, "money"],
+      ["Прибыль валовая", 27000, 40000, "money"],
+      ["Новые сделки", 17, 25, "num", "шт"],
+      ["Успешные", 8, 12, "num", "шт"],
+      ["Конв. счёт→оплата", 73, 75, "pct"],
+      ["Звонки (хол.)", 148, 200, "num", "из них 78 хол."],
+      ["Средний чек", 16100, 14000, "money"],
+    ],
+    month: [  // прошло ~40% месяца
+      ["Выручка (отгрузки)", 294000, 700000, "money", "", true],
+      ["Оплаты с НДС", 258000, 680000, "money"],
+      ["Прибыль валовая", 66000, 165000, "money"],
+      ["Новые сделки", 38, 95, "num", "шт"],
+      ["Успешные", 13, 40, "num", "шт"],
+      ["Конв. счёт→оплата", 71, 75, "pct"],
+      ["Звонки (хол.)", 360, 800, "num", "из них 188 хол."],
+      ["Средний чек", 15800, 15000, "money"],
+    ],
+    quarter: [  // прошло ~81% квартала — отстаём
+      ["Выручка (отгрузки)", 1470000, 2100000, "money", "", true],
+      ["Оплаты с НДС", 1360000, 2040000, "money"],
+      ["Прибыль валовая", 360000, 495000, "money"],
+      ["Новые сделки", 210, 285, "num", "шт"],
+      ["Успешные", 88, 120, "num", "шт"],
+      ["Конв. счёт→оплата", 70, 75, "pct"],
+      ["Звонки (хол.)", 1900, 2400, "num", "из них 980 хол."],
+      ["Средний чек", 17900, 15000, "money"],
+    ],
+    year: [  // прошло ~45% года — лёгкое опережение
+      ["Выручка (отгрузки)", 4200000, 8400000, "money", "", true],
+      ["Оплаты с НДС", 3900000, 8160000, "money"],
+      ["Прибыль валовая", 900000, 1980000, "money"],
+      ["Новые сделки", 520, 1140, "num", "шт"],
+      ["Успешные", 220, 480, "num", "шт"],
+      ["Конв. счёт→оплата", 69, 75, "pct"],
+      ["Звонки (хол.)", 4400, 9600, "num", "из них 2300 хол."],
+      ["Средний чек", 17600, 15000, "money"],
+    ],
+  };
+
+  function fmtMoney(n){
+    if(n>=1000000) return (n/1000000).toFixed(2).replace('.',',')+" млн Br";
+    return n.toLocaleString('ru-RU').replace(/,/g,' ')+" Br";
+  }
+  function fmtShort(n){ // компактно для прогноза: 735к / 1,76 млн
+    if(n>=1000000) return (n/1000000).toFixed(2).replace('.',',')+" млн Br";
+    if(n>=1000) return Math.round(n/1000)+"к Br";
+    return n+" Br";
+  }
+  function fmtVal(v,kind){
+    if(kind==="money") return fmtMoney(v);
+    if(kind==="pct") return v+"%";
+    return v.toLocaleString('ru-RU').replace(/,/g,' ');
+  }
+  function toneFor(pct){
+    if(pct>=100) return {c:'var(--ok)',label:'🟢'};
+    if(pct>=70)  return {c:'var(--warn)',label:'🟡'};
+    return {c:'var(--bad)',label:'🔴'};
+  }
+
+  function render(period){
+    const m = PERIODS[period];
+    const elapsed = m.el; // % прошедшего времени периода
+    const rows = DATA[period];
+    const html = rows.map(([lbl,fact,plan,kind,unit,headline])=>{
+      const pct = Math.round((fact/plan)*100);
+      const tone = toneFor(pct);
+      const w = Math.min(pct,100);
+      // метка темпа: где факт ДОЛЖЕН быть к этому дню (линейный план). title — подсказка.
+      const mark = `<span class="pace-mark" style="left:${Math.min(elapsed,100)}%" title="нужно к этому дню: ${elapsed}%"></span>`;
+      // прогноз факта на конец периода по текущему темпу (run-rate). Для ставочных метрик (%/чек) темп не считаем.
+      const isRate = kind==='pct' || lbl.indexOf('чек')>=0;
+      let projHtml='';
+      if(!isRate){
+        const projFact = Math.round(fact*100/elapsed);
+        const projPct = Math.round(projFact/plan*100);
+        const pc = projPct>=100?'ok':projPct>=85?'warn':'bad';
+        const projTxt = kind==='money'?fmtShort(projFact):fmtVal(projFact,kind);
+        projHtml = `<div class="proj">→ идём на <b>${projTxt}</b> <span class="pp ${pc}">(${projPct}%)</span></div>`;
+      }
+      return `<div class="cell ${headline?'headline':''}">
+        <div class="lbl">${lbl}</div>
+        <div class="val">${fmtVal(fact,kind)} <span class="plan">/ ${fmtVal(plan,kind)}</span>
+          ${unit?`<div class="unit">${unit}</div>`:''}</div>
+        <div class="bar"><span style="width:${w}%;background:${tone.c}"></span>${mark}</div>
+        <div class="pct" style="color:${tone.c}"><span class="dot" style="background:${tone.c}"></span>${pct}% выполнено</div>
+        ${projHtml}
+      </div>`;
+    }).join('');
+    document.getElementById('sb-row').innerHTML = html;
+
+    // бейдж темпа: сравниваем выполнение выручки (headline) с прошедшим временем
+    const rev = rows[0]; const revPct = Math.round((rev[1]/rev[2])*100);
+    const diff = revPct - elapsed;
+    const pb = document.getElementById('pace-badge');
+    let cls,txt;
+    if(diff>=5){ cls='ahead'; txt=`🟢 Опережаем график на ${diff} п.п.`; }
+    else if(diff>=-5){ cls='ontrack'; txt='🟡 Идём в графике'; }
+    else { cls='behind'; txt=`🔴 Отстаём на ${-diff} п.п.`; }
+    pb.className='pace-badge '+cls;
+    pb.innerHTML=`${txt} <span class="el">· прошло ${elapsed}% периода</span>`;
+
+    document.getElementById('sb-sub').textContent = m.sub;
+    document.getElementById('pl-count').textContent = m.pl.count;
+    document.getElementById('pl-sum').textContent = m.pl.sum;
+    document.getElementById('pl-weight').textContent = m.pl.weight;
+    document.querySelector('.pipeline .chip').textContent = m.pl.chip;
+    document.querySelectorAll('.pipeline .pl-item b')[3].textContent = m.pl.stuck;
+  }
+
+  document.getElementById('periods').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#periods button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    render(b.dataset.p);
+  });
+
+  render('month');
+
+  /* ════════ Карточка: 1 клик = drawer, 2 клика = fullscreen ════════ */
+  const STAGE_ORDER = ["Новая заявка","Взят в работу","Квалифицирован","Встреча назначена",
+    "Цена запрошена","Есть цена","Счёт отправлен","Счёт защищён","Договор / Предоплата"];
+  const STAGE_SHORT = ["Новая","В работе","Квалиф.","Встреча","Цена","Есть цена","Счёт","Защищён","Договор"];
+
+  // вытащить данные из DOM карточки (без дублирования — единый источник на доске)
+  function readCard(card){
+    const col = card.closest('.col');
+    const txt = sel => { const e = card.querySelector(sel); return e ? e.textContent.trim() : ''; };
+    const stripe = col.querySelector('.stripe');
+    const stageTitle = col.querySelector('.ch-title')?.firstChild?.textContent.trim() || '';
+    const res = txt('.res');
+    return {
+      num: txt('.num'), company: txt('.company'), desc: txt('.desc') || '—',
+      money: txt('.money'), wbadge: txt('.wbadge'), next: txt('.next'),
+      owner: txt('.owner span'), date: card.querySelectorAll('.owner span')[1]?.textContent.trim() || '',
+      days: txt('.days'), stuck: card.querySelector('.days')?.classList.contains('stuck'),
+      stageTitle, color: stripe ? stripe.style.background : '#3B82F6', res,
+    };
+  }
+
+  function stepperHtml(stageTitle){
+    const idx = STAGE_ORDER.indexOf(stageTitle);
+    if(idx < 0) return ''; // терминал — без степпера
+    let s = '<div class="stepper">';
+    for(let i=0;i<9;i++) s += `<div class="stp ${i<idx?'done':i===idx?'cur':''}"></div>`;
+    s += `</div><div class="stp-l"><span>${STAGE_SHORT[0]}</span><span>${STAGE_SHORT[idx]}</span><span>${STAGE_SHORT[8]}</span></div>`;
+    return s;
+  }
+
+  function chipsHtml(d){
+    let h = `<span class="pchip stage" style="background:${d.color}22;color:${d.color}">● ${d.stageTitle}</span>`;
+    if(d.wbadge) h += `<span class="pchip prob">${d.wbadge}</span>`;
+    if(d.days) h += `<span class="pchip days ${d.stuck?'stuck':''}">${d.days}</span>`;
+    return h;
+  }
+
+  function openDrawer(card){
+    const d = readCard(card);
+    document.getElementById('dk-num').textContent = d.num;
+    document.getElementById('dk-company').textContent = d.company;
+    document.getElementById('dk-desc').textContent = d.desc;
+    document.getElementById('dk-chips').innerHTML = chipsHtml(d);
+    document.getElementById('dk-body').innerHTML = `
+      <div class="sec">
+        <div class="amt">${d.money || '—'}</div>
+        ${d.wbadge?`<div class="amt-sub">${d.wbadge.replace('·','· взвешенно')}</div>`:''}
+        ${stepperHtml(d.stageTitle)}
+      </div>
+      <div class="sec"><h3>Данные сделки</h3>
+        <div class="kv"><span class="k">Стадия</span><span class="v">${d.stageTitle}</span></div>
+        <div class="kv"><span class="k">Ответственный</span><span class="v">${d.owner||'—'}</span></div>
+        ${d.date?`<div class="kv"><span class="k">Дата</span><span class="v">${d.date}</span></div>`:''}
+        ${d.next?`<div class="kv"><span class="k">След. шаг</span><span class="v">${d.next.replace(/^След:?\s*/,'')}</span></div>`:''}
+        ${d.res?`<div class="kv"><span class="k">Результат</span><span class="v">${d.res}</span></div>`:''}
+      </div>
+      <div class="sec"><h3>Связаться</h3>
+        <div class="channels"><div class="chbtn">📞</div><div class="chbtn">🟢</div><div class="chbtn">✈</div><div class="chbtn">✉</div></div>
+      </div>
+      <div class="sec"><div class="open-hint">Задачи, позиции, переписка и документы — в полном виде. Двойной клик по карточке или ⤢</div></div>`;
+    document.getElementById('dk-body').scrollTop = 0;
+    document.getElementById('ov').classList.add('show');
+    document.getElementById('drawer').classList.add('show');
+    window._lastCard = card;
+  }
+
+  function openFull(card){
+    // 2 клика — «проваливание» в полную карточку сделки (отдельный экран)
+    window.location.href = 'sales-card-full.html';
+    return;
+    const d = readCard(card);
+    document.getElementById('f-num').textContent = d.num;
+    document.getElementById('f-wrap').innerHTML = `
+      <div class="fcard">
+        <span style="font-size:12px;color:var(--muted)">${d.num}</span>
+        <h1>${d.company}</h1>
+        <div class="fsub">${d.desc}</div>
+        <div class="famt">${d.money||'—'}</div>
+        ${stepperHtml(d.stageTitle)}
+        <div class="secttl">Задачи</div>
+        <div class="ftask"><div class="cb"></div><div><div class="tt">${(d.next||'Связаться с клиентом').replace(/^След:?\s*/,'')}</div><div class="mt ${d.stuck?'over':''}">${d.stuck?'просрочена':'ближайшая'}</div></div></div>
+        <div class="ftask done"><div class="cb">✓</div><div><div class="tt">Первичный контакт</div><div class="mt">выполнено</div></div></div>
+        <div class="secttl">Номенклатура</div>
+        <div class="frow"><span>Позиции сделки</span><span style="font-weight:700">${d.money||'—'}</span></div>
+        <div class="secttl">Переписка</div>
+        <div class="frow"><span class="k">Последнее сообщение</span><span>${d.next?'есть активность':'—'}</span></div>
+        <div class="secttl">Документы</div>
+        <div class="frow"><span class="k">Счёт / договор</span><span>${['Счёт отправлен','Счёт защищён','Договор / Предоплата'].includes(d.stageTitle)?'есть':'нет'}</span></div>
+      </div>
+      <div class="fcard">
+        <div class="secttl" style="margin-top:0">Сводка</div>
+        <div class="frow"><span class="k">Стадия</span><span>${d.stageTitle}</span></div>
+        ${d.wbadge?`<div class="frow"><span class="k">Прогноз</span><span>${d.wbadge}</span></div>`:''}
+        <div class="frow"><span class="k">Ответственный</span><span>${d.owner||'—'}</span></div>
+        ${d.days?`<div class="frow"><span class="k">В стадии</span><span>${d.days}</span></div>`:''}
+        ${d.res?`<div class="frow"><span class="k">Результат</span><span>${d.res}</span></div>`:''}
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="fbtn primary">→ Стадия</button><button class="fbtn">✎ Задача</button>
+        </div>
+        <div class="secttl">Связаться</div>
+        <div class="channels"><div class="chbtn">📞</div><div class="chbtn">🟢</div><div class="chbtn">✈</div><div class="chbtn">✉</div><div class="chbtn">🟣</div></div>
+      </div>`;
+    document.getElementById('full').classList.add('show');
+  }
+
+  function goFull(){ if(window._lastCard){ document.getElementById('drawer').classList.remove('show'); openFull(window._lastCard); } }
+
+  function closeAll(){
+    document.getElementById('ov').classList.remove('show');
+    document.getElementById('drawer').classList.remove('show');
+    document.getElementById('full').classList.remove('show');
+  }
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAll(); });
+
+  /* ════════ Фильтр «Только висяки» ════════ */
+  const stuckBtn = document.getElementById('stuckBtn');
+  let stuckOnly = false;
+  stuckBtn.addEventListener('click', ()=>{
+    stuckOnly = !stuckOnly;
+    stuckBtn.classList.toggle('on', stuckOnly);
+    document.querySelectorAll('.board .col').forEach(col=>{
+      const cards = col.querySelectorAll('.card');
+      const add = col.querySelector('.add-card');
+      let shown = 0;
+      cards.forEach(c=>{
+        const isStuck = !!c.querySelector('.days.stuck');
+        const vis = !stuckOnly || isStuck;
+        c.style.display = vis ? '' : 'none';
+        if(vis) shown++;
+      });
+      if(add) add.style.display = stuckOnly ? 'none' : '';
+      // примечание «нет висяков» в пустой колонке
+      let note = col.querySelector('.col-empty-note');
+      if(stuckOnly && shown === 0){
+        if(!note){ note = document.createElement('div'); note.className='col-empty-note'; note.textContent='нет висяков'; col.appendChild(note); }
+        note.style.display = '';
+        col.classList.add('dim');
+      } else {
+        if(note) note.style.display = 'none';
+        col.classList.remove('dim');
+      }
+    });
+  });
+
+  // 1-клик / 2-клика — делегированием на доску (работает и для новых карточек)
+  let clickTimer = null;
+  const boardEl = document.querySelector('.board');
+
+  /* ════════════════ ПЕРЕКЛЮЧАТЕЛЬ ВОРОНОК (одна доска) ════════════════ */
+  const FUNNEL_NEW = boardEl.innerHTML; // сохранить исходную воронку новых клиентов
+  function col(color,title,n,meta,weight,cards){
+    return `<div class="col"><div class="col-head"><div class="stripe" style="background:${color}"></div>
+      <div class="ch-body"><div class="ch-title">${title} <span class="n">${n}</span></div>
+      <div class="ch-meta">${meta}</div>${weight?`<div class="ch-weight">${weight}</div>`:''}</div></div>
+      ${cards}<div class="add-card">＋ Добавить</div></div>`;
+  }
+  function rcard(num,reg,pri,priLbl,days,stuck,company,desc,money,wbadge,next,owner,date){
+    return `<div class="card"><div class="c-top"><span class="num">${num}</span>
+      <div class="c-badges">${reg?'<span class="pri" style="background:#ECFDF5;color:#047857">★ Пост.</span>':''}<span class="pri ${pri}">${priLbl}</span>${days?`<span class="days ${stuck?'stuck':''}">🕒 ${days}</span>`:''}<span class="star on">★</span></div></div>
+      <div class="company">${company}</div><div class="desc">${desc}</div>
+      <div class="money-row"><span class="money">${money}</span>${wbadge?`<span class="wbadge">${wbadge}</span>`:''}</div>
+      ${next?`<div class="next">След. шаг: <b>${next}</b></div>`:''}
+      <div class="owner"><span>👤 ${owner}</span><span>📅 ${date}</span></div></div>`;
+  }
+  const FUNNEL_REPEAT =
+    col('#FB923C','Пора связаться','3','3 · радар перезаказа','прогноз: 84 200 Br',
+      rcard('№ RE-2041',true,'high','Высокий','просрочен',true,'ООО «СтройБаза»','Перезаказ АКБ (цикл ~90 дн)','18 400 Br','','клиент молчит 12 дн — звонок','Орлов И.','просроч.')+
+      rcard('№ RE-2039',true,'high','Высокий','3 дн',false,'ОАО «Белтранс»','Перезаказ + парк вырос','46 800 Br','','предложить +2 АКБ и 2 ЗУ','Сидоров К.','15.06'))+
+    col('#8B5CF6','Контакт / потребность','2','2 · 79 100 Br','',
+      rcard('№ RE-2035',true,'mid','Средний','1 дн',false,'Автопарк №7','Уточняем объём на квартал','49 500 Br','','согласовать кол-во','Сидоров К.','13.06'))+
+    col('#14B8A6','Счёт','1','1 · 31 600 Br','',
+      rcard('№ RE-2028',true,'mid','Средний','2 дн',false,'ТЧУП «Энергомир»','Счёт по перезаказу','31 600 Br','','защитить счёт','Петрова А.','11.06'))+
+    col('#06B6D4','Оплата','1','1 · 52 400 Br','',
+      rcard('№ RE-2021',true,'high','Высокий','1 дн',false,'РУП «Белводхоз»','Ждём оплату','52 400 Br','','контроль оплаты','Петрова А.','12.06'))+
+    col('#10B981','Отгрузка','2','2 · 88 700 Br','',
+      rcard('№ RE-2014',true,'mid','Средний','',false,'СТО «Гранд-Сервис»','Отгрузка по графику','14 800 Br','','передать логистике','Сидоров К.','10.06'))+
+    `<div class="col-sep"><div class="ln"></div></div>`+
+    col('#22C55E','Повторно закрыто','9','9 · 214 800 Br','',
+      rcard('№ RE-1998',true,'mid','Средний','',false,'УП «Минскэлектро»','Перезаказ выполнен','38 900 Br','','—','Орлов И.','05.06'))+
+    col('#EF4444','Не отвечает','1','ушёл / молчит','',
+      rcard('№ RE-1990',true,'low','Низкий','',false,'ИП Левченко','Не выходит на связь','8 600 Br','','передать РОПу','Орлов И.','03.06'));
+  const FUNNEL_TENDER =
+    col('#3B82F6','Объявлен','2','2 · 180 000 Br','',
+      rcard('№ T-512',false,'high','Высокий','1 дн',false,'Госзакупки РБ','Тендер на АКБ для МЧС','120 000 Br','','подготовить заявку','Сидоров К.','14.06'))+
+    col('#F59E0B','Заявка подана','1','1 · 86 000 Br','',
+      rcard('№ T-508',false,'mid','Средний','4 дн',false,'ОАО «Гомсельмаш»','Конкурсная заявка','86 000 Br','','ждём итоги','Петрова А.','18.06'))+
+    col('#14B8A6','Торги','1','1 · 240 000 Br','',
+      rcard('№ T-505',false,'high','Высокий','2 дн',false,'Белжелдор','Электронные торги','240 000 Br','','ставки','Сидоров К.','16.06'))+
+    `<div class="col-sep"><div class="ln"></div></div>`+
+    col('#22C55E','Выигран','4','4 · 612 000 Br','',
+      rcard('№ T-490',false,'high','Высокий','',false,'УП «Минскводоканал»','Контракт подписан','310 000 Br','','исполнение','Сидоров К.','01.06'))+
+    col('#EF4444','Проигран','3','3 · 188 000 Br','',
+      rcard('№ T-486',false,'low','Низкий','',false,'ОАО «Нафтан»','Не прошли по цене','64 000 Br','','—','Петрова А.','28.05'));
+
+  const COMBINED =
+    `<div class="funnel-sec"><div class="fs-title" style="--c:#2563EB">▦ Новые клиенты <span class="fs-sub">· привлечение · 9 стадий</span></div><div class="subboard">${FUNNEL_NEW}</div></div>`+
+    `<div class="funnel-sec"><div class="fs-title" style="--c:#FB923C">♻ Постоянные / перезаказы <span class="fs-sub">· удержание · короткая воронка</span></div><div class="subboard">${FUNNEL_REPEAT}</div></div>`+
+    `<div class="funnel-sec"><div class="fs-title" style="--c:#14B8A6">📑 Тендеры <span class="fs-sub">· госзакупки и конкурсы</span></div><div class="subboard">${FUNNEL_TENDER}</div></div>`;
+
+  // ── группировка «по датам действий» (планирование: что и когда делать) ──
+  const FUNNEL_DATES =
+    col('#EF4444','Просрочено','2','требует действия сейчас','',
+      rcard('№ CRM-0955',true,'high','Высокий','',false,'ООО «СтройБаза»','Перезаказ — клиент молчит','18 400 Br','','позвонить (просрочено 12 дн)','Орлов И.','01.06')+
+      rcard('№ CRM-1009',false,'high','Высокий','',false,'ООО «ТрансЛогик»','Выставить счёт','42 300 Br','','счёт (просрочено 2 дн)','Сидоров К.','10.06'))+
+    col('#2563EB','Сегодня','2','12 июня','',
+      rcard('№ CRM-1042',false,'high','Высокий','',false,'ТД «ВольтАвто»','Квалификация','18 400 Br','','перезвонить, уточнить ЛПР · 15:00','Орлов И.','12.06')+
+      rcard('№ CRM-0998',false,'high','Высокий','',false,'УП «Минскэлектро»','Защита счёта','38 900 Br','','защитить счёт у снабжения','Орлов И.','12.06'))+
+    col('#6366F1','Завтра','1','13 июня','',
+      rcard('№ CRM-1018',false,'mid','Средний','',false,'ТЧУП «Энергомир»','Цена запрошена','31 600 Br','','посчитать цену из закупки','Петрова А.','13.06'))+
+    col('#8B5CF6','Эта неделя','2','09–15 июня','',
+      rcard('№ CRM-1024',true,'high','Высокий','',false,'Автопарк №7','Встреча','54 000 Br','','встреча 13.06 11:00','Сидоров К.','13.06')+
+      rcard('№ CRM-1029',true,'high','Высокий','',false,'ОАО «Белтранс»','Назначить встречу','46 800 Br','','согласовать дату с гл.инж.','Сидоров К.','15.06'))+
+    col('#F59E0B','Этот месяц','1','до 30 июня','',
+      rcard('№ CRM-0991',false,'high','Высокий','',false,'ОАО «Гомсельмаш»','Контроль оплаты','41 200 Br','','контроль оплаты до 16.06','Сидоров К.','16.06'))+
+    col('#14B8A6','Следующий месяц','2','июль','',
+      rcard('№ RE-2014',true,'mid','Средний','',false,'ОАО «Нафтан»','Перезаказ по циклу','62 800 Br','','связаться ~05.07','Сидоров К.','05.07')+
+      rcard('№ RE-2021',true,'mid','Средний','',false,'РУП «Белводхоз»','Перезаказ по циклу','52 400 Br','','связаться ~27.07','Петрова А.','27.07'));
+
+  let curFunnel='all', curGroup='stage';
+  function renderBoard(){
+    if(curGroup==='dates'){ boardEl.classList.remove('stacked'); boardEl.innerHTML=FUNNEL_DATES; }
+    else if(curFunnel==='all'){ boardEl.classList.add('stacked'); boardEl.innerHTML=COMBINED; }
+    else { boardEl.classList.remove('stacked');
+      boardEl.innerHTML = curFunnel==='repeat'?FUNNEL_REPEAT : curFunnel==='tender'?FUNNEL_TENDER : FUNNEL_NEW; }
+    applyCardFields();
+    markActionDates();
+    document.getElementById('filterBtn').classList.remove('warn');
+    document.getElementById('stuckBtn').classList.remove('on');
+  }
+  // подсветить карточки с действием сегодня/завтра (видно в стадийном канбане)
+  function markActionDates(){
+    const TODAY='12.06', TOM='13.06';
+    boardEl.querySelectorAll('.card').forEach(c=>{
+      c.querySelector('.act-badge')?.remove(); c.classList.remove('act-today','act-tom');
+      const spans=c.querySelectorAll('.owner span');
+      const dt = spans.length>1 ? spans[1].textContent.replace(/[^\d.]/g,'') : '';
+      const ownerTxt = c.querySelector('.owner')?.textContent || '';
+      let cls,txt;
+      if(dt===TODAY || /сегодня/i.test(ownerTxt)){ cls='today'; txt='Сегодня'; }
+      else if(dt===TOM){ cls='tom'; txt='Завтра'; }
+      if(cls){
+        c.classList.add(cls==='today'?'act-today':'act-tom');
+        const badges=c.querySelector('.c-badges');
+        if(badges){ const b=document.createElement('span'); b.className='act-badge '+cls; b.textContent=txt; badges.insertBefore(b, badges.firstChild); }
+      }
+    });
+  }
+  document.getElementById('funnelSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#funnelSeg button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); curFunnel=b.dataset.fn; curGroup='stage';
+    document.querySelectorAll('#groupSeg button').forEach(x=>x.classList.remove('active'));
+    document.querySelector('#groupSeg [data-g="stage"]').classList.add('active');
+    renderBoard();
+  });
+  document.getElementById('groupSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#groupSeg button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); curGroup=b.dataset.g; renderBoard();
+  });
+  // старт — в самом конце скрипта (после объявления FIELD_SEL)
+
+  boardEl.addEventListener('click', e=>{
+    const card = e.target.closest('.card'); if(!card) return;
+    if(clickTimer) return;
+    clickTimer = setTimeout(()=>{ clickTimer = null; openDrawer(card); }, 230);
+  });
+  boardEl.addEventListener('dblclick', e=>{
+    const card = e.target.closest('.card'); if(!card) return;
+    if(clickTimer){ clearTimeout(clickTimer); clickTimer = null; }
+    document.getElementById('ov').classList.add('show');
+    openFull(card);
+  });
+
+  /* ════════════════ Модалки: общий open/close ════════════════ */
+  function openModal(id){ document.getElementById(id).classList.add('show'); }
+  function closeModal(el){ el.classList.remove('show'); }
+  document.querySelectorAll('.modal-ov').forEach(ov=>{
+    ov.addEventListener('click', e=>{ if(e.target===ov || e.target.closest('[data-close]')) closeModal(ov); });
+  });
+
+  /* ── список стадий: «продажные» колонки = до .col-sep ── */
+  function salesColumns(){
+    const cols=[]; for(const ch of boardEl.children){ if(ch.classList.contains('col-sep')) break; if(ch.classList.contains('col')) cols.push(ch); }
+    return cols;
+  }
+  function colTitle(col){ return col.querySelector('.ch-title').firstChild.textContent.trim(); }
+  function colColor(col){ return col.querySelector('.stripe').style.background || '#3B82F6'; }
+  function recount(col){
+    const cards=col.querySelectorAll('.card'); let sum=0;
+    cards.forEach(c=>{ const m=c.querySelector('.money'); if(m) sum+=parseInt(m.textContent.replace(/\D/g,''))||0; });
+    const n=col.querySelector('.ch-title .n'); if(n) n.textContent=cards.length;
+    const meta=col.querySelector('.ch-meta'); if(meta) meta.textContent=`${cards.length} · ${sum.toLocaleString('ru-RU').replace(/,/g,' ')} Br`;
+  }
+
+  /* ════════════════ СОЗДАТЬ СДЕЛКУ ════════════════ */
+  let dealSeq = 1100;
+  document.getElementById('createBtn').addEventListener('click', ()=>{
+    const sel=document.getElementById('c-stage'); sel.innerHTML='';
+    [...salesColumns(), ...[...boardEl.querySelectorAll('.col')].slice(salesColumns().length)].forEach(col=>{
+      const o=document.createElement('option'); o.value=''; o.textContent=colTitle(col); o.dataset.title=colTitle(col); sel.appendChild(o);
+    });
+    document.getElementById('c-company').value=''; document.getElementById('c-desc').value='';
+    document.getElementById('c-amount').value=''; document.getElementById('c-next').value='';
+    openModal('m-create');
+  });
+  document.getElementById('c-save').addEventListener('click', ()=>{
+    const company=document.getElementById('c-company').value.trim()||'Без названия';
+    const desc=document.getElementById('c-desc').value.trim()||'—';
+    const amount=parseInt(document.getElementById('c-amount').value)||0;
+    const pri=document.getElementById('c-pri').value, owner=document.getElementById('c-owner').value;
+    const next=document.getElementById('c-next').value.trim();
+    const stageTitle=document.getElementById('c-stage').selectedOptions[0].textContent;
+    const col=[...boardEl.querySelectorAll('.col')].find(c=>colTitle(c)===stageTitle);
+    if(!col) return;
+    const priLbl={high:'Высокий',mid:'Средний',low:'Низкий'}[pri];
+    const card=document.createElement('div'); card.className='card';
+    card.innerHTML=`<div class="c-top"><span class="num">№ CRM-${++dealSeq}</span>
+      <div class="c-badges"><span class="pri ${pri}">${priLbl}</span><span class="days">🕒 0 дн</span><span class="star">★</span></div></div>
+      <div class="company">${company}</div><div class="desc">${desc}</div>
+      <div class="money-row"><span class="money">${amount.toLocaleString('ru-RU').replace(/,/g,' ')} Br</span><span class="wbadge">5% · ≈ ${Math.round(amount*0.05).toLocaleString('ru-RU').replace(/,/g,' ')} Br</span></div>
+      ${next?`<div class="next">След. шаг: <b>${next}</b></div>`:''}
+      <div class="owner"><span>👤 ${owner}</span><span>📅 сегодня</span></div>`;
+    const add=col.querySelector('.add-card'); col.insertBefore(card, add||null);
+    applyCardFields(); markActionDates(); recount(col);
+    closeModal(document.getElementById('m-create'));
+  });
+
+  /* ════════════════ НАСТРОЙКА ВОРОНКИ ════════════════ */
+  const PALETTE=['#3B82F6','#6366F1','#8B5CF6','#F59E0B','#F97316','#EAB308','#14B8A6','#06B6D4','#10B981'];
+  let editorRows=[];
+  function renderStageList(){
+    const box=document.getElementById('stage-list'); box.innerHTML='';
+    editorRows.forEach((r,i)=>{
+      const row=document.createElement('div'); row.className='stage-edit';
+      if(r.terminal){
+        row.innerHTML=`<span class="grip" style="opacity:.3">⋮⋮</span>
+          <span class="stripe" style="display:inline-block;width:14px;height:14px;border-radius:4px;background:${r.color}"></span>
+          <input type="text" value="${r.title}" disabled style="opacity:.6"><span class="term">терминал</span>`;
+      } else {
+        row.innerHTML=`<span class="grip">⋮⋮</span>
+          <input type="color" value="${rgbToHex(r.color)}" data-i="${i}" class="se-color">
+          <input type="text" value="${r.title}" data-i="${i}" class="se-title">
+          <div class="ord"><button data-up="${i}">▲</button><button data-down="${i}">▼</button></div>
+          <button class="del" data-del="${i}">🗑</button>`;
+      }
+      box.appendChild(row);
+    });
+  }
+  function rgbToHex(c){
+    if(!c) return '#3B82F6'; if(c[0]==='#') return c;
+    const m=c.match(/\d+/g); if(!m) return '#3B82F6';
+    return '#'+m.slice(0,3).map(x=>(+x).toString(16).padStart(2,'0')).join('');
+  }
+  document.getElementById('funnelBtn').addEventListener('click', ()=>{
+    editorRows=[];
+    salesColumns().forEach(col=>editorRows.push({title:colTitle(col), color:rgbToHex(colColor(col)), colEl:col, terminal:false}));
+    [...boardEl.querySelectorAll('.col')].slice(salesColumns().length).forEach(col=>editorRows.push({title:colTitle(col), color:rgbToHex(colColor(col)), colEl:col, terminal:true}));
+    renderStageList(); openModal('m-funnel');
+  });
+  document.getElementById('stage-list').addEventListener('input', e=>{
+    const i=e.target.dataset.i; if(i==null) return;
+    if(e.target.classList.contains('se-title')) editorRows[i].title=e.target.value;
+    if(e.target.classList.contains('se-color')) editorRows[i].color=e.target.value;
+  });
+  document.getElementById('stage-list').addEventListener('click', e=>{
+    const up=e.target.dataset.up, down=e.target.dataset.down, del=e.target.dataset.del;
+    if(up!=null){ const i=+up; if(i>0 && !editorRows[i-1].terminal){ [editorRows[i-1],editorRows[i]]=[editorRows[i],editorRows[i-1]]; renderStageList(); } }
+    if(down!=null){ const i=+down; if(i<editorRows.length-1 && !editorRows[i+1].terminal){ [editorRows[i+1],editorRows[i]]=[editorRows[i],editorRows[i+1]]; renderStageList(); } }
+    if(del!=null){ const i=+del; const cards=editorRows[i].colEl?editorRows[i].colEl.querySelectorAll('.card').length:0;
+      if(cards>0 && !confirm(`В стадии «${editorRows[i].title}» ${cards} сделок — они будут убраны с доски. Удалить стадию?`)) return;
+      editorRows.splice(i,1); renderStageList(); }
+  });
+  document.getElementById('addStage').addEventListener('click', ()=>{
+    const firstTerm=editorRows.findIndex(r=>r.terminal); const at=firstTerm<0?editorRows.length:firstTerm;
+    editorRows.splice(at,0,{title:'Новая стадия', color:PALETTE[at%PALETTE.length], colEl:null, terminal:false});
+    renderStageList();
+  });
+  function makeColumn(title,color){
+    const col=document.createElement('div'); col.className='col';
+    col.innerHTML=`<div class="col-head"><div class="stripe" style="background:${color}"></div>
+      <div class="ch-body"><div class="ch-title">${title} <span class="n">0</span></div>
+      <div class="ch-meta">0 · 0 Br</div><div class="ch-weight">взвешенно: 0 Br</div></div></div>
+      <div class="add-card">＋ Добавить сделку</div>`;
+    return col;
+  }
+  document.getElementById('funnel-save').addEventListener('click', ()=>{
+    const sep=boardEl.querySelector('.col-sep');
+    salesColumns().forEach(c=>c.remove()); // detach old sales columns
+    editorRows.filter(r=>!r.terminal).forEach(r=>{
+      let col=r.colEl||makeColumn(r.title,r.color);
+      col.querySelector('.stripe').style.background=r.color;
+      const t=col.querySelector('.ch-title'); t.firstChild.textContent=r.title+' ';
+      boardEl.insertBefore(col, sep);
+    });
+    // терминалы: обновить названия/цвета по строкам
+    const terms=[...boardEl.querySelectorAll('.col')].slice(salesColumns().length);
+    editorRows.filter(r=>r.terminal).forEach((r,k)=>{ if(terms[k]){ terms[k].querySelector('.stripe').style.background=r.color;
+      terms[k].querySelector('.ch-title').firstChild.textContent=r.title+' '; }});
+    applyCardFields();
+    closeModal(document.getElementById('m-funnel'));
+  });
+
+  /* ════════════════ ПОЛЯ КАРТОЧКИ ════════════════ */
+  const FIELD_SEL={pri:'.pri', days:'.days', star:'.star', wbadge:'.wbadge', next:'.next', owner:'.owner'};
+  function applyCardFields(){
+    document.querySelectorAll('#card-fields input[data-f]').forEach(cb=>{
+      const sel=FIELD_SEL[cb.dataset.f]; if(!sel) return;
+      boardEl.querySelectorAll(sel).forEach(el=>el.style.display=cb.checked?'':'none');
+    });
+  }
+  document.getElementById('cardBtn').addEventListener('click', ()=>openModal('m-card'));
+  document.getElementById('card-fields').addEventListener('change', applyCardFields);
+  document.getElementById('density').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#density button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    boardEl.classList.toggle('compact', b.dataset.d==='compact');
+  });
+
+  /* ════════════════ ФИЛЬТРЫ (сборные) ════════════════ */
+  const REG_CLIENTS=['Белтранс','Автопарк №7','Гомсельмаш','Нафтан','Белводхоз'];
+  document.getElementById('filterBtn').addEventListener('click', ()=>openModal('m-filter'));
+  document.querySelectorAll('#m-filter [data-flt]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const ctl=document.querySelector(`#m-filter .filter-ctl[data-for="${cb.dataset.flt}"]`);
+      if(ctl) ctl.classList.toggle('on', cb.checked);
+    });
+  });
+  document.getElementById('flt-pri').addEventListener('click', e=>{ const b=e.target.closest('button'); if(b) b.classList.toggle('on'); });
+  document.getElementById('flt-apply').addEventListener('click', ()=>{
+    const on=f=>document.querySelector(`#m-filter [data-flt="${f}"]`).checked;
+    const owner=on('owner')?document.getElementById('flt-owner').value:'';
+    const pris=on('pri')?[...document.querySelectorAll('#flt-pri button.on')].map(b=>b.dataset.v):[];
+    const min=on('amount')?(parseInt(document.getElementById('flt-min').value)||0):0;
+    const max=on('amount')?(parseInt(document.getElementById('flt-max').value)||Infinity):Infinity;
+    const stuckF=on('stuck'), regF=on('reg');
+    boardEl.querySelectorAll('.col').forEach(col=>{
+      col.querySelectorAll('.card').forEach(c=>{
+        let ok=true;
+        if(owner){ const o=c.querySelector('.owner span')?.textContent||''; if(!o.includes(owner.split(' ')[0])) ok=false; }
+        if(pris.length){ const cls=c.querySelector('.pri'); const p=cls?(cls.classList.contains('high')?'high':cls.classList.contains('mid')?'mid':'low'):''; if(!pris.includes(p)) ok=false; }
+        if(ok && (min||max!==Infinity)){ const v=parseInt(c.querySelector('.money')?.textContent.replace(/\D/g,''))||0; if(v<min||v>max) ok=false; }
+        if(ok && stuckF && !c.querySelector('.days.stuck')) ok=false;
+        if(ok && regF){ const nm=c.querySelector('.company')?.textContent||''; if(!REG_CLIENTS.some(r=>nm.includes(r))) ok=false; }
+        c.style.display=ok?'':'none';
+      });
+      const add=col.querySelector('.add-card'); if(add) add.style.display='none';
+    });
+    closeModal(document.getElementById('m-filter'));
+    document.getElementById('filterBtn').classList.add('warn');
+  });
+  document.getElementById('flt-reset').addEventListener('click', ()=>{
+    document.querySelectorAll('#m-filter [data-flt]').forEach(cb=>{cb.checked=false;});
+    document.querySelectorAll('#m-filter .filter-ctl').forEach(c=>c.classList.remove('on'));
+    document.querySelectorAll('#flt-pri button').forEach(b=>b.classList.remove('on'));
+    document.getElementById('flt-owner').value=''; document.getElementById('flt-min').value=''; document.getElementById('flt-max').value='';
+    boardEl.querySelectorAll('.card').forEach(c=>c.style.display='');
+    boardEl.querySelectorAll('.add-card').forEach(a=>a.style.display='');
+    document.getElementById('filterBtn').classList.remove('warn');
+  });
+
+  /* ════════════════ ЧАТ: клик по диалогу → окно переписки ════════════════ */
+  const CHATS={
+    beltrans:{av:'БТ',c:'#2563EB',nm:'ОАО «Белтранс»',chan:'WhatsApp',
+      msgs:[{d:'day',t:'Сегодня'},
+        {d:'in',t:'Здравствуйте! Получили ваше КП по парку.',m:'WhatsApp · 09:40'},
+        {d:'in',t:'Когда сможете подъехать на осмотр парка?',m:'WhatsApp · 09:41'},
+        {d:'out',t:'Добрый день! Готовы 13.06 в 11:00, подойдёт?',m:'WhatsApp · 10:05 ✓✓'}]},
+    park7:{av:'А7',c:'#F59E0B',nm:'Автопарк №7',chan:'Email',
+      msgs:[{d:'day',t:'Вчера'},
+        {d:'out',t:'Подготовили предложение по годовой поставке, во вложении.',m:'Email · 16:00'},
+        {d:'in',t:'Спасибо, изучаем. Жду предложение по году окончательно.',m:'Email · 17:20'}]},
+    minskelektro:{av:'МЭ',c:'#14B8A6',nm:'УП «Минскэлектро»',chan:'Email',
+      msgs:[{d:'day',t:'Сегодня'},
+        {d:'out',t:'Счёт СЧ-0421 выставлен, направил на почту.',m:'Email · 11:10'},
+        {d:'in',t:'Счёт получили, передали на оплату.',m:'Email · 12:00'}]},
+    voltavto:{av:'ВА',c:'#8B5CF6',nm:'ТД «ВольтАвто»',chan:'WhatsApp',
+      msgs:[{d:'day',t:'Сегодня'},
+        {d:'in',t:'Интересуют АКБ на 12 машин, что есть в наличии?',m:'Сайт · 10:02'},
+        {d:'in',t:'И цену опт, пожалуйста.',m:'WhatsApp · 10:03'}]},
+    rop:{av:'СК',c:'#0EA5E9',nm:'Сидоров К. · РОП',chan:'Telegram',
+      msgs:[{d:'day',t:'Сегодня'},
+        {d:'in',t:'Согласовал твой план на июнь. Держим темп по Белтрансу.',m:'Telegram · 08:30'}]},
+    petrova:{av:'ПА',c:'#64748B',nm:'Петрова А.',chan:'Telegram',
+      msgs:[{d:'day',t:'Вчера'},
+        {d:'in',t:'Передай контакт по Гомелю, у меня там встреча.',m:'Telegram · 15:12'}]},
+  };
+  let curChat=null;
+  function renderThread(key){
+    const c=CHATS[key]; const body=document.getElementById('cw-body'); body.innerHTML='';
+    c.msgs.forEach(m=>{
+      if(m.d==='day'){ const d=document.createElement('div'); d.className='cw-day'; d.textContent=m.t; body.appendChild(d); return; }
+      const b=document.createElement('div'); b.className='bub '+m.d; b.innerHTML=`${m.t}<div class="bm">${m.m}</div>`; body.appendChild(b);
+    });
+    body.scrollTop=body.scrollHeight;
+  }
+  function openChat(key){
+    const c=CHATS[key]; if(!c) return; curChat=key;
+    document.getElementById('cw-av').textContent=c.av;
+    document.getElementById('cw-av').style.background=c.c;
+    document.getElementById('cw-nm').textContent=c.nm;
+    document.getElementById('cw-st').textContent='● онлайн · '+c.chan;
+    document.querySelectorAll('#cw-chan button').forEach(b=>b.classList.toggle('on', b.dataset.ch===c.chan));
+    renderThread(key);
+    document.getElementById('chatwin').classList.add('show');
+    document.getElementById('cw-input').focus();
+  }
+  function closeChat(){ document.getElementById('chatwin').classList.remove('show'); }
+  document.querySelectorAll('.chat-row').forEach(row=>{
+    row.addEventListener('click', ()=>openChat(row.dataset.chat));
+  });
+  document.getElementById('cw-chan').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#cw-chan button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    document.getElementById('cw-st').textContent='● онлайн · '+b.dataset.ch;
+  });
+  function sendMsg(){
+    const inp=document.getElementById('cw-input'); const txt=inp.value.trim(); if(!txt||!curChat) return;
+    const chan=document.querySelector('#cw-chan button.on')?.dataset.ch||'WhatsApp';
+    CHATS[curChat].msgs.push({d:'out',t:txt,m:chan+' · сейчас ✓'});
+    renderThread(curChat); inp.value='';
+    // имитация ответа клиента
+    setTimeout(()=>{ if(curChat){ CHATS[curChat].msgs.push({d:'in',t:'Принял, спасибо!',m:chan+' · сейчас'}); if(document.getElementById('chatwin').classList.contains('show')) renderThread(curChat); } }, 1400);
+  }
+  document.getElementById('cw-send').addEventListener('click', sendMsg);
+  document.getElementById('cw-input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+
+  /* ════════════════ ПЛАНИРОВАНИЕ: личный план на следующий месяц → РОПу ════════════════ */
+  document.getElementById('planBtn').addEventListener('click', ()=>{
+    const rows = DATA.month, el = PERIODS.month.el;
+    const tb = document.getElementById('plan-rows'); tb.innerHTML='';
+    rows.forEach(([lbl,fact,plan,kind,unit])=>{
+      const isRate = kind==='pct' || lbl.indexOf('чек')>=0;
+      const proj = isRate ? fact : Math.round(fact*100/el);
+      const projPct = Math.round(proj/plan*100);
+      const pc = projPct>=100?'ok':projPct>=85?'warn':'bad';
+      // план июля по умолчанию = прогноз факта (деньги округляем до тысяч, счётные — как есть)
+      const julyDefault = isRate ? plan : (kind==='money' ? Math.round(proj/1000)*1000 : proj);
+      tb.innerHTML += `<tr>
+        <td class="mname">${lbl}</td>
+        <td class="r">${fmtVal(plan,kind)}</td>
+        <td class="r">${fmtVal(fact,kind)}</td>
+        <td class="r proj-cell ${pc}">${fmtVal(proj,kind)} <span style="font-weight:400;color:#9aa3b0">(${projPct}%)</span></td>
+        <td class="r"><input type="text" value="${fmtVal(julyDefault,kind)}"></td>
+      </tr>`;
+    });
+    openModal('m-plan');
+  });
+  document.getElementById('plan-submit').addEventListener('click', ()=>{
+    closeModal(document.getElementById('m-plan'));
+    const st = document.getElementById('planStatus');
+    st.textContent = '● План на июль отправлен — на согласовании у РОПа';
+    st.className = 'pb-status pending';
+    document.getElementById('planBtn').style.display = 'none';
+  });
+
+  // ── старт: общий вид «Все вместе» (после того как FIELD_SEL объявлен) ──
+  renderBoard();
+</script>
+</body>
+</html>

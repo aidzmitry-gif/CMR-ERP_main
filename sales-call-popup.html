@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Окно входящего звонка — screen-pop (CRM)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-pop:0 24px 64px rgba(15,23,42,.30);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444; --ai:#7C3AED; --ai-50:#F5F3FF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--ink);font-size:14px;min-height:100vh}
+
+  /* фон — будто CRM под окном */
+  .backdrop{position:fixed;inset:0;background:
+     radial-gradient(1200px 600px at 80% -10%, #E3ECFF, transparent),
+     linear-gradient(180deg,#EEF1F6,#F4F5F7);z-index:0}
+  .bd-bars{position:fixed;inset:0;z-index:0;opacity:.5;filter:blur(2px);padding:70px 40px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-content:start}
+  .bd-bars .b{height:120px;background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(16,24,40,.06)}
+  .scrim{position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:1}
+
+  /* переключатель состояний (для демо) */
+  .states{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10;background:#fff;border:1px solid #E5E7EB;border-radius:12px;box-shadow:0 8px 24px rgba(16,24,40,.12);padding:6px;display:flex;gap:5px;flex-wrap:wrap;max-width:94vw}
+  .states button{font-size:12px;font-weight:600;border:1px solid transparent;background:#F4F5F7;color:#475467;border-radius:8px;padding:7px 11px;cursor:pointer}
+  .states button.on{background:var(--brand);color:#fff}
+  .hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;font-size:11.5px;color:#fff;background:rgba(15,23,42,.6);border-radius:9px;padding:7px 13px;max-width:92vw;text-align:center}
+
+  /* окно звонка */
+  .wrap{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:80px 16px 40px}
+  .pop{width:430px;max-width:96vw;background:#fff;border-radius:18px;box-shadow:var(--shadow-pop);overflow:hidden;animation:pin .25s cubic-bezier(.4,0,.2,1)}
+  @keyframes pin{from{transform:translateY(14px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+
+  /* шапка звонка */
+  .cp-head{padding:18px 20px;display:flex;align-items:center;gap:13px;color:#fff;position:relative}
+  .cp-head.in{background:linear-gradient(135deg,#16A34A,#15803D)}
+  .cp-head.live{background:linear-gradient(135deg,#2563EB,#1D4FD7)}
+  .cp-head.done{background:linear-gradient(135deg,#475569,#334155)}
+  .cp-head.unknown{background:linear-gradient(135deg,#D97706,#B45309)}
+  .ring{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+  .cp-head.in .ring{animation:ring 1.1s infinite}
+  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(255,255,255,.5)}70%{box-shadow:0 0 0 14px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+  .cp-h-t{flex:1;min-width:0}
+  .cp-ttl{font-size:15px;font-weight:800}
+  .cp-line{font-size:12px;opacity:.85;margin-top:1px}
+  .cp-num{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+  .cp-timer{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+
+  .cp-body{padding:16px 20px}
+
+  /* клиент */
+  .cp-client{display:flex;align-items:center;gap:12px}
+  .ava{width:46px;height:46px;border-radius:12px;background:var(--brand-50);color:var(--brand-700);font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .ava.q{background:#FEF3C7;color:#B45309}
+  .ci{min-width:0}
+  .cn{font-size:16px;font-weight:800;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .reg{font-size:10.5px;font-weight:700;color:#047857;background:#ECFDF5;border-radius:5px;padding:1px 7px}
+  .cr{font-size:12.5px;color:var(--muted);margin-top:2px}
+
+  .cp-owner{margin-top:12px;font-size:12.5px;color:#334155;background:#F8FAFC;border-radius:9px;padding:8px 11px}
+  .cp-owner.foreign{background:#FFFBEB;color:#92400E}
+  .cp-owner a{color:var(--brand-700);font-weight:600;cursor:pointer;text-decoration:none}
+
+  /* сделка */
+  .cp-deal{margin-top:12px;border:1px solid #EEF0F2;border-radius:11px;padding:11px 13px}
+  .dh{font-size:10.5px;font-weight:700;text-transform:uppercase;color:#9aa3b0;letter-spacing:.03em}
+  .drow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:5px;font-size:13.5px;font-weight:700}
+  .drow .stg{font-size:10.5px;font-weight:700;background:var(--brand-50);color:var(--brand-700);border-radius:5px;padding:1px 7px}
+  .drow .ship{font-size:10.5px;font-weight:700;background:#FFF7ED;color:#C2410C;border-radius:5px;padding:1px 7px}
+  .dnext{font-size:12px;color:var(--muted);margin-top:5px}
+
+  /* AI-подсказка */
+  .cp-ai{margin-top:12px;background:var(--ai-50);border:1px solid #EDE9FE;border-radius:11px;padding:11px 13px;font-size:12.5px;color:#3b2d63;line-height:1.5}
+  .cp-ai b{color:#5B21B6}
+  .cp-ai .tps{margin-top:7px;display:flex;flex-direction:column;gap:4px}
+  .cp-ai .tp{display:flex;gap:7px;align-items:flex-start}.cp-ai .tp .i{flex-shrink:0}
+
+  /* действия */
+  .cp-actions{display:flex;gap:10px;margin-top:16px}
+  .cp-actions button{flex:1;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px}
+  .accept{background:var(--ok);color:#fff}
+  .decline{background:#fff;color:#B91C1C;border:1px solid #FECACA!important}
+  .endcall{background:var(--bad);color:#fff}
+  .cp-actions button:hover{filter:brightness(.97)}
+  .cp-sub{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .cp-sub span{flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:9px;padding:8px;font-size:12px;font-weight:600;color:#475467;cursor:pointer;min-width:120px}
+  .cp-sub span:hover{background:#F8FAFC}
+
+  /* in-call: пульт */
+  .dialpad{display:flex;gap:8px;margin-top:14px}
+  .dialpad .k{flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:9px;text-align:center;font-size:12px;font-weight:600;color:#475467;cursor:pointer;background:#fff}
+  .dialpad .k:hover{background:#F8FAFC}
+  .script{margin-top:13px;border:1px solid #EEF0F2;border-radius:11px;padding:11px 13px}
+  .script .sh{font-size:10.5px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin-bottom:7px}
+  .ck{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;padding:4px 0;cursor:pointer}
+  .ck .box{width:16px;height:16px;border:2px solid #CBD5E1;border-radius:5px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .ck.on .box{background:var(--ok);border-color:var(--ok)}
+  .ck.on .t{text-decoration:line-through;color:#9aa3b0}
+  .livenote{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:12.5px;font-family:inherit;margin-top:12px;resize:vertical;min-height:54px}
+  .livenote:focus{outline:none;border-color:var(--brand)}
+  .reserve{margin-top:12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:11px;padding:11px 13px;font-size:12.5px;color:#92400E;line-height:1.5}
+  .reserve b{color:#78350F}
+
+  /* after-call: итог */
+  .seg{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+  .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:8px 12px;font-size:12.5px;font-weight:600;color:#475467;cursor:pointer}
+  .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
+  .fld{margin-top:13px}
+  .fld .l{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin-bottom:5px}
+  .fld select,.fld input{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit}
+  .rec{margin-top:13px;display:flex;align-items:center;gap:10px;background:#F8FAFC;border-radius:10px;padding:9px 12px;font-size:12px;color:#475467}
+  .rec .play{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+  .rec .pend{margin-left:auto;color:#9aa3b0}
+
+  /* новый лид */
+  .newlead{margin-top:12px}
+  .newlead input{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;margin-bottom:8px}
+  .newlead .grow{display:flex;gap:8px}.newlead .grow input{margin-bottom:0}
+
+  .src{font-size:10.5px;color:#9aa3b0;text-align:center;padding:10px 16px 14px}
+
+  /* телефон в одну строку */
+  .cp-num{white-space:nowrap;font-size:14px;line-height:1.2}
+
+  /* новый клиент: УНП → реквизиты */
+  .unp-row{display:flex;gap:8px;margin-top:12px}
+  .unp-row input{flex:1;min-width:0;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit}
+  .unp-row button{border:none;background:var(--brand);color:#fff;border-radius:10px;padding:0 13px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .req{margin-top:12px;border:1px solid #BBF7D0;background:#F0FDF4;border-radius:11px;padding:11px 13px}
+  .req .rh{font-size:11px;font-weight:800;text-transform:uppercase;color:#047857;margin-bottom:6px}
+  .req .kv2{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+  .req .kv2 .k{color:#5b8c74}
+  .terms-lbl{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin:13px 0 5px}
+
+  /* широкое окно разговора с большим чек-листом */
+  .pop.wide{width:840px;max-width:96vw}
+  .live-grid{display:grid;grid-template-columns:1fr 1.08fr}
+  .lg-left{padding:16px 18px;border-right:1px solid #F1F3F5}
+  .lg-right{padding:16px 18px;background:#FBFCFE;max-height:62vh;overflow:auto}
+  @media(max-width:780px){.pop.wide{width:96vw}.live-grid{grid-template-columns:1fr}.lg-left{border-right:none;border-bottom:1px solid #F1F3F5}}
+  .lg-ctx{display:flex;align-items:center;gap:10px;background:#EFF5FF;border-radius:10px;padding:9px 11px;margin-bottom:12px}
+  .lg-ctx .a{width:34px;height:34px;border-radius:9px;background:#fff;color:var(--brand-700);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .lg-ctx .t{font-size:13px;font-weight:700}.lg-ctx .s{font-size:11.5px;color:#475467}
+  .script-full .scc{margin-bottom:13px}
+  .script-full .scc-h{font-size:11px;font-weight:800;text-transform:uppercase;color:var(--brand-700);letter-spacing:.02em;margin-bottom:5px;display:flex;align-items:center;gap:7px}
+  .script-full .scc-h .n{background:var(--brand);color:#fff;border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:10px}
+
+  /* инлайн-оформление нового клиента в разговоре */
+  .order-flow .ofstep{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #EEF0F2}
+  .order-flow .ofstep:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+  .ofs-h{font-size:11px;font-weight:800;text-transform:uppercase;color:var(--brand-700);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .ofs-h .n{background:var(--brand);color:#fff;border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:10px}
+  .ministock .ms-row{display:grid;grid-template-columns:20px 1fr 64px 50px;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;border-top:1px solid #F6F7F9}
+  .ministock .ms-row:first-child{border-top:none}
+  .ministock input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
+  .ministock .nm{font-weight:600;min-width:0}.ministock .nm small{display:block;color:#9aa3b0;font-size:10.5px}
+  .ministock .pr{text-align:right;font-weight:600}
+  .ministock .q{width:46px;border:1px solid #E5E7EB;border-radius:6px;padding:4px;font-size:12px;text-align:center;font-family:inherit}
+  .resv-toggle{display:flex;gap:9px;align-items:center;font-size:12.5px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 12px;cursor:pointer;color:#92400E;font-weight:600}
+  .resv-toggle input{width:17px;height:17px;accent-color:var(--warn)}
+  .hintline{font-size:11px;color:#9aa3b0;margin-top:8px;text-align:center}
+
+  /* вкладки в окне разговора: скрипт / заказ */
+  .lg-tabs{display:flex;gap:6px;margin-bottom:12px}
+  .lg-tabs button{flex:1;border:1px solid #E5E7EB;background:#fff;border-radius:8px;padding:7px;font-size:12px;font-weight:600;color:#475467;cursor:pointer}
+  .lg-tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .repeat{background:#ECFDF5;border:1px solid #A7F3D0;border-radius:10px;padding:11px 13px;margin-bottom:13px}
+  .repeat .rt{font-size:12.5px;color:#065F46;line-height:1.5}.repeat .rt b{color:#047857}
+  .repeat .btn-rep{margin-top:9px;border:none;background:#047857;color:#fff;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer}
+
+  /* окно разговора в 3 колонки */
+  .pop.wide3{width:1180px;max-width:97vw}
+  .live3{display:grid;grid-template-columns:1fr 1.12fr 0.92fr}
+  .l3col{padding:15px 16px;border-right:1px solid #F1F3F5;max-height:66vh;overflow:auto}
+  .l3col:last-child{border-right:none}
+  .l3h{font-size:11px;font-weight:800;text-transform:uppercase;color:#9aa3b0;margin-bottom:11px}
+  @media(max-width:1000px){.pop.wide3{width:96vw}.live3{grid-template-columns:1fr}.l3col{border-right:none;border-bottom:1px solid #F1F3F5;max-height:none}}
+  .add-more{width:100%;border:1px dashed #C7D2FE;background:var(--brand-50);color:var(--brand-700);border-radius:9px;padding:9px;font-size:12px;font-weight:600;cursor:pointer;margin-top:9px}
+  .add-more:hover{background:var(--brand-100)}
+  .order-cta{display:flex;flex-direction:column;gap:8px;margin-top:13px}
+  .order-cta button{width:100%;border-radius:11px;padding:11px;font-size:13px;font-weight:700;cursor:pointer}
+  .order-cta .inv{border:none;background:var(--ok);color:#fff}
+  .order-cta .ctr{border:1px solid #E5E7EB;background:#fff;color:#475467}
+  .order-cta button:hover{filter:brightness(.97)}
+
+  /* модалка предпросмотра документа (счёт/договор) + подбора */
+  .ov2{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:120;display:none;align-items:center;justify-content:center;padding:24px}
+  .ov2.show{display:flex}
+  .docview{background:#fff;border-radius:14px;width:560px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(15,23,42,.35)}
+  .dv-h{padding:13px 18px;border-bottom:1px solid #F1F3F5;font-weight:800;font-size:14px;display:flex;align-items:center;gap:8px}
+  .dv-h .x{margin-left:auto;color:#9aa3b0;cursor:pointer}
+  .dv-b{overflow:auto;background:#F4F5F7;flex:1}
+  .dv-f{padding:12px 18px;border-top:1px solid #F1F3F5;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .dv-note{font-size:11.5px;color:#B45309;margin-right:auto;font-weight:600}
+  .btn-sec{border:1px solid #E5E7EB;background:#fff;color:#475467;border-radius:9px;padding:9px 13px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .btn-send{border:none;background:var(--ok);color:#fff;border-radius:9px;padding:9px 14px;font-size:12.5px;font-weight:700;cursor:pointer}
+
+  /* «бумага» документа */
+  .paper{background:#fff;margin:16px;border-radius:8px;box-shadow:0 1px 4px rgba(16,24,40,.1);padding:22px 24px;font-size:12.5px;color:#1F2937;line-height:1.5}
+  .pp-h{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #1F2937;padding-bottom:10px;margin-bottom:12px}
+  .pp-org{font-size:15px;font-weight:800}.pp-sub{font-size:11px;color:#6B7280}
+  .pp-no{text-align:right;font-weight:700;white-space:nowrap}
+  .pp-parties{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12px}
+  .pp-t{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px}
+  .pp-t th,.pp-t td{border:1px solid #E5E7EB;padding:6px 8px;text-align:left}
+  .pp-t th{background:#F8FAFC;font-size:10.5px;text-transform:uppercase;color:#6B7280}
+  .pp-t td.r,.pp-t th.r{text-align:right}
+  .pp-tot{text-align:right;font-weight:800;font-size:13px;margin-bottom:8px}
+  .pp-foot{font-size:11px;color:#6B7280;border-top:1px solid #EEF0F2;padding-top:8px}
+  .pp-title{font-size:15px;font-weight:800;text-align:center}
+  .pp-date{text-align:center;color:#6B7280;font-size:11px;margin-bottom:12px}
+  .paper p{margin-bottom:8px}
+  .pp-sign{display:flex;justify-content:space-between;margin-top:22px;font-size:11px;color:#475467}
+
+  /* таблица подбора со склада (мультисклад) */
+  .st-toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .st-toolbar input,.st-toolbar select{border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:12.5px;font-family:inherit}
+  .st-toolbar .grow{flex:1;min-width:140px}
+  .stbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .stbl th{font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#6B7280;background:#F8FAFC;padding:8px;text-align:left;position:sticky;top:0;border-bottom:1px solid #E5E7EB;z-index:1}
+  .stbl th.r,.stbl td.r{text-align:right}
+  .stbl td{padding:7px 8px;border-bottom:1px solid #F1F3F5;vertical-align:middle}
+  .stbl tr.grp-first td{border-top:2px solid #EAECEF}
+  .stbl .pname{font-weight:700}
+  .stbl .pname small{display:block;color:#9aa3b0;font-weight:500;font-size:10.5px;margin-top:1px}
+  .stbl .wh{color:#475467;white-space:nowrap}
+  .stbl .res{color:#B45309;font-weight:600}
+  .stbl .free{color:#047857;font-weight:800}
+  .stbl .free.low{color:#B91C1C}
+  .stbl .price{font-weight:700;white-space:nowrap}
+  .stbl .q{width:68px;border:1px solid #E5E7EB;border-radius:6px;padding:5px;font-size:12px;text-align:center;font-family:inherit}
+  .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
+  .st-legend{display:flex;gap:14px;font-size:11px;color:#6B7280;margin-top:11px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+  <a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+  <div class="backdrop"></div>
+  <div class="bd-bars"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div>
+  <div class="scrim"></div>
+
+  <div class="states">
+    <button class="on" onclick="show('known',this)">Узнан · есть сделка</button>
+    <button onclick="show('nodeals',this)">Узнан · без сделки</button>
+    <button onclick="show('unknown',this)">Новый номер</button>
+    <button onclick="show('live',this)">Идёт разговор</button>
+    <button onclick="show('livenew',this)">Разговор · новый клиент</button>
+    <button onclick="show('done',this)">Итог звонка</button>
+  </div>
+
+  <div class="wrap"><div id="pop"></div></div>
+  <div class="hint" id="hint"></div>
+
+  <!-- предпросмотр счёта/договора -->
+  <div class="ov2" id="docViewOv" onclick="if(event.target===this)closeDocView()">
+    <div class="docview">
+      <div class="dv-h"><span id="docViewTitle">Счёт</span><span class="x" onclick="closeDocView()">✕</span></div>
+      <div class="dv-b" id="docViewBody"></div>
+      <div class="dv-f">
+        <span class="dv-note">⚠ Проверьте перед отправкой</span>
+        <button class="btn-sec" onclick="closeDocView()">✎ Редактировать</button>
+        <button class="btn-send" id="docViewSend" onclick="closeDocView()">✉ Отправить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- подобрать ещё товар со склада -->
+  <div class="ov2" id="stockMoreOv" onclick="if(event.target===this)closeStockMore()">
+    <div class="docview" style="width:780px">
+      <div class="dv-h">🏬 Подбор товара со склада <span style="font-weight:500;font-size:12px;color:#9aa3b0">остаток · резерв · свободно по каждому складу</span><span class="x" onclick="closeStockMore()">✕</span></div>
+      <div class="dv-b" style="background:#fff"><div style="padding:14px 16px">
+        <div class="st-toolbar">
+          <input class="grow" id="smSearch" placeholder="Поиск по номенклатуре…">
+          <select id="smWh" onchange="renderStock(this.value)"><option>Все склады</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+        </div>
+        <div id="smRows"></div>
+        <div class="st-legend">
+          <span><b style="color:#1F2937">Остаток</b> — всего на складе</span>
+          <span>· <b style="color:#B45309">Резерв</b> — под другие заказы</span>
+          <span>· <b style="color:#047857">Свободно</b> — доступно к продаже (ATP)</span>
+        </div>
+      </div></div>
+      <div class="dv-f"><span class="dv-note" id="smCnt" style="color:#6B7280">Выбрано: 0 · доступно со всех складов</span><button class="btn-sec" onclick="closeStockMore()">Отмена</button><button class="btn-send" onclick="closeStockMore()">Добавить в заказ</button></div>
+    </div>
+  </div>
+
+<script>
+const VIEWS = {
+  // ── узнан клиент + активная сделка ──
+  known: {
+    hint:"Звонок пришёл от номера, привязанного к карточке клиента → CRM мгновенно поднимает контакт, сделку и подсказку. Источник — телефония (Asterisk AMI/ARI), доставка в браузер по SSE.",
+    html:`
+    <div class="pop">
+      <div class="cp-head in">
+        <div class="ring">📞</div>
+        <div class="cp-h-t"><div class="cp-ttl">Входящий звонок…</div><div class="cp-line">линия SIP-101 · звонит 00:06</div></div>
+        <div class="cp-num">+375 29 612-44-18</div>
+      </div>
+      <div class="cp-body">
+        <div class="cp-client">
+          <div class="ava">БТ</div>
+          <div class="ci"><div class="cn">ОАО «Белтранс» <span class="reg">★ постоянный</span></div>
+            <div class="cr">Звонит: Ткачёв Виктор Анатольевич · Главный инженер (лицо, принимающее решение)</div></div>
+        </div>
+        <div class="cp-owner">👤 Ответственный: <b>Сидоров Константин Андреевич</b> (вы) · клиент с 2024 · 7 заказов</div>
+
+        <div class="cp-deal">
+          <div class="dh">Активная сделка</div>
+          <div class="drow">CRM-1029 · 46 800 Br <span class="stg">Договор</span> <span class="ship">🚚 рейс ETA 18.06</span></div>
+          <div class="dnext">След. шаг: позвонить после доставки · оплачено 100%</div>
+        </div>
+
+        <div class="cp-ai">
+          🤖 <b>Вероятно, звонит по доставке.</b> Рейс TR-0418 прибудет <b>18.06 ~14:00</b>.
+          <div class="tps">
+            <div class="tp"><span class="i">📦</span><span>Сразу назвать ETA — снимает 80% таких вопросов.</span></div>
+            <div class="tp"><span class="i">💡</span><span>Допродажа: ни разу не брал зарядные устройства — парк вырос до 40.</span></div>
+          </div>
+        </div>
+
+        <div class="cp-actions">
+          <button class="accept" onclick="show('live')">✅ Принять</button>
+          <button class="decline">✕ Отклонить</button>
+        </div>
+        <div class="cp-sub">
+          <span onclick="location.href='sales-card-full.html'">📋 Открыть сделку</span>
+          <span>↪ Переадресовать</span>
+          <span>📝 Заметка</span>
+        </div>
+      </div>
+      <div class="src">📡 Событие телефонии · резолв клиента по номеру · поднятие за &lt;1 сек (SSE)</div>
+    </div>`
+  },
+
+  // ── узнан, но активных сделок нет ──
+  nodeals: {
+    hint:"Клиент в базе, но открытых сделок нет. CRM подсказывает: пора перезаказ (цикл вышел) — и предлагает создать сделку в один клик прямо из звонка.",
+    html:`
+    <div class="pop">
+      <div class="cp-head in">
+        <div class="ring">📞</div>
+        <div class="cp-h-t"><div class="cp-ttl">Входящий звонок…</div><div class="cp-line">линия SIP-101 · звонит 00:04</div></div>
+        <div class="cp-num">+375 33 701-09-22</div>
+      </div>
+      <div class="cp-body">
+        <div class="cp-client">
+          <div class="ava">АП</div>
+          <div class="ci"><div class="cn">Автопарк №7 <span class="reg">★ постоянный</span></div>
+            <div class="cr">Звонит: Лагун Олег Петрович · Заместитель директора (лицо, принимающее решение)</div></div>
+        </div>
+        <div class="cp-owner">👤 Ответственный: <b>Сидоров Константин Андреевич</b> (вы) · 5 заказов · ср. чек 49 500 Br</div>
+
+        <div class="cp-deal" style="border-color:#FDE68A;background:#FFFBEB">
+          <div class="dh" style="color:#B45309">Активных сделок нет</div>
+          <div class="drow" style="color:#92400E">Последний заказ 15.02 · цикл ~120 дн — <b>пора перезаказ</b></div>
+          <div class="dnext">Рекомендация: оформить повторную сделку в короткой воронке</div>
+        </div>
+
+        <div class="cp-ai">
+          🤖 <b>Хороший момент для перезаказа и допродажи.</b>
+          <div class="tps">
+            <div class="tp"><span class="i">♻</span><span>Предложить тот же объём + сервис-пакет на год.</span></div>
+            <div class="tp"><span class="i">📈</span><span>Средний чек стабилен — можно поднять на тестерах АКБ.</span></div>
+          </div>
+        </div>
+
+        <div class="cp-actions">
+          <button class="accept" onclick="show('live')">✅ Принять</button>
+          <button class="decline">✕ Отклонить</button>
+        </div>
+        <div class="cp-sub">
+          <span>➕ Создать сделку</span>
+          <span>👤 Открыть клиента</span>
+          <span>📝 Заметка</span>
+        </div>
+      </div>
+      <div class="src">📡 Резолв по номеру → карточка клиента · сделок не найдено</div>
+    </div>`
+  },
+
+  // ── неизвестный номер ──
+  unknown: {
+    hint:"Номера нет в базе. Окно предлагает быстро завести лид и закрепить за ним этот звонок (и запись), либо пометить как спам. Звонок в любом случае попадёт в call_log.",
+    html:`
+    <div class="pop">
+      <div class="cp-head unknown">
+        <div class="ring">📞</div>
+        <div class="cp-h-t"><div class="cp-ttl">Входящий звонок…</div><div class="cp-line">линия SIP-102 · звонит 00:03</div></div>
+        <div class="cp-num">+375 44 100-22-33</div>
+      </div>
+      <div class="cp-body">
+        <div class="cp-client">
+          <div class="ava q">?</div>
+          <div class="ci"><div class="cn">Неизвестный номер</div>
+            <div class="cr">В CRM не найден · регион: Минск (по коду 44)</div></div>
+        </div>
+
+        <div class="cp-ai">
+          🤖 Номера нет в базе. Узнайте <b>УНП</b> — подтянем реквизиты из ЕГР, согласуем условия и сразу отправим счёт и договор. Звонок уже пишется в call_log.
+        </div>
+
+        <div class="unp-row">
+          <input id="unpIn" placeholder="УНП (9 цифр)" value="191234567">
+          <button onclick="pullReq()">Подтянуть из ЕГР</button>
+        </div>
+        <div id="reqBox"></div>
+
+        <div class="cp-actions">
+          <button class="accept" onclick="show('live')">✅ Принять</button>
+          <button class="decline">✕ Отклонить</button>
+        </div>
+        <div class="cp-sub">
+          <span>➕ Создать лид</span>
+          <span>🚫 Это спам</span>
+          <span>📝 Заметка</span>
+        </div>
+      </div>
+      <div class="src">📡 Реквизиты по УНП тянутся из ЕГР · договор формируется по шаблону автоматически</div>
+    </div>`
+  },
+
+  // ── идёт разговор ──
+  live: {
+    hint:"Менеджер принял звонок. Таймер идёт, доступны удержание/перевод, живая заметка пишется в карточку, чек-лист скрипта и запись с авто-транскрибацией после завершения. Внизу — подсказка по резерву под счёт.",
+    html:`
+    <div class="pop wide3">
+      <div class="cp-head live">
+        <div class="ring">🎧</div>
+        <div class="cp-h-t"><div class="cp-ttl">Разговор · ОАО «Белтранс»</div><div class="cp-line">Ткачёв Виктор Анатольевич · сделка CRM-1029</div></div>
+        <div class="cp-timer" id="timer">01:12</div>
+      </div>
+      <div class="live3">
+        <!-- колонка 1: скрипт -->
+        <div class="l3col">
+          <div class="l3h">📋 Скрипт звонка</div>
+          <div class="script-full">
+            <div class="scc">
+              <div class="scc-h"><span class="n">1</span> Приветствие</div>
+              <div class="ck on" onclick="this.classList.toggle('on')"><span class="box">✓</span><span class="t">Поздороваться, назвать себя и компанию</span></div>
+              <div class="ck on" onclick="this.classList.toggle('on')"><span class="box">✓</span><span class="t">Уточнить, удобно ли говорить</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">2</span> Квалификация / потребность</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Уточнить причину обращения</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Подтвердить объём и сроки</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Кто принимает решение / бюджет</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">3</span> Презентация / ценность</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Назвать ETA доставки (18.06 ~14:00)</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Гарантия и сервис в цене</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">💡 Допродажа: зарядные устройства (парк вырос до 40)</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">4</span> Работа с возражениями</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">«Дорого» → совокупная стоимость владения</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">«Подумаю» → зафиксировать дату следующего контакта</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">5</span> Договорённости</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Проговорить итог вслух</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Согласовать условия оплаты</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">6</span> Следующий шаг</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Назначить конкретное действие и дату</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- колонка 2: заказ / счёт -->
+        <div class="l3col">
+          <div class="l3h">🛒 Заказ / счёт</div>
+          <div class="repeat">
+            <div class="ofs-h" style="color:#047857"><span class="n" style="background:#047857">↻</span> Повторить прошлый заказ</div>
+            <div class="rt">Последний: <b>АКБ 6СТ-190 × 38</b> — 41 800 Br · 12.03.2026<br>Частота ~90 дн · клиент в цикле</div>
+            <button class="btn-rep">↻ Повторить заказ (подставить позиции)</button>
+          </div>
+          <div class="ofs-h"><span class="n">📦</span> Товар со склада <span style="font-weight:600;color:#9aa3b0;text-transform:none">(ATP · реквизиты есть)</span></div>
+          <div class="ministock">
+            <div class="ms-row"><input type="checkbox" checked><div class="nm">АКБ 6СТ-190 (Зубр)<small>● свободно 41 · резерв 13 · повтор</small></div><div class="pr">1 100 Br</div><input class="q" value="38"></div>
+            <div class="ms-row"><input type="checkbox"><div class="nm">Зарядное устройство ЗУ-15А<small>● свободно 30 · допродажа</small></div><div class="pr">420 Br</div><input class="q" value="2"></div>
+            <div class="ms-row"><input type="checkbox"><div class="nm">Тестер АКБ цифровой<small>● свободно 45</small></div><div class="pr">180 Br</div><input class="q" value="1"></div>
+          </div>
+          <button class="add-more" onclick="openStockMore()">＋ Подобрать ещё товар</button>
+          <label class="resv-toggle" style="margin-top:12px"><input type="checkbox" checked> 📦 Зарезервировать на 5 кал. дней <span style="font-weight:600;color:#b08400">(до 19.06)</span></label>
+          <div class="terms-lbl">Условия оплаты</div>
+          <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button></div>
+          <div class="order-cta">
+            <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
+            <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
+          </div>
+          <div class="hintline">Перед отправкой откроется предпросмотр — счёт/договор можно проверить.</div>
+        </div>
+
+        <!-- колонка 3: управление звонком -->
+        <div class="l3col">
+          <div class="l3h">📞 Управление звонком</div>
+          <div class="lg-ctx">
+            <div class="a">БТ</div>
+            <div><div class="t">ОАО «Белтранс» · 46 800 Br</div><div class="s">Договор · 🚚 рейс ETA 18.06</div></div>
+          </div>
+          <div class="dialpad" style="flex-wrap:wrap">
+            <div class="k">🔇 Микр.</div><div class="k">⏸ Удержать</div><div class="k">↪ Перевод</div>
+          </div>
+          <textarea class="livenote" placeholder="Живая заметка по звонку…">Клиент уточнил дату доставки — назвал 18.06. Интересовался зарядными.</textarea>
+          <div class="reserve">⚡ <b>Резерв под счёт:</b> при дефиците уйдёт запрос закупщику на подтверждение срока.</div>
+          <div class="cp-actions"><button class="endcall" onclick="show('done')">⏹ Завершить</button></div>
+          <div class="cp-sub"><span onclick="location.href='sales-card-full.html'">📋 Открыть сделку</span></div>
+        </div>
+      </div>
+      <div class="src">🔴 Запись идёт · транскрибация и AI-резюме после завершения · отмеченные пункты лягут в итог</div>
+    </div>`
+  },
+
+  // ── разговор с новым клиентом: оформить, не проваливаясь в сделку ──
+  livenew: {
+    hint:"Звонит новый клиент — прямо в разговоре, не открывая сделку: ввести УНП → подтянуть реквизиты из ЕГР → подобрать товар со склада → зарезервировать → отправить счёт и договор. Сделка создастся в фоне сама.",
+    html:`
+    <div class="pop wide3">
+      <div class="cp-head live">
+        <div class="ring">🎧</div>
+        <div class="cp-h-t"><div class="cp-ttl">Разговор · новый клиент</div><div class="cp-line">+375 44 100-22-33 · в базе не найден</div></div>
+        <div class="cp-timer">00:48</div>
+      </div>
+      <div class="live3">
+        <!-- колонка 1: скрипт нового клиента -->
+        <div class="l3col">
+          <div class="l3h">📋 Скрипт · новый клиент</div>
+          <div class="script-full">
+            <div class="scc">
+              <div class="scc-h"><span class="n">1</span> Приветствие</div>
+              <div class="ck on" onclick="this.classList.toggle('on')"><span class="box">✓</span><span class="t">Поздороваться, назвать компанию</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Узнать, откуда о нас (источник)</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">2</span> Потребность</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Что нужно: тип АКБ, объём</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Сроки и форма оплаты</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Кто принимает решение</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">3</span> Презентация</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Наличие на складе и сроки</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Гарантия и сервис в цене</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">4</span> Оформление</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Взять УНП → подтянуть реквизиты</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Согласовать условия оплаты</span></div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Выставить счёт / договор</span></div>
+            </div>
+            <div class="scc">
+              <div class="scc-h"><span class="n">5</span> Следующий шаг</div>
+              <div class="ck" onclick="this.classList.toggle('on')"><span class="box"></span><span class="t">Договориться о подтверждении оплаты</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- колонка 2: оформление за звонок (УНП → товар → счёт/договор) -->
+        <div class="l3col">
+          <div class="l3h">🧾 Оформление за звонок</div>
+          <div class="order-flow">
+            <div class="ofstep">
+              <div class="ofs-h"><span class="n">1</span> Реквизиты по УНП</div>
+              <div class="unp-row"><input id="unpLive" value="191234567" placeholder="УНП (9 цифр)"><button onclick="pullReqLive()">Подтянуть</button></div>
+              <div id="reqLive"></div>
+            </div>
+            <div class="ofstep">
+              <div class="ofs-h"><span class="n">2</span> Товар со склада <span style="font-weight:600;color:#9aa3b0;text-transform:none">(ATP)</span></div>
+              <div class="ministock">
+                <div class="ms-row"><input type="checkbox" checked><div class="nm">АКБ 6СТ-190 (Зубр)<small>● свободно 41 · резерв 13</small></div><div class="pr">1 100 Br</div><input class="q" value="20"></div>
+                <div class="ms-row"><input type="checkbox"><div class="nm">Зарядное устройство ЗУ-15А<small>● свободно 30</small></div><div class="pr">420 Br</div><input class="q" value="2"></div>
+              </div>
+              <button class="add-more" onclick="openStockMore()">＋ Подобрать ещё товар</button>
+            </div>
+            <div class="ofstep">
+              <div class="ofs-h"><span class="n">3</span> Резерв и условия</div>
+              <label class="resv-toggle"><input type="checkbox" checked> 📦 Зарезервировать на 5 кал. дней <span style="font-weight:600;color:#b08400">(до 19.06)</span></label>
+              <div class="terms-lbl">Условия оплаты</div>
+              <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button></div>
+              <div class="order-cta">
+                <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
+                <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
+              </div>
+              <div class="hintline">Перед отправкой — предпросмотр. Сделка создастся в фоне.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- колонка 3: управление звонком -->
+        <div class="l3col">
+          <div class="l3h">📞 Управление звонком</div>
+          <div class="lg-ctx" style="background:#FFF7ED">
+            <div class="a" style="color:#B45309">?</div>
+            <div><div class="t">Новый клиент</div><div class="s">+375 44 100-22-33 · не в базе</div></div>
+          </div>
+          <div class="dialpad" style="flex-wrap:wrap">
+            <div class="k">🔇 Микр.</div><div class="k">⏸ Удержать</div><div class="k">↪ Перевод</div>
+          </div>
+          <textarea class="livenote" placeholder="Живая заметка по звонку…">Новый клиент, по рекомендации. Нужны АКБ 6СТ-190 ~20 шт, оплата по счёту.</textarea>
+          <div class="cp-ai" style="margin-top:12px">🤖 Карточка клиента и сделка создадутся автоматически из реквизитов и заказа.</div>
+          <div class="cp-actions"><button class="endcall" onclick="show('done')">⏹ Завершить</button></div>
+        </div>
+      </div>
+      <div class="src">🔴 Запись идёт · реквизиты из ЕГР · договор по шаблону · резерв и сделка — автоматически</div>
+    </div>`
+  },
+
+  // ── итог звонка ──
+  done: {
+    hint:"Звонок завершён. Менеджер фиксирует результат (дисциплина данных для воронки), сразу ставит следующий шаг. Запись сохранена → транскрибация и AI-резюме подтянутся в карточку и хронологию.",
+    html:`
+    <div class="pop">
+      <div class="cp-head done">
+        <div class="ring">✓</div>
+        <div class="cp-h-t"><div class="cp-ttl">Звонок завершён · 03:48</div><div class="cp-line">ОАО «Белтранс» · CRM-1029</div></div>
+      </div>
+      <div class="cp-body">
+        <div class="fld">
+          <div class="l">Результат звонка</div>
+          <div class="seg">
+            <button class="on">✅ Дозвонился</button>
+            <button>📵 Не дозвонился</button>
+            <button>🔁 Перезвонить</button>
+            <button>🚫 Отказ</button>
+          </div>
+        </div>
+
+        <div class="fld">
+          <div class="l">Итог / договорённость</div>
+          <select><option>Подтвердил доставку 18.06, ждёт трек</option><option>Запросил счёт</option><option>Думает</option><option>Другое…</option></select>
+        </div>
+
+        <div class="fld">
+          <div class="l">Следующий шаг</div>
+          <input value="Прислать трек рейса утром 14.06" >
+        </div>
+
+        <div class="rec">
+          <div class="play">▶</div> Запись 03:48 сохранена
+          <span class="pend">🤖 транскрибация готовится…</span>
+        </div>
+
+        <div class="cp-actions">
+          <button class="accept" onclick="location.href='sales-card-full.html'">💾 Сохранить в сделку</button>
+        </div>
+        <div class="cp-sub">
+          <span>➕ Поставить задачу</span>
+          <span>🧾 Выставить счёт</span>
+          <span>✕ Закрыть</span>
+        </div>
+      </div>
+      <div class="src">📝 Результат пишется в call_log и в хронологию сделки</div>
+    </div>`
+  }
+};
+
+function pullReq(){
+  const unp = (document.getElementById('unpIn')||{}).value || '191234567';
+  document.getElementById('reqBox').innerHTML = `
+    <div class="req">
+      <div class="rh">✅ Реквизиты по УНП ${unp} — из ЕГР</div>
+      <div class="kv2"><span class="k">Организация</span><span><b>ООО «Стартлайн»</b></span></div>
+      <div class="kv2"><span class="k">Адрес</span><span>г. Минск, ул. Кальварийская, 17</span></div>
+      <div class="kv2"><span class="k">Расчётный счёт</span><span>BY12 ALFA 3012 0000 …</span></div>
+      <div class="kv2"><span class="k">Статус</span><span style="color:#047857">действующая</span></div>
+    </div>
+    <div class="terms-lbl">Условия (согласовать)</div>
+    <div class="seg">
+      <button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>По договору</button>
+    </div>
+    <div class="order-cta" style="margin-top:12px">
+      <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
+      <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
+    </div>
+    <div style="font-size:11px;color:#9aa3b0;margin-top:7px;text-align:center">Перед отправкой — предпросмотр. Договор соберётся по шаблону с реквизитами.</div>`;
+}
+
+/* ── подбор «ещё» товара со склада: таблица с разбивкой по складам ── */
+const STOCK_WH = [
+  {sku:"АКБ 6СТ-190 (Зубр)", pr:"1 100 Br", wh:[
+    {name:"Минск (центр.)", on:54, res:13},
+    {name:"Гомель", on:20, res:0},
+    {name:"Брест", on:8, res:5}
+  ]},
+  {sku:"АКБ 6СТ-225 (промышленный)", pr:"2 600 Br", wh:[
+    {name:"Минск (центр.)", on:18, res:0}
+  ]},
+  {sku:"Зарядное устройство ЗУ-15А", pr:"420 Br", wh:[
+    {name:"Минск (центр.)", on:30, res:0},
+    {name:"Гомель", on:12, res:2}
+  ]},
+  {sku:"Тестер АКБ цифровой", pr:"180 Br", wh:[
+    {name:"Минск (центр.)", on:45, res:0}
+  ]},
+  {sku:"АКБ 6СТ-77 (легковой)", pr:"260 Br", wh:[
+    {name:"Минск (центр.)", on:120, res:10},
+    {name:"Гомель", on:60, res:0}
+  ]},
+  {sku:"АКБ тяговая 6ЭМ-145", pr:"3 900 Br", wh:[
+    {name:"Минск (центр.)", on:3, res:2}
+  ]}
+];
+function renderStock(filter){
+  filter = filter || 'Все склады';
+  let body='';
+  STOCK_WH.forEach(p=>{
+    const whs = (filter==='Все склады') ? p.wh : p.wh.filter(w=>w.name===filter);
+    if(!whs.length) return;
+    const totFree = whs.reduce((s,x)=>s+(x.on-x.res),0);
+    whs.forEach((w,wi)=>{
+      const free = w.on - w.res, low = free<=3;
+      body += `<tr class="${wi===0?'grp-first':''}">`;
+      if(wi===0){
+        body += `<td rowspan="${whs.length}"><input type="checkbox" onchange="smCount()"></td>
+          <td rowspan="${whs.length}" class="pname">${p.sku}<small>Σ свободно ${totFree} · ${whs.length>1?whs.length+' склада':'1 склад'}</small></td>`;
+      }
+      body += `<td class="wh">🏬 ${w.name}</td>
+        <td class="r">${w.on}</td>
+        <td class="r res">${w.res?w.res:'—'}</td>
+        <td class="r free ${low?'low':''}">${free}${low?' ⚠':''}</td>`;
+      if(wi===0) body += `<td rowspan="${whs.length}" class="r price">${p.pr}</td>`;
+      body += `<td class="r"><input class="q" value="0" inputmode="numeric" data-free="${free}" oninput="qtyMark(this)"></td></tr>`;
+    });
+  });
+  if(!body) body = '<tr><td colspan="8" style="text-align:center;color:#9aa3b0;padding:18px">Нет позиций на этом складе</td></tr>';
+  document.getElementById('smRows').innerHTML = `<table class="stbl">
+    <thead><tr><th></th><th>Товар</th><th>Склад</th><th class="r">Остаток</th><th class="r">Резерв</th><th class="r">Свободно</th><th class="r">Цена</th><th class="r">Кол-во</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+  document.getElementById('smCnt').textContent = 'Выбрано: 0 · ' + (filter==='Все склады'?'со всех складов':filter);
+}
+function openStockMore(){
+  const sel=document.getElementById('smWh'); if(sel) sel.value='Все склады';
+  renderStock('Все склады');
+  document.getElementById('stockMoreOv').classList.add('show');
+}
+function smCount(){ const n=document.querySelectorAll('#smRows input[type=checkbox]:checked').length; document.getElementById('smCnt').textContent='Выбрано: '+n+' поз.'; }
+function qtyMark(inp){
+  const q=parseInt(inp.value)||0, free=parseInt(inp.dataset.free)||0;
+  if(q>free){ inp.style.borderColor='#F59E0B'; inp.style.background='#FFFBEB'; inp.title=`Под заказ: дефицит ${q-free} шт → в закупку`; }
+  else { inp.style.borderColor=''; inp.style.background=''; inp.title=''; }
+}
+function closeStockMore(){ document.getElementById('stockMoreOv').classList.remove('show'); }
+
+/* ── предпросмотр счёта / договора ── */
+const INVOICE_HTML = `<div class="paper">
+  <div class="pp-h">
+    <div><div class="pp-org">ООО «Энерго-Дисконт»</div><div class="pp-sub">УНП 191000111 · г. Минск · р/с BY24 ALFA 3012 …</div></div>
+    <div class="pp-no">СЧЁТ № СЧ-0462<br>от 14.06.2026</div>
+  </div>
+  <div class="pp-parties">
+    <div><b>Поставщик:</b> ООО «Энерго-Дисконт», УНП 191000111</div>
+    <div><b>Покупатель:</b> ОАО «Белтранс», УНП 190283746, г. Гомель</div>
+  </div>
+  <table class="pp-t">
+    <thead><tr><th>№</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>АКБ 6СТ-190 (Зубр)</td><td class="r">38</td><td class="r">1 100</td><td class="r">41 800</td></tr>
+    </tbody>
+  </table>
+  <div class="pp-tot">Итого: 41 800 Br · в т.ч. НДС 20%: 6 967 Br</div>
+  <div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026. Основание — счёт-договор.</div>
+</div>`;
+const CONTRACT_HTML = `<div class="paper">
+  <div class="pp-title">ДОГОВОР ПОСТАВКИ № ДГ-0125</div>
+  <div class="pp-date">г. Минск · 14.06.2026</div>
+  <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111), и <b>Покупатель:</b> ОАО «Белтранс» (УНП 190283746), заключили настоящий договор о нижеследующем.</p>
+  <p><b>1. Предмет договора.</b> Поставщик обязуется поставить аккумуляторные батареи согласно спецификации (счёт № СЧ-0462), а Покупатель — принять и оплатить.</p>
+  <p><b>2. Сумма и порядок расчётов.</b> Общая сумма — 41 800 Br, в т.ч. НДС 20%. Форма оплаты — предоплата 100%.</p>
+  <p><b>3. Условия поставки.</b> Резерв товара до 19.06.2026. Доставка по согласованию. Гарантия 24 мес.</p>
+  <div class="pp-sign"><div>Поставщик ______________ /Сидоров К.А./</div><div>Покупатель ______________ /Ткачёв В.А./</div></div>
+</div>`;
+function previewInvoice(){
+  document.getElementById('docViewTitle').textContent = 'Счёт — предпросмотр перед отправкой';
+  document.getElementById('docViewBody').innerHTML = INVOICE_HTML;
+  document.getElementById('docViewSend').textContent = '✉ Отправить счёт';
+  document.getElementById('docViewOv').classList.add('show');
+}
+function previewContract(){
+  document.getElementById('docViewTitle').textContent = 'Договор — предпросмотр перед отправкой';
+  document.getElementById('docViewBody').innerHTML = CONTRACT_HTML;
+  document.getElementById('docViewSend').textContent = '✉ Отправить на подпись';
+  document.getElementById('docViewOv').classList.add('show');
+}
+function closeDocView(){ document.getElementById('docViewOv').classList.remove('show'); }
+
+function liveTab(name, btn){
+  document.getElementById('tab-script').style.display = name==='script' ? '' : 'none';
+  document.getElementById('tab-order').style.display  = name==='order'  ? '' : 'none';
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+}
+
+function pullReqLive(){
+  const unp=(document.getElementById('unpLive')||{}).value||'191234567';
+  document.getElementById('reqLive').innerHTML=`<div class="req">
+    <div class="rh">✅ УНП ${unp} — из ЕГР</div>
+    <div class="kv2"><span class="k">Организация</span><span><b>ООО «Стартлайн»</b></span></div>
+    <div class="kv2"><span class="k">Адрес</span><span>г. Минск, ул. Кальварийская, 17</span></div>
+    <div class="kv2"><span class="k">Расчётный счёт</span><span>BY12 ALFA 3012 …</span></div>
+    <div class="kv2"><span class="k">Статус</span><span style="color:#047857">действующая</span></div>
+  </div>`;
+}
+
+function show(key, btn){
+  document.getElementById('pop').innerHTML = VIEWS[key].html;
+  document.getElementById('hint').textContent = VIEWS[key].hint;
+  const btns=document.querySelectorAll('.states button');
+  if(btn){ btns.forEach(b=>b.classList.remove('on')); btn.classList.add('on'); }
+  else { btns.forEach(b=>b.classList.remove('on')); const map={known:0,nodeals:1,unknown:2,live:3,livenew:4,done:5}; if(map[key]!=null) btns[map[key]].classList.add('on'); }
+}
+show('known');
+</script>
+</body>
+</html>

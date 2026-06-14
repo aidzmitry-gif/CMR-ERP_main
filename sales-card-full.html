@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сделки 2.0 — карточка сделки (полный экран)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+    --ai:#7C3AED; --ai-50:#F5F3FF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;overflow-x:hidden}
+
+  .topnav{background:#fff;border-bottom:1px solid #E5E7EB;padding:9px 22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:40}
+  .topnav a.back{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--brand-700);text-decoration:none;background:var(--brand-50);border-radius:8px;padding:6px 11px}
+  .topnav a.back:hover{background:var(--brand-100)}
+  .crumb{font-size:12.5px;color:var(--muted)}.crumb b{color:var(--ink)}
+  .nav-right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .deal-pills{display:flex;gap:6px}
+  .deal-pills button{font-size:12px;font-weight:600;border:1px solid #E5E7EB;background:#fff;color:#475467;border-radius:8px;padding:6px 11px;cursor:pointer}
+  .deal-pills button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .gear{font-size:12.5px;font-weight:600;border:1px solid #E5E7EB;background:#fff;border-radius:8px;padding:6px 11px;cursor:pointer;color:#475467}
+  .gear:hover{background:#F8FAFC}
+
+  .block-menu{position:fixed;top:50px;right:18px;background:#fff;border:1px solid #E5E7EB;border-radius:12px;box-shadow:0 12px 34px rgba(16,24,40,.16);padding:9px;z-index:80;width:248px;display:none;max-height:80vh;overflow:auto}
+  .block-menu.show{display:block}
+  .block-menu .bm-h{font-size:10.5px;font-weight:700;text-transform:uppercase;color:#9aa3b0;padding:4px 8px 8px}
+  .block-menu label{display:flex;align-items:center;gap:9px;font-size:13px;padding:6px 8px;border-radius:8px;cursor:pointer}
+  .block-menu label:hover{background:#F8FAFC}
+  .block-menu input{width:15px;height:15px;accent-color:var(--brand)}
+
+  main{padding:18px 22px 40px;max-width:1280px;margin:0 auto}
+
+  /* ── ШАПКА ── */
+  .head{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:13px 18px;margin-bottom:14px}
+  .h-top{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .h-id{min-width:0}
+  .h-id .num{font-size:12.5px;color:var(--muted)}
+  .h-id h1{font-size:19px;font-weight:800;line-height:1.1;margin-top:1px}
+  .h-id .desc{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .h-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+  .bdg{font-size:11px;font-weight:700;border-radius:7px;padding:3px 9px;display:inline-flex;align-items:center;gap:5px}
+  .bdg.reg{background:#ECFDF5;color:#047857}
+  .bdg.pri{background:#FEE2E2;color:#B91C1C}
+  .bdg.ship{background:#FFF7ED;color:#C2410C}
+  .bdg.stage{background:var(--brand-50);color:var(--brand-700)}
+  .bdg.temp{background:#FEF2F2;color:#DC2626}
+  .h-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .btn{border-radius:9px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;background:#fff;color:#475467;display:inline-flex;align-items:center;gap:6px}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.danger{border-color:#FECACA;color:#B91C1C}
+  .btn.sm{padding:6px 10px;font-size:12px}
+  .btn:hover{filter:brightness(.97)}
+
+  .metrics{display:flex;gap:0;margin-top:11px;border:1px solid #EEF0F2;border-radius:10px;overflow:hidden;flex-wrap:wrap}
+  .metric{flex:1;min-width:150px;padding:7px 14px;border-right:1px solid #EEF0F2;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+  .metric:last-child{border-right:none}
+  .metric .ml{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em}
+  .metric .mv{font-size:15px;font-weight:800}
+  .metric .mv.pf{color:#047857}
+  .metric .ms{font-size:10.5px;color:var(--muted)}
+
+  .stages{margin-top:11px;display:flex;align-items:center;position:relative}
+  .stg{flex:1;text-align:center;position:relative;min-width:0}
+  .stg .ln{position:absolute;top:8px;left:50%;width:100%;height:2px;background:#E5E7EB;z-index:0}
+  .stg:last-child .ln{display:none}
+  .stg .nd{position:relative;z-index:1;width:17px;height:17px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:9px;background:#E5E7EB;color:#fff;font-weight:700}
+  .stg.done .nd{background:var(--brand)}.stg.done .ln{background:var(--brand)}
+  .stg.cur .nd{background:var(--warn);box-shadow:0 0 0 3px rgba(245,158,11,.18)}
+  .stg .tl{font-size:9px;margin-top:4px;line-height:1.15;color:#9aa3b0;padding:0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stg.done .tl,.stg.cur .tl{color:var(--ink);font-weight:600}
+  .stg .dt{display:none}
+  .stg.cur .dt{display:block;font-size:9px;color:#B45309;font-weight:700;margin-top:1px}
+
+  /* ── СЕТКА ── */
+  .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+  .grid>div{min-width:0}
+  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
+  .panel{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);margin-bottom:16px;overflow:hidden}
+  .panel .ph{padding:13px 18px;border-bottom:1px solid #F1F3F5;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .panel .ph .add{margin-left:auto;font-size:11.5px;color:var(--brand-700);font-weight:600;cursor:pointer}
+  .panel .ph .x{margin-left:auto;font-size:13px;color:#CBD5E1;cursor:pointer;line-height:1;padding-left:8px}
+  .panel .ph .add + .x{margin-left:8px}
+  .panel .ph .x:hover{color:#94a3b8}
+  .pb{padding:14px 18px}
+
+  .kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:6px 0}
+  .kv .k{color:var(--muted)}.kv .v{font-weight:500;text-align:right;min-width:0;word-break:break-word}
+
+  /* ── контакты ── */
+  .contact{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px solid #F6F7F9}
+  .contact:first-of-type{border-top:none}
+  .c-ava{width:34px;height:34px;border-radius:9px;background:var(--brand-50);color:var(--brand-700);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .contact.main .c-ava{background:#ECFDF5;color:#047857}
+  .c-info{flex:1;min-width:0}
+  .c-name{font-size:13px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .c-main{font-size:10px;font-weight:700;color:#047857;background:#ECFDF5;border-radius:5px;padding:1px 6px}
+  .c-role{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .c-phone{font-size:12.5px;color:#334155;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .c-acts{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-top:5px}
+  .cbtn{width:28px;height:28px;border-radius:7px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;background:#fff}
+  .cbtn.call{background:var(--brand);border-color:var(--brand);color:#fff}
+  .cbtn:hover{filter:brightness(.95)}
+  .c-sel{font-size:11px;border:1px solid #E5E7EB;border-radius:7px;padding:4px 6px;color:#64748b;background:#fff;max-width:140px}
+  .c-acts-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+
+  /* ── доставка ── */
+  .dlv-seg{display:flex;gap:8px;margin-bottom:6px}
+  .dlv-seg button{flex:1;border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:9px;font-size:12.5px;font-weight:600;color:#475467;cursor:pointer}
+  .dlv-seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
+  .dlv-input{width:100%;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;margin:8px 0 4px}
+  .dlv-input:focus{outline:none;border-color:var(--brand)}
+  .dlv-input.req{border-color:#FCA5A5;background:#FEF2F2}
+  .dlv-req{font-size:11px;color:#B91C1C;margin-top:2px}
+  .dlv-lbl{font-size:11px;color:var(--muted)}
+
+  /* ── AI блок ── */
+  .ai-panel{background:linear-gradient(135deg,#F5F3FF,#FAF5FF);border:1px solid #DDD6FE}
+  .ai-panel .ph{border-bottom-color:#EDE9FE;color:#5B21B6}
+  .ai-panel .ph .x{color:#C4B5FD}
+  .ai-sum{font-size:13px;line-height:1.55;color:#3b2d63}
+  .ai-nba{background:#fff;border:1px solid #DDD6FE;border-radius:11px;padding:12px 14px;margin-top:12px}
+  .ai-nba .t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ai)}
+  .ai-nba .a{font-size:14px;font-weight:700;margin-top:4px}
+  .ai-nba .w{font-size:12px;color:#6d28d9;margin-top:4px;line-height:1.45}
+  .ai-nba .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .ai-row{display:flex;gap:12px;margin-top:12px;flex-wrap:wrap}
+  .ai-chip{font-size:11.5px;font-weight:600;border-radius:8px;padding:5px 10px;background:#fff;border:1px solid #E9D5FF;color:#6d28d9;display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+  .ai-risk{font-size:12px;color:#3b2d63}
+  .risk-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+  .btn.ai{background:var(--ai);border-color:var(--ai);color:#fff}
+
+  /* ── звонки/транскрибация ── */
+  .call{border:1px solid #EEF0F2;border-radius:12px;padding:13px 14px;margin-bottom:11px}
+  .call:last-child{margin-bottom:0}
+  .call-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .call-dir{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .call-dir.in{background:#ECFDF5;color:#047857}.call-dir.out{background:var(--brand-50);color:var(--brand-700)}
+  .call-meta{font-size:12px;color:var(--muted)}
+  .sent{margin-left:auto;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .sent.pos{background:#DCFCE7;color:#15803D}.sent.neu{background:#F1F5F9;color:#475569}.sent.neg{background:#FEE2E2;color:#B91C1C}
+  .player{display:flex;align-items:center;gap:11px;background:#F8FAFC;border-radius:10px;padding:9px 12px;margin-top:11px}
+  .play{width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;flex-shrink:0}
+  .wave{flex:1;display:flex;align-items:center;gap:2px;height:30px;overflow:hidden;min-width:0}
+  .wave i{width:3px;border-radius:2px;background:#CBD5E1;flex-shrink:0}
+  .wave i.on{background:var(--brand)}
+  .ptime{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex-shrink:0}
+  .pspeed{font-size:11px;font-weight:600;color:#64748b;border:1px solid #E5E7EB;border-radius:6px;padding:2px 7px;cursor:pointer;flex-shrink:0}
+  .call-ai{margin-top:11px;background:var(--ai-50);border:1px solid #EDE9FE;border-radius:10px;padding:10px 12px}
+  .call-ai .l{font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--ai)}
+  .call-ai .s{font-size:12.5px;color:#3b2d63;margin-top:4px;line-height:1.5}
+  .extract{margin-top:9px}
+  .extract .ex{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;padding:4px 0}
+  .extract .ex .ico{flex-shrink:0}
+  .extract .ex .mk{margin-left:auto;font-size:11px;color:var(--brand-700);font-weight:600;cursor:pointer;flex-shrink:0}
+  .tr-toggle{font-size:12px;font-weight:600;color:var(--brand-700);cursor:pointer;margin-top:10px;display:inline-flex;align-items:center;gap:5px}
+  .transcript{margin-top:10px;display:none}
+  .transcript.show{display:block}
+  .line{display:flex;gap:9px;font-size:12.5px;padding:5px 0}
+  .line .tm{color:#9aa3b0;font-variant-numeric:tabular-nums;flex-shrink:0;width:38px}
+  .line .spk{font-weight:700;flex-shrink:0;width:74px}
+  .line.mgr .spk{color:var(--brand-700)}.line.cli .spk{color:#047857}
+  .line .tx{color:#334155;min-width:0}
+
+  /* финансы (касса) */
+  .pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .pay-grid .cell{background:#F8FAFC;border-radius:10px;padding:10px 12px}
+  .pay-grid .cell .l{font-size:11px;color:var(--muted)}
+  .pay-grid .cell .v{font-size:16px;font-weight:800;margin-top:2px}
+  .paybar{height:9px;border-radius:99px;background:#EEF0F2;overflow:hidden;margin:12px 0 4px}
+  .paybar i{display:block;height:100%;background:var(--ok)}
+
+  /* номенклатура */
+  .items{font-size:13px}
+  .items .ih,.items .ir,.items .tot{display:grid;grid-template-columns:1fr 64px 88px 84px;gap:8px}
+  .items .ih{font-size:10.5px;text-transform:uppercase;color:#9aa3b0;font-weight:700;padding-bottom:7px;border-bottom:1px solid #EEF0F2}
+  .items .ir{padding:8px 0;border-top:1px solid #F6F7F9;align-items:center}
+  .items .ir:first-of-type{border-top:none}
+  .items .nm small{color:#9aa3b0;display:block;font-size:11px}
+  .items .num2{text-align:right}
+  .items .pf{text-align:right;color:#047857;font-weight:600}
+  .items .tot{font-weight:800;padding-top:9px;margin-top:4px;border-top:1px solid #E5E7EB}
+
+  /* машина */
+  .shipbar{display:flex;align-items:center;gap:10px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:11px;padding:10px 14px;margin-bottom:14px;flex-wrap:wrap}
+  .shipbar .ic{font-size:20px}
+  .shipbar .t{font-weight:700;font-size:13px;color:#9A3412}
+  .shipbar .s{font-size:11.5px;color:#B45309}
+  .shipbar .eta{margin-left:auto;text-align:right}
+  .shipbar .eta .l{font-size:10px;color:#B45309}.shipbar .eta .v{font-size:15px;font-weight:800;color:#9A3412}
+  .track{display:flex;align-items:flex-start;margin:6px 4px 4px;position:relative}
+  .tstep{flex:1;text-align:center;position:relative;min-width:0}
+  .tstep .ln{position:absolute;top:11px;left:50%;width:100%;height:3px;background:#E5E7EB;z-index:0}
+  .tstep:last-child .ln{display:none}
+  .tstep .nd{position:relative;z-index:1;width:24px;height:24px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:11px;background:#E5E7EB;color:#fff}
+  .tstep.done .nd{background:var(--ok)}.tstep.done .ln{background:var(--ok)}
+  .tstep.cur .nd{background:var(--warn);box-shadow:0 0 0 4px rgba(245,158,11,.18)}
+  .tstep .tl{font-size:10px;margin-top:6px;line-height:1.2;color:#9aa3b0;padding:0 2px}
+  .tstep.done .tl,.tstep.cur .tl{color:var(--ink);font-weight:600}
+  .tstep .dt{font-size:9.5px;color:#b0b8c4;margin-top:2px}.tstep.cur .dt{color:#B45309;font-weight:700}
+  .ship-src{font-size:11px;color:#9aa3b0;margin-top:11px;display:flex;gap:7px}.ship-src b{color:var(--ink)}
+
+  /* задачи */
+  .task{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid #F6F7F9}
+  .task:first-of-type{border-top:none}
+  .task .cb{width:18px;height:18px;border-radius:6px;border:2px solid #CBD5E1;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;cursor:pointer}
+  .task.done .cb{background:var(--ok);border-color:var(--ok)}
+  .task .tt{font-size:13px}.task.done .tt{text-decoration:line-through;color:#9aa3b0}
+  .task .meta{font-size:11px;color:var(--muted);margin-top:2px}
+  .task .kind{font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;background:#F1F5F9;color:#475569;margin-left:auto;flex-shrink:0}
+
+  /* документы */
+  .doc-gen{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+  .doc-gen button{font-size:12px;font-weight:600;border:1px dashed #C7D2FE;background:var(--brand-50);color:var(--brand-700);border-radius:8px;padding:6px 11px;cursor:pointer}
+  .doc-gen button:hover{background:var(--brand-100)}
+  .doc{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;padding:9px 0;border-top:1px solid #F6F7F9}
+  .doc:first-of-type{border-top:none}
+  .doc .doc-main{flex:1;min-width:0}
+  .doc .dn{font-size:13px;font-weight:500;word-break:break-word}
+  .doc .dt2{font-size:11px;color:#9aa3b0;margin-top:1px}
+  .doc .st{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;flex-shrink:0}
+  .st.posted{background:#DCFCE7;color:#15803D}.st.pending{background:#FEF3C7;color:#92400E}.st.paid{background:#DBEAFE;color:#1D4ED8}.st.draft{background:#F1F5F9;color:#475569}
+  .doc-acts{display:flex;gap:5px;flex-shrink:0}
+  .dbtn{height:28px;min-width:28px;padding:0 8px;border-radius:7px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:#475467}
+  .dbtn.send{background:var(--brand);border-color:var(--brand);color:#fff}
+  .dbtn:hover{filter:brightness(.97)}
+  .send-ch{flex-basis:100%;display:none;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .send-ch.show{display:flex}
+  .send-ch .lbl{font-size:11.5px;color:var(--muted)}
+  .send-ch span.ch{border:1px solid #E5E7EB;border-radius:7px;padding:5px 10px;cursor:pointer;color:#475467;font-weight:600;font-size:11.5px}
+  .send-ch span.ch:hover{background:var(--brand-50);border-color:#BFD3FF;color:var(--brand-700)}
+
+  /* допродажа */
+  .upsell{background:linear-gradient(135deg,#ECFDF5,#F0FDFA);border:1px solid #A7F3D0;border-radius:11px;padding:12px 14px}
+  .upsell .u-t{font-size:12.5px;font-weight:700;color:#047857;display:flex;align-items:center;gap:6px}
+  .upsell .u-b{font-size:12.5px;color:#065F46;margin-top:6px;line-height:1.5}
+
+  /* ── ХРОНОЛОГИЯ ── */
+  .tl-add{display:flex;gap:8px;margin-bottom:12px}
+  .tl-add input{flex:1;min-width:0;border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:12.5px;font-family:inherit}
+  .tl-add input:focus{outline:none;border-color:var(--brand)}
+  .tl-add button{border:none;background:var(--brand);color:#fff;border-radius:9px;padding:0 13px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .tl-filter{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .tl-filter button{font-size:11px;font-weight:600;border:1px solid #E5E7EB;background:#fff;color:#64748b;border-radius:7px;padding:4px 9px;cursor:pointer}
+  .tl-filter button.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  .feed{position:relative;padding-left:20px}
+  .feed::before{content:'';position:absolute;left:6px;top:4px;bottom:4px;width:2px;background:#EEF0F2}
+  .ev{position:relative;padding:0 0 15px}
+  .ev::before{content:'';position:absolute;left:-17px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid #CBD5E1}
+  .ev.stage::before{border-color:var(--brand);background:var(--brand)}
+  .ev.pay::before{border-color:var(--ok);background:var(--ok)}
+  .ev.ship::before{border-color:var(--warn);background:var(--warn)}
+  .ev.call::before{border-color:#0EA5E9;background:#0EA5E9}
+  .ev.note::before{border-color:var(--ai);background:var(--ai)}
+  .ev.msg::before{border-color:#94a3b8;background:#fff}
+  .ev-row{display:flex;align-items:flex-start;gap:8px}
+  .ev .et{font-size:12.5px;font-weight:600;flex:1;min-width:0;word-break:break-word}
+  .ev.msg .et{font-weight:500;background:#F1F5F9;border-radius:9px;padding:7px 10px;color:#334155}
+  .ev.msg.out .et{background:var(--brand-50);color:#1E3A8A}
+  .ev .em{font-size:11px;color:var(--muted);margin-top:2px}
+  .ev .pin{flex-shrink:0;font-size:13px;color:#CBD5E1;cursor:pointer;line-height:1}
+  .ev.pinned .pin{color:#F59E0B}
+  .ev.pinned{background:#FFFBEB;border-radius:9px;margin-left:-6px;padding:6px 6px 9px}
+  .ev.pinned::before{left:-11px}
+  .pin-hd{font-size:10.5px;font-weight:700;text-transform:uppercase;color:#B45309;margin-bottom:8px;display:none}
+  .pin-hd.show{display:block}
+  .reply{display:flex;gap:8px;margin-top:6px;align-items:center}
+  .reply input{flex:1;min-width:0;border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:12.5px;font-family:inherit}
+  .reply .chs{display:flex;gap:5px}
+  .reply .chs span{width:30px;height:30px;border:1px solid #E5E7EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer}
+
+  .linked{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:7px 0;border-top:1px solid #F6F7F9}
+  .linked:first-of-type{border-top:none}
+
+  /* следующий шаг */
+  .ns-text{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13.5px;font-family:inherit;font-weight:600}
+  .ns-text:focus{outline:none;border-color:var(--brand)}
+  .ns-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .ns-row label{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0}
+  .ns-row input[type=date],.ns-row select{border:1px solid #E5E7EB;border-radius:9px;padding:8px 10px;font-size:13px;font-family:inherit}
+  .ns-row .btn{margin-left:auto}
+
+  /* модалка подбора со склада */
+  .stock-ov{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:90;display:none;align-items:center;justify-content:center;padding:24px}
+  .stock-ov.show{display:flex}
+  #invOv{z-index:95} #stockOv{z-index:100} #invPrevOv{z-index:110} #ctrOv{z-index:95} #ctrPrevOv{z-index:110}
+  .stock-dlg{background:#fff;border-radius:16px;width:640px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(15,23,42,.3);overflow:hidden}
+  .sd-h{padding:15px 18px;border-bottom:1px solid #F1F3F5;font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px}
+  .sd-h .x{margin-left:auto;color:#9aa3b0;cursor:pointer;font-size:15px}
+  .sd-b{padding:14px 18px;overflow:auto}
+  .sd-search{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 12px;font-size:13px;font-family:inherit;margin-bottom:12px}
+  .srow{display:grid;grid-template-columns:22px 1fr 130px 90px 70px;gap:10px;align-items:center;padding:9px 0;border-top:1px solid #F6F7F9;font-size:13px}
+  .srow:first-of-type{border-top:none}
+  .srow input[type=checkbox]{width:17px;height:17px;accent-color:var(--brand)}
+  .srow .snm{font-weight:600}
+  .srow .av{font-size:11.5px;color:#047857}
+  .srow .av.low{color:#B45309}
+  .srow .pr{text-align:right;font-weight:600}
+  .srow .qty{width:60px;border:1px solid #E5E7EB;border-radius:7px;padding:5px 7px;font-size:12.5px;text-align:center;font-family:inherit}
+  .sd-f{padding:13px 18px;border-top:1px solid #F1F3F5;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .sd-f .cnt{font-size:12.5px;color:var(--muted);margin-right:auto}
+  .sd-note{font-size:11.5px;color:#9aa3b0;margin-top:10px;display:flex;gap:7px}
+  .srow .av .res{color:#B45309}
+
+  /* talk-ratio звонка */
+  .talk{display:flex;align-items:center;gap:9px;margin-top:11px;font-size:11.5px;color:var(--muted)}
+  .talk .bar{flex:1;height:7px;border-radius:99px;overflow:hidden;display:flex;background:#EEF0F2;min-width:60px}
+  .talk .bar .mgr{background:var(--brand)}.talk .bar .cli{background:#22C55E}
+  .talk b{font-weight:700;color:var(--ink)}
+  /* авто-теги звонка */
+  .ctags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .ctag{font-size:10.5px;font-weight:700;border-radius:6px;padding:3px 8px}
+  .ctag.sig{background:#ECFDF5;color:#047857}
+  .ctag.warn{background:#FEF2F2;color:#B91C1C}
+  .ctag.tip{background:#F5F3FF;color:#6d28d9}
+  /* статусы документа */
+  .dflow{display:flex;align-items:center;gap:5px;margin-top:6px;flex-wrap:wrap;flex-basis:100%}
+  .ds{font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px;background:#F1F5F9;color:#94a3b8}
+  .ds.done{background:#DCFCE7;color:#15803D}
+  .dflow .arr{color:#CBD5E1;font-size:10px}
+  /* дни в стадии */
+  .bdg.stale{background:#FEF3C7;color:#B45309}
+
+  /* окно исходящего вызова */
+  .call-ov{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:95;display:none;align-items:center;justify-content:center;padding:24px}
+  .call-ov.show{display:flex}
+  .call-card{width:380px;max-width:94vw;background:#fff;border-radius:16px;box-shadow:0 24px 64px rgba(15,23,42,.3);overflow:hidden;animation:cpop .22s ease}
+  @keyframes cpop{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+  .cc-head{display:flex;align-items:center;gap:12px;padding:16px 18px;color:#fff;background:linear-gradient(135deg,#2563EB,#1D4FD7)}
+  .cc-head.ring{background:linear-gradient(135deg,#16A34A,#15803D)}
+  .cc-ring{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+  .cc-head.ring .cc-ring{animation:ccr 1.1s infinite}
+  @keyframes ccr{0%{box-shadow:0 0 0 0 rgba(255,255,255,.5)}70%{box-shadow:0 0 0 12px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+  .cc-t{font-size:14px;font-weight:800}.cc-s{font-size:12px;opacity:.92}
+  .cc-num{margin-left:auto;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .cc-body{padding:16px 18px}
+  .cc-status{font-size:13px;color:var(--muted);text-align:center;margin-bottom:14px}
+  .cc-status b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .cc-actions{display:flex;gap:10px}
+  .cc-actions .end{flex:1;border:none;background:var(--bad);color:#fff;border-radius:11px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+  .cc-sub{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .cc-sub span{flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:9px;padding:8px;font-size:12px;font-weight:600;color:#475467;cursor:pointer;min-width:90px}
+  .cc-sub span:hover{background:#F8FAFC}
+
+  /* ── редактор счёта ── */
+  .inv-dlg{background:#fff;border-radius:16px;width:820px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(15,23,42,.3);overflow:hidden}
+  .iv-h{padding:14px 18px;border-bottom:1px solid #F1F3F5;display:flex;align-items:center;gap:10px}
+  .iv-h .t{font-weight:800;font-size:15px}
+  .iv-h .no{font-size:12px;color:var(--muted)}
+  .iv-h .x{margin-left:auto;color:#9aa3b0;cursor:pointer;font-size:15px}
+  .iv-b{padding:14px 18px;overflow:auto}
+  .iv-req{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#475467;background:#F8FAFC;border-radius:10px;padding:10px 13px;margin-bottom:13px}
+  .iv-req b{color:var(--ink)}
+  .iv-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .iv-tbl th{font-size:10px;text-transform:uppercase;color:#9aa3b0;text-align:left;padding:6px 7px;border-bottom:1px solid #EEF0F2}
+  .iv-tbl th.r,.iv-tbl td.r{text-align:right}
+  .iv-tbl td{padding:5px 7px;border-bottom:1px solid #F6F7F9;vertical-align:middle}
+  .iv-tbl .nm{font-weight:600}
+  .iv-tbl input{border:1px solid #E5E7EB;border-radius:7px;padding:6px 7px;font-size:12.5px;font-family:inherit;text-align:right;width:100%}
+  .iv-tbl input.name{text-align:left}
+  .iv-tbl .sum{font-weight:700;white-space:nowrap}
+  .iv-tbl .del{color:#CBD5E1;cursor:pointer;font-size:14px;text-align:center}
+  .iv-tbl .del:hover{color:#EF4444}
+  .iv-add{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .iv-add button{border:1px dashed #C7D2FE;background:var(--brand-50);color:var(--brand-700);border-radius:9px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .iv-add button:hover{background:var(--brand-100)}
+  .iv-bottom{display:flex;gap:16px;margin-top:15px;flex-wrap:wrap}
+  .iv-terms{flex:1;min-width:240px}
+  .iv-terms .l{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin:0 0 6px}
+  .iv-terms .seg{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+  .iv-terms .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;color:#475467;cursor:pointer}
+  .iv-terms .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
+  .iv-terms .row{display:flex;gap:9px;align-items:center;font-size:12.5px;margin-bottom:9px}
+  .iv-terms input[type=date]{border:1px solid #E5E7EB;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
+  .iv-resv{display:flex;gap:9px;align-items:center;font-size:12.5px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:9px 12px;color:#92400E;font-weight:600;cursor:pointer}
+  .iv-resv input{width:16px;height:16px;accent-color:var(--warn)}
+  .iv-sum{width:260px;background:#F8FAFC;border-radius:12px;padding:13px 15px;font-size:13px}
+  .iv-sum .r{display:flex;justify-content:space-between;padding:4px 0}
+  .iv-sum .r.tot{border-top:1px solid #E5E7EB;margin-top:6px;padding-top:8px;font-size:16px;font-weight:800}
+  .iv-sum .r .k{color:var(--muted)}
+  .iv-f{padding:12px 18px;border-top:1px solid #F1F3F5;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .iv-f .warn{font-size:11.5px;color:#B45309;margin-right:auto;font-weight:600}
+
+  /* мультисклад-таблица подбора */
+  .stbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .stbl th{font-size:10px;text-transform:uppercase;color:#6B7280;background:#F8FAFC;padding:8px;text-align:left;position:sticky;top:0;border-bottom:1px solid #E5E7EB;z-index:1}
+  .stbl th.r,.stbl td.r{text-align:right}
+  .stbl td{padding:7px 8px;border-bottom:1px solid #F1F3F5;vertical-align:middle}
+  .stbl tr.grp-first td{border-top:2px solid #EAECEF}
+  .stbl .pname{font-weight:700}
+  .stbl .pname small{display:block;color:#9aa3b0;font-weight:500;font-size:10.5px;margin-top:1px}
+  .stbl .wh{color:#475467;white-space:nowrap}
+  .stbl .res{color:#B45309;font-weight:600}
+  .stbl .free{color:#047857;font-weight:800}
+  .stbl .free.low{color:#B91C1C}
+  .stbl .price{font-weight:700;white-space:nowrap}
+  .stbl .q{width:68px;border:1px solid #E5E7EB;border-radius:6px;padding:5px;font-size:12px;text-align:center;font-family:inherit}
+  .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
+
+  /* «бумага» предпросмотра */
+  .paper{background:#fff;margin:16px;border-radius:8px;box-shadow:0 1px 4px rgba(16,24,40,.1);padding:22px 24px;font-size:12.5px;color:#1F2937;line-height:1.5}
+  .pp-h{display:flex;justify-content:space-between;gap:12px;border-bottom:2px solid #1F2937;padding-bottom:10px;margin-bottom:12px}
+  .pp-org{font-size:15px;font-weight:800}.pp-sub{font-size:11px;color:#6B7280}
+  .pp-no{text-align:right;font-weight:700;white-space:nowrap}
+  .pp-parties{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12px}
+  .pp-t{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px}
+  .pp-t th,.pp-t td{border:1px solid #E5E7EB;padding:6px 8px;text-align:left}
+  .pp-t th{background:#F8FAFC;font-size:10.5px;text-transform:uppercase;color:#6B7280}
+  .pp-t td.r,.pp-t th.r{text-align:right}
+  .pp-tot{text-align:right;font-weight:800;font-size:13px;margin-bottom:8px}
+  .pp-foot{font-size:11px;color:#6B7280;border-top:1px solid #EEF0F2;padding-top:8px}
+  .pp-title{font-size:15px;font-weight:800;text-align:center}
+  .pp-date{text-align:center;color:#6B7280;font-size:11px;margin-bottom:12px}
+  .paper p{margin-bottom:8px}
+  .pp-sign{display:flex;justify-content:space-between;margin-top:22px;font-size:11px;color:#475467}
+
+  /* поля редактора договора */
+  .ct-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .ct-field .l{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin-bottom:5px}
+  .ct-field input,.ct-field textarea,.ct-field select{width:100%;border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:13px;font-family:inherit}
+  .ct-field input:focus,.ct-field textarea:focus,.ct-field select:focus{outline:none;border-color:var(--brand)}
+  .ct-field textarea{min-height:52px;resize:vertical}
+  .ct-field.full{grid-column:1 / -1}
+  .ct-field .seg{display:flex;gap:7px;flex-wrap:wrap}
+  .ct-field .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;color:#475467;cursor:pointer}
+  .ct-field .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
+  .iv-terms .mini{display:flex;gap:10px;align-items:center;font-size:12.5px;margin-bottom:9px;flex-wrap:wrap}
+  .iv-terms .mini label{color:var(--muted)}
+  .iv-terms .mini input,.iv-terms .mini select{border:1px solid #E5E7EB;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
+  .iv-terms .mini input{width:64px;text-align:right}
+
+  /* тост-уведомление */
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#111827;color:#fff;font-size:13px;font-weight:600;padding:11px 18px;border-radius:11px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:200;opacity:0;pointer-events:none;transition:.25s;max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+  <div class="topnav">
+    <a class="back" href="sales-2.0-index.html">← К списку макетов</a>
+    <span class="crumb">Сделки · <b id="crumb">CRM-1029</b> · полная карточка</span>
+    <div class="nav-right">
+      <button class="gear" id="gearBtn" onclick="toggleBlockMenu(event)">⚙ Блоки</button>
+      <div class="deal-pills">
+        <button class="on" onclick="render('beltrans',this)">CRM-1029 · едет в машине</button>
+        <button onclick="render('park7',this)">CRM-1024 · без машины</button>
+      </div>
+    </div>
+  </div>
+  <div class="block-menu" id="blockMenu"></div>
+  <div class="toast" id="toast"></div>
+
+  <main id="app"></main>
+
+  <!-- модалка подбора товара со склада (мультисклад) -->
+  <div class="stock-ov" id="stockOv" onclick="if(event.target===this)closeStock()">
+    <div class="stock-dlg" style="width:780px">
+      <div class="sd-h">🏬 Подбор товара со склада <span style="font-weight:500;font-size:12px;color:#9aa3b0">остаток · резерв · свободно по складам</span><span class="x" onclick="closeStock()">✕</span></div>
+      <div class="sd-b">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input class="sd-search" id="stSearch" placeholder="Поиск по номенклатуре…" style="flex:1;margin-bottom:0">
+          <select id="stWh" onchange="renderStock(this.value)" style="border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:12.5px;font-family:inherit"><option>Все склады</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+        </div>
+        <div id="stockRows"></div>
+        <div class="sd-note">📦 <span><b style="color:#1F2937">Остаток</b> — всего · <b style="color:#B45309">Резерв</b> — под другие заказы · <b style="color:#047857">Свободно</b> — доступно (ATP). <b>Кол-во не ограничено</b> — можно заказать больше остатка, дефицит уйдёт в закупку (под заказ).</span></div>
+      </div>
+      <div class="sd-f">
+        <span class="cnt" id="stockCnt">Выбрано: 0</span>
+        <button class="btn" onclick="closeStock()">Отмена</button>
+        <button class="btn primary" id="stAddBtn" onclick="confirmStock()">Добавить в счёт</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- редактор счёта -->
+  <div class="stock-ov" id="invOv" onclick="if(event.target===this)closeInv()">
+    <div class="inv-dlg">
+      <div class="iv-h"><span class="t">🧾 Счёт</span><span class="no" id="invNo">№ СЧ-0462 · от 14.06.2026</span><span class="x" onclick="closeInv()">✕</span></div>
+      <div class="iv-b">
+        <div class="iv-req" id="invReq"></div>
+        <table class="iv-tbl">
+          <thead><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Скидка %</th><th class="r">Сумма</th><th></th></tr></thead>
+          <tbody id="invRows"></tbody>
+        </table>
+        <div class="iv-add">
+          <button onclick="openStock('invoice')">🏬 Добавить со склада</button>
+          <button onclick="addInvRow()">＋ Строка вручную</button>
+        </div>
+        <div class="iv-bottom">
+          <div class="iv-terms">
+            <div class="l">Условия оплаты</div>
+            <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>50 / 50</button></div>
+            <div class="row"><span style="color:var(--muted)">Оплатить до</span><input type="date" value="2026-06-19"></div>
+            <div class="mini">
+              <label>Скидка на счёт</label><input id="invDocDisc" value="0" oninput="renderInvSum()"> %
+              <label style="margin-left:6px">Склад отгрузки</label>
+              <select><option>Авто по наличию</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+            </div>
+            <label class="iv-resv"><input type="checkbox" checked> 📦 Зарезервировать товар на 5 кал. дней (до 19.06 · авто-снятие)</label>
+          </div>
+          <div class="iv-sum" id="invSum"></div>
+        </div>
+      </div>
+      <div class="iv-f">
+        <span class="warn">Черновик · не отправлен</span>
+        <button class="btn" onclick="closeInv()">Сохранить черновик</button>
+        <button class="btn primary" onclick="invPreview()">👁 Предпросмотр и отправка</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- предпросмотр счёта перед отправкой -->
+  <div class="stock-ov" id="invPrevOv" onclick="if(event.target===this)closeInvPrev()">
+    <div class="stock-dlg" style="width:600px">
+      <div class="sd-h">Счёт — предпросмотр перед отправкой <span class="x" onclick="closeInvPrev()">✕</span></div>
+      <div class="sd-b" style="background:#F4F5F7;padding:0" id="invPaper"></div>
+      <div class="sd-f">
+        <span class="cnt" style="color:#B45309;margin-right:auto">⚠ Проверьте перед отправкой</span>
+        <button class="btn" onclick="closeInvPrev()">✎ Редактировать</button>
+        <button class="btn" onclick="invSent()">🟢 WhatsApp</button>
+        <button class="btn" onclick="invSent()">🧾 ЭДО/1С</button>
+        <button class="btn primary" onclick="invSent()">✉ Отправить (Email)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- редактор договора -->
+  <div class="stock-ov" id="ctrOv" onclick="if(event.target===this)closeCtr()">
+    <div class="inv-dlg" style="width:720px">
+      <div class="iv-h"><span class="t">📄 Договор поставки</span><span class="no" id="ctrNo">№ ДГ-0125 · от 14.06.2026</span><span class="x" onclick="closeCtr()">✕</span></div>
+      <div class="iv-b">
+        <div class="iv-req" id="ctrReq"></div>
+        <div class="ct-grid">
+          <div class="ct-field full"><div class="l">Предмет договора</div><textarea id="ctrSubject">Поставка аккумуляторных батарей согласно спецификации (счёт № СЧ-0462).</textarea></div>
+          <div class="ct-field"><div class="l">Сумма договора</div><input id="ctrSum" value="46 800 Br"></div>
+          <div class="ct-field"><div class="l">Гарантия, мес</div><input id="ctrWarr" value="24"></div>
+          <div class="ct-field full"><div class="l">Условия оплаты</div><div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>50 / 50</button></div></div>
+          <div class="ct-field"><div class="l">Срок поставки</div><input id="ctrDeliv" value="до 19.06.2026 (резерв)"></div>
+          <div class="ct-field"><div class="l">Способ подписания</div><select id="ctrSign"><option>Ссылка на подпись (онлайн)</option><option>ЭДО</option><option>Бумажный оригинал</option></select></div>
+        </div>
+      </div>
+      <div class="iv-f">
+        <span class="warn">Проект договора · не отправлен</span>
+        <button class="btn" onclick="closeCtr()">Сохранить черновик</button>
+        <button class="btn primary" onclick="ctrPreview()">👁 Предпросмотр и отправка</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- предпросмотр договора -->
+  <div class="stock-ov" id="ctrPrevOv" onclick="if(event.target===this)closeCtrPrev()">
+    <div class="stock-dlg" style="width:600px">
+      <div class="sd-h">Договор — предпросмотр перед отправкой <span class="x" onclick="closeCtrPrev()">✕</span></div>
+      <div class="sd-b" style="background:#F4F5F7;padding:0" id="ctrPaper"></div>
+      <div class="sd-f">
+        <span class="cnt" style="color:#B45309;margin-right:auto">⚠ Проверьте перед отправкой</span>
+        <button class="btn" onclick="closeCtrPrev()">✎ Редактировать</button>
+        <button class="btn" onclick="ctrSent()">🧾 ЭДО</button>
+        <button class="btn primary" onclick="ctrSent()">🔗 Отправить на подпись</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- окно исходящего вызова (по кнопке звонка) -->
+  <div class="call-ov" id="callOv" onclick="if(event.target===this)closeCall()">
+    <div class="call-card">
+      <div class="cc-head ring" id="ccHead">
+        <div class="cc-ring">📞</div>
+        <div><div class="cc-t" id="ccT">Исходящий вызов…</div><div class="cc-s" id="ccWho">—</div></div>
+        <div class="cc-num" id="ccNum">—</div>
+      </div>
+      <div class="cc-body">
+        <div class="cc-status" id="ccStatus">Соединение… идут гудки</div>
+        <div class="cc-actions"><button class="end" onclick="closeCall()">⏹ Завершить</button></div>
+        <div class="cc-sub">
+          <span>🔇 Микр.</span><span>⏸ Удержать</span><span onclick="location.href='sales-call-popup.html'">⤢ Полное окно</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const STAGES = ["Новая","В работе","Квалиф.","Цена запр.","Есть цена","Встреча","Счёт","Защищён","Договор"];
+
+const BLOCKS = [
+  {id:"ai",       name:"🤖 AI-ассистент"},
+  {id:"next",     name:"⏭ Следующий шаг"},
+  {id:"ship",     name:"🚚 Статус машины"},
+  {id:"calls",    name:"📞 Звонки и транскрибация"},
+  {id:"pay",      name:"💵 Оплата и деньги"},
+  {id:"delivery", name:"📦 Доставка"},
+  {id:"items",    name:"🧾 Номенклатура"},
+  {id:"tasks",    name:"✅ Задачи"},
+  {id:"docs",     name:"📄 Документы"},
+  {id:"client",   name:"👤 Клиент и контакты"},
+  {id:"reg",      name:"★ Постоянный клиент"},
+  {id:"timeline", name:"🕑 Хронология"},
+  {id:"linked",   name:"🔗 Сделки клиента"}
+];
+const hidden = new Set();
+let currentKey = "beltrans";
+
+const DEALS = {
+  beltrans: {
+    num:"№ CRM-1029", company:"ОАО «Белтранс»", desc:"Парк 40 ед. · АКБ 6СТ-190 · годовая поставка",
+    reg:true, pri:"Высокий", temp:"🔥 Горячая", stageDays:"3 дн", stageStale:false, stageIdx:8, stageDates:["02.05","04.05","12.05","18.05","22.05","28.05","30.05","02.06","05.06"],
+    amount:"46 800 Br", cost:"31 200 Br", profit:"15 600 Br", margin:"33%",
+    prob:"95%", weighted:"44 460 Br", close:"05.06.2026 · выиграна",
+    owner:"Сидоров Константин Андреевич", unp:"УНП 190283746",
+    nextStep:"Позвонить после доставки, подтвердить приёмку и предложить зарядные устройства", nextDate:"2026-06-18",
+    contacts:[
+      {name:"Ткачёв Виктор Анатольевич", role:"Главный инженер · лицо, принимающее решение", phone:"+375 29 612-44-18", main:true},
+      {name:"Гурко Елена Сергеевна", role:"Специалист отдела снабжения", phone:"+375 29 555-10-02", main:false}
+    ],
+    delivery:{method:"address", address:"г. Гомель, ул. Барыкина, 145, склад №3", date:"18.06.2026", warehouse:"Минск, ул. Промышленная, 8"},
+    ai:{
+      summary:"Сделка выиграна и оплачена (предоплата 100%). Товар в рейсе TR-0418, ETA клиенту 18.06. Постоянный клиент, 7-й заказ, частота ~90 дней, средний чек растёт (+8%). Фокус сейчас — постпродажа и подготовка перезаказа.",
+      nextAction:"Позвонить 18.06 после доставки — подтвердить приёмку и закрыть акт",
+      nextWhy:"Звонок в день доставки повышает повторные продажи и даёт повод предложить ЗУ (клиент их ни разу не брал).",
+      riskLevel:"low", risk:"Рисков нет: оплачено, груз в пути по графику. Следить только за ETA рейса."
+    },
+    pay:{label:"Предоплата 100% получена", pct:100, paid:"46 800 Br", left:"0 Br", vat:"7 800 Br", due:"оплачено 06.06"},
+    calls:[
+      {dir:"out", date:"09.06 · 14:35", dur:"4:12", who:"Сидоров К. ↔ Ткачёв В.А.", sentiment:"pos",
+       talkMgr:45, talkCli:55, mono:"0:38 (клиент)",
+       tags:[{t:"📈 buying signal: парк вырос",c:"sig"},{t:"💡 повод к допродаже",c:"tip"}],
+       summary:"Клиент подтвердил готовность к поставке, согласовал дату доставки 18.06. Просил прислать трек рейса утром в день отгрузки. Упомянул, что парк вырос до 40 машин.",
+       extract:[
+         {ico:"🤝", t:"Договорённость: доставка 18.06 к 14:00"},
+         {ico:"✅", t:"Задача: прислать трек рейса утром 14.06", task:true},
+         {ico:"💡", t:"Сигнал к допродаже: парк вырос 38→40 ед. — предложить +2 АКБ и ЗУ", task:true}
+       ],
+       transcript:[
+         {spk:"Менеджер",cls:"mgr",tm:"0:04",tx:"Виктор Анатольевич, по вашему заказу всё согласовано, готовы отгружать."},
+         {spk:"Клиент",cls:"cli",tm:"0:11",tx:"Отлично. Когда машина будет у нас?"},
+         {spk:"Менеджер",cls:"mgr",tm:"0:16",tx:"18 июня ориентировочно к 14:00. Утром в день отгрузки пришлю трек."},
+         {spk:"Клиент",cls:"cli",tm:"0:24",tx:"Договорились. У нас, кстати, парк подрос — теперь 40 машин."},
+         {spk:"Менеджер",cls:"mgr",tm:"0:31",tx:"Тогда в следующий заказ заложим запас и подберём зарядные."}
+       ]}
+    ],
+    items:[
+      {n:"АКБ 6СТ-190 (Зубр)",sub:"для парка",q:"38 шт",sum:"41 800 Br",pf:"+13 300"},
+      {n:"Доставка по РБ",sub:"",q:"1 усл.",sum:"5 000 Br",pf:"+2 300"}
+    ],
+    itemsTotal:{sum:"46 800 Br",pf:"+15 600"},
+    invoiceSeed:[{name:"АКБ 6СТ-190 (Зубр)",qty:38,price:1100,disc:0},{name:"Доставка по РБ",qty:1,price:5000,disc:0}],
+    ship:{
+      id:"Рейс TR-2026-0418 · авто AB 7421-7", route:"склад поставщика → Гомель → клиент",
+      status:"В пути до нашего склада", eta:"18 июня, ~14:00", inDeal:"АКБ 6СТ-190 — 38 шт (вся сделка в этом рейсе)",
+      steps:[
+        {t:"Заказано",d:"10.06",s:"done"},{t:"Отгружено",d:"14.06",s:"done"},
+        {t:"В пути до склада",d:"ETA 16.06",s:"cur"},{t:"Склад · комплектация",d:"~16–17.06",s:""},
+        {t:"Доставка клиенту",d:"~18.06",s:""},{t:"Доставлено",d:"~18.06",s:""}
+      ]
+    },
+    regInfo:{orders:7,interval:"~90 дн",last:"12.03.2026",next:"следующий ~10.09 (пора прогревать)",avg:"43 200 Br",trend:"↗ +8%"},
+    upsell:"Берёт АКБ, но <b>ни разу не брал зарядные устройства и тестеры</b>. Парк вырос с 38 до 40 ед. → предложить <b>+2 АКБ и комплект ЗУ</b> при следующем заказе. Средний чек можно поднять на ~12%.",
+    tasks:[
+      {t:"Постпродажа: позвонить, всё ли ок по поставке",m:"запланировано на 20.06 (+2 дня после доставки)",kind:"Звонок",done:false},
+      {t:"Поставить напоминание о перезаказе",m:"на ~25.08 (за 2 нед. до цикла)",kind:"Авто",done:false},
+      {t:"Подписать акт приёма-передачи",m:"после доставки 18.06",kind:"Документ",done:false},
+      {t:"Согласовать договор у юриста",m:"выполнено 02.06",kind:"Документ",done:true}
+    ],
+    docs:[
+      {n:"Договор ДГ-0118 — годовая поставка",kind:"Договор",st:"posted",lbl:"подписан",sent:true,steps:["отправлен","просмотрен","подписан"]},
+      {n:"Счёт СЧ-0420",kind:"Счёт на оплату",st:"paid",lbl:"оплачен",sent:true,steps:["отправлен","просмотрен","оплачен"]},
+      {n:"ТТН (отгрузка) — формирует логистика",kind:"Накладная",st:"pending",lbl:"при отгрузке",sent:false,steps:[]}
+    ],
+    timeline:[
+      {type:"ship", t:"Рейс TR-0418 отправлен поставщиком", m:"логистика · 14.06 09:10", pin:true},
+      {type:"msg", dir:"in", t:"Когда ждать машину?", m:"WhatsApp · 13.06 09:20"},
+      {type:"msg", dir:"out", t:"18 июня к 14:00, пришлю трек утром", m:"Сидоров К. · WhatsApp · 13.06 09:35"},
+      {type:"call", t:"📞 Исходящий звонок · 4:12 · позитивный", m:"Сидоров К. ↔ Ткачёв В.А. · 09.06 14:35 — см. блок «Звонки»", pin:true},
+      {type:"pay", t:"Предоплата 46 800 Br зачислена", m:"финансы · 06.06 11:40"},
+      {type:"stage", t:"Стадия → Договор / предоплата", m:"Сидоров К. · 05.06 16:20"},
+      {type:"stage", t:"Стадия → Счёт защищён", m:"Сидоров К. · 02.06"},
+      {type:"note", t:"ЛПР — гл.инженер, решение принимает он, не снабжение", m:"Сидоров К. · 28.05", pin:true}
+    ],
+    linked:[
+      {n:"CRM-0815 · поставка 2025",sum:"39 800 Br",st:"posted",lbl:"выиграна"},
+      {n:"CRM-0640 · поставка 2024",sum:"36 400 Br",st:"posted",lbl:"выиграна"}
+    ]
+  },
+
+  park7: {
+    num:"№ CRM-1024", company:"Автопарк №7", desc:"Поставка АКБ на год · рамочный договор",
+    reg:true, pri:"Высокий", temp:"🌤 Тёплая", stageDays:"9 дн", stageStale:true, stageIdx:5, stageDates:["28.05","30.05","02.06","05.06","08.06","13.06","","",""],
+    amount:"54 000 Br", cost:"36 700 Br", profit:"17 300 Br", margin:"32%",
+    prob:"45%", weighted:"24 300 Br", close:"20.07.2026 (план)",
+    owner:"Сидоров Константин Андреевич", unp:"УНП 191556024",
+    nextStep:"Провести встречу и согласовать рамочный договор с фиксированной ценой", nextDate:"2026-06-13",
+    contacts:[
+      {name:"Лагун Олег Петрович", role:"Заместитель директора · лицо, принимающее решение", phone:"+375 33 701-09-22", main:true},
+      {name:"Ковальчук Игорь Леонидович", role:"Главный механик (влияет на решение)", phone:"+375 44 220-13-90", main:false}
+    ],
+    delivery:{method:"pickup", address:"", date:"по готовности", warehouse:"Минск, ул. Промышленная, 8"},
+    ai:{
+      summary:"Тёплая сделка на годовой контракт. Сегодня встреча с зам.директора — ключевая точка. Постоянный клиент (5 заказов, ~120 дн), оплата ещё не выставлена, КП отправлено. Вероятность 45% — решение зависит от встречи и условий рамочного договора.",
+      nextAction:"Провести встречу 13.06 11:00 и предложить рамочный договор с фикс-ценой",
+      nextWhy:"Рамочный договор закрывает год вперёд и снимает риск ухода к конкуренту по цене. Зам.директора — ЛПР по бюджету.",
+      riskLevel:"mid", risk:"Средний риск: давно нет оплаты, конкурент уже звонил клиенту. Зафиксировать цену на встрече."
+    },
+    pay:{label:"Оплата ещё не выставлена", pct:0, paid:"0 Br", left:"54 000 Br", vat:"9 000 Br", due:"после подписания"},
+    calls:[
+      {dir:"in", date:"08.06 · 6:48", dur:"6:48", who:"Лагун О. → Сидоров К.", sentiment:"neu",
+       talkMgr:64, talkCli:36, mono:"1:12 (менеджер) ⚠",
+       tags:[{t:"⚠ упомянут конкурент",c:"warn"},{t:"⚠ возражение: цена",c:"warn"},{t:"📈 интерес к году",c:"sig"}],
+       summary:"Клиент запросил годовое предложение, упомянул что сравнивает с другим поставщиком по цене. Интересует фиксация цены на год и квартальная отгрузка. Готов встретиться 13.06.",
+       extract:[
+         {ico:"⚠️", t:"Возражение: конкурент дешевле — нужна аргументация ценности", task:true},
+         {ico:"🤝", t:"Договорённость: встреча 13.06 в 11:00"},
+         {ico:"✅", t:"Задача: подготовить рамочный договор с фикс-ценой", task:true}
+       ],
+       transcript:[
+         {spk:"Клиент",cls:"cli",tm:"0:05",tx:"Нам нужна поставка на год. Сравниваем несколько поставщиков по цене."},
+         {spk:"Менеджер",cls:"mgr",tm:"0:13",tx:"Мы можем зафиксировать цену на год и отгружать поквартально — прогнозируемый бюджет."},
+         {spk:"Клиент",cls:"cli",tm:"0:22",tx:"Интересно. Но у конкурента позиция дешевле процентов на пять."},
+         {spk:"Менеджер",cls:"mgr",tm:"0:29",tx:"На встрече разберём по совокупной стоимости — гарантия и сервис у нас в цене."},
+         {spk:"Клиент",cls:"cli",tm:"0:37",tx:"Хорошо, давайте 13-го в 11:00."}
+       ]}
+    ],
+    items:[
+      {n:"АКБ 6СТ-190 (годовой объём)",sub:"квартальная отгрузка",q:"45 шт",sum:"49 500 Br",pf:"+15 800"},
+      {n:"Сервис-пакет",sub:"",q:"1",sum:"4 500 Br",pf:"+1 500"}
+    ],
+    itemsTotal:{sum:"54 000 Br",pf:"+17 300"},
+    invoiceSeed:[{name:"АКБ 6СТ-190 (годовой объём)",qty:45,price:1100,disc:0},{name:"Сервис-пакет",qty:1,price:4500,disc:0}],
+    ship:null,
+    regInfo:{orders:5,interval:"~120 дн",last:"15.02.2026",next:"в цикле (ожид. 15.06)",avg:"49 500 Br",trend:"→ стабильно"},
+    upsell:"Годовой контракт — <b>предложить рамочный договор с фикс-ценой</b> и квартальной отгрузкой: +удержание и предсказуемая выручка. Добавить тестеры АКБ в сервис-пакет.",
+    tasks:[
+      {t:"Встреча с зам. директора",m:"13.06 · 11:00 (сегодня)",kind:"Встреча",done:false},
+      {t:"Подготовить рамочный договор",m:"до 16.06",kind:"Документ",done:false}
+    ],
+    docs:[
+      {n:"КП-0288 — годовая поставка",kind:"Коммерческое предложение",st:"posted",lbl:"просмотрено",sent:true,steps:["отправлен","просмотрен"]},
+      {n:"Счёт СЧ-0461 (черновик)",kind:"Счёт на оплату",st:"draft",lbl:"не отправлен",sent:false,steps:[]},
+      {n:"Договор ДГ-0124 (проект, рамочный)",kind:"Договор",st:"draft",lbl:"не отправлен",sent:false,steps:[]}
+    ],
+    timeline:[
+      {type:"call", t:"📞 Входящий звонок · 6:48 · нейтральный", m:"Лагун О. → Сидоров К. · 08.06 — см. блок «Звонки»", pin:true},
+      {type:"stage", t:"Стадия → Встреча назначена", m:"Сидоров К. · 13.06 09:00"},
+      {type:"msg", dir:"out", t:"Подготовили предложение по годовой поставке", m:"Email · 10.06 16:00"},
+      {type:"stage", t:"Стадия → Есть цена", m:"Сидоров К. · 08.06"},
+      {type:"note", t:"Конкурент дешевле на ~5% — давить ценностью (гарантия+сервис)", m:"Сидоров К. · 08.06", pin:true}
+    ],
+    linked:[{n:"CRM-0701 · поставка 2025",sum:"47 200 Br",st:"posted",lbl:"выиграна"}]
+  }
+};
+
+function bars(n, onCount){
+  let h=''; const hts=[6,10,16,22,14,9,18,26,20,12,8,15,24,28,19,11,7,13,21,27,17,10,14,23,29,18,9,12,20,25,15,8,11,19,26,16,10,13,22,28];
+  for(let i=0;i<n;i++){ h+=`<i class="${i<onCount?'on':''}" style="height:${hts[i%hts.length]}px"></i>`; }
+  return h;
+}
+
+function stages(d){
+  let h='<div class="stages">';
+  for(let i=0;i<9;i++){
+    const cls = i<d.stageIdx?'done':i===d.stageIdx?'cur':'';
+    h+=`<div class="stg ${cls}"><div class="ln"></div><div class="nd">${i<d.stageIdx?'✓':i+1}</div><div class="tl">${STAGES[i]}</div><div class="dt">${d.stageDates[i]||''}</div></div>`;
+  }
+  return h+'</div>';
+}
+
+function contactsHtml(d){
+  let rows='';
+  d.contacts.forEach((c,i)=>{
+    const ini = c.name.replace('«','').slice(0,2).toUpperCase();
+    rows+=`<div class="contact ${c.main?'main':''}">
+      <div class="c-ava">${ini}</div>
+      <div class="c-info">
+        <div class="c-name">${c.name} ${c.main?'<span class="c-main">★ ответственный</span>':''}</div>
+        <div class="c-role">${c.role}</div>
+        <div class="c-phone">${c.phone}</div>
+      </div>
+      <div class="c-acts-wrap">
+        <div class="c-acts">
+          <span class="cbtn call" title="Позвонить" onclick="openCall('${c.name}','${c.phone}')">📞</span>
+          <span class="cbtn" title="WhatsApp">🟢</span>
+          <span class="cbtn" title="Telegram">✈</span>
+        </div>
+        <select class="c-sel" onchange="contactAction(${i}, this)">
+          <option value="">Действие…</option>
+          ${c.main?'':'<option value="main">★ Сделать ответственным</option>'}
+          <option value="role">Изменить роль</option>
+          <option value="email">Написать e-mail</option>
+          <option value="del">Удалить контакт</option>
+        </select>
+      </div>
+    </div>`;
+  });
+  return rows;
+}
+
+function contactAction(i, sel){
+  const v = sel.value; sel.value='';
+  const d = DEALS[currentKey];
+  if(v==='main'){ d.contacts.forEach((c,j)=>c.main=(j===i)); render(currentKey); }
+  else if(v==='del'){ if(d.contacts.length>1){ d.contacts.splice(i,1); render(currentKey); } }
+}
+function addContact(){
+  DEALS[currentKey].contacts.push({name:"Новый контакт", role:"роль не указана", phone:"+375 __ ___-__-__", main:false});
+  render(currentKey);
+}
+
+function deliveryHtml(d){
+  const dv = d.delivery;
+  const isAddr = dv.method==='address';
+  const need = isAddr && !dv.address.trim();
+  return `<div class="dlv-seg">
+      <button class="${dv.method==='pickup'?'on':''}" onclick="setDelivery('pickup')">🏬 Самовывоз</button>
+      <button class="${isAddr?'on':''}" onclick="setDelivery('address')">🚚 Доставка на адрес</button>
+    </div>
+    ${isAddr ? `
+      <div class="dlv-lbl">Адрес доставки${need?' · обязательно':''}</div>
+      <input class="dlv-input ${need?'req':''}" value="${dv.address}" placeholder="Город, улица, дом, склад…" oninput="DEALS[currentKey].delivery.address=this.value">
+      ${need?'<div class="dlv-req">Укажите адрес — без него доставку не оформить</div>':''}
+      <div class="kv"><span class="k">Дата доставки</span><span class="v">${dv.date}</span></div>
+    ` : `
+      <div class="kv"><span class="k">Склад самовывоза</span><span class="v">${dv.warehouse}</span></div>
+      <div class="kv"><span class="k">Готовность</span><span class="v">${dv.date}</span></div>
+    `}`;
+}
+function setDelivery(m){ DEALS[currentKey].delivery.method=m; render(currentKey); }
+
+const STOCK_WH = [
+  {sku:"АКБ 6СТ-190 (Зубр)", price:1100, wh:[{name:"Минск (центр.)",on:54,res:13},{name:"Гомель",on:20,res:0},{name:"Брест",on:8,res:5}]},
+  {sku:"АКБ 6СТ-225 (промышленный)", price:2600, wh:[{name:"Минск (центр.)",on:18,res:0}]},
+  {sku:"Зарядное устройство ЗУ-15А", price:420, wh:[{name:"Минск (центр.)",on:30,res:0},{name:"Гомель",on:12,res:2}]},
+  {sku:"Тестер АКБ цифровой", price:180, wh:[{name:"Минск (центр.)",on:45,res:0}]},
+  {sku:"АКБ 6СТ-77 (легковой)", price:260, wh:[{name:"Минск (центр.)",on:120,res:10},{name:"Гомель",on:60,res:0}]},
+  {sku:"АКБ тяговая 6ЭМ-145", price:3900, wh:[{name:"Минск (центр.)",on:3,res:2}]}
+];
+let _stockTarget = 'invoice';
+function fmt(n){ return Math.round(n).toLocaleString('ru-RU').replace(/,/g,' '); }
+/* ── исходящий вызов по кнопке звонка ── */
+let _callTimer=null;
+function openCall(name, phone){
+  document.getElementById('ccWho').textContent = name;
+  document.getElementById('ccNum').textContent = phone;
+  document.getElementById('ccT').textContent = 'Исходящий вызов…';
+  document.getElementById('ccStatus').innerHTML = 'Соединение… идут гудки';
+  document.getElementById('ccHead').classList.add('ring');
+  document.getElementById('callOv').classList.add('show');
+  if(_callTimer){ clearInterval(_callTimer); _callTimer=null; }
+  setTimeout(()=>{
+    if(!document.getElementById('callOv').classList.contains('show')) return;
+    document.getElementById('ccT').textContent = 'Идёт разговор';
+    document.getElementById('ccHead').classList.remove('ring');
+    let s=0;
+    _callTimer=setInterval(()=>{ s++; const m=String(Math.floor(s/60)).padStart(2,'0'), ss=String(s%60).padStart(2,'0');
+      document.getElementById('ccStatus').innerHTML = '🔴 На связи · <b>'+m+':'+ss+'</b> · запись и транскрибация идут'; }, 1000);
+  }, 1800);
+}
+function closeCall(){ document.getElementById('callOv').classList.remove('show'); if(_callTimer){ clearInterval(_callTimer); _callTimer=null; } }
+function callMain(){ const d=DEALS[currentKey]; const c=(d.contacts.find(x=>x.main)||d.contacts[0]); openCall(c.name, c.phone); }
+
+function renderStock(filter){
+  filter = filter || 'Все склады';
+  let body='';
+  STOCK_WH.forEach(p=>{
+    const whs = (filter==='Все склады') ? p.wh : p.wh.filter(w=>w.name===filter);
+    if(!whs.length) return;
+    const totFree = whs.reduce((s,x)=>s+(x.on-x.res),0);
+    whs.forEach((w,wi)=>{
+      const free=w.on-w.res, low=free<=3;
+      body+=`<tr class="${wi===0?'grp-first':''}"><td><input type="checkbox" onchange="stockCount()"></td>`;
+      if(wi===0) body+=`<td rowspan="${whs.length}" class="pname">${p.sku}<small>Σ свободно ${totFree}</small></td>`;
+      body+=`<td class="wh">🏬 ${w.name}</td><td class="r">${w.on}</td><td class="r res">${w.res||'—'}</td><td class="r free ${low?'low':''}">${free}${low?' ⚠':''}</td>`;
+      if(wi===0) body+=`<td rowspan="${whs.length}" class="r price">${fmt(p.price)} Br</td>`;
+      body+=`<td class="r"><input class="q" value="1" inputmode="numeric" data-sku="${p.sku}" data-price="${p.price}" data-free="${free}" oninput="qtyMark(this)"></td></tr>`;
+    });
+  });
+  if(!body) body='<tr><td colspan="8" style="text-align:center;color:#9aa3b0;padding:18px">Нет позиций на этом складе</td></tr>';
+  document.getElementById('stockRows').innerHTML = `<table class="stbl">
+    <thead><tr><th></th><th>Товар</th><th>Склад</th><th class="r">Остаток</th><th class="r">Резерв</th><th class="r">Свободно</th><th class="r">Цена</th><th class="r">Кол-во</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+  stockCount();
+}
+function openStock(target){
+  _stockTarget = target || 'invoice';
+  document.getElementById('stAddBtn').textContent = _stockTarget==='invoice' ? 'Добавить в счёт' : 'Добавить в сделку';
+  const sel=document.getElementById('stWh'); if(sel) sel.value='Все склады';
+  renderStock('Все склады');
+  document.getElementById('stockOv').classList.add('show');
+}
+function stockCount(){
+  const n=document.querySelectorAll('#stockRows input[type=checkbox]:checked').length;
+  document.getElementById('stockCnt').textContent = `Выбрано: ${n}`;
+}
+function qtyMark(inp){
+  const q=parseInt(inp.value)||0, free=parseInt(inp.dataset.free)||0;
+  if(q>free){ inp.style.borderColor='#F59E0B'; inp.style.background='#FFFBEB'; inp.title=`Под заказ: дефицит ${q-free} шт → в закупку`; }
+  else { inp.style.borderColor=''; inp.style.background=''; inp.title=''; }
+}
+function confirmStock(){
+  document.querySelectorAll('#stockRows tbody tr').forEach(tr=>{
+    const cb=tr.querySelector('input[type=checkbox]'); if(!cb||!cb.checked) return;
+    const q=tr.querySelector('input.q'); if(!q) return; const qty=parseInt(q.value)||0; if(qty<=0) return;
+    const sku=q.dataset.sku, price=parseFloat(q.dataset.price);
+    if(_stockTarget==='invoice'){
+      const ex=invoiceItems.find(it=>it.name===sku);
+      if(ex) ex.qty+=qty; else invoiceItems.push({name:sku,qty:qty,price:price,disc:0});
+    }
+  });
+  closeStock();
+  if(_stockTarget==='invoice'){ renderInv(); document.getElementById('invOv').classList.add('show'); }
+}
+function closeStock(){ document.getElementById('stockOv').classList.remove('show'); }
+
+/* ── редактор счёта ── */
+let invoiceItems = [];
+function openInvoice(){
+  const d=DEALS[currentKey];
+  invoiceItems = (d.invoiceSeed||[]).map(x=>({...x}));
+  document.getElementById('invReq').innerHTML =
+    `<div><b>Поставщик:</b> ООО «Энерго-Дисконт» · УНП 191000111</div>
+     <div><b>Покупатель:</b> ${d.company} · ${d.unp}</div>`;
+  renderInv();
+  document.getElementById('invOv').classList.add('show');
+}
+function renderInv(){
+  let rows='';
+  invoiceItems.forEach((it,i)=>{
+    const sum=it.qty*it.price*(1-(it.disc||0)/100);
+    rows+=`<tr>
+      <td><input class="name" value="${it.name}" oninput="invEdit(${i},'name',this.value)"></td>
+      <td class="r"><input value="${it.qty}" inputmode="numeric" oninput="invEdit(${i},'qty',this.value)" style="width:74px"></td>
+      <td class="r"><input value="${it.price}" inputmode="numeric" oninput="invEdit(${i},'price',this.value)" style="width:94px"></td>
+      <td class="r"><input value="${it.disc||0}" oninput="invEdit(${i},'disc',this.value)" style="width:56px"></td>
+      <td class="r sum">${fmt(sum)} Br</td>
+      <td class="del" onclick="rmInv(${i})">✕</td></tr>`;
+  });
+  if(!invoiceItems.length) rows='<tr><td colspan="6" style="text-align:center;color:#9aa3b0;padding:16px">Нет позиций — добавьте со склада или вручную</td></tr>';
+  document.getElementById('invRows').innerHTML = rows;
+  renderInvSum();
+}
+function invEdit(i,field,val){
+  if(field==='name') invoiceItems[i].name=val;
+  else invoiceItems[i][field]=parseFloat(val)||0;
+  const it=invoiceItems[i];
+  const tr=document.querySelectorAll('#invRows tr')[i];
+  if(tr){ const c=tr.querySelector('.sum'); if(c) c.textContent=fmt(it.qty*it.price*(1-(it.disc||0)/100))+' Br'; }
+  renderInvSum();
+}
+function computeTotals(){
+  let sub=0, lineDisc=0;
+  invoiceItems.forEach(it=>{ const base=it.qty*it.price; sub+=base; lineDisc+=base*(it.disc||0)/100; });
+  const afterLine = sub - lineDisc;
+  const dd = parseFloat((document.getElementById('invDocDisc')||{}).value)||0;
+  const docDisc = afterLine*dd/100;
+  const total = afterLine - docDisc;
+  return {sub, lineDisc, dd, docDisc, total, vat: total*20/120};
+}
+function renderInvSum(){
+  const t=computeTotals();
+  let h = `<div class="r"><span class="k">Подытог</span><span>${fmt(t.sub)} Br</span></div>`;
+  if(t.lineDisc>0) h+=`<div class="r"><span class="k">Скидка по строкам</span><span>− ${fmt(t.lineDisc)} Br</span></div>`;
+  if(t.docDisc>0) h+=`<div class="r"><span class="k">Скидка на счёт ${t.dd}%</span><span>− ${fmt(t.docDisc)} Br</span></div>`;
+  h += `<div class="r"><span class="k">в т.ч. НДС 20%</span><span>${fmt(t.vat)} Br</span></div>
+        <div class="r tot"><span>Итого</span><span>${fmt(t.total)} Br</span></div>`;
+  document.getElementById('invSum').innerHTML = h;
+}
+function addInvRow(){ invoiceItems.push({name:'',qty:1,price:0,disc:0}); renderInv(); }
+function rmInv(i){ invoiceItems.splice(i,1); renderInv(); }
+function closeInv(){ document.getElementById('invOv').classList.remove('show'); }
+function invPreview(){
+  let rows='';
+  invoiceItems.forEach((it,i)=>{ const s=it.qty*it.price*(1-(it.disc||0)/100);
+    rows+=`<tr><td>${i+1}</td><td>${it.name||'—'}</td><td class="r">${it.qty}</td><td class="r">${fmt(it.price)}</td><td class="r">${fmt(s)}</td></tr>`; });
+  const t=computeTotals();
+  const d=DEALS[currentKey];
+  const ddLine = t.docDisc>0 ? `<div class="pp-tot" style="font-weight:600;font-size:12px;color:#B45309">Скидка на счёт ${t.dd}%: − ${fmt(t.docDisc)} Br</div>` : '';
+  document.getElementById('invPaper').innerHTML = `<div class="paper">
+    <div class="pp-h"><div><div class="pp-org">ООО «Энерго-Дисконт»</div><div class="pp-sub">УНП 191000111 · г. Минск · р/с BY24 ALFA 3012 …</div></div><div class="pp-no">СЧЁТ № СЧ-0462<br>от 14.06.2026</div></div>
+    <div class="pp-parties"><div><b>Поставщик:</b> ООО «Энерго-Дисконт», УНП 191000111</div><div><b>Покупатель:</b> ${d.company}, ${d.unp}</div></div>
+    <table class="pp-t"><thead><tr><th>№</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
+    ${ddLine}
+    <div class="pp-tot">Итого: ${fmt(t.total)} Br · в т.ч. НДС 20%: ${fmt(t.vat)} Br</div>
+    <div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026.</div>
+  </div>`;
+  document.getElementById('invPrevOv').classList.add('show');
+}
+function closeInvPrev(){ document.getElementById('invPrevOv').classList.remove('show'); }
+let _toastT=null;
+function toast(msg){ const t=document.getElementById('toast'); t.innerHTML=msg; t.classList.add('show'); if(_toastT)clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove('show'),3600); }
+function invSent(){
+  const d=DEALS[currentKey];
+  d.tasks.unshift({t:"Проконтролировать оплату счёта СЧ-0462",m:"на 16.06 (+2 дня после отправки)",kind:"Авто",done:false});
+  d.timeline.unshift({type:"pay",t:"🧾 Счёт СЧ-0462 отправлен (Email)",m:"Вы · только что",pin:false});
+  closeInvPrev(); closeInv(); render(currentKey);
+  toast("✓ Счёт отправлен · задача «контроль оплаты» на 16.06 · записано в хронологию");
+}
+function ctrSent(){
+  const d=DEALS[currentKey];
+  d.tasks.unshift({t:"Дождаться подписания договора ДГ-0125",m:"напоминание +2 дня, если не подписан",kind:"Авто",done:false});
+  d.timeline.unshift({type:"stage",t:"📄 Договор ДГ-0125 отправлен на подпись",m:"Вы · только что",pin:false});
+  closeCtrPrev(); closeCtr(); render(currentKey);
+  toast("✓ Договор отправлен на подпись · напоминание поставлено");
+}
+/* кликабельные сегменты условий (счёт/договор) */
+document.addEventListener('click', e=>{
+  const b=e.target.closest('.iv-terms .seg button, .ct-field .seg button');
+  if(b){ b.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
+});
+
+/* ── редактор договора ── */
+function val(id){ const e=document.getElementById(id); return e?e.value:''; }
+function openContract(){
+  const d=DEALS[currentKey];
+  document.getElementById('ctrReq').innerHTML =
+    `<div><b>Поставщик:</b> ООО «Энерго-Дисконт» · УНП 191000111</div><div><b>Покупатель:</b> ${d.company} · ${d.unp}</div>`;
+  document.getElementById('ctrSum').value = invoiceItems.length ? fmt(computeTotals().total)+' Br' : d.amount;
+  document.getElementById('ctrOv').classList.add('show');
+}
+function ctrPreview(){
+  const d=DEALS[currentKey];
+  const main=(d.contacts.find(x=>x.main)||d.contacts[0]);
+  const sn = main ? main.name.split(' ').slice(0,2).join(' ') : '';
+  document.getElementById('ctrPaper').innerHTML = `<div class="paper">
+    <div class="pp-title">ДОГОВОР ПОСТАВКИ № ДГ-0125</div>
+    <div class="pp-date">г. Минск · 14.06.2026</div>
+    <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111) и <b>Покупатель:</b> ${d.company} (${d.unp}) заключили настоящий договор о нижеследующем.</p>
+    <p><b>1. Предмет.</b> ${val('ctrSubject')}</p>
+    <p><b>2. Сумма и оплата.</b> ${val('ctrSum')}, в т.ч. НДС 20%. Форма оплаты — согласно согласованным условиям.</p>
+    <p><b>3. Поставка и гарантия.</b> ${val('ctrDeliv')}. Гарантия ${val('ctrWarr')} мес.</p>
+    <p><b>4. Подписание.</b> ${val('ctrSign')}.</p>
+    <div class="pp-sign"><div>Поставщик ____________ /Сидоров К.А./</div><div>Покупатель ____________ /${sn}/</div></div>
+  </div>`;
+  document.getElementById('ctrPrevOv').classList.add('show');
+}
+function closeCtr(){ document.getElementById('ctrOv').classList.remove('show'); }
+function closeCtrPrev(){ document.getElementById('ctrPrevOv').classList.remove('show'); }
+
+function docsHtml(d){
+  let rows='';
+  const ALLSTEPS = ["отправлен","просмотрен","подписан","оплачен"];
+  d.docs.forEach(dc=>{
+    const sendLabel = dc.sent ? '✉ Отправить ещё' : '✉ Отправить';
+    let flow='';
+    if(dc.steps && dc.steps.length){
+      // показываем путь: пройденные шаги done, плюс следующий ожидаемый бледным
+      const seq = dc.steps;
+      flow = '<div class="dflow">';
+      seq.forEach((s,i)=>{ flow += (i?'<span class="arr">→</span>':'') + `<span class="ds done">✓ ${s}</span>`; });
+      // следующий ожидаемый шаг (если документ ещё не оплачен/подписан финально)
+      const last = seq[seq.length-1];
+      const nextMap = {"отправлен":"просмотрен","просмотрен": (dc.kind==="Счёт на оплату"?"оплачен":"подписан")};
+      const nxt = nextMap[last];
+      if(nxt && !seq.includes(nxt)) flow += `<span class="arr">→</span><span class="ds">${nxt}</span>`;
+      flow += '</div>';
+    } else if(!dc.sent){
+      flow = '<div class="dflow"><span class="ds">черновик</span><span class="arr">→</span><span class="ds">отправить</span></div>';
+    }
+    rows+=`<div class="doc">
+      <div class="doc-main"><div class="dn">${dc.n}</div><div class="dt2">${dc.kind}</div></div>
+      <span class="st ${dc.st}">${dc.lbl}</span>
+      <div class="doc-acts">
+        <span class="dbtn" title="Просмотр">👁</span>
+        <span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${sendLabel}</span>
+        <span class="dbtn" title="Скачать PDF">⬇</span>
+      </div>
+      ${flow}
+      <div class="send-ch">
+        <span class="lbl">Канал:</span>
+        <span class="ch">✉ Email</span><span class="ch">🟢 WhatsApp</span><span class="ch">✈ Telegram</span><span class="ch">🧾 ЭДО / 1С</span><span class="ch">🔗 Ссылка на подпись</span>
+      </div>
+    </div>`;
+  });
+  return `<div class="doc-gen">
+      <button onclick="openInvoice()">＋ Счёт</button><button onclick="openContract()">＋ Договор</button><button>＋ КП</button><button>＋ Акт</button>
+    </div>${rows}`;
+}
+
+function shipPanel(s){
+  if(!s) return '';
+  let steps='';
+  s.steps.forEach(st=>{ steps+=`<div class="tstep ${st.s}"><div class="ln"></div><div class="nd">${st.s==='done'?'✓':st.s==='cur'?'🚚':''}</div><div class="tl">${st.t}</div><div class="dt">${st.d}</div></div>`; });
+  return `<div class="panel" id="blk-ship">
+    <div class="ph">🚚 Статус машины · сквозной <span class="x" onclick="hideBlock('ship')" title="Скрыть блок">✕</span></div>
+    <div class="pb">
+      <div class="shipbar">
+        <span class="ic">🚚</span>
+        <div><div class="t">${s.id}</div><div class="s">${s.route} · ${s.status}</div></div>
+        <div class="eta"><div class="l">прибытие к клиенту</div><div class="v">${s.eta}</div></div>
+      </div>
+      <div class="track">${steps}</div>
+      <div class="ship-src"><span>📦</span><span>В этом рейсе из сделки: <b>${s.inDeal}</b></span></div>
+      <div class="ship-src"><span>🔗</span><span>Источник истины — <b>логистика</b> (shipment.status.changed), read-only.</span></div>
+    </div>
+  </div>`;
+}
+
+function callsPanel(d){
+  let calls='';
+  d.calls.forEach((c)=>{
+    let ex=''; c.extract.forEach(e=>{ ex+=`<div class="ex"><span class="ico">${e.ico}</span><span>${e.t}</span>${e.task?'<span class="mk">＋ задача</span>':''}</div>`; });
+    let tr=''; c.transcript.forEach(l=>{ tr+=`<div class="line ${l.cls}"><span class="tm">${l.tm}</span><span class="spk">${l.spk}</span><span class="tx">${l.tx}</span></div>`; });
+    const sl={pos:"😊 позитивный",neu:"😐 нейтральный",neg:"😟 негативный"}[c.sentiment];
+    const talk = (c.talkMgr!=null) ? `<div class="talk"><span>Говорили:</span>
+        <div class="bar"><div class="mgr" style="width:${c.talkMgr}%"></div><div class="cli" style="width:${c.talkCli}%"></div></div>
+        <span><b>${c.talkMgr}%</b> менеджер / <b>${c.talkCli}%</b> клиент · моноло́г ${c.mono}</span></div>` : '';
+    const tags = (c.tags&&c.tags.length) ? `<div class="ctags">${c.tags.map(t=>`<span class="ctag ${t.c}">${t.t}</span>`).join('')}</div>` : '';
+    calls+=`<div class="call">
+      <div class="call-top">
+        <span class="call-dir ${c.dir}">${c.dir==='in'?'↘ входящий':'↗ исходящий'}</span>
+        <span class="call-meta">${c.date} · ${c.dur} · ${c.who}</span>
+        <span class="sent ${c.sentiment}">${sl}</span>
+      </div>
+      ${talk}${tags}
+      <div class="player">
+        <div class="play" onclick="this.textContent=this.textContent==='▶'?'⏸':'▶'">▶</div>
+        <div class="wave">${bars(40, 14)}</div>
+        <span class="ptime">1:42 / ${c.dur}</span>
+        <span class="pspeed">1×</span>
+      </div>
+      <div class="call-ai">
+        <div class="l">🤖 AI-резюме звонка</div>
+        <div class="s">${c.summary}</div>
+        <div class="extract">${ex}</div>
+      </div>
+      <div class="tr-toggle" onclick="this.nextElementSibling.classList.toggle('show'); this.textContent=this.nextElementSibling.classList.contains('show')?'▾ Свернуть транскрибацию':'▸ Показать полную транскрибацию'">▸ Показать полную транскрибацию</div>
+      <div class="transcript">${tr}</div>
+    </div>`;
+  });
+  return `<div class="panel" id="blk-calls">
+    <div class="ph">📞 Звонки и транскрибация <span class="add">＋ привязать запись</span><span class="x" onclick="hideBlock('calls')" title="Скрыть блок">✕</span></div>
+    <div class="pb">${calls}</div>
+  </div>`;
+}
+
+function aiPanel(d){
+  const rc={low:"#22C55E",mid:"#F59E0B",high:"#EF4444"}[d.ai.riskLevel];
+  return `<div class="panel ai-panel" id="blk-ai">
+    <div class="ph">🤖 AI-ассистент сделки <span class="x" onclick="hideBlock('ai')" title="Скрыть блок">✕</span></div>
+    <div class="pb">
+      <div class="ai-sum">${d.ai.summary}</div>
+      <div class="ai-nba">
+        <div class="t">Следующий шаг · рекомендация ИИ</div>
+        <div class="a">${d.ai.nextAction}</div>
+        <div class="w">${d.ai.nextWhy}</div>
+        <div class="row"><button class="btn ai sm">✓ Принять и поставить задачу</button><button class="btn sm">✎ Изменить</button></div>
+      </div>
+      <div class="ai-row"><span class="ai-risk"><span class="risk-dot" style="background:${rc}"></span>${d.ai.risk}</span></div>
+      <div class="ai-row">
+        <span class="ai-chip">✉ Сгенерировать письмо</span>
+        <span class="ai-chip">📝 Черновик КП</span>
+        <span class="ai-chip">💬 Спросить ИИ по сделке</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTimeline(d){
+  function item(e){
+    return `<div class="ev ${e.type} ${e.dir||''} ${e.pin?'pinned':''}">
+      <div class="ev-row">
+        <div style="flex:1;min-width:0"><div class="et">${e.t}</div><div class="em">${e.m}</div></div>
+        <span class="pin" title="Закрепить" onclick="togglePin(this)">📌</span>
+      </div></div>`;
+  }
+  const pinned = d.timeline.filter(e=>e.pin), rest = d.timeline.filter(e=>!e.pin);
+  let h='';
+  if(pinned.length){ h+='<div class="pin-hd show">📌 Закреплённое</div>'; pinned.forEach(e=>h+=item(e)); }
+  rest.forEach(e=>h+=item(e));
+  return h;
+}
+function togglePin(el){ el.closest('.ev').classList.toggle('pinned'); }
+function addNote(){
+  const inp=document.getElementById('noteInput'); const v=inp.value.trim(); if(!v) return;
+  const feed=document.getElementById('feed'); const div=document.createElement('div');
+  div.className='ev note';
+  div.innerHTML=`<div class="ev-row"><div style="flex:1;min-width:0"><div class="et">${v}</div><div class="em">Вы · только что</div></div><span class="pin" onclick="togglePin(this)">📌</span></div>`;
+  feed.insertBefore(div, feed.firstChild); inp.value='';
+}
+
+/* ── блоки: показать/скрыть ── */
+function hideBlock(id){ hidden.add(id); applyHidden(); buildMenu(); }
+function applyHidden(){ BLOCKS.forEach(b=>{ const el=document.getElementById('blk-'+b.id); if(el) el.style.display = hidden.has(b.id)?'none':''; }); }
+function onBlockCheck(id, ch){ if(ch) hidden.delete(id); else hidden.add(id); applyHidden(); }
+function buildMenu(){
+  let h='<div class="bm-h">Блоки карточки — что показывать</div>';
+  BLOCKS.forEach(b=>{ h+=`<label><input type="checkbox" ${hidden.has(b.id)?'':'checked'} onchange="onBlockCheck('${b.id}',this.checked)"> ${b.name}</label>`; });
+  document.getElementById('blockMenu').innerHTML=h;
+}
+function toggleBlockMenu(e){ e.stopPropagation(); document.getElementById('blockMenu').classList.toggle('show'); }
+document.addEventListener('click',e=>{ if(!e.target.closest('#blockMenu')&&!e.target.closest('#gearBtn')) document.getElementById('blockMenu').classList.remove('show'); });
+
+function render(key, btn){
+  currentKey = key;
+  const d = DEALS[key];
+  if(btn){ document.querySelectorAll('.deal-pills button').forEach(b=>b.classList.remove('on')); btn.classList.add('on'); }
+  document.getElementById('crumb').textContent = d.num.replace('№ ','');
+
+  let items=''; d.items.forEach(it=>{ items+=`<div class="ir"><div class="nm">${it.n}<small>${it.sub}</small></div><div class="num2">${it.q}</div><div class="num2">${it.sum}</div><div class="pf">${it.pf}</div></div>`; });
+  let tasks=''; d.tasks.forEach(t=>{ tasks+=`<div class="task ${t.done?'done':''}"><div class="cb">${t.done?'✓':''}</div><div style="flex:1;min-width:0"><div class="tt">${t.t}</div><div class="meta">${t.m}</div></div><span class="kind">${t.kind}</span></div>`; });
+  const docs = docsHtml(d);
+  let linked=''; d.linked.forEach(l=>{ linked+=`<div class="linked"><span>${l.n}</span><span><b>${l.sum}</b> <span class="st ${l.st}">${l.lbl}</span></span></div>`; });
+
+  const regBlock = d.reg ? `<div class="panel" id="blk-reg">
+    <div class="ph">★ Постоянный клиент · допродажа <span class="x" onclick="hideBlock('reg')" title="Скрыть блок">✕</span></div>
+    <div class="pb">
+      <div class="kv"><span class="k">Заказов</span><span class="v">${d.regInfo.orders} · ср. чек ${d.regInfo.avg} <span style="color:#047857">${d.regInfo.trend}</span></span></div>
+      <div class="kv"><span class="k">Периодичность</span><span class="v">${d.regInfo.interval} · посл. ${d.regInfo.last}</span></div>
+      <div class="kv"><span class="k">Следующий заказ</span><span class="v" style="color:#B45309">${d.regInfo.next}</span></div>
+      <div class="upsell" style="margin-top:11px"><div class="u-t">💡 Допродажа</div><div class="u-b">${d.upsell}</div></div>
+    </div></div>` : '';
+
+  document.getElementById('app').innerHTML = `
+  <div class="head">
+    <div class="h-top">
+      <div class="h-id">
+        <div class="num">${d.num}</div>
+        <h1>${d.company}</h1>
+        <div class="desc">${d.desc}</div>
+        <div class="h-badges">
+          <span class="bdg stage">● ${STAGES[d.stageIdx]}</span>
+          <span class="bdg ${d.stageStale?'stale':''}">🕒 ${d.stageDays} в стадии${d.stageStale?' · засиделась':''}</span>
+          ${d.reg?'<span class="bdg reg">★ Постоянный</span>':''}
+          <span class="bdg pri">🔥 ${d.pri}</span>
+          <span class="bdg temp">${d.temp}</span>
+          ${d.ship?`<span class="bdg ship">🚚 В рейсе · ${d.ship.eta}</span>`:''}
+        </div>
+      </div>
+      <div class="h-actions">
+        <button class="btn primary">→ Следующая стадия</button>
+        <button class="btn">＋ Задача</button>
+        <button class="btn" onclick="callMain()">📞 Позвонить</button>
+        <button class="btn danger">✕ Отказ</button>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="ml">Сумма</div><div class="mv">${d.amount}</div><div class="ms">с НДС</div></div>
+      <div class="metric"><div class="ml">Вал. прибыль</div><div class="mv pf">${d.profit}</div><div class="ms">маржа ${d.margin} · с/с ${d.cost}</div></div>
+      <div class="metric"><div class="ml">Вероятность</div><div class="mv">${d.prob}</div><div class="ms">взв. ${d.weighted}</div></div>
+      <div class="metric"><div class="ml">Закрытие</div><div class="mv" style="font-size:14px">${d.close}</div><div class="ms">👤 ${d.owner}</div></div>
+    </div>
+    ${stages(d)}
+  </div>
+
+  <div class="grid">
+    <div class="col-main">
+      ${aiPanel(d)}
+
+      <div class="panel" id="blk-next">
+        <div class="ph">⏭ Следующий шаг <span class="x" onclick="hideBlock('next')" title="Скрыть блок">✕</span></div>
+        <div class="pb">
+          <input class="ns-text" value="${d.nextStep}">
+          <div class="ns-row">
+            <label>Когда</label><input type="date" value="${d.nextDate}">
+            <label>Кто</label><select><option>${d.owner}</option></select>
+            <button class="btn primary sm">✓ Сохранить шаг</button>
+          </div>
+        </div>
+      </div>
+
+      ${shipPanel(d.ship)}
+      ${callsPanel(d)}
+
+      <div class="panel" id="blk-pay">
+        <div class="ph">💵 Оплата и деньги <span class="x" onclick="hideBlock('pay')" title="Скрыть блок">✕</span></div>
+        <div class="pb">
+          <div class="pay-grid">
+            <div class="cell"><div class="l">Оплачено</div><div class="v" style="color:#047857">${d.pay.paid}</div></div>
+            <div class="cell"><div class="l">Остаток</div><div class="v">${d.pay.left}</div></div>
+            <div class="cell"><div class="l">в т.ч. НДС</div><div class="v" style="font-size:14px">${d.pay.vat}</div></div>
+            <div class="cell"><div class="l">Срок оплаты</div><div class="v" style="font-size:14px">${d.pay.due}</div></div>
+          </div>
+          <div class="paybar"><i style="width:${d.pay.pct}%"></i></div>
+          <div class="kv"><span class="k">${d.pay.label}</span><span class="v">${d.pay.pct}%</span></div>
+        </div>
+      </div>
+
+      <div class="panel" id="blk-delivery">
+        <div class="ph">📦 Доставка <span class="x" onclick="hideBlock('delivery')" title="Скрыть блок">✕</span></div>
+        <div class="pb">${deliveryHtml(d)}</div>
+      </div>
+
+      <div class="panel" id="blk-items">
+        <div class="ph">🧾 Номенклатура <span class="add" onclick="openInvoice()">🧾 Выставить счёт</span><span class="x" onclick="hideBlock('items')" title="Скрыть блок">✕</span></div>
+        <div class="pb"><div class="items">
+          <div class="ih"><span>Позиция</span><span class="num2">Кол-во</span><span class="num2">Сумма</span><span class="pf">Прибыль</span></div>
+          ${items}
+          <div class="tot"><span>Итого</span><span class="num2"></span><span class="num2">${d.itemsTotal.sum}</span><span class="pf">${d.itemsTotal.pf}</span></div>
+        </div></div>
+      </div>
+
+      <div class="panel" id="blk-tasks">
+        <div class="ph">✅ Задачи и следующие шаги <span class="add">＋ задача</span><span class="x" onclick="hideBlock('tasks')" title="Скрыть блок">✕</span></div>
+        <div class="pb">${tasks}</div>
+      </div>
+
+      <div class="panel" id="blk-docs">
+        <div class="ph">📄 Документы <span class="x" onclick="hideBlock('docs')" title="Скрыть блок">✕</span></div>
+        <div class="pb">${docs}</div>
+      </div>
+    </div>
+
+    <div class="col-side">
+      <div class="panel" id="blk-client">
+        <div class="ph">👤 Клиент и контакты <span class="add" onclick="addContact()">＋ контакт</span><span class="x" onclick="hideBlock('client')" title="Скрыть блок">✕</span></div>
+        <div class="pb">
+          <div class="kv"><span class="k">Организация</span><span class="v">${d.company}</span></div>
+          <div class="kv"><span class="k">Реквизиты</span><span class="v">${d.unp}</span></div>
+          <div class="kv"><span class="k">Ответственный менеджер</span><span class="v">👤 ${d.owner}</span></div>
+          <div style="font-size:11px;font-weight:700;color:#9aa3b0;text-transform:uppercase;margin:12px 0 2px">Контактные лица</div>
+          ${contactsHtml(d)}
+        </div>
+      </div>
+
+      ${regBlock}
+
+      <div class="panel" id="blk-timeline">
+        <div class="ph">🕑 Хронология · события и переписка <span class="x" onclick="hideBlock('timeline')" title="Скрыть блок">✕</span></div>
+        <div class="pb">
+          <div class="tl-add">
+            <input id="noteInput" placeholder="Заметка по сделке…" onkeydown="if(event.key==='Enter')addNote()">
+            <button onclick="addNote()">＋</button>
+          </div>
+          <div class="tl-filter">
+            <button class="on">Всё</button><button>Звонки</button><button>Переписка</button><button>Стадии</button><button>📌 Важное</button>
+          </div>
+          <div class="feed" id="feed">${renderTimeline(d)}</div>
+          <div class="reply">
+            <input placeholder="Ответить клиенту…">
+            <div class="chs"><span title="WhatsApp">🟢</span><span title="Telegram">✈</span><span title="Email">✉</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="blk-linked">
+        <div class="ph">🔗 Сделки этого клиента <span class="x" onclick="hideBlock('linked')" title="Скрыть блок">✕</span></div>
+        <div class="pb">${linked}</div>
+      </div>
+    </div>
+  </div>`;
+
+  applyHidden();
+}
+
+buildMenu();
+render('beltrans');
+</script>
+</body>
+</html>
