@@ -780,8 +780,8 @@ function contactsHtml(d){
       <div class="c-acts-wrap">
         <div class="c-acts">
           <span class="cbtn call" title="Позвонить" onclick="openCall('${c.name}','${c.phone}')">📞</span>
-          <span class="cbtn" title="WhatsApp">🟢</span>
-          <span class="cbtn" title="Telegram">✈</span>
+          <span class="cbtn" title="WhatsApp" onclick="contactChat('WhatsApp','${c.name}')">🟢</span>
+          <span class="cbtn" title="Telegram" onclick="contactChat('Telegram','${c.name}')">✈</span>
         </div>
         <select class="c-sel" onchange="contactAction(${i}, this)">
           <option value="">Действие…</option>
@@ -1155,14 +1155,14 @@ function docsHtml(d){
       <div class="doc-main"><div class="dn">${dc.n}</div><div class="dt2">${dc.kind}</div></div>
       <span class="st ${dc.st}">${dc.lbl}</span>
       <div class="doc-acts">
-        <span class="dbtn" title="Просмотр">👁</span>
+        <span class="dbtn" title="Просмотр" onclick="docPreview('${dc.n}')">👁</span>
         <span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${sendLabel}</span>
-        <span class="dbtn" title="Скачать PDF">⬇</span>
+        <span class="dbtn" title="Скачать PDF" onclick="docDownload('${dc.n}')">⬇</span>
       </div>
       ${flow}
       <div class="send-ch">
         <span class="lbl">Канал:</span>
-        <span class="ch">✉ Email</span><span class="ch">🟢 WhatsApp</span><span class="ch">✈ Telegram</span><span class="ch">🧾 ЭДО / 1С</span><span class="ch">🔗 Ссылка на подпись</span>
+        <span class="ch" onclick="sendDoc('Email','${dc.n}')">✉ Email</span><span class="ch" onclick="sendDoc('WhatsApp','${dc.n}')">🟢 WhatsApp</span><span class="ch" onclick="sendDoc('Telegram','${dc.n}')">✈ Telegram</span><span class="ch" onclick="sendDoc('ЭДО / 1С','${dc.n}')">🧾 ЭДО / 1С</span><span class="ch" onclick="sendDoc('ссылка на подпись','${dc.n}')">🔗 Ссылка на подпись</span>
       </div>
     </div>`;
   });
@@ -1223,7 +1223,7 @@ function callsPanel(d){
     </div>`;
   });
   return `<div class="panel" id="blk-calls">
-    <div class="ph">📞 Звонки и транскрибация <span class="add">＋ привязать запись</span><span class="x" onclick="hideBlock('calls')" title="Скрыть блок">✕</span></div>
+    <div class="ph">📞 Звонки и транскрибация <span class="add" onclick="attachRec()">＋ привязать запись</span><span class="x" onclick="hideBlock('calls')" title="Скрыть блок">✕</span></div>
     <div class="pb">${calls}</div>
   </div>`;
 }
@@ -1238,13 +1238,13 @@ function aiPanel(d){
         <div class="t">Следующий шаг · рекомендация ИИ</div>
         <div class="a">${d.ai.nextAction}</div>
         <div class="w">${d.ai.nextWhy}</div>
-        <div class="row"><button class="btn ai sm">✓ Принять и поставить задачу</button><button class="btn sm">✎ Изменить</button></div>
+        <div class="row"><button class="btn ai sm" onclick="aiAccept()">✓ Принять и поставить задачу</button><button class="btn sm" onclick="aiEdit()">✎ Изменить</button></div>
       </div>
       <div class="ai-row"><span class="ai-risk"><span class="risk-dot" style="background:${rc}"></span>${d.ai.risk}</span></div>
       <div class="ai-row">
-        <span class="ai-chip">✉ Сгенерировать письмо</span>
-        <span class="ai-chip">📝 Черновик КП</span>
-        <span class="ai-chip">💬 Спросить ИИ по сделке</span>
+        <span class="ai-chip" onclick="aiChip('mail')">✉ Сгенерировать письмо</span>
+        <span class="ai-chip" onclick="aiChip('kp')">📝 Черновик КП</span>
+        <span class="ai-chip" onclick="aiChip('ask')">💬 Спросить ИИ по сделке</span>
       </div>
     </div>
   </div>`;
@@ -1272,6 +1272,55 @@ function addNote(){
   div.innerHTML=`<div class="ev-row"><div style="flex:1;min-width:0"><div class="et">${v}</div><div class="em">Вы · только что</div></div><span class="pin" onclick="togglePin(this)">📌</span></div>`;
   feed.insertBefore(div, feed.firstChild); inp.value='';
 }
+
+/* ── действия карточки ── */
+function nextStage(){ const d=DEALS[currentKey];
+  if(d.stageIdx>=8){ toast('Сделка уже на финальной стадии'); return; }
+  d.stageIdx++; if(!d.stageDates[d.stageIdx]) d.stageDates[d.stageIdx]='14.06';
+  d.stageDays='0 дн'; d.stageStale=false;
+  d.timeline.unshift({type:'stage',t:`Стадия → ${STAGES[d.stageIdx]}`,m:'Вы · только что',pin:false});
+  render(currentKey); toast(`✓ Стадия → «${STAGES[d.stageIdx]}»`);
+}
+function quickTask(){ const d=DEALS[currentKey];
+  d.tasks.unshift({t:'Новая задача — уточните формулировку',m:'на сегодня',kind:'Ручная',done:false});
+  render(currentKey); toast('✓ Задача добавлена — отредактируйте в блоке «Задачи»');
+}
+function rejectDeal(){ const d=DEALS[currentKey];
+  d.timeline.unshift({type:'stage',t:'⛔ Сделка переведена в «Отказ»',m:'Вы · только что',pin:true});
+  d.tasks.unshift({t:'Указать причину отказа (для аналитики воронки)',m:'обязательно',kind:'Авто',done:false});
+  render(currentKey); toast('Сделка помечена «Отказ» · укажите причину');
+}
+function aiAccept(){ const d=DEALS[currentKey];
+  d.tasks.unshift({t:d.ai.nextAction,m:'из рекомендации ИИ · на сегодня',kind:'AI',done:false});
+  d.timeline.unshift({type:'doc',t:'🤖 Принята рекомендация ИИ → задача',m:d.ai.nextAction,pin:false});
+  render(currentKey); toast('✓ Рекомендация ИИ принята · задача поставлена');
+}
+function aiEdit(){ const inp=document.querySelector('#blk-next .ns-text'); if(inp){ inp.focus(); inp.scrollIntoView({block:'center'}); } toast('Отредактируйте следующий шаг'); }
+function saveNextStep(){ const d=DEALS[currentKey];
+  const t=document.querySelector('#blk-next .ns-text'); const dt=document.querySelector('#blk-next input[type=date]');
+  if(t) d.nextStep=t.value; if(dt) d.nextDate=dt.value;
+  d.timeline.unshift({type:'doc',t:`⏭ Следующий шаг: ${d.nextStep}`,m:`срок ${d.nextDate} · Вы`,pin:false});
+  render(currentKey); toast('✓ Следующий шаг сохранён');
+}
+function filterTimeline(btn,type){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on');
+  const feed=document.getElementById('feed'); if(!feed) return;
+  [...feed.querySelectorAll('.ev')].forEach(ev=>{
+    let ok=true;
+    if(type==='call') ok=ev.classList.contains('call');
+    else if(type==='msg') ok=ev.classList.contains('msg')||ev.classList.contains('note');
+    else if(type==='stage') ok=ev.classList.contains('stage');
+    else if(type==='pin') ok=ev.classList.contains('pinned');
+    ev.style.display=ok?'':'none';
+  });
+}
+function contactChat(ch,name){ toast(`Открываю ${ch} · ${name}`); }
+function docPreview(name){ toast(`👁 Предпросмотр документа: ${name}`); }
+function docDownload(name){ toast(`⬇ Скачивание PDF: ${name}`); }
+function aiChip(kind){ if(kind==='kp'){ openQuote(); return; } toast(kind==='mail'?'🤖 Генерирую письмо клиенту…':'🤖 Открываю чат с ИИ по сделке…'); }
+function attachRec(){ toast('🔗 Привязка записи звонка к сделке'); }
+function replySend(ch){ toast(`Ответ отправлен · ${ch}`); }
+function sendDoc(ch,name){ const d=document.querySelectorAll('.send-ch.show'); d.forEach(x=>x.classList.remove('show')); toast(`✓ ${name} отправлен · ${ch}`); }
 
 /* ── блоки: показать/скрыть ── */
 function hideBlock(id){ hidden.add(id); applyHidden(); buildMenu(); }
@@ -1322,10 +1371,10 @@ function render(key, btn){
         </div>
       </div>
       <div class="h-actions">
-        <button class="btn primary">→ Следующая стадия</button>
-        <button class="btn">＋ Задача</button>
+        <button class="btn primary" onclick="nextStage()">→ Следующая стадия</button>
+        <button class="btn" onclick="quickTask()">＋ Задача</button>
         <button class="btn" onclick="callMain()">📞 Позвонить</button>
-        <button class="btn danger">✕ Отказ</button>
+        <button class="btn danger" onclick="rejectDeal()">✕ Отказ</button>
       </div>
     </div>
     <div class="metrics">
@@ -1348,7 +1397,7 @@ function render(key, btn){
           <div class="ns-row">
             <label>Когда</label><input type="date" value="${d.nextDate}">
             <label>Кто</label><select><option>${d.owner}</option></select>
-            <button class="btn primary sm">✓ Сохранить шаг</button>
+            <button class="btn primary sm" onclick="saveNextStep()">✓ Сохранить шаг</button>
           </div>
         </div>
       </div>
@@ -1417,12 +1466,12 @@ function render(key, btn){
             <button onclick="addNote()">＋</button>
           </div>
           <div class="tl-filter">
-            <button class="on">Всё</button><button>Звонки</button><button>Переписка</button><button>Стадии</button><button>📌 Важное</button>
+            <button class="on" onclick="filterTimeline(this,'all')">Всё</button><button onclick="filterTimeline(this,'call')">Звонки</button><button onclick="filterTimeline(this,'msg')">Переписка</button><button onclick="filterTimeline(this,'stage')">Стадии</button><button onclick="filterTimeline(this,'pin')">📌 Важное</button>
           </div>
           <div class="feed" id="feed">${renderTimeline(d)}</div>
           <div class="reply">
             <input placeholder="Ответить клиенту…">
-            <div class="chs"><span title="WhatsApp">🟢</span><span title="Telegram">✈</span><span title="Email">✉</span></div>
+            <div class="chs"><span title="WhatsApp" onclick="replySend('WhatsApp')">🟢</span><span title="Telegram" onclick="replySend('Telegram')">✈</span><span title="Email" onclick="replySend('Email')">✉</span></div>
           </div>
         </div>
       </div>

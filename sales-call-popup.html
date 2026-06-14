@@ -261,7 +261,7 @@
       <div class="dv-f">
         <span class="dv-note">⚠ Проверьте перед отправкой</span>
         <button class="btn-sec" onclick="closeDocView()">✎ Редактировать</button>
-        <button class="btn-send" id="docViewSend" onclick="closeDocView()">✉ Отправить</button>
+        <button class="btn-send" id="docViewSend" onclick="sendDocCall()">✉ Отправить</button>
       </div>
     </div>
   </div>
@@ -648,9 +648,9 @@ const VIEWS = {
           <button class="accept" onclick="location.href='sales-card-full.html'">💾 Сохранить в сделку</button>
         </div>
         <div class="cp-sub">
-          <span>➕ Поставить задачу</span>
-          <span>🧾 Выставить счёт</span>
-          <span>✕ Закрыть</span>
+          <span onclick="toast('➕ Задача поставлена · добавлена в сделку')">➕ Поставить задачу</span>
+          <span onclick="show('live')">🧾 Выставить счёт</span>
+          <span onclick="show('known')">✕ Закрыть</span>
         </div>
       </div>
       <div class="src">📝 Результат пишется в call_log и в хронологию сделки</div>
@@ -840,6 +840,7 @@ function previewContract(){
   document.getElementById('docViewOv').classList.add('show');
 }
 function closeDocView(){ document.getElementById('docViewOv').classList.remove('show'); }
+function sendDocCall(){ const t=document.getElementById('docViewTitle').textContent; closeDocView(); toast(t.includes('Договор')?'✓ Договор отправлен на подпись':'✓ Счёт отправлен клиенту'); }
 
 function liveTab(name, btn){
   document.getElementById('tab-script').style.display = name==='script' ? '' : 'none';
@@ -866,6 +867,13 @@ function show(key, btn){
   if(btn){ btns.forEach(b=>b.classList.remove('on')); btn.classList.add('on'); }
   else { btns.forEach(b=>b.classList.remove('on')); const map={known:0,nodeals:1,unknown:2,live:3,livenew:4,done:5}; if(map[key]!=null) btns[map[key]].classList.add('on'); }
 }
+/* делегированные клики: сегменты (условия/результат) + дайлпад */
+document.addEventListener('click', e=>{
+  const seg=e.target.closest('.seg button');
+  if(seg){ seg.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on')); seg.classList.add('on'); return; }
+  const k=e.target.closest('.dialpad .k');
+  if(k){ toast(k.textContent.trim()+' — выполнено'); return; }
+});
 show('known');
 </script>
 </body>
