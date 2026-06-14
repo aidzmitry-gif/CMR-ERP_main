@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """spawn_workers.py — Windows orchestrator for parallel Claude Code workers.
 
-Rewritten for Windows 11 + PowerShell + this project (CRM ERP / AI-First OS).
-The original (macOS / job_ghost_stalker, Terminal.app + osascript + GNU screen)
-is preserved as spawn_workers.macos-reference.py.
+Rewritten for Windows 11 + PowerShell + this project (CRM ERP / AI-First OS)
+from a macOS original (job_ghost_stalker, Terminal.app + osascript + GNU screen).
 
 PATTERN (worktree-orchestrator):
   The orchestrator splits one big task into small scoped sub-tasks. For each
