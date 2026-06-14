@@ -70,12 +70,16 @@
   <div class="toast" id="toast"></div>
 
 <script>
-  // демо: документы/версии, помеченные на удаление в карточках сделок
-  let ITEMS = [
-    {id:1, n:"Счёт СЧ-0461 (черновик)", kind:"Счёт на оплату", ver:1, deal:"CRM-1024", client:"Автопарк №7", by:"Сидоров К.", at:"14.06.2026 11:20", reason:"ошибка в позициях, выставлен новый"},
-    {id:2, n:"КП-0288 — годовая поставка", kind:"Коммерческое предложение", ver:1, deal:"CRM-1024", client:"Автопарк №7", by:"Петрова А.", at:"13.06.2026 16:05", reason:"устаревшие цены"},
-    {id:3, n:"Договор ДГ-0118 — годовая поставка", kind:"Договор · версия", ver:1, deal:"CRM-1029", client:"ОАО «Белтранс»", by:"Сидоров К.", at:"12.06.2026 09:40", reason:"черновик до правок юриста"},
+  // демо-fallback (если в localStorage пусто — на чистом профиле экран не будет пустым)
+  const DEMO = [
+    {id:"demo-1", n:"Счёт СЧ-0461 (черновик)", kind:"Счёт на оплату", ver:1, deal:"CRM-1024 · Автопарк №7", by:"Сидоров К.", at:"14.06.2026 11:20", reason:"ошибка в позициях, выставлен новый"},
+    {id:"demo-2", n:"КП-0288 — годовая поставка", kind:"Коммерческое предложение", ver:1, deal:"CRM-1024 · Автопарк №7", by:"Петрова А.", at:"13.06.2026 16:05", reason:"устаревшие цены"},
+    {id:"demo-3", n:"Договор ДГ-0118 — годовая поставка", kind:"Договор · версия", ver:1, deal:"CRM-1029 · ОАО «Белтранс»", by:"Сидоров К.", at:"12.06.2026 09:40", reason:"черновик до правок юриста"},
   ];
+  // реальные пометки приходят из карточек сделок через localStorage ключ 'docTrash'
+  function trashRead(){ try{ return JSON.parse(localStorage.getItem('docTrash')||'[]'); }catch(e){ return []; } }
+  function trashWrite(a){ try{ localStorage.setItem('docTrash', JSON.stringify(a)); }catch(e){} }
+  let ITEMS = (function(){ const real=trashRead(); return real.length ? real : DEMO.slice(); })();
 
   function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._t); window._t=setTimeout(()=>t.classList.remove('show'),3200); }
 
@@ -83,23 +87,26 @@
     const list=document.getElementById('list');
     document.getElementById('cnt').textContent = ITEMS.length ? `${ITEMS.length} док./версий` : '0';
     if(!ITEMS.length){ list.innerHTML='<div class="empty">✓ Нет документов, помеченных на удаление</div>'; return; }
-    list.innerHTML = ITEMS.map(it=>`
+    list.innerHTML = ITEMS.map(it=>{
+      const eid = String(it.id).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `
       <div class="row" data-id="${it.id}">
         <div>
           <div class="dn">${it.n} <span class="ver">v${it.ver}</span></div>
-          <div class="meta">${it.deal} · ${it.client} · пометил ${it.by} · ${it.at}<br>основание: ${it.reason}</div>
+          <div class="meta">${it.deal||''}${it.client?(' · '+it.client):''} · пометил ${it.by} · ${it.at}<br>основание: ${it.reason}</div>
         </div>
         <span class="kindbadge">${it.kind}</span>
         <div class="acts">
-          <button class="btn restore" onclick="restore(${it.id})">♻ Восстановить</button>
-          <button class="btn purge" onclick="purge(${it.id})">🗑 Удалить безвозвратно</button>
+          <button class="btn restore" onclick="restore('${eid}')">♻ Восстановить</button>
+          <button class="btn purge" onclick="purge('${eid}')">🗑 Удалить безвозвратно</button>
         </div>
-      </div>`).join('');
+      </div>`;}).join('');
   }
-  function restore(id){ const it=ITEMS.find(x=>x.id===id); ITEMS=ITEMS.filter(x=>x.id!==id); render(); toast('♻ Восстановлено: '+(it?it.n:'')+' — пометка снята, документ вернулся в сделку'); }
+  function persist(id){ if(!String(id).startsWith('demo-')) trashWrite(trashRead().filter(x=>x.id!==id)); }
+  function restore(id){ const it=ITEMS.find(x=>x.id===id); ITEMS=ITEMS.filter(x=>x.id!==id); persist(id); render(); toast('♻ Восстановлено: '+(it?it.n:'')+' — пометка снята, документ вернулся в сделку'); }
   function purge(id){ const it=ITEMS.find(x=>x.id===id);
     if(!confirm('Удалить безвозвратно?\n\n'+(it?it.n:'')+'\nДействие необратимо и будет записано в журнал аудита.')) return;
-    ITEMS=ITEMS.filter(x=>x.id!==id); render(); toast('🗑 Удалено безвозвратно: '+(it?it.n:'')+' · записано в журнал аудита');
+    ITEMS=ITEMS.filter(x=>x.id!==id); persist(id); render(); toast('🗑 Удалено безвозвратно: '+(it?it.n:'')+' · записано в журнал аудита');
   }
   render();
 </script>

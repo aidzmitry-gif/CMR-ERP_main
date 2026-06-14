@@ -1423,12 +1423,26 @@ function editDoc(i){
   render(currentKey);
   toast(`✎ Создана версия v${dc.ver} · прежняя v${dc.ver-1} сохранена в истории`);
 }
-/* пометки на удаление (мягкое удаление; безвозвратно — в модуле «Архив документов») */
-function markDoc(i){ DEALS[currentKey].docs[i].del=true; render(currentKey); toast('🗑 Помечен на удаление · отправка заблокирована'); }
-function unmarkDoc(i){ DEALS[currentKey].docs[i].del=false; render(currentKey); toast('♻ Пометка на удаление снята'); }
+/* пометки на удаление (мягкое удаление; безвозвратно — в модуле «Архив документов»)
+   общий слой с sales-docs-purge.html через localStorage ключ 'docTrash' */
+function trashRead(){ try{ return JSON.parse(localStorage.getItem('docTrash')||'[]'); }catch(e){ return []; } }
+function trashWrite(a){ try{ localStorage.setItem('docTrash', JSON.stringify(a)); }catch(e){} }
+function trashAdd(rec){ const a=trashRead().filter(x=>x.id!==rec.id); a.unshift(rec); trashWrite(a); }
+function trashRemove(id){ trashWrite(trashRead().filter(x=>x.id!==id)); }
+function dealLabel(d){ return d.num.replace('№ ','')+' · '+d.company; }
+function markDoc(i){ const d=DEALS[currentKey], dc=d.docs[i]; dc.del=true;
+  trashAdd({id:`${currentKey}|${dc.n}|v${dc.ver||1}`, n:dc.n, kind:dc.kind, ver:dc.ver||1, deal:dealLabel(d), by:'Сидоров К.', at:'14.06.2026', reason:'помечен в карточке сделки'});
+  render(currentKey); toast('🗑 Помечен на удаление · отправка заблокирована'); }
+function unmarkDoc(i){ const d=DEALS[currentKey], dc=d.docs[i]; dc.del=false;
+  trashRemove(`${currentKey}|${dc.n}|v${dc.ver||1}`);
+  render(currentKey); toast('♻ Пометка на удаление снята'); }
 function blockSend(){ toast('🚫 Нельзя отправить — документ помечен на удаление'); }
-function markVer(i,vi){ DEALS[currentKey].docs[i].history[vi].del=true; render(currentKey); toast('🗑 Версия помечена на удаление'); }
-function unmarkVer(i,vi){ DEALS[currentKey].docs[i].history[vi].del=false; render(currentKey); toast('♻ Пометка с версии снята'); }
+function markVer(i,vi){ const d=DEALS[currentKey], dc=d.docs[i], h=dc.history[vi]; h.del=true;
+  trashAdd({id:`${currentKey}|${dc.n}|v${h.ver}`, n:dc.n+' (версия)', kind:dc.kind+' · версия', ver:h.ver, deal:dealLabel(d), by:'Сидоров К.', at:'14.06.2026', reason:h.lbl||'старая версия'});
+  render(currentKey); toast('🗑 Версия помечена на удаление'); }
+function unmarkVer(i,vi){ const d=DEALS[currentKey], dc=d.docs[i], h=dc.history[vi]; h.del=false;
+  trashRemove(`${currentKey}|${dc.n}|v${h.ver}`);
+  render(currentKey); toast('♻ Пометка с версии снята'); }
 /* ── заказ-наряд: предпросмотр перед созданием ── */
 let _woView=false;
 function nextWoNum(d){ const ns=(d.docs||[]).map(x=>{const m=/ЗН-(\d+)/.exec(x.n||'');return m?+m[1]:0;}); return 'ЗН-'+String(Math.max(207,...ns)+1).padStart(4,'0'); }
