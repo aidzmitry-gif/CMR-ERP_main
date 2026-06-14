@@ -80,6 +80,9 @@
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Ставки НДС</span><span title="версионный">🕘</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Страны</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Банки</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Регионы и города</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Языки</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Часовые пояса</span></li>
           </ul>
 
           <!-- Общие мастер-данные -->
@@ -90,7 +93,7 @@
             </li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Контакты</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Номенклатура <span title="мастер-данные">★</span></span><span>🤖</span></li>
-            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сотрудники</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сотрудники <span title="мастер-данные">★</span></span><span title="в каталоге AI">🤖</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Банковские счета</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Договоры (рамочные)</span></li>
           </ul>
@@ -100,6 +103,7 @@
           <ul class="mb-1">
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Стадии воронки</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Причины отказа</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы сделок</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Источники лидов</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Прайс-листы</span><span title="версионный">🕘</span></li>
           </ul>
@@ -108,8 +112,10 @@
           <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">📦 Склад</div>
           <ul class="mb-1">
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Склады</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Зоны</span><span title="иерархия">🌳</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Ячейки</span><span title="иерархия">🌳</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы операций</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Статусы партий</span></li>
           </ul>
 
           <!-- Финансы -->
@@ -118,11 +124,63 @@
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>План счетов</span><span title="иерархия">🌳</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Статьи затрат/доходов</span><span title="иерархия">🌳</span></li>
             <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>ЦФО</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Проекты / направления</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы документов</span></li>
           </ul>
 
-          <!-- Производство / Закупки / прочее (свёрнуто) -->
-          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🏭 Производство · 🛒 Закупки · 👥 HR · 🚚 Логистика · 🛠 Сервис · 📣 Маркетинг</div>
-          <div class="px-2 pb-1 text-[12px] text-slate-400">BOM 🕘 · нормы · условия оплаты · оргструктура 🌳 · перевозчики · SLA · каналы …</div>
+          <!-- Закупки -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🛒 Закупки</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы поставщиков</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Условия оплаты (Net 30/60)</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сроки поставки (lead time)</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сертификации</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Инкотермс</span></li>
+          </ul>
+
+          <!-- Производство -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🏭 Производство</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>BOM / спецификации</span><span title="версионный">🕘</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Маршруты и операции</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Нормы</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Центры обработки</span></li>
+          </ul>
+
+          <!-- HR -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">👥 HR</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Должности</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Оргструктура</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы начислений</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Причины увольнения</span></li>
+          </ul>
+
+          <!-- Логистика -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🚚 Логистика</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Перевозчики</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Тарифы</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы ТС</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Маршруты доставки</span></li>
+          </ul>
+
+          <!-- Сервис -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🛠 Сервис</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы обращений</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>SLA</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Категории неисправностей</span></li>
+          </ul>
+
+          <!-- Маркетинг -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">📣 Маркетинг</div>
+          <ul>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Каналы</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Кампании</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сегменты</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>UTM-источники</span></li>
+          </ul>
         </nav>
       </aside>
 
