@@ -1177,7 +1177,30 @@
     clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3000);
   }
   function favDeal(btn){ const on=btn.textContent.trim()==='★'; btn.textContent=on?'☆':'★'; toast(on?'Убрано из избранного':'★ В избранном'); }
-  function drawerStage(){ toast('→ Стадия продвинута (полная логика — в карточке сделки)'); }
+  function colStage(col){ return col?.querySelector('.ch-title')?.firstChild?.textContent.trim() || ''; }
+  function updateColCount(col){ if(!col) return; const n=col.querySelector('.ch-title .n'); if(n) n.textContent=col.querySelectorAll('.card').length; }
+  function drawerStage(){
+    const card = window._lastCard;
+    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
+    if(curGroup!=='stage'){ toast('Перемещение по стадиям доступно в виде «По стадиям»'); return; }
+    const col = card.closest('.col');
+    const cur = colStage(col);
+    const idx = STAGE_ORDER.indexOf(cur);
+    if(idx < 0){ toast('Стадия колонки не распознана'); return; }
+    if(idx >= STAGE_ORDER.length-1){ toast('Сделка уже на финальной стадии воронки'); return; }
+    const nextTitle = STAGE_ORDER[idx+1];
+    const cols = [...boardEl.querySelectorAll('.col')];
+    const matches = cols.filter(c => colStage(c) === nextTitle);
+    // в составном виде берём ближайшую следующую колонку той же воронки
+    const target = matches.find(c => col.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) || matches[0];
+    if(!target){ toast('В текущем виде нет колонки «'+nextTitle+'»'); return; }
+    const add = target.querySelector('.add-card');
+    if(add) target.insertBefore(card, add); else target.appendChild(card);
+    updateColCount(col); updateColCount(target);
+    markActionDates();
+    closeAll();
+    toast('Стадия → '+nextTitle);
+  }
   function drawerTask(){ toast('✎ Задача поставлена по сделке'); }
   function drawerReject(){ toast('✕ Сделка переведена в «Отказ»'); }
   function chCh(ch){ toast('Связь · '+ch); }
