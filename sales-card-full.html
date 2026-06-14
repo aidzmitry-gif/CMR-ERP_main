@@ -295,7 +295,7 @@
   /* модалка подбора со склада */
   .stock-ov{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:90;display:none;align-items:center;justify-content:center;padding:24px}
   .stock-ov.show{display:flex}
-  #invOv{z-index:95} #stockOv{z-index:100} #invPrevOv{z-index:110} #ctrOv{z-index:95} #ctrPrevOv{z-index:110}
+  #invOv{z-index:95} #stockOv{z-index:100} #invPrevOv{z-index:110} #ctrOv{z-index:95} #ctrPrevOv{z-index:110} #woOv{z-index:110}
   .stock-dlg{background:#fff;border-radius:16px;width:640px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(15,23,42,.3);overflow:hidden}
   .sd-h{padding:15px 18px;border-bottom:1px solid #F1F3F5;font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px}
   .sd-h .x{margin-left:auto;color:#9aa3b0;cursor:pointer;font-size:15px}
@@ -568,6 +568,19 @@
         <button class="btn" onclick="closeCtrPrev()">✎ Редактировать</button>
         <button class="btn" onclick="ctrSent()">🧾 ЭДО</button>
         <button class="btn primary" onclick="ctrSent()">🔗 Отправить на подпись</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- предпросмотр заказ-наряда (перед созданием) -->
+  <div class="stock-ov" id="woOv" onclick="if(event.target===this)closeWo()">
+    <div class="stock-dlg" style="width:600px">
+      <div class="sd-h" id="woTitle">Заказ-наряд — предпросмотр перед созданием <span class="x" onclick="closeWo()">✕</span></div>
+      <div class="sd-b" style="background:#F4F5F7;padding:0" id="woPaper"></div>
+      <div class="sd-f">
+        <span class="cnt" style="color:#B45309;margin-right:auto">⚠ Проверьте состав перед созданием</span>
+        <button class="btn" onclick="closeWo()">Отмена</button>
+        <button class="btn primary" id="woCreateBtn" onclick="woCreate()">✓ Создать заказ-наряд</button>
       </div>
     </div>
   </div>
@@ -1144,7 +1157,7 @@ function closeCtrPrev(){ document.getElementById('ctrPrevOv').classList.remove('
 function docsHtml(d){
   let rows='';
   const ALLSTEPS = ["отправлен","просмотрен","подписан","оплачен"];
-  d.docs.forEach(dc=>{
+  d.docs.forEach((dc,i)=>{
     const sendLabel = dc.sent ? '✉ Отправить ещё' : '✉ Отправить';
     let flow='';
     if(dc.steps && dc.steps.length){
@@ -1165,9 +1178,11 @@ function docsHtml(d){
       <div class="doc-main"><div class="dn">${dc.n}</div><div class="dt2">${dc.kind}</div></div>
       <span class="st ${dc.st}">${dc.lbl}</span>
       <div class="doc-acts">
-        <span class="dbtn" title="Просмотр" onclick="docPreview('${dc.n}')">👁</span>
+        <span class="dbtn" title="Просмотр" onclick="docPreview('${dc.kind}','${dc.n.replace(/'/g,"\\'")}')">👁</span>
         <span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${sendLabel}</span>
-        <span class="dbtn" title="Скачать PDF" onclick="docDownload('${dc.n}')">⬇</span>
+        <span class="dbtn" title="Редактировать" onclick="editDoc(${i})">✎</span>
+        <span class="dbtn" title="Скачать PDF" onclick="docDownload('${dc.n.replace(/'/g,"\\'")}')">⬇</span>
+        <span class="dbtn" title="Удалить" onclick="delDoc(${i})">✕</span>
       </div>
       ${flow}
       <div class="send-ch">
@@ -1362,17 +1377,56 @@ function filterTimeline(btn,type){
   });
 }
 function contactChat(ch,name){ toast(`Открываю ${ch} · ${name}`); }
-function docPreview(name){ toast(`👁 Предпросмотр документа: ${name}`); }
+function docPreview(kind, name){
+  const d=DEALS[currentKey];
+  if(/Договор/i.test(kind)){ ctrPreview(); }
+  else if(/КП|Коммерч/i.test(kind)){ _docKind='quote'; invoiceItems=dealItemsToInvoice(d); invPreview(); }
+  else if(/Акт/i.test(kind)){ _docKind='act'; invoiceItems=dealItemsToInvoice(d); invPreview(); }
+  else if(/Заказ-наряд/i.test(kind)){ woPreview(true); }
+  else if(/Счёт/i.test(kind)){ _docKind='invoice'; invoiceItems=dealItemsToInvoice(d); invPreview(); }
+  else { toast(`👁 ${name} — предпросмотр (формируется смежным отделом)`); }
+}
+function editDoc(i){
+  const d=DEALS[currentKey]; const dc=d.docs[i]; if(!dc) return;
+  if(/Договор/i.test(dc.kind)) openContract();
+  else if(/КП|Коммерч/i.test(dc.kind)) openQuote();
+  else if(/Акт/i.test(dc.kind)) openAct();
+  else if(/Счёт/i.test(dc.kind)) openInvoice();
+  else if(/Заказ-наряд/i.test(dc.kind)) woPreview(false);
+  else toast('Этот документ формируется смежным отделом — правка там');
+}
+function delDoc(i){ const d=DEALS[currentKey]; const n=d.docs[i]?d.docs[i].n:''; d.docs.splice(i,1); render(currentKey); toast('Документ удалён: '+n); }
+/* ── заказ-наряд: предпросмотр перед созданием ── */
+let _woView=false;
+function nextWoNum(d){ const ns=(d.docs||[]).map(x=>{const m=/ЗН-(\d+)/.exec(x.n||'');return m?+m[1]:0;}); return 'ЗН-'+String(Math.max(207,...ns)+1).padStart(4,'0'); }
+function woPreview(view){
+  _woView=!!view; const d=DEALS[currentKey];
+  const num = view ? 'ЗН-0207' : nextWoNum(d);
+  let rows=''; (d.items||[]).forEach((it,i)=>{ rows+=`<tr><td>${i+1}</td><td>${it.n}</td><td class="r">${it.q}</td></tr>`; });
+  const wh = d.delivery && d.delivery.warehouse ? d.delivery.warehouse : 'склад по наличию';
+  const ready = d.delivery && d.delivery.date ? d.delivery.date : '—';
+  document.getElementById('woPaper').innerHTML = `<div class="paper">
+    <div class="pp-h"><div><div class="pp-org">ООО «Энерго-Дисконт» · склад</div><div class="pp-sub">комплектация и отгрузка</div></div><div class="pp-no">ЗАКАЗ-НАРЯД № ${num}<br>от 14.06.2026</div></div>
+    <div class="pp-parties"><div><b>Сделка:</b> ${d.num.replace('№ ','')} · ${d.company}</div><div><b>Склад отгрузки:</b> ${wh}</div></div>
+    <table class="pp-t"><thead><tr><th>№</th><th>Номенклатура к комплектации</th><th class="r">Кол-во</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="pp-foot">Комплектовщик: ____________ · Контроль ОТК: ____________ · Готовность к отгрузке: ${ready}</div>
+    <div class="pp-sign"><div>Выдал ____________</div><div>Принял ____________</div></div>
+  </div>`;
+  document.getElementById('woTitle').textContent = view ? 'Заказ-наряд — просмотр' : 'Заказ-наряд — предпросмотр перед созданием';
+  document.getElementById('woCreateBtn').style.display = view ? 'none' : '';
+  document.getElementById('woOv').classList.add('show');
+}
+function woCreate(){ const d=DEALS[currentKey]; const num=nextWoNum(d);
+  d.docs.unshift({n:`Заказ-наряд ${num} — комплектация и отгрузка`,kind:'Заказ-наряд',st:'pending',lbl:'в работе',sent:false,steps:['создан']});
+  closeWo(); render(currentKey); toast(`✓ Заказ-наряд ${num} создан`);
+}
+function closeWo(){ document.getElementById('woOv').classList.remove('show'); }
 function docDownload(name){ toast(`⬇ Скачивание PDF: ${name}`); }
 function aiChip(kind){ if(kind==='kp'){ openQuote(); return; } toast(kind==='mail'?'🤖 Генерирую письмо клиенту…':'🤖 Открываю чат с ИИ по сделке…'); }
 function attachRec(){ toast('🔗 Привязка записи звонка к сделке'); }
 function replySend(ch){ toast(`Ответ отправлен · ${ch}`); }
 function sendDoc(ch,name){ const d=document.querySelectorAll('.send-ch.show'); d.forEach(x=>x.classList.remove('show')); toast(`✓ ${name} отправлен · ${ch}`); }
-function addWorkOrder(){ const d=DEALS[currentKey];
-  d.docs.unshift({n:'Заказ-наряд ЗН-0208 (черновик)',kind:'Заказ-наряд',st:'draft',lbl:'не сформирован',sent:false,steps:[]});
-  render(currentKey); toast('✓ Заказ-наряд создан (черновик) — в блоке «Документы»');
-  const blk=document.getElementById('blk-docs'); if(blk) blk.scrollIntoView({block:'center'});
-}
+function addWorkOrder(){ woPreview(false); }
 function openLinkedDeal(name){ toast('Открываю сделку: '+name); location.href='sales-card-full.html'; }
 
 /* ── блоки: показать/скрыть ── */
