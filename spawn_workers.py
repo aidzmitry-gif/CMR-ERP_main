@@ -195,6 +195,40 @@ def _mcp_config_for_worker(name: str) -> Path:
     return EMPTY_MCP_FILE
 
 
+# ── PreToolUse deny-гард для воркеров ────────────────────────────────────────────
+# Воркеры идут под bypassPermissions (headless — ответить на запрос некому). Чтобы это
+# не было «голым», в их сессию через --settings подключается claude_guard_hook.py — тот
+# же deny-гард, что у B-сессий: режет катастрофу (rm -rf по корню, curl|sh, чтение
+# .env/секретов, tailscale ssh/prod-IP, git push --force) ДО выполнения, при любом режиме.
+# STRICT-тир (как у удалённых B). Отключить целиком: env WORKER_GUARD=0.
+GUARD_HOOK = REPO_ROOT / "claude_guard_hook.py"
+GUARD_SETTINGS = COORD_DIR / ".guard-settings.json"
+WORKER_GUARD = os.environ.get("WORKER_GUARD", "1") not in ("0", "false", "False")
+
+
+def _guard_enabled() -> bool:
+    return WORKER_GUARD and GUARD_HOOK.is_file()
+
+
+def _ensure_guard_settings() -> str | None:
+    """Записать settings-файл с PreToolUse-гардом (АБСОЛЮТНЫЕ пути к main-venv-python и
+    хуку — чтобы работало из любого worktree) и вернуть путь. None, если гард выключен."""
+    if not _guard_enabled():
+        return None
+    cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
+    cfg = {"hooks": {"PreToolUse": [{
+        "matcher": "Bash|Edit|Write|MultiEdit|Read|NotebookEdit",
+        "hooks": [{"type": "command", "command": cmd}],
+    }]}}
+    try:
+        GUARD_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        GUARD_SETTINGS.write_text(
+            json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(GUARD_SETTINGS)
+    except OSError:
+        return None
+
+
 def _human_age(ts: float) -> str:
     delta = max(0.0, time.time() - ts)
     if delta < 60:
@@ -508,6 +542,11 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
     model_flag = "" if model == "inherit" else f"--model {psq(model)} "
     # Per-worker MCP: пусто по умолчанию; serena — только если scope это запросил.
     mcp_cfg = _mcp_config_for_worker(name)
+    # PreToolUse deny-гард в сессию воркера (--settings) + строгий тир. Хардненинг под
+    # bypassPermissions: катастрофа режется до выполнения. Отключить — env WORKER_GUARD=0.
+    guard = _ensure_guard_settings()
+    guard_flag = f"--settings {psq(guard)} " if guard else ""
+    strict_line = "$env:CLAUDE_GUARD_STRICT = '1'\n" if guard else ""
 
     # NOTES on encoding (hard-won — Russian-locale Windows):
     #   * The .ps1 is written utf-8-SIG (BOM). Windows PowerShell 5.1 reads
@@ -536,7 +575,9 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"Set-Location -LiteralPath {psq(str(wt))}\n"
         f"$prompt = Get-Content -Raw -Encoding UTF8 -LiteralPath {psq(str(prompt_file))}\n"
         f"Write-Host '=== worker:{name} — claude (auto mode) starting ===' -ForegroundColor Cyan\n"
+        f"{strict_line}"
         f"& {psq(claude_cli)} --print --verbose --permission-mode {perm} "
+        f"{guard_flag}"
         f"{model_flag}"
         f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
         f"--add-dir {psq(str(REPO_ROOT))} "
@@ -587,10 +628,13 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
     # because headless workers can't answer permission prompts; downgrade with
     # --perm if you don't need unattended Bash/git.
     if perm == "bypassPermissions":
-        print("⚠️  SECURITY: workers run with --permission-mode bypassPermissions "
-              "(no command is blocked; worktree is not a sandbox). "
-              "Use --perm acceptEdits/default to restrict, or sandbox the host.",
-              file=sys.stderr)
+        if _guard_enabled():
+            note = ("deny-гард claude_guard_hook.py режет катастрофу (rm -rf по корню, "
+                    "curl|sh, чтение секретов, prod-IP, push --force), но worktree — НЕ песочница")
+        else:
+            note = "команды НЕ блокируются (WORKER_GUARD=0); worktree — НЕ песочница"
+        print(f"⚠️  SECURITY: воркеры под --permission-mode bypassPermissions: {note}. "
+              "Ограничить: --perm acceptEdits/default или изолировать хост.", file=sys.stderr)
 
     # Soft concurrency cap (quota guard).
     if not dry_run and not allow_over_cap:
@@ -622,7 +666,8 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
                 print(f"[dry-run:spawn:{name}] worktree {wt} ({exists}); "
                       f"prompt {len(message)} chars (pitfalls {len(mem)}); "
                       f"perm={perm}; model={wm}; "
-                      f"mcp={_mcp_config_for_worker(name).name}; cli={claude_cli}")
+                      f"mcp={_mcp_config_for_worker(name).name}; "
+                      f"guard={'on' if _guard_enabled() else 'off'}; cli={claude_cli}")
                 continue
             if mem:
                 print(f"[spawn:{name}] memory: pitfalls injected ({len(mem)} chars) "
