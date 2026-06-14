@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Справочники — единый реестр (превью)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Те же кастомные токены, что в Tailwind-конфиге проекта (canvas/ink/muted/brand/shadow-card).
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#f6f7f9",
+            ink: "#0f172a",
+            muted: "#64748b",
+            brand: { DEFAULT: "#2563eb", 100: "#dbeafe", 600: "#2563eb" },
+          },
+          boxShadow: { card: "0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+        },
+      },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <!-- ⚠️ Статичный макет вкладки «Справочники» (registry pattern) для визуальной проверки.
+       Концепция: coordination/db-and-reference-data-concept.md (v3). Демо-данные, BYN. -->
+
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Заголовок -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Справочники — единый реестр</h1>
+      <p class="mt-1 text-sm text-muted">
+        Витрина поверх данных, которыми владеют ядро и модули. Дублей нет: данные остаются у владельца.
+      </p>
+    </div>
+
+    <!-- Инфо-полоса: суть registry-паттерна -->
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl bg-brand-100/60 px-4 py-2.5 text-[12px] text-slate-600">
+      <span class="font-semibold text-brand-600">Как это устроено:</span>
+      <span>📇 это <b>реестр-витрина</b>, а не второе хранилище</span>
+      <span>🔒 у каждого справочника есть <b>владелец</b></span>
+      <span>🗃 архив вместо удаления</span>
+      <span>🕘 у части справочников — <b>история по датам</b></span>
+      <span>🤖 точный доступ для AI</span>
+    </div>
+
+    <!-- Легенда значков -->
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+      <span>Значки:</span>
+      <span>★ мастер-данные (golden record)</span>
+      <span>🕘 версионный (история по датам)</span>
+      <span>🌳 иерархия (дерево)</span>
+      <span>🤖 в каталоге для AI</span>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+
+      <!-- ЛЕВО: дерево по отделам -->
+      <aside class="space-y-3">
+        <!-- Поиск по реестру -->
+        <div class="rounded-2xl bg-white p-2 shadow-card">
+          <div class="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+            <span class="text-slate-400">🔎</span>
+            <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Найти справочник…" />
+          </div>
+        </div>
+
+        <!-- Дерево -->
+        <nav class="rounded-2xl bg-white p-2 shadow-card text-[13px]">
+
+          <!-- Система -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">⚙️ Система · ядро</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Единицы измерения</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Валюты</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Курсы валют</span><span title="версионный">🕘</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Ставки НДС</span><span title="версионный">🕘</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Страны</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Банки</span></li>
+          </ul>
+
+          <!-- Общие мастер-данные -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🏛 Общие · мастер-данные</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg bg-brand-100 px-2 py-1.5 font-semibold text-brand-600">
+              <span>Контрагенты <span title="мастер-данные">★</span></span><span title="в каталоге AI">🤖</span>
+            </li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Контакты</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Номенклатура <span title="мастер-данные">★</span></span><span>🤖</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Сотрудники</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Банковские счета</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Договоры (рамочные)</span></li>
+          </ul>
+
+          <!-- Продажи -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">📈 Продажи</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Стадии воронки</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Причины отказа</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Источники лидов</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Прайс-листы</span><span title="версионный">🕘</span></li>
+          </ul>
+
+          <!-- Склад -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">📦 Склад</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Склады</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Ячейки</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Типы операций</span></li>
+          </ul>
+
+          <!-- Финансы -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">💰 Финансы</div>
+          <ul class="mb-1">
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>План счетов</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>Статьи затрат/доходов</span><span title="иерархия">🌳</span></li>
+            <li class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50"><span>ЦФО</span><span title="иерархия">🌳</span></li>
+          </ul>
+
+          <!-- Производство / Закупки / прочее (свёрнуто) -->
+          <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🏭 Производство · 🛒 Закупки · 👥 HR · 🚚 Логистика · 🛠 Сервис · 📣 Маркетинг</div>
+          <div class="px-2 pb-1 text-[12px] text-slate-400">BOM 🕘 · нормы · условия оплаты · оргструктура 🌳 · перевозчики · SLA · каналы …</div>
+        </nav>
+      </aside>
+
+      <!-- ПРАВО: универсальная таблица справочника -->
+      <section class="space-y-4">
+
+        <!-- Карточка справочника -->
+        <div class="rounded-2xl bg-white shadow-card">
+          <!-- Шапка -->
+          <div class="border-b border-slate-100 p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-bold text-ink">Контрагенты <span class="text-brand-600">★</span></h2>
+                <p class="mt-0.5 text-sm text-muted">Мастер-данные · единая эталонная запись (golden record) · владелец — ядро</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">схема: public</span>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-slate-600">/refs/counterparties</span>
+                <span class="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">🤖 в каталоге AI</span>
+                <span class="rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700">права: refs.view · refs.edit</span>
+              </div>
+            </div>
+
+            <!-- Используется в отделах -->
+            <div class="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
+              <span class="text-slate-400">Один справочник — вызывается из отделов:</span>
+              <span class="rounded-full bg-white px-2 py-0.5 text-slate-600 ring-1 ring-slate-200">Продажи</span>
+              <span class="rounded-full bg-white px-2 py-0.5 text-slate-600 ring-1 ring-slate-200">Закупки</span>
+              <span class="rounded-full bg-white px-2 py-0.5 text-slate-600 ring-1 ring-slate-200">Финансы</span>
+              <span class="rounded-full bg-white px-2 py-0.5 text-slate-600 ring-1 ring-slate-200">Логистика</span>
+              <span class="rounded-full bg-white px-2 py-0.5 text-slate-600 ring-1 ring-slate-200">Сервис</span>
+            </div>
+          </div>
+
+          <!-- Тулбар -->
+          <div class="flex flex-wrap items-center gap-2 px-5 py-3">
+            <div class="flex min-w-[260px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+              <span class="text-slate-400">🔎</span>
+              <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Поиск по коду, названию или УНП…" />
+            </div>
+            <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">+ Добавить</button>
+            <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Показать архив</button>
+            <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-400 shadow-card ring-1 ring-slate-200" title="1С — временный входной адаптер (источник истины — ERP)">↧ Импорт из 1С</button>
+          </div>
+
+          <!-- Таблица -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th class="px-5 py-2 font-semibold">Код</th>
+                  <th class="px-3 py-2 font-semibold">Наименование</th>
+                  <th class="px-3 py-2 font-semibold">УНП</th>
+                  <th class="px-3 py-2 font-semibold">Тип</th>
+                  <th class="px-3 py-2 font-semibold">Статус</th>
+                  <th class="px-3 py-2 font-semibold">Изменил</th>
+                  <th class="px-3 py-2 font-semibold">Когда</th>
+                  <th class="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-5 py-2.5 font-mono text-[13px] text-slate-500">CP-001045</td>
+                  <td class="px-3 py-2.5 font-medium text-ink">ООО «Ромашка»</td>
+                  <td class="px-3 py-2.5 text-slate-500">191234567</td>
+                  <td class="px-3 py-2.5 text-slate-600">Клиент</td>
+                  <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Активен</span></td>
+                  <td class="px-3 py-2.5 text-slate-600">А. Петров</td>
+                  <td class="px-3 py-2.5 text-slate-400">12.06.2026</td>
+                  <td class="px-3 py-2.5 text-right text-slate-300">⋯</td>
+                </tr>
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-5 py-2.5 font-mono text-[13px] text-slate-500">CP-000231</td>
+                  <td class="px-3 py-2.5 font-medium text-ink">ОАО «БелАвтоТех»</td>
+                  <td class="px-3 py-2.5 text-slate-500">100045678</td>
+                  <td class="px-3 py-2.5 text-slate-600">Клиент + Поставщик</td>
+                  <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Активен</span></td>
+                  <td class="px-3 py-2.5 text-slate-600"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">↧ 1С</span></td>
+                  <td class="px-3 py-2.5 text-slate-400">10.06.2026</td>
+                  <td class="px-3 py-2.5 text-right text-slate-300">⋯</td>
+                </tr>
+                <tr class="hover:bg-slate-50/60">
+                  <td class="px-5 py-2.5 font-mono text-[13px] text-slate-500">CP-001102</td>
+                  <td class="px-3 py-2.5 font-medium text-ink">ИП Сидоров А.А.</td>
+                  <td class="px-3 py-2.5 text-slate-500">290876543</td>
+                  <td class="px-3 py-2.5 text-slate-600">Поставщик</td>
+                  <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Активен</span></td>
+                  <td class="px-3 py-2.5 text-slate-600">М. Иванова</td>
+                  <td class="px-3 py-2.5 text-slate-400">09.06.2026</td>
+                  <td class="px-3 py-2.5 text-right text-slate-300">⋯</td>
+                </tr>
+                <!-- Архивная / слитая запись (golden record) -->
+                <tr class="bg-slate-50/40 text-slate-400">
+                  <td class="px-5 py-2.5 font-mono text-[13px]">CP-000777</td>
+                  <td class="px-3 py-2.5 italic">ООО «Старт» <span class="text-[11px]">(дубль)</span></td>
+                  <td class="px-3 py-2.5">191234567</td>
+                  <td class="px-3 py-2.5">—</td>
+                  <td class="px-3 py-2.5"><span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-500">🗃 Слит → CP-001045</span></td>
+                  <td class="px-3 py-2.5">система</td>
+                  <td class="px-3 py-2.5">05.06.2026</td>
+                  <td class="px-3 py-2.5 text-right">⋯</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Подпись под таблицей -->
+          <div class="border-t border-slate-100 px-5 py-3 text-[12px] text-muted">
+            ★ Дубли склеиваются в эталонную запись по УНП (<b>golden record</b>, merge — с подтверждением).
+            Архив вместо удаления — на запись ссылаются документы. Все правки пишутся в аудит.
+          </div>
+        </div>
+
+        <!-- Нижний ряд: версионный справочник + взгляд AI -->
+        <div class="grid gap-4 lg:grid-cols-2">
+
+          <!-- Версионный справочник: Ставки НДС -->
+          <div class="rounded-2xl bg-white p-5 shadow-card">
+            <div class="flex items-center justify-between">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">🕘 Версионный справочник · Ставки НДС</div>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">схема: public</span>
+            </div>
+            <table class="mt-3 w-full text-sm">
+              <thead>
+                <tr class="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th class="py-1.5 font-semibold">Код</th>
+                  <th class="py-1.5 font-semibold">Ставка</th>
+                  <th class="py-1.5 font-semibold">Действует с</th>
+                  <th class="py-1.5 font-semibold">по</th>
+                  <th class="py-1.5 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                <tr>
+                  <td class="py-2 font-mono text-[13px] text-slate-500">НДС20</td>
+                  <td class="py-2 font-semibold text-ink">20%</td>
+                  <td class="py-2 text-slate-600">01.01.2024</td>
+                  <td class="py-2 text-slate-400">— <span class="text-[11px]">(текущая)</span></td>
+                  <td class="py-2"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Активна</span></td>
+                </tr>
+                <tr class="text-slate-400">
+                  <td class="py-2 font-mono text-[13px]">НДС20</td>
+                  <td class="py-2">25%</td>
+                  <td class="py-2">01.01.2022</td>
+                  <td class="py-2">31.12.2023</td>
+                  <td class="py-2"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px]">архив-версия</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="mt-3 text-[12px] text-muted">Документ видит ставку, действовавшую <b>на свою дату</b> — прошлые версии не перезаписываются.</p>
+          </div>
+
+          <!-- Как это видит AI -->
+          <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+            <div class="flex items-center justify-between">
+              <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">🤖 Как этот справочник видит AI</div>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-slate-300">каталог</span>
+            </div>
+            <pre class="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">{
+  "key": "counterparties",
+  "title": "Контрагенты",
+  "endpoint": "/refs/counterparties",
+  "owner": "public",
+  "columns": [
+    { "code":  "стабильный код ссылки" },
+    { "title": "наименование" },
+    { "unp":   "налоговый № (natural key)" },
+    { "is_active": "архивные не выбираются" }
+  ]
+}</pre>
+            <p class="mt-3 text-[12px] text-slate-400">
+              AI берёт точные значения <b>отсюда</b> структурным запросом — не угадывает и не использует эмбеддинги для точных полей.
+            </p>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <!-- Футер-пояснение -->
+    <p class="px-1 text-[11px] text-slate-400">
+      Макет вкладки «Справочники» (registry pattern). Концепция — coordination/db-and-reference-data-concept.md (v3). Данные демонстрационные, BYN.
+    </p>
+  </div>
+</body>
+</html>
