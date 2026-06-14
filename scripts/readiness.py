@@ -1,14 +1,21 @@
 """Сканер готовности модулей — объективные метрики без ручного обхода.
 
-Запуск:  python scripts/readiness.py
-Печатает таблицу loc / роуты / миграции / тип фронта по каждому модулю.
-Субъективный % выставляется вручную в coordination/STATUS.md (этот скрипт его НЕ трогает).
+Запуск:
+  python scripts/readiness.py            печатает таблицу loc / роуты / миграции / тип фронта
+  python scripts/readiness.py --write    то же + обновляет АВТО-БЛОК в coordination/STATUS.md
+
+`--write` НЕ трогает курируемую таблицу с субъективными %: он лишь вставляет/заменяет
+фенсед-блок между маркерами `<!-- READINESS:AUTO -->` … `<!-- /READINESS:AUTO -->`
+(в первый раз — дописывает в конец файла). Субъективную оценку по-прежнему правишь руками,
+сверяясь со свежими объективными числами в авто-блоке.
 
 Цель — дать свежие цифры одной командой, чтобы не сканировать дерево вручную каждый раз.
 """
 from __future__ import annotations
 
+import argparse
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +26,9 @@ MODULES = [
 ROUTE_RE = re.compile(r"@router\.(get|post|put|patch|delete)\b")
 MIGR_DIR = ROOT / "migrations" / "versions"
 FE_APP = ROOT / "frontend" / "src" / "app"
+STATUS_FILE = ROOT / "coordination" / "STATUS.md"
+MARK_START = "<!-- READINESS:AUTO — авто-блок scripts/readiness.py --write, не редактируй вручную -->"
+MARK_END = "<!-- /READINESS:AUTO -->"
 
 
 def py_loc(pkg: Path) -> int:
@@ -73,20 +83,74 @@ FE_MAP = {
 }
 
 
-def main() -> None:
-    print(f"{'module':<12} {'loc':>5} {'routes':>7} {'migr':>5}  ui")
-    print("-" * 60)
+def _rows() -> list[tuple]:
+    rows: list[tuple] = []
     for m in MODULES:
         pkg = ROOT / "modules" / m
         if not pkg.exists():
-            print(f"{m:<12} {'—':>5} {'—':>7} {'—':>5}  (нет пакета)")
-            continue
-        print(f"{m:<12} {py_loc(pkg):>5} {route_count(pkg):>7} "
-              f"{migration_count(m):>5}  {fe_ui(FE_MAP.get(m, []))}")
-    total_migr = len(list(MIGR_DIR.glob('*.py'))) if MIGR_DIR.exists() else 0
+            rows.append((m, "—", "—", "—", "(нет пакета)"))
+        else:
+            rows.append((m, py_loc(pkg), route_count(pkg),
+                         migration_count(m), fe_ui(FE_MAP.get(m, []))))
+    return rows
+
+
+def _auto_block(rows: list[tuple], total_migr: int, stamp: str) -> str:
+    lines = [
+        MARK_START,
+        f"### Объективные метрики (авто, обновлено {stamp})",
+        "",
+        "Свежие цифры из кода: loc (без миграций) · роуты · миграции модуля · тип фронта.",
+        "Таблица с **%** выше — курируемая вручную; сверяй её с этими числами.",
+        "",
+        "| пакет | loc | роуты | мигр | ui |",
+        "|---|---:|---:|---:|---|",
+    ]
+    lines += [f"| `{m}` | {loc} | {routes} | {migr} | {ui} |"
+              for m, loc, routes, migr, ui in rows]
+    lines += [f"| **всего миграций** | | | **{total_migr}** | |", "", MARK_END]
+    return "\n".join(lines)
+
+
+def _write_status(block: str) -> str:
+    if not STATUS_FILE.is_file():
+        STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATUS_FILE.write_text(block + "\n", encoding="utf-8")
+        return "создан"
+    text = STATUS_FILE.read_text(encoding="utf-8")
+    if MARK_START in text and MARK_END in text:
+        pre = text[: text.index(MARK_START)]
+        post = text[text.index(MARK_END) + len(MARK_END):]
+        new, verb = pre + block + post, "обновлён"
+    else:
+        new, verb = text.rstrip() + "\n\n" + block + "\n", "дописан"
+    STATUS_FILE.write_text(new, encoding="utf-8")
+    return verb
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description="Сканер готовности модулей")
+    ap.add_argument("--write", action="store_true",
+                    help="обновить авто-блок в coordination/STATUS.md (курируемое не трогает)")
+    args = ap.parse_args(argv)
+
+    rows = _rows()
+    total_migr = len(list(MIGR_DIR.glob("*.py"))) if MIGR_DIR.exists() else 0
+
+    print(f"{'module':<12} {'loc':>5} {'routes':>7} {'migr':>5}  ui")
+    print("-" * 60)
+    for m, loc, routes, migr, ui in rows:
+        print(f"{m:<12} {str(loc):>5} {str(routes):>7} {str(migr):>5}  {ui}")
     print("-" * 60)
     print(f"всего миграций: {total_migr}")
-    print("\n% готовности — см. coordination/STATUS.md (правится вручную при сдвиге блока).")
+
+    if args.write:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        verb = _write_status(_auto_block(rows, total_migr, stamp))
+        print(f"\nSTATUS.md: авто-блок {verb} ({stamp}); курируемые % не тронуты.")
+    else:
+        print("\n% готовности — см. coordination/STATUS.md (правится вручную). "
+              "Свежий авто-блок: readiness.py --write.")
 
 
 if __name__ == "__main__":
