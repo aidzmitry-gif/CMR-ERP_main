@@ -1,4 +1,4 @@
-# register-daily-automation.ps1 — две задачи Планировщика Windows:
+﻿# register-daily-automation.ps1 — две задачи Планировщика Windows:
 #   CRM-tg-digest     ежедневно 08:00 → tg_digest.py   (дашборд+готовность+CI → Telegram)
 #   CRM-daily-review  ежедневно 23:59 → daily_review.py (авто-сессия ретроспективы дня)
 #
