@@ -163,6 +163,38 @@ def _status_path_in_worktree(name: str, wt: Path) -> Path:
     return wt / "coordination" / f"{name}-status.md"
 
 
+def _model_for_worker(name: str, default: str) -> str:
+    """Per-worker модель из scope LOOP CONTRACT (`model: haiku|sonnet|opus|inherit`).
+    Механическая работа → haiku, основной код → sonnet, архитектура → opus (cost-гайд
+    Anthropic). Фолбэк — дефолт спавна (--model / $WORKER_MODEL)."""
+    try:
+        text = _scope_path(name).read_text(encoding="utf-8-sig")
+    except OSError:
+        return default
+    for m in re.finditer(r"(?im)^\s*model:\s*([A-Za-z0-9._-]+)\s*$", text):
+        val = m.group(1).strip().lower()
+        if val in {"inherit", "haiku", "sonnet", "opus"} or val.startswith("claude-"):
+            return val
+    return default
+
+
+def _mcp_config_for_worker(name: str) -> Path:
+    """По умолчанию воркер стартует с ПУСТЫМ MCP (grep-first дефолт Anthropic, без
+    оверхеда MCP-определений). Если scope содержит `mcp: serena` И есть конфиг
+    coordination/mcp-serena.json — отдаём его (семантическая навигация по символам)."""
+    try:
+        text = _scope_path(name).read_text(encoding="utf-8-sig")
+    except OSError:
+        return EMPTY_MCP_FILE
+    if re.search(r"(?im)^\s*mcp:\s*serena\s*$", text):
+        serena = COORD_DIR / "mcp-serena.json"
+        if serena.is_file():
+            return serena
+        print(f"[spawn:{name}] scope просит mcp: serena, но {serena} нет — "
+              f"запускаю с пустым MCP.", file=sys.stderr)
+    return EMPTY_MCP_FILE
+
+
 def _human_age(ts: float) -> str:
     delta = max(0.0, time.time() - ts)
     if delta < 60:
@@ -474,6 +506,8 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
 
     # "inherit" => no --model flag => worker uses the account default model.
     model_flag = "" if model == "inherit" else f"--model {psq(model)} "
+    # Per-worker MCP: пусто по умолчанию; serena — только если scope это запросил.
+    mcp_cfg = _mcp_config_for_worker(name)
 
     # NOTES on encoding (hard-won — Russian-locale Windows):
     #   * The .ps1 is written utf-8-SIG (BOM). Windows PowerShell 5.1 reads
@@ -504,7 +538,7 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"Write-Host '=== worker:{name} — claude (auto mode) starting ===' -ForegroundColor Cyan\n"
         f"& {psq(claude_cli)} --print --verbose --permission-mode {perm} "
         f"{model_flag}"
-        f"--strict-mcp-config --mcp-config {psq(str(EMPTY_MCP_FILE))} "
+        f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
         f"--add-dir {psq(str(REPO_ROOT))} "
         f"-- $prompt\n"
         "Write-Host ''\n"
@@ -584,9 +618,11 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
             if dry_run:
                 wt = _worktree_path(name)
                 exists = "exists" if wt.is_dir() else f"would create from {BASE_BRANCH}"
+                wm = _model_for_worker(name, model)
                 print(f"[dry-run:spawn:{name}] worktree {wt} ({exists}); "
                       f"prompt {len(message)} chars (pitfalls {len(mem)}); "
-                      f"perm={perm}; model={model}; cli={claude_cli}")
+                      f"perm={perm}; model={wm}; "
+                      f"mcp={_mcp_config_for_worker(name).name}; cli={claude_cli}")
                 continue
             if mem:
                 print(f"[spawn:{name}] memory: pitfalls injected ({len(mem)} chars) "
@@ -597,7 +633,8 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
             _write_skeleton_status(name, wt)
             _commit_scaffold(name, wt)
             _prime_trust(wt)
-            launcher = _write_launcher(name, wt, message, claude_cli, perm, model)
+            worker_model = _model_for_worker(name, model)
+            launcher = _write_launcher(name, wt, message, claude_cli, perm, worker_model)
             method = _launch_window(name, launcher)
             _set_worker_state(
                 name,
@@ -1046,7 +1083,7 @@ def _harvest_pitfalls(name: str, status_text: str) -> int:
         existing = PITFALLS_FILE.read_text(encoding="utf-8") if PITFALLS_FILE.is_file() else ""
     except OSError:
         existing = ""
-    existing_sigs = {_pitfall_sig(l) for l in existing.splitlines() if l.strip()}
+    existing_sigs = {_pitfall_sig(line) for line in existing.splitlines() if line.strip()}
     new: list[str] = []
     for e in entries:
         sig = _pitfall_sig(e)
@@ -1141,6 +1178,32 @@ def cmd_integrate(name: str, dry_run: bool) -> int:
         print(f"[integrate:{name}] no commits ahead of {BASE_BRANCH} — nothing to merge.",
               file=sys.stderr)
         return 1
+
+    # ACCEPTANCE GATE (durable machine-checkable JSON). If the worker has a gate
+    # file, it must be GREEN before we touch main. acceptance_gate.py RE-RUNS the
+    # objective checks (ruff/tsc/pytest), so a worker's optimistic passes:true
+    # cannot survive a failing command — the guard against hallucinated "done".
+    # Workers without a gate file are not blocked (backward-compatible).
+    gate_file = COORD_DIR / "acceptance" / f"{name}.json"
+    if gate_file.is_file():
+        gate = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "acceptance_gate.py"), "check", name],
+            cwd=str(REPO_ROOT), capture_output=True, text=True,
+        )
+        if gate.stdout:
+            print(gate.stdout.rstrip())
+        if gate.returncode != 0:
+            if gate.stderr:
+                print(gate.stderr.rstrip(), file=sys.stderr)
+            print(f"⚠ worker {name}: acceptance gate RED — refuse to integrate.",
+                  file=sys.stderr)
+            return 1
+        print(f"[integrate:{name}] acceptance gate GREEN ✓")
+    else:
+        print(f"[integrate:{name}] no acceptance gate "
+              f"(coordination/acceptance/{name}.json); skipping machine gate. "
+              f"Seed one with acceptance_gate.py init to enforce objective checks.",
+              file=sys.stderr)
 
     method = "merge"
     proc = _git_run(["merge", "--no-ff", branch, "-m",
