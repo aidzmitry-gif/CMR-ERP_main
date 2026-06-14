@@ -1105,6 +1105,61 @@ def _harvest_pitfalls(name: str, status_text: str) -> int:
     return len(new)
 
 
+def cmd_pitfalls_distill(prune: bool, dry_run: bool) -> int:
+    """Анализ и КОНСЕРВАТИВНАЯ чистка pitfalls.md (вшивается в каждый промпт). По
+    умолчанию — только отчёт (размер, записи, дубли). С --prune-dupes удаляет ТОЛЬКО
+    записи-дубли внутри авто-блоков (## Авто-добавлено …); курируемые секции и
+    преамбулу не трогает."""
+    if not PITFALLS_FILE.is_file():
+        print("pitfalls.md не найден", file=sys.stderr)
+        return 1
+    lines = PITFALLS_FILE.read_text(encoding="utf-8").splitlines()
+    seen: dict[str, int] = {}
+    total = 0
+    dup_lines: list[int] = []
+    dup_preview: list[str] = []
+    in_auto = False
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if s.startswith("## "):
+            in_auto = "авто-добавлено" in s.lower()
+            continue
+        m = re.match(r"(?:[-*]\s+|\d+[.)]\s+)(.+)", s)
+        if not m:
+            continue
+        sig = _pitfall_sig(m.group(1))
+        if not sig:
+            continue
+        total += 1
+        if sig in seen:
+            if in_auto:
+                dup_lines.append(i)
+                dup_preview.append(m.group(1).strip())
+        else:
+            seen[sig] = i
+    size = sum(len(ln.encode("utf-8")) + 1 for ln in lines)
+    print(f"pitfalls.md: {size} байт · {total} записей · {len(seen)} уникальных · "
+          f"{len(dup_lines)} дублей в авто-блоках")
+    if size > PITFALLS_SIZE_WARN:
+        print(f"  ⚠ > {PITFALLS_SIZE_WARN} байт — вшивается в КАЖДЫЙ промпт воркера")
+    for e in dup_preview[:15]:
+        print(f"  dup: {e[:80]}")
+    if not dup_lines:
+        print("  дублей-кандидатов нет.")
+        return 0
+    if not prune:
+        print("  → --prune-dupes удалит эти дубли (курируемые секции не трогаются)")
+        return 0
+    drop = set(dup_lines)
+    kept = [ln for i, ln in enumerate(lines) if i not in drop]
+    if dry_run:
+        print(f"  [dry-run] удалил бы {len(drop)} строк-дублей")
+        return 0
+    PITFALLS_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    print(f"  ✓ удалено {len(drop)} дублей из авто-блоков. Закоммить при желании.")
+    return 0
+
+
 # ─── integrate ──────────────────────────────────────────────────────────────────
 
 
@@ -1249,6 +1304,42 @@ def cmd_integrate(name: str, dry_run: bool) -> int:
     print(f"[integrate:{name}] done. Close the worker window; then "
           f"`cleanup {name}` to remove the worktree.")
     return 0 if smoke_ok else 1
+
+
+def _complete_workers() -> list[str]:
+    """Воркеры с живым worktree и статусом COMPLETE/VERIFIED — кандидаты на интеграцию."""
+    out: list[str] = []
+    for n in _list_available():
+        if not _worktree_path(n).is_dir():
+            continue
+        g = _worker_git_state(n)
+        st = (g.status_state or "").upper() if g else ""
+        if "COMPLETE" in st or "VERIFIED" in st:
+            out.append(n)
+    return out
+
+
+def cmd_integrate_all(dry_run: bool) -> int:
+    """Батч-интеграция всех COMPLETE-воркеров по очереди. Каждый проходит тот же
+    acceptance-гейт + smoke, что и одиночный integrate — красные не сливаются."""
+    workers = _complete_workers()
+    if not workers:
+        print("[integrate --all-complete] нет воркеров в COMPLETE.", file=sys.stderr)
+        return 1
+    print(f"[integrate --all-complete] кандидаты ({len(workers)}): {', '.join(workers)}")
+    ok: list[str] = []
+    failed: list[str] = []
+    for n in workers:
+        print(f"\n===== integrate {n} =====")
+        rc = cmd_integrate(n, dry_run)
+        (ok if rc == 0 else failed).append(n)
+    print(f"\n[integrate --all-complete] итог: {len(ok)} ok, {len(failed)} fail "
+          f"(из {len(workers)}).")
+    if ok:
+        print(f"  ok:   {', '.join(ok)}")
+    if failed:
+        print(f"  fail: {', '.join(failed)}")
+    return 0 if not failed else 1
 
 
 def _write_report(name: str, wt: Path, branch: str, unique: list[str],
@@ -1408,8 +1499,16 @@ def main(argv: list[str] | None = None) -> int:
     tl.add_argument("-n", type=int, default=20)
 
     ig = sub.add_parser("integrate", help=f"merge worker branch -> {BASE_BRANCH} + smoke + report")
-    ig.add_argument("name")
+    ig.add_argument("name", nargs="?")
+    ig.add_argument("--all-complete", action="store_true",
+                    help="integrate every COMPLETE worker (each gated) instead of one name")
     ig.add_argument("--dry-run", action="store_true")
+
+    pd = sub.add_parser("pitfalls-distill",
+                        help="отчёт по pitfalls.md + чистка дублей в авто-блоках")
+    pd.add_argument("--prune-dupes", action="store_true",
+                    help="удалить дубли из авто-блоков (курируемое не трогает)")
+    pd.add_argument("--dry-run", action="store_true")
 
     cl = sub.add_parser("cleanup", help="retire fully-merged workers (stop+close window, remove worktree + branch)")
     cl.add_argument("names", nargs="*")
@@ -1445,7 +1544,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "tail":
         return cmd_tail(args.name, args.n)
     if args.cmd == "integrate":
+        if args.all_complete:
+            return cmd_integrate_all(args.dry_run)
+        if not args.name:
+            print("integrate: укажи <name> или --all-complete", file=sys.stderr)
+            return 1
         return cmd_integrate(args.name, args.dry_run)
+    if args.cmd == "pitfalls-distill":
+        return cmd_pitfalls_distill(args.prune_dupes, args.dry_run)
     if args.cmd == "cleanup":
         return cmd_cleanup(args.names, args.dry_run)
     if args.cmd == "stop":
