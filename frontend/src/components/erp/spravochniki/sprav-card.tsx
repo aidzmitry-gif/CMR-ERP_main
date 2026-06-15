@@ -3,10 +3,18 @@
 import { Mail, Phone, Star, User } from "lucide-react";
 
 import type { CounterpartyCard } from "@/lib/reference-data";
-import { formatAuditDate, groupAliasesBySource } from "@/lib/spravochniki-card";
+import { formatAuditDate } from "@/lib/spravochniki-card";
+
+/** Русское склонение существительного по числу: [1, 2-4, 5+]. */
+function plural(n: number, forms: [string, string, string]): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return forms[0];
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1];
+  return forms[2];
+}
 
 export function SpravCard({ card }: { card: CounterpartyCard }) {
-  const aliasesBySource = groupAliasesBySource(card.aliases);
   const sourceCount = card.aliases.length;
 
   return (
@@ -124,26 +132,24 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
               <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
                 <Star className="h-4 w-4 fill-brand text-brand" />
                 {sourceCount > 0
-                  ? `Собрана из ${sourceCount} источник${sourceCount === 1 ? "а" : "ов"}`
+                  ? `Собрана из ${sourceCount} ${plural(sourceCount, ["источника", "источника", "источников"])}`
                   : "Эталон без алиасов"}
               </p>
-              {Object.keys(aliasesBySource).length > 0 && (
+              {card.aliases.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  {Object.entries(aliasesBySource).map(([source, list]) =>
-                    list.map((a) => (
-                      <div
-                        key={`${source}-${a.external_ref}`}
-                        className="flex items-center justify-between gap-2"
-                      >
-                        <span className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">
-                          {source} · {a.external_ref}
-                        </span>
-                        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
-                          alias
-                        </span>
-                      </div>
-                    )),
-                  )}
+                  {card.aliases.map((a) => (
+                    <div
+                      key={`${a.source}-${a.external_ref}`}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">
+                        {a.source} · {a.external_ref}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                        alias
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
               <p className="mt-3 text-[11px] text-slate-400">

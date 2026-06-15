@@ -1,23 +1,13 @@
-import type { CounterpartyAlias } from "@/lib/reference-data";
-
-/** Group aliases by source name for display in the Golden Record section. */
-export function groupAliasesBySource(
-  aliases: CounterpartyAlias[],
-): Record<string, CounterpartyAlias[]> {
-  const result: Record<string, CounterpartyAlias[]> = {};
-  for (const alias of aliases) {
-    if (!result[alias.source]) result[alias.source] = [];
-    result[alias.source].push(alias);
-  }
-  return result;
-}
-
-/** Format ISO timestamp to DD.MM.YYYY using UTC date parts to avoid TZ drift. */
-export function formatAuditDate(isoTs: string): string {
-  const d = new Date(isoTs);
-  return [
-    String(d.getUTCDate()).padStart(2, "0"),
-    String(d.getUTCMonth() + 1).padStart(2, "0"),
-    String(d.getUTCFullYear()),
-  ].join(".");
+/**
+ * Формат даты аудита DD.MM.YYYY из значения, которое отдаёт backend (`str(datetime)`).
+ *
+ * Backend сериализует через `str()`, поэтому строка — `"2026-06-15 23:30:00.123456"`
+ * (разделитель пробел, не `T`) или с офсетом `…+00:00`. `new Date()` на такой форме
+ * ведёт себя по-разному в разных движках (naive → как локальное время → сдвиг дня в
+ * `getUTC*`; строгие движки → Invalid Date → `NaN.NaN.NaN`). Берём календарную дату
+ * прямо из ведущих `YYYY-MM-DD` — они одинаковы при любом разделителе и таймзоне.
+ */
+export function formatAuditDate(ts: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ts);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : ts;
 }

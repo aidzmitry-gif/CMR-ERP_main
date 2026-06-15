@@ -323,8 +323,9 @@ async def main() -> None:
             c.code: c for c in (await s.execute(select(NomenclatureCategory))).scalars().all()
         }
         for code, _name, parent_code in CATEGORY_DEFS:
-            if parent_code and cat_by_code[code].parent_id is None:
-                cat_by_code[code].parent_id = cat_by_code[parent_code].id
+            cat, parent = cat_by_code.get(code), cat_by_code.get(parent_code)
+            if cat and parent and cat.parent_id is None:
+                cat.parent_id = parent.id
 
         # Номенклатура (по коду, идемпотентно) — с привязкой к группе.
         existing_codes = set((await s.execute(select(Sku.code))).scalars().all())
