@@ -866,26 +866,6 @@
     </div>
   </div>
 
-  <!-- ════ Модалка: Личный план на следующий месяц → РОПу ════ -->
-  <div class="modal-ov" id="m-plan">
-    <div class="modal wide">
-      <div class="m-head"><h2>Мой план на июль · согласование с РОПом</h2><button class="x" data-close>✕</button></div>
-      <div class="m-body">
-        <div class="plan-hint">Учтите согласованный план июня и текущий темп. «Прогноз факта» — куда выходите при нынешнем темпе. Поставьте цель на июль и отправьте РОПу.</div>
-        <table class="plan-tbl">
-          <thead><tr>
-            <th>Показатель</th><th class="r">План июня</th><th class="r">Факт сейчас</th>
-            <th class="r">Прогноз факта</th><th class="r">План июля</th>
-          </tr></thead>
-          <tbody id="plan-rows"></tbody>
-        </table>
-      </div>
-      <div class="m-foot">
-        <button class="mbtn ghost" data-close>Сохранить черновик</button>
-        <button class="mbtn primary" id="plan-submit">Отправить РОПу на согласование</button>
-      </div>
-    </div>
-  </div>
 
   <!-- ════ Модалка: Фильтры (сборные параметры) ════ -->
   <div class="modal-ov" id="m-filter">
@@ -1619,33 +1599,11 @@
   document.getElementById('cw-send').addEventListener('click', sendMsg);
   document.getElementById('cw-input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
 
-  /* ════════════════ ПЛАНИРОВАНИЕ: личный план на следующий месяц → РОПу ════════════════ */
+  /* ════════════════ ПЛАНИРОВАНИЕ: «Составить план» → конструктор плана продавца ════════════════ */
+  // Продавец нажимает «Составить план» → попадает в полноценный конструктор
+  // (декомпозиция по действиям из 3 источников), а не в быстрый модальный список.
   document.getElementById('planBtn').addEventListener('click', ()=>{
-    const rows = DATA.month, el = PERIODS.month.el;
-    const tb = document.getElementById('plan-rows'); tb.innerHTML='';
-    rows.forEach(([lbl,fact,plan,kind,unit])=>{
-      const isRate = kind==='pct' || lbl.indexOf('чек')>=0;
-      const proj = isRate ? fact : Math.round(fact*100/el);
-      const projPct = Math.round(proj/plan*100);
-      const pc = projPct>=100?'ok':projPct>=85?'warn':'bad';
-      // план июля по умолчанию = прогноз факта (деньги округляем до тысяч, счётные — как есть)
-      const julyDefault = isRate ? plan : (kind==='money' ? Math.round(proj/1000)*1000 : proj);
-      tb.innerHTML += `<tr>
-        <td class="mname">${lbl}</td>
-        <td class="r">${fmtVal(plan,kind)}</td>
-        <td class="r">${fmtVal(fact,kind)}</td>
-        <td class="r proj-cell ${pc}">${fmtVal(proj,kind)} <span style="font-weight:400;color:#9aa3b0">(${projPct}%)</span></td>
-        <td class="r"><input type="text" value="${fmtVal(julyDefault,kind)}"></td>
-      </tr>`;
-    });
-    openModal('m-plan');
-  });
-  document.getElementById('plan-submit').addEventListener('click', ()=>{
-    closeModal(document.getElementById('m-plan'));
-    const st = document.getElementById('planStatus');
-    st.textContent = '● План на июль отправлен — на согласовании у РОПа';
-    st.className = 'pb-status pending';
-    document.getElementById('planBtn').style.display = 'none';
+    location.href = 'sales-plan-builder.html?period=2026-07';
   });
 
   // ── старт: общий вид «Все вместе» (после того как FIELD_SEL объявлен) ──
