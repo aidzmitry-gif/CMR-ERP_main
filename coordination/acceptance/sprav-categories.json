@@ -1,0 +1,49 @@
+{
+  "worker": "sprav-categories",
+  "checks": [
+    {
+      "id": "types",
+      "kind": "types",
+      "desc": "tsc --noEmit чисто на frontend/",
+      "cmd": "cd frontend && node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+      "passes": true,
+      "evidence": "Exit 0, no output — 0 ошибок"
+    },
+    {
+      "id": "vitest",
+      "kind": "test",
+      "desc": "vitest: spravochniki-categories.test.ts зелёный",
+      "cmd": "cd frontend && node node_modules/.bin/vitest run src/lib/spravochniki-categories.test.ts",
+      "passes": true,
+      "evidence": "Test Files 1 passed (1); Tests 14 passed (14); Duration 1.81s"
+    },
+    {
+      "id": "tree-renders",
+      "kind": "manual",
+      "desc": "/erp/spravochniki/categories рендерит дерево групп",
+      "passes": true,
+      "evidence": "SSR page.tsx вызывает fetchNomenclatureGroups({roles}) -> передаёт initial в SpravCategories; компонент вызывает buildCategoryTree(filtered) и рендерит TreeNodeRow на каждый корень; graceful degrade при пустом initial — показывает 'Нет данных'"
+    },
+    {
+      "id": "crud",
+      "kind": "manual",
+      "desc": "CRUD (добавить/переименовать/переместить/архивировать) обновляет дерево",
+      "passes": true,
+      "evidence": "handleAdd/handleRename/handleMove/handleArchive вызывают create/patch/archiveNomenclatureGroup из reference-data.ts, затем reload() -> refetchGroups('/api/system/refs/nomenclature-groups') -> setGroups(fresh); дерево пересчитывается через useMemo"
+    },
+    {
+      "id": "graceful-degrade",
+      "kind": "manual",
+      "desc": "Без бэкенда — пустое состояние, не падает",
+      "passes": true,
+      "evidence": "initial=[] -> tree=[] -> показывает 'Нет данных. Добавьте первую категорию.'; refetchGroups() обёрнут try/catch -> возвращает [] при ошибке; fetchNomenclatureGroups в reference-data.ts тоже try/catch -> []"
+    },
+    {
+      "id": "scope-only",
+      "kind": "manual",
+      "desc": "Тронуты только файлы scope",
+      "passes": true,
+      "evidence": "Созданы только: app/erp/spravochniki/categories/page.tsx, components/erp/spravochniki/sprav-categories.tsx, lib/spravochniki-categories.ts, lib/spravochniki-categories.test.ts. reference-data.ts не тронут."
+    }
+  ]
+}
