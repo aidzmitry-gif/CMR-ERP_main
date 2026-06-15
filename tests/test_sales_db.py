@@ -42,7 +42,7 @@ async def test_board_groups_by_stage(api):
     r = await api.get("/sales/board")
     assert r.status_code == 200
     data = r.json()
-    assert len(data["stages"]) == 6  # + «Закрыто: Отказ» (SALES-40)
+    assert len(data["stages"]) == 11  # 9-стадийная воронка 2.0 + cond_lost/lost
     stages = {s["id"]: s for s in data["stages"]}
     assert stages["new"]["count"] == 1
     assert stages["new"]["sum"] == 100

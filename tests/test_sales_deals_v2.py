@@ -83,7 +83,7 @@ async def test_lost_column_on_board(api):
     board = (await api.get("/sales/board")).json()
     stages = {s["id"]: s for s in board["stages"]}
     assert "lost" in stages
-    assert stages["lost"]["title"] == "Закрыто: Отказ"
+    assert stages["lost"]["title"] == "Отказ"
     assert stages["lost"]["count"] == 1
     assert stages["lost"]["sum"] == 700
 
@@ -114,12 +114,12 @@ async def test_win_deal(session, api):
 async def test_stage_history_recorded(api):
     deal = await _new_deal(api, "H-1", stage="new")
     await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "qual"})
-    await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "prop"})
+    await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "price_req"})
 
     hist = (await api.get(f"/sales/deals/{deal['id']}/history")).json()
     transitions = [(h["from_stage"], h["to_stage"]) for h in hist]
     assert ("new", "qual") in transitions
-    assert ("qual", "prop") in transitions
+    assert ("qual", "price_req") in transitions
 
 
 async def test_stage_change_updates_stage_changed_at(session, api):
@@ -175,14 +175,14 @@ async def test_probability_patch(api):
 
 async def test_board_weighted(api):
     # явная вероятность
-    await _new_deal(api, "WT-1", stage="prop", amount=1000, probability=20)
-    # без вероятности → дефолт стадии prop = 50%
-    await _new_deal(api, "WT-2", stage="prop", amount=1000)
+    await _new_deal(api, "WT-1", stage="has_price", amount=1000, probability=20)
+    # без вероятности → дефолт стадии has_price = 45%
+    await _new_deal(api, "WT-2", stage="has_price", amount=1000)
 
     board = (await api.get("/sales/board")).json()
-    prop = next(s for s in board["stages"] if s["id"] == "prop")
-    assert prop["sum"] == 2000
-    assert prop["weighted"] == 200 + 500  # 1000*20% + 1000*50%(дефолт)
+    col = next(s for s in board["stages"] if s["id"] == "has_price")
+    assert col["sum"] == 2000
+    assert col["weighted"] == 200 + 450  # 1000*20% + 1000*45%(дефолт)
 
 
 # ── SALES-49: непрочитанные сообщения ──────────────────────────────────────
