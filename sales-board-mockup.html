@@ -171,6 +171,7 @@
   .col-head .ch-title .n{font-size:12px;color:#9aa3b0;font-weight:600;background:#F4F5F7;border-radius:6px;padding:1px 8px}
   .col-head .ch-meta{font-size:12px;color:var(--muted);margin-top:3px}
   .col-head .ch-weight{font-size:11.5px;font-weight:600;color:var(--brand-700);margin-top:2px}
+  .col-head .ch-margin{font-size:11px;font-weight:700;color:#047857;margin-top:1px}
 
   .card{background:#fff;border-radius:12px;box-shadow:var(--shadow-card);padding:13px;cursor:pointer;transition:box-shadow .15s}
   .card:hover{box-shadow:var(--shadow-pop)}
@@ -411,9 +412,11 @@
       <div class="pl-sep"></div>
       <div class="pl-item"><span class="pl-key">Сумма pipeline:</span> <b id="pl-sum">312 400 Br</b></div>
       <div class="pl-sep"></div>
-      <div class="pl-item"><span class="pl-key">Взвешенный прогноз:</span> <b id="pl-weight" style="color:var(--brand-700)">≈ 168 200 Br</b></div>
+      <div class="pl-item"><span class="pl-key">Взвешенный прогноз <span style="font-weight:400;color:#9aa3b0">(выручка)</span>:</span> <b id="pl-weight" style="color:var(--brand-700)">≈ 168 200 Br</b></div>
       <div class="pl-sep"></div>
-      <div class="pl-item"><span class="pl-key">Висяки &gt;7 дн:</span> <b style="color:#B45309">6</b></div>
+      <div class="pl-item"><span class="pl-key">Прогноз маржи <span style="font-weight:400;color:#9aa3b0" title="Демо-ставка маржи 22%. Реальная маржа — из landed cost (закупки), методика цены ещё разрабатывается.">(вал. прибыль · демо&nbsp;22%)</span>:</span> <b id="pl-margin" style="color:#047857">≈ 37 000 Br</b></div>
+      <div class="pl-sep"></div>
+      <div class="pl-item"><span class="pl-key">Висяки &gt;7 дн:</span> <b id="pl-stuck" style="color:#B45309">6</b></div>
       <span class="chip">Закроем месяц на ~92% плана</span>
     </div>
 
@@ -1024,7 +1027,8 @@
     document.getElementById('pl-sum').textContent = m.pl.sum;
     document.getElementById('pl-weight').textContent = m.pl.weight;
     document.querySelector('.pipeline .chip').textContent = m.pl.chip;
-    document.querySelectorAll('.pipeline .pl-item b')[3].textContent = m.pl.stuck;
+    document.getElementById('pl-stuck').textContent = m.pl.stuck;
+    annotateMargin();   // пересчитать прогноз маржи под новую взвешенную выручку
   }
 
   document.getElementById('periods').addEventListener('click', e=>{
@@ -1298,8 +1302,32 @@
       boardEl.innerHTML = curFunnel==='repeat'?FUNNEL_REPEAT : curFunnel==='tender'?FUNNEL_TENDER : FUNNEL_NEW; }
     applyCardFields();
     markActionDates();
+    annotateMargin();
     document.getElementById('filterBtn').classList.remove('warn');
     document.getElementById('stuckBtn').classList.remove('on');
+  }
+  // ── второй взвешенный показатель: «прогноз маржи» = взвешенная выручка × демо-ставка маржи ──
+  // hoisted-функция со всеми хелперами ВНУТРИ: вызывается и из ранней render() (до const boardEl/helpers — TDZ)
+  // ponytail: демо-ставка-константа; в проде — маржа из landed cost по строкам (методика цены, задача №0)
+  function annotateMargin(){
+    const DEMO_MARGIN = 0.22;
+    const fmtBr = n => Math.round(n).toLocaleString('ru-RU').replace(/,/g,' ') + ' Br';
+    const numOf = s => parseInt((s||'').replace(/[^\d]/g,'')) || 0;   // «взвешенно: 8 450 Br» → 8450
+    // по колонкам: под строкой «взвешенно/прогноз: N Br» добавить «прогноз маржи ~M Br»
+    const board = document.querySelector('.board');
+    board && board.querySelectorAll('.ch-weight').forEach(w=>{
+      w.parentElement.querySelector('.ch-margin')?.remove();
+      const rev = numOf(w.textContent);
+      if(!rev) return;
+      const m = document.createElement('div');
+      m.className = 'ch-margin';
+      m.textContent = `прогноз маржи: ~${fmtBr(rev*DEMO_MARGIN)}`;
+      w.insertAdjacentElement('afterend', m);
+    });
+    // шапка pipeline: прогноз маржи из взвешенной выручки
+    const plMargin = document.getElementById('pl-margin');
+    if(plMargin){ const rev = numOf(document.getElementById('pl-weight').textContent);
+      plMargin.textContent = '≈ ' + fmtBr(rev*DEMO_MARGIN); }
   }
   // подсветить карточки с действием сегодня/завтра (видно в стадийном канбане)
   function markActionDates(){
