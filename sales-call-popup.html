@@ -252,6 +252,19 @@
   .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
   .st-legend{display:flex;gap:14px;font-size:11px;color:#6B7280;margin-top:11px;flex-wrap:wrap}
 
+  /* маршрутизация обращения в итоге звонка */
+  .route{border:1px solid #DDD6FE;background:#F5F3FF;border-radius:11px;padding:11px 13px;margin-bottom:14px}
+  .route .rl{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#6d28d9;margin-bottom:7px;display:flex;align-items:center;gap:6px}
+  .route .rl .scen{margin-left:auto;display:flex;gap:4px}
+  .route .rl .scen b{font-size:9.5px;font-weight:700;text-transform:none;letter-spacing:0;border:1px solid #DDD6FE;border-radius:6px;padding:2px 6px;color:#6d28d9;cursor:pointer;background:#fff}
+  .route .rl .scen b.on{background:#6d28d9;color:#fff;border-color:#6d28d9}
+  .route .rtarget{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:#1F2937}
+  .route .rtarget .ic{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid #E9D5FF;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+  .route select{width:100%;border:1px solid #DDD6FE;border-radius:9px;padding:8px 10px;font-size:12.5px;font-family:inherit;background:#fff;margin-top:8px}
+  .route .rnote{font-size:11px;color:#6d28d9;margin-top:7px;line-height:1.45}
+  .route.warn{border-color:#FDE68A;background:#FFFBEB}.route.warn .rl,.route.warn .rnote{color:#B45309}.route.warn .rtarget .ic{border-color:#FDE68A}
+  .route.new{border-color:#A7F3D0;background:#ECFDF5}.route.new .rl,.route.new .rnote{color:#047857}.route.new .rtarget .ic{border-color:#A7F3D0}
+
   /* список людей для переадресации */
   .people{display:flex;flex-direction:column;gap:7px}
   .person{display:flex;align-items:center;gap:11px;border:1px solid #EEF0F2;border-radius:11px;padding:9px 11px;cursor:pointer}
@@ -689,6 +702,8 @@ const VIEWS = {
         <div class="cp-h-t"><div class="cp-ttl">Звонок завершён · 03:48</div><div class="cp-line">ОАО «Белтранс» · CRM-1029</div></div>
       </div>
       <div class="cp-body">
+        <div class="route" id="routeBox"></div>
+
         <div class="fld">
           <div class="l">Результат звонка</div>
           <div class="seg">
@@ -729,15 +744,15 @@ const VIEWS = {
         </details>
 
         <div class="cp-actions">
-          <button class="accept" onclick="location.href='sales-card-full.html'">💾 Сохранить в сделку</button>
+          <button class="accept" onclick="saveAndClose()">💾 Сохранить и закрыть</button>
         </div>
         <div class="cp-sub">
-          <span onclick="toast('➕ Задача поставлена · добавлена в сделку')">➕ Поставить задачу</span>
+          <span onclick="openNote()">➕ Поставить задачу</span>
           <span onclick="show('live')">🧾 Выставить счёт</span>
           <span onclick="show('known')">✕ Закрыть</span>
         </div>
       </div>
-      <div class="src">📝 Результат пишется в call_log и в хронологию сделки</div>
+      <div class="src">📝 Обращение уже в call_log · результат, запись и AI-резюме автосохраняются в выбранную сделку</div>
     </div>`
   }
 };
@@ -1042,9 +1057,59 @@ function saveNote(){
 }
 function closeNote(){ document.getElementById('noteOv').classList.remove('show'); }
 
+/* ── маршрутизация обращения (правило: любой звонок → запись в систему) ── */
+/* сценарии резолва клиента после звонка */
+const ROUTE_SCEN={
+  one:  {cls:'',     client:'ОАО «Белтранс»', deals:[{id:'CRM-1029',t:'Договор · 46 800 Br'}],
+         rule:'У клиента одна активная сделка — запись звонка уходит в неё автоматически.'},
+  many: {cls:'',     client:'ОАО «Белтранс»', deals:[{id:'CRM-1029',t:'Договор · 46 800 Br'},{id:'CRM-1044',t:'Счёт отправлен · 12 300 Br'},{id:'CRM-1051',t:'Новая заявка · зарядные'}],
+         rule:'У клиента несколько сделок — выберите, в какую записать обращение.'},
+  none: {cls:'warn',  client:'Автопарк №7', deals:[],
+         rule:'Активных сделок нет → создаём новую сделку (короткая воронка). Обращение нельзя потерять.'},
+  lead: {cls:'new',   client:'Новый клиент · +375 44 100-22-33', deals:[],
+         rule:'Клиента нет в базе → обращение в лиды. Спец по лидам / ИИ квалифицирует и распределит по продавцам, создав сделку.'}
+};
+let _routeScen='one';
+function setRoute(s){ _routeScen=s; renderRoute(); }
+function renderRoute(){
+  const box=document.getElementById('routeBox'); if(!box) return;
+  const sc=ROUTE_SCEN[_routeScen];
+  const tabs=`<span class="scen">
+    <b class="${_routeScen==='one'?'on':''}" onclick="setRoute('one')">1 сделка</b>
+    <b class="${_routeScen==='many'?'on':''}" onclick="setRoute('many')">неск.</b>
+    <b class="${_routeScen==='none'?'on':''}" onclick="setRoute('none')">нет сделок</b>
+    <b class="${_routeScen==='lead'?'on':''}" onclick="setRoute('lead')">новый</b></span>`;
+  let target, sel='';
+  if(_routeScen==='lead'){
+    target=`<div class="ic">🧲</div><div>В лиды · ${sc.client}<div style="font-size:11px;font-weight:500;color:#047857;margin-top:1px">после квалификации → сделка нужному продавцу</div></div>`;
+  } else if(_routeScen==='none'){
+    target=`<div class="ic">➕</div><div>Новая сделка · ${sc.client}<div style="font-size:11px;font-weight:500;color:#B45309;margin-top:1px">короткая воронка · ответственный — вы</div></div>`;
+  } else if(sc.deals.length===1){
+    target=`<div class="ic">📋</div><div>${sc.deals[0].id} · ${sc.client}<div style="font-size:11px;font-weight:500;color:#6B7280;margin-top:1px">${sc.deals[0].t}</div></div>`;
+  } else {
+    target=`<div class="ic">📋</div><div>${sc.client}<div style="font-size:11px;font-weight:500;color:#6B7280;margin-top:1px">${sc.deals.length} активных сделки — выберите</div></div>`;
+    sel=`<select id="routeDeal">${sc.deals.map(d=>`<option>${d.id} · ${d.t}</option>`).join('')}<option>➕ Новая сделка</option></select>`;
+  }
+  box.className='route '+sc.cls;
+  box.innerHTML=`<div class="rl">📍 Куда записать обращение ${tabs}</div>
+    <div class="rtarget">${target}</div>${sel}
+    <div class="rnote">⚡ ${sc.rule}</div>`;
+}
+function saveAndClose(){
+  const sc=ROUTE_SCEN[_routeScen];
+  let where;
+  if(_routeScen==='lead') where='лид создан · уйдёт на квалификацию';
+  else if(_routeScen==='none') where='создана новая сделка';
+  else if(sc.deals.length>1){ const d=(document.getElementById('routeDeal')||{}).value||sc.deals[0].id; where='записано в '+d.split(' · ')[0]; }
+  else where='записано в '+sc.deals[0].id;
+  toast(`💾 Звонок сохранён · ${where} · запись и AI-резюме в хронологии`);
+  setTimeout(()=>location.href='sales-card-full.html', 900);
+}
+
 function show(key, btn){
   document.getElementById('pop').innerHTML = VIEWS[key].html;
   document.getElementById('hint').textContent = VIEWS[key].hint;
+  if(key==='done') renderRoute();
   const btns=document.querySelectorAll('.states button');
   if(btn){ btns.forEach(b=>b.classList.remove('on')); btn.classList.add('on'); }
   else { btns.forEach(b=>b.classList.remove('on')); const map={known:0,nodeals:1,unknown:2,live:3,livenew:4,done:5}; if(map[key]!=null) btns[map[key]].classList.add('on'); }
