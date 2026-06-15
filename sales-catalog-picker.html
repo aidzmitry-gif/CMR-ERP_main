@@ -270,7 +270,7 @@
     return `<div class="pcard ${inCart?'added':''}">
       <div class="pic">${p.pic}</div>
       <div class="pinfo">
-        <div class="pname">${p.sku} <a class="info" href="sales-product-card.html" title="Карточка товара">ℹ карточка</a></div>
+        <div class="pname">${p.sku} <span class="info" onclick="toast('ℹ Карточка товара — в модуле «Справочники» (МДМ): атрибуты, фото, проверка, история цены')" title="Карточка товара — в Справочниках">ℹ карточка</span></div>
         <div class="pmeta"><span class="art">арт. ${p.art}</span><span>ШК ${p.bar}</span></div>
         ${stockHtml(p)}
       </div>
