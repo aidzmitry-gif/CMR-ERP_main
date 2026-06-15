@@ -21,6 +21,14 @@
 2. **Python — только через venv.** Запускай `& ".\.venv\Scripts\python.exe" …`,
    а не голый `python` (его может не быть в PATH / быть не тот).
 
+2b. **СИМПТОМ: первое сообщение воркеру пришло «обрезанным»** — виден только заголовок
+   `=== WORKER ENGINEERING STANDARDS ===`, а тело (стандарты/scope/задача) пустое. Причина:
+   инъекция большого первого промпта на Windows иногда теряет тело. → **НЕ зависай и не проси
+   уточнить вживую.** Задание и стандарты ВСЕГДА лежат на диске твоего worktree — прочитай их
+   сам: `coordination/worker-engineering-standards.md`, `coordination/sprav-fe-common.md`
+   (или твой общий контракт), `coordination/<name>-scope.md`, `coordination/first-msgs/<name>.md`.
+   Имя `<name>` = имя твоей ветки/worktree. Прочитал — выполняй.
+
 ## Backend (FastAPI · async SQLAlchemy 2 · Alembic)
 
 3. **`no such column …` на старте или в тестах** — `create_all` НЕ мигрирует уже
