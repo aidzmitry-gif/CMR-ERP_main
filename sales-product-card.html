@@ -96,6 +96,51 @@
   .modal .mh .x{cursor:pointer;color:#94A3B8}
   .modal .mb{aspect-ratio:4/3;background:linear-gradient(135deg,#EEF2F7,#E2E8F0);display:flex;align-items:center;justify-content:center;font-size:80px;color:#94A3B8}
   .modal .mcap{padding:11px 16px;font-size:12.5px;color:var(--muted)}
+
+  /* редактирование */
+  .head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn-edit,.btn-save,.btn-cancel{font:inherit;font-size:13px;font-weight:600;border:none;border-radius:9px;padding:8px 14px;cursor:pointer}
+  .btn-edit{background:var(--brand);color:#fff}
+  .btn-save{background:var(--ok);color:#fff}
+  .btn-cancel{background:#F1F5F9;color:#475569}
+  body.editing .editable{outline:1px dashed #93C5FD;border-radius:6px;padding:1px 6px;cursor:text}
+  body.editing .editable:focus{outline:2px solid var(--brand);background:#fff}
+  .addbtn{display:none}
+  body.editing .addbtn{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;color:var(--brand-700);background:var(--brand-50);border:1px dashed #BFD3FF;border-radius:8px;padding:6px 11px;cursor:pointer;font-weight:600;margin-top:9px}
+
+  /* история цены — заметный заголовок + версии */
+  .ph-head{font-size:12.5px;font-weight:700;color:#475467;padding:11px 0 7px;border-top:1px solid #EEF0F2;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
+  .ph-count{font-weight:600;color:#94A3B8;font-size:11px}
+  .ph-row.now{background:#F0FDF4;border-radius:7px}
+  .ph-row .badge-now{font-size:9px;font-weight:700;background:#DCFCE7;color:#15803D;border-radius:5px;padding:1px 6px;margin-left:6px}
+
+  /* форма «новая цена» */
+  .price-add{display:none;margin-top:10px;gap:8px;flex-wrap:wrap;align-items:center;background:#F8FAFC;border:1px solid #EEF0F2;border-radius:10px;padding:11px}
+  .price-add.show{display:flex}
+  .price-add input{font:inherit;font-size:12.5px;border:1px solid #D8DEE6;border-radius:7px;padding:7px 9px;color:var(--ink)}
+  .price-add .pa-price{width:96px}
+  .price-add .pa-why{flex:1;min-width:130px}
+  .price-add .pa-apply{background:var(--brand);color:#fff;border:none;border-radius:7px;padding:7px 13px;font-weight:600;cursor:pointer;font-size:12.5px}
+
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:#111827;color:#fff;font-size:13px;padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;z-index:300;pointer-events:none;max-width:90vw;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* группа номенклатуры — заметная строка под названием */
+  .group-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;font-size:13px}
+  .group-bar .gb-k{color:var(--muted)}
+  .group-bar .gb-path{font-weight:700;color:#6D28D9;background:#EDE9FE;border-radius:8px;padding:3px 11px}
+  .group-bar .gb-btn{margin-top:0!important}
+
+  /* dev-роль + гейт цен */
+  .role-sel{font:inherit;font-size:12.5px;border:1px solid #D8DEE6;border-radius:9px;padding:8px 10px;color:var(--ink);background:#fff;cursor:pointer}
+  .price-lock{display:none;align-items:center;gap:6px;margin-top:10px;font-size:11.5px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:7px 11px;line-height:1.4}
+  body.noprice .price-lock{display:flex}
+  body.noprice #btnNewPrice{display:none!important}
+
+  /* фактические продажи (прайс vs цена со скидкой) */
+  .sales-tbl td .who{font-weight:600}
+  .sales-foot{padding:9px 12px;font-size:11.5px;color:var(--muted);border-top:1px solid #F1F3F5;line-height:1.5}
+  .src-mini{padding:0 12px 10px;font-size:11px;color:#9aa3b0}
 </style>
 </head>
 <body>
@@ -105,13 +150,27 @@
     <div class="head">
       <div class="htxt">
         <h1 id="pName">АКБ 6СТ-190 (Зубр)</h1>
+        <div class="group-bar">📂 <span class="gb-k">Группа номенклатуры:</span>
+          <span class="gb-path editable" id="pGroup">Аккумуляторы › Грузовые 6СТ</span>
+          <button class="addbtn gb-btn" onclick="changeGroup()">сменить</button>
+        </div>
         <div class="h-sub">
-          <span class="tag grp" id="pGroup">Группа: Аккумуляторы / Грузовые 6СТ</span>
           <span class="tag" id="pArt">Артикул: AKB-6ST-190-ZBR</span>
           <span class="tag" id="pBar">ШК: 4811234567894</span>
           <span class="tag" id="pTnved">ТН ВЭД: 8507 10 920 0</span>
         </div>
-        <div class="src-note">🔗 Атрибуты товара (вес, габариты, ТН ВЭД, фото проверки, ячейка) — из <b>склада/закупок</b> (shared-kernel SKU). Продажи их <b>показывают</b>, не редактируют. Здесь — демо-данные.</div>
+        <div class="src-note">🔗 Карточка <b>справочника номенклатуры</b> (shared-kernel SKU, владелец — склад/закупки). Группа — из справочника <code>core.nomenclature_groups</code>. Прайсовая цена ведётся <b>версиями</b> (SCD2); цена продажи у продавца = прайс − скидка (из сделок). Здесь — демо-данные.</div>
+      </div>
+      <div class="head-actions">
+        <select class="role-sel" id="roleSel" onchange="applyRole()" title="dev-роль (демо доступа)">
+          <option value="sales">👤 Продавец</option>
+          <option value="procurement">📦 Закупщик</option>
+          <option value="deputy">🤝 Зам. директора</option>
+          <option value="director" selected>👑 Директор</option>
+        </select>
+        <button class="btn-edit" id="btnEdit" onclick="toggleEdit()">✏️ Редактировать</button>
+        <button class="btn-save" id="btnSave" onclick="saveEdit()" style="display:none">💾 Сохранить</button>
+        <button class="btn-cancel" id="btnCancel" onclick="cancelEdit()" style="display:none">Отмена</button>
       </div>
     </div>
 
@@ -122,16 +181,25 @@
           <div class="ch">🖼️ Фото товара</div>
           <div class="main" id="galMain">🔋</div>
           <div class="thumbs" id="galThumbs"></div>
+          <div style="padding:0 10px 10px"><button class="addbtn" onclick="addPhoto()">＋ Фото</button></div>
         </div>
 
         <div class="card">
-          <div class="ch">💰 Цена</div>
+          <div class="ch">💰 Прайсовая цена (на продажу)</div>
           <div class="cb">
             <div><span class="price-now" id="pNow">1 100 Br</span><span class="price-was" id="pWas">980 Br</span><span class="price-delta up" id="pDelta">▲ +12,2%</span></div>
             <div class="price-meta" id="pMeta">Действует с 10.06.2026 · прошлая — до 10.06 · валюта BYN, с НДС</div>
+            <div class="price-lock" id="priceLock">🔒 Прайс меняют: <b>закупщик · директор · зам. директора</b>. У продавца — только продажа со скидкой (в сделке).</div>
             <div class="price-hist">
-              <div class="ch" style="padding:8px 0 4px;border:none;font-size:12px;color:var(--muted)">📈 История изменения цены</div>
+              <div class="ph-head">📈 История изменения прайса<span class="ph-count" id="phCount"></span></div>
               <div id="priceHist"></div>
+              <button class="addbtn" id="btnNewPrice" onclick="togglePriceAdd()">＋ Новая цена</button>
+              <div class="price-add" id="priceAdd">
+                <input class="pa-price" id="paPrice" type="number" step="0.01" placeholder="Br" />
+                <input class="pa-date" id="paDate" type="date" />
+                <input class="pa-why" id="paWhy" placeholder="причина изменения" />
+                <button class="pa-apply" onclick="applyPrice()">Применить</button>
+              </div>
             </div>
           </div>
         </div>
@@ -143,12 +211,24 @@
               <thead><tr><th>Склад</th><th class="r">Остаток</th><th class="r">Резерв</th><th class="r">Свободно</th><th class="r">В пути</th><th>Ячейка</th></tr></thead>
               <tbody id="whRows"></tbody>
             </table>
+            <div style="padding:10px"><button class="addbtn" onclick="addWh()">＋ Склад</button></div>
           </div>
         </div>
       </div>
 
-      <!-- ПРАВО: характеристики, проверка, описание -->
+      <!-- ПРАВО: продажи, характеристики, проверка, описание -->
       <div class="col">
+        <div class="card">
+          <div class="ch">🧾 Фактические продажи (прайс − скидка)</div>
+          <div class="cb" style="padding:0">
+            <table class="stbl sales-tbl">
+              <thead><tr><th>Дата</th><th>Продавец</th><th>Клиент</th><th class="r">Прайс</th><th class="r">Скидка</th><th class="r">Цена продажи</th></tr></thead>
+              <tbody id="salesRows"></tbody>
+            </table>
+            <div class="sales-foot" id="salesFoot"></div>
+            <div class="src-mini">Из сделок (модуль продаж): цена продажи = прайс − скидка продавца. Прайс (базовый) — в блоке слева, версионный справочник.</div>
+          </div>
+        </div>
         <div class="card">
           <div class="ch">📐 Габариты, вес, упаковка</div>
           <div class="cb">
@@ -172,8 +252,10 @@
               <span class="k">Результат</span><span class="v" style="color:#15803D" id="cResult">✓ Принято (брак 0,8%)</span>
             </div>
             <div class="check-list" id="checkParams"></div>
+            <button class="addbtn" onclick="addCheck()">＋ Параметр проверки</button>
             <div class="ch" style="padding:10px 0 4px;border:none;font-size:12px;color:var(--muted)">📸 Фото проверки (Китай, до отгрузки)</div>
             <div class="check-photos" id="checkPhotos"></div>
+            <button class="addbtn" onclick="addCheckPhoto()">＋ Фото проверки</button>
           </div>
         </div>
 
@@ -182,6 +264,7 @@
           <div class="cb">
             <div class="desc" id="pDesc">Аккумуляторная батарея 6СТ-190 для грузовой и спецтехники. Технология Ca/Ca, повышенный пусковой ток, виброустойчивое исполнение. Полярность обратная, клеммы конусные. Соответствует ГОСТ.</div>
             <div class="pill-row" id="pSpecs"></div>
+            <button class="addbtn" onclick="addSpec()">＋ Характеристика</button>
           </div>
         </div>
       </div>
@@ -229,6 +312,12 @@
       {ic:'📦',cap:'Упаковка перед отгрузкой'},
     ],
     specs:['12 В','190 А·ч','EN 1250 A','Ca/Ca','обратная полярность','клеммы конус','ГОСТ'],
+    sales:[
+      {dt:'14.06.2026', who:'Макаров', client:'ООО «Автопарк-7»', list:1100, disc:5},
+      {dt:'11.06.2026', who:'Карчевская', client:'ИП Сидорчук', list:1100, disc:0},
+      {dt:'08.06.2026', who:'Кадурин', client:'ОАО «ТрансБел»', list:980, disc:8},
+      {dt:'02.06.2026', who:'Макаров', client:'ЧТУП «Грузовик»', list:980, disc:12},
+    ],
   };
 
   let galSel=0;
@@ -248,8 +337,9 @@
     d.className='price-delta '+(up?'up':'down');
     d.textContent=(up?'▲ +':'▼ ')+delta.toFixed(1).replace('.',',')+'%';
     document.getElementById('pMeta').textContent=`Текущая действует с ${P.priceFrom} · прошлая — до ${P.priceFrom} · валюта BYN, с НДС`;
-    document.getElementById('priceHist').innerHTML = P.priceHist.map(h=>
-      `<div class="ph-row"><span class="dt">${h.dt}</span><span class="why">${h.why}</span><span class="pr ${h.dir==='up'?'ph-up':h.dir==='down'?'ph-down':''}">${h.pr.toLocaleString('ru-RU')} Br${h.dir==='up'?' ▲':h.dir==='down'?' ▼':''}</span></div>`).join('');
+    document.getElementById('phCount').textContent = P.priceHist.length+' верс.';
+    document.getElementById('priceHist').innerHTML = P.priceHist.map((h,i)=>
+      `<div class="ph-row ${i===0?'now':''}"><span class="dt">${h.dt}</span><span class="why">${h.why}${i===0?'<span class="badge-now">текущая</span>':''}</span><span class="pr ${h.dir==='up'?'ph-up':h.dir==='down'?'ph-down':''}">${h.pr.toLocaleString('ru-RU')} Br${h.dir==='up'?' ▲':h.dir==='down'?' ▼':''}</span></div>`).join('');
   }
 
   function renderWh(){
@@ -270,10 +360,84 @@
     document.getElementById('pSpecs').innerHTML = P.specs.map(s=>`<span class="pill">${s}</span>`).join('');
   }
 
+  function renderSales(){
+    document.getElementById('salesRows').innerHTML = P.sales.map(s=>{
+      const sold=Math.round(s.list*(1-s.disc/100));
+      const disc = s.disc ? `<span style="color:#B45309;font-weight:700">−${s.disc}%</span>` : '<span style="color:#CBD5E1">—</span>';
+      return `<tr><td class="cell">${s.dt}</td><td class="who">${s.who}</td><td class="cell">${s.client}</td><td class="r cell">${s.list.toLocaleString('ru-RU')}</td><td class="r">${disc}</td><td class="r" style="font-weight:800;color:#047857">${sold.toLocaleString('ru-RU')} Br</td></tr>`;
+    }).join('');
+    const avg = P.sales.length ? P.sales.reduce((a,s)=>a+s.disc,0)/P.sales.length : 0;
+    document.getElementById('salesFoot').innerHTML =
+      `Сделок: <b>${P.sales.length}</b> · средняя скидка <b>${avg.toFixed(1).replace('.',',')}%</b> · текущий прайс <b>${P.priceNow.toLocaleString('ru-RU')} Br</b>`;
+  }
+
   function zoom(ic,cap){ document.getElementById('zoomImg').textContent=ic; document.getElementById('zoomT').textContent=cap; document.getElementById('zoomCap').textContent=cap; document.getElementById('zoomOv').classList.add('show'); }
   function closeZoom(){ document.getElementById('zoomOv').classList.remove('show'); }
 
-  renderGallery(); renderPrice(); renderWh(); renderCheck(); renderSpecs();
+  // ── режим редактирования (демо: правки в DOM; в проде — PATCH владельцу SKU + аудит) ──
+  const EDITABLE_IDS=['pName','pGroup','pArt','pBar','pTnved','aDim','aWeight','aUnit','aPack','cMethod','cDate','cResult','pDesc'];
+  let _snap={};
+  function toggleEdit(){
+    document.body.classList.add('editing');
+    _snap={};
+    EDITABLE_IDS.forEach(id=>{ const el=document.getElementById(id); _snap[id]=el.innerHTML; el.classList.add('editable'); el.setAttribute('contenteditable','true'); });
+    document.getElementById('btnEdit').style.display='none';
+    document.getElementById('btnSave').style.display='';
+    document.getElementById('btnCancel').style.display='';
+  }
+  function endEdit(){
+    document.body.classList.remove('editing');
+    EDITABLE_IDS.forEach(id=>{ const el=document.getElementById(id); el.classList.remove('editable'); el.removeAttribute('contenteditable'); });
+    document.getElementById('btnEdit').style.display='';
+    document.getElementById('btnSave').style.display='none';
+    document.getElementById('btnCancel').style.display='none';
+    document.getElementById('priceAdd').classList.remove('show');
+  }
+  function saveEdit(){ endEdit(); toast('Сохранено · правки уходят владельцу (SKU) с записью в аудит'); }
+  function cancelEdit(){ EDITABLE_IDS.forEach(id=>document.getElementById(id).innerHTML=_snap[id]); endEdit(); }
+
+  // ── добавление позиций (демо: prompt; в проде — формы + запись владельцу) ──
+  function addPhoto(){ const ic=prompt('Эмодзи/иконка фото:','📷'); if(!ic) return; const cap=prompt('Подпись фото:','Новое фото')||'Фото'; P.photos.push({ic,cap}); galSel=P.photos.length-1; renderGallery(); }
+  function addSpec(){ const s=prompt('Характеристика (напр. «12 В»):'); if(s){ P.specs.push(s); renderSpecs(); } }
+  function addWh(){ const name=prompt('Название склада:'); if(!name) return; const on=parseInt(prompt('Остаток, шт:','0'),10)||0; P.wh.push({name,on,res:0,inc:'—',cell:'—'}); renderWh(); }
+  function addCheck(){ const t=prompt('Параметр проверки (можно с <b>…</b>):'); if(t){ P.checkParams.push({ok:true,t}); renderCheck(); } }
+  function addCheckPhoto(){ const ic=prompt('Эмодзи/иконка фото проверки:','📷'); if(!ic) return; const cap=prompt('Подпись (что на фото):','Фото проверки')||'Фото'; P.checkPhotos.push({ic,cap}); renderCheck(); }
+  function changeGroup(){ const g=prompt('Группа (справочник core.nomenclature_groups), путь через ›:', document.getElementById('pGroup').textContent); if(g) document.getElementById('pGroup').textContent=g.trim(); }
+
+  // ── dev-роль: изменение прайса доступно закупщику / директору / зам. директора ──
+  const PRICE_ROLES=['procurement','deputy','director'];
+  function applyRole(){
+    const r=document.getElementById('roleSel').value;
+    const allowed=PRICE_ROLES.includes(r);
+    document.body.classList.toggle('noprice', !allowed);
+    if(!allowed) document.getElementById('priceAdd').classList.remove('show');
+  }
+
+  // ── история цены: новая версия (старая сохраняется — SCD2, полуоткрытый интервал) ──
+  function togglePriceAdd(){ document.getElementById('priceAdd').classList.toggle('show'); }
+  function applyPrice(){
+    const v=parseFloat(document.getElementById('paPrice').value);
+    const dRaw=document.getElementById('paDate').value;
+    const why=(document.getElementById('paWhy').value||'').trim()||'изменение цены';
+    if(!v||!dRaw){ toast('Укажите цену и дату'); return; }
+    const dt=dRaw.split('-').reverse().join('.');
+    const dir=v>P.priceNow?'up':v<P.priceNow?'down':'';
+    P.priceWas=P.priceNow; P.priceNow=v; P.priceFrom=dt;
+    P.priceHist.unshift({dt,why,pr:v,dir});
+    renderPrice();
+    document.getElementById('paPrice').value=''; document.getElementById('paWhy').value='';
+    document.getElementById('priceAdd').classList.remove('show');
+    toast('Новая версия цены · прошлая сохранена в истории (SCD2)');
+  }
+
+  function toast(msg){
+    let t=document.getElementById('toast');
+    if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+    t.textContent=msg; t.classList.add('show');
+    clearTimeout(window._tt); window._tt=setTimeout(()=>t.classList.remove('show'),2600);
+  }
+
+  renderGallery(); renderPrice(); renderWh(); renderCheck(); renderSpecs(); renderSales(); applyRole();
 </script>
 </body>
 </html>
