@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { Search } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ReferenceCatalog, ReferenceMeta } from "@/lib/reference-data";
-import { defaultRef, sortedDepartments } from "@/lib/spravochniki-catalog";
+import { sortedDepartments } from "@/lib/spravochniki-catalog";
 
 // Hub cards — shortcuts to the other 6 reference screens.
 const HUB_LINKS = [
@@ -71,35 +71,37 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
   const [loading, setLoading] = useState(false);
   const [treeSearch, setTreeSearch] = useState("");
   const [tableSearch, setTableSearch] = useState("");
+  // Version counter prevents stale fetch responses from overwriting newer selections.
+  const fetchVersion = useRef(0);
 
   async function selectRef(ref: ReferenceMeta) {
     if (ref.key === selected?.key) return;
     setSelected(ref);
     setTableSearch("");
     setLoading(true);
+    const version = ++fetchVersion.current;
     const r = await fetchRowsViaProxy(ref.endpoint);
+    if (fetchVersion.current !== version) return;
     setRows(r);
     setLoading(false);
   }
 
   const groups = sortedDepartments(catalog);
 
-  const filteredGroups = treeSearch.trim()
+  const treeQ = treeSearch.trim().toLowerCase();
+  const filteredGroups = treeQ
     ? groups
         .map((g) => ({
           ...g,
-          refs: g.refs.filter((r) =>
-            r.title.toLowerCase().includes(treeSearch.toLowerCase()),
-          ),
+          refs: g.refs.filter((r) => r.title.toLowerCase().includes(treeQ)),
         }))
         .filter((g) => g.refs.length > 0)
     : groups;
 
-  const visibleRows = tableSearch.trim()
+  const tableQ = tableSearch.trim().toLowerCase();
+  const visibleRows = tableQ
     ? rows.filter((row) =>
-        Object.values(row).some((v) =>
-          String(v ?? "").toLowerCase().includes(tableSearch.toLowerCase()),
-        ),
+        Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(tableQ)),
       )
     : rows;
 
@@ -310,15 +312,15 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                       ) : (
                         visibleRows.map((row, i) => (
                           <tr
-                            key={i}
-                            className={`hover:bg-slate-50/60 ${row.is_active === false ? "opacity-50" : ""}`}
+                            key={String(row.id ?? row.code ?? i)}
+                            className={`hover:bg-slate-50/60 ${!row.is_active && row.is_active != null ? "opacity-50" : ""}`}
                           >
                             {selected.columns.map((col) => {
                               const val = row[col.name];
                               if (col.name === "is_active") {
                                 return (
                                   <td key={col.name} className="px-4 py-2.5">
-                                    {val === false ? (
+                                    {!val && val != null ? (
                                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                                         Архив
                                       </span>
