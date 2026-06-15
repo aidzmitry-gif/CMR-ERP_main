@@ -1433,8 +1433,9 @@ function cargoHtml(s){
       <div class="cd-items">${items}</div>
     </div>`;
   }).join('');
+  const n=cargo.length, plural=(n%10===1&&n%100!==11)?'сделка':(n%10>=2&&n%10<=4&&(n%100<10||n%100>=20))?'сделки':'сделок';
   return `<div class="cargo">
-    <div class="cargo-h">📦 Груз рейса: <b>${cargo.length}</b> сделок · <b>${totalSku}</b> позиц.${totalQty?` · ${totalQty} шт`:''}</div>
+    <div class="cargo-h">📦 Груз рейса: <b>${n}</b> ${plural} · <b>${totalSku}</b> позиц.${totalQty?` · ${totalQty} шт`:''}</div>
     ${rows}
   </div>`;
 }
