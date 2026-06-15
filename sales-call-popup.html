@@ -107,6 +107,8 @@
   .seg{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
   .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:8px 12px;font-size:12.5px;font-weight:600;color:#475467;cursor:pointer}
   .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
+  .seg button.add-term{border-style:dashed;border-color:#C7D2FE;color:var(--brand-700);background:#fff}
+  .seg button.add-term:hover{background:var(--brand-50)}
   .fld{margin-top:13px}
   .fld .l{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin-bottom:5px}
   .fld select,.fld input{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit}
@@ -249,6 +251,15 @@
   .stbl .q{width:68px;border:1px solid #E5E7EB;border-radius:6px;padding:5px;font-size:12px;text-align:center;font-family:inherit}
   .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
   .st-legend{display:flex;gap:14px;font-size:11px;color:#6B7280;margin-top:11px;flex-wrap:wrap}
+
+  /* список людей для переадресации */
+  .people{display:flex;flex-direction:column;gap:7px}
+  .person{display:flex;align-items:center;gap:11px;border:1px solid #EEF0F2;border-radius:11px;padding:9px 11px;cursor:pointer}
+  .person:hover{border-color:var(--brand);background:var(--brand-50)}
+  .person .pa{width:34px;height:34px;border-radius:9px;background:var(--brand-50);color:var(--brand-700);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .person .pn{font-size:13px;font-weight:700}.person .ps{font-size:11.5px;color:#6B7280}
+  .person .free{margin-left:auto;font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 7px}
+  .person .free.on{background:#ECFDF5;color:#047857}.person .free.busy{background:#FEF2F2;color:#B91C1C}
 </style>
 </head>
 <body>
@@ -279,6 +290,46 @@
         <button class="btn-sec" onclick="closeDocView()">✎ Редактировать</button>
         <button class="btn-send" id="docViewSend" onclick="sendDocCall()">✉ Отправить</button>
       </div>
+    </div>
+  </div>
+
+  <!-- переадресация звонка коллеге -->
+  <div class="ov2" id="fwdOv" onclick="if(event.target===this)closeFwd()">
+    <div class="docview" style="width:420px">
+      <div class="dv-h">↪ Переадресовать звонок<span class="x" onclick="closeFwd()">✕</span></div>
+      <div class="dv-b" style="background:#fff"><div style="padding:14px 16px">
+        <div style="font-size:12.5px;color:#6B7280;margin-bottom:11px">Кому перевести вызов — гудок уйдёт выбранному сотруднику, текущая линия встанет на удержание.</div>
+        <div id="fwdList" class="people"></div>
+        <div id="fwdRinging" style="display:none;margin-top:12px;background:#EFF5FF;border:1px solid #C7D2FE;border-radius:10px;padding:11px 13px;font-size:12.5px;color:#1D4FD7;font-weight:600"></div>
+      </div></div>
+      <div class="dv-f"><span class="dv-note" style="color:#6B7280">Клиент слышит мелодию ожидания</span><button class="btn-sec" onclick="closeFwd()">Отмена</button></div>
+    </div>
+  </div>
+
+  <!-- заметка по звонку + задача коллеге -->
+  <div class="ov2" id="noteOv" onclick="if(event.target===this)closeNote()">
+    <div class="docview" style="width:460px">
+      <div class="dv-h">📝 Заметка по звонку<span class="x" onclick="closeNote()">✕</span></div>
+      <div class="dv-b" style="background:#fff"><div style="padding:14px 16px">
+        <textarea id="noteText" class="livenote" style="margin-top:0;min-height:80px" placeholder="Что обсудили, договорённости, контекст…"></textarea>
+        <label style="display:flex;gap:9px;align-items:center;font-size:12.5px;font-weight:600;color:#334155;margin-top:13px;cursor:pointer">
+          <input type="checkbox" id="noteTaskOn" style="width:17px;height:17px;accent-color:var(--brand)" onchange="toggleNoteTask()"> ✅ Поставить задачу коллеге
+        </label>
+        <div id="noteTaskBox" style="display:none;margin-top:10px;border-left:3px solid var(--brand-50);padding-left:11px">
+          <div class="terms-lbl" style="margin-top:0">Кому</div>
+          <select id="noteWho" class="fld" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit"></select>
+          <div class="terms-lbl">Что сделать</div>
+          <select id="noteWhat" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;margin-bottom:8px">
+            <option>Перезвонить клиенту</option>
+            <option>Подготовить КП</option>
+            <option>Выставить счёт</option>
+            <option>Уточнить наличие на складе</option>
+            <option>Другое…</option>
+          </select>
+          <div style="display:flex;gap:8px"><input id="noteDue" type="date" style="flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit"><input id="noteDueT" type="time" value="10:00" style="width:96px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit"></div>
+        </div>
+      </div></div>
+      <div class="dv-f"><button class="btn-sec" onclick="closeNote()">Отмена</button><button class="btn-send" onclick="saveNote()">Сохранить</button></div>
     </div>
   </div>
 
@@ -342,8 +393,8 @@ const VIEWS = {
         </div>
         <div class="cp-sub">
           <span onclick="location.href='sales-card-full.html'">📋 Открыть сделку</span>
-          <span onclick="toast('↪ Переадресация коллеге')">↪ Переадресовать</span>
-          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
+          <span onclick="openFwd()">↪ Переадресовать</span>
+          <span onclick="openNote()">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Событие телефонии · резолв клиента по номеру · поднятие за &lt;1 сек (SSE)</div>
@@ -389,7 +440,7 @@ const VIEWS = {
         <div class="cp-sub">
           <span onclick="show('live')">➕ Создать сделку</span>
           <span onclick="location.href='sales-card-full.html'">👤 Открыть клиента</span>
-          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
+          <span onclick="openNote()">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Резолв по номеру → карточка клиента · сделок не найдено</div>
@@ -429,8 +480,8 @@ const VIEWS = {
         </div>
         <div class="cp-sub">
           <span onclick="toast('➕ Лид создан'); show('livenew')">➕ Создать лид</span>
-          <span onclick="toast('🚫 Номер помечен как спам')">🚫 Это спам</span>
-          <span onclick="toast('📝 Заметка по звонку добавлена')">📝 Заметка</span>
+          <span onclick="openFwd()">↪ Переадресовать</span>
+          <span onclick="openNote()">📝 Заметка</span>
         </div>
       </div>
       <div class="src">📡 Реквизиты по УНП тянутся из ЕГР · договор формируется по шаблону автоматически</div>
@@ -503,7 +554,7 @@ const VIEWS = {
           <button class="add-more" onclick="openStockMore()">＋ Подобрать ещё товар</button>
           <label class="resv-toggle" style="margin-top:12px"><input type="checkbox" checked> 📦 Зарезервировать на 5 кал. дней <span style="font-weight:600;color:#b08400">(до 19.06)</span></label>
           <div class="terms-lbl">Условия оплаты</div>
-          <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button></div>
+          <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button class="add-term" onclick="addTerm(this)">＋ свой вариант</button></div>
           <div class="order-cta">
             <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
             <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
@@ -596,7 +647,7 @@ const VIEWS = {
               <div class="ofs-h"><span class="n">3</span> Резерв и условия</div>
               <label class="resv-toggle"><input type="checkbox" checked> 📦 Зарезервировать на 5 кал. дней <span style="font-weight:600;color:#b08400">(до 19.06)</span></label>
               <div class="terms-lbl">Условия оплаты</div>
-              <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button></div>
+              <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button class="add-term" onclick="addTerm(this)">＋ свой вариант</button></div>
               <div class="order-cta">
                 <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
                 <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
@@ -698,15 +749,34 @@ function pullReq(){
       <div class="kv2"><span class="k">Расчётный счёт</span><span>BY12 ALFA 3012 0000 …</span></div>
       <div class="kv2"><span class="k">Статус</span><span style="color:#047857">действующая</span></div>
     </div>
-    <div class="terms-lbl">Условия (согласовать)</div>
-    <div class="seg">
-      <button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>По договору</button>
+
+    <div class="terms-lbl">Товар в счёт <span style="font-weight:600;color:#9aa3b0;text-transform:none">(ATP · со склада)</span></div>
+    <div class="ministock">
+      <div class="ms-row"><input type="checkbox" checked><div class="nm">АКБ 6СТ-190 (Зубр)<small>● свободно 41 · резерв 13</small></div><div class="pr">1 100 Br</div><input class="q" value="20"></div>
+      <div class="ms-row"><input type="checkbox"><div class="nm">Зарядное устройство ЗУ-15А<small>● свободно 30</small></div><div class="pr">420 Br</div><input class="q" value="2"></div>
     </div>
+    <button class="add-more" onclick="openStockMore()" style="margin-top:9px">＋ Подобрать ещё товар</button>
+
+    <div class="terms-lbl">Условия оплаты <span style="font-weight:600;color:#9aa3b0;text-transform:none">(можно добавить свой вариант)</span></div>
+    <div class="seg" id="unpTerms">
+      <button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>По договору</button>
+      <button class="add-term" onclick="addTerm(this)">＋ свой вариант</button>
+    </div>
+
     <div class="order-cta" style="margin-top:12px">
-      <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
+      <button class="inv" onclick="previewInvoice(true)">🧾 Проверить и отправить счёт · создать сделку</button>
       <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
     </div>
-    <div style="font-size:11px;color:#9aa3b0;margin-top:7px;text-align:center">Перед отправкой — предпросмотр. Договор соберётся по шаблону с реквизитами.</div>`;
+    <div style="font-size:11px;color:#9aa3b0;margin-top:7px;text-align:center">При отправке счёта автоматически создаётся карточка клиента и сделка из реквизитов и заказа.</div>`;
+}
+/* добавить свой вариант условий оплаты в любой блок .seg */
+function addTerm(btn){
+  const val=(prompt('Свой вариант условий оплаты:','Отсрочка 14 дней')||'').trim();
+  if(!val) return;
+  const b=document.createElement('button'); b.textContent=val;
+  btn.insertAdjacentElement('beforebegin', b);   // вставить перед кнопкой «＋ свой вариант»
+  b.parentElement.querySelectorAll('button:not(.add-term)').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
 }
 
 /* ── подбор «ещё» товара со склада: таблица с разбивкой по складам ── */
@@ -843,7 +913,9 @@ function repeatOrder(){
   const first=ms.querySelector('.ms-row'); if(first){ first.querySelector('input[type=checkbox]').checked=true; }
   toast('↻ Позиции прошлого заказа подставлены — проверьте количество');
 }
-function previewInvoice(){
+let _invCreatesDeal=false;
+function previewInvoice(createDeal){
+  _invCreatesDeal=!!createDeal;
   const items=orderRows();
   let body='', sub=0;
   items.forEach((it,i)=>{ const s=it.price*it.qty; sub+=s;
@@ -855,10 +927,10 @@ function previewInvoice(){
     <div class="pp-parties"><div><b>Поставщик:</b> ООО «Энерго-Дисконт», УНП 191000111</div><div><b>Покупатель:</b> ${buyerLine()}</div></div>
     <table class="pp-t"><thead><tr><th>№</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${body}</tbody></table>
     <div class="pp-tot">Итого: ${fmt(sub)} Br · в т.ч. НДС 20%: ${fmt(vat)} Br</div>
-    <div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026. Основание — счёт-договор.</div>
+    <div class="pp-foot">Условия оплаты: <b>${activeTerm()}</b>. Товар зарезервирован до 19.06.2026. Основание — счёт-договор.${_invCreatesDeal?' <span style="color:#047857">При отправке создаётся карточка клиента и сделка.</span>':''}</div>
   </div>`;
   document.getElementById('docViewTitle').textContent = 'Счёт — предпросмотр перед отправкой';
-  document.getElementById('docViewSend').textContent = '✉ Отправить счёт';
+  document.getElementById('docViewSend').textContent = _invCreatesDeal ? '✉ Отправить счёт · создать сделку' : '✉ Отправить счёт';
   document.getElementById('docViewOv').classList.add('show');
 }
 function previewContract(){
@@ -869,7 +941,7 @@ function previewContract(){
     <div class="pp-date">г. Минск · 14.06.2026</div>
     <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111), и <b>Покупатель:</b> ${buyerLine()}, заключили настоящий договор о нижеследующем.</p>
     <p><b>1. Предмет договора.</b> Поставщик обязуется поставить аккумуляторные батареи согласно спецификации (счёт № СЧ-0462), а Покупатель — принять и оплатить.</p>
-    <p><b>2. Сумма и порядок расчётов.</b> Общая сумма — ${fmt(sub)} Br, в т.ч. НДС 20%. Форма оплаты — предоплата 100%.</p>
+    <p><b>2. Сумма и порядок расчётов.</b> Общая сумма — ${fmt(sub)} Br, в т.ч. НДС 20%. Форма оплаты — ${activeTerm().toLowerCase()}.</p>
     <p><b>3. Условия поставки.</b> Резерв товара до 19.06.2026. Доставка по согласованию. Гарантия 24 мес.</p>
     <div class="pp-sign"><div>Поставщик ______________ /Сидоров К.А./</div><div>Покупатель ______________ /________/</div></div>
   </div>`;
@@ -878,7 +950,17 @@ function previewContract(){
   document.getElementById('docViewOv').classList.add('show');
 }
 function closeDocView(){ document.getElementById('docViewOv').classList.remove('show'); }
-function sendDocCall(){ const t=document.getElementById('docViewTitle').textContent; closeDocView(); toast(t.includes('Договор')?'✓ Договор отправлен на подпись':'✓ Счёт отправлен клиенту'); }
+/* активное условие оплаты из видимого блока .seg (последний отрисованный экран) */
+function activeTerm(){
+  const segs=[...document.querySelectorAll('.seg')];
+  for(let i=segs.length-1;i>=0;i--){ const on=segs[i].querySelector('button.on'); if(on) return on.textContent.trim(); }
+  return 'Предоплата 100%';
+}
+function sendDocCall(){
+  const t=document.getElementById('docViewTitle').textContent; closeDocView();
+  if(t.includes('Договор')){ toast('✓ Договор отправлен на подпись'); return; }
+  toast(_invCreatesDeal ? '✓ Счёт отправлен · сделка CRM-1043 создана · клиент заведён' : '✓ Счёт отправлен клиенту');
+}
 
 function liveTab(name, btn){
   document.getElementById('tab-script').style.display = name==='script' ? '' : 'none';
@@ -898,6 +980,60 @@ function pullReqLive(){
   </div>`;
 }
 
+/* ── коллеги (для переадресации и постановки задачи) ── */
+const TEAM=[
+  {name:"Петрова Анна",     role:"Менеджер ОП",        ini:"АП", free:true},
+  {name:"Ковалёв Дмитрий",  role:"Менеджер ОП",        ini:"КД", free:true},
+  {name:"Мельник Ольга",    role:"Менеджер ОП",        ini:"МО", free:false},
+  {name:"Сидоров К.А.",     role:"РОП",                ini:"СК", free:true},
+  {name:"Тех. поддержка",   role:"Сервис",             ini:"ТП", free:true}
+];
+
+/* переадресация: выбор → гудок уходит выбранному, перевод */
+function openFwd(){
+  document.getElementById('fwdRinging').style.display='none';
+  document.getElementById('fwdList').innerHTML = TEAM.map((p,i)=>`
+    <div class="person" onclick="doFwd(${i})">
+      <div class="pa">${p.ini}</div>
+      <div><div class="pn">${p.name}</div><div class="ps">${p.role}</div></div>
+      <span class="free ${p.free?'on':'busy'}">${p.free?'● свободен':'● занят'}</span>
+    </div>`).join('');
+  document.getElementById('fwdOv').classList.add('show');
+}
+function doFwd(i){
+  const p=TEAM[i];
+  const box=document.getElementById('fwdRinging');
+  box.style.display='block';
+  box.textContent=`📞 Гудок уходит → ${p.name} (${p.role})… ждём ответа`;
+  clearTimeout(window._fwdT);
+  window._fwdT=setTimeout(()=>{ closeFwd(); toast(`↪ Звонок переведён → ${p.name}`); },1600);
+}
+function closeFwd(){ document.getElementById('fwdOv').classList.remove('show'); }
+
+/* заметка: текст + опционально задача коллеге (кому · что · срок) */
+function openNote(){
+  document.getElementById('noteText').value='';
+  document.getElementById('noteTaskOn').checked=false;
+  toggleNoteTask();
+  const who=document.getElementById('noteWho');
+  who.innerHTML=TEAM.map((p,i)=>`<option value="${i}">${p.name} · ${p.role}</option>`).join('');
+  document.getElementById('noteOv').classList.add('show');
+}
+function toggleNoteTask(){ document.getElementById('noteTaskBox').style.display=document.getElementById('noteTaskOn').checked?'block':'none'; }
+function saveNote(){
+  const txt=(document.getElementById('noteText').value||'').trim();
+  closeNote();
+  if(document.getElementById('noteTaskOn').checked){
+    const p=TEAM[+document.getElementById('noteWho').value]||TEAM[0];
+    const what=document.getElementById('noteWhat').value;
+    const due=document.getElementById('noteDue').value;
+    toast(`📝 Заметка сохранена · ✅ задача «${what}» → ${p.name}${due?(' к '+due):''}`);
+  } else {
+    toast(txt?'📝 Заметка по звонку добавлена':'📝 Пустая заметка не сохранена');
+  }
+}
+function closeNote(){ document.getElementById('noteOv').classList.remove('show'); }
+
 function show(key, btn){
   document.getElementById('pop').innerHTML = VIEWS[key].html;
   document.getElementById('hint').textContent = VIEWS[key].hint;
@@ -908,9 +1044,9 @@ function show(key, btn){
 /* делегированные клики: сегменты (условия/результат) + дайлпад */
 document.addEventListener('click', e=>{
   const seg=e.target.closest('.seg button');
-  if(seg){ seg.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on')); seg.classList.add('on'); return; }
+  if(seg && !seg.classList.contains('add-term')){ seg.parentElement.querySelectorAll('button:not(.add-term)').forEach(b=>b.classList.remove('on')); seg.classList.add('on'); return; }
   const k=e.target.closest('.dialpad .k');
-  if(k){ toast(k.textContent.trim()+' — выполнено'); return; }
+  if(k){ if(/Перевод/.test(k.textContent)){ openFwd(); return; } toast(k.textContent.trim()+' — выполнено'); return; }
 });
 // демо: ?screen=done|live|livenew… — открыть конкретное состояние (для проверки/показа)
 const _sc=new URLSearchParams(location.search).get('screen');
