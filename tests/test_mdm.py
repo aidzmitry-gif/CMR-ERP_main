@@ -3,6 +3,10 @@ import pytest
 
 from core.domain.models import Contact, Counterparty
 from core.services import mdm
+from core.services.eventbus import OutboxEventBus
+
+#: реальная шина: ``emit`` лишь добавляет OutboxEvent в сессию (без I/O) — тестирует реальный путь
+bus = OutboxEventBus()
 
 
 async def test_duplicate_clusters_and_merge(session):
@@ -16,7 +20,7 @@ async def test_duplicate_clusters_and_merge(session):
     assert clusters[0]["unp"] == "191234567"
     assert {m["id"] for m in clusters[0]["members"]} == {a.id, b.id}
 
-    survivor = await mdm.merge(session, a.id, b.id)
+    survivor = await mdm.merge(session, bus, a.id, b.id)
     assert survivor.id == a.id
     assert b.is_active is False
     assert b.merged_into_id == a.id
@@ -34,7 +38,7 @@ async def test_survivorship_fills_empty_survivor_field(session):
     session.add_all([a, b])
     await session.flush()
 
-    await mdm.merge(session, a.id, b.id)
+    await mdm.merge(session, bus, a.id, b.id)
     assert a.name == "ОАО Имя"  # непустое из дубля заполнило пустое эталона
 
 
@@ -44,8 +48,8 @@ async def test_unmerge_reverses(session):
     session.add_all([a, b])
     await session.flush()
 
-    await mdm.merge(session, a.id, b.id)
-    await mdm.unmerge(session, b.id)
+    await mdm.merge(session, bus, a.id, b.id)
+    await mdm.unmerge(session, bus, b.id)
 
     assert b.is_active is True
     assert b.merged_into_id is None
@@ -69,9 +73,9 @@ async def test_merge_guards(session):
     session.add(a)
     await session.flush()
     with pytest.raises(ValueError):
-        await mdm.merge(session, a.id, a.id)  # сам с собой
+        await mdm.merge(session, bus, a.id, a.id)  # сам с собой
     with pytest.raises(ValueError):
-        await mdm.merge(session, a.id, 999999)  # несуществующий
+        await mdm.merge(session, bus, a.id, 999999)  # несуществующий
 
 
 async def test_mdm_endpoints(api, session):
@@ -104,7 +108,7 @@ async def test_counterparty_card(api, session):
     session.add(dup)
     await session.flush()
     await mdm.add_source_alias(session, etalon.id, "1c", "0000-77")  # источник 1С
-    await mdm.merge(session, etalon.id, dup.id)                       # даст merge-alias + слитый дубль
+    await mdm.merge(session, bus, etalon.id, dup.id)                  # даст merge-alias + слитый дубль
     await session.commit()
 
     card = (await api.get(f"/system/mdm/counterparty/{etalon.id}")).json()
@@ -113,6 +117,32 @@ async def test_counterparty_card(api, session):
     assert {a["source"] for a in card["aliases"]} == {"1c", "merge"}
     assert [d["id"] for d in card["merged_duplicates"]] == [dup.id]
     assert [c["full_name"] for c in card["contacts"]] == ["Иван Петров"]
-    assert card["audit"] == []  # доменных событий по контрагенту пока не пишется
+    # событие merge ушло в outbox, но relay в этом тесте не крутился → аудит ещё пуст
+    assert card["audit"] == []
+
+
+async def test_merge_unmerge_emit_audit_events(api, session):
+    """merge/unmerge пишут событие в outbox → relay проецирует в аудит карточки эталона."""
+    from core.services.eventbus import EventContext
+
+    a = Counterparty(name="ООО Альфа", unp="191000111")
+    b = Counterparty(name="ООО Альфа-2", unp="191000111")
+    session.add_all([a, b])
+    await session.flush()
+
+    await mdm.merge(session, bus, a.id, b.id, by="director")
+    await mdm.unmerge(session, bus, b.id, by="director")
+    await session.commit()
+    # прогоняем доставку: проекция событий в AuditLog по entity_ref=counterparty:<id>
+    await bus.relay_once(session, EventContext(session, None))
+
+    card = (await api.get(f"/system/mdm/counterparty/{a.id}")).json()
+    actions = [e["action"] for e in card["audit"]]
+    assert "counterparty.merged" in actions
+    assert "counterparty.unmerged" in actions
+    assert all(e["actor"] == "director" for e in card["audit"])  # актёр проброшен
+    # детали события доступны для разбора
+    merged = next(e for e in card["audit"] if e["action"] == "counterparty.merged")
+    assert merged["detail"]["duplicate_id"] == b.id
 
     assert (await api.get("/system/mdm/counterparty/999999")).status_code == 404

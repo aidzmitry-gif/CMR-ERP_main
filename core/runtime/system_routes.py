@@ -161,11 +161,16 @@ async def mdm_duplicates(session: AsyncSession = Depends(get_session)) -> dict:
 
 
 @router.post("/system/mdm/merge")
-async def mdm_merge(payload: dict = Body(...), session: AsyncSession = Depends(get_session)) -> dict:
+async def mdm_merge(
+    request: Request, payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+) -> dict:
     """Слить дубль в эталон (survivorship + архив дубля + alias). Обратимо через unmerge."""
+    core = request.app.state.core
+    actor = next(iter(roles_from_request(request)), "")
     try:
         survivor = await mdm.merge(
-            session, int(payload["survivor_id"]), int(payload["duplicate_id"])
+            session, core.event_bus, int(payload["survivor_id"]), int(payload["duplicate_id"]),
+            by=actor,
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -174,10 +179,16 @@ async def mdm_merge(payload: dict = Body(...), session: AsyncSession = Depends(g
 
 
 @router.post("/system/mdm/unmerge")
-async def mdm_unmerge(payload: dict = Body(...), session: AsyncSession = Depends(get_session)) -> dict:
+async def mdm_unmerge(
+    request: Request, payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+) -> dict:
     """Расклеить ранее слитый дубль (вернуть активность, убрать merge-alias)."""
+    core = request.app.state.core
+    actor = next(iter(roles_from_request(request)), "")
     try:
-        duplicate = await mdm.unmerge(session, int(payload["duplicate_id"]))
+        duplicate = await mdm.unmerge(
+            session, core.event_bus, int(payload["duplicate_id"]), by=actor
+        )
     except (KeyError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()

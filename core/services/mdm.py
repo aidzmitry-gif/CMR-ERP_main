@@ -71,8 +71,20 @@ def _apply_survivorship(survivor: Counterparty, duplicate: Counterparty) -> None
             setattr(survivor, field, getattr(duplicate, field))
 
 
-async def merge(session: AsyncSession, survivor_id: int, duplicate_id: int) -> Counterparty:
-    """Слить ``duplicate`` в ``survivor``: survivorship + архив дубля + alias. Обратимо."""
+def _entity_ref(counterparty_id: int) -> str:
+    """Ссылка на контрагента в аудите/событиях — формат ``counterparty:<id>``."""
+    return f"{AUDIT_ENTITY_PREFIX}{counterparty_id}"
+
+
+async def merge(
+    session: AsyncSession, event_bus, survivor_id: int, duplicate_id: int, *, by: str = ""
+) -> Counterparty:
+    """Слить ``duplicate`` в ``survivor``: survivorship + архив дубля + alias. Обратимо.
+
+    Пишет доменное событие ``counterparty.merged`` в outbox (та же транзакция) —
+    relay проецирует его в ``AuditLog`` по ``entity_ref=counterparty:<survivor_id>``,
+    наполняя историю изменений карточки эталона.
+    """
     if survivor_id == duplicate_id:
         raise ValueError("нельзя слить запись саму с собой")
     survivor = await session.get(Counterparty, survivor_id)
@@ -87,14 +99,26 @@ async def merge(session: AsyncSession, survivor_id: int, duplicate_id: int) -> C
     session.add(
         CounterpartyAlias(counterparty_id=survivor_id, source="merge", external_ref=str(duplicate_id))
     )
+    event_bus.emit(
+        session,
+        "counterparty.merged",
+        {"entity_ref": _entity_ref(survivor_id), "by": by,
+         "survivor_id": survivor_id, "duplicate_id": duplicate_id, "duplicate_name": duplicate.name},
+    )
     return survivor
 
 
-async def unmerge(session: AsyncSession, duplicate_id: int) -> Counterparty:
-    """Расклеить ранее слитый дубль: вернуть активность, снять ссылку, убрать merge-alias."""
+async def unmerge(
+    session: AsyncSession, event_bus, duplicate_id: int, *, by: str = ""
+) -> Counterparty:
+    """Расклеить ранее слитый дубль: вернуть активность, снять ссылку, убрать merge-alias.
+
+    Событие ``counterparty.unmerged`` уходит в аудит эталона, из которого расклеили.
+    """
     duplicate = await session.get(Counterparty, duplicate_id)
     if duplicate is None or duplicate.merged_into_id is None:
         raise ValueError("запись не является слитым дублем")
+    survivor_id = duplicate.merged_into_id
     alias = (
         await session.execute(
             select(CounterpartyAlias).where(
@@ -107,6 +131,12 @@ async def unmerge(session: AsyncSession, duplicate_id: int) -> Counterparty:
         await session.delete(alias)
     duplicate.is_active = True
     duplicate.merged_into_id = None
+    event_bus.emit(
+        session,
+        "counterparty.unmerged",
+        {"entity_ref": _entity_ref(survivor_id), "by": by,
+         "survivor_id": survivor_id, "duplicate_id": duplicate_id, "duplicate_name": duplicate.name},
+    )
     return duplicate
 
 
