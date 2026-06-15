@@ -29,8 +29,8 @@
   .hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;font-size:11.5px;color:#fff;background:rgba(15,23,42,.6);border-radius:9px;padding:7px 13px;max-width:92vw;text-align:center}
 
   /* окно звонка */
-  .wrap{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:80px 16px 40px}
-  .pop{width:430px;max-width:96vw;background:#fff;border-radius:18px;box-shadow:var(--shadow-pop);overflow:hidden;animation:pin .25s cubic-bezier(.4,0,.2,1)}
+  .wrap{position:fixed;inset:0;z-index:5;display:flex;align-items:flex-start;justify-content:center;padding:80px 16px 40px;overflow:auto}
+  .pop{width:430px;max-width:96vw;background:#fff;border-radius:18px;box-shadow:var(--shadow-pop);overflow:hidden;animation:pin .25s cubic-bezier(.4,0,.2,1);margin:auto}
   @keyframes pin{from{transform:translateY(14px) scale(.98);opacity:0}to{transform:none;opacity:1}}
 
   /* шапка звонка */
@@ -312,21 +312,24 @@
       <div class="dv-h">📝 Заметка по звонку<span class="x" onclick="closeNote()">✕</span></div>
       <div class="dv-b" style="background:#fff"><div style="padding:14px 16px">
         <textarea id="noteText" class="livenote" style="margin-top:0;min-height:80px" placeholder="Что обсудили, договорённости, контекст…"></textarea>
-        <label style="display:flex;gap:9px;align-items:center;font-size:12.5px;font-weight:600;color:#334155;margin-top:13px;cursor:pointer">
-          <input type="checkbox" id="noteTaskOn" style="width:17px;height:17px;accent-color:var(--brand)" onchange="toggleNoteTask()"> ✅ Поставить задачу коллеге
+        <label style="display:flex;gap:9px;align-items:center;font-size:13px;font-weight:700;color:#334155;margin-top:13px;cursor:pointer">
+          <input type="checkbox" id="noteTaskOn" style="width:18px;height:18px;accent-color:var(--brand)" onchange="toggleNoteTask()"> Поставить задачу коллеге
         </label>
-        <div id="noteTaskBox" style="display:none;margin-top:10px;border-left:3px solid var(--brand-50);padding-left:11px">
-          <div class="terms-lbl" style="margin-top:0">Кому</div>
-          <select id="noteWho" class="fld" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit"></select>
+        <div style="font-size:11.5px;color:#9aa3b0;margin-top:3px;margin-left:27px">напр. «перезвонить клиенту» — упадёт исполнителю в задачи и в хронологию сделки</div>
+        <div id="noteTaskBox" style="display:none;margin-top:11px;background:#F8FAFC;border:1px solid #EEF0F2;border-radius:11px;padding:11px 13px">
+          <div class="terms-lbl" style="margin-top:0">Кому поручить</div>
+          <select id="noteWho" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;background:#fff"></select>
           <div class="terms-lbl">Что сделать</div>
-          <select id="noteWhat" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;margin-bottom:8px">
+          <select id="noteWhat" style="width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;margin-bottom:8px;background:#fff">
             <option>Перезвонить клиенту</option>
             <option>Подготовить КП</option>
             <option>Выставить счёт</option>
             <option>Уточнить наличие на складе</option>
             <option>Другое…</option>
           </select>
-          <div style="display:flex;gap:8px"><input id="noteDue" type="date" style="flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit"><input id="noteDueT" type="time" value="10:00" style="width:96px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit"></div>
+          <div class="terms-lbl">Срок</div>
+          <div style="display:flex;gap:8px"><input id="noteDue" type="date" style="flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit;background:#fff"><input id="noteDueT" type="time" value="10:00" style="width:96px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit;background:#fff"></div>
+          <div style="font-size:11.5px;color:#6B7280;margin-top:9px;line-height:1.45">📍 Куда попадёт: коллеге — в его список задач и уведомление; в карточку сделки — в раздел «Задачи»; в хронологию звонка.</div>
         </div>
       </div></div>
       <div class="dv-f"><button class="btn-sec" onclick="closeNote()">Отмена</button><button class="btn-send" onclick="saveNote()">Сохранить</button></div>
@@ -475,7 +478,7 @@ const VIEWS = {
         <div id="reqBox"></div>
 
         <div class="cp-actions">
-          <button class="accept" onclick="show('live')">✅ Принять</button>
+          <button class="accept" onclick="show('livenew')">✅ Принять</button>
           <button class="decline" onclick="toast('✕ Звонок отклонён'); show('done')">✕ Отклонить</button>
         </div>
         <div class="cp-sub">
@@ -649,10 +652,10 @@ const VIEWS = {
               <div class="terms-lbl">Условия оплаты</div>
               <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button class="add-term" onclick="addTerm(this)">＋ свой вариант</button></div>
               <div class="order-cta">
-                <button class="inv" onclick="previewInvoice()">🧾 Проверить и отправить счёт</button>
+                <button class="inv" onclick="previewInvoice(true)">🧾 Проверить и отправить счёт · создать сделку</button>
                 <button class="ctr" onclick="previewContract()">📄 Проверить и отправить договор</button>
               </div>
-              <div class="hintline">Перед отправкой — предпросмотр. Сделка создастся в фоне.</div>
+              <div class="hintline">Перед отправкой — предпросмотр. Карточка клиента и сделка создадутся при отправке.</div>
             </div>
           </div>
         </div>
@@ -1017,6 +1020,10 @@ function openNote(){
   toggleNoteTask();
   const who=document.getElementById('noteWho');
   who.innerHTML=TEAM.map((p,i)=>`<option value="${i}">${p.name} · ${p.role}</option>`).join('');
+  // срок по умолчанию — завтра (чтобы поле не было пустым)
+  const d=new Date(); d.setDate(d.getDate()+1);
+  const pad=n=>String(n).padStart(2,'0');
+  document.getElementById('noteDue').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   document.getElementById('noteOv').classList.add('show');
 }
 function toggleNoteTask(){ document.getElementById('noteTaskBox').style.display=document.getElementById('noteTaskOn').checked?'block':'none'; }
@@ -1027,7 +1034,8 @@ function saveNote(){
     const p=TEAM[+document.getElementById('noteWho').value]||TEAM[0];
     const what=document.getElementById('noteWhat').value;
     const due=document.getElementById('noteDue').value;
-    toast(`📝 Заметка сохранена · ✅ задача «${what}» → ${p.name}${due?(' к '+due):''}`);
+    const t=(document.getElementById('noteDueT')||{}).value||'';
+    toast(`✅ Задача «${what}» → ${p.name}${due?(' к '+due+(t?' '+t:'')):''} · в его список задач и в карточку сделки`);
   } else {
     toast(txt?'📝 Заметка по звонку добавлена':'📝 Пустая заметка не сохранена');
   }
