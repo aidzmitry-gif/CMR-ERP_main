@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Search } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { ReferenceCatalog, ReferenceMeta } from "@/lib/reference-data";
 import { sortedDepartments } from "@/lib/spravochniki-catalog";
@@ -59,6 +59,26 @@ async function fetchRowsViaProxy(endpoint: string): Promise<Record<string, unkno
   }
 }
 
+interface SearchBoxProps {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}
+
+function SearchBox({ value, onChange, placeholder }: SearchBoxProps) {
+  return (
+    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+      <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      <input
+        className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
 interface Props {
   catalog: ReferenceCatalog;
   initialRef: ReferenceMeta | null;
@@ -86,7 +106,8 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
     setLoading(false);
   }
 
-  const groups = sortedDepartments(catalog);
+  // catalog is a static SSR prop — memoize the sort to avoid re-sorting on every keystroke.
+  const groups = useMemo(() => sortedDepartments(catalog), [catalog]);
 
   const treeQ = treeSearch.trim().toLowerCase();
   const filteredGroups = treeQ
@@ -104,8 +125,6 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
         Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(tableQ)),
       )
     : rows;
-
-  const hasData = Object.keys(catalog.departments).length > 0;
 
   return (
     <div className="space-y-4">
@@ -159,20 +178,16 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
         <aside className="space-y-3 lg:sticky lg:top-6 lg:self-start">
           {/* Tree search */}
           <div className="rounded-2xl bg-white p-2 shadow-card">
-            <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-              <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <input
-                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-                placeholder="Найти справочник…"
-                value={treeSearch}
-                onChange={(e) => setTreeSearch(e.target.value)}
-              />
-            </div>
+            <SearchBox
+              value={treeSearch}
+              onChange={setTreeSearch}
+              placeholder="Найти справочник…"
+            />
           </div>
 
           {/* Nav tree */}
           <nav className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-2xl bg-white p-2 shadow-card text-[13px]">
-            {!hasData ? (
+            {groups.length === 0 ? (
               <div className="px-2 py-6 text-center text-sm text-muted">
                 Каталог недоступен
               </div>
@@ -264,13 +279,11 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
 
               {/* Table toolbar */}
               <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-                <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-                  <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                  <input
-                    className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-                    placeholder="Поиск по таблице…"
+                <div className="min-w-[220px] flex-1">
+                  <SearchBox
                     value={tableSearch}
-                    onChange={(e) => setTableSearch(e.target.value)}
+                    onChange={setTableSearch}
+                    placeholder="Поиск по таблице…"
                   />
                 </div>
               </div>
