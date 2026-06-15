@@ -1,0 +1,49 @@
+{
+  "worker": "sprav-merge",
+  "checks": [
+    {
+      "id": "types",
+      "kind": "types",
+      "desc": "tsc --noEmit чисто в frontend/",
+      "cmd": "cd frontend && node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+      "passes": true,
+      "evidence": "exit 0, no output — 2026-06-15T18:38"
+    },
+    {
+      "id": "vitest",
+      "kind": "test",
+      "desc": "vitest зелёный для spravochniki-merge.test.ts (5/5)",
+      "cmd": "cd frontend && node_modules\\.bin\\vitest.cmd run src/lib/spravochniki-merge.test.ts",
+      "passes": true,
+      "evidence": "Test Files 1 passed (1), Tests 5 passed (5) — 2026-06-15T18:39"
+    },
+    {
+      "id": "scope",
+      "kind": "manual",
+      "desc": "Тронуты только файлы scope (4 файла), без reference-data.ts/api.ts/sidebar.tsx",
+      "passes": true,
+      "evidence": "git diff --name-only: frontend/src/app/erp/spravochniki/merge/page.tsx, frontend/src/components/erp/spravochniki/sprav-merge.tsx, frontend/src/lib/spravochniki-merge.ts, frontend/src/lib/spravochniki-merge.test.ts"
+    },
+    {
+      "id": "clusters",
+      "kind": "manual",
+      "desc": "/erp/spravochniki/merge рендерит кластеры из fetchDuplicateClusters + счётчик totalDuplicates",
+      "passes": true,
+      "evidence": "page.tsx: SSR fetchDuplicateClusters(role) → SpravMerge({initial}); SpravMerge: totalDuplicates(initial) показан в заголовке левой панели"
+    },
+    {
+      "id": "mutations",
+      "kind": "manual",
+      "desc": "Кнопки «Слить» / «Расклеить» вызывают mergeCounterparties / unmergeCounterparty, список обновляется",
+      "passes": true,
+      "evidence": "sprav-merge.tsx: handleMerge → mergeCounterparties(survivor.id, dup.id) → router.refresh(); handleUnmerge → unmergeCounterparty(dup.id) → router.refresh()"
+    },
+    {
+      "id": "graceful",
+      "kind": "manual",
+      "desc": "Graceful degrade без бэка: initial=[] → «Дублей не обнаружено.»",
+      "passes": true,
+      "evidence": "sprav-merge.tsx строка: {initial.length === 0 ? <empty state> : <grid>}"
+    }
+  ]
+}
