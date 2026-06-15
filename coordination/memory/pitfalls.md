@@ -79,3 +79,7 @@
 ## Авто-добавлено воркером sprav-ai (2026-06-15)
 
 - **СИМПТОМ: хук CLAUDE.md напомнил `/code-review` → `/simplify` постфактум (уже после коммита)** — причина: hook срабатывает на `Bash`, а не на логику кода, поэтому предупреждение приходит только когда git commit уже вызван. → **ЛЕЧЕНИЕ: запускать `/code-review` на staged-diff ДО `git commit`, не после**; в частности, хук виден в первом Bash-вызове git-операции — взять за правило проверять tsc+vitest+review в отдельном шаге до staging. --- STATE: COMPLETE
+
+## Авто-добавлено воркером sprav-rates (2026-06-15)
+
+- `title` prop на lucide-react SVG-иконках (`<Clock title="...">`) → TS2322 (prop не существует в `LucideProps`). **ЛЕЧЕНИЕ:** убрать `title`, использовать обёртку `<span title="..."><Icon /></span>` если нужен тултип. --- STATE: COMPLETE
