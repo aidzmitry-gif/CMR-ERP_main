@@ -28,6 +28,46 @@
   .filters select{border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;color:#374151}
   .filters input:focus,.filters select:focus{outline:none;border-color:var(--brand)}
 
+  /* ИИ-подбор */
+  .ai{background:linear-gradient(135deg,#F5F3FF,#FAF5FF);border:1px solid #DDD6FE;border-radius:13px;padding:13px 15px;margin-bottom:14px}
+  .ai-h{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .ai-t{font-weight:800;font-size:14px;color:#5B21B6}
+  .ai-sub{font-size:11.5px;color:#7C5CBF}
+  .ai-reset{margin-left:auto;border:1px solid #DDD6FE;background:#fff;color:#6D28D9;border-radius:7px;width:28px;height:28px;cursor:pointer;font-size:14px}
+  .ai-script{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  @media(max-width:680px){.ai-script{grid-template-columns:1fr}}
+  .ai-q{background:#fff;border:1px solid #E9D5FF;border-radius:10px;padding:8px 10px}
+  .ai-q .ql{font-size:11px;font-weight:700;color:#6D28D9;display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:5px}
+  .ai-q .ql .pull{font-size:10px;font-weight:600;color:#1D4ED8;background:#EFF6FF;border:1px solid #BFD3FF;border-radius:6px;padding:1px 6px;cursor:pointer}
+  .ai-q input,.ai-q select{width:100%;border:1px solid #E5E7EB;border-radius:8px;padding:6px 8px;font-size:12.5px;font-family:inherit}
+  .ai-q input:focus,.ai-q select:focus{outline:none;border-color:#8B5CF6}
+  .ai-free{display:flex;gap:8px}
+  .ai-free input{flex:1;border:1px solid #DDD6FE;border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;background:#fff}
+  .ai-free input:focus{outline:none;border-color:#8B5CF6}
+  .ai-go{border:none;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff;border-radius:9px;padding:9px 15px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .ai-go:hover{filter:brightness(1.05)}
+  .ai-out{margin-top:11px}
+  .ai-clarify{background:#FFF7ED;border:1px solid #FED7AA;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#9A3412;display:flex;gap:8px;align-items:flex-start}
+  .ai-reco{background:#fff;border:1px solid #E9D5FF;border-radius:10px;padding:10px 12px}
+  .ai-reco .rh{font-size:12px;font-weight:700;color:#5B21B6;margin-bottom:7px}
+  .ai-reco .ritem{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #F3EEFF}
+  .ai-reco .ritem:first-of-type{border-top:none}
+  .ai-reco .rscore{flex-shrink:0;width:40px;height:40px;border-radius:9px;background:#F5F3FF;color:#6D28D9;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+  .ai-reco .rscore.top{background:#ECFDF5;color:#047857}
+  .ai-reco .rinfo{flex:1;min-width:0}
+  .ai-reco .rname{font-weight:700;font-size:13px}
+  .ai-reco .rwhy{font-size:11.5px;color:#6B7280;margin-top:2px}
+  .ai-reco .radd{border:none;background:var(--brand);color:#fff;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .ai-reco .radd.in{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0}
+  .ai-reco .rfoot{margin-top:9px;font-size:11px;color:#9aa3b0}
+
+  /* быстрые чипы-фасеты групп */
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+  .chips .chip{font-size:12px;font-weight:600;border:1px solid #E5E7EB;background:#fff;color:#475467;border-radius:20px;padding:5px 12px;cursor:pointer}
+  .chips .chip:hover{border-color:#BFD3FF;color:var(--brand-700)}
+  .chips .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .chips .chip .c-n{opacity:.6;margin-left:5px;font-weight:700}
+
   .grp-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#9aa3b0;margin:14px 0 7px}
   .pcard{background:#fff;border:1px solid #EEF0F2;border-radius:13px;box-shadow:var(--shadow);padding:13px 15px;margin-bottom:10px;display:grid;grid-template-columns:46px 1fr auto;gap:13px;align-items:center}
   .pcard.added{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-50)}
@@ -87,12 +127,25 @@
     <div class="cat">
       <h1>🛒 Каталог-подбор</h1>
       <div class="sub">Большой каталог: остатки по складам, «в пути», <b>прошлая → текущая</b> цена. Отмеченные позиции справа уйдут в счёт. ℹ — открыть карточку товара.</div>
+
+      <!-- ИИ-подбор: скрипт вопросов + свободный запрос + ответы из разговора -->
+      <div class="ai">
+        <div class="ai-h"><span class="ai-t">🤖 ИИ-подбор товара</span><span class="ai-sub">скрипт вопросов · ответы вручную или из разговора · свободный запрос</span><button class="ai-reset" onclick="aiReset()" title="Сбросить">↺</button></div>
+        <div class="ai-script" id="aiScript"></div>
+        <div class="ai-free">
+          <input type="text" id="aiQuery" placeholder="Свободный запрос ИИ: «нужен АКБ на фуру MAN, бюджет до 1500, срочно»" onkeydown="if(event.key==='Enter')aiRun()">
+          <button class="ai-go" onclick="aiRun()">✨ Подобрать</button>
+        </div>
+        <div class="ai-out" id="aiOut"></div>
+      </div>
+
       <div class="filters">
         <input type="search" id="q" placeholder="🔍 поиск: название / артикул / штрихкод" oninput="renderCat()">
         <select id="grp" onchange="renderCat()"></select>
         <select id="whf" onchange="renderCat()"><option value="">Все склады</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
         <label style="font-size:12.5px;color:#475467;display:flex;gap:6px;align-items:center"><input type="checkbox" id="instock" onchange="renderCat()"> только в наличии</label>
       </div>
+      <div class="chips" id="chips"></div>
       <div id="catList"></div>
     </div>
 
@@ -111,23 +164,32 @@
   function fmt(n){ return Math.round(n).toLocaleString('ru-RU'); }
 
   // каталог (в проде — shared-kernel SKU / склад / закупки; sales показывает)
+  // tags — параметры для ИИ-подбора: тип техники, вольтаж, ёмкость, ключевые слова применимости
   const CATALOG = [
     {sku:"АКБ 6СТ-190 (Зубр)", grp:"Аккумуляторы / Грузовые", art:"AKB-6ST-190", bar:"4811234567894", pic:"🔋",
-     priceNow:1100, priceWas:980, wh:[{n:"Минск (центр.)",on:54,res:13,inc:40,eta:"18.06"},{n:"Гомель",on:20,res:0},{n:"Брест",on:8,res:5,inc:12,eta:"25.06"}]},
+     priceNow:1100, priceWas:980, tags:["грузовой","фура","тягач","man","volvo","scania","камаз","12в","190ач","пуск 1250a"],
+     wh:[{n:"Минск (центр.)",on:54,res:13,inc:40,eta:"18.06"},{n:"Гомель",on:20,res:0},{n:"Брест",on:8,res:5,inc:12,eta:"25.06"}]},
     {sku:"АКБ 6СТ-225 (промышленный)", grp:"Аккумуляторы / Грузовые", art:"AKB-6ST-225", bar:"4811234567900", pic:"🔋",
-     priceNow:2600, priceWas:2600, wh:[{n:"Минск (центр.)",on:18,res:0,inc:30,eta:"22.06"}]},
+     priceNow:2600, priceWas:2600, tags:["грузовой","спецтехника","автобус","экскаватор","12в","225ач","высокий пуск","мороз"],
+     wh:[{n:"Минск (центр.)",on:18,res:0,inc:30,eta:"22.06"}]},
     {sku:"АКБ 6СТ-77 (легковой)", grp:"Аккумуляторы / Легковые", art:"AKB-6ST-77", bar:"4811234567801", pic:"🔋",
-     priceNow:260, priceWas:285, wh:[{n:"Минск (центр.)",on:120,res:10},{n:"Гомель",on:60,res:0}]},
+     priceNow:260, priceWas:285, tags:["легковой","авто","седан","кроссовер","12в","77ач","бюджет"],
+     wh:[{n:"Минск (центр.)",on:120,res:10},{n:"Гомель",on:60,res:0}]},
     {sku:"АКБ тяговая 6ЭМ-145", grp:"Аккумуляторы / Тяговые", art:"AKB-6EM-145", bar:"4811234567955", pic:"🔋",
-     priceNow:3900, priceWas:3600, wh:[{n:"Минск (центр.)",on:3,res:2,inc:6,eta:"01.07"}]},
+     priceNow:3900, priceWas:3600, tags:["погрузчик","штабелёр","склад","тяговый","ричтрак","145ач","циклический"],
+     wh:[{n:"Минск (центр.)",on:3,res:2,inc:6,eta:"01.07"}]},
     {sku:"Зарядное устройство ЗУ-15А", grp:"Зарядные устройства", art:"ZU-15A", bar:"4811234568013", pic:"🔌",
-     priceNow:420, priceWas:420, wh:[{n:"Минск (центр.)",on:30,res:0},{n:"Гомель",on:12,res:2}]},
+     priceNow:420, priceWas:420, tags:["зарядка","зу","обслуживание","сопутствующий","до 200ач"],
+     wh:[{n:"Минск (центр.)",on:30,res:0},{n:"Гомель",on:12,res:2}]},
     {sku:"Зарядное устройство ЗУ-30А PRO", grp:"Зарядные устройства", art:"ZU-30A-PRO", bar:"4811234568020", pic:"🔌",
-     priceNow:980, priceWas:1050, wh:[{n:"Минск (центр.)",on:7,res:0}]},
+     priceNow:980, priceWas:1050, tags:["зарядка","зу","профи","автопарк","быстрая","сопутствующий"],
+     wh:[{n:"Минск (центр.)",on:7,res:0}]},
     {sku:"Тестер АКБ цифровой", grp:"Оборудование", art:"TST-DIG", bar:"4811234568105", pic:"🔧",
-     priceNow:180, priceWas:180, wh:[{n:"Минск (центр.)",on:45,res:0}]},
+     priceNow:180, priceWas:180, tags:["тестер","диагностика","обслуживание","сопутствующий"],
+     wh:[{n:"Минск (центр.)",on:45,res:0}]},
     {sku:"Доставка по РБ", grp:"Услуги", art:"SRV-DELIV", bar:"—", pic:"🚚",
-     priceNow:5000, priceWas:5000, wh:[]},
+     priceNow:5000, priceWas:5000, tags:["доставка","логистика","услуга"],
+     wh:[]},
   ];
 
   const cart = {}; // sku -> qty
@@ -140,6 +202,16 @@
     const grps=[...new Set(CATALOG.map(p=>p.grp))].sort();
     document.getElementById('grp').innerHTML = `<option value="">Все группы</option>`+grps.map(g=>`<option>${g}</option>`).join('');
   }
+  // быстрые чипы-фасеты (одним кликом — выбор группы); счётчик = всего в группе
+  function renderChips(){
+    const cur=document.getElementById('grp').value;
+    const grps=[...new Set(CATALOG.map(p=>p.grp))].sort();
+    const cnt=g=>CATALOG.filter(p=>p.grp===g).length;
+    document.getElementById('chips').innerHTML =
+      `<span class="chip ${!cur?'on':''}" onclick="pickGroup('')">Все<span class="c-n">${CATALOG.length}</span></span>` +
+      grps.map(g=>`<span class="chip ${g===cur?'on':''}" onclick="pickGroup('${g.replace(/'/g,"\\'")}')">${g}<span class="c-n">${cnt(g)}</span></span>`).join('');
+  }
+  function pickGroup(g){ document.getElementById('grp').value=g; renderCat(); }
 
   function priceHtml(p){
     if(p.priceNow===p.priceWas) return `<div class="price">${fmt(p.priceNow)} Br</div>`;
@@ -155,21 +227,36 @@
   }
 
   function renderCat(){
+    renderChips();
     const q=document.getElementById('q').value.toLowerCase().trim();
     const grp=document.getElementById('grp').value;
     const inStock=document.getElementById('instock').checked;
+    // наименование товара из ИИ-скрипта (поле «item») — фильтрует и сортирует каталог по ATP
+    const item=(aiAns.item||'').toLowerCase().trim();
     let list=CATALOG.filter(p=>
       (!grp||p.grp===grp) &&
       (!inStock || isService(p) || whFree(p)>0) &&
-      (!q || (p.sku+' '+p.art+' '+p.bar).toLowerCase().includes(q))
+      (!q || (p.sku+' '+p.art+' '+p.bar).toLowerCase().includes(q)) &&
+      (!item || matchItem(p,item))
     );
     const root=document.getElementById('catList');
-    if(!list.length){ root.innerHTML='<div class="cart-empty">Ничего не найдено</div>'; return; }
-    // группировка по grp
+    if(!list.length){ root.innerHTML='<div class="cart-empty">Ничего не найдено'+(item?` по «${aiAns.item}»`:'')+'</div>'; return; }
+    // если задано наименование — плоский список, сортировка по ATP (свободно ↓), сервис в конец
+    if(item){
+      list.sort((a,b)=>(isService(b)?-1:whFree(b)) - (isService(a)?-1:whFree(a)));
+      root.innerHTML = `<div class="grp-h">Подбор по «${aiAns.item}» · сортировка по наличию (ATP)</div>` + list.map(cardHtml).join('');
+      return;
+    }
+    // иначе — группировка по grp
     const g={}; list.forEach(p=>{ (g[p.grp]=g[p.grp]||[]).push(p); });
     root.innerHTML = Object.keys(g).sort().map(grpName=>
       `<div class="grp-h">${grpName}</div>` + g[grpName].map(cardHtml).join('')
     ).join('');
+  }
+  // совпадение по наименованию: имя/артикул/теги (АКБ 6СТ → все 6СТ; ЗУ → зарядные)
+  function matchItem(p,item){
+    const hay=(p.sku+' '+p.art+' '+(p.tags||[]).join(' ')).toLowerCase();
+    return item.split(/\s+/).every(w=>w.length<2 || hay.includes(w));
   }
 
   function cardHtml(p){
@@ -232,6 +319,83 @@
     setTimeout(()=>{ location.href='sales-card-full.html'; }, 900);
   }
 
+  /* ════════ ИИ-подбор ════════ */
+  // скрипт вопросов; pull — что «подтянуть из транскрибации разговора» (демо)
+  const AI_SCRIPT = [
+    {id:"item", q:"Товар (наименование)", type:"text", ph:"АКБ 6СТ, ЗУ, тестер…", pull:"АКБ 6СТ-190"},
+    {id:"vehicle", q:"Тип техники / модель", type:"text", ph:"фура MAN, погрузчик, легковой…", pull:"фура MAN TGX"},
+    {id:"need", q:"Что нужно", type:"select", opts:["","Аккумулятор","Зарядное устройство","Диагностика","Комплект"], pull:"Аккумулятор"},
+    {id:"budget", q:"Бюджет, Br (до)", type:"text", ph:"напр. 1500", pull:"1500"},
+    {id:"urgency", q:"Срочность", type:"select", opts:["","Срочно (со склада)","Можно подождать приход","Не срочно"], pull:"Срочно (со склада)"},
+  ];
+  const aiAns = {};
+  function renderScript(){
+    document.getElementById('aiScript').innerHTML = AI_SCRIPT.map(s=>{
+      const v = aiAns[s.id]||'';
+      // ввод «item» сразу сортирует/фильтрует каталог по ATP (renderCat)
+      const after = s.id==='item' ? ';renderCat()' : '';
+      const ctrl = s.type==='select'
+        ? `<select onchange="aiAns['${s.id}']=this.value${after}">${s.opts.map(o=>`<option ${o===v?'selected':''}>${o}</option>`).join('')}</select>`
+        : `<input value="${v.replace(/"/g,'&quot;')}" placeholder="${s.ph||''}" oninput="aiAns['${s.id}']=this.value${after}">`;
+      return `<div class="ai-q"><div class="ql">${s.q}<span class="pull" onclick="aiPull('${s.id}')" title="Подтянуть из транскрибации разговора">↓ из разговора</span></div>${ctrl}</div>`;
+    }).join('');
+  }
+  function aiPull(id){ const s=AI_SCRIPT.find(x=>x.id===id); if(s&&s.pull){ aiAns[id]=s.pull; renderScript(); if(id==='item') renderCat(); toast('↓ Подтянуто из разговора: '+s.pull); } }
+  function aiReset(){ Object.keys(aiAns).forEach(k=>delete aiAns[k]); document.getElementById('aiQuery').value=''; document.getElementById('aiOut').innerHTML=''; renderScript(); }
+
+  // матчинг: счёт по совпадению тегов с сигналом (скрипт + свободный запрос), фильтр бюджета/срочности
+  function aiSignal(){
+    const free=(document.getElementById('aiQuery').value||'').toLowerCase();
+    const parts=[aiAns.vehicle, aiAns.need, free].filter(Boolean).join(' ').toLowerCase();
+    const budget=parseInt((aiAns.budget||'').replace(/\D/g,''))|| (free.match(/до\s*(\d+)/)?+free.match(/до\s*(\d+)/)[1]:0);
+    const urgent=(aiAns.urgency||'').includes('Срочно') || /срочно/.test(free);
+    return {text:parts, budget, urgent, words:parts.split(/[\s,;/]+/).filter(w=>w.length>2)};
+  }
+  function scoreProduct(p,sig){
+    let s=0, hits=[];
+    sig.words.forEach(w=>{ if((p.tags||[]).some(t=>t.includes(w)||w.includes(t))){ s+=2; hits.push(w); }
+      else if((p.sku+' '+p.grp).toLowerCase().includes(w)){ s+=1; } });
+    if(sig.budget && p.priceNow<=sig.budget) s+=1;
+    if(sig.urgent && whFree(p)>0) s+=1;
+    return {p, s, hits};
+  }
+  function aiRun(){
+    const sig=aiSignal();
+    const out=document.getElementById('aiOut');
+    if(!sig.text.trim()){ out.innerHTML=`<div class="ai-clarify"><span>🤔</span><span>Опишите задачу: тип техники и что нужно — или впишите свободный запрос. Можно подтянуть ответы из разговора (↓).</span></div>`; return; }
+    let ranked=CATALOG.map(p=>scoreProduct(p,sig)).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
+    // мало сигнала → уточняющий вопрос
+    const topScore=ranked.length?ranked[0].s:0;
+    if(topScore<2 || (!aiAns.vehicle && !sig.text.match(/фур|погруз|легк|груз|авто|спец|склад/))){
+      out.innerHTML=`<div class="ai-clarify"><span>❓</span><span><b>Уточните:</b> для какой техники подбираем — грузовой/тягач, легковой, погрузчик (склад) или спецтехника? Это сильно сужает подбор. ${ranked.length?'Пока показываю ближайшее ниже.':''}</span></div>`;
+      if(!ranked.length) return;
+    }
+    const top=ranked.slice(0,4);
+    const budgetNote = sig.budget?` · бюджет до ${fmt(sig.budget)} Br`:'';
+    const urgNote = sig.urgent?' · только со склада приоритетно':'';
+    out.innerHTML += `<div class="ai-reco"><div class="rh">✨ Рекомендую под задачу«${sig.text.trim()}»${budgetNote}${urgNote}:</div>` +
+      top.map((x,i)=>{
+        const p=x.p, sk=p.sku.replace(/'/g,"\\'"), free=isService(p)?'—':whFree(p), inCart=cart[p.sku]>0;
+        const why = whyText(p,x,sig);
+        return `<div class="ritem">
+          <div class="rscore ${i===0?'top':''}">${i===0?'★':''}${Math.min(99,x.s*20)}%</div>
+          <div class="rinfo"><div class="rname">${p.sku} · ${fmt(p.priceNow)} Br${isService(p)?'':` · своб. ${free}`}</div><div class="rwhy">${why}</div></div>
+          <button class="radd ${inCart?'in':''}" onclick="aiAdd('${sk}')">${inCart?'✓ в счёте':'＋ в счёт'}</button>
+        </div>`;
+      }).join('') +
+      `<div class="rfoot">Подбор по параметрам техники и наличию. Решение — за менеджером; уточните бюджет/совместимость при сомнении.</div></div>`;
+  }
+  function whyText(p,x,sig){
+    const bits=[];
+    if(x.hits.length) bits.push('подходит по: '+[...new Set(x.hits)].slice(0,3).join(', '));
+    if(sig.budget && p.priceNow<=sig.budget) bits.push('в бюджет');
+    if(sig.urgent && whFree(p)>0) bits.push('есть на складе сейчас');
+    if(whInc(p)) bits.push('+приход '+whInc(p));
+    return bits.join(' · ') || 'близко к запросу';
+  }
+  function aiAdd(sku){ cart[sku]=(cart[sku]||0)+1; renderCat(); renderCart(); aiRun(); toast('＋ В счёт: '+sku); }
+
+  renderScript();
   fillGroups(); renderCat(); renderCart();
 </script>
 </body>

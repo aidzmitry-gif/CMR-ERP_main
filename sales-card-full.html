@@ -522,11 +522,7 @@
           <div class="iv-terms">
             <div class="mini">
               <label>Условия оплаты</label>
-              <select id="invTerms" onchange="syncReserveLbl()">
-                <option>Предоплата 100%</option><option>Предоплата 50% / 50% по факту</option>
-                <option>Отсрочка 5 банковских дней</option><option>Отсрочка 14 календарных дней</option>
-                <option>Отсрочка 30 календарных дней</option><option>Оплата по факту поставки</option>
-              </select>
+              <select id="invTerms" onchange="onTermsChange(this)"></select>
             </div>
             <div class="mini">
               <label>Работаем по</label>
@@ -592,11 +588,7 @@
           <div class="ct-field"><div class="l">Сумма договора</div><input id="ctrSum" value="46 800 Br"></div>
           <div class="ct-field"><div class="l">Гарантия, мес</div><input id="ctrWarr" value="24"></div>
           <div class="ct-field full"><div class="l">Условия оплаты</div>
-            <select id="ctrTerms">
-              <option>Предоплата 100%</option><option>Предоплата 50% / 50% по факту</option>
-              <option>Отсрочка 5 банковских дней</option><option>Отсрочка 14 календарных дней</option>
-              <option>Отсрочка 30 календарных дней</option><option>Оплата по факту поставки</option>
-            </select>
+            <select id="ctrTerms" onchange="onTermsChange(this)"></select>
           </div>
           <div class="ct-field"><div class="l">Вид договора</div>
             <select id="ctrBasis">
@@ -1110,6 +1102,29 @@ const DOC_KINDS = {
   quote:   {title:'📋 Коммерческое предложение', no:'№ КП-0118 · от 14.06.2026', prev:'Коммерческое предложение — предпросмотр'},
   act:     {title:'✅ Акт приёма-передачи',      no:'№ АП-0073 · от 14.06.2026', prev:'Акт приёма-передачи — предпросмотр'},
 };
+// ── условия оплаты: общий список (счёт+договор) + свои варианты ──
+const PAY_TERMS = [
+  "Предоплата 100%", "Предоплата 50% / 50% по факту",
+  "Отсрочка 5 банковских дней", "Отсрочка 14 календарных дней",
+  "Отсрочка 30 календарных дней", "Оплата по факту поставки",
+];
+function fillTermsSelect(sel){
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = PAY_TERMS.map(t=>`<option ${t===cur?'selected':''}>${t}</option>`).join('')
+    + `<option value="__add__">➕ свой вариант…</option>`;
+}
+function onTermsChange(sel){
+  if(sel.value==='__add__'){
+    const v=(prompt('Свой вариант условий оплаты:','')||'').trim();
+    if(v){ if(!PAY_TERMS.includes(v)) PAY_TERMS.push(v);
+           // обновить оба селекта, выбрать новый
+           document.querySelectorAll('#invTerms,#ctrTerms').forEach(s=>{ fillTermsSelect(s); });
+           sel.value=v; toast('Добавлено условие оплаты: '+v); }
+    else { fillTermsSelect(sel); sel.value=PAY_TERMS[0]; }
+  }
+  if(sel.id==='invTerms') syncReserveLbl();
+}
 function dealItemsToInvoice(d){
   return (d.items||[]).map(it=>{
     const qty = parseInt((it.q||'').replace(/\D/g,'')) || 1;
@@ -1129,7 +1144,7 @@ function openDoc(kind){
     `<div><b>Поставщик:</b> ООО «Энерго-Дисконт» · УНП 191000111</div>
      <div><b>Покупатель:</b> ${d.company} · ${d.unp}</div>`;
   renderInv();
-  toggleBasis(); syncReserveLbl();
+  fillTermsSelect(document.getElementById('invTerms')); toggleBasis(); syncReserveLbl();
   document.getElementById('invOv').classList.add('show');
 }
 function openInvoice(){ openDoc('invoice'); }
@@ -1304,6 +1319,7 @@ function openContract(){
   document.getElementById('ctrReq').innerHTML =
     `<div><b>Поставщик:</b> ООО «Энерго-Дисконт» · УНП 191000111</div><div><b>Покупатель:</b> ${d.company} · ${d.unp}</div>`;
   document.getElementById('ctrSum').value = invoiceItems.length ? fmt(computeTotals().total)+' Br' : d.amount;
+  fillTermsSelect(document.getElementById('ctrTerms'));
   document.getElementById('ctrOv').classList.add('show');
 }
 function ctrPreview(){

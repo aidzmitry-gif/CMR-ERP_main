@@ -114,6 +114,22 @@
   .rec .play{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
   .rec .pend{margin-left:auto;color:#9aa3b0}
 
+  /* ИИ-транскрибация в итоге звонка */
+  .tr{margin-top:12px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:11px;padding:4px 12px 11px}
+  .tr summary{cursor:pointer;font-weight:700;font-size:13px;color:#5B21B6;padding:9px 0;user-select:none}
+  .tr-sum{font-size:12.5px;line-height:1.5;color:#3b2d63;background:#fff;border:1px solid #E9D5FF;border-radius:9px;padding:9px 11px;margin-bottom:8px}
+  .tr-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}
+  .tr-tags .ttag{font-size:11px;font-weight:600;border-radius:7px;padding:2px 8px;background:#fff;border:1px solid #E9D5FF;color:#6d28d9}
+  .tr-tags .ttag.up{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
+  .tr-lines{background:#fff;border:1px solid #E9D5FF;border-radius:9px;padding:8px 10px;max-height:150px;overflow:auto;margin-bottom:8px}
+  .trl{display:flex;gap:8px;font-size:12px;padding:3px 0;line-height:1.45}
+  .trl .tm{color:#9aa3b0;font-variant-numeric:tabular-nums;flex-shrink:0}
+  .trl .who{font-weight:700;flex-shrink:0;width:64px}
+  .trl.mgr .who{color:var(--brand-700)}.trl.cli .who{color:#047857}
+  .trl .tx{color:#374151}
+  .tr-act{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;color:#6d28d9}
+  .tr-act span{cursor:pointer}.tr-act span:hover{text-decoration:underline}
+
   /* новый лид */
   .newlead{margin-top:12px}
   .newlead input{width:100%;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;margin-bottom:8px}
@@ -641,8 +657,22 @@ const VIEWS = {
 
         <div class="rec">
           <div class="play">▶</div> Запись 03:48 сохранена
-          <span class="pend">🤖 транскрибация готовится…</span>
+          <span class="pend" id="trStatus">🤖 транскрибация готова</span>
         </div>
+
+        <!-- ИИ-транскрибация и резюме разговора (под «Завершить») -->
+        <details class="tr" open>
+          <summary>🤖 ИИ-транскрибация и резюме разговора</summary>
+          <div class="tr-sum"><b>AI-резюме:</b> Клиент подтвердил приёмку 18.06, ждёт трек рейса. Интересовался зарядными устройствами — потенциальная допродажа. Тон позитивный, возражений нет.</div>
+          <div class="tr-tags"><span class="ttag">📌 доставка 18.06</span><span class="ttag">🛒 интерес: ЗУ</span><span class="ttag up">😊 позитивный</span><span class="ttag">talk: 38% / 62%</span></div>
+          <div class="tr-lines">
+            <div class="trl mgr"><span class="tm">00:12</span><span class="who">Менеджер</span><span class="tx">Добрый день! По вашему заказу — машина выходит, ориентир приёмки 18 июня.</span></div>
+            <div class="trl cli"><span class="tm">00:21</span><span class="who">Клиент</span><span class="tx">Отлично. Трек пришлёте? И ещё — есть зарядные на 190-е?</span></div>
+            <div class="trl mgr"><span class="tm">00:34</span><span class="who">Менеджер</span><span class="tx">Трек утром 14-го. По зарядным — ЗУ-15А в наличии, пришлю в КП.</span></div>
+            <div class="trl cli"><span class="tm">00:48</span><span class="who">Клиент</span><span class="tx">Давайте. Оплата как обычно, по счёту.</span></div>
+          </div>
+          <div class="tr-act"><span onclick="toast('📋 Транскрипт скопирован')">📋 Копировать</span><span onclick="toast('🛒 Открыт ИИ-подбор по «зарядные» из разговора')">🛒 Подобрать товар из разговора</span><span onclick="toast('➕ Договорённости добавлены в хронологию')">➕ В хронологию</span></div>
+        </details>
 
         <div class="cp-actions">
           <button class="accept" onclick="location.href='sales-card-full.html'">💾 Сохранить в сделку</button>
@@ -882,7 +912,9 @@ document.addEventListener('click', e=>{
   const k=e.target.closest('.dialpad .k');
   if(k){ toast(k.textContent.trim()+' — выполнено'); return; }
 });
-show('known');
+// демо: ?screen=done|live|livenew… — открыть конкретное состояние (для проверки/показа)
+const _sc=new URLSearchParams(location.search).get('screen');
+show(_sc && VIEWS[_sc] ? _sc : 'known');
 </script>
 </body>
 </html>
