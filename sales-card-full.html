@@ -428,6 +428,11 @@
   .stbl .res{color:#B45309;font-weight:600}
   .stbl .free{color:#047857;font-weight:800}
   .stbl .free.low{color:#B91C1C}
+  .stbl .inc{white-space:nowrap}
+  .stbl .inc .muted{color:#CBD5E1}
+  .stbl .incval{color:#1D4ED8;font-weight:700;cursor:help}
+  .stbl .incval small{color:#64748B;font-weight:600}
+  .stbl .incmore{font-size:10px;color:#1D4ED8;background:#EFF6FF;border-radius:5px;padding:0 4px;font-weight:700}
   .stbl .price{font-weight:700;white-space:nowrap}
   .stbl .q{width:68px;border:1px solid #E5E7EB;border-radius:6px;padding:5px;font-size:12px;text-align:center;font-family:inherit}
   .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
@@ -496,7 +501,7 @@
           <select id="stWh" onchange="renderStock(this.value)" style="border:1px solid #E5E7EB;border-radius:9px;padding:8px 11px;font-size:12.5px;font-family:inherit"><option>Все склады</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
         </div>
         <div id="stockRows"></div>
-        <div class="sd-note">📦 <span><b style="color:#1F2937">Остаток</b> — всего · <b style="color:#B45309">Резерв</b> — под другие заказы · <b style="color:#047857">Свободно</b> — доступно (ATP). <b>Кол-во не ограничено</b> — можно заказать больше остатка, дефицит уйдёт в закупку (под заказ).</span></div>
+        <div class="sd-note">📦 <span><b style="color:#1F2937">Остаток</b> — всего · <b style="color:#B45309">Резерв</b> — под другие заказы · <b style="color:#047857">Свободно</b> — доступно (ATP) · <b style="color:#1D4ED8">🚚 В пути</b> — на приходе с датой (из логистики/закупок). <b>Кол-во не ограничено</b>: если дефицит закрывается приходом — менеджер может назвать срок; остаток уйдёт в закупку.</span></div>
       </div>
       <div class="sd-f">
         <span class="cnt" id="stockCnt">Выбрано: 0</span>
@@ -922,13 +927,14 @@ function deliveryHtml(d){
 }
 function setDelivery(m){ DEALS[currentKey].delivery.method=m; render(currentKey); }
 
+// inc — в пути (на приходе): qty шт, eta — дата прихода на склад, src — рейс/поставка (логистика/закупки).
 const STOCK_WH = [
-  {sku:"АКБ 6СТ-190 (Зубр)", price:1100, wh:[{name:"Минск (центр.)",on:54,res:13},{name:"Гомель",on:20,res:0},{name:"Брест",on:8,res:5}]},
-  {sku:"АКБ 6СТ-225 (промышленный)", price:2600, wh:[{name:"Минск (центр.)",on:18,res:0}]},
+  {sku:"АКБ 6СТ-190 (Зубр)", price:1100, wh:[{name:"Минск (центр.)",on:54,res:13,inc:[{qty:40,eta:"18.06",src:"TR-0418"}]},{name:"Гомель",on:20,res:0},{name:"Брест",on:8,res:5,inc:[{qty:12,eta:"25.06",src:"TR-0431"}]}]},
+  {sku:"АКБ 6СТ-225 (промышленный)", price:2600, wh:[{name:"Минск (центр.)",on:18,res:0,inc:[{qty:30,eta:"22.06",src:"ЗАК-0207"}]}]},
   {sku:"Зарядное устройство ЗУ-15А", price:420, wh:[{name:"Минск (центр.)",on:30,res:0},{name:"Гомель",on:12,res:2}]},
   {sku:"Тестер АКБ цифровой", price:180, wh:[{name:"Минск (центр.)",on:45,res:0}]},
   {sku:"АКБ 6СТ-77 (легковой)", price:260, wh:[{name:"Минск (центр.)",on:120,res:10},{name:"Гомель",on:60,res:0}]},
-  {sku:"АКБ тяговая 6ЭМ-145", price:3900, wh:[{name:"Минск (центр.)",on:3,res:2}]}
+  {sku:"АКБ тяговая 6ЭМ-145", price:3900, wh:[{name:"Минск (центр.)",on:3,res:2,inc:[{qty:6,eta:"01.07",src:"ЗАК-0211"}]}]}
 ];
 let _stockTarget = 'invoice';
 function fmt(n){ return Math.round(n).toLocaleString('ru-RU').replace(/,/g,' '); }
@@ -954,6 +960,17 @@ function openCall(name, phone){
 function closeCall(){ document.getElementById('callOv').classList.remove('show'); if(_callTimer){ clearInterval(_callTimer); _callTimer=null; } }
 function callMain(){ const d=DEALS[currentKey]; const c=(d.contacts.find(x=>x.main)||d.contacts[0]); openCall(c.name, c.phone); }
 
+// ── «в пути» (на приходе) по складу: суммарное кол-во, ближайшая дата, текст ячейки ──
+function incQty(w){ return (w.inc||[]).reduce((s,x)=>s+x.qty,0); }
+function incEta(w){ return (w.inc&&w.inc.length)?w.inc[0].eta:''; }
+function incStr(w){
+  if(!w.inc||!w.inc.length) return '<span class="muted">—</span>';
+  // несколько приходов — показать ближайший + «и ещё N» в title
+  const tip = w.inc.map(x=>`+${x.qty} к ${x.eta} (${x.src})`).join(' · ');
+  const f=w.inc[0]; const more=w.inc.length>1?` <span class="incmore">+${w.inc.length-1}</span>`:'';
+  return `<span class="incval" title="${tip}">🚚 +${incQty(w)} <small>к ${f.eta}</small></span>${more}`;
+}
+
 function renderStock(filter){
   filter = filter || 'Все склады';
   let body='';
@@ -965,17 +982,20 @@ function renderStock(filter){
       const free=w.on-w.res, low=free<=3;
       body+=`<tr class="${wi===0?'grp-first':''}"><td><input type="checkbox" onchange="stockCount()"></td>`;
       if(wi===0) body+=`<td rowspan="${whs.length}" class="pname">${p.sku}<small>Σ свободно ${totFree}</small></td>`;
-      body+=`<td class="wh">🏬 ${w.name}</td><td class="r">${w.on}</td><td class="r res">${w.res||'—'}</td><td class="r free ${low?'low':''}">${free}${low?' ⚠':''}</td>`;
+      const inc=incStr(w);
+      body+=`<td class="wh">🏬 ${w.name}</td><td class="r">${w.on}</td><td class="r res">${w.res||'—'}</td><td class="r free ${low?'low':''}">${free}${low?' ⚠':''}</td><td class="r inc">${inc}</td>`;
       if(wi===0) body+=`<td rowspan="${whs.length}" class="r price">${fmt(p.price)} Br</td>`;
-      body+=`<td class="r"><input class="q" value="1" inputmode="numeric" data-sku="${p.sku}" data-price="${p.price}" data-free="${free}" oninput="qtyMark(this)"></td></tr>`;
+      body+=`<td class="r"><input class="q" value="1" inputmode="numeric" data-sku="${p.sku}" data-price="${p.price}" data-free="${free}" data-inc="${incQty(w)}" data-eta="${incEta(w)}" oninput="qtyMark(this)"></td></tr>`;
     });
   });
-  if(!body) body='<tr><td colspan="8" style="text-align:center;color:#9aa3b0;padding:18px">Нет позиций на этом складе</td></tr>';
+  if(!body) body='<tr><td colspan="9" style="text-align:center;color:#9aa3b0;padding:18px">Нет позиций на этом складе</td></tr>';
   document.getElementById('stockRows').innerHTML = `<table class="stbl">
-    <thead><tr><th></th><th>Товар</th><th>Склад</th><th class="r">Остаток</th><th class="r">Резерв</th><th class="r">Свободно</th><th class="r">Цена</th><th class="r">Кол-во</th></tr></thead>
+    <thead><tr><th></th><th>Товар</th><th>Склад</th><th class="r">Остаток</th><th class="r">Резерв</th><th class="r">Свободно</th><th class="r">В пути</th><th class="r">Цена</th><th class="r">Кол-во</th></tr></thead>
     <tbody>${body}</tbody></table>`;
   stockCount();
 }
+// демо: ?autostock=1 — сразу открыть подбор (для скриншотов/проверки)
+if(new URLSearchParams(location.search).get('autostock')) window.addEventListener('load',()=>setTimeout(()=>openStock('deal'),300));
 function openStock(target){
   _stockTarget = target || 'invoice';
   document.getElementById('stAddBtn').textContent = _stockTarget==='invoice' ? 'Добавить в счёт' : 'Добавить в сделку';
@@ -989,8 +1009,17 @@ function stockCount(){
 }
 function qtyMark(inp){
   const q=parseInt(inp.value)||0, free=parseInt(inp.dataset.free)||0;
-  if(q>free){ inp.style.borderColor='#F59E0B'; inp.style.background='#FFFBEB'; inp.title=`Под заказ: дефицит ${q-free} шт → в закупку`; }
-  else { inp.style.borderColor=''; inp.style.background=''; inp.title=''; }
+  const inc=parseInt(inp.dataset.inc)||0, eta=inp.dataset.eta||'';
+  if(q>free){
+    const def=q-free;
+    if(inc>0 && def<=inc){ // дефицит закрывается приходом — менеджер может назвать срок
+      inp.style.borderColor='#3B82F6'; inp.style.background='#EFF6FF';
+      inp.title=`Дефицит ${def} шт закроется приходом (+${inc} к ${eta})`;
+    } else { // дефицит больше прихода → остаток в закупку
+      inp.style.borderColor='#F59E0B'; inp.style.background='#FFFBEB';
+      inp.title= inc>0 ? `Дефицит ${def} шт: +${inc} к ${eta}, ещё ${def-inc} в закупку` : `Под заказ: дефицит ${def} шт → в закупку`;
+    }
+  } else { inp.style.borderColor=''; inp.style.background=''; inp.title=''; }
 }
 function confirmStock(){
   let added=0;

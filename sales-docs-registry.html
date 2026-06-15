@@ -40,6 +40,14 @@
   .filters select,.filters input[type=search]{font-size:12.5px;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;font-family:inherit;background:#fff;color:#374151}
   .filters select:focus,.filters input:focus{outline:none;border-color:var(--brand)}
   .filters .f-lbl{font-size:11px;color:var(--muted);margin-right:-4px}
+  .filters input[type=date]{font-size:12.5px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 8px;font-family:inherit;color:#374151}
+  .filters input[type=date]:focus{outline:none;border-color:var(--brand)}
+  .filters .f-dash{color:var(--muted)}
+  .filters .datechips{display:flex;gap:4px}
+  .filters .datechips button{font-size:11px;font-weight:600;border:1px solid #E5E7EB;background:#fff;color:#475467;border-radius:7px;padding:5px 8px;cursor:pointer}
+  .filters .datechips button:hover{background:var(--brand-50);border-color:#BFD3FF;color:var(--brand-700)}
+  .filters .f-reset{font-size:11.5px;font-weight:600;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C;border-radius:8px;padding:6px 10px;cursor:pointer}
+  .filters .f-reset:hover{filter:brightness(.97)}
   .filters .delonly{display:flex;align-items:center;gap:6px;font-size:12.5px;color:#B91C1C;cursor:pointer;user-select:none}
   .filters .grp{margin-left:auto;display:flex;align-items:center;gap:6px}
   .filters .grp .f-lbl{color:var(--muted)}
@@ -96,15 +104,23 @@
     <div class="stats" id="stats"></div>
 
     <div class="filters">
+      <span class="f-lbl">Контрагент</span><select id="f-client" onchange="render()"></select>
+      <span class="f-lbl">Тип</span><select id="f-kind" onchange="render()"></select>
       <span class="f-lbl">Отдел</span><select id="f-dept" onchange="render()"></select>
       <span class="f-lbl">Менеджер</span><select id="f-mgr" onchange="render()"></select>
-      <span class="f-lbl">Тип</span><select id="f-kind" onchange="render()"></select>
       <span class="f-lbl">Статус</span><select id="f-status" onchange="render()"></select>
+      <span class="f-lbl">Период</span>
+      <input type="date" id="f-from" onchange="render()" title="дата с">
+      <span class="f-dash">–</span>
+      <input type="date" id="f-to" onchange="render()" title="дата по">
+      <span class="datechips"><button onclick="quickDate(7)">7 дн</button><button onclick="quickDate(30)">30 дн</button><button onclick="quickDate(0)">сброс</button></span>
       <input type="search" id="f-q" placeholder="🔍 номер / сделка / клиент" oninput="render()">
       <label class="delonly"><input type="checkbox" id="f-del" onchange="render()"> только помеченные 🗑</label>
+      <button class="f-reset" onclick="resetFilters()" title="Сбросить все фильтры">✕ сбросить</button>
       <span class="grp"><span class="f-lbl">Группировать</span>
         <select id="f-group" onchange="render()">
           <option value="dept">по отделу</option>
+          <option value="client">по контрагенту</option>
           <option value="kind">по типу</option>
           <option value="deal">по сделке</option>
           <option value="flat">плоско</option>
@@ -158,31 +174,51 @@
   function fillFilters(){
     const docs = visible();
     const uniq = (arr)=>[...new Set(arr)].sort();
+    setOpts('f-client', uniq(docs.map(d=>d.client)), 'Все контрагенты');
     setOpts('f-dept', uniq(docs.map(d=>d.dept)), 'Все отделы');
     setOpts('f-mgr', uniq(docs.map(d=>d.mgr)), 'Все менеджеры');
     setOpts('f-kind', uniq(docs.map(d=>d.kind)), 'Все типы');
     setOpts('f-status', uniq(docs.map(d=>d.lbl)), 'Все статусы');
   }
+  // дата "дд.мм.гггг" → "гггг-мм-дд" (для сравнения с <input type=date>)
+  function isoOf(ddmmyyyy){ const [d,m,y]=ddmmyyyy.split('.'); return `${y}-${m}-${d}`; }
   function setOpts(id, vals, allLabel){
     const el=document.getElementById(id); const cur=el.value;
     el.innerHTML = `<option value="">${allLabel}</option>` + vals.map(v=>`<option ${v===cur?'selected':''}>${v}</option>`).join('');
   }
 
   function applyFilters(docs){
-    const dept=val('f-dept'), mgr=val('f-mgr'), kind=val('f-kind'), status=val('f-status'), q=val('f-q').toLowerCase(), delOnly=document.getElementById('f-del').checked;
-    return docs.filter(d=>
-      (!dept||d.dept===dept) && (!mgr||d.mgr===mgr) && (!kind||d.kind===kind) && (!status||d.lbl===status) &&
-      (!delOnly||d.del) &&
-      (!q || (d.n+' '+d.deal+' '+d.client).toLowerCase().includes(q))
-    );
+    const client=val('f-client'), dept=val('f-dept'), mgr=val('f-mgr'), kind=val('f-kind'), status=val('f-status'),
+          q=val('f-q').toLowerCase(), delOnly=document.getElementById('f-del').checked,
+          from=val('f-from'), to=val('f-to');
+    return docs.filter(d=>{
+      const iso=isoOf(d.date);
+      return (!client||d.client===client) && (!dept||d.dept===dept) && (!mgr||d.mgr===mgr) &&
+        (!kind||d.kind===kind) && (!status||d.lbl===status) && (!delOnly||d.del) &&
+        (!from||iso>=from) && (!to||iso<=to) &&
+        (!q || (d.n+' '+d.deal+' '+d.client).toLowerCase().includes(q));
+    });
   }
   function val(id){ return document.getElementById(id).value; }
+
+  // быстрый период: последние N дней от 15.06.2026 (демо-«сегодня»); 0 — сброс
+  function quickDate(days){
+    const f=document.getElementById('f-from'), t=document.getElementById('f-to');
+    if(!days){ f.value=''; t.value=''; render(); return; }
+    const today=new Date(2026,5,15); const past=new Date(today); past.setDate(today.getDate()-days+1);
+    const iso=dt=>dt.toISOString().slice(0,10);
+    f.value=iso(past); t.value=iso(today); render();
+  }
+  function resetFilters(){
+    ['f-client','f-dept','f-mgr','f-kind','f-status','f-from','f-to','f-q'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('f-del').checked=false; render();
+  }
 
   function setRole(r){
     curRole=r;
     document.querySelectorAll('#roleseg button').forEach(b=>b.classList.toggle('on', b.dataset.role===r));
     // сбросить фильтры под новую видимость
-    ['f-dept','f-mgr','f-kind','f-status'].forEach(id=>document.getElementById(id).value='');
+    ['f-client','f-dept','f-mgr','f-kind','f-status'].forEach(id=>document.getElementById(id).value='');
     fillFilters(); render();
   }
 
@@ -206,8 +242,8 @@
 
     const by = val('f-group');
     if(by==='flat'){ root.innerHTML = `<div class="group">${docs.map(rowHtml).join('')}</div>`; return; }
-    const keyOf = {dept:d=>d.dept, kind:d=>d.kind, deal:d=>d.deal}[by];
-    const icoOf = {dept:k=>DEPT_ICON[k]||'📁', kind:k=>KIND_ICON[k]||'📄', deal:()=>'🗂️'}[by];
+    const keyOf = {dept:d=>d.dept, client:d=>d.client, kind:d=>d.kind, deal:d=>d.deal}[by];
+    const icoOf = {dept:k=>DEPT_ICON[k]||'📁', client:()=>'🏢', kind:k=>KIND_ICON[k]||'📄', deal:()=>'🗂️'}[by];
     const g={}; docs.forEach(d=>{ const k=keyOf(d); (g[k]=g[k]||[]).push(d); });
     root.innerHTML = Object.keys(g).sort().map(k=>{
       const items=g[k]; const gsum=items.reduce((s,d)=>s+(+d.amount.replace(/\s/g,'')||0),0);
