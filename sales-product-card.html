@@ -136,6 +136,9 @@
   .price-lock{display:none;align-items:center;gap:6px;margin-top:10px;font-size:11.5px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:7px 11px;line-height:1.4}
   body.noprice .price-lock{display:flex}
   body.noprice #btnNewPrice{display:none!important}
+  .client-hint{display:none;align-items:center;gap:6px;margin:0 14px 10px;font-size:11.5px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:7px 11px;line-height:1.4}
+  body.noclient .client-hint{display:flex}
+  body.noclient .cl{display:none}
 
   /* фактические продажи (прайс vs цена со скидкой) */
   .sales-tbl td .who{font-weight:600}
@@ -218,11 +221,12 @@
 
       <!-- ПРАВО: продажи, характеристики, проверка, описание -->
       <div class="col">
-        <div class="card">
+        <div class="card" id="salesCard">
           <div class="ch">🧾 Фактические продажи (прайс − скидка)</div>
+          <div class="client-hint" id="clientHint">🔒 Закупщик видит цену продажи со скидкой, но <b>не видит клиента</b> — колонка скрыта.</div>
           <div class="cb" style="padding:0">
             <table class="stbl sales-tbl">
-              <thead><tr><th>Дата</th><th>Продавец</th><th>Клиент</th><th class="r">Прайс</th><th class="r">Скидка</th><th class="r">Цена продажи</th></tr></thead>
+              <thead><tr><th>Дата</th><th>Продавец</th><th class="cl">Клиент</th><th class="r">Прайс</th><th class="r">Скидка</th><th class="r">Цена продажи</th></tr></thead>
               <tbody id="salesRows"></tbody>
             </table>
             <div class="sales-foot" id="salesFoot"></div>
@@ -364,7 +368,7 @@
     document.getElementById('salesRows').innerHTML = P.sales.map(s=>{
       const sold=Math.round(s.list*(1-s.disc/100));
       const disc = s.disc ? `<span style="color:#B45309;font-weight:700">−${s.disc}%</span>` : '<span style="color:#CBD5E1">—</span>';
-      return `<tr><td class="cell">${s.dt}</td><td class="who">${s.who}</td><td class="cell">${s.client}</td><td class="r cell">${s.list.toLocaleString('ru-RU')}</td><td class="r">${disc}</td><td class="r" style="font-weight:800;color:#047857">${sold.toLocaleString('ru-RU')} Br</td></tr>`;
+      return `<tr><td class="cell">${s.dt}</td><td class="who">${s.who}</td><td class="cell cl">${s.client}</td><td class="r cell">${s.list.toLocaleString('ru-RU')}</td><td class="r">${disc}</td><td class="r" style="font-weight:800;color:#047857">${sold.toLocaleString('ru-RU')} Br</td></tr>`;
     }).join('');
     const avg = P.sales.length ? P.sales.reduce((a,s)=>a+s.disc,0)/P.sales.length : 0;
     document.getElementById('salesFoot').innerHTML =
@@ -404,13 +408,16 @@
   function addCheckPhoto(){ const ic=prompt('Эмодзи/иконка фото проверки:','📷'); if(!ic) return; const cap=prompt('Подпись (что на фото):','Фото проверки')||'Фото'; P.checkPhotos.push({ic,cap}); renderCheck(); }
   function changeGroup(){ const g=prompt('Группа (справочник core.nomenclature_groups), путь через ›:', document.getElementById('pGroup').textContent); if(g) document.getElementById('pGroup').textContent=g.trim(); }
 
-  // ── dev-роль: изменение прайса доступно закупщику / директору / зам. директора ──
+  // ── dev-роль: прайс меняют закупщик/директор/зам (у продавца — замок).
+  //    Продажи со скидкой видят все, НО закупщик не видит клиента (колонка скрыта) —
+  //    он контролирует цену/маржу, но не «кому продали». ──
   const PRICE_ROLES=['procurement','deputy','director'];
   function applyRole(){
     const r=document.getElementById('roleSel').value;
-    const allowed=PRICE_ROLES.includes(r);
-    document.body.classList.toggle('noprice', !allowed);
-    if(!allowed) document.getElementById('priceAdd').classList.remove('show');
+    const canPrice=PRICE_ROLES.includes(r);
+    document.body.classList.toggle('noprice', !canPrice);
+    document.body.classList.toggle('noclient', r==='procurement');
+    if(!canPrice) document.getElementById('priceAdd').classList.remove('show');
   }
 
   // ── история цены: новая версия (старая сохраняется — SCD2, полуоткрытый интервал) ──
