@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReferenceCatalog, ReferenceMeta } from "@/lib/reference-data";
-import { defaultRef, sortedDepartments } from "./spravochniki-catalog";
+import { defaultRef, rowsSource, sortedDepartments } from "./spravochniki-catalog";
 
 function makeRef(key: string, title: string): ReferenceMeta {
   return {
@@ -78,5 +78,23 @@ describe("defaultRef", () => {
 
   it("returns null when only dept has no refs", () => {
     expect(defaultRef({ departments: { Закупки: [] } })).toBeNull();
+  });
+});
+
+describe("rowsSource", () => {
+  it("CRUD: /system/refs/… → читается GET-ом по endpoint", () => {
+    expect(rowsSource({ endpoint: "/system/refs/units", key: "core.units" })).toBe("crud");
+    expect(rowsSource({ endpoint: "/system/refs/currency-rates", key: "core.currency_rates" })).toBe("crud");
+    expect(rowsSource({ endpoint: "/system/refs/nomenclature-groups", key: "core.nomenclature_groups" })).toBe("crud");
+  });
+
+  it("query-list: номенклатура отдаётся reference.query списком", () => {
+    expect(rowsSource({ endpoint: "/refs/skus", key: "core.skus" })).toBe("query-list");
+  });
+
+  it("lookup-only: контрагенты/контакты/сотрудники списком не выгружаются", () => {
+    expect(rowsSource({ endpoint: "/refs/counterparties", key: "core.counterparties" })).toBe("lookup-only");
+    expect(rowsSource({ endpoint: "/refs/contacts", key: "core.contacts" })).toBe("lookup-only");
+    expect(rowsSource({ endpoint: "/refs/employees", key: "core.employees" })).toBe("lookup-only");
   });
 });

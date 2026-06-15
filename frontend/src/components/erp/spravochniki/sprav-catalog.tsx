@@ -5,7 +5,7 @@ import { Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import type { ReferenceCatalog, ReferenceMeta } from "@/lib/reference-data";
-import { sortedDepartments } from "@/lib/spravochniki-catalog";
+import { rowsSource, sortedDepartments } from "@/lib/spravochniki-catalog";
 
 // Hub cards — shortcuts to the other 6 reference screens.
 const HUB_LINKS = [
@@ -48,9 +48,23 @@ const HUB_LINKS = [
 ] as const;
 
 // Fetch rows client-side via Next.js API proxy (/api/* → backend).
-async function fetchRowsViaProxy(endpoint: string): Promise<Record<string, unknown>[]> {
+// crud → GET по endpoint; query-list → reference.query по ключу;
+// lookup-only → строк нет (см. rowsSource): данные у владельца, точечный доступ.
+async function fetchRowsViaProxy(ref: ReferenceMeta): Promise<Record<string, unknown>[]> {
+  const src = rowsSource(ref);
+  if (src === "lookup-only") return [];
   try {
-    const res = await fetch(`/api${endpoint}`);
+    if (src === "query-list") {
+      const res = await fetch("/api/system/references/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: ref.key, limit: 200 }),
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { result?: unknown };
+      return Array.isArray(data.result) ? (data.result as Record<string, unknown>[]) : [];
+    }
+    const res = await fetch(`/api${ref.endpoint}`);
     if (!res.ok) return [];
     const data: unknown = await res.json();
     return Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
@@ -100,7 +114,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
     setTableSearch("");
     setLoading(true);
     const version = ++fetchVersion.current;
-    const r = await fetchRowsViaProxy(ref.endpoint);
+    const r = await fetchRowsViaProxy(ref);
     if (fetchVersion.current !== version) return;
     setRows(r);
     setLoading(false);
@@ -292,6 +306,13 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
               {loading ? (
                 <div className="px-5 py-8 text-center text-sm text-muted">
                   Загрузка…
+                </div>
+              ) : rowsSource(selected) === "lookup-only" ? (
+                <div className="rounded-xl bg-slate-50 px-5 py-8 text-center text-sm text-muted">
+                  Данные у владельца — список не выгружается целиком.
+                  <br />
+                  Точечный доступ: карточка эталона, дедупликация или структурный запрос AI
+                  (<span className="font-mono text-[12px]">reference.query</span> по УНП / имени).
                 </div>
               ) : selected.columns.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-muted">

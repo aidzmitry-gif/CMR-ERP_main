@@ -57,3 +57,25 @@ export function defaultRef(catalog: ReferenceCatalog): ReferenceMeta | null {
   const groups = sortedDepartments(catalog);
   return groups[0]?.refs[0] ?? null;
 }
+
+/**
+ * Откуда каталог берёт строки таблицы для справочника. Три источника:
+ *
+ * - `crud` — generic-роутер под `/system/refs/…` (units/currencies/страны/банки/
+ *   курсы/НДС/группы): GET по `endpoint`, полный список.
+ * - `query-list` — master-data, которую `reference.query` отдаёт списком
+ *   (номенклатура `core.skus`): POST reference.query по ключу.
+ * - `lookup-only` — master-data, которую backend НЕ вываливает списком намеренно
+ *   (контрагентов/контактов/сотрудников могут быть тысячи; `reference.query`
+ *   требует точечный key/name). В каталоге показываем пояснение, а не пустую
+ *   таблицу: данные у владельца, точечный доступ — через карточку/AI.
+ */
+export type RowsSource = "crud" | "query-list" | "lookup-only";
+
+const LOOKUP_ONLY_KEYS = new Set(["core.counterparties", "core.contacts", "core.employees"]);
+
+export function rowsSource(ref: Pick<ReferenceMeta, "endpoint" | "key">): RowsSource {
+  if (ref.endpoint.startsWith("/system/refs/")) return "crud";
+  if (LOOKUP_ONLY_KEYS.has(ref.key)) return "lookup-only";
+  return "query-list";
+}

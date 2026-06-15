@@ -20,25 +20,25 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "director": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge",
-        "analytics", "it",
+        "analytics", "spravochniki", "it",
     ],
     "commercial": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge",
-        "analytics", "it",
+        "analytics", "spravochniki", "it",
     ],
-    "assistant": ["home", "procurement", "logistics", "office", "knowledge"],
-    "sales_head": ["home", "crm", "marketing", "service", "knowledge", "analytics"],
+    "assistant": ["home", "procurement", "logistics", "office", "knowledge", "spravochniki"],
+    "sales_head": ["home", "crm", "marketing", "service", "knowledge", "analytics", "spravochniki"],
     "sales": ["home", "crm", "service", "knowledge"],
     "sales_cli": ["home", "crm", "service", "knowledge"],
-    "procurement": ["home", "procurement", "logistics", "knowledge"],
+    "procurement": ["home", "procurement", "logistics", "knowledge", "spravochniki"],
     "warehouse": ["home", "wms", "logistics", "knowledge"],
     "logistics": ["home", "wms", "logistics", "knowledge"],
     "production": ["home", "production", "wms", "knowledge"],
     "finance": ["home", "logistics", "office", "knowledge"],
     "hr": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
-        "marketing", "service", "hr", "office", "legal", "knowledge",
+        "marketing", "service", "hr", "office", "legal", "knowledge", "spravochniki",
     ],
 }
 

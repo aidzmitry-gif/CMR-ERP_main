@@ -1,6 +1,6 @@
 "use client";
 
-import { GitMerge, Unlink } from "lucide-react";
+import { GitMerge } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -9,7 +9,6 @@ import {
   type DuplicateMember,
   mergeCounterparties,
   totalDuplicates,
-  unmergeCounterparty,
 } from "@/lib/reference-data";
 import { clusterDuplicates, clusterSurvivor } from "@/lib/spravochniki-merge";
 
@@ -72,7 +71,6 @@ function MemberRow({
   busy,
   pending,
   onMerge,
-  onUnmerge,
 }: {
   member: DuplicateMember;
   unp: string;
@@ -80,7 +78,6 @@ function MemberRow({
   busy: boolean;
   pending: boolean;
   onMerge?: () => void;
-  onUnmerge?: () => void;
 }) {
   return (
     <tr className="hover:bg-slate-50/60">
@@ -99,25 +96,18 @@ function MemberRow({
         )}
       </td>
       <td className="px-3 py-2.5">
+        {/* В кластере дубли ещё НЕ слиты (приходят из duplicate_clusters, фильтр
+            is_active) — расклеивать нечего, поэтому здесь только «Слить».
+            Обратное действие (unmerge) живёт на карточке эталона. */}
         {!isSurvivor && (
-          <div className="flex gap-2">
-            <button
-              disabled={busy || pending}
-              onClick={onMerge}
-              className="flex items-center gap-1 rounded-xl bg-brand px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-card disabled:opacity-50 hover:bg-brand-700"
-            >
-              <GitMerge size={13} />
-              Слить
-            </button>
-            <button
-              disabled={busy || pending}
-              onClick={onUnmerge}
-              className="flex items-center gap-1 rounded-xl bg-white px-2.5 py-1.5 text-[12px] font-medium text-slate-600 shadow-card ring-1 ring-slate-200 disabled:opacity-50 hover:bg-slate-50"
-            >
-              <Unlink size={13} />
-              Расклеить
-            </button>
-          </div>
+          <button
+            disabled={busy || pending}
+            onClick={onMerge}
+            className="flex items-center gap-1 rounded-xl bg-brand px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-card disabled:opacity-50 hover:bg-brand-700"
+          >
+            <GitMerge size={13} />
+            Слить
+          </button>
         )}
       </td>
     </tr>
@@ -138,13 +128,6 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
     if (!survivor) return;
     setBusyId(dup.id);
     await mergeCounterparties(survivor.id, dup.id);
-    setBusyId(null);
-    startTransition(() => router.refresh());
-  }
-
-  async function handleUnmerge(dup: DuplicateMember) {
-    setBusyId(dup.id);
-    await unmergeCounterparty(dup.id);
     setBusyId(null);
     startTransition(() => router.refresh());
   }
@@ -240,7 +223,6 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                             busy={busyId === dup.id}
                             pending={isPending}
                             onMerge={() => handleMerge(dup)}
-                            onUnmerge={() => handleUnmerge(dup)}
                           />
                         ))}
                       </tbody>

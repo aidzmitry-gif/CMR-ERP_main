@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Headphones,
   Home,
+  Library,
   Megaphone,
   Scale,
   Settings,
@@ -164,6 +165,20 @@ const MODULES: ModuleItem[] = [
     ],
   },
   { slug: "analytics", label: "Аналитика", Icon: BarChart3, href: "/erp/analytics" },
+  {
+    slug: "spravochniki",
+    label: "Справочники",
+    Icon: Library,
+    href: "/erp/spravochniki",
+    sub: [
+      { label: "Каталог", href: "/erp/spravochniki" },
+      { label: "Курсы валют · НДС", href: "/erp/spravochniki/rates" },
+      { label: "Дедупликация", href: "/erp/spravochniki/merge" },
+      { label: "Группы номенклатуры", href: "/erp/spravochniki/categories" },
+      { label: "Импорт из 1С", href: "/erp/spravochniki/import" },
+      { label: "Доступ AI", href: "/erp/spravochniki/ai" },
+    ],
+  },
   { slug: "it", label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
 ];
 

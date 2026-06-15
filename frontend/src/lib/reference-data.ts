@@ -182,6 +182,30 @@ export async function fetchRefRowsByEndpoint(
   }
 }
 
+/** Строки master-data витрины по ключу через `reference.query` (SSR, абсолютный URL).
+ *
+ * Контрагенты/контакты/номенклатура/сотрудники не имеют CRUD-роутера — читаются
+ * структурным запросом. Не-200 → пусто. */
+export async function fetchRefRowsByKey(
+  key: string,
+  roles?: string,
+  limit = 200,
+): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetch(`${BASE}/system/references/query`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", ...roleHeaders(roles) },
+      body: JSON.stringify({ ref: key, limit }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = (await res.json()) as { result?: unknown };
+    return Array.isArray(data.result) ? (data.result as Record<string, unknown>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Создать запись простого справочника (клиент). */
 export async function createSimpleRef(
   table: SimpleRefTable,
