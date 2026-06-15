@@ -12,11 +12,14 @@ class OneCClient:
         self.base_url = base_url
 
     async def fetch_counterparties(self) -> list[dict]:
-        # TODO(part-6): при base_url — реальный OData GET вместо mock
+        # TODO(part-6): при base_url — реальный OData GET вместо mock.
+        # 1С отдаёт Ref_Key (GUID) на каждый элемент справочника — кладём его в ``id``,
+        # адаптер фиксирует его как alias-провенанс источника (golden record), чтобы
+        # отключение 1С было обратимым без потери связи «наш контрагент ← запись 1С».
         return [
-            {"name": "ООО Аккумулятор", "unp": "191234567"},
-            {"name": "ООО МеталлПром", "unp": "190000001"},
-            {"name": "АО СтройКомплект", "unp": "190000002"},
+            {"name": "ООО Аккумулятор", "unp": "191234567", "id": "b7e3f1a0-1c00-4a01-9e10-000000000001"},
+            {"name": "ООО МеталлПром", "unp": "190000001", "id": "b7e3f1a0-1c00-4a01-9e10-000000000002"},
+            {"name": "АО СтройКомплект", "unp": "190000002", "id": "b7e3f1a0-1c00-4a01-9e10-000000000003"},
         ]
 
     async def fetch_stock(self) -> list[dict]:

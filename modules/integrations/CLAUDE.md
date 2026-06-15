@@ -17,7 +17,7 @@
 - `client.py` — `OneCClient` (реализует `OneCGateway`): чтение из 1С; пустой `onec_base_url` → mock-данные.
 - `stock.py` — `StockService` (реализует `StockGateway`): остатки/резервы.
 - `registry.py` — `RegistryClient` (реализует `RegistryGateway`): поиск по УНП в ЕГР.
-- `service.py` — `sync_1c(session, event_bus, onec)`: upsert контрагентов/SKU/остатков в shared kernel + `integrations.stock_item`, эмитит событие.
+- `service.py` — `sync_1c(session, event_bus, onec)`: контрагенты — через идемпотентный адаптер ядра `core.services.reference_import` (матч по УНП + alias-провенанс источника в golden record); SKU/остатки — upsert в shared kernel + `integrations.stock_item`; эмитит событие.
 - `models.py` — ORM `StockItem` (схема `integrations`).
 - `schemas.py` — `StockOut`, `RegistryOut`.
 
@@ -28,7 +28,7 @@
 - Подписок/workflow/ролей/telegram нет.
 
 ## События
-- **Публикует**: `integration.1c.synced` (payload: `{counterparties, new_counterparties, stock}`) — из `sync_1c`.
+- **Публикует**: `integration.1c.synced` (payload: `{counterparties, new_counterparties, counterparty_aliases, stock}`) — из `sync_1c`.
 - **Подписан на**: —
 
 ## Внешние интеграции
@@ -43,5 +43,5 @@
 
 ## Подводные камни / детали
 - Этот модуль — **источник шлюзов `onec/stock/registry`**: если он выключен в `ENABLED_MODULES`, `core.services.onec/stock/registry == None`, и зависящие роуты отдают 503. Держать его включённым раньше потребителей (sales, wms).
-- Sync идемпотентен: контрагенты дедуплицируются по УНП, SKU — по коду, остатки — по `(sku_code, warehouse)`.
+- Sync идемпотентен: контрагенты — match по УНП через `reference_import` (+ alias-провенанс `counterparty_alias` по Ref_Key 1С, без дублей при повторе; пустое имя дозаполняется, существующее не перезатирается), SKU — по коду, остатки — по `(sku_code, warehouse)`.
 - Даты хранятся как naive UTC (`_utcnow()` срезает tzinfo).

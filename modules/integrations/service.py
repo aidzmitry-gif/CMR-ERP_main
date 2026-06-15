@@ -1,7 +1,10 @@
 """Синхронизация из 1С в бизнес-память (контрагенты, SKU, остатки/цены).
 
 Читает данные коннектором и upsert-ит в общую модель; о результате сообщает
-событием через шину (часть 6).
+событием через шину (часть 6). Контрагенты идут через идемпотентный входной
+адаптер ядра (`core.services.reference_import`): матч по УНП + alias-провенанс
+источника в golden record. ERP — система-источник, 1С — временный адаптер:
+отключение 1С = перестать звать sync, структура мастер-данных не меняется.
 """
 from __future__ import annotations
 
@@ -11,7 +14,8 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import Counterparty, Sku
+from core.domain.models import Sku
+from core.services import reference_import
 from core.services.onec import OneCGateway
 from modules.integrations.models import StockItem
 
@@ -21,17 +25,10 @@ def _utcnow() -> datetime:
 
 
 async def sync_1c(session: AsyncSession, event_bus, client: OneCGateway) -> dict:
-    # Контрагенты (по УНП), в shared kernel
+    # Контрагенты (по УНП) → идемпотентный входной адаптер ядра: матч/создание +
+    # alias-провенанс источника в golden record (reference_import — сердце «1С=адаптер»).
     counterparties = await client.fetch_counterparties()
-    known_unp = {u for u in (await session.execute(select(Counterparty.unp))).scalars().all() if u}
-    new_counterparties = 0
-    for cp in counterparties:
-        if cp.get("unp") and cp["unp"] in known_unp:
-            continue
-        session.add(Counterparty(name=cp["name"], unp=cp.get("unp")))
-        if cp.get("unp"):
-            known_unp.add(cp["unp"])
-        new_counterparties += 1
+    cp = await reference_import.import_counterparties(session, counterparties, source="1c")
 
     # Остатки/цены + SKU
     stock = await client.fetch_stock()
@@ -58,8 +55,9 @@ async def sync_1c(session: AsyncSession, event_bus, client: OneCGateway) -> dict
 
     await session.flush()
     summary = {
-        "counterparties": len(counterparties),
-        "new_counterparties": new_counterparties,
+        "counterparties": cp["total"],
+        "new_counterparties": cp["created"],
+        "counterparty_aliases": cp["aliases_added"],
         "stock": len(stock),
     }
     event_bus.emit(session, "integration.1c.synced", summary)
