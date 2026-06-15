@@ -243,7 +243,9 @@
     if(!list.length){ root.innerHTML='<div class="cart-empty">Ничего не найдено'+(item?` по «${aiAns.item}»`:'')+'</div>'; return; }
     // если задано наименование — плоский список, сортировка по ATP (свободно ↓), сервис в конец
     if(item){
-      list.sort((a,b)=>(isService(b)?-1:whFree(b)) - (isService(a)?-1:whFree(a)));
+      // ATP-ключ: услуги/без склада — в конец; больше свободно — выше
+      const atp=p=>isService(p)?-Infinity:whFree(p);
+      list.sort((a,b)=>atp(b)-atp(a));
       root.innerHTML = `<div class="grp-h">Подбор по «${aiAns.item}» · сортировка по наличию (ATP)</div>` + list.map(cardHtml).join('');
       return;
     }
@@ -346,8 +348,9 @@
   // матчинг: счёт по совпадению тегов с сигналом (скрипт + свободный запрос), фильтр бюджета/срочности
   function aiSignal(){
     const free=(document.getElementById('aiQuery').value||'').toLowerCase();
-    const parts=[aiAns.vehicle, aiAns.need, free].filter(Boolean).join(' ').toLowerCase();
-    const budget=parseInt((aiAns.budget||'').replace(/\D/g,''))|| (free.match(/до\s*(\d+)/)?+free.match(/до\s*(\d+)/)[1]:0);
+    const parts=[aiAns.item, aiAns.vehicle, aiAns.need, free].filter(Boolean).join(' ').toLowerCase();
+    const freeBudget=free.match(/до\s*(\d+)/);
+    const budget=parseInt((aiAns.budget||'').replace(/\D/g,'')) || (freeBudget?+freeBudget[1]:0);
     const urgent=(aiAns.urgency||'').includes('Срочно') || /срочно/.test(free);
     return {text:parts, budget, urgent, words:parts.split(/[\s,;/]+/).filter(w=>w.length>2)};
   }
@@ -364,16 +367,17 @@
     const out=document.getElementById('aiOut');
     if(!sig.text.trim()){ out.innerHTML=`<div class="ai-clarify"><span>🤔</span><span>Опишите задачу: тип техники и что нужно — или впишите свободный запрос. Можно подтянуть ответы из разговора (↓).</span></div>`; return; }
     let ranked=CATALOG.map(p=>scoreProduct(p,sig)).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
-    // мало сигнала → уточняющий вопрос
+    // собираем всё в одну строку и присваиваем РАЗ (иначе aiAdd→aiRun плодит панели)
+    let html='';
     const topScore=ranked.length?ranked[0].s:0;
     if(topScore<2 || (!aiAns.vehicle && !sig.text.match(/фур|погруз|легк|груз|авто|спец|склад/))){
-      out.innerHTML=`<div class="ai-clarify"><span>❓</span><span><b>Уточните:</b> для какой техники подбираем — грузовой/тягач, легковой, погрузчик (склад) или спецтехника? Это сильно сужает подбор. ${ranked.length?'Пока показываю ближайшее ниже.':''}</span></div>`;
-      if(!ranked.length) return;
+      html += `<div class="ai-clarify"><span>❓</span><span><b>Уточните:</b> для какой техники подбираем — грузовой/тягач, легковой, погрузчик (склад) или спецтехника? Это сильно сужает подбор. ${ranked.length?'Пока показываю ближайшее ниже.':''}</span></div>`;
+      if(!ranked.length){ out.innerHTML=html; return; }
     }
     const top=ranked.slice(0,4);
     const budgetNote = sig.budget?` · бюджет до ${fmt(sig.budget)} Br`:'';
     const urgNote = sig.urgent?' · только со склада приоритетно':'';
-    out.innerHTML += `<div class="ai-reco"><div class="rh">✨ Рекомендую под задачу«${sig.text.trim()}»${budgetNote}${urgNote}:</div>` +
+    html += `<div class="ai-reco"><div class="rh">✨ Рекомендую под задачу «${sig.text.trim()}»${budgetNote}${urgNote}:</div>` +
       top.map((x,i)=>{
         const p=x.p, sk=p.sku.replace(/'/g,"\\'"), free=isService(p)?'—':whFree(p), inCart=cart[p.sku]>0;
         const why = whyText(p,x,sig);
@@ -384,6 +388,7 @@
         </div>`;
       }).join('') +
       `<div class="rfoot">Подбор по параметрам техники и наличию. Решение — за менеджером; уточните бюджет/совместимость при сомнении.</div></div>`;
+    out.innerHTML = html;
   }
   function whyText(p,x,sig){
     const bits=[];
