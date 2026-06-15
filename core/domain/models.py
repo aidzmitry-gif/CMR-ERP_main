@@ -15,13 +15,36 @@ from core.db.base import Base
 
 
 class Counterparty(Base):
-    """Контрагент (клиент или поставщик)."""
+    """Контрагент (клиент или поставщик) — эталонная запись (golden record).
+
+    Дубли склеиваются MDM-сервисом ядра (``core.services.mdm``): дубль архивируется
+    (``is_active=False``) и ссылается на эталон (``merged_into_id``); merge обратим.
+    """
 
     __tablename__ = "counterparty"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    unp: Mapped[str | None] = mapped_column(String(32))  # УНП (РБ)
+    unp: Mapped[str | None] = mapped_column(String(32))  # УНП (РБ) — natural key
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # ссылка дубля на эталон, в который он слит (NULL — самостоятельная запись)
+    merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"))
+
+
+class CounterpartyAlias(Base):
+    """Алиас/источник эталонной записи контрагента (golden record).
+
+    Привязка внешних идентификаторов (1С, Bitrix) и слитых дублей к эталону. Позволяет
+    резолвить ссылки из внешних систем и обратимо расклеивать merge.
+    """
+
+    __tablename__ = "counterparty_alias"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    counterparty_id: Mapped[int] = mapped_column(ForeignKey("counterparty.id"))  # эталон
+    source: Mapped[str] = mapped_column(String(32))  # "1c" | "bitrix" | "merge" | "erp"
+    external_ref: Mapped[str] = mapped_column(String(128))  # id/код записи в источнике
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Contact(Base):

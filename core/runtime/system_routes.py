@@ -1,7 +1,7 @@
 """Системные роуты ядра: health-check и интроспекция реестра подключённых модулей."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,7 @@ from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_tit
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
+from core.services import mdm
 
 router = APIRouter(tags=["system"])
 
@@ -116,6 +117,36 @@ async def system_references_ai_catalog(request: Request) -> dict:
             if rr.reference.ai_exposed
         ]
     }
+
+
+@router.get("/system/mdm/duplicates")
+async def mdm_duplicates(session: AsyncSession = Depends(get_session)) -> dict:
+    """Кластеры дублей контрагентов по УНП — кандидаты на слияние (golden record)."""
+    return {"clusters": await mdm.duplicate_clusters(session)}
+
+
+@router.post("/system/mdm/merge")
+async def mdm_merge(payload: dict = Body(...), session: AsyncSession = Depends(get_session)) -> dict:
+    """Слить дубль в эталон (survivorship + архив дубля + alias). Обратимо через unmerge."""
+    try:
+        survivor = await mdm.merge(
+            session, int(payload["survivor_id"]), int(payload["duplicate_id"])
+        )
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return {"id": survivor.id, "name": survivor.name, "unp": survivor.unp}
+
+
+@router.post("/system/mdm/unmerge")
+async def mdm_unmerge(payload: dict = Body(...), session: AsyncSession = Depends(get_session)) -> dict:
+    """Расклеить ранее слитый дубль (вернуть активность, убрать merge-alias)."""
+    try:
+        duplicate = await mdm.unmerge(session, int(payload["duplicate_id"]))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return {"id": duplicate.id, "is_active": duplicate.is_active}
 
 
 @router.get("/system/events")
