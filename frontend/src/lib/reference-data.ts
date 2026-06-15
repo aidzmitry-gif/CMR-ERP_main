@@ -374,6 +374,52 @@ export async function unmergeCounterparty(duplicateId: number): Promise<boolean>
   }
 }
 
+/** Источник эталона (откуда пришла запись): 1С/Bitrix/merge. */
+export interface CounterpartyAlias {
+  source: string;
+  external_ref: string;
+  created_at: string;
+}
+
+/** Запись аудит-журнала по контрагенту (проекция доменных событий). */
+export interface CounterpartyAudit {
+  id: number;
+  ts: string;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
+}
+
+/** Карточка эталона контрагента (golden record): реквизиты + источники + дубли + контакты + аудит. */
+export interface CounterpartyCard {
+  id: number;
+  name: string;
+  unp: string | null;
+  is_active: boolean;
+  merged_into_id: number | null;
+  aliases: CounterpartyAlias[];
+  merged_duplicates: DuplicateMember[];
+  contacts: { id: number; full_name: string; phone: string | null; email: string | null; is_primary: boolean }[];
+  audit: CounterpartyAudit[];
+}
+
+/** Карточка одного эталона контрагента (SSR) — экран карточки/MDM. `null` — нет записи. */
+export async function fetchCounterpartyCard(
+  id: number,
+  roles?: string,
+): Promise<CounterpartyCard | null> {
+  try {
+    const res = await fetch(`${BASE}/system/mdm/counterparty/${id}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as CounterpartyCard;
+  } catch {
+    return null;
+  }
+}
+
 // ── Группы (категории) номенклатуры — иерархия (parent_id) ───────────────────
 
 /** Группа номенклатуры (узел дерева; parent_id=null → корень). */

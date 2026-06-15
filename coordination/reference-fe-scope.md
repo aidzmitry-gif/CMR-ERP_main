@@ -2,8 +2,9 @@
 
 **Кому:** Sonnet-флот (1 воркер = 1 экран). **От кого:** сессия «Справочники» (Opus).
 **Статус подготовки (Opus):** ГОТОВО — типизированный API-клиент `frontend/src/lib/reference-data.ts`
-(+ `reference-data.test.ts`, vitest 6/6, `tsc --noEmit` чисто). Бэкенд-эндпоинты реальны и
-проверены тестами (см. ниже). Воркерам остаётся **только UI**: страницы + клиентские компоненты.
+(+ `reference-data.test.ts`, vitest зелёно, `tsc --noEmit` чисто). Бэкенд-эндпоинты реальны и
+проверены тестами (см. ниже). **Гэпы A и B закрыты** → теперь **6 экранов LIVE, 1 ЧАСТИЧНО** (импорт 1С, гэп C).
+Воркерам остаётся **только UI**: страницы + клиентские компоненты.
 
 > Принцип: **бэкенд НЕ трогаем** (заморожен), пишем презентацию поверх готового клиента.
 > Где реального эндпоинта нет — честный демо-экран с пометкой (НЕ выдавать демо за live).
@@ -16,9 +17,15 @@
   (generic — по `endpoint` из метаданных), CRUD: `createSimpleRef/patchSimpleRef/archiveSimpleRef`.
 - **Версионные SCD2:** `fetchCurrencyRates(key,roles)`, `fetchVatRates(key,roles)`,
   `currencyRateAsOf(key,on)`, `addRateVersion(table,payload)`.
-- **MDM:** `fetchDuplicateClusters(roles)`, `mergeCounterparties(survivor,dup)`, `unmergeCounterparty(dup)`.
+- **MDM:** `fetchDuplicateClusters(roles)`, `mergeCounterparties(survivor,dup)`, `unmergeCounterparty(dup)`,
+  `fetchCounterpartyCard(id,roles)` → карточка эталона (реквизиты + `aliases` источников 1С/Bitrix/merge
+  + `merged_duplicates` + `contacts` + `audit`); `null` если нет записи. **(гэп A закрыт)**
+- **Группы номенклатуры (иерархия parent_id):** `fetchNomenclatureGroups(roles)`,
+  `createNomenclatureGroup`, `patchNomenclatureGroup`, `archiveNomenclatureGroup`; дерево из плоского
+  списка — хелпер `buildCategoryTree`. **(гэп B закрыт; seed засевает демо-дерево)**
 - **AI:** `runReferenceQuery({ref,key,as_of,name,limit})`.
-- **Чистые хелперы (тестируемы):** `flattenCatalog`, `isCurrentVersion`, `sortVersionsDesc`, `totalDuplicates`.
+- **Чистые хелперы (тестируемы):** `flattenCatalog`, `isCurrentVersion`, `sortVersionsDesc`,
+  `totalDuplicates`, `buildCategoryTree`.
 
 Конвенция как в `api.ts`: SSR-чтения на `${BASE}` с `X-User-Roles`; клиентские мутации — через
 прокси `/api/*`; всё в try/catch с безопасным fallback. **Новые эндпоинты НЕ нужны** — если
@@ -41,21 +48,24 @@
 | 2 | `spravochniki-versioned-preview.html` (курсы SCD2) | `/erp/spravochniki/rates` | `fetchCurrencyRates`, `currencyRateAsOf`, `addRateVersion`, `isCurrentVersion`, `sortVersionsDesc` | **LIVE** |
 | 3 | `spravochniki-merge-preview.html` (дедуп/MDM) | `/erp/spravochniki/merge` | `fetchDuplicateClusters`, `mergeCounterparties`, `unmergeCounterparty`, `totalDuplicates` | **LIVE** |
 | 4 | `spravochniki-ai-preview.html` (semantic/MCP) | `/erp/spravochniki/ai` | `fetchAiCatalog`, `runReferenceQuery` | **LIVE** |
-| 5 | `spravochniki-card-preview.html` (карточка + алиасы) | `/erp/spravochniki/counterparty/[id]` | `runReferenceQuery({ref:"core.counterparties",...})` (список/поиск) | **ЧАСТИЧНО** — карточка-эталон есть по списку; **алиасы/аудит — демо** (гэп A) |
+| 5 | `spravochniki-card-preview.html` (карточка + алиасы) | `/erp/spravochniki/counterparty/[id]` | `fetchCounterpartyCard(id)` (эталон + алиасы + дубли + контакты + аудит); поиск — `runReferenceQuery({ref:"core.counterparties",...})` | **LIVE** — карточка/алиасы/дубли/контакты реальны; аудит пуст пока нет доменных событий по контрагенту (не демо — честно пусто) |
 | 6 | `spravochniki-import-1c-preview.html` (адаптер 1С) | `/erp/spravochniki/import` | live-кнопка `POST /api/integrations/1c/sync` (summary) | **ЧАСТИЧНО** — синк реальный; **маппинг/предпросмотр конфликтов — демо** (гэп C) |
-| 7 | `spravochniki-hierarchy-preview.html` (категории parent_id+ltree) | `/erp/spravochniki/categories` | — | **ДЕМО** — backend категорий нет (гэп B) |
+| 7 | `spravochniki-hierarchy-preview.html` (категории parent_id) | `/erp/spravochniki/categories` | `fetchNomenclatureGroups` + `buildCategoryTree`; CRUD `create/patch/archiveNomenclatureGroup` | **LIVE** — иерархия из БД (seed засевает демо-дерево); ltree-путь — будущая Postgres-оптимизация, не нужен для UI |
 
 Хаб `spravochniki-preview-index.html` → навигация между экранами (вкладки/ссылки внутри `/erp/spravochniki`).
 
 ## Гэпы бэкенда — ФЛАЖОК оркестратору, НЕ чинить в этой полосе
 
-- **A. Карточка контрагента + алиасы/аудит:** нет `GET /system/mdm/counterparty/{id}` (эталон +
-  `counterparty_alias` + история). Сейчас доступен только список через `reference.query`. Раздел
-  «алиасы-источники / аудит» на экране 5 — демо до появления эндпоинта.
-- **B. Иерархия категорий:** таблицы/эндпоинта категорий (parent_id + ltree) ещё нет — экран 7 демо.
+- ~~**A. Карточка контрагента + алиасы/аудит**~~ — **ЗАКРЫТ** (`GET /system/mdm/counterparty/{id}`,
+  клиент `fetchCounterpartyCard`). Экран 5 — LIVE. Аудит пока пуст (нет доменных событий по
+  контрагенту) — показывать как «истории пока нет», НЕ как демо.
+- ~~**B. Иерархия категорий**~~ — **ЗАКРЫТ** (`/system/refs/nomenclature-groups` + `reference.query`
+  `core.nomenclature_groups`; seed засевает демо-дерево; клиент `fetchNomenclatureGroups`+`buildCategoryTree`).
+  Экран 7 — LIVE.
 - **C. Импорт 1С — маппинг/предпросмотр:** есть только идемпотентный `POST /integrations/1c/sync`
   (отдаёт summary `{counterparties,new_counterparties,counterparty_aliases,stock}`). Шаги
-  «маппинг полей → конфликты → импорт» из макета — демо до backend-фазы адаптера.
+  «маппинг полей → конфликты → импорт» из макета — демо до backend-фазы адаптера. **(единственный
+  открытый гэп)**
 
 ## Координация (общий worktree main, параллельные сессии)
 
