@@ -438,9 +438,11 @@
   .stbl .free.low{color:#B91C1C}
   .stbl .inc{white-space:nowrap}
   .stbl .inc .muted{color:#CBD5E1}
-  .stbl .incval{color:#1D4ED8;font-weight:700;cursor:help}
+  .stbl .incval{color:#1D4ED8;font-weight:700}
   .stbl .incval small{color:#64748B;font-weight:600}
-  .stbl .incmore{font-size:10px;color:#1D4ED8;background:#EFF6FF;border-radius:5px;padding:0 4px;font-weight:700}
+  .stbl .inc-detail{margin-top:3px;white-space:normal}
+  .stbl .inc-line{font-size:10.5px;font-weight:500;color:#475467;line-height:1.45}
+  .stbl .inc-line b{color:#1D4ED8;font-weight:700}
   .stbl .price{font-weight:700;white-space:nowrap}
   .stbl .q{width:68px;border:1px solid #E5E7EB;border-radius:6px;padding:5px;font-size:12px;text-align:center;font-family:inherit}
   .stbl input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand)}
@@ -1006,10 +1008,12 @@ function incQty(w){ return (w.inc||[]).reduce((s,x)=>s+x.qty,0); }
 function incEta(w){ return (w.inc&&w.inc.length)?w.inc[0].eta:''; }
 function incStr(w){
   if(!w.inc||!w.inc.length) return '<span class="muted">—</span>';
-  // несколько приходов — показать ближайший + «и ещё N» в title
-  const tip = w.inc.map(x=>`+${x.qty} к ${x.eta} (${x.src})`).join(' · ');
-  const f=w.inc[0]; const more=w.inc.length>1?` <span class="incmore">+${w.inc.length-1}</span>`:'';
-  return `<span class="incval" title="${tip}">🚚 +${incQty(w)} <small>к ${f.eta}</small></span>${more}`;
+  // итог + видимая разбивка по каждому приходу: рейс/заказ · кол-во · дата (источник — логистика/закупки)
+  const lines = w.inc.map(x=>{
+    const kind = /^TR/i.test(x.src) ? '🚚 рейс' : '🛒 заказ';
+    return `<div class="inc-line">${kind} <b>${x.src}</b> · +${x.qty} шт · к ${x.eta}</div>`;
+  }).join('');
+  return `<span class="incval">🚚 +${incQty(w)} <small>к ${incEta(w)}</small></span><div class="inc-detail">${lines}</div>`;
 }
 
 function renderStock(filter){
