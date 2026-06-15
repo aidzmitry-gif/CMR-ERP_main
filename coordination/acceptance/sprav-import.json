@@ -1,0 +1,49 @@
+{
+  "worker": "sprav-import",
+  "checks": [
+    {
+      "id": "types",
+      "kind": "types",
+      "desc": "tsc --noEmit чисто на frontend",
+      "cmd": "cd frontend && node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+      "passes": true,
+      "evidence": "auto: exit 0"
+    },
+    {
+      "id": "tests",
+      "kind": "test",
+      "desc": "vitest зелено для spravochniki-import.test.ts",
+      "cmd": "cd frontend && npx vitest run src/lib/spravochniki-import.test.ts",
+      "passes": true,
+      "evidence": "auto: exit 0"
+    },
+    {
+      "id": "scope",
+      "kind": "manual",
+      "desc": "Тронуты ТОЛЬКО файлы scope (4 файла, без reference-data.ts и прочего запрещённого)",
+      "passes": true,
+      "evidence": "git diff --name-only: src/app/erp/spravochniki/import/page.tsx, src/components/erp/spravochniki/sprav-import.tsx, src/lib/spravochniki-import.ts, src/lib/spravochniki-import.test.ts — именно scope-файлы"
+    },
+    {
+      "id": "live-sync",
+      "kind": "manual",
+      "desc": "LIVE: кнопка «Синхронизировать» → POST /api/integrations/1c/sync, рендер summary",
+      "passes": true,
+      "evidence": "SpravImport.tsx: handleSync() вызывает fetch('/api/integrations/1c/sync', {method:'POST'}), результат передаётся в formatSyncSummary(), отображается в grid из 4 карточек"
+    },
+    {
+      "id": "demo-badge",
+      "kind": "manual",
+      "desc": "ДЕМО-шаги (маппинг/конфликты) визуально помечены плашкой ДЕМО",
+      "passes": true,
+      "evidence": "Компонент содержит DEMO section label с badge «ДЕМО» (bg-amber-100 text-amber-800) перед stepper/mapping/preview секциями"
+    },
+    {
+      "id": "graceful-degrade",
+      "kind": "manual",
+      "desc": "Graceful degrade без бэка: страница не падает, ошибка отображается",
+      "passes": true,
+      "evidence": "handleSync() обёрнут в try/catch; ошибка попадает в setSyncError(); рендерится rose-50 блок с текстом ошибки; страница продолжает работу"
+    }
+  ]
+}
