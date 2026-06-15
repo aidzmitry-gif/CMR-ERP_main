@@ -402,13 +402,9 @@
   .iv-bottom{display:flex;gap:16px;margin-top:15px;flex-wrap:wrap}
   .iv-terms{flex:1;min-width:240px}
   .iv-terms .l{font-size:11px;font-weight:700;text-transform:uppercase;color:#9aa3b0;margin:0 0 6px}
-  .iv-terms .seg{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
-  .iv-terms .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;color:#475467;cursor:pointer}
-  .iv-terms .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
   .iv-terms .row{display:flex;gap:9px;align-items:center;font-size:12.5px;margin-bottom:9px}
   .iv-terms input[type=date]{border:1px solid #E5E7EB;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
-  .iv-resv{display:flex;gap:9px;align-items:center;font-size:12.5px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:9px 12px;color:#92400E;font-weight:600;cursor:pointer}
-  .iv-resv input{width:16px;height:16px;accent-color:var(--warn)}
+  .iv-terms select{border:1px solid #E5E7EB;border-radius:8px;padding:6px 9px;font-size:12.5px;font-family:inherit;color:#374151}
   .iv-sum{width:260px;background:#F8FAFC;border-radius:12px;padding:13px 15px;font-size:13px}
   .iv-sum .r{display:flex;justify-content:space-between;padding:4px 0}
   .iv-sum .r.tot{border-top:1px solid #E5E7EB;margin-top:6px;padding-top:8px;font-size:16px;font-weight:800}
@@ -461,9 +457,6 @@
   .ct-field input:focus,.ct-field textarea:focus,.ct-field select:focus{outline:none;border-color:var(--brand)}
   .ct-field textarea{min-height:52px;resize:vertical}
   .ct-field.full{grid-column:1 / -1}
-  .ct-field .seg{display:flex;gap:7px;flex-wrap:wrap}
-  .ct-field .seg button{border:1px solid #E5E7EB;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;color:#475467;cursor:pointer}
-  .ct-field .seg button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700)}
   .iv-terms .mini{display:flex;gap:10px;align-items:center;font-size:12.5px;margin-bottom:9px;flex-wrap:wrap}
   .iv-terms .mini label{color:var(--muted)}
   .iv-terms .mini input,.iv-terms .mini select{border:1px solid #E5E7EB;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
@@ -1101,6 +1094,12 @@ function skuFree(name){
   if(!s) return Infinity;
   return s.wh.reduce((a,w)=>a+(w.on-w.res),0);
 }
+/* кол-во в пути (∑ inc по складам) — чтобы дефицит, закрываемый приходом, не уходил в закупку */
+function skuIncoming(name){
+  const s=STOCK_WH.find(x=>x.sku===name);
+  if(!s) return 0;
+  return s.wh.reduce((a,w)=>a+(w.inc||[]).reduce((b,x)=>b+x.qty,0),0);
+}
 function closeStock(){ document.getElementById('stockOv').classList.remove('show'); }
 
 /* ── редактор счёта / КП / акта (общее ядро) ── */
@@ -1264,15 +1263,24 @@ function invSent(){
     let defNote='';
     if(rd){
       const until = reserveUntil(rd);
-      const deficits = invoiceItems
-        .map(it=>({name:it.name, def:it.qty - skuFree(it.name)}))
-        .filter(x=>isFinite(x.def) && x.def>0);
-      if(deficits.length){
-        const txt = deficits.map(x=>`${x.name} — ${x.def} шт`).join('; ');
+      // делим дефицит как в подборе: что закроется приходом (в пути) и что реально в закупку
+      const defs = invoiceItems
+        .map(it=>{ const d0=it.qty - skuFree(it.name); if(!isFinite(d0)||d0<=0) return null;
+                   const byInc=Math.min(d0, skuIncoming(it.name)); return {name:it.name, buy:d0-byInc, inc:byInc}; })
+        .filter(Boolean);
+      const toBuy = defs.filter(x=>x.buy>0);
+      const onWay = defs.filter(x=>x.inc>0);
+      if(toBuy.length){
+        const txt = toBuy.map(x=>`${x.name} — ${x.buy} шт`).join('; ');
         d.tasks.unshift({t:`Подтвердить закупку дефицита: ${txt}`,m:"закупщику на подтверждение → авто-отправка в закупку",kind:"Закупка",done:false});
         d.timeline.unshift({type:"stage",t:`⚠ Дефицит под резерв: ${txt} → закупщику на подтверждение`,m:"Авто · только что",pin:false});
-        defNote = ` · дефицит → закупщику: ${deficits.reduce((a,x)=>a+x.def,0)} шт`;
-      } else {
+        defNote = ` · дефицит → закупщику: ${toBuy.reduce((a,x)=>a+x.buy,0)} шт`;
+      }
+      if(onWay.length){
+        const txt = onWay.map(x=>`${x.name} — ${x.inc} шт`).join('; ');
+        d.timeline.unshift({type:"doc",t:`🚚 Дефицит закроется приходом: ${txt} (в пути)`,m:"Авто · только что",pin:false});
+      }
+      if(!defs.length){
         d.timeline.unshift({type:"doc",t:`📦 Товар зарезервирован до ${until} (${rd} кал. дн., со склада)`,m:"Авто · только что",pin:false});
       }
     }

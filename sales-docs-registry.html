@@ -206,7 +206,8 @@
     const f=document.getElementById('f-from'), t=document.getElementById('f-to');
     if(!days){ f.value=''; t.value=''; render(); return; }
     const today=new Date(2026,5,15); const past=new Date(today); past.setDate(today.getDate()-days+1);
-    const iso=dt=>dt.toISOString().slice(0,10);
+    // локальные компоненты, не toISOString() — иначе в UTC+N дата уезжает на день назад
+    const iso=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
     f.value=iso(past); t.value=iso(today); render();
   }
   function resetFilters(){
