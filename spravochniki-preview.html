@@ -56,10 +56,10 @@
       <span>🤖 в каталоге для AI</span>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
 
       <!-- ЛЕВО: дерево по отделам -->
-      <aside class="space-y-3">
+      <aside class="space-y-3 lg:sticky lg:top-6 lg:self-start">
         <!-- Поиск по реестру -->
         <div class="rounded-2xl bg-white p-2 shadow-card">
           <div class="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
@@ -69,7 +69,7 @@
         </div>
 
         <!-- Дерево -->
-        <nav class="rounded-2xl bg-white p-2 shadow-card text-[13px]">
+        <nav class="max-h-[calc(100vh-9rem)] overflow-y-auto rounded-2xl bg-white p-2 shadow-card text-[13px]">
 
           <!-- Система -->
           <div class="px-2 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">⚙️ Система · ядро</div>
