@@ -1,7 +1,7 @@
 """MDM контрагентов: дедуп по УНП, merge (survivorship + архив + alias), unmerge, гарды."""
 import pytest
 
-from core.domain.models import Counterparty
+from core.domain.models import Contact, Counterparty
 from core.services import mdm
 
 
@@ -91,3 +91,28 @@ async def test_mdm_endpoints(api, session):
     r = await api.post("/system/mdm/unmerge", json={"duplicate_id": ids[1]})
     assert r.status_code == 200
     assert len((await api.get("/system/mdm/duplicates")).json()["clusters"]) == 1
+
+
+async def test_counterparty_card(api, session):
+    # эталон + контакт; затем слитый дубль (alias merge) и внешний alias 1С
+    etalon = Counterparty(name="ООО Эталон", unp="190445566")
+    session.add(etalon)
+    await session.flush()
+    session.add(Contact(counterparty_id=etalon.id, full_name="Иван Петров",
+                        phone="+375291112233", is_primary=True))
+    dup = Counterparty(name="ООО Эталон дубль", unp="190445566")
+    session.add(dup)
+    await session.flush()
+    await mdm.add_source_alias(session, etalon.id, "1c", "0000-77")  # источник 1С
+    await mdm.merge(session, etalon.id, dup.id)                       # даст merge-alias + слитый дубль
+    await session.commit()
+
+    card = (await api.get(f"/system/mdm/counterparty/{etalon.id}")).json()
+    assert card["id"] == etalon.id
+    assert card["unp"] == "190445566"
+    assert {a["source"] for a in card["aliases"]} == {"1c", "merge"}
+    assert [d["id"] for d in card["merged_duplicates"]] == [dup.id]
+    assert [c["full_name"] for c in card["contacts"]] == ["Иван Петров"]
+    assert card["audit"] == []  # доменных событий по контрагенту пока не пишется
+
+    assert (await api.get("/system/mdm/counterparty/999999")).status_code == 404

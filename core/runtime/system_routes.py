@@ -184,6 +184,17 @@ async def mdm_unmerge(payload: dict = Body(...), session: AsyncSession = Depends
     return {"id": duplicate.id, "is_active": duplicate.is_active}
 
 
+@router.get("/system/mdm/counterparty/{counterparty_id}")
+async def mdm_counterparty_card(
+    counterparty_id: int, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Карточка эталона контрагента: реквизиты + источники (1С/Bitrix), слитые дубли, контакты, аудит."""
+    card = await mdm.counterparty_card(session, counterparty_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="контрагент не найден")
+    return card
+
+
 @router.get("/system/events")
 async def system_events(session: AsyncSession = Depends(get_session)) -> list[dict]:
     """Последние доменные события — журнал outbox (единый event log, часть 3)."""

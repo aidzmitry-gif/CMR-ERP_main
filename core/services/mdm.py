@@ -13,10 +13,13 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import Counterparty, CounterpartyAlias
+from core.domain.models import AuditLog, Contact, Counterparty, CounterpartyAlias
 
 #: поля контрагента, участвующие в survivorship при слиянии
 _SURVIVORSHIP_FIELDS = ("name", "unp")
+
+#: префикс ссылки на контрагента в журнале аудита (``entity_ref``)
+AUDIT_ENTITY_PREFIX = "counterparty:"
 
 
 async def duplicate_clusters(session: AsyncSession) -> list[dict]:
@@ -129,3 +132,61 @@ async def aliases(session: AsyncSession, counterparty_id: int) -> list[Counterpa
             )
         ).scalars().all()
     )
+
+
+async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict | None:
+    """Карточка эталона контрагента: реквизиты + источники (alias) + слитые дубли + контакты + аудит.
+
+    Витрина одной записи golden record: откуда она пришла (1С/Bitrix), какие дубли в неё
+    слиты (обратимо), кто контактные лица и история изменений (проекция событий по
+    ``entity_ref = counterparty:<id>``). ``None`` — записи нет.
+    """
+    cp = await session.get(Counterparty, counterparty_id)
+    if cp is None:
+        return None
+
+    alias_rows = await aliases(session, counterparty_id)
+    merged = (
+        await session.execute(
+            select(Counterparty)
+            .where(Counterparty.merged_into_id == counterparty_id)
+            .order_by(Counterparty.id)
+        )
+    ).scalars().all()
+    contacts = (
+        await session.execute(
+            select(Contact)
+            .where(Contact.counterparty_id == counterparty_id)
+            .order_by(Contact.is_primary.desc(), Contact.id)
+        )
+    ).scalars().all()
+    audit = (
+        await session.execute(
+            select(AuditLog)
+            .where(AuditLog.entity_ref == f"{AUDIT_ENTITY_PREFIX}{counterparty_id}")
+            .order_by(AuditLog.id.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+
+    return {
+        "id": cp.id,
+        "name": cp.name,
+        "unp": cp.unp,
+        "is_active": cp.is_active,
+        "merged_into_id": cp.merged_into_id,
+        "aliases": [
+            {"source": a.source, "external_ref": a.external_ref, "created_at": str(a.created_at)}
+            for a in alias_rows
+        ],
+        "merged_duplicates": [{"id": d.id, "name": d.name, "unp": d.unp} for d in merged],
+        "contacts": [
+            {"id": c.id, "full_name": c.full_name, "phone": c.phone,
+             "email": c.email, "is_primary": c.is_primary}
+            for c in contacts
+        ],
+        "audit": [
+            {"id": a.id, "ts": str(a.ts), "actor": a.actor, "action": a.action, "detail": a.detail}
+            for a in audit
+        ],
+    }
