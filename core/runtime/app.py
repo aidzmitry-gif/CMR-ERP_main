@@ -19,6 +19,7 @@ from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
 from core.runtime.reference_registry import register_system_references
+from core.runtime.reference_routes import build_reference_router
 from core.services import build_services
 from core.services.eventbus import EventContext
 
@@ -78,6 +79,8 @@ def create_app() -> FastAPI:
 
     # системные роуты ядра (/health, /system/modules, /system/events, /system/owner)
     app.include_router(system_routes.router)
+    # CRUD системных справочников ядра под /system/refs/* (см. каталог /system/references)
+    app.include_router(build_reference_router())
     # согласования (human-in-the-loop)
     app.include_router(approval_routes.router)
     # Telegram-интерфейс (часть 11): команды и согласования в боте

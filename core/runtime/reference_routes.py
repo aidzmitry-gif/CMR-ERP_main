@@ -1,0 +1,185 @@
+"""Generic-CRUD для системных справочников ядра (схема ``public``), под эндпоинты каталога.
+
+Две фабрики роутеров — эталон, который модули переиспользуют для своих классификаторов:
+- ``build_simple_ref_router`` — простой справочник: list (с архивом), create, patch,
+  archive (мягкое удаление через ``is_active``);
+- ``build_versioned_ref_router`` — версионный (SCD2): список версий, current, as-of,
+  добавление новой версии с даты.
+
+Транзакцию коммитит роут (вызывающий код владеет границей транзакции, §ядро).
+Данные остаются у владельца — это CRUD поверх таблиц public, не второе хранилище.
+"""
+from __future__ import annotations
+
+from datetime import date
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.domain.reference import Bank, Country, Currency, CurrencyRate, Unit, VatRate
+from core.runtime.deps import get_session
+from core.services import scd2
+
+
+def _row(obj, fields: tuple[str, ...]) -> dict:
+    return {f: getattr(obj, f) for f in fields}
+
+
+async def _by_key(session: AsyncSession, model: type, key_field: str, value):
+    obj = (
+        await session.execute(select(model).where(getattr(model, key_field) == value))
+    ).scalars().first()
+    if obj is None:
+        raise HTTPException(status_code=404, detail="запись не найдена")
+    return obj
+
+
+def build_simple_ref_router(
+    model: type,
+    *,
+    fields: tuple[str, ...],
+    editable: tuple[str, ...],
+    required: tuple[str, ...] = (),
+    key_field: str = "code",
+) -> APIRouter:
+    """Роутер простого справочника: list (с архивом), create, patch, archive."""
+    router = APIRouter()
+
+    @router.get("")
+    async def list_items(
+        archived: bool = False, session: AsyncSession = Depends(get_session)
+    ) -> list[dict]:
+        query = select(model)
+        if not archived:
+            query = query.where(model.is_active.is_(True))
+        query = query.order_by(getattr(model, key_field))
+        return [_row(o, fields) for o in (await session.execute(query)).scalars().all()]
+
+    @router.post("")
+    async def create_item(
+        payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+    ) -> dict:
+        missing = [k for k in required if k not in payload]
+        if missing:
+            raise HTTPException(status_code=422, detail=f"не хватает полей: {', '.join(missing)}")
+        obj = model(**{k: payload[k] for k in editable if k in payload})
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return _row(obj, fields)
+
+    @router.patch("/{code}")
+    async def update_item(
+        code: str, payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+    ) -> dict:
+        obj = await _by_key(session, model, key_field, code)
+        for field in editable:
+            if field in payload:
+                setattr(obj, field, payload[field])
+        await session.commit()
+        return _row(obj, fields)
+
+    @router.delete("/{code}")
+    async def archive_item(
+        code: str, session: AsyncSession = Depends(get_session)
+    ) -> dict:
+        obj = await _by_key(session, model, key_field, code)
+        obj.is_active = False
+        await session.commit()
+        return {"archived": code}
+
+    return router
+
+
+def build_versioned_ref_router(
+    model: type,
+    *,
+    key_field: str,
+    value_fields: tuple[str, ...],
+    list_fields: tuple[str, ...],
+) -> APIRouter:
+    """Роутер версионного справочника (SCD2): список версий, current, as-of, добавить версию."""
+    router = APIRouter()
+
+    @router.get("")
+    async def list_versions(
+        key: str | None = None, session: AsyncSession = Depends(get_session)
+    ) -> list[dict]:
+        query = select(model)
+        if key is not None:
+            query = query.where(getattr(model, key_field) == key)
+        query = query.order_by(getattr(model, key_field), model.start_date.desc())
+        return [_row(o, list_fields) for o in (await session.execute(query)).scalars().all()]
+
+    @router.get("/current")
+    async def current_version(key: str, session: AsyncSession = Depends(get_session)) -> dict:
+        obj = await scd2.current_version(session, model, key_field, key)
+        if obj is None:
+            raise HTTPException(status_code=404, detail="нет текущей версии")
+        return _row(obj, list_fields)
+
+    @router.get("/as-of")
+    async def version_as_of(
+        key: str, on: date, session: AsyncSession = Depends(get_session)
+    ) -> dict:
+        obj = await scd2.version_as_of(session, model, key_field, key, on)
+        if obj is None:
+            raise HTTPException(status_code=404, detail="нет версии на эту дату")
+        return _row(obj, list_fields)
+
+    @router.post("/versions")
+    async def add_version(
+        payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+    ) -> dict:
+        key = payload.get(key_field)
+        start = payload.get("start_date")
+        if key is None or start is None:
+            raise HTTPException(status_code=422, detail=f"нужны поля: {key_field}, start_date")
+        if isinstance(start, str):
+            start = date.fromisoformat(start)
+        values = {f: payload[f] for f in value_fields if f in payload}
+        try:
+            obj = await scd2.add_version(session, model, key_field, key, start, **values)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await session.commit()
+        await session.refresh(obj)
+        return _row(obj, list_fields)
+
+    return router
+
+
+def build_reference_router() -> APIRouter:
+    """Собрать системный CRUD-роутер справочников ядра под ``/system/refs/*`` (см. каталог)."""
+    router = APIRouter(prefix="/system/refs", tags=["references"])
+    simple = (
+        ("/units", Unit, ("code", "title", "is_active"), ("code", "title")),
+        ("/currencies", Currency, ("code", "title", "is_active"), ("code", "title")),
+        ("/countries", Country, ("code", "title", "is_active"), ("code", "title")),
+        ("/banks", Bank, ("code", "title", "swift", "is_active"), ("code", "title")),
+    )
+    for prefix, model, fields, required in simple:
+        router.include_router(
+            build_simple_ref_router(model, fields=fields, editable=fields, required=required),
+            prefix=prefix,
+        )
+    router.include_router(
+        build_versioned_ref_router(
+            CurrencyRate,
+            key_field="currency_code",
+            value_fields=("rate",),
+            list_fields=("id", "currency_code", "rate", "start_date", "end_date"),
+        ),
+        prefix="/currency-rates",
+    )
+    router.include_router(
+        build_versioned_ref_router(
+            VatRate,
+            key_field="code",
+            value_fields=("title", "rate"),
+            list_fields=("id", "code", "title", "rate", "start_date", "end_date"),
+        ),
+        prefix="/vat-rates",
+    )
+    return router
