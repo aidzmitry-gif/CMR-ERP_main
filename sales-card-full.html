@@ -527,15 +527,40 @@
         </div>
         <div class="iv-bottom">
           <div class="iv-terms">
-            <div class="l">Условия оплаты</div>
-            <div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>50 / 50</button></div>
-            <div class="row"><span style="color:var(--muted)">Оплатить до</span><input type="date" value="2026-06-19"></div>
             <div class="mini">
-              <label>Скидка на счёт</label><input id="invDocDisc" value="0" oninput="renderInvSum()"> %
-              <label style="margin-left:6px">Склад отгрузки</label>
-              <select><option>Авто по наличию</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+              <label>Условия оплаты</label>
+              <select id="invTerms" onchange="syncReserveLbl()">
+                <option>Предоплата 100%</option><option>Предоплата 50% / 50% по факту</option>
+                <option>Отсрочка 5 банковских дней</option><option>Отсрочка 14 календарных дней</option>
+                <option>Отсрочка 30 календарных дней</option><option>Оплата по факту поставки</option>
+              </select>
             </div>
-            <label class="iv-resv"><input type="checkbox" checked> 📦 Зарезервировать товар на 5 кал. дней (до 19.06 · авто-снятие)</label>
+            <div class="mini">
+              <label>Работаем по</label>
+              <select id="invBasis" onchange="toggleBasis()">
+                <option value="offer">Публичной оферте</option>
+                <option value="invoice-contract" selected>Счёту-договору</option>
+                <option value="annual">Годовому договору</option>
+              </select>
+              <span id="invBasisExtra" style="display:none;gap:6px">
+                <input id="invBasisNo" placeholder="№ договора" value="ДГ-0118" style="width:96px">
+                <input type="date" id="invBasisDate" value="2026-05-30" style="width:140px">
+              </span>
+            </div>
+            <div class="mini">
+              <label>Срок резерва</label>
+              <select id="invReserve" onchange="syncReserveLbl()">
+                <option value="0">Без резерва</option><option value="3">3 кал. дня</option>
+                <option value="5" selected>5 кал. дней</option><option value="7">7 кал. дней</option>
+                <option value="10">10 кал. дней</option><option value="14">14 кал. дней</option><option value="30">30 кал. дней</option>
+              </select>
+              <span id="invReserveLbl" style="color:var(--muted);font-size:11.5px"></span>
+            </div>
+            <div class="mini">
+              <label>Скидка на счёт</label><input id="invDocDisc" value="0" oninput="renderInvSum()" style="width:54px"> %
+              <label style="margin-left:6px">Склад отгрузки</label>
+              <select id="invWh"><option>Авто по наличию</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+            </div>
           </div>
           <div class="iv-sum" id="invSum"></div>
         </div>
@@ -573,7 +598,20 @@
           <div class="ct-field full"><div class="l">Предмет договора</div><textarea id="ctrSubject">Поставка аккумуляторных батарей согласно спецификации (счёт № СЧ-0462).</textarea></div>
           <div class="ct-field"><div class="l">Сумма договора</div><input id="ctrSum" value="46 800 Br"></div>
           <div class="ct-field"><div class="l">Гарантия, мес</div><input id="ctrWarr" value="24"></div>
-          <div class="ct-field full"><div class="l">Условия оплаты</div><div class="seg"><button class="on">Предоплата 100%</button><button>Отсрочка 5 дней</button><button>50 / 50</button></div></div>
+          <div class="ct-field full"><div class="l">Условия оплаты</div>
+            <select id="ctrTerms">
+              <option>Предоплата 100%</option><option>Предоплата 50% / 50% по факту</option>
+              <option>Отсрочка 5 банковских дней</option><option>Отсрочка 14 календарных дней</option>
+              <option>Отсрочка 30 календарных дней</option><option>Оплата по факту поставки</option>
+            </select>
+          </div>
+          <div class="ct-field"><div class="l">Вид договора</div>
+            <select id="ctrBasis">
+              <option value="invoice-contract" selected>Счёт-договор (разовый)</option>
+              <option value="annual">Годовой договор</option>
+              <option value="offer">Договор-оферта</option>
+            </select>
+          </div>
           <div class="ct-field"><div class="l">Срок поставки</div><input id="ctrDeliv" value="до 19.06.2026 (резерв)"></div>
           <div class="ct-field"><div class="l">Способ подписания</div><select id="ctrSign"><option>Ссылка на подпись (онлайн)</option><option>ЭДО</option><option>Бумажный оригинал</option></select></div>
         </div>
@@ -994,8 +1032,13 @@ function renderStock(filter){
     <tbody>${body}</tbody></table>`;
   stockCount();
 }
-// демо: ?autostock=1 — сразу открыть подбор (для скриншотов/проверки)
-if(new URLSearchParams(location.search).get('autostock')) window.addEventListener('load',()=>setTimeout(()=>openStock('deal'),300));
+// демо: ?autostock=1 — открыть подбор; ?autodoc=invoice|contract — открыть редактор (для скриншотов/проверки)
+{
+  const _qp=new URLSearchParams(location.search);
+  if(_qp.get('autostock')) window.addEventListener('load',()=>setTimeout(()=>openStock('deal'),300));
+  const _ad=_qp.get('autodoc');
+  if(_ad) window.addEventListener('load',()=>setTimeout(()=>{ _ad==='contract'?openContract():openInvoice(); },300));
+}
 function openStock(target){
   _stockTarget = target || 'invoice';
   document.getElementById('stAddBtn').textContent = _stockTarget==='invoice' ? 'Добавить в счёт' : 'Добавить в сделку';
@@ -1087,6 +1130,7 @@ function openDoc(kind){
     `<div><b>Поставщик:</b> ООО «Энерго-Дисконт» · УНП 191000111</div>
      <div><b>Покупатель:</b> ${d.company} · ${d.unp}</div>`;
   renderInv();
+  toggleBasis(); syncReserveLbl();
   document.getElementById('invOv').classList.add('show');
 }
 function openInvoice(){ openDoc('invoice'); }
@@ -1137,6 +1181,26 @@ function renderInvSum(){
 function addInvRow(){ invoiceItems.push({name:'',qty:1,price:0,disc:0}); renderInv(); }
 function rmInv(i){ invoiceItems.splice(i,1); renderInv(); }
 function closeInv(){ document.getElementById('invOv').classList.remove('show'); }
+
+// показать поля №/дата только для годового договора
+function toggleBasis(){
+  const v=(document.getElementById('invBasis')||{}).value;
+  const ex=document.getElementById('invBasisExtra'); if(ex) ex.style.display = v==='annual' ? 'inline-flex' : 'none';
+}
+// дата авто-снятия резерва от «сегодня» (14.06.2026) + N дней + подпись чекбокса-резерва
+function reserveUntil(days){ const d=new Date(2026,5,14); d.setDate(d.getDate()+(+days||0)); return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); }
+function syncReserveLbl(){
+  const sel=document.getElementById('invReserve'); if(!sel) return;
+  const days=+sel.value, lbl=document.getElementById('invReserveLbl');
+  if(lbl) lbl.textContent = days ? `📦 резерв до ${reserveUntil(days)} · авто-снятие` : 'без резерва';
+}
+// человекочитаемое «работаем по …» (для счёта и договора)
+function basisText(){
+  const v=(document.getElementById('invBasis')||{}).value || 'invoice-contract';
+  if(v==='offer') return 'на основании публичной оферты';
+  if(v==='annual'){ const no=(document.getElementById('invBasisNo')||{}).value||'—'; const dt=fmtDate((document.getElementById('invBasisDate')||{}).value); return `по годовому договору № ${no} от ${dt}`; }
+  return 'по счёту-договору (настоящий счёт является договором-офертой)';
+}
 function invPreview(){
   let rows='';
   invoiceItems.forEach((it,i)=>{ const s=it.qty*it.price*(1-(it.disc||0)/100);
@@ -1158,8 +1222,11 @@ function invPreview(){
       + `<div class="pp-foot">Товар поставлен в полном объёме и надлежащего качества. Стороны взаимных претензий не имеют. Основание: договор № ДГ-0125, счёт № СЧ-0462.</div>
          <div class="pp-sign"><div>Поставщик: ____________ / Сидоров К.А.</div><div>Покупатель: ____________ / ${d.company}</div></div>`;
   } else {
+    const terms=(document.getElementById('invTerms')||{}).value||'Предоплата 100%';
+    const rd=+((document.getElementById('invReserve')||{}).value||0);
+    const resv = rd ? ` Товар зарезервирован до ${reserveUntil(rd)} (${rd} кал. дн.).` : '';
     paper = head.replace('{NO}','СЧЁТ № СЧ-0462')
-      + `<div class="pp-foot">Оплата в течение 5 банковских дней. Товар зарезервирован до 19.06.2026.</div>`;
+      + `<div class="pp-foot"><b>Условия оплаты:</b> ${terms}.${resv}<br><b>Основание:</b> работаем ${basisText()}.</div>`;
   }
   document.getElementById('invPaper').innerHTML = `<div class="paper">${paper}</div>`;
   document.getElementById('invPrevTitle').firstChild.textContent = DOC_KINDS[_docKind].prev + ' ';
@@ -1192,10 +1259,11 @@ function invSent(){
   } else {
     d.tasks.unshift({t:"Проконтролировать оплату счёта СЧ-0462",m:"на 16.06 (+2 дня после отправки)",kind:"Авто",done:false});
     d.timeline.unshift({type:"pay",t:"🧾 Счёт СЧ-0462 отправлен (Email)",m:"Вы · только что",pin:false});
-    // резерв с дефицитом → подтверждение закупки
-    const reserve = (document.querySelector('.iv-resv input')||{}).checked;
+    // резерв (срок из выпадающего списка) с дефицитом → подтверждение закупки
+    const rd = +((document.getElementById('invReserve')||{}).value||0);
     let defNote='';
-    if(reserve){
+    if(rd){
+      const until = reserveUntil(rd);
       const deficits = invoiceItems
         .map(it=>({name:it.name, def:it.qty - skuFree(it.name)}))
         .filter(x=>isFinite(x.def) && x.def>0);
@@ -1205,7 +1273,7 @@ function invSent(){
         d.timeline.unshift({type:"stage",t:`⚠ Дефицит под резерв: ${txt} → закупщику на подтверждение`,m:"Авто · только что",pin:false});
         defNote = ` · дефицит → закупщику: ${deficits.reduce((a,x)=>a+x.def,0)} шт`;
       } else {
-        d.timeline.unshift({type:"doc",t:"📦 Товар зарезервирован до 19.06 (со склада)",m:"Авто · только что",pin:false});
+        d.timeline.unshift({type:"doc",t:`📦 Товар зарезервирован до ${until} (${rd} кал. дн., со склада)`,m:"Авто · только что",pin:false});
       }
     }
     const moved = advanceStage(d, 'invoice');
@@ -1221,12 +1289,6 @@ function ctrSent(){
   closeCtrPrev(); closeCtr(); render(currentKey);
   toast("✓ Договор отправлен на подпись · напоминание поставлено" + (moved?` · стадия → «${moved}»`:''));
 }
-/* кликабельные сегменты условий (счёт/договор) */
-document.addEventListener('click', e=>{
-  const b=e.target.closest('.iv-terms .seg button, .ct-field .seg button');
-  if(b){ b.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
-});
-
 /* ── редактор договора ── */
 function val(id){ const e=document.getElementById(id); return e?e.value:''; }
 function openContract(){
@@ -1240,12 +1302,16 @@ function ctrPreview(){
   const d=DEALS[currentKey];
   const main=(d.contacts.find(x=>x.main)||d.contacts[0]);
   const sn = main ? main.name.split(' ').slice(0,2).join(' ') : '';
+  const terms = val('ctrTerms') || 'Предоплата 100%';
+  const typeMap = {'invoice-contract':'Счёт-договор (разовая поставка)','annual':'Годовой договор поставки','offer':'Договор публичной оферты'};
+  const ctype = typeMap[val('ctrBasis')] || 'Договор поставки';
+  const title = val('ctrBasis')==='annual' ? 'ГОДОВОЙ ДОГОВОР ПОСТАВКИ № ДГ-0125' : 'ДОГОВОР ПОСТАВКИ № ДГ-0125';
   document.getElementById('ctrPaper').innerHTML = `<div class="paper">
-    <div class="pp-title">ДОГОВОР ПОСТАВКИ № ДГ-0125</div>
-    <div class="pp-date">г. Минск · 14.06.2026</div>
+    <div class="pp-title">${title}</div>
+    <div class="pp-date">г. Минск · 14.06.2026 · <b>${ctype}</b></div>
     <p><b>Поставщик:</b> ООО «Энерго-Дисконт» (УНП 191000111) и <b>Покупатель:</b> ${d.company} (${d.unp}) заключили настоящий договор о нижеследующем.</p>
     <p><b>1. Предмет.</b> ${val('ctrSubject')}</p>
-    <p><b>2. Сумма и оплата.</b> ${val('ctrSum')}, в т.ч. НДС 20%. Форма оплаты — согласно согласованным условиям.</p>
+    <p><b>2. Сумма и оплата.</b> ${val('ctrSum')}, в т.ч. НДС 20%. <b>Условия оплаты:</b> ${terms}.</p>
     <p><b>3. Поставка и гарантия.</b> ${val('ctrDeliv')}. Гарантия ${val('ctrWarr')} мес.</p>
     <p><b>4. Подписание.</b> ${val('ctrSign')}.</p>
     <div class="pp-sign"><div>Поставщик ____________ /Сидоров К.А./</div><div>Покупатель ____________ /${sn}/</div></div>
