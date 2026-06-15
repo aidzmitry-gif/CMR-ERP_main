@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Каталог-подбор товара — в счёт</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#DBEAFE; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+    --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px}
+  .backbar{background:#fff;border-bottom:1px solid #EEF0F2;padding:11px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  .backbar a{color:var(--brand-700);font-weight:600;text-decoration:none;background:var(--brand-50);border-radius:8px;padding:7px 13px;font-size:13px}
+  .backbar .crumb{color:var(--muted);font-size:13px}
+
+  .layout{display:grid;grid-template-columns:1fr 380px;gap:0;height:calc(100vh - 49px)}
+  @media(max-width:920px){.layout{grid-template-columns:1fr;height:auto}}
+
+  /* ЛЕВО — каталог */
+  .cat{padding:18px 22px;overflow:auto}
+  h1{font-size:20px;font-weight:800;display:flex;align-items:center;gap:9px}
+  .sub{color:var(--muted);font-size:13px;margin:4px 0 14px;line-height:1.5}
+  .filters{display:flex;gap:9px;align-items:center;margin-bottom:14px;flex-wrap:wrap;position:sticky;top:0;background:var(--canvas);padding-bottom:8px;z-index:5}
+  .filters input[type=search]{flex:1;min-width:180px;border:1px solid #E5E7EB;border-radius:9px;padding:9px 12px;font-size:13px;font-family:inherit}
+  .filters select{border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;color:#374151}
+  .filters input:focus,.filters select:focus{outline:none;border-color:var(--brand)}
+
+  .grp-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#9aa3b0;margin:14px 0 7px}
+  .pcard{background:#fff;border:1px solid #EEF0F2;border-radius:13px;box-shadow:var(--shadow);padding:13px 15px;margin-bottom:10px;display:grid;grid-template-columns:46px 1fr auto;gap:13px;align-items:center}
+  .pcard.added{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-50)}
+  .pic{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,#EEF2F7,#E2E8F0);display:flex;align-items:center;justify-content:center;font-size:24px;color:#94A3B8}
+  .pinfo{min-width:0}
+  .pname{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .pname .info{cursor:pointer;color:var(--brand-700);font-size:12px;font-weight:600;border:1px solid #BFD3FF;border-radius:6px;padding:1px 6px;text-decoration:none}
+  .pmeta{font-size:11.5px;color:var(--muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap}
+  .pmeta .art{font-variant-numeric:tabular-nums}
+  .stockline{font-size:11.5px;margin-top:5px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .stockline .free{color:#047857;font-weight:700}.stockline .free.low{color:#B91C1C}
+  .stockline .inc{color:#1D4ED8;font-weight:700}
+  .stockline .wh{color:#64748B}
+  .pright{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .price{font-size:16px;font-weight:800;color:#111827;white-space:nowrap}
+  .price .was{font-size:11.5px;color:#9aa3b0;text-decoration:line-through;margin-right:5px;font-weight:600}
+  .price .delta{font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px;margin-left:4px}
+  .price .delta.up{background:#FEE2E2;color:#B91C1C}.price .delta.down{background:#DCFCE7;color:#15803D}
+  .addbtn{border:none;background:var(--brand);color:#fff;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .addbtn:hover{filter:brightness(.96)}
+  .qadj{display:flex;align-items:center;gap:6px}
+  .qadj button{width:26px;height:26px;border:1px solid #E5E7EB;background:#fff;border-radius:7px;font-size:14px;cursor:pointer;color:#475467}
+  .qadj input{width:48px;text-align:center;border:1px solid #E5E7EB;border-radius:7px;padding:5px;font-size:12.5px;font-family:inherit}
+
+  /* ПРАВО — корзина (что уйдёт в счёт) */
+  .cart{background:#fff;border-left:1px solid #EEF0F2;display:flex;flex-direction:column;height:100%}
+  .cart-h{padding:15px 18px;border-bottom:1px solid #EEF0F2;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:space-between}
+  .cart-h .cnt{font-size:12px;color:var(--muted);background:#F1F5F9;border-radius:20px;padding:2px 10px;font-weight:600}
+  .cart-body{flex:1;overflow:auto;padding:10px 14px}
+  .cart-empty{text-align:center;color:#9aa3b0;padding:40px 16px;font-size:13px}
+  .crow{border-bottom:1px solid #F6F7F9;padding:10px 0}
+  .crow .cn{font-weight:600;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+  .crow .cn .rm{cursor:pointer;color:#CBD5E1;font-weight:700}
+  .crow .cn .rm:hover{color:var(--bad)}
+  .crow .cl{font-size:11.5px;color:var(--muted);margin-top:3px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .crow .cl .csum{font-weight:700;color:#111827}
+  .crow .warnbuy{font-size:11px;color:#B45309;margin-top:3px}
+  .crow .warnbuy.inc{color:#1D4ED8}
+  .cart-foot{border-top:1px solid #EEF0F2;padding:14px 18px}
+  .cart-foot .trow{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:#475467}
+  .cart-foot .trow.tot{font-size:17px;font-weight:800;color:#111827;border-top:1px solid #E5E7EB;margin-top:6px;padding-top:8px}
+  .cart-foot .go{width:100%;margin-top:12px;border:none;background:var(--brand);color:#fff;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+  .cart-foot .go:hover{filter:brightness(.96)}
+  .cart-foot .go:disabled{background:#E5E7EB;color:#9aa3b0;cursor:default}
+
+  .modal-ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:200;padding:20px}
+  .modal-ov.show{display:flex}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <div class="backbar"><a href="sales-card-full.html">← В карточку сделки</a><span class="crumb">Каталог-подбор · позиции уйдут в счёт CRM-1029 · ОАО «Белтранс»</span></div>
+
+  <div class="layout">
+    <!-- КАТАЛОГ -->
+    <div class="cat">
+      <h1>🛒 Каталог-подбор</h1>
+      <div class="sub">Большой каталог: остатки по складам, «в пути», <b>прошлая → текущая</b> цена. Отмеченные позиции справа уйдут в счёт. ℹ — открыть карточку товара.</div>
+      <div class="filters">
+        <input type="search" id="q" placeholder="🔍 поиск: название / артикул / штрихкод" oninput="renderCat()">
+        <select id="grp" onchange="renderCat()"></select>
+        <select id="whf" onchange="renderCat()"><option value="">Все склады</option><option>Минск (центр.)</option><option>Гомель</option><option>Брест</option></select>
+        <label style="font-size:12.5px;color:#475467;display:flex;gap:6px;align-items:center"><input type="checkbox" id="instock" onchange="renderCat()"> только в наличии</label>
+      </div>
+      <div id="catList"></div>
+    </div>
+
+    <!-- КОРЗИНА -->
+    <div class="cart">
+      <div class="cart-h">🧾 В счёт <span class="cnt" id="cartCnt">0 позиций</span></div>
+      <div class="cart-body" id="cartBody"></div>
+      <div class="cart-foot" id="cartFoot"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  let _t; function toast(m){ const t=document.getElementById('toast'); t.innerHTML=m; t.classList.add('show'); clearTimeout(_t); _t=setTimeout(()=>t.classList.remove('show'),2800); }
+  function fmt(n){ return Math.round(n).toLocaleString('ru-RU'); }
+
+  // каталог (в проде — shared-kernel SKU / склад / закупки; sales показывает)
+  const CATALOG = [
+    {sku:"АКБ 6СТ-190 (Зубр)", grp:"Аккумуляторы / Грузовые", art:"AKB-6ST-190", bar:"4811234567894", pic:"🔋",
+     priceNow:1100, priceWas:980, wh:[{n:"Минск (центр.)",on:54,res:13,inc:40,eta:"18.06"},{n:"Гомель",on:20,res:0},{n:"Брест",on:8,res:5,inc:12,eta:"25.06"}]},
+    {sku:"АКБ 6СТ-225 (промышленный)", grp:"Аккумуляторы / Грузовые", art:"AKB-6ST-225", bar:"4811234567900", pic:"🔋",
+     priceNow:2600, priceWas:2600, wh:[{n:"Минск (центр.)",on:18,res:0,inc:30,eta:"22.06"}]},
+    {sku:"АКБ 6СТ-77 (легковой)", grp:"Аккумуляторы / Легковые", art:"AKB-6ST-77", bar:"4811234567801", pic:"🔋",
+     priceNow:260, priceWas:285, wh:[{n:"Минск (центр.)",on:120,res:10},{n:"Гомель",on:60,res:0}]},
+    {sku:"АКБ тяговая 6ЭМ-145", grp:"Аккумуляторы / Тяговые", art:"AKB-6EM-145", bar:"4811234567955", pic:"🔋",
+     priceNow:3900, priceWas:3600, wh:[{n:"Минск (центр.)",on:3,res:2,inc:6,eta:"01.07"}]},
+    {sku:"Зарядное устройство ЗУ-15А", grp:"Зарядные устройства", art:"ZU-15A", bar:"4811234568013", pic:"🔌",
+     priceNow:420, priceWas:420, wh:[{n:"Минск (центр.)",on:30,res:0},{n:"Гомель",on:12,res:2}]},
+    {sku:"Зарядное устройство ЗУ-30А PRO", grp:"Зарядные устройства", art:"ZU-30A-PRO", bar:"4811234568020", pic:"🔌",
+     priceNow:980, priceWas:1050, wh:[{n:"Минск (центр.)",on:7,res:0}]},
+    {sku:"Тестер АКБ цифровой", grp:"Оборудование", art:"TST-DIG", bar:"4811234568105", pic:"🔧",
+     priceNow:180, priceWas:180, wh:[{n:"Минск (центр.)",on:45,res:0}]},
+    {sku:"Доставка по РБ", grp:"Услуги", art:"SRV-DELIV", bar:"—", pic:"🚚",
+     priceNow:5000, priceWas:5000, wh:[]},
+  ];
+
+  const cart = {}; // sku -> qty
+
+  function whFree(p){ return p.wh.reduce((a,w)=>a+(w.on-w.res),0); }
+  function whInc(p){ return p.wh.reduce((a,w)=>a+(w.inc||0),0); }
+  function isService(p){ return !p.wh.length; }
+
+  function fillGroups(){
+    const grps=[...new Set(CATALOG.map(p=>p.grp))].sort();
+    document.getElementById('grp').innerHTML = `<option value="">Все группы</option>`+grps.map(g=>`<option>${g}</option>`).join('');
+  }
+
+  function priceHtml(p){
+    if(p.priceNow===p.priceWas) return `<div class="price">${fmt(p.priceNow)} Br</div>`;
+    const up=p.priceNow>p.priceWas; const d=((p.priceNow-p.priceWas)/p.priceWas*100);
+    return `<div class="price"><span class="was">${fmt(p.priceWas)}</span>${fmt(p.priceNow)} Br<span class="delta ${up?'up':'down'}">${up?'▲':'▼'}${Math.abs(d).toFixed(0)}%</span></div>`;
+  }
+
+  function stockHtml(p){
+    if(isService(p)) return `<div class="stockline"><span class="wh">услуга — без склада</span></div>`;
+    const free=whFree(p), low=free<=5, inc=whInc(p);
+    const whTxt = p.wh.map(w=>`${w.n.split(' ')[0]} ${w.on-w.res}`).join(' · ');
+    return `<div class="stockline"><span class="free ${low?'low':''}">Свободно: ${free}${low?' ⚠':''}</span>${inc?`<span class="inc">🚚 в пути +${inc}</span>`:''}<span class="wh">${whTxt}</span></div>`;
+  }
+
+  function renderCat(){
+    const q=document.getElementById('q').value.toLowerCase().trim();
+    const grp=document.getElementById('grp').value;
+    const inStock=document.getElementById('instock').checked;
+    let list=CATALOG.filter(p=>
+      (!grp||p.grp===grp) &&
+      (!inStock || isService(p) || whFree(p)>0) &&
+      (!q || (p.sku+' '+p.art+' '+p.bar).toLowerCase().includes(q))
+    );
+    const root=document.getElementById('catList');
+    if(!list.length){ root.innerHTML='<div class="cart-empty">Ничего не найдено</div>'; return; }
+    // группировка по grp
+    const g={}; list.forEach(p=>{ (g[p.grp]=g[p.grp]||[]).push(p); });
+    root.innerHTML = Object.keys(g).sort().map(grpName=>
+      `<div class="grp-h">${grpName}</div>` + g[grpName].map(cardHtml).join('')
+    ).join('');
+  }
+
+  function cardHtml(p){
+    const inCart = cart[p.sku]>0;
+    const sk = p.sku.replace(/'/g,"\\'");
+    const ctrl = inCart
+      ? `<div class="qadj"><button onclick="adj('${sk}',-1)">−</button><input value="${cart[p.sku]}" inputmode="numeric" onchange="setQ('${sk}',this.value)"><button onclick="adj('${sk}',1)">+</button></div>`
+      : `<button class="addbtn" onclick="adj('${sk}',1)">＋ В счёт</button>`;
+    return `<div class="pcard ${inCart?'added':''}">
+      <div class="pic">${p.pic}</div>
+      <div class="pinfo">
+        <div class="pname">${p.sku} <a class="info" href="sales-product-card.html" title="Карточка товара">ℹ карточка</a></div>
+        <div class="pmeta"><span class="art">арт. ${p.art}</span><span>ШК ${p.bar}</span></div>
+        ${stockHtml(p)}
+      </div>
+      <div class="pright">${priceHtml(p)}${ctrl}</div>
+    </div>`;
+  }
+
+  function adj(sku,delta){ cart[sku]=Math.max(0,(cart[sku]||0)+delta); if(!cart[sku]) delete cart[sku]; renderCat(); renderCart(); }
+  function setQ(sku,v){ const n=parseInt(v)||0; if(n<=0) delete cart[sku]; else cart[sku]=n; renderCat(); renderCart(); }
+  function rm(sku){ delete cart[sku]; renderCat(); renderCart(); }
+
+  function renderCart(){
+    const items=Object.keys(cart).map(sku=>({p:CATALOG.find(x=>x.sku===sku), qty:cart[sku]})).filter(x=>x.p);
+    document.getElementById('cartCnt').textContent = `${items.length} ${items.length===1?'позиция':items.length<5?'позиции':'позиций'}`;
+    const body=document.getElementById('cartBody'), foot=document.getElementById('cartFoot');
+    if(!items.length){ body.innerHTML='<div class="cart-empty">Пусто. Добавьте товары из каталога слева — они уйдут в счёт.</div>'; foot.innerHTML=''; return; }
+    body.innerHTML = items.map(({p,qty})=>{
+      const sk=p.sku.replace(/'/g,"\\'");
+      const sum=qty*p.priceNow;
+      // дефицит: что закроется приходом vs в закупку (как в подборе карточки)
+      let warn='';
+      if(!isService(p)){
+        const def=qty-whFree(p);
+        if(def>0){ const byInc=Math.min(def,whInc(p)); const buy=def-byInc;
+          if(byInc>0) warn+=`<div class="warnbuy inc">🚚 ${byInc} шт закроется приходом</div>`;
+          if(buy>0)   warn+=`<div class="warnbuy">⚠ ${buy} шт под заказ → закупка</div>`;
+        }
+      }
+      return `<div class="crow">
+        <div class="cn">${p.sku} <span class="rm" onclick="rm('${sk}')">✕</span></div>
+        <div class="cl"><span>${qty} × ${fmt(p.priceNow)} Br</span><span class="csum">${fmt(sum)} Br</span></div>
+        ${warn}
+      </div>`;
+    }).join('');
+    const sub=items.reduce((a,{p,qty})=>a+qty*p.priceNow,0);
+    const vat=sub*20/120;
+    foot.innerHTML = `
+      <div class="trow"><span>Позиций</span><span>${items.length}</span></div>
+      <div class="trow"><span>в т.ч. НДС 20%</span><span>${fmt(vat)} Br</span></div>
+      <div class="trow tot"><span>Итого</span><span>${fmt(sub)} Br</span></div>
+      <button class="go" onclick="toInvoice()">Перенести в счёт →</button>`;
+  }
+
+  function toInvoice(){
+    const n=Object.keys(cart).length;
+    if(!n) return;
+    toast(`✓ ${n} позиц. перенесены в счёт · открывается редактор счёта`);
+    setTimeout(()=>{ location.href='sales-card-full.html'; }, 900);
+  }
+
+  fillGroups(); renderCat(); renderCart();
+</script>
+</body>
+</html>
