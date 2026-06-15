@@ -107,6 +107,18 @@
   .cbtn:hover{filter:brightness(.95)}
   .c-sel{font-size:11px;border:1px solid #E5E7EB;border-radius:7px;padding:4px 6px;color:#64748b;background:#fff;max-width:140px}
   .c-acts-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .c-dm{font-size:10px;font-weight:700;color:#9A3412;background:#FFF7ED;border:1px solid #FED7AA;border-radius:5px;padding:1px 6px}
+  /* форма создания/правки контакта */
+  .contact.editing .c-ava{background:#EFF5FF;color:var(--brand-700)}
+  .c-edit{display:flex;flex-direction:column;gap:7px}
+  .c-edit input,.c-edit select{border:1px solid #E5E7EB;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit;width:100%}
+  .c-edit input:focus,.c-edit select:focus{outline:none;border-color:var(--brand)}
+  .ce-dm{display:flex;align-items:center;gap:7px;font-size:12px;color:#475467;cursor:pointer}
+  .ce-dm input{width:auto}
+  .ce-act{display:flex;gap:8px;margin-top:2px}
+  .ce-save{border:none;background:var(--brand);color:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .ce-save:hover{filter:brightness(.96)}
+  .ce-cancel{border:1px solid #E5E7EB;background:#fff;color:#64748b;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer}
 
   /* ── доставка ── */
   .dlv-seg{display:flex;gap:8px;margin-bottom:6px}
@@ -800,14 +812,25 @@ function stages(d){
   return h+'</div>';
 }
 
+// Справочник должностей для выпадающего списка при создании/правке контакта.
+const CONTACT_ROLES = [
+  "Директор","Коммерческий директор","Главный инженер","Начальник отдела снабжения",
+  "Специалист отдела снабжения","Менеджер по закупкам","Главный бухгалтер","Бухгалтер",
+  "Начальник производства","Технический специалист","Юрист","Секретарь","Иное",
+];
+function roleOptions(sel){
+  return CONTACT_ROLES.map(r=>`<option ${r===sel?'selected':''}>${r}</option>`).join('');
+}
+
 function contactsHtml(d){
   let rows='';
   d.contacts.forEach((c,i)=>{
+    if(c._edit){ rows+=contactEditHtml(c,i); return; }
     const ini = c.name.replace('«','').slice(0,2).toUpperCase();
     rows+=`<div class="contact ${c.main?'main':''}">
       <div class="c-ava">${ini}</div>
       <div class="c-info">
-        <div class="c-name">${c.name} ${c.main?'<span class="c-main">★ ответственный</span>':''}</div>
+        <div class="c-name">${c.name} ${c.main?'<span class="c-main">★ ответственный</span>':''}${c.dm?'<span class="c-dm">ЛПР</span>':''}</div>
         <div class="c-role">${c.role}</div>
         <div class="c-phone">${c.phone}</div>
       </div>
@@ -820,7 +843,8 @@ function contactsHtml(d){
         <select class="c-sel" onchange="contactAction(${i}, this)">
           <option value="">Действие…</option>
           ${c.main?'':'<option value="main">★ Сделать ответственным</option>'}
-          <option value="role">Изменить роль</option>
+          <option value="dm">${c.dm?'Снять пометку ЛПР':'Пометить как ЛПР'}</option>
+          <option value="edit">✎ Изменить</option>
           <option value="email">Написать e-mail</option>
           <option value="del">Удалить контакт</option>
         </select>
@@ -830,14 +854,51 @@ function contactsHtml(d){
   return rows;
 }
 
+// Форма создания/правки контакта: имя + должность из списка + ЛПР + телефон.
+function contactEditHtml(c,i){
+  return `<div class="contact editing">
+    <div class="c-ava">＋</div>
+    <div class="c-info c-edit">
+      <input class="ce-name" placeholder="ФИО контакта" value="${c.name===''?'':c.name.replace(/"/g,'&quot;')}">
+      <select class="ce-role">${roleOptions(c.role)}</select>
+      <input class="ce-phone" placeholder="+375 __ ___-__-__" value="${c.phone||''}">
+      <label class="ce-dm"><input type="checkbox" class="ce-dmcb" ${c.dm?'checked':''}> ЛПР — лицо, принимающее решение</label>
+      <div class="ce-act">
+        <button class="ce-save" onclick="saveContact(this,${i})">✓ Сохранить</button>
+        <button class="ce-cancel" onclick="cancelContact(${i})">Отмена</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function contactAction(i, sel){
   const v = sel.value; sel.value='';
   const d = DEALS[currentKey];
   if(v==='main'){ d.contacts.forEach((c,j)=>c.main=(j===i)); render(currentKey); }
+  else if(v==='dm'){ d.contacts[i].dm=!d.contacts[i].dm; render(currentKey); }
+  else if(v==='edit'){ d.contacts[i]._edit=true; render(currentKey); }
   else if(v==='del'){ if(d.contacts.length>1){ d.contacts.splice(i,1); render(currentKey); } }
 }
 function addContact(){
-  DEALS[currentKey].contacts.push({name:"Новый контакт", role:"роль не указана", phone:"+375 __ ___-__-__", main:false});
+  DEALS[currentKey].contacts.push({name:"", role:"Специалист отдела снабжения", phone:"", main:false, dm:false, _edit:true, _new:true});
+  render(currentKey);
+}
+function saveContact(btn,i){
+  const box = btn.closest('.contact');
+  const c = DEALS[currentKey].contacts[i];
+  const name = box.querySelector('.ce-name').value.trim();
+  if(!name){ box.querySelector('.ce-name').style.borderColor='#FCA5A5'; return; }
+  c.name = name;
+  c.role = box.querySelector('.ce-role').value;
+  c.phone = box.querySelector('.ce-phone').value.trim() || '+375 __ ___-__-__';
+  c.dm = box.querySelector('.ce-dmcb').checked;
+  delete c._edit; delete c._new;
+  render(currentKey);
+  toast('Контакт сохранён: '+name);
+}
+function cancelContact(i){
+  const c = DEALS[currentKey].contacts[i];
+  if(c._new){ DEALS[currentKey].contacts.splice(i,1); } else { delete c._edit; }
   render(currentKey);
 }
 

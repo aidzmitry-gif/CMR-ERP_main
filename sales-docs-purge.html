@@ -32,6 +32,8 @@
   .aibtn{margin-left:auto;border:none;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff;border-radius:9px;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px}
   .aibtn:hover{filter:brightness(1.05)}
   .aibtn.dis{background:#E5E7EB;color:#9aa3b0;cursor:default;filter:none}
+  .aisel{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#15803D;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;user-select:none}
+  .aisel input{width:16px;height:16px;accent-color:var(--ok);cursor:pointer}
 
   .card{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden;margin-bottom:16px}
   .card.empty-card .ch{border-bottom:none}
@@ -91,6 +93,7 @@
         <div class="ttl">🤖 ИИ-проверка причин удаления</div>
         <div class="stat" id="aistat">Нажмите «Проверить» — ИИ разберёт основания и отметит безопасные / требующие разбора.</div>
       </div>
+      <label class="aisel" id="aisel" style="display:none"><input type="checkbox" id="aiselcb" onchange="selectSafe(this.checked)"> отметить всё, что ИИ разрешил удалять</label>
       <button class="aibtn" id="aibtn" onclick="runAi()">✨ Проверить причины</button>
     </div>
 
@@ -149,8 +152,15 @@
     ITEMS.forEach(it=>{ (aiVerdict(it.reason).level==='safe'?safe++:risk++); });
     document.getElementById('aistat').innerHTML =
       `ИИ разобрал ${ITEMS.length} основан.: <b class="ok">${safe}</b> безопасных (рекоменд. удалять) · <b class="bad">${risk}</b> требуют разбора (не удалять без проверки).`;
+    const sel=document.getElementById('aisel'); if(safe){ sel.style.display='flex'; } else { sel.style.display='none'; }
     render();
     toast('🤖 ИИ проверил основания: '+safe+' безопасных, '+risk+' на разбор');
+  }
+
+  // отметить все документы с безопасным вердиктом ИИ (рекомендованные к удалению)
+  function selectSafe(on){
+    ITEMS.forEach(it=>{ if(aiVerdict(it.reason).level==='safe'){ on?SEL.add(it.id):SEL.delete(it.id); } });
+    render();
   }
 
   // группировка ITEMS по отделам
