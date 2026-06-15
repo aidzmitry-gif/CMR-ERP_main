@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Реестр документов — все документы CRM</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#DBEAFE; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+    --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding-bottom:60px}
+  .backbar{background:#fff;border-bottom:1px solid #EEF0F2;padding:11px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  .backbar a{color:var(--brand-700);font-weight:600;text-decoration:none;background:var(--brand-50);border-radius:8px;padding:7px 13px;font-size:13px}
+  .backbar .crumb{color:var(--muted);font-size:13px}
+  .wrap{max-width:1140px;margin:22px auto;padding:0 22px}
+  h1{font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px}
+  .sub{color:var(--muted);font-size:13.5px;margin:5px 0 16px;line-height:1.5}
+
+  /* роль (демо-переключатель видимости) */
+  .rolebar{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:11px 15px;margin-bottom:14px;box-shadow:var(--shadow);flex-wrap:wrap}
+  .rolebar .lbl{font-size:12.5px;color:var(--muted);font-weight:600}
+  .roleseg{display:flex;gap:4px;background:#F1F5F9;border-radius:9px;padding:3px}
+  .roleseg button{border:none;background:transparent;border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:600;color:#64748b;cursor:pointer}
+  .roleseg button.on{background:#fff;color:var(--brand-700);box-shadow:var(--shadow)}
+  .rolebar .scope{font-size:12px;color:#475467;margin-left:auto}
+  .rolebar .scope b{color:#111827}
+
+  /* счётчики */
+  .stats{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .stat{flex:1;min-width:120px;background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+  .stat .v{font-size:20px;font-weight:800}
+  .stat .k{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .stat.bad .v{color:var(--bad)}.stat.warn .v{color:#B45309}.stat.ok .v{color:#15803D}
+
+  /* фильтры */
+  .filters{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:12px 15px;margin-bottom:14px;box-shadow:var(--shadow);flex-wrap:wrap}
+  .filters select,.filters input[type=search]{font-size:12.5px;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;font-family:inherit;background:#fff;color:#374151}
+  .filters select:focus,.filters input:focus{outline:none;border-color:var(--brand)}
+  .filters .f-lbl{font-size:11px;color:var(--muted);margin-right:-4px}
+  .filters .delonly{display:flex;align-items:center;gap:6px;font-size:12.5px;color:#B91C1C;cursor:pointer;user-select:none}
+  .filters .grp{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .filters .grp .f-lbl{color:var(--muted)}
+
+  /* группы */
+  .group{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+  .ghead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #EEF0F2;background:#FAFBFC}
+  .ghead .gname{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .ghead .gcnt{font-size:11.5px;color:var(--muted);background:#F1F5F9;border-radius:20px;padding:2px 10px;font-weight:600}
+  .ghead .gsum{font-size:12px;color:#475467;margin-left:auto}
+
+  /* строка документа */
+  .doc{display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid #F6F7F9}
+  .doc:last-child{border-bottom:none}
+  .doc.deldoc{opacity:.6;background:#FFFBFB}
+  .doc.deldoc .dn{text-decoration:line-through}
+  .dn{font-size:13px;font-weight:600}
+  .dn .ver{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 5px;margin-left:5px}
+  .dn .frozen{font-size:10px;margin-left:4px}
+  .meta{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .meta a{color:var(--brand-700);text-decoration:none;font-weight:600}
+  .kindbadge{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;background:#F1F5F9;color:#475569;white-space:nowrap}
+  .st{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .st.posted{background:#DCFCE7;color:#15803D}.st.pending{background:#FEF3C7;color:#92400E}.st.paid{background:#DBEAFE;color:#1D4ED8}.st.draft{background:#F1F5F9;color:#475569}.st.signed{background:#EDE9FE;color:#6D28D9}.st.del{background:#FEE2E2;color:#B91C1C}
+  .acts{display:flex;gap:5px}
+  .dbtn{height:28px;min-width:28px;padding:0 8px;border-radius:7px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;background:#fff;color:#475467}
+  .dbtn.dis{color:#B91C1C;background:#FEF2F2;border-color:#FECACA;cursor:not-allowed}
+  .dbtn:hover{filter:brightness(.97)}
+  .empty{padding:34px;text-align:center;color:#9aa3b0}
+  .note{font-size:11.5px;color:#5b6573;background:#F8FAFC;border:1px solid #EEF0F2;border-radius:9px;padding:9px 11px;margin-bottom:14px;line-height:1.55}
+  .note a{color:var(--brand-700);font-weight:600}
+
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;pointer-events:none;max-width:80vw;text-align:center}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <div class="backbar"><a href="sales-2.0-index.html">← К списку макетов</a><span class="crumb">Реестр документов · <b>все документы CRM</b> · общий + врезка в отдел</span></div>
+
+  <div class="wrap">
+    <h1>🗂️ Реестр документов</h1>
+    <div class="sub">Единый реестр всех документов сделок: счета, договоры, КП, акты, заказ-наряды, накладные. Видимость — по роли. Группировка переключается; «врезку в отдел» даёт тот же реестр с фильтром по отделу (без дублирования).</div>
+
+    <div class="rolebar">
+      <span class="lbl">Я вошёл как:</span>
+      <div class="roleseg" id="roleseg">
+        <button data-role="manager" class="on" onclick="setRole('manager')">👤 Менеджер (Сидоров К.)</button>
+        <button data-role="rop" onclick="setRole('rop')">👔 РОП (Новые)</button>
+        <button data-role="director" onclick="setRole('director')">🏢 Директор / Архивариус</button>
+      </div>
+      <span class="scope" id="scope"></span>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+      <span class="f-lbl">Отдел</span><select id="f-dept" onchange="render()"></select>
+      <span class="f-lbl">Менеджер</span><select id="f-mgr" onchange="render()"></select>
+      <span class="f-lbl">Тип</span><select id="f-kind" onchange="render()"></select>
+      <span class="f-lbl">Статус</span><select id="f-status" onchange="render()"></select>
+      <input type="search" id="f-q" placeholder="🔍 номер / сделка / клиент" oninput="render()">
+      <label class="delonly"><input type="checkbox" id="f-del" onchange="render()"> только помеченные 🗑</label>
+      <span class="grp"><span class="f-lbl">Группировать</span>
+        <select id="f-group" onchange="render()">
+          <option value="dept">по отделу</option>
+          <option value="kind">по типу</option>
+          <option value="deal">по сделке</option>
+          <option value="flat">плоско</option>
+        </select>
+      </span>
+    </div>
+
+    <div class="note">📋 Реестр — <b>проекция</b>, а не второе хранилище: документ принадлежит сделке → менеджеру → отделу; отдел здесь это фильтр через цепочку. Действия (правка/пометка) подчиняются тем же правилам, что в карточке: подписанный/оплаченный заморожен 🔒, помеченный нельзя отправить, безвозвратно — в <a href="sales-docs-purge.html" target="_blank">Архиве</a>.</div>
+
+    <div id="list"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  let _t; function toast(m){ const t=document.getElementById('toast'); t.innerHTML=m; t.classList.add('show'); clearTimeout(_t); _t=setTimeout(()=>t.classList.remove('show'),3000); }
+
+  // отделы и принадлежность менеджеров
+  const MGR_DEPT = {
+    "Сидоров К.":"Отдел продаж · Новые", "Петрова А.":"Отдел продаж · Новые",
+    "Иванов И.":"Отдел продаж · Постоянные", "Ковалёва М.":"Отдел продаж · Постоянные",
+    "Морозов Д.":"Тендерный отдел",
+  };
+  const DEPT_ICON = {"Отдел продаж · Новые":"🟦","Отдел продаж · Постоянные":"♻️","Тендерный отдел":"📑"};
+  const KIND_ICON = {"Счёт":"💵","Договор":"📜","КП":"📊","Акт":"✅","Заказ-наряд":"🔧","Накладная":"🚚"};
+
+  // роли → область видимости
+  const ROLE = {
+    manager:  {who:"Сидоров К.", scope:"свои сделки", filter:d=>d.mgr==="Сидоров К."},
+    rop:      {who:"РОП «Новые»", scope:"отдел «Отдел продаж · Новые»", filter:d=>d.dept==="Отдел продаж · Новые"},
+    director: {who:"Директор / Архивариус", scope:"все отделы", filter:()=>true},
+  };
+  let curRole = "manager";
+
+  // демо-документы всех отделов (структура совместима с карточкой/архивом)
+  const DOCS = [
+    {n:"Счёт СЧ-0461", kind:"Счёт", mgr:"Сидоров К.", deal:"CRM-1024 · Автопарк №7", client:"Автопарк №7", st:"posted", lbl:"отправлен", ver:1, signed:false, paid:false, date:"14.06.2026", amount:"12 400"},
+    {n:"Договор ДГ-0118", kind:"Договор", mgr:"Сидоров К.", deal:"CRM-1029 · ОАО «Белтранс»", client:"Белтранс", st:"signed", lbl:"подписан", ver:2, signed:true, paid:false, date:"12.06.2026", amount:"86 000"},
+    {n:"Счёт СЧ-0420", kind:"Счёт", mgr:"Сидоров К.", deal:"CRM-1029 · ОАО «Белтранс»", client:"Белтранс", st:"paid", lbl:"оплачен", ver:1, signed:false, paid:true, date:"10.06.2026", amount:"86 000"},
+    {n:"КП-0288", kind:"КП", mgr:"Петрова А.", deal:"CRM-1024 · Автопарк №7", client:"Автопарк №7", st:"posted", lbl:"просмотрен", ver:1, signed:false, paid:false, date:"13.06.2026", amount:"45 000", del:true, reason:"устаревшие цены"},
+    {n:"Заказ-наряд ЗН-0207", kind:"Заказ-наряд", mgr:"Петрова А.", deal:"CRM-1031 · СТО «Вираж»", client:"СТО Вираж", st:"pending", lbl:"в работе", ver:1, signed:false, paid:false, date:"11.06.2026", amount:"7 200"},
+    {n:"Счёт СЧ-0455", kind:"Счёт", mgr:"Иванов И.", deal:"CRM-1031 · СТО «Вираж»", client:"СТО Вираж", st:"paid", lbl:"оплачен", ver:2, signed:false, paid:true, date:"11.06.2026", amount:"31 000"},
+    {n:"Акт АКТ-0140", kind:"Акт", mgr:"Иванов И.", deal:"CRM-1015 · ООО «Логист»", client:"Логист", st:"posted", lbl:"подписан", ver:1, signed:true, paid:false, date:"09.06.2026", amount:"19 800"},
+    {n:"Договор ДГ-0120", kind:"Договор", mgr:"Морозов Д.", deal:"CRM-1040 · РУП «Белэнерго»", client:"Белэнерго", st:"signed", lbl:"подписан", ver:1, signed:true, paid:false, date:"10.06.2026", amount:"240 000"},
+    {n:"КП-0301", kind:"КП", mgr:"Морозов Д.", deal:"CRM-1041 · РУП «Минскэнерго»", client:"Минскэнерго", st:"draft", lbl:"черновик", ver:1, signed:false, paid:false, date:"14.06.2026", amount:"180 000"},
+    {n:"ТТН-0512", kind:"Накладная", mgr:"Ковалёва М.", deal:"CRM-1033 · ИП Сергеев", client:"ИП Сергеев", st:"draft", lbl:"черновик", ver:1, signed:false, paid:false, date:"15.06.2026", amount:"4 100"},
+  ].map(d=>({...d, dept: MGR_DEPT[d.mgr]||"Без отдела"}));
+
+  function visible(){ return DOCS.filter(ROLE[curRole].filter); }
+
+  function fillFilters(){
+    const docs = visible();
+    const uniq = (arr)=>[...new Set(arr)].sort();
+    setOpts('f-dept', uniq(docs.map(d=>d.dept)), 'Все отделы');
+    setOpts('f-mgr', uniq(docs.map(d=>d.mgr)), 'Все менеджеры');
+    setOpts('f-kind', uniq(docs.map(d=>d.kind)), 'Все типы');
+    setOpts('f-status', uniq(docs.map(d=>d.lbl)), 'Все статусы');
+  }
+  function setOpts(id, vals, allLabel){
+    const el=document.getElementById(id); const cur=el.value;
+    el.innerHTML = `<option value="">${allLabel}</option>` + vals.map(v=>`<option ${v===cur?'selected':''}>${v}</option>`).join('');
+  }
+
+  function applyFilters(docs){
+    const dept=val('f-dept'), mgr=val('f-mgr'), kind=val('f-kind'), status=val('f-status'), q=val('f-q').toLowerCase(), delOnly=document.getElementById('f-del').checked;
+    return docs.filter(d=>
+      (!dept||d.dept===dept) && (!mgr||d.mgr===mgr) && (!kind||d.kind===kind) && (!status||d.lbl===status) &&
+      (!delOnly||d.del) &&
+      (!q || (d.n+' '+d.deal+' '+d.client).toLowerCase().includes(q))
+    );
+  }
+  function val(id){ return document.getElementById(id).value; }
+
+  function setRole(r){
+    curRole=r;
+    document.querySelectorAll('#roleseg button').forEach(b=>b.classList.toggle('on', b.dataset.role===r));
+    // сбросить фильтры под новую видимость
+    ['f-dept','f-mgr','f-kind','f-status'].forEach(id=>document.getElementById(id).value='');
+    fillFilters(); render();
+  }
+
+  function render(){
+    const role=ROLE[curRole];
+    document.getElementById('scope').innerHTML = `видит: <b>${role.scope}</b>`;
+    const docs = applyFilters(visible());
+
+    // счётчики
+    const sum = docs.reduce((s,d)=>s+(+d.amount.replace(/\s/g,'')||0),0);
+    const del = docs.filter(d=>d.del).length;
+    const frozen = docs.filter(d=>d.signed||d.paid).length;
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="v">${docs.length}</div><div class="k">документов видно</div></div>
+      <div class="stat ok"><div class="v">${sum.toLocaleString('ru-RU')} Br</div><div class="k">сумма по реестру</div></div>
+      <div class="stat warn"><div class="v">${frozen}</div><div class="k">🔒 заморожено (подписан/оплачен)</div></div>
+      <div class="stat bad"><div class="v">${del}</div><div class="k">🗑 помечено на удаление</div></div>`;
+
+    const root=document.getElementById('list');
+    if(!docs.length){ root.innerHTML='<div class="group"><div class="empty">Нет документов под текущие фильтры/роль</div></div>'; return; }
+
+    const by = val('f-group');
+    if(by==='flat'){ root.innerHTML = `<div class="group">${docs.map(rowHtml).join('')}</div>`; return; }
+    const keyOf = {dept:d=>d.dept, kind:d=>d.kind, deal:d=>d.deal}[by];
+    const icoOf = {dept:k=>DEPT_ICON[k]||'📁', kind:k=>KIND_ICON[k]||'📄', deal:()=>'🗂️'}[by];
+    const g={}; docs.forEach(d=>{ const k=keyOf(d); (g[k]=g[k]||[]).push(d); });
+    root.innerHTML = Object.keys(g).sort().map(k=>{
+      const items=g[k]; const gsum=items.reduce((s,d)=>s+(+d.amount.replace(/\s/g,'')||0),0);
+      return `<div class="group">
+        <div class="ghead">
+          <span class="gname">${icoOf(k)} ${k}</span>
+          <span class="gcnt">${items.length}</span>
+          <span class="gsum">${gsum.toLocaleString('ru-RU')} Br</span>
+        </div>
+        ${items.map(rowHtml).join('')}
+      </div>`;
+    }).join('');
+  }
+
+  function rowHtml(d){
+    const i = DOCS.indexOf(d);
+    const frozen = d.signed || d.paid;
+    const stCls = d.del ? 'del' : d.st;
+    const stLbl = d.del ? 'на удалении' : d.lbl;
+    const sendBtn = d.del
+      ? `<span class="dbtn dis" title="Помечен на удаление — отправка запрещена" onclick="blockSend()">🚫</span>`
+      : `<span class="dbtn" title="Отправить" onclick="toast('✉ Отправка: ${d.n}')">✉</span>`;
+    const editBtn = frozen
+      ? `<span class="dbtn dis" title="Заморожен (юр. сила) — правка запрещена" onclick="blockFrozen()">🔒</span>`
+      : `<span class="dbtn" title="Изменить (новая версия)" onclick="revise(${i})">✎</span>`;
+    const markBtn = frozen
+      ? `<span class="dbtn dis" title="Заморожен — пометка запрещена" onclick="blockFrozen()">🔒</span>`
+      : d.del
+      ? `<span class="dbtn" title="Снять пометку" onclick="unmark(${i})">♻</span>`
+      : `<span class="dbtn" title="Пометить на удаление" onclick="mark(${i})">🗑</span>`;
+    return `<div class="doc ${d.del?'deldoc':''}">
+      <div>
+        <div class="dn">${d.n} <span class="ver">v${d.ver}</span>${frozen?'<span class="frozen">🔒</span>':''}</div>
+        <div class="meta"><a href="sales-card-full.html" title="Открыть сделку">${d.deal}</a> · ${d.mgr} · ${d.dept} · ${d.date} · <b>${d.amount} Br</b>${d.del?(' · основание: '+d.reason):''}</div>
+      </div>
+      <span class="kindbadge">${KIND_ICON[d.kind]||''} ${d.kind}</span>
+      <span class="st ${stCls}">${stLbl}</span>
+      <div class="acts">
+        <span class="dbtn" title="Просмотр" onclick="toast('👁 Предпросмотр: ${d.n}')">👁</span>
+        ${sendBtn}${editBtn}${markBtn}
+      </div>
+    </div>`;
+  }
+
+  function mark(i){ DOCS[i].del=true; DOCS[i].reason=DOCS[i].reason||'помечено из реестра'; render(); toast('🗑 Помечен: '+DOCS[i].n+' — попадёт в Архив, отправка заблокирована'); }
+  function unmark(i){ DOCS[i].del=false; render(); toast('♻ Пометка снята: '+DOCS[i].n); }
+  function blockSend(){ toast('🚫 Нельзя отправить — документ помечен на удаление'); }
+  function blockFrozen(){ toast('🔒 Документ заморожен (подписан/оплачен) — правка и пометка запрещены'); }
+  function revise(i){ DOCS[i].ver++; render(); toast('✎ Новая версия v'+DOCS[i].ver+' · прежняя в истории сделки'); }
+
+  // стартовая роль из ?role= (для демо-ссылок «реестр глазами РОПа/директора»)
+  const _qr = new URLSearchParams(location.search).get('role');
+  if(_qr && ROLE[_qr]){ curRole=_qr; document.querySelectorAll('#roleseg button').forEach(b=>b.classList.toggle('on', b.dataset.role===_qr)); }
+  fillFilters(); render();
+</script>
+</body>
+</html>
