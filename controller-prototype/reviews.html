@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контролёр ОП · Разборы — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px} .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:18px;margin-top:16px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)} .t-red{background:var(--red-bg);color:var(--red)} .t-brand{background:var(--brand-100);color:var(--brand)} .t-violet{background:var(--violet-bg);color:var(--violet)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:10px 8px 10px 0;border-top:1px solid var(--line);vertical-align:top}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .strong{font-weight:700} .muted{color:var(--muted)} .small{font-size:12px}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px}
+  .f-red{background:var(--red-500)} .f-amber{background:var(--amber-500)} .f-slate{background:var(--slate-400)}
+  .lever{display:flex;justify-content:space-between;font-size:13px;margin:12px 0 4px}
+  .grid{display:grid;gap:16px;margin-top:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1.3fr}}
+  .step{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--slate-bg);color:var(--slate)}
+  .chip.now{background:var(--brand);color:#fff}
+  .chip.done{background:var(--green-bg);color:var(--green)}
+  .arr{color:var(--slate-400)}
+  .att{border-left:3px solid;border-radius:0 8px 8px 0;padding:8px 12px;margin-top:10px}
+  .att.red{border-color:var(--red-500)} .att.amber{border-color:var(--amber-500)} .att.green{border-color:var(--green-500)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .note{font-size:12px;color:var(--slate-400);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Контролёр</b> / Разборы</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит</a>
+    <a class="tab" href="focus.html">Фокус-сделки</a>
+    <a class="tab" href="okk.html">ОКК · звонки</a>
+    <a class="tab" href="funnel.html">Показатели</a>
+    <a class="tab" href="money.html">Конверсия и деньги</a>
+    <a class="tab active" href="reviews.html">Разборы</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <h1>Разборы — провалы недели и крупные сделки</h1>
+  <p class="sub">Две регулярные процедуры контролёра: разбор <b>провальных сделок</b> за неделю (почему слили) и контроль движения по <b>крупным сделкам</b> (чтобы не зависли).</p>
+
+  <!-- Провалы -->
+  <div class="card">
+    <div class="row-between"><span class="caption">Разбор провальных сделок · неделя 24 · 10 шт</span><span class="tag t-red">сумма потерь 187 000 BYN</span></div>
+
+    <div class="grid g2">
+      <div>
+        <span class="caption">Причины провалов</span>
+        <div class="lever"><span>Дорого / не согласовали цену</span><span class="strong">4</span></div><div class="bar"><i class="f-red" style="width:40%"></i></div>
+        <div class="lever"><span>Долго думали → ушли к конкуренту</span><span class="strong">3</span></div><div class="bar"><i class="f-amber" style="width:30%"></i></div>
+        <div class="lever"><span>Не дожали / пропал контакт</span><span class="strong">2</span></div><div class="bar"><i class="f-amber" style="width:20%"></i></div>
+        <div class="lever"><span>Не наш профиль (дисквалиф.)</span><span class="strong">1</span></div><div class="bar"><i class="f-slate" style="width:10%"></i></div>
+        <div class="att red"><div class="strong small">Вывод контролёра</div><div class="muted small">«Не дожали» + «долго думали» = 5 из 10 — это управляемые потери. Корень — слабые побуждающие вопросы (см. ОКК) и поздняя реакция. Управляемо обучением.</div></div>
+      </div>
+      <div>
+        <span class="caption">Реестр провалов</span>
+        <table style="margin-top:10px">
+          <thead><tr><th>Сделка</th><th>Менеджер</th><th class="num">Сумма</th><th>Причина</th></tr></thead>
+          <tbody>
+            <tr><td class="strong">МеталлТорг</td><td class="muted">Сергей С.</td><td class="num">64 000</td><td><span class="tag t-amber">не дожал</span></td></tr>
+            <tr><td class="strong">ПромСбыт</td><td class="muted">Сергей С.</td><td class="num">38 000</td><td><span class="tag t-amber">долго думали</span></td></tr>
+            <tr><td class="strong">ВостокСнаб</td><td class="muted">Мария М.</td><td class="num">29 000</td><td><span class="tag t-red">цена</span></td></tr>
+            <tr><td class="strong">ГрандЛогист</td><td class="muted">Дмитрий Д.</td><td class="num">26 000</td><td><span class="tag t-red">цена</span></td></tr>
+            <tr><td class="strong">СибПромТех</td><td class="muted">Сергей С.</td><td class="num">18 000</td><td><span class="tag t-amber">пропал контакт</span></td></tr>
+            <tr><td class="muted small" colspan="4">…ещё 5 на 12 000 BYN</td></tr>
+          </tbody>
+        </table>
+        <p class="small muted" style="margin-top:8px">3 из топ-5 провалов — Сергей С. Совпадает с ОКК (балл 6.1) и Показателями (4 сделки без дел). Точка приложения — он.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Крупные сделки -->
+  <div class="card">
+    <div class="row-between"><span class="caption">Контроль движения по крупным сделкам</span><span class="tag t-brand">порог ≥ 50 000 BYN · 5 в работе</span></div>
+    <table style="margin-top:12px">
+      <thead><tr><th>Сделка</th><th>Менеджер</th><th class="num">Сумма</th><th>Стадия / движение</th><th>Контроль</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="strong">ООО ХимПром</td><td class="muted">Анна А.</td><td class="num">140 000</td>
+          <td><div class="step"><span class="chip done">Счёт</span><span class="arr">→</span><span class="chip now">Защита счёта</span><span class="arr">→</span><span class="chip">Договор</span></div><div class="small muted" style="margin-top:3px">движется, был контакт сегодня</div></td>
+          <td><span class="tag t-green">в графике</span></td>
+        </tr>
+        <tr style="background:var(--amber-bg)">
+          <td class="strong">ООО АльфаМеталл</td><td class="muted">Сергей С.</td><td class="num">58 000</td>
+          <td><div class="step"><span class="chip done">КП</span><span class="arr">→</span><span class="chip now">Счёт</span></div><div class="small muted" style="margin-top:3px">3 дня без движения, балл звонка 4.5</div></td>
+          <td><span class="tag t-red">завис → разбор</span></td>
+        </tr>
+        <tr>
+          <td class="strong">ИП СтройКомплекс</td><td class="muted">Дмитрий Д.</td><td class="num">42 000</td>
+          <td><div class="step"><span class="chip now">Спецификация</span></div><div class="small muted" style="margin-top:3px">перенос без причины — уточняется</div></td>
+          <td><span class="tag t-amber">следить</span></td>
+        </tr>
+        <tr>
+          <td class="strong">ООО ТехноЛес</td><td class="muted">Анна А.</td><td class="num">96 000</td>
+          <td><div class="step"><span class="chip done">Защита</span><span class="arr">→</span><span class="chip now">Договор</span></div><div class="small muted" style="margin-top:3px">на согласовании договора (офис)</div></td>
+          <td><span class="tag t-green">в графике</span></td>
+        </tr>
+        <tr>
+          <td class="strong">ОАО ЭнергоСбыт</td><td class="muted">Мария М.</td><td class="num">72 000</td>
+          <td><div class="step"><span class="chip now">Защита счёта</span></div><div class="small muted" style="margin-top:3px">ждёт решение ЛПР до 16.06</div></td>
+          <td><span class="tag t-amber">следить</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="att amber"><div class="strong small">Фокус контролёра</div><div class="muted small">АльфаМеталл (58 000) завис на одном слабом менеджере — приоритет: разбор звонка + подключить РОПа, пока сделка не ушла в провал, как МеталлТорг.</div></div>
+  </div>
+
+  <p class="note">⚠️ Концепт-прототип по вкладкам «Провалы» и «Крупные сделки». Суммы/причины — демонстрационные, BYN. Связки между экранами (провал ↔ ОКК ↔ показатели) — ключевая ценность: одна причина видна с разных сторон.</p>
+</div>
+</body>
+</html>

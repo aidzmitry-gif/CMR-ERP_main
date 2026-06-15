@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контролёр ОП · ОКК звонки — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px} .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .grid{display:grid;gap:16px;margin-top:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1.2fr 1fr 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:18px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)} .t-brand{background:var(--brand-100);color:var(--brand)} .t-violet{background:var(--violet-bg);color:var(--violet)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:10px 8px 10px 0;border-top:1px solid var(--line);vertical-align:top}
+  .strong{font-weight:700} .muted{color:var(--muted)} .small{font-size:12px}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .score{display:inline-flex;align-items:center;justify-content:center;min-width:30px;padding:1px 7px;border-radius:7px;font-weight:700}
+  .sc-hi{background:var(--green-bg);color:var(--green)} .sc-mid{background:var(--amber-bg);color:var(--amber)} .sc-lo{background:var(--red-bg);color:var(--red)}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px}
+  .f-green{background:var(--green-500)} .f-amber{background:var(--amber-500)} .f-red{background:var(--red-500)} .f-violet{background:var(--violet-500)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden}
+  .seg a{padding:6px 12px;font-size:13px;color:var(--slate);border-right:1px solid #E5E7EB}
+  .seg a:last-child{border-right:none} .seg a.on{background:var(--brand);color:#fff;font-weight:600}
+  .lever{display:flex;justify-content:space-between;font-size:13px;margin:12px 0 5px}
+  .big{font-size:26px;font-weight:700}
+  .hl-amber{background:var(--amber-bg);color:#92400E;border-radius:12px;padding:12px;font-size:13px;line-height:1.4;margin-top:12px}
+  .note{font-size:12px;color:var(--slate-400);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Контролёр</b> / ОКК · звонки</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит</a>
+    <a class="tab" href="focus.html">Фокус-сделки</a>
+    <a class="tab active" href="okk.html">ОКК · звонки</a>
+    <a class="tab" href="funnel.html">Показатели</a>
+    <a class="tab" href="money.html">Конверсия и деньги</a>
+    <a class="tab" href="reviews.html">Разборы</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>ОКК — прослушивание и баллы по звонкам</h1>
+      <p class="sub">Контроль качества: контролёр слушает звонки, ставит балл и пишет анализ. Отдельно — <b>разбор по целям</b> за выбранный день: тема разговора и были ли побуждающие к продвижению сделки вопросы.</p>
+    </div>
+    <div class="seg">
+      <a href="#">Нед. 23</a>
+      <a class="on" href="#">Нед. 24 (10–14.06)</a>
+      <a href="#">Нед. 25</a>
+    </div>
+  </div>
+
+  <!-- Сводка по менеджерам -->
+  <div class="grid g3">
+    <div class="card">
+      <span class="caption">Средний балл недели</span>
+      <div class="row-between" style="margin-top:6px"><span class="big" style="color:var(--amber)">7.8</span><span class="tag t-green">↑ 0.4 к нед. 23</span></div>
+      <div class="lever"><span>Анна А.</span><span class="strong">8.6</span></div><div class="bar"><i class="f-green" style="width:86%"></i></div>
+      <div class="lever"><span>Дмитрий Д.</span><span class="strong">7.9</span></div><div class="bar"><i class="f-green" style="width:79%"></i></div>
+      <div class="lever"><span>Мария М.</span><span class="strong">7.4</span></div><div class="bar"><i class="f-amber" style="width:74%"></i></div>
+      <div class="lever"><span style="color:var(--red)">Сергей С.</span><span class="strong" style="color:var(--red)">6.1</span></div><div class="bar"><i class="f-red" style="width:61%"></i></div>
+    </div>
+    <div class="card">
+      <span class="caption">Покрытие прослушки</span>
+      <div class="big" style="margin-top:6px">38 <span class="muted small" style="font-size:13px">из 154 звонков</span></div>
+      <div class="muted small" style="margin-top:4px">25% звонков прослушано за неделю</div>
+      <div class="hl-amber">Цель ОКК — ≥ 30% звонков и 100% звонков по фокус-сделкам. Сейчас фокус закрыт, общий охват добрать.</div>
+    </div>
+    <div class="card">
+      <span class="caption">Слабые зоны (по анализу)</span>
+      <div class="lever"><span>Нет побуждающих вопросов</span><span class="strong">11</span></div><div class="bar"><i class="f-red" style="width:55%"></i></div>
+      <div class="lever"><span>Не назначен след. шаг</span><span class="strong">7</span></div><div class="bar"><i class="f-amber" style="width:35%"></i></div>
+      <div class="lever"><span>Слабая работа с ценой</span><span class="strong">5</span></div><div class="bar"><i class="f-amber" style="width:25%"></i></div>
+      <div class="lever"><span>Не выявлена потребность</span><span class="strong">3</span></div><div class="bar"><i class="f-violet" style="width:15%"></i></div>
+    </div>
+  </div>
+
+  <!-- Журнал прослушанных звонков -->
+  <div class="card" style="margin-top:16px">
+    <span class="caption">Журнал прослушанных звонков · неделя 24</span>
+    <table style="margin-top:12px">
+      <thead><tr><th>Дата звонка</th><th>Дата прослуш.</th><th>Менеджер</th><th>Сделка</th><th>Анализ звонка</th><th class="num">Балл</th></tr></thead>
+      <tbody>
+        <tr><td class="muted">12.06</td><td class="muted">12.06</td><td>Анна А.</td><td class="strong">Сатурн</td><td class="muted small">Чисто отработала цену, назначен счёт с дедлайном</td><td class="num"><span class="score sc-hi">9</span></td></tr>
+        <tr><td class="muted">12.06</td><td class="muted">13.06</td><td>Дмитрий Д.</td><td class="strong">СтройКомплекс</td><td class="muted small">Хорошо, но не зафиксировал конкретную дату следующего шага</td><td class="num"><span class="score sc-mid">7</span></td></tr>
+        <tr style="background:var(--red-bg)"><td class="muted">12.06</td><td class="muted">13.06</td><td>Сергей С.</td><td class="strong">АльфаМеталл</td><td class="muted small">Нет ни одного побуждающего к продвижению вопроса, разговор «ни о чём»</td><td class="num"><span class="score sc-lo">4.5</span></td></tr>
+        <tr><td class="muted">11.06</td><td class="muted">12.06</td><td>Мария М.</td><td class="strong">Тернопарк</td><td class="muted small">Потребность выявлена, но скомкана презентация выгод</td><td class="num"><span class="score sc-mid">7</span></td></tr>
+        <tr><td class="muted">11.06</td><td class="muted">12.06</td><td>Сергей С.</td><td class="strong">ТехноЛайн</td><td class="muted small">Норм контакт, но перезвон позже обещанного срока</td><td class="num"><span class="score sc-mid">7</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Разбор по целям (вкладка "Разбор звонков") -->
+  <div class="card" style="margin-top:16px">
+    <div class="row-between">
+      <span class="caption">Разбор звонков по целям · день 12.06 (все звонки ОП)</span>
+      <span class="tag t-brand">47 звонков</span>
+    </div>
+    <p class="muted small" style="margin-top:6px">Контролёр слушает все звонки специалистов за день и размечает: на какую тему шёл разговор и были ли вопросы, побуждающие двигать сделку вперёд.</p>
+    <div class="grid g2" style="margin-top:12px">
+      <div>
+        <span class="caption">Тема разговора</span>
+        <div class="lever"><span>Продвижение сделки (счёт/договор)</span><span class="strong">18</span></div><div class="bar"><i class="f-green" style="width:38%"></i></div>
+        <div class="lever"><span>Выявление потребности</span><span class="strong">12</span></div><div class="bar"><i class="f-green" style="width:26%"></i></div>
+        <div class="lever"><span>Презентация / КП</span><span class="strong">9</span></div><div class="bar"><i class="f-amber" style="width:19%"></i></div>
+        <div class="lever"><span>Болтовня / без цели</span><span class="strong" style="color:var(--red)">8</span></div><div class="bar"><i class="f-red" style="width:17%"></i></div>
+      </div>
+      <div>
+        <span class="caption">Были ли побуждающие вопросы?</span>
+        <div class="row-between" style="margin-top:14px">
+          <div style="text-align:center;flex:1"><div class="big" style="color:var(--green)">62%</div><div class="small muted">да — двигали сделку</div></div>
+          <div style="text-align:center;flex:1"><div class="big" style="color:var(--red)">38%</div><div class="small muted">нет — пассивный разговор</div></div>
+        </div>
+        <div class="hl-amber">38% звонков без единого побуждающего вопроса — главный рычаг роста конверсии. Основной вклад — Сергей С. Вынести в разбор и в обучение.</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">⚠️ Концепт-прототип по файлу «ОКК в отделе продаж» (вкладки баллов по неделям + «Разбор звонков»). Балл и анализ — экспертная оценка контролёра. Данные демонстрационные.</p>
+</div>
+</body>
+</html>

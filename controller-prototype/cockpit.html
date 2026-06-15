@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контролёр ОП · Кокпит — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px} .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g4{grid-template-columns:repeat(4,1fr)}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .card.tight{padding:0}
+  .card.lv{border-left:4px solid var(--violet-500)}
+  .card.lr{border-left:4px solid var(--red-500)}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr)}
+  @media(min-width:640px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:1040px){.kpis{grid-template-columns:repeat(6,1fr)}}
+  .kpi{padding:16px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .kpi .v{font-size:19px;font-weight:700}
+  .kpi .l{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.25}
+  .kpi .s{font-size:10px;color:var(--slate-400)}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)} .t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)} .t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .d-green{background:var(--green-500)} .d-amber{background:var(--amber-500)} .d-red{background:var(--red-500)} .d-teal{background:var(--teal-500)}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px;background:var(--brand)}
+  .f-green{background:var(--green-500)!important} .f-amber{background:var(--amber-500)!important} .f-red{background:var(--red-500)!important}
+  .f-teal{background:var(--teal-500)!important} .f-slate{background:var(--slate-400)!important}
+  .strong{font-weight:700} .muted{color:var(--muted)} .small{font-size:12px}
+  .hl-amber{background:var(--amber-bg);color:#92400E;border-radius:12px;padding:12px;font-size:13px;line-height:1.4}
+  .hl-green{background:var(--green-bg);color:#065F46;border-radius:12px;padding:12px;font-size:13px;line-height:1.4}
+  .btn{border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn-pri{background:var(--brand);color:#fff} .btn-red{background:var(--red);color:#fff} .btn-ghost{background:#fff;border:1px solid #E5E7EB;color:var(--slate)}
+  .att{border-left:2px solid;border-radius:0 8px 8px 0;padding-left:12px}
+  .att.green{border-color:var(--green-500)} .att.amber{border-color:var(--amber-500)} .att.red{border-color:var(--red-500)} .att.slate{border-color:var(--slate-400)} .att.violet{border-color:var(--violet-500)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .dep{display:flex;flex-direction:column;gap:10px}
+  .dep .hd{display:flex;align-items:center;justify-content:space-between}
+  .dep .big{font-size:22px;font-weight:700}
+  .dep .ln{display:flex;align-items:center;justify-content:space-between;font-size:12px;gap:8px}
+  .dep .ln .nm{color:var(--ink)} .dep .ln .v{color:var(--muted);font-variant-numeric:tabular-nums}
+  .stub{opacity:.6}
+  .note{font-size:12px;color:var(--slate-400);margin-top:18px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Контролёр</b></span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab active" href="cockpit.html">Кокпит</a>
+    <a class="tab" href="focus.html">Фокус-сделки</a>
+    <a class="tab" href="okk.html">ОКК · звонки</a>
+    <a class="tab" href="funnel.html">Показатели</a>
+    <a class="tab" href="money.html">Конверсия и деньги</a>
+    <a class="tab" href="reviews.html">Разборы</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Контролёр — ежедневная дисциплина и качество</h1>
+      <p class="sub">Пилот — <b>отдел продаж (ОП)</b>, по регламенту HR. Контролёр следит за исполнением (действия до 12:00, дела, звонки), <b>слушает звонки и ставит баллы (ОКК)</b>, разбирает причины переносов и провалов. Каркас рассчитан на все отделы.</p>
+    </div>
+    <span class="tag t-brand">Сегодня · 13.06.2026 · ОП</span>
+  </div>
+
+  <!-- KPI контролёра ОП (из таблиц HR) -->
+  <div class="card tight" style="margin-top:16px;overflow:hidden">
+    <div class="kpis">
+      <div class="kpi"><div class="v" style="color:var(--amber)">74%</div><div class="l">Действия до 12:00</div><div class="s">17 из 23 фокус-сделок · цель 100%</div></div>
+      <div class="kpi"><div class="v" style="color:var(--green)">7.8</div><div class="l">Средний балл звонка</div><div class="s">ОКК · из 10 · ↑ 0.4 к нед.</div></div>
+      <div class="kpi"><div class="v" style="color:var(--red)">5</div><div class="l">Сделок без дел</div><div class="s">нет запланированного шага</div></div>
+      <div class="kpi"><div class="v" style="color:var(--red)">4</div><div class="l">Просрочено дел</div><div class="s">сегодня</div></div>
+      <div class="kpi"><div class="v">31%</div><div class="l">Конверсия недели</div><div class="s">успех / всего · чистая 24%</div></div>
+      <div class="kpi"><div class="v" style="color:var(--green)">82%</div><div class="l">ВП к плану</div><div class="s">валовая прибыль · контекст РОП</div></div>
+    </div>
+  </div>
+
+  <!-- Каркас по отделам: ОП раскрыт, остальные — заглушки -->
+  <p class="caption" style="margin-top:24px">Отделы под контролем</p>
+  <div class="grid g4" style="margin-top:10px">
+
+    <!-- ОП — раскрыт -->
+    <div class="card dep" style="border-left:4px solid var(--brand)">
+      <div class="hd"><span class="strong">Отдел продаж</span><span class="tag t-brand">пилот · активен</span></div>
+      <div><span class="big" style="color:var(--amber)">74%</span> <span class="muted small">действий до 12:00</span></div>
+      <div class="bar" style="height:6px"><i class="f-amber" style="width:74%"></i></div>
+      <div class="ln"><span class="nm">Средний балл звонка</span><span class="v">7.8 / 10</span></div>
+      <div class="ln"><span class="nm">Просрочено дел</span><span class="v" style="color:var(--red)">4</span></div>
+      <div class="ln"><span class="nm">Сделок без дел</span><span class="v" style="color:var(--red)">5</span></div>
+      <a class="btn btn-pri" style="text-align:center;margin-top:auto" href="focus.html">Фокус-сделки дня →</a>
+    </div>
+
+    <!-- Заглушки -->
+    <div class="card dep stub">
+      <div class="hd"><span class="strong">Закуп</span><span class="tag">скоро</span></div>
+      <div class="muted small" style="margin-top:6px">Тот же паттерн: ежедневный чек действий, SLA по задачам, причины переносов.</div>
+      <div class="ln" style="margin-top:auto"><span class="nm muted">Контроль</span><span class="v">не настроен</span></div>
+    </div>
+    <div class="card dep stub">
+      <div class="hd"><span class="strong">Производство</span><span class="tag">скоро</span></div>
+      <div class="muted small" style="margin-top:6px">Нормо-часы, ОТК, сроки партий — подключим по образцу ОП.</div>
+      <div class="ln" style="margin-top:auto"><span class="nm muted">Контроль</span><span class="v">не настроен</span></div>
+    </div>
+    <div class="card dep stub">
+      <div class="hd"><span class="strong">Офис</span><span class="tag">скоро</span></div>
+      <div class="muted small" style="margin-top:6px">Дедлайны документов (ЭСЧФ/ТТН/договор), возврат оригиналов.</div>
+      <div class="ln" style="margin-top:auto"><span class="nm muted">Контроль</span><span class="v">не настроен</span></div>
+    </div>
+  </div>
+
+  <!-- Горит сегодня + срез дня -->
+  <div class="grid g2" style="margin-top:16px">
+    <!-- Требует контролёра сейчас -->
+    <div class="card lr">
+      <div class="row-between">
+        <span class="caption" style="color:var(--red)">Требует контролёра сейчас</span>
+        <a class="small" style="color:var(--brand)" href="focus.html">Все фокус-сделки →</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+        <div class="att red">
+          <div class="row-between"><span class="strong small">Сергей С. · 3 фокус-сделки без действий до 12:00</span><span class="tag t-red">нет</span></div>
+          <div class="muted small" style="margin-top:2px">Авто-напоминание ушло в 12:05. Не отреагировал — взять на контроль.</div>
+          <button class="btn btn-pri" style="margin-top:6px">Напомнить лично</button>
+        </div>
+        <div class="att amber">
+          <div class="row-between"><span class="strong small">«СтройКомплекс» · перенос без причины</span><span class="tag t-amber">?</span></div>
+          <div class="muted small" style="margin-top:2px">Дело сдвинуто на завтра, причина не указана. Запросить у менеджера.</div>
+          <button class="btn btn-ghost" style="margin-top:6px">Спросить причину переноса</button>
+        </div>
+        <div class="att amber">
+          <div class="row-between"><span class="strong small">«АльфаМеталл» · звонок 4.5/10</span><span class="tag t-amber">слабо</span></div>
+          <div class="muted small" style="margin-top:2px">Нет побуждающих к продвижению вопросов. Разобрать с менеджером.</div>
+          <button class="btn btn-ghost" style="margin-top:6px">Открыть разбор звонка</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Срез дня (Показатели) -->
+    <div class="card">
+      <div class="row-between"><span class="caption">Срез дня · воронка ОП</span><a class="small" style="color:var(--brand)" href="funnel.html">Все показатели →</a></div>
+      <div class="grid g2" style="margin-top:12px;gap:10px">
+        <div class="hl-green" style="padding:10px"><div class="strong" style="font-size:18px">23</div><div class="small">дел на сегодня</div></div>
+        <div class="hl-green" style="padding:10px"><div class="strong" style="font-size:18px">18</div><div class="small">дел со звонком</div></div>
+        <div class="hl-amber" style="padding:10px"><div class="strong" style="font-size:18px">11 / 7</div><div class="small">звонков до / после 12:00</div></div>
+        <div style="background:var(--red-bg);color:#991B1B;border-radius:12px;padding:10px"><div class="strong" style="font-size:18px">5</div><div class="small">сделок без дел</div></div>
+      </div>
+      <p class="caption" style="margin-top:16px">Сделки по статусам</p>
+      <div style="margin-top:8px">
+        <div class="ln" style="display:flex;justify-content:space-between"><span class="small">Сделка сформирована</span><span class="small strong">42</span></div>
+        <div class="bar" style="height:6px;margin-top:4px"><i style="width:100%"></i></div>
+        <div class="ln" style="display:flex;justify-content:space-between;margin-top:8px"><span class="small">Отправлен счёт</span><span class="small strong">19</span></div>
+        <div class="bar" style="height:6px;margin-top:4px"><i class="f-teal" style="width:45%"></i></div>
+        <div class="ln" style="display:flex;justify-content:space-between;margin-top:8px"><span class="small">Счёт защищён</span><span class="small strong">8</span></div>
+        <div class="bar" style="height:6px;margin-top:4px"><i class="f-green" style="width:19%"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI-ассистент -->
+  <div class="card lv" style="margin-top:16px">
+    <div class="row-between">
+      <span class="caption" style="color:var(--violet)">Ассистент контролёра · сегодня</span>
+      <span class="tag t-violet">Итерация 1 · ИИ</span>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="att red"><div class="strong small">Сергей С. — 3 фокуса без шага до 12:00</div><div class="muted small">Системно у него же 2 слабых звонка. Эскалировать РОПу + поставить разбор.</div></div>
+      <div class="att amber"><div class="strong small">2 переноса без причины за утро</div><div class="muted small">Правило регламента нарушено. Запросить причину, иначе перенос не засчитывать.</div></div>
+      <div class="att green"><div class="strong small">Балл звонков растёт (7.4 → 7.8)</div><div class="muted small">Работает разбор по целям прошлой недели — продолжить фокус на побуждающих вопросах.</div></div>
+      <div class="att slate"><div class="strong small">Граница с РОП</div><div class="muted small">Деньги/план/конверсию ведёт РОП — здесь они как контекст. Уникальное контролёра: до 12:00, баллы, причины.</div></div>
+    </div>
+  </div>
+
+  <p class="note">⚠️ Концепт-прототип блока «Контролёр» (пилот — ОП по таблицам HR «Фокус ОП» / «ОКК» / «Показатели 2026»). Данные демонстрационные, BYN. Баллы/риски — ручная отметка контролёра + подсказка по правилам, не модель.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контролёр ОП · Показатели — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px} .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:18px;margin-top:16px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)} .t-red{background:var(--red-bg);color:var(--red)} .t-brand{background:var(--brand-100);color:var(--brand)}
+  /* metric tiles */
+  .mgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  @media(min-width:680px){.mgrid{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:1000px){.mgrid{grid-template-columns:repeat(4,1fr)}}
+  .m{border:1px solid var(--line);border-radius:12px;padding:13px}
+  .m .v{font-size:22px;font-weight:700} .m .l{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.3}
+  .m.red{background:var(--red-bg)} .m.red .v{color:var(--red)}
+  .m.green .v{color:var(--green)} .m.amber .v{color:var(--amber)}
+  .funnel{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+  .frow{display:flex;align-items:center;gap:12px}
+  .frow .nm{width:210px;font-size:13px}
+  .frow .track{flex:1;height:26px;background:#F1F5F9;border-radius:8px;overflow:hidden;position:relative}
+  .frow .track>i{display:block;height:100%;border-radius:8px;background:var(--brand)}
+  .frow .track span{position:absolute;left:10px;top:0;line-height:26px;font-size:12px;font-weight:700;color:#fff}
+  .frow .cv{width:74px;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 8px 9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .strong{font-weight:700} .muted{color:var(--muted)} .small{font-size:12px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .note{font-size:12px;color:var(--slate-400);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Контролёр</b> / Показатели</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит</a>
+    <a class="tab" href="focus.html">Фокус-сделки</a>
+    <a class="tab" href="okk.html">ОКК · звонки</a>
+    <a class="tab active" href="funnel.html">Показатели</a>
+    <a class="tab" href="money.html">Конверсия и деньги</a>
+    <a class="tab" href="reviews.html">Разборы</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <h1>Показатели воронки и дисциплины ОП</h1>
+  <p class="sub">Вкладка «Показатели 2026»: где стоят сделки, сколько дел и звонков, что просрочено. Контролёр снимает срез ежедневно — это его «приборная панель» исполнения.</p>
+
+  <!-- Воронка по статусам -->
+  <div class="card">
+    <div class="row-between"><span class="caption">Сделки по статусам · до результата «Подписан договор»</span><span class="tag t-brand">всего в воронке · 96</span></div>
+    <div class="funnel">
+      <div class="frow"><span class="nm">Сделка сформирована</span><div class="track"><i style="width:100%"></i><span>42</span></div><span class="cv">база</span></div>
+      <div class="frow"><span class="nm">Отправлен счёт</span><div class="track"><i style="width:45%;background:var(--teal-500)"></i><span>19</span></div><span class="cv">45%</span></div>
+      <div class="frow"><span class="nm">Счёт защищён</span><div class="track"><i style="width:19%;background:var(--amber-500)"></i><span>8</span></div><span class="cv">42%</span></div>
+      <div class="frow"><span class="nm">До результата (в работе)</span><div class="track"><i style="width:62%;background:var(--slate-400)"></i><span>27</span></div><span class="cv">—</span></div>
+      <div class="frow"><span class="nm">Подписан договор</span><div class="track"><i style="width:12%;background:var(--green-500)"></i><span>5</span></div><span class="cv">результат</span></div>
+    </div>
+    <p class="small muted" style="margin-top:10px">Узкое место по регламенту: «Отправлен счёт → Счёт защищён» (42%). Контролёр смотрит, что мешает защите счёта — цена, ЛПР, сроки.</p>
+  </div>
+
+  <!-- 11 счётчиков -->
+  <div class="card">
+    <span class="caption">Дела и звонки · сегодня 13.06</span>
+    <div class="mgrid" style="margin-top:12px">
+      <div class="m"><div class="v">96</div><div class="l">Всего сделок в воронке</div></div>
+      <div class="m"><div class="v">42</div><div class="l">Статус «Сделка сформирована»</div></div>
+      <div class="m"><div class="v">19</div><div class="l">Статус «Отправлен счёт»</div></div>
+      <div class="m green"><div class="v">8</div><div class="l">Статус «Счёт защищён»</div></div>
+      <div class="m"><div class="v">27</div><div class="l">В работе до результата</div></div>
+      <div class="m"><div class="v">23</div><div class="l">Дел на сегодня</div></div>
+      <div class="m green"><div class="v">18</div><div class="l">Дел, в которых был звонок</div></div>
+      <div class="m green"><div class="v">11</div><div class="l">Звонков до 12:00</div></div>
+      <div class="m amber"><div class="v">7</div><div class="l">Звонков после 12:00</div></div>
+      <div class="m red"><div class="v">4</div><div class="l">Просроченных дел</div></div>
+      <div class="m red"><div class="v">5</div><div class="l">Сделок без дел</div></div>
+    </div>
+    <p class="small muted" style="margin-top:12px">«Сделок без дел» и «просроченные дела» — главные дисциплинарные триггеры: по ним контролёр идёт в Фокус-сделки и ставит/двигает задачу.</p>
+  </div>
+
+  <!-- По менеджерам -->
+  <div class="card">
+    <span class="caption">Разрез по менеджерам · сегодня</span>
+    <table style="margin-top:12px">
+      <thead><tr><th>Менеджер</th><th class="num">Дел</th><th class="num">Со звонком</th><th class="num">До 12:00</th><th class="num">Просроч.</th><th class="num">Без дел</th></tr></thead>
+      <tbody>
+        <tr><td class="strong">Анна А.</td><td class="num">6</td><td class="num">6</td><td class="num" style="color:var(--green)">6</td><td class="num">0</td><td class="num">0</td></tr>
+        <tr><td class="strong">Дмитрий Д.</td><td class="num">5</td><td class="num">5</td><td class="num" style="color:var(--green)">5</td><td class="num">0</td><td class="num">1</td></tr>
+        <tr><td class="strong">Мария М.</td><td class="num">5</td><td class="num">4</td><td class="num">4</td><td class="num">1</td><td class="num">0</td></tr>
+        <tr style="background:var(--red-bg)"><td class="strong">Сергей С.</td><td class="num">7</td><td class="num">3</td><td class="num" style="color:var(--red)">2</td><td class="num" style="color:var(--red)">3</td><td class="num" style="color:var(--red)">4</td></tr>
+        <tr class="strong"><td>Итого</td><td class="num">23</td><td class="num">18</td><td class="num">17</td><td class="num">4</td><td class="num">5</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:10px">Сергей С. даёт почти всю просрочку и сделки без дел — совпадает с низким баллом звонков (ОКК 6.1). Системный кандидат на разбор.</p>
+  </div>
+
+  <p class="note">⚠️ Концепт-прототип по вкладке «Показатели 2026» (файл «ОКК в отделе продаж»). Конверсии между статусами и срезы — демонстрационные. Реальные формулы — после выгрузки таблиц.</p>
+</div>
+</body>
+</html>

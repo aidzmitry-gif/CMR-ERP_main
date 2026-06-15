@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контролёр ОП · Конверсия и деньги — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px} .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .grid{display:grid;gap:16px;margin-top:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:18px}
+  .banner{background:var(--violet-bg);color:#5B21B6;border-radius:12px;padding:10px 14px;font-size:12.5px;line-height:1.4;margin-top:14px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)} .t-red{background:var(--red-bg);color:var(--red)} .t-brand{background:var(--brand-100);color:var(--brand)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 8px 9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .strong{font-weight:700} .muted{color:var(--muted)} .small{font-size:12px}
+  .conv{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .cv{border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
+  .cv .v{font-size:22px;font-weight:700} .cv .l{font-size:11px;color:var(--muted);margin-top:2px}
+  .cv.g .v{color:var(--green)} .cv.r .v{color:var(--red)}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%;border-radius:999px}
+  .f-green{background:var(--green-500)} .f-amber{background:var(--amber-500)} .f-red{background:var(--red-500)}
+  .lever{display:flex;justify-content:space-between;font-size:13px;margin:12px 0 4px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden}
+  .seg a{padding:6px 12px;font-size:13px;color:var(--slate);border-right:1px solid #E5E7EB}
+  .seg a:last-child{border-right:none} .seg a.on{background:var(--brand);color:#fff;font-weight:600}
+  .note{font-size:12px;color:var(--slate-400);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Контролёр</b> / Конверсия и деньги</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит</a>
+    <a class="tab" href="focus.html">Фокус-сделки</a>
+    <a class="tab" href="okk.html">ОКК · звонки</a>
+    <a class="tab" href="funnel.html">Показатели</a>
+    <a class="tab active" href="money.html">Конверсия и деньги</a>
+    <a class="tab" href="reviews.html">Разборы</a>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Конверсия и деньги — факт ОП</h1>
+      <p class="sub">Движение воронки за неделю/месяц, валовая прибыль и счета. Контролёр снимает <b>факт</b>; план и прогноз ведёт РОП — здесь они как контекст и сверка.</p>
+    </div>
+    <div class="seg"><a class="on" href="#">Неделя 24</a><a href="#">Месяц июнь</a></div>
+  </div>
+
+  <div class="banner">↔ Граница с РОП: эти показатели частично совпадают с кокпитом РОП. РОП отвечает за <b>план/прогноз/решения по сделкам</b>; контролёр — за <b>достоверность факта и дисциплину</b>, которая к этому факту привела. В проде — один источник данных, две роли-читателя.</div>
+
+  <!-- Конверсия неделя -->
+  <div class="grid g2">
+    <div class="card">
+      <span class="caption">Движение ОП за неделю · общая конверсия</span>
+      <p class="small muted" style="margin-top:4px">Сделки, в которых были изменения на этой неделе.</p>
+      <div class="conv">
+        <div class="cv g"><div class="v">14</div><div class="l">успешных</div></div>
+        <div class="cv"><div class="v">31</div><div class="l">в работе</div></div>
+        <div class="cv r"><div class="v">10</div><div class="l">провальных</div></div>
+      </div>
+      <div class="lever"><span>Конверсия успешных (14 / 55)</span><span class="strong" style="color:var(--green)">31%</span></div>
+      <div class="bar"><i class="f-green" style="width:31%"></i></div>
+      <div class="lever"><span>Доля провальных (10 / 55)</span><span class="strong" style="color:var(--red)">18%</span></div>
+      <div class="bar"><i class="f-red" style="width:18%"></i></div>
+    </div>
+    <div class="card">
+      <span class="caption">Чистая конверсия недели</span>
+      <p class="small muted" style="margin-top:4px">Сделки, которые созданы И изменены на этой неделе.</p>
+      <div class="conv">
+        <div class="cv g"><div class="v">6</div><div class="l">успешных</div></div>
+        <div class="cv"><div class="v">25</div><div class="l">всего за неделю</div></div>
+        <div class="cv r"><div class="v">4</div><div class="l">провальных</div></div>
+      </div>
+      <div class="lever"><span>Чистая конверсия (6 / 25)</span><span class="strong" style="color:var(--green)">24%</span></div>
+      <div class="bar"><i class="f-green" style="width:24%"></i></div>
+      <div class="lever"><span>Доля провальных (4 / 25)</span><span class="strong" style="color:var(--amber)">16%</span></div>
+      <div class="bar"><i class="f-amber" style="width:16%"></i></div>
+    </div>
+  </div>
+
+  <!-- ВП / ГПР + по менеджерам -->
+  <div class="grid g2">
+    <div class="card">
+      <span class="caption">Валовая прибыль (ГПР)</span>
+      <div class="row-between" style="margin-top:10px">
+        <div><div class="strong" style="font-size:24px">232 000 <span class="small muted">BYN</span></div><div class="small muted">ВП месяц · факт</div></div>
+        <div style="text-align:right"><div class="strong" style="font-size:24px;color:var(--green)">82%</div><div class="small muted">к плану 283 000</div></div>
+      </div>
+      <div class="bar" style="height:10px;margin-top:10px"><i class="f-green" style="width:82%"></i></div>
+      <div class="lever"><span>ВП на человека (4 чел.)</span><span class="strong">58 000 BYN</span></div>
+      <div class="bar"><i class="f-green" style="width:82%"></i></div>
+      <p class="small muted" style="margin-top:10px">%выполнения и ВП/чел. считаются по формуле (как в «ГПР»). Контролёр сверяет: дисциплина → счета → ВП.</p>
+    </div>
+    <div class="card">
+      <span class="caption">По менеджерам · день (вкладка «ОП»)</span>
+      <table style="margin-top:10px">
+        <thead><tr><th>Менеджер</th><th class="num">ВП факт</th><th class="num">% плана</th><th class="num">Счетов</th><th class="num">Σ счетов</th></tr></thead>
+        <tbody>
+          <tr><td class="strong">Анна А.</td><td class="num">3 200</td><td class="num" style="color:var(--green)">96%</td><td class="num">4</td><td class="num">41 000</td></tr>
+          <tr><td class="strong">Дмитрий Д.</td><td class="num">2 600</td><td class="num" style="color:var(--amber)">74%</td><td class="num">3</td><td class="num">28 000</td></tr>
+          <tr><td class="strong">Мария М.</td><td class="num">2 100</td><td class="num" style="color:var(--amber)">61%</td><td class="num">2</td><td class="num">16 000</td></tr>
+          <tr style="background:var(--red-bg)"><td class="strong">Сергей С.</td><td class="num">1 300</td><td class="num" style="color:var(--red)">48%</td><td class="num">1</td><td class="num">6 000</td></tr>
+          <tr class="strong"><td>Итого</td><td class="num">9 200</td><td class="num" style="color:var(--amber)">82%</td><td class="num">10</td><td class="num">91 000</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Рост специалистов -->
+  <div class="card" style="margin-top:16px">
+    <span class="caption">Ежемесячный рост специалистов ОП (вкладка «Рост»)</span>
+    <table style="margin-top:10px">
+      <thead><tr><th>Менеджер</th><th class="num">Выручка</th><th class="num">Себестоимость</th><th class="num">Валовая прибыль</th><th class="num">Средний чек</th><th class="num">Рентаб., %</th></tr></thead>
+      <tbody>
+        <tr><td class="strong">Анна А.</td><td class="num">186 000</td><td class="num">112 000</td><td class="num strong">74 000</td><td class="num">15 500</td><td class="num" style="color:var(--green)">40%</td></tr>
+        <tr><td class="strong">Дмитрий Д.</td><td class="num">152 000</td><td class="num">98 000</td><td class="num strong">54 000</td><td class="num">12 700</td><td class="num">36%</td></tr>
+        <tr><td class="strong">Мария М.</td><td class="num">98 000</td><td class="num">66 000</td><td class="num strong">32 000</td><td class="num">9 800</td><td class="num">33%</td></tr>
+        <tr><td class="strong">Сергей С.</td><td class="num">61 000</td><td class="num">43 000</td><td class="num strong">18 000</td><td class="num">7 600</td><td class="num" style="color:var(--red)">30%</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:10px">Тренд месяц-к-месяцу показывает, растёт ли специалист. Связка с ОКК: рост среднего чека и рентабельности идёт за ростом балла звонков.</p>
+  </div>
+
+  <p class="note">⚠️ Концепт-прототип по вкладкам «ГПР», «ОП», «Движение ОП нед.», «Анализ ОП мес.», «Рост». Все суммы и %% — демонстрационные, BYN. Формулы %плана/конверсии — после выгрузки таблиц.</p>
+</div>
+</body>
+</html>
