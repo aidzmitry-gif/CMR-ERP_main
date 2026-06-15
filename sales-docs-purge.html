@@ -15,32 +15,58 @@
   .backbar{background:#fff;border-bottom:1px solid #EEF0F2;padding:11px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
   .backbar a{color:var(--brand-700);font-weight:600;text-decoration:none;background:var(--brand-50);border-radius:8px;padding:7px 13px;font-size:13px}
   .backbar .crumb{color:var(--muted);font-size:13px}
-  .wrap{max-width:1000px;margin:24px auto;padding:0 22px}
+  .wrap{max-width:1040px;margin:24px auto;padding:0 22px}
   h1{font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px}
   .sub{color:var(--muted);margin:6px 0 18px;font-size:13.5px;line-height:1.5}
-  .gate{background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;gap:12px;align-items:flex-start}
+  .gate{background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:14px 16px;margin-bottom:18px;display:flex;gap:12px;align-items:flex-start}
   .gate .ic{font-size:22px}
   .gate b{color:#B45309}
   .gate .who{margin-top:7px;font-size:12.5px;color:#92400e;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .gate .who .pill{background:#fff;border:1px solid #FED7AA;border-radius:7px;padding:3px 9px;font-weight:600}
-  .card{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
-  .ch{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EEF0F2}
-  .ch .t{font-weight:700;font-size:15px}
-  .ch .cnt{font-size:12.5px;color:var(--muted)}
-  .row{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid #F6F7F9}
+
+  /* AI-панель */
+  .aibar{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:12px 16px;margin-bottom:16px;box-shadow:var(--shadow-card);flex-wrap:wrap}
+  .aibar .ttl{font-weight:700;display:flex;align-items:center;gap:7px}
+  .aibar .stat{font-size:12.5px;color:var(--muted)}
+  .aibar .stat b.ok{color:#15803D}.aibar .stat b.bad{color:#B91C1C}
+  .aibtn{margin-left:auto;border:none;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff;border-radius:9px;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px}
+  .aibtn:hover{filter:brightness(1.05)}
+  .aibtn.dis{background:#E5E7EB;color:#9aa3b0;cursor:default;filter:none}
+
+  .card{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden;margin-bottom:16px}
+  .card.empty-card .ch{border-bottom:none}
+  .ch{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid #EEF0F2;gap:12px}
+  .ch .left{display:flex;align-items:center;gap:11px}
+  .ch .deptname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
+  .ch .deptname .dico{font-size:17px}
+  .ch .cnt{font-size:12px;color:var(--muted);background:#F1F5F9;border-radius:20px;padding:2px 10px;font-weight:600}
+  .ch .grpdel{border:none;background:var(--bad);color:#fff;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;opacity:.45;pointer-events:none;transition:opacity .15s}
+  .ch .grpdel.on{opacity:1;pointer-events:auto}
+  .ch .grpdel:hover{filter:brightness(.95)}
+  .selall{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+
+  .row{display:grid;grid-template-columns:22px 1fr auto auto auto;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid #F6F7F9}
   .row:last-child{border-bottom:none}
   .row.gone{opacity:.4}
+  .row.sel{background:#FEF2F2}
+  .row input.cb{width:17px;height:17px;cursor:pointer;accent-color:var(--bad)}
   .dn{font-weight:600}
   .dn .ver{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 5px;margin-left:5px}
   .meta{font-size:12px;color:var(--muted);margin-top:3px}
   .kindbadge{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;background:#F1F5F9;color:#475569;white-space:nowrap}
+  /* вердикт ИИ */
+  .verdict{font-size:11.5px;font-weight:700;border-radius:7px;padding:4px 10px;white-space:nowrap;display:flex;align-items:center;gap:5px;border:1px solid transparent}
+  .verdict.safe{background:#F0FDF4;color:#15803D;border-color:#BBF7D0}
+  .verdict.risk{background:#FEF2F2;color:#B91C1C;border-color:#FECACA}
+  .verdict.none{background:#F8FAFC;color:#94A3B8;border-color:#E2E8F0}
+  .verdict .why{font-weight:500;opacity:.85}
   .acts{display:flex;gap:8px}
   .btn{border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #E5E7EB;background:#fff;color:#475467;white-space:nowrap}
   .btn.restore:hover{border-color:var(--ok);color:#15803D}
   .btn.purge{border:none;background:var(--bad);color:#fff}
   .btn.purge:hover{filter:brightness(.95)}
   .empty{padding:34px;text-align:center;color:#9aa3b0}
-  .foot{max-width:1000px;margin:16px auto 0;padding:0 22px;font-size:12px;color:#9aa3b0;line-height:1.6}
+  .foot{max-width:1040px;margin:16px auto 0;padding:0 22px;font-size:12px;color:#9aa3b0;line-height:1.6}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;pointer-events:none;max-width:80vw;text-align:center}
   .toast.show{opacity:1}
 </style>
@@ -50,7 +76,7 @@
 
   <div class="wrap">
     <h1>🗄️ Архив документов</h1>
-    <div class="sub">Сюда попадают документы и версии, <b>помеченные на удаление</b> в карточках сделок. В самой CRM удалить документ нельзя — только пометить. Безвозвратное удаление выполняется здесь.</div>
+    <div class="sub">Сюда попадают документы и версии, <b>помеченные на удаление</b> в карточках сделок. В самой CRM удалить документ нельзя — только пометить. Безвозвратное удаление выполняется здесь — <b>сгруппировано по отделам</b>, можно отметить отдел галочкой и удалять группой.</div>
 
     <div class="gate">
       <div class="ic">🔒</div>
@@ -60,54 +86,164 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="ch"><span class="t">Помечено на удаление</span><span class="cnt" id="cnt">—</span></div>
-      <div id="list"></div>
+    <div class="aibar">
+      <div>
+        <div class="ttl">🤖 ИИ-проверка причин удаления</div>
+        <div class="stat" id="aistat">Нажмите «Проверить» — ИИ разберёт основания и отметит безопасные / требующие разбора.</div>
+      </div>
+      <button class="aibtn" id="aibtn" onclick="runAi()">✨ Проверить причины</button>
     </div>
-    <div class="foot">Каждое безвозвратное удаление пишется в журнал аудита (кто, что, когда, основание) и необратимо. Восстановление снимает пометку и возвращает документ в карточку сделки.</div>
+
+    <div id="groups"></div>
+    <div class="foot">Каждое безвозвратное удаление пишется в журнал аудита (кто, что, когда, основание) и необратимо. Восстановление снимает пометку и возвращает документ в карточку сделки. <b>ИИ-проверка — подсказка, а не разрешение:</b> окончательное решение и ответственность — за архивариусом.</div>
   </div>
 
   <div class="toast" id="toast"></div>
 
 <script>
+  // ── отделы: владелец/исполнитель → отдел (демо-справочник) ────────────────
+  const OWNER_DEPT = {
+    "Сидоров К.":"Отдел продаж · Новые", "Петрова А.":"Отдел продаж · Новые",
+    "Иванов И.":"Отдел продаж · Постоянные", "Ковалёва М.":"Отдел продаж · Постоянные",
+    "Морозов Д.":"Тендерный отдел", "Юрист Юрьев":"Юридический отдел",
+  };
+  const DEPT_ICON = {
+    "Отдел продаж · Новые":"🟦", "Отдел продаж · Постоянные":"♻️",
+    "Тендерный отдел":"📑", "Юридический отдел":"⚖️", "Без отдела":"📁",
+  };
+  function deptOf(it){ return it.dept || OWNER_DEPT[it.by] || "Без отдела"; }
+
+  // ── ИИ-эвристика: безопасная / небезопасная причина удаления ──────────────
+  // safe — рутинная замена черновика/опечатки; risk — документ имел юр./фин. силу.
+  const RISK_RE = /оплач|подписан|проведён|проведен|юрист|претензи|спор|суд|налог|акт сверки|закрывающ|отгруж|ЭДО|контрагент подтверд/i;
+  const SAFE_RE = /ошибк|опечат|дубл|повтор|устаревш|неактуальн|черновик|новый выставлен|выставлен новый|тест|до правок|до согласован|не отправл/i;
+  function aiVerdict(reason){
+    const r = (reason||"").toLowerCase();
+    if(RISK_RE.test(r)) return {level:"risk",  label:"⚠ Разобраться", why:"документ мог иметь юридическую/финансовую силу"};
+    if(SAFE_RE.test(r)) return {level:"safe",  label:"✓ Можно удалять", why:"рутинная замена черновика/ошибки"};
+    return {level:"risk", label:"⚠ Разобраться", why:"основание неоднозначно — проверить вручную"};
+  }
+  let AI_DONE = false;
+
   // демо-fallback (если в localStorage пусто — на чистом профиле экран не будет пустым)
   const DEMO = [
     {id:"demo-1", n:"Счёт СЧ-0461 (черновик)", kind:"Счёт на оплату", ver:1, deal:"CRM-1024 · Автопарк №7", by:"Сидоров К.", at:"14.06.2026 11:20", reason:"ошибка в позициях, выставлен новый"},
     {id:"demo-2", n:"КП-0288 — годовая поставка", kind:"Коммерческое предложение", ver:1, deal:"CRM-1024 · Автопарк №7", by:"Петрова А.", at:"13.06.2026 16:05", reason:"устаревшие цены"},
     {id:"demo-3", n:"Договор ДГ-0118 — годовая поставка", kind:"Договор · версия", ver:1, deal:"CRM-1029 · ОАО «Белтранс»", by:"Сидоров К.", at:"12.06.2026 09:40", reason:"черновик до правок юриста"},
+    {id:"demo-4", n:"Счёт СЧ-0455 — поставка Q2", kind:"Счёт на оплату", ver:2, deal:"CRM-1031 · СТО «Вираж»", by:"Иванов И.", at:"11.06.2026 14:10", reason:"счёт оплачен, но клиент просит переоформить — заменён"},
+    {id:"demo-5", n:"Договор ДГ-0120 — тендер РУП", kind:"Договор · версия", ver:1, deal:"CRM-1040 · РУП «Белэнерго»", by:"Морозов Д.", at:"10.06.2026 10:30", reason:"подписан, но переподписан с новой редакцией приложения"},
   ];
   // реальные пометки приходят из карточек сделок через localStorage ключ 'docTrash'
   function trashRead(){ try{ return JSON.parse(localStorage.getItem('docTrash')||'[]'); }catch(e){ return []; } }
   function trashWrite(a){ try{ localStorage.setItem('docTrash', JSON.stringify(a)); }catch(e){} }
   let ITEMS = (function(){ const real=trashRead(); return real.length ? real : DEMO.slice(); })();
+  const SEL = new Set();  // выбранные id
 
-  function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._t); window._t=setTimeout(()=>t.classList.remove('show'),3200); }
+  function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._t); window._t=setTimeout(()=>t.classList.remove('show'),3400); }
+  function esc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+  function runAi(){
+    AI_DONE = true;
+    const btn=document.getElementById('aibtn'); btn.textContent='✓ Проверено'; btn.classList.add('dis');
+    let safe=0, risk=0;
+    ITEMS.forEach(it=>{ (aiVerdict(it.reason).level==='safe'?safe++:risk++); });
+    document.getElementById('aistat').innerHTML =
+      `ИИ разобрал ${ITEMS.length} основан.: <b class="ok">${safe}</b> безопасных (рекоменд. удалять) · <b class="bad">${risk}</b> требуют разбора (не удалять без проверки).`;
+    render();
+    toast('🤖 ИИ проверил основания: '+safe+' безопасных, '+risk+' на разбор');
+  }
+
+  // группировка ITEMS по отделам
+  function grouped(){
+    const g = {};
+    ITEMS.forEach(it=>{ const d=deptOf(it); (g[d]=g[d]||[]).push(it); });
+    return g;
+  }
 
   function render(){
-    const list=document.getElementById('list');
-    document.getElementById('cnt').textContent = ITEMS.length ? `${ITEMS.length} док./версий` : '0';
-    if(!ITEMS.length){ list.innerHTML='<div class="empty">✓ Нет документов, помеченных на удаление</div>'; return; }
-    list.innerHTML = ITEMS.map(it=>{
-      const eid = String(it.id).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const root=document.getElementById('groups');
+    if(!ITEMS.length){ root.innerHTML='<div class="card empty-card"><div class="empty">✓ Нет документов, помеченных на удаление</div></div>'; syncGroupBtns(); return; }
+    const g = grouped();
+    root.innerHTML = Object.keys(g).sort().map(dept=>{
+      const items = g[dept];
+      const ico = DEPT_ICON[dept]||"📁";
+      const rows = items.map(it=>{
+        const eid = esc(it.id);
+        const v = AI_DONE ? aiVerdict(it.reason) : {level:"none",label:"— не проверено",why:""};
+        const vh = `<span class="verdict ${v.level}">${v.label}${v.why?` <span class="why">· ${v.why}</span>`:''}</span>`;
+        const checked = SEL.has(it.id)?'checked':'';
+        return `
+        <div class="row ${SEL.has(it.id)?'sel':''}" data-id="${it.id}">
+          <input type="checkbox" class="cb" ${checked} onchange="toggleSel('${eid}',this.checked)">
+          <div>
+            <div class="dn">${it.n} <span class="ver">v${it.ver}</span></div>
+            <div class="meta">${it.deal||''} · пометил ${it.by} · ${it.at}<br>основание: ${it.reason}</div>
+          </div>
+          <span class="kindbadge">${it.kind}</span>
+          ${vh}
+          <div class="acts">
+            <button class="btn restore" onclick="restore('${eid}')">♻ Восстановить</button>
+            <button class="btn purge" onclick="purge('${eid}')">🗑 Удалить</button>
+          </div>
+        </div>`;}).join('');
+      const ed = esc(dept);
+      const allSel = items.every(it=>SEL.has(it.id));
       return `
-      <div class="row" data-id="${it.id}">
-        <div>
-          <div class="dn">${it.n} <span class="ver">v${it.ver}</span></div>
-          <div class="meta">${it.deal||''}${it.client?(' · '+it.client):''} · пометил ${it.by} · ${it.at}<br>основание: ${it.reason}</div>
+      <div class="card" data-dept="${dept}">
+        <div class="ch">
+          <div class="left">
+            <label class="selall"><input type="checkbox" class="cb selallcb" ${allSel?'checked':''} onchange="toggleDept('${ed}',this.checked)"> отметить отдел</label>
+            <span class="deptname"><span class="dico">${ico}</span>${dept}</span>
+            <span class="cnt">${items.length} док./версий</span>
+          </div>
+          <button class="grpdel" data-dept="${dept}" onclick="purgeDept('${ed}')">🗑 Удалить отмеченные</button>
         </div>
-        <span class="kindbadge">${it.kind}</span>
-        <div class="acts">
-          <button class="btn restore" onclick="restore('${eid}')">♻ Восстановить</button>
-          <button class="btn purge" onclick="purge('${eid}')">🗑 Удалить безвозвратно</button>
-        </div>
-      </div>`;}).join('');
+        ${rows}
+      </div>`;
+    }).join('');
+    syncGroupBtns();
   }
+
+  function syncGroupBtns(){
+    const g = grouped();
+    document.querySelectorAll('.grpdel').forEach(btn=>{
+      const dept=btn.dataset.dept; const items=g[dept]||[];
+      const n = items.filter(it=>SEL.has(it.id)).length;
+      btn.textContent = n ? `🗑 Удалить отмеченные (${n})` : '🗑 Удалить отмеченные';
+      btn.classList.toggle('on', n>0);
+    });
+  }
+
+  function toggleSel(id,on){ if(on)SEL.add(id); else SEL.delete(id); render(); }
+  function toggleDept(dept,on){
+    (grouped()[dept]||[]).forEach(it=>{ on?SEL.add(it.id):SEL.delete(it.id); });
+    render();
+  }
+
   function persist(id){ if(!String(id).startsWith('demo-')) trashWrite(trashRead().filter(x=>x.id!==id)); }
-  function restore(id){ const it=ITEMS.find(x=>x.id===id); ITEMS=ITEMS.filter(x=>x.id!==id); persist(id); render(); toast('♻ Восстановлено: '+(it?it.n:'')+' — пометка снята, документ вернулся в сделку'); }
+
+  function restore(id){ const it=ITEMS.find(x=>x.id===id); ITEMS=ITEMS.filter(x=>x.id!==id); SEL.delete(id); persist(id); render(); toast('♻ Восстановлено: '+(it?it.n:'')+' — пометка снята, документ вернулся в сделку'); }
+
   function purge(id){ const it=ITEMS.find(x=>x.id===id);
-    if(!confirm('Удалить безвозвратно?\n\n'+(it?it.n:'')+'\nДействие необратимо и будет записано в журнал аудита.')) return;
-    ITEMS=ITEMS.filter(x=>x.id!==id); persist(id); render(); toast('🗑 Удалено безвозвратно: '+(it?it.n:'')+' · записано в журнал аудита');
+    const v = aiVerdict(it?it.reason:'');
+    const warn = (AI_DONE && v.level==='risk') ? '\n\n⚠ ИИ: причина требует разбора («'+v.why+'»). Удалять?' : '';
+    if(!confirm('Удалить безвозвратно?\n\n'+(it?it.n:'')+'\nДействие необратимо и будет записано в журнал аудита.'+warn)) return;
+    ITEMS=ITEMS.filter(x=>x.id!==id); SEL.delete(id); persist(id); render(); toast('🗑 Удалено безвозвратно: '+(it?it.n:'')+' · записано в журнал аудита');
   }
+
+  function purgeDept(dept){
+    const items=(grouped()[dept]||[]).filter(it=>SEL.has(it.id));
+    if(!items.length){ toast('Не отмечено ни одного документа в отделе'); return; }
+    const risky = AI_DONE ? items.filter(it=>aiVerdict(it.reason).level==='risk') : [];
+    let msg = 'Удалить безвозвратно группой — отдел «'+dept+'»:\n\n'+items.map(it=>'• '+it.n).join('\n')+'\n\nДействие необратимо, всё пишется в журнал аудита.';
+    if(risky.length) msg += '\n\n⚠ ИИ: '+risky.length+' из '+items.length+' — причина требует разбора. Точно удалить всё?';
+    if(!confirm(msg)) return;
+    const ids=new Set(items.map(it=>it.id));
+    items.forEach(it=>persist(it.id));
+    ITEMS=ITEMS.filter(x=>!ids.has(x.id)); ids.forEach(id=>SEL.delete(id)); render();
+    toast('🗑 Удалено группой: '+items.length+' док. («'+dept+'») · в журнал аудита');
+  }
+
   render();
 </script>
 </body>
