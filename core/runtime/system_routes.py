@@ -1,6 +1,8 @@
 """Системные роуты ядра: health-check и интроспекция реестра подключённых модулей."""
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +11,7 @@ from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_tit
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm
+from core.services import mdm, reference_query
 
 router = APIRouter(tags=["system"])
 
@@ -100,6 +102,12 @@ async def system_references_ai_catalog(request: Request) -> dict:
     """
     core = request.app.state.core
     return {
+        "tool": {
+            "name": "reference.query",
+            "endpoint": "/system/references/query",
+            "params": ["ref", "key", "as_of", "name", "limit"],
+            "note": "точные значения структурно, с историчностью as_of; pgvector — вторично",
+        },
         "references": [
             {
                 "key": rr.reference.key,
@@ -117,6 +125,33 @@ async def system_references_ai_catalog(request: Request) -> dict:
             if rr.reference.ai_exposed
         ]
     }
+
+
+@router.post("/system/references/query")
+async def references_query(
+    payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Структурный lookup AI по справочнику (tool reference.query): точное значение с историчностью."""
+    ref = payload.get("ref")
+    if not ref:
+        raise HTTPException(status_code=422, detail="нужно поле ref")
+    as_of = payload.get("as_of")
+    if isinstance(as_of, str):
+        try:
+            as_of = date.fromisoformat(as_of)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="as_of должен быть YYYY-MM-DD") from exc
+    try:
+        return await reference_query.query(
+            session,
+            ref,
+            key=payload.get("key"),
+            as_of=as_of,
+            name=payload.get("name"),
+            limit=int(payload.get("limit", 10)),
+        )
+    except reference_query.ReferenceQueryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/system/mdm/duplicates")
