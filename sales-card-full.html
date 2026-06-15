@@ -215,6 +215,18 @@
   .tstep.done .tl,.tstep.cur .tl{color:var(--ink);font-weight:600}
   .tstep .dt{font-size:9.5px;color:#b0b8c4;margin-top:2px}.tstep.cur .dt{color:#B45309;font-weight:700}
   .ship-src{font-size:11px;color:#9aa3b0;margin-top:11px;display:flex;gap:7px}.ship-src b{color:var(--ink)}
+  /* сквозной груз рейса: сделки + товары */
+  .cargo{margin-top:12px;border:1px solid #EEF0F2;border-radius:11px;overflow:hidden}
+  .cargo-h{background:#F8FAFC;padding:8px 12px;font-size:12px;color:#475467;border-bottom:1px solid #EEF0F2}
+  .cargo-h b{color:#1F2937}
+  .cargo-deal{padding:9px 12px;border-bottom:1px solid #F6F7F9}
+  .cargo-deal:last-child{border-bottom:none}
+  .cargo-deal.cur{background:#FFF7ED}
+  .cd-h{font-size:12.5px;color:#334155;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .cd-badge{font-size:10px;font-weight:700;color:#9A3412;background:#FED7AA;border-radius:5px;padding:1px 7px}
+  .cd-items{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px}
+  .cd-items .ci{font-size:11.5px;color:#475467;background:#F1F5F9;border-radius:6px;padding:3px 8px}
+  .cd-items .ci b{color:#1F2937}
 
   /* задачи */
   .task{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid #F6F7F9}
@@ -721,7 +733,13 @@ const DEALS = {
     invoiceSeed:[{name:"АКБ 6СТ-190 (Зубр)",qty:38,price:1100,disc:0},{name:"Доставка по РБ",qty:1,price:5000,disc:0}],
     ship:{
       id:"Рейс TR-2026-0418 · авто AB 7421-7", route:"склад поставщика → Гомель → клиент",
-      status:"В пути до нашего склада", eta:"18 июня, ~14:00", inDeal:"АКБ 6СТ-190 — 38 шт (вся сделка в этом рейсе)",
+      status:"В пути до нашего склада", eta:"18 июня, ~14:00",
+      // сквозной груз: рейс везёт несколько сделок; cur — текущая (эта карточка)
+      cargo:[
+        {deal:"CRM-1029 · ОАО «Белтранс»", cur:true, items:[{n:"АКБ 6СТ-190 (Зубр)",q:38},{n:"Зарядное устройство ЗУ-15А",q:4}]},
+        {deal:"CRM-1024 · Автопарк №7", items:[{n:"АКБ 6СТ-225 (промышленный)",q:12}]},
+        {deal:"CRM-1031 · СТО «Вираж»", items:[{n:"АКБ 6СТ-77 (легковой)",q:20},{n:"Тестер АКБ цифровой",q:2}]},
+      ],
       steps:[
         {t:"Заказано",d:"10.06",s:"done"},{t:"Отгружено",d:"14.06",s:"done"},
         {t:"В пути до склада",d:"ETA 16.06",s:"cur"},{t:"Склад · комплектация",d:"~16–17.06",s:""},
@@ -1398,6 +1416,24 @@ function docsHtml(d){
     </div>${rows}`;
 }
 
+// сквозной груз рейса: какие сделки и какие товары едут (текущая — выделена)
+function cargoHtml(s){
+  const cargo = s.cargo || (s.inDeal ? [{deal:'эта сделка', cur:true, items:[{n:s.inDeal,q:''}]}] : []);
+  if(!cargo.length) return '';
+  const totalSku = cargo.reduce((a,c)=>a+c.items.length,0);
+  const totalQty = cargo.reduce((a,c)=>a+c.items.reduce((b,it)=>b+(+it.q||0),0),0);
+  const rows = cargo.map(c=>{
+    const items = c.items.map(it=>`<span class="ci">${it.n}${it.q?` · <b>${it.q} шт</b>`:''}</span>`).join('');
+    return `<div class="cargo-deal ${c.cur?'cur':''}">
+      <div class="cd-h">${c.cur?'<span class="cd-badge">эта сделка</span> ':''}<b>${c.deal}</b></div>
+      <div class="cd-items">${items}</div>
+    </div>`;
+  }).join('');
+  return `<div class="cargo">
+    <div class="cargo-h">📦 Груз рейса: <b>${cargo.length}</b> сделок · <b>${totalSku}</b> позиц.${totalQty?` · ${totalQty} шт`:''}</div>
+    ${rows}
+  </div>`;
+}
 function shipPanel(s){
   if(!s) return '';
   let steps='';
@@ -1411,8 +1447,8 @@ function shipPanel(s){
         <div class="eta"><div class="l">прибытие к клиенту</div><div class="v">${s.eta}</div></div>
       </div>
       <div class="track">${steps}</div>
-      <div class="ship-src"><span>📦</span><span>В этом рейсе из сделки: <b>${s.inDeal}</b></span></div>
-      <div class="ship-src"><span>🔗</span><span>Источник истины — <b>логистика</b> (shipment.status.changed), read-only.</span></div>
+      ${cargoHtml(s)}
+      <div class="ship-src"><span>🔗</span><span>Источник истины — <b>логистика</b> (shipment.status.changed), read-only. Сводный груз рейса виден всем сделкам в нём.</span></div>
     </div>
   </div>`;
 }
