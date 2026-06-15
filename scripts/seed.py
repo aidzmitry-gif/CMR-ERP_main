@@ -13,7 +13,15 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
-from core.domain.reference import Bank, Country, Currency, CurrencyRate, Unit, VatRate
+from core.domain.reference import (
+    Bank,
+    Country,
+    Currency,
+    CurrencyRate,
+    NomenclatureCategory,
+    Unit,
+    VatRate,
+)
 from core.services import build_services
 from modules.hr.models import Candidate
 from modules.knowledge.models import Course
@@ -35,9 +43,22 @@ from modules.wms.models import WarehouseOp
 KPI_DATE = date(2026, 6, 2)
 
 SKU_DEFS = [
-    ("AKB-60", "Аккумулятор 60 А·ч", "шт"),
-    ("ROLL-5", "Лист горячекатаный 5 мм Ст3сп5 ГОСТ 19903-2015", "т"),
-    ("REBAR-12", "Арматура А500С Ø12 мм ГОСТ 34028-2016", "т"),
+    # code, title, unit, category_code (группа номенклатуры из ref_nomenclature_category)
+    ("AKB-60", "Аккумулятор 60 А·ч", "шт", "CAT-0101"),
+    ("ROLL-5", "Лист горячекатаный 5 мм Ст3сп5 ГОСТ 19903-2015", "т", "CAT-0201"),
+    ("REBAR-12", "Арматура А500С Ø12 мм ГОСТ 34028-2016", "т", "CAT-0202"),
+]
+
+# Демо-дерево групп номенклатуры (adjacency list: parent_code → код предка).
+# Корни — parent_code=None; обход рекурсивным CTE на стороне reference.query.
+CATEGORY_DEFS = [
+    # code, name, parent_code
+    ("CAT-0100", "Аккумуляторы", None),
+    ("CAT-0101", "Грузовые 6СТ", "CAT-0100"),
+    ("CAT-0102", "Тяговые LiFePO4", "CAT-0100"),
+    ("CAT-0200", "Металлопрокат", None),
+    ("CAT-0201", "Листовой прокат", "CAT-0200"),
+    ("CAT-0202", "Арматура", "CAT-0200"),
 ]
 
 
@@ -294,11 +315,24 @@ async def main() -> None:
             await s.flush()
             s.add(Contact(counterparty_id=cp.id, full_name="Пётр Петров", phone="+375291234567"))
 
-        # Номенклатура (по коду, идемпотентно)
+        # Группы (категории) номенклатуры — иерархия (parent_id строится по коду предка).
+        if (await s.execute(select(NomenclatureCategory))).scalars().first() is None:
+            s.add_all([NomenclatureCategory(code=c, name=n) for c, n, _ in CATEGORY_DEFS])
+            await s.flush()  # получить id, чтобы связать parent_id
+        cat_by_code = {
+            c.code: c for c in (await s.execute(select(NomenclatureCategory))).scalars().all()
+        }
+        for code, _name, parent_code in CATEGORY_DEFS:
+            if parent_code and cat_by_code[code].parent_id is None:
+                cat_by_code[code].parent_id = cat_by_code[parent_code].id
+
+        # Номенклатура (по коду, идемпотентно) — с привязкой к группе.
         existing_codes = set((await s.execute(select(Sku.code))).scalars().all())
-        for code, title, unit in SKU_DEFS:
+        for code, title, unit, cat_code in SKU_DEFS:
             if code not in existing_codes:
-                s.add(Sku(code=code, title=title, unit=unit))
+                cat = cat_by_code.get(cat_code)
+                s.add(Sku(code=code, title=title, unit=unit,
+                          category_id=cat.id if cat else None))
         await s.flush()
 
         # Сделки
