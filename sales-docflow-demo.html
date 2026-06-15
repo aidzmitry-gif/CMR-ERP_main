@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Документооборот сделки — макет на согласование</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#DBEAFE; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+    --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding-bottom:60px}
+  .backbar{background:#fff;border-bottom:1px solid #EEF0F2;padding:11px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  .backbar a{color:var(--brand-700);font-weight:600;text-decoration:none;background:var(--brand-50);border-radius:8px;padding:7px 13px;font-size:13px}
+  .backbar .crumb{color:var(--muted);font-size:13px}
+  .wrap{max-width:1180px;margin:24px auto;padding:0 22px;display:grid;grid-template-columns:1fr 360px;gap:22px;align-items:start}
+  @media(max-width:980px){.wrap{grid-template-columns:1fr}}
+  h1{font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:13.5px;margin-bottom:18px;line-height:1.5}
+
+  .panel{background:#fff;border:1px solid #EEF0F2;border-radius:14px;box-shadow:var(--shadow)}
+  .ph{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EEF0F2;font-weight:700;font-size:15px}
+  .pb{padding:16px 18px}
+
+  /* документы (1:1 с карточкой sales-card-full) */
+  .doc-gen{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+  .doc-gen button{font-size:12px;font-weight:600;border:1px dashed #C7D2FE;background:var(--brand-50);color:var(--brand-700);border-radius:8px;padding:6px 11px;cursor:pointer}
+  .doc-gen button:hover{background:var(--brand-100)}
+  .doc{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;padding:11px 0;border-top:1px solid #F6F7F9}
+  .doc:first-of-type{border-top:none}
+  .doc .doc-main{flex:1;min-width:0}
+  .doc .dn{font-size:13px;font-weight:500;word-break:break-word}
+  .doc .dt2{font-size:11px;color:#9aa3b0;margin-top:1px}
+  .doc .st{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;flex-shrink:0}
+  .st.posted{background:#DCFCE7;color:#15803D}.st.pending{background:#FEF3C7;color:#92400E}.st.paid{background:#DBEAFE;color:#1D4ED8}.st.draft{background:#F1F5F9;color:#475569}
+  .doc-acts{display:flex;gap:5px;flex-shrink:0}
+  .doc.deldoc{opacity:.6;background:#FFFBFB}
+  .doc.deldoc .dn{text-decoration:line-through}
+  .ver-badge{font-size:10px;font-weight:700;color:var(--brand-700);background:var(--brand-50);border-radius:5px;padding:1px 5px;margin-left:5px}
+  .dbtn{height:28px;min-width:28px;padding:0 8px;border-radius:7px;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:#475467}
+  .dbtn.send{background:var(--brand);border-color:var(--brand);color:#fff}
+  .dbtn.dis{color:#B91C1C;background:#FEF2F2;border-color:#FECACA;cursor:not-allowed}
+  .dbtn:hover{filter:brightness(.97)}
+  .dflow{flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px}
+  .ds{font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 8px;background:#F1F5F9;color:#94A3B8}
+  .ds.done{background:#ECFDF5;color:#047857}
+  .dflow .arr{color:#CBD5E1;font-size:11px}
+  .doc-hist{margin-top:6px;font-size:11.5px;flex-basis:100%}
+  .doc-hist summary{cursor:pointer;color:var(--muted);user-select:none}
+  .hver{display:flex;justify-content:space-between;gap:8px;padding:4px 0 4px 16px;color:#475467}
+  .hver.hdel{opacity:.5;text-decoration:line-through}
+  .hver .hact{cursor:pointer;color:var(--brand-700);font-weight:600;flex-shrink:0}
+  .doc-note{font-size:11.5px;color:#5b6573;background:#F8FAFC;border:1px solid #EEF0F2;border-radius:9px;padding:9px 11px;margin-bottom:11px;line-height:1.55}
+  .doc-note a{color:var(--brand-700);font-weight:600}
+  .send-ch{flex-basis:100%;display:none;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .send-ch.show{display:flex}
+  .send-ch .lbl{font-size:11.5px;color:var(--muted)}
+  .send-ch span.ch{border:1px solid #E5E7EB;border-radius:7px;padding:5px 10px;cursor:pointer;color:#475467;font-weight:600;font-size:11.5px}
+  .send-ch span.ch:hover{background:var(--brand-50);border-color:#BFD3FF;color:var(--brand-700)}
+
+  /* правая колонка — принципы на согласование */
+  .rules .pb{font-size:12.8px;line-height:1.6;color:#374151}
+  .rule{display:flex;gap:9px;padding:9px 0;border-top:1px solid #F6F7F9}
+  .rule:first-child{border-top:none}
+  .rule .n{flex-shrink:0;width:22px;height:22px;border-radius:7px;background:var(--brand-50);color:var(--brand-700);font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .rule b{color:#111827}
+  .legend{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px}
+  .legend span{font-size:11px;border-radius:6px;padding:2px 8px;font-weight:600}
+
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;pointer-events:none;max-width:80vw;text-align:center}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <div class="backbar"><a href="sales-2.0-index.html">← К списку макетов</a><span class="crumb">Документооборот сделки · <b>макет на согласование</b> · CRM-1029 · ОАО «Белтранс»</span></div>
+
+  <div class="wrap">
+    <div>
+      <h1>📄 Документооборот сделки</h1>
+      <div class="sub">Чистый блок «Документы» из полной карточки — без оверлеев. Кнопки рабочие: пометьте на удаление, создайте версию, попробуйте отправить помеченный.</div>
+      <div class="panel">
+        <div class="ph">📄 Документы</div>
+        <div class="pb" id="docs"></div>
+      </div>
+    </div>
+
+    <div class="panel rules">
+      <div class="ph">✅ Принципы — на согласование</div>
+      <div class="pb">
+        <div class="rule"><div class="n">1</div><div><b>Нельзя удалить — только пометить.</b> В CRM кнопки «удалить» нет. 🗑 ставит пометку на удаление, ♻ снимает. Помечать может <b>владелец сделки</b> (свои документы) или архивариус (<code>doc_admin</code>).</div></div>
+        <div class="rule"><div class="n">2</div><div><b>Помеченный нельзя отправить.</b> Кнопка отправки заменяется на 🚫 — защита от отправки «мусорного» документа клиенту.</div></div>
+        <div class="rule"><div class="n">🔒</div><div><b>Подписанный / оплаченный — заморожен.</b> Документ с юр. силой только для чтения: правка (✎) и пометка (🗑) заблокированы. Отправленный — править можно (создаётся новая версия).</div></div>
+        <div class="rule"><div class="n">3</div><div><b>Правка создаёт новую версию.</b> ✎ архивирует текущую в «Историю версий» (v1, v2…), правки идут в новой версии. Старые версии тоже можно пометить на удаление.</div></div>
+        <div class="rule"><div class="n">4</div><div><b>Безвозвратно — вне CRM.</b> Реальное удаление — только в <a href="sales-docs-purge.html" target="_blank">Архиве документов</a> (отдельный модуль, доступ <code>doc_admin</code>, журнал аудита, ИИ-проверка причин).</div></div>
+        <div class="rule"><div class="n">5</div><div><b>Сквозной статус.</b> Документ идёт по цепочке:
+          <div class="legend">
+            <span class="ds done">✓ отправлен</span><span class="ds done">✓ просмотрен</span><span class="ds">оплачен / подписан</span>
+          </div>
+        </div></div>
+        <div class="rule"><div class="n">6</div><div><b>Типы документов:</b> Счёт · Договор · КП · Акт · <b>Заказ-наряд</b> (ЗН-NNNN) · накладная (ТТН). Каждый — со своим предпросмотром-«бумагой» перед отправкой.</div></div>
+        <div class="rule"><div class="n">7</div><div><b>Каналы отправки:</b> Email · WhatsApp · Telegram · ЭДО/1С · ссылка на подпись.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  let _t; function toast(m){ const t=document.getElementById('toast'); t.innerHTML=m; t.classList.add('show'); clearTimeout(_t); _t=setTimeout(()=>t.classList.remove('show'),3200); }
+
+  // демо-документы сделки (структура 1:1 с sales-card-full.html)
+  let DOCS = [
+    {n:"Договор ДГ-0118 — годовая поставка", kind:"Договор", st:"posted", lbl:"подписан", sent:true, ver:2,
+     steps:["отправлен","просмотрен","подписан"],
+     history:[{ver:1, lbl:"черновик (до правок юриста)", ts:"30.05.2026", del:false}]},
+    {n:"Счёт СЧ-0420 — поставка июнь", kind:"Счёт на оплату", st:"paid", lbl:"оплачен", sent:true, ver:1,
+     steps:["отправлен","просмотрен"]},
+    {n:"КП-0288 — годовая поставка", kind:"Коммерческое предложение", st:"posted", lbl:"просмотрен", sent:true, ver:1,
+     steps:["отправлен","просмотрен"]},
+    {n:"Заказ-наряд ЗН-0207 — комплектация", kind:"Заказ-наряд", st:"pending", lbl:"в работе", sent:true, ver:1,
+     steps:["отправлен"]},
+    {n:"ТТН (отгрузка) — формируется", kind:"Накладная", st:"draft", lbl:"черновик", sent:false, ver:1},
+  ];
+
+  function flowHtml(dc){
+    if(dc.steps && dc.steps.length){
+      let f='<div class="dflow">';
+      dc.steps.forEach((s,k)=>{ f += (k?'<span class="arr">→</span>':'') + `<span class="ds done">✓ ${s}</span>`; });
+      const last=dc.steps[dc.steps.length-1];
+      const nextMap={"отправлен":"просмотрен","просмотрен":(dc.kind==="Счёт на оплату"?"оплачен":"подписан")};
+      const nxt=nextMap[last];
+      if(nxt && !dc.steps.includes(nxt)) f += `<span class="arr">→</span><span class="ds">${nxt}</span>`;
+      return f+'</div>';
+    }
+    if(!dc.sent) return '<div class="dflow"><span class="ds">черновик</span><span class="arr">→</span><span class="ds">отправить</span></div>';
+    return '';
+  }
+
+  function render(){
+    const note = `<div class="doc-note">📋 Документы здесь <b>не удаляются</b> — их можно <b>пометить на удаление</b> (🗑). Помеченный документ нельзя отправить. Правка (✎) создаёт <b>новую версию</b>, прежняя — в истории. Безвозвратное удаление — только в модуле <a href="sales-docs-purge.html" target="_blank">«Архив документов» (вне CRM, по доступу)</a>.</div>`;
+    const gen = `<div class="doc-gen"><button onclick="gen('Счёт')">＋ Счёт</button><button onclick="gen('Договор')">＋ Договор</button><button onclick="gen('КП')">＋ КП</button><button onclick="gen('Акт')">＋ Акт</button><button onclick="gen('Заказ-наряд')">＋ Заказ-наряд</button></div>`;
+    const rows = DOCS.map((dc,i)=>{
+      const del=!!dc.del, ver=dc.ver||1, hist=dc.history||[];
+      // заморозка: документ с юр. силой (оплачен/подписан) — только чтение
+      const frozen = dc.st==='paid' || (dc.steps && dc.steps.includes('подписан'));
+      const sendBtn = del
+        ? `<span class="dbtn dis" title="Помечен на удаление — отправка запрещена" onclick="blockSend()">🚫 Отправка</span>`
+        : `<span class="dbtn send" onclick="this.closest('.doc').querySelector('.send-ch').classList.toggle('show')">${dc.sent?'✉ Отправить ещё':'✉ Отправить'}</span>`;
+      const editBtn = frozen
+        ? `<span class="dbtn dis" title="Документ заморожен (юр. сила) — правка запрещена" onclick="blockFrozen()">🔒</span>`
+        : `<span class="dbtn" title="Изменить (создать новую версию)" onclick="revise(${i})">✎</span>`;
+      const markBtn = frozen
+        ? `<span class="dbtn dis" title="Документ заморожен (юр. сила) — пометка запрещена" onclick="blockFrozen()">🔒</span>`
+        : del
+        ? `<span class="dbtn" title="Снять пометку" onclick="unmark(${i})">♻</span>`
+        : `<span class="dbtn" title="Пометить на удаление" onclick="mark(${i})">🗑</span>`;
+      let histHtml='';
+      if(hist.length){
+        const hr=hist.map((h,vi)=>`<div class="hver ${h.del?'hdel':''}"><span>v${h.ver} · ${h.lbl} · ${h.ts}</span><span class="hact" onclick="${h.del?`unmarkVer(${i},${vi})`:`markVer(${i},${vi})`}">${h.del?'♻ снять':'🗑 на удаление'}</span></div>`).join('');
+        histHtml=`<details class="doc-hist"><summary>История версий (${hist.length})</summary>${hr}</details>`;
+      }
+      return `<div class="doc ${del?'deldoc':''}">
+        <div class="doc-main"><div class="dn">${dc.n} <span class="ver-badge">v${ver}</span></div><div class="dt2">${dc.kind}${del?' · 🗑 помечен на удаление':''}</div></div>
+        <span class="st ${del?'draft':dc.st}">${del?'на удалении':dc.lbl}</span>
+        <div class="doc-acts">
+          <span class="dbtn" title="Просмотр" onclick="toast('👁 Предпросмотр «бумаги»: ${dc.n}')">👁</span>
+          ${sendBtn}
+          ${editBtn}
+          <span class="dbtn" title="Скачать PDF" onclick="toast('⬇ PDF: ${dc.n}')">⬇</span>
+          ${markBtn}
+        </div>
+        ${flowHtml(dc)}
+        ${histHtml}
+        <div class="send-ch"><span class="lbl">Канал:</span>
+          <span class="ch" onclick="toast('✉ Отправлено по Email: ${dc.n}')">✉ Email</span>
+          <span class="ch" onclick="toast('🟢 WhatsApp: ${dc.n}')">🟢 WhatsApp</span>
+          <span class="ch" onclick="toast('✈ Telegram: ${dc.n}')">✈ Telegram</span>
+          <span class="ch" onclick="toast('🧾 ЭДО/1С: ${dc.n}')">🧾 ЭДО / 1С</span>
+          <span class="ch" onclick="toast('🔗 Ссылка на подпись: ${dc.n}')">🔗 Ссылка на подпись</span>
+        </div>
+      </div>`;
+    }).join('');
+    document.getElementById('docs').innerHTML = note + gen + rows;
+  }
+
+  function mark(i){ DOCS[i].del=true; render(); toast('🗑 Помечен на удаление: '+DOCS[i].n+' — попадёт в Архив, отправка заблокирована'); }
+  function unmark(i){ DOCS[i].del=false; render(); toast('♻ Пометка снята: '+DOCS[i].n); }
+  function blockSend(){ toast('🚫 Нельзя отправить — документ помечен на удаление'); }
+  function blockFrozen(){ toast('🔒 Документ заморожен (подписан/оплачен) — правка и пометка запрещены'); }
+  function revise(i){
+    const dc=DOCS[i]; dc.history=dc.history||[];
+    dc.history.unshift({ver:dc.ver||1, lbl:"версия до правок", ts:"14.06.2026", del:false});
+    dc.ver=(dc.ver||1)+1;
+    render(); toast('✎ Создана новая версия v'+dc.ver+' · прежняя сохранена в истории');
+  }
+  function markVer(i,vi){ DOCS[i].history[vi].del=true; render(); toast('🗑 Версия помечена на удаление'); }
+  function unmarkVer(i,vi){ DOCS[i].history[vi].del=false; render(); toast('♻ Пометка с версии снята'); }
+  function gen(kind){
+    const num={'Счёт':'СЧ','Договор':'ДГ','КП':'КП','Акт':'АКТ','Заказ-наряд':'ЗН'}[kind]||'ДОК';
+    const map={'Счёт':'Счёт на оплату','КП':'Коммерческое предложение','Заказ-наряд':'Заказ-наряд','Акт':'Акт','Договор':'Договор'};
+    DOCS.unshift({n:`${kind} ${num}-0500 (черновик)`, kind:map[kind]||kind, st:"draft", lbl:"черновик", sent:false, ver:1});
+    render(); toast('＋ Создан черновик: '+kind+' — откроется предпросмотр перед отправкой');
+  }
+
+  render();
+</script>
+</body>
+</html>
