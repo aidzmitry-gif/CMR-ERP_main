@@ -17,7 +17,15 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.reference import Bank, Country, Currency, CurrencyRate, Unit, VatRate
+from core.domain.reference import (
+    Bank,
+    Country,
+    Currency,
+    CurrencyRate,
+    NomenclatureCategory,
+    Unit,
+    VatRate,
+)
 from core.runtime.deps import get_session
 from core.services import scd2
 
@@ -181,5 +189,15 @@ def build_reference_router() -> APIRouter:
             list_fields=("id", "code", "title", "rate", "start_date", "end_date"),
         ),
         prefix="/vat-rates",
+    )
+    # Группы номенклатуры — иерархия (parent_id); дерево собирает фронт из плоского списка.
+    router.include_router(
+        build_simple_ref_router(
+            NomenclatureCategory,
+            fields=("id", "code", "name", "parent_id", "is_active"),
+            editable=("code", "name", "parent_id"),
+            required=("code", "name"),
+        ),
+        prefix="/nomenclature-groups",
     )
     return router

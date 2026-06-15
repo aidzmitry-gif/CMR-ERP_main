@@ -69,6 +69,8 @@ class Sku(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True)
     title: Mapped[str] = mapped_column(String(255))
     unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
+    # группа (категория) номенклатуры — ссылка на иерархический справочник (public)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
     # переменные характеристики (цвет/размер/тех.параметры) — JSONB, не EAV.
     # На масштабе каталога: «горячие» атрибуты выносятся в типизированные колонки,
     # хвост остаётся здесь; фасетный поиск млн+ SKU — через внешний search-движок.

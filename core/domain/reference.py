@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, Index, Numeric, String
+from sqlalchemy import Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -98,4 +98,26 @@ class VatRate(Base):
 
     __table_args__ = (
         Index("ix_ref_vat_rate_lookup", "code", "start_date"),
+    )
+
+
+class NomenclatureCategory(Base):
+    """Группа (категория) номенклатуры — иерархия (adjacency list: ``parent_id`` = истина).
+
+    Дерево хранится через ``parent_id`` (переносимо в SQLite-dev, обход рекурсивным CTE);
+    ``Sku.category_id`` ссылается сюда. # ponytail: O(глубина)-обход по parent_id —
+    производный ltree-путь + GiST на Postgres, если деревья станут глубокими/горячими
+    для поддеревьев и структурного доступа AI.
+    """
+
+    __tablename__ = "ref_nomenclature_category"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True)  # стабильный код: "CAT-0102"
+    name: Mapped[str] = mapped_column(String(255))
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+
+    __table_args__ = (
+        Index("ix_ref_nom_category_parent", "parent_id"),
     )

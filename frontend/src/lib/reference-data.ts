@@ -374,6 +374,86 @@ export async function unmergeCounterparty(duplicateId: number): Promise<boolean>
   }
 }
 
+// ── Группы (категории) номенклатуры — иерархия (parent_id) ───────────────────
+
+/** Группа номенклатуры (узел дерева; parent_id=null → корень). */
+export interface NomenclatureGroup {
+  id: number;
+  code: string;
+  name: string;
+  parent_id: number | null;
+  is_active: boolean;
+}
+
+/** Узел дерева категорий (собирается из плоского списка на клиенте). */
+export interface CategoryTreeNode extends NomenclatureGroup {
+  children: CategoryTreeNode[];
+}
+
+/** Плоский список групп (SSR); `archived` — включая архивные. Дерево строит {@link buildCategoryTree}. */
+export async function fetchNomenclatureGroups(
+  opts: { archived?: boolean; roles?: string } = {},
+): Promise<NomenclatureGroup[]> {
+  try {
+    const q = opts.archived ? "?archived=true" : "";
+    const res = await fetch(`${BASE}/system/refs/nomenclature-groups${q}`, {
+      cache: "no-store",
+      headers: roleHeaders(opts.roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as NomenclatureGroup[];
+  } catch {
+    return [];
+  }
+}
+
+/** Создать группу (клиент); `parent_id` пуст → корневая. */
+export async function createNomenclatureGroup(group: {
+  code: string;
+  name: string;
+  parent_id?: number | null;
+}): Promise<boolean> {
+  try {
+    const res = await fetch("/api/system/refs/nomenclature-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(group),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Изменить группу по коду (имя / перенос в другого родителя). */
+export async function patchNomenclatureGroup(
+  code: string,
+  fields: { name?: string; parent_id?: number | null },
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/system/refs/nomenclature-groups/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Архивировать группу по коду (мягкое удаление). */
+export async function archiveNomenclatureGroup(code: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/system/refs/nomenclature-groups/${encodeURIComponent(code)}`, {
+      method: "DELETE",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Чистые хелперы (без I/O, тестируемые) ────────────────────────────────────
 
 /** Плоский список справочников с прикреплённым отделом (для поиска/дерева). */
@@ -396,4 +476,18 @@ export function sortVersionsDesc<T extends { start_date: string }>(rows: T[]): T
 /** Сколько всего дублей-кандидатов на слияние (members сверх эталона) во всех кластерах. */
 export function totalDuplicates(clusters: DuplicateCluster[]): number {
   return clusters.reduce((sum, c) => sum + Math.max(0, c.members.length - 1), 0);
+}
+
+/** Собрать дерево категорий из плоского списка по `parent_id` (порядок входа сохраняется).
+ * Узлы с отсутствующим/неактивным родителем поднимаются в корни (сироты не теряются). */
+export function buildCategoryTree(groups: NomenclatureGroup[]): CategoryTreeNode[] {
+  const byId = new Map<number, CategoryTreeNode>();
+  for (const g of groups) byId.set(g.id, { ...g, children: [] });
+  const roots: CategoryTreeNode[] = [];
+  for (const node of byId.values()) {
+    const parent = node.parent_id != null ? byId.get(node.parent_id) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
 }

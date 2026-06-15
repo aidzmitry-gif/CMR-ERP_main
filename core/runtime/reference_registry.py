@@ -150,11 +150,35 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
             _CODE,
             _TITLE,
             ReferenceColumn("unit", "Ед.", "string"),
+            ReferenceColumn(
+                "category_id", "Группа", "number",
+                semantic="ссылка на группу номенклатуры (core.nomenclature_groups)",
+            ),
             ReferenceColumn("attributes", "Характеристики", "json", semantic="переменные атрибуты (JSONB)"),
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
         description="Номенклатура (товарные позиции) + характеристики.",
+    ),
+    Reference(
+        key="core.nomenclature_groups",
+        title="Группы номенклатуры",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/nomenclature-groups",
+        columns=(
+            _CODE,
+            ReferenceColumn("name", "Наименование", "string"),
+            ReferenceColumn(
+                "parent_id", "Родитель", "number",
+                semantic="родительская группа (иерархия adjacency list); пусто = корень",
+            ),
+            _ACTIVE,
+        ),
+        permissions=("refs.view", "refs.edit"),
+        ai_exposed=True,
+        description="Иерархия групп (категорий) номенклатуры: parent_id (adjacency list), "
+        "производный ltree-путь на Postgres. На группу ссылается core.skus.",
     ),
     Reference(
         key="core.employees",

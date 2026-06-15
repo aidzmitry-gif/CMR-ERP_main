@@ -15,7 +15,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import Counterparty, Sku
-from core.domain.reference import Bank, Country, Currency, CurrencyRate, Unit, VatRate
+from core.domain.reference import (
+    Bank,
+    Country,
+    Currency,
+    CurrencyRate,
+    NomenclatureCategory,
+    Unit,
+    VatRate,
+)
 from core.services import scd2
 
 
@@ -60,7 +68,8 @@ async def query(
     - версионные (``core.currency_rates``/``core.vat_rates``): ``key`` + ``as_of`` → версия,
       действовавшая на дату (или текущая без ``as_of``), с периодом ``start_date/end_date``;
     - ``core.counterparties``: ``key``=УНП или ``name`` → эталоны (active, не слитые);
-    - ``core.skus``: ``key``=code → позиция номенклатуры.
+    - ``core.skus``: ``key``=code → позиция номенклатуры (с ``category_id`` — группой);
+    - ``core.nomenclature_groups``: ``key``=code → группа; без key → активные группы (дерево).
     """
     if ref in _SIMPLE:
         return await _query_simple(session, ref, key, limit)
@@ -70,6 +79,8 @@ async def query(
         return await _query_counterparties(session, key, name, limit)
     if ref == "core.skus":
         return await _query_skus(session, key, limit)
+    if ref == "core.nomenclature_groups":
+        return await _query_categories(session, key, limit)
     raise ReferenceQueryError(f"неизвестный справочник: {ref}")
 
 
@@ -128,5 +139,21 @@ async def _query_skus(session: AsyncSession, key: str | None, limit: int) -> dic
     rows = (await session.execute(stmt.limit(limit))).scalars().all()
     return {
         "ref": "core.skus",
-        "result": [{"code": r.code, "title": r.title, "unit": r.unit} for r in rows],
+        "result": [
+            {"code": r.code, "title": r.title, "unit": r.unit, "category_id": r.category_id}
+            for r in rows
+        ],
     }
+
+
+async def _query_categories(session: AsyncSession, key: str | None, limit: int) -> dict:
+    stmt = select(NomenclatureCategory).where(NomenclatureCategory.is_active.is_(True))
+    if key:
+        stmt = stmt.where(NomenclatureCategory.code == key)
+    rows = (
+        await session.execute(stmt.order_by(NomenclatureCategory.code).limit(limit))
+    ).scalars().all()
+    data = [{"id": r.id, "code": r.code, "name": r.name, "parent_id": r.parent_id} for r in rows]
+    if key:
+        return {"ref": "core.nomenclature_groups", "key": key, "result": data[0] if data else None}
+    return {"ref": "core.nomenclature_groups", "result": data}
