@@ -572,15 +572,18 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"$Host.UI.RawUI.WindowTitle = 'worker:{name}'\n"
         f"$PID | Out-File -Encoding ascii -LiteralPath {psq(str(pid_file))}\n"
         f"Set-Location -LiteralPath {psq(str(wt))}\n"
-        f"$prompt = Get-Content -Raw -Encoding UTF8 -LiteralPath {psq(str(prompt_file))}\n"
         f"Write-Host '=== worker:{name} — claude (auto mode) starting ===' -ForegroundColor Cyan\n"
         f"{strict_line}"
+        # Промпт подаём claude через STDIN (пайп файла), НЕ позиционным argv.
+        # Большая многострочная строка в `-- $prompt` рвалась PowerShell'ом по переносам →
+        # claude получал только первую строку (заголовок стандартов), тело терялось →
+        # воркер вставал «прислали пустоту». Пайп файла в stdin переносит любой размер целиком.
+        f"Get-Content -Raw -Encoding UTF8 -LiteralPath {psq(str(prompt_file))} | "
         f"& {psq(claude_cli)} --print --verbose --permission-mode {perm} "
         f"{guard_flag}"
         f"{model_flag}"
         f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
-        f"--add-dir {psq(str(REPO_ROOT))} "
-        f"-- $prompt\n"
+        f"--add-dir {psq(str(REPO_ROOT))}\n"
         "Write-Host ''\n"
         f"Write-Host '=== worker:{name} — claude finished (window kept open) ===' "
         "-ForegroundColor Yellow\n",
