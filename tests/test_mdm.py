@@ -146,3 +146,25 @@ async def test_merge_unmerge_emit_audit_events(api, session):
     assert merged["detail"]["duplicate_id"] == b.id
 
     assert (await api.get("/system/mdm/counterparty/999999")).status_code == 404
+
+
+async def test_merge_route_records_username_as_actor(api, session):
+    """Через роут актёр аудита = личность (X-User), а не роль — кто слил, видно поимённо."""
+    from core.services.eventbus import EventContext
+
+    a = Counterparty(name="ООО Гамма", unp="191222333")
+    b = Counterparty(name="ООО Гамма-2", unp="191222333")
+    session.add_all([a, b])
+    await session.commit()
+
+    r = await api.post(
+        "/system/mdm/merge",
+        json={"survivor_id": a.id, "duplicate_id": b.id},
+        headers={"X-User": "ivanov", "X-User-Roles": "director"},  # личность + право
+    )
+    assert r.status_code == 200
+    await bus.relay_once(session, EventContext(session, None))
+
+    card = (await api.get(f"/system/mdm/counterparty/{a.id}")).json()
+    merged = next(e for e in card["audit"] if e["action"] == "counterparty.merged")
+    assert merged["actor"] == "ivanov"  # username, не "director"

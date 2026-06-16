@@ -182,14 +182,23 @@ export async function fetchRefRowsByEndpoint(
   }
 }
 
+// ponytail: каталог тянет строки витрины одной страницей без пагинации — потолок
+// строк; если выйдет за него (напр. >200 SKU), нужна пагинация/счётчик «N из M».
+export const CATALOG_ROW_LIMIT = 200;
+
+/** Развернуть конверт reference.query (`{result: [...]}`) в массив строк; иначе — пусто. */
+export function rowsFromResult(payload: { result?: unknown } | null): Record<string, unknown>[] {
+  return Array.isArray(payload?.result) ? (payload.result as Record<string, unknown>[]) : [];
+}
+
 /** Строки master-data витрины по ключу через `reference.query` (SSR, абсолютный URL).
  *
  * Контрагенты/контакты/номенклатура/сотрудники не имеют CRUD-роутера — читаются
- * структурным запросом. Не-200 → пусто. */
+ * структурным запросом. Не-200 → пусто. Клиентский путь — `runReferenceQuery`. */
 export async function fetchRefRowsByKey(
   key: string,
   roles?: string,
-  limit = 200,
+  limit = CATALOG_ROW_LIMIT,
 ): Promise<Record<string, unknown>[]> {
   try {
     const res = await fetch(`${BASE}/system/references/query`, {
@@ -199,8 +208,7 @@ export async function fetchRefRowsByKey(
       body: JSON.stringify({ ref: key, limit }),
     });
     if (!res.ok) throw new Error(String(res.status));
-    const data = (await res.json()) as { result?: unknown };
-    return Array.isArray(data.result) ? (data.result as Record<string, unknown>[]) : [];
+    return rowsFromResult(await res.json());
   } catch {
     return [];
   }

@@ -72,6 +72,12 @@ export function defaultRef(catalog: ReferenceCatalog): ReferenceMeta | null {
  */
 export type RowsSource = "crud" | "query-list" | "lookup-only";
 
+// ponytail: классификация дублирует знание бэкенда (reference_query.query поддерживает
+// только перечисленные там ключи). Источник истины — реестр; при росте числа витрин
+// перенести в метаданные Reference (поле rows_source) и читать из каталога, а не угадывать.
+// Сейчас в query-list реально попадает только core.skus; всё прочее не-/system/refs/ —
+// lookup-only. Добавляешь listable-витрину → добавь её и в reference_query.query, иначе
+// query-list даст 422 → пустую таблицу без подсказки.
 const LOOKUP_ONLY_KEYS = new Set(["core.counterparties", "core.contacts", "core.employees"]);
 
 export function rowsSource(ref: Pick<ReferenceMeta, "endpoint" | "key">): RowsSource {

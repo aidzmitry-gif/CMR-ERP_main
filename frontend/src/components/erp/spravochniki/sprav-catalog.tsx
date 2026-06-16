@@ -4,7 +4,13 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
-import type { ReferenceCatalog, ReferenceMeta } from "@/lib/reference-data";
+import {
+  type ReferenceCatalog,
+  type ReferenceMeta,
+  CATALOG_ROW_LIMIT,
+  rowsFromResult,
+  runReferenceQuery,
+} from "@/lib/reference-data";
 import { rowsSource, sortedDepartments } from "@/lib/spravochniki-catalog";
 
 // Hub cards — shortcuts to the other 6 reference screens.
@@ -48,22 +54,15 @@ const HUB_LINKS = [
 ] as const;
 
 // Fetch rows client-side via Next.js API proxy (/api/* → backend).
-// crud → GET по endpoint; query-list → reference.query по ключу;
-// lookup-only → строк нет (см. rowsSource): данные у владельца, точечный доступ.
+// crud → GET по endpoint; query-list → reference.query по ключу (общий клиентский
+// helper runReferenceQuery); lookup-only → строк нет (см. rowsSource).
 async function fetchRowsViaProxy(ref: ReferenceMeta): Promise<Record<string, unknown>[]> {
   const src = rowsSource(ref);
   if (src === "lookup-only") return [];
+  if (src === "query-list") {
+    return rowsFromResult(await runReferenceQuery({ ref: ref.key, limit: CATALOG_ROW_LIMIT }));
+  }
   try {
-    if (src === "query-list") {
-      const res = await fetch("/api/system/references/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref: ref.key, limit: 200 }),
-      });
-      if (!res.ok) return [];
-      const data = (await res.json()) as { result?: unknown };
-      return Array.isArray(data.result) ? (data.result as Record<string, unknown>[]) : [];
-    }
     const res = await fetch(`/api${ref.endpoint}`);
     if (!res.ok) return [];
     const data: unknown = await res.json();
