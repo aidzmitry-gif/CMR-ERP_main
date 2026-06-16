@@ -1,0 +1,12 @@
+{
+  "north_star": "Довести 9 модулей до beta с нулём crit-уязвимостей",
+  "window_days": 2,
+  "stack": "Python-монолит (корень, ruff) + Next.js frontend (./frontend, tsc/eslint). Windows/Cygwin bash.",
+  "repos": {
+    "crm-erp": {
+      "path": "d:/6 Проекты/CRM ERP/Сlaude CRM - проект",
+      "last_commit": "d743b35db38590e1bd5eed222d36a4117c5d15c4",
+      "last_review_at": "2026-06-15T20:51:45Z"
+    }
+  }
+}
