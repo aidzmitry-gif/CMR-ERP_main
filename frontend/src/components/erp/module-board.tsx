@@ -110,17 +110,17 @@ export function ModuleBoard({
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink"
         >
           <Plus size={16} /> Добавить
         </button>
       </div>
 
       {open && (
-        <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl bg-white p-4 shadow-card">
+        <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
           {fields.map((f) => (
             <label key={f.key} className="block">
-              <span className="mb-1 block text-xs font-medium text-slate-500">{f.label}</span>
+              <span className="mb-1 block text-xs font-medium text-muted">{f.label}</span>
               <input
                 type={f.type ?? "text"}
                 value={form[f.key]}
@@ -130,14 +130,14 @@ export function ModuleBoard({
                     [f.key]: f.type === "number" ? Number(e.target.value) : e.target.value,
                   })
                 }
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+                className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
               />
             </label>
           ))}
           <button
             onClick={onCreate}
             disabled={busy}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             Сохранить
           </button>
@@ -148,9 +148,9 @@ export function ModuleBoard({
         <p className="mt-3 text-xs text-muted">Подсказка: кликните по статусу, чтобы сменить его.</p>
       )}
 
-      <div className="mt-2 overflow-hidden rounded-xl bg-white shadow-card">
+      <div className="mt-2 overflow-hidden rounded-xl bg-surface shadow-card">
         <table className="w-full text-sm">
-          <thead className="border-b border-slate-100 text-left text-xs text-muted">
+          <thead className="border-b border-line text-left text-xs text-muted">
             <tr>
               {columns.map((c) => (
                 <th key={c.key} className="px-4 py-2.5 font-medium">
@@ -169,13 +169,13 @@ export function ModuleBoard({
               </tr>
             )}
             {rows.map((row, i) => (
-              <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <tr key={i} className="border-b border-line last:border-0 hover:bg-sunken">
                 {columns.map((c) => (
                   <td key={c.key} className="px-4 py-2.5 text-ink">
                     {clickableStatus && c.key === statusKey ? (
                       <button
                         onClick={() => onStatus(row)}
-                        className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-brand-100 hover:text-brand-600"
+                        className="rounded-md bg-sunken px-2 py-0.5 text-xs font-medium text-muted hover:bg-accent-soft hover:text-accent-ink"
                       >
                         {String(row[c.key] ?? "")}
                       </button>
@@ -188,7 +188,7 @@ export function ModuleBoard({
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => onAction(row)}
-                      className="rounded-lg border border-brand px-3 py-1 text-xs font-medium text-brand-600 hover:bg-blue-50"
+                      className="rounded-lg border border-accent px-3 py-1 text-xs font-medium text-accent-ink hover:bg-blue-50"
                     >
                       {action.label}
                     </button>

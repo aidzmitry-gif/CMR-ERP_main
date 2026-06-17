@@ -25,19 +25,19 @@ export function DealAiAssistant({ dealId }: { dealId: string }) {
         <button
           onClick={() => run("summary")}
           disabled={!!busy}
-          className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+          className="rounded-lg border border-indigo-200 bg-surface px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
         >
           {busy === "summary" ? "Анализ…" : "Резюме сделки"}
         </button>
         <button
           onClick={() => run("next_step")}
           disabled={!!busy}
-          className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+          className="rounded-lg border border-indigo-200 bg-surface px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
         >
           {busy === "next_step" ? "Анализ…" : "Следующий шаг"}
         </button>
       </div>
-      {text && <p className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-600">{text}</p>}
+      {text && <p className="mt-3 rounded-lg bg-surface p-3 text-sm text-muted">{text}</p>}
     </div>
   );
 }

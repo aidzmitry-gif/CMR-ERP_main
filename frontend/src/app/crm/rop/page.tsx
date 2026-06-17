@@ -42,14 +42,14 @@ export default function RopOverviewPage() {
 
           {/* KPI-полоса */}
           <Card className="!p-0">
-            <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+            <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
               {overviewKpis.map((k) => (
                 <div key={k.label} className="p-4">
                   <div className={`text-lg font-bold ${k.tone ? TEXT_TONE[k.tone] : "text-ink"}`}>
                     {k.value}
                   </div>
                   <div className="mt-1 text-[11px] leading-tight text-muted">{k.label}</div>
-                  <div className="text-[10px] text-slate-400">{k.sub}</div>
+                  <div className="text-[10px] text-faint">{k.sub}</div>
                 </div>
               ))}
             </div>
@@ -93,7 +93,7 @@ export default function RopOverviewPage() {
                 <span className="text-xs font-semibold text-muted">План {formatByn(forecast.plan)}</span>
               </div>
 
-              <div className="mt-4 flex h-6 w-full overflow-hidden rounded-md bg-slate-100">
+              <div className="mt-4 flex h-6 w-full overflow-hidden rounded-md bg-sunken">
                 {forecast.parts
                   .filter((p) => p.inBar)
                   .map((p) => (
@@ -174,7 +174,7 @@ export default function RopOverviewPage() {
                           <button className="rounded-lg bg-teal-600 px-3 py-1 text-xs font-semibold text-white">
                             Согласовать
                           </button>
-                          <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+                          <button className="rounded-lg border border-line px-3 py-1 text-xs font-semibold text-muted">
                             Отклонить
                           </button>
                         </div>
@@ -190,7 +190,7 @@ export default function RopOverviewPage() {
               <Caption>Команда · июнь (BYN)</Caption>
               <table className="mt-3 w-full text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th className="pb-2 text-left font-semibold">Менеджер</th>
                     <th className="pb-2 text-right font-semibold">В работе</th>
                     <th className="pb-2 text-right font-semibold">Обязат.</th>
@@ -200,7 +200,7 @@ export default function RopOverviewPage() {
                 </thead>
                 <tbody>
                   {team.map((t) => (
-                    <tr key={t.name} className="border-t border-slate-100">
+                    <tr key={t.name} className="border-t border-line">
                       <td className="py-2">
                         <span className="flex items-center gap-2">
                           <Avatar name={t.name} />
@@ -220,7 +220,7 @@ export default function RopOverviewPage() {
                       <td className="py-2 text-right tabular-nums text-ink">{t.calls}</td>
                     </tr>
                   ))}
-                  <tr className="border-t border-slate-200 font-bold text-ink">
+                  <tr className="border-t border-line-strong font-bold text-ink">
                     <td className="py-2">Итого</td>
                     <td className="py-2 text-right tabular-nums">{teamTotal.inWork}</td>
                     <td className="py-2 text-right tabular-nums text-teal-700">{teamTotal.commit}</td>
@@ -243,7 +243,7 @@ export default function RopOverviewPage() {
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th className="pb-2 text-left font-semibold">Сделка</th>
                     <th className="pb-2 text-right font-semibold">Сумма</th>
                     <th className="pb-2 text-center font-semibold">Вероятн.</th>
@@ -254,7 +254,7 @@ export default function RopOverviewPage() {
                 </thead>
                 <tbody>
                   {focus.map((d) => (
-                    <tr key={d.name} className="border-t border-slate-100">
+                    <tr key={d.name} className="border-t border-line">
                       <td className="py-2 font-medium text-ink">{d.name}</td>
                       <td className="py-2 text-right tabular-nums text-ink">{d.amount}</td>
                       <td className="py-2 text-center">
@@ -263,14 +263,14 @@ export default function RopOverviewPage() {
                       <td className="py-2">
                         <Tag tone={d.riskTone}>{d.risk}</Tag>
                       </td>
-                      <td className="py-2 text-slate-600">{d.rec}</td>
+                      <td className="py-2 text-muted">{d.rec}</td>
                       <td className="py-2 text-right text-muted">{d.date}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-xs text-slate-400">{focusFootnote}</p>
+            <p className="mt-3 text-xs text-faint">{focusFootnote}</p>
           </Card>
         </div>
       </main>

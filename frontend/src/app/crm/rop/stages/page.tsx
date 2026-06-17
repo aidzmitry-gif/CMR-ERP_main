@@ -39,14 +39,14 @@ export default function RopStagesPage() {
 
           {/* KPI-полоса */}
           <Card className="!p-0">
-            <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+            <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
               {stageKpis.map((k) => (
                 <div key={k.label} className="p-4">
                   <div className={`text-lg font-bold ${k.tone ? TEXT_TONE[k.tone] : "text-ink"}`}>
                     {k.value}
                   </div>
                   <div className="mt-1 text-[11px] leading-tight text-muted">{k.label}</div>
-                  <div className="text-[10px] text-slate-400">{k.sub}</div>
+                  <div className="text-[10px] text-faint">{k.sub}</div>
                 </div>
               ))}
             </div>
@@ -60,18 +60,18 @@ export default function RopStagesPage() {
                 <div key={s.stage} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
                   <span className="flex w-52 shrink-0 items-center gap-2">
                     <span className="font-medium text-ink">{s.stage}</span>
-                    <span className="text-[11px] text-slate-400">{s.count} сд.</span>
+                    <span className="text-[11px] text-faint">{s.count} сд.</span>
                   </span>
                   <Bar percent={(s.avgDays / stageMax) * 100} tone={s.tone} className="min-w-[120px] flex-1" />
                   <span className="w-32 text-right tabular-nums text-ink">
                     <span className={s.over ? `font-semibold ${TEXT_TONE[s.tone]}` : "font-semibold"}>
                       {s.avgDays} дн
                     </span>
-                    <span className="text-[11px] text-slate-400"> · {s.norm}</span>
+                    <span className="text-[11px] text-faint"> · {s.norm}</span>
                   </span>
                   <span className="w-20 text-right">
                     {s.conv === "—" ? (
-                      <span className="text-[11px] text-slate-300">старт</span>
+                      <span className="text-[11px] text-faint">старт</span>
                     ) : (
                       <Tag tone={s.tone}>{s.conv}</Tag>
                     )}
@@ -107,7 +107,7 @@ export default function RopStagesPage() {
                   <div key={d.name} className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0">
                       <span className="text-sm font-semibold text-ink">{d.name}</span>
-                      <span className="ml-2 text-[11px] text-slate-400">{d.owner}</span>
+                      <span className="ml-2 text-[11px] text-faint">{d.owner}</span>
                       <span className="mt-1 flex items-center gap-2">
                         <Tag tone={d.tone}>{d.stage}</Tag>
                         <span className="text-[11px] text-muted">{d.reason}</span>
@@ -135,7 +135,7 @@ export default function RopStagesPage() {
               <Caption>Старение по менеджерам</Caption>
               <table className="mt-3 w-full text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th scope="col" className="pb-2 text-left font-semibold">Менеджер</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Сделок</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Ср. возраст</th>
@@ -144,7 +144,7 @@ export default function RopStagesPage() {
                 </thead>
                 <tbody>
                   {managerAging.map((m) => (
-                    <tr key={m.name} className="border-t border-slate-100 align-top">
+                    <tr key={m.name} className="border-t border-line align-top">
                       <td className="py-2.5">
                         <span className="flex items-center gap-2">
                           <Avatar name={m.name} />
@@ -159,7 +159,7 @@ export default function RopStagesPage() {
                       <td className={`py-2.5 text-right tabular-nums ${TEXT_TONE[m.tone]}`}>{m.stuck}</td>
                     </tr>
                   ))}
-                  <tr className="border-t border-slate-200 font-bold text-ink">
+                  <tr className="border-t border-line-strong font-bold text-ink">
                     <td className="py-2.5">Итого</td>
                     <td className="py-2.5 text-right tabular-nums">{managerAgingTotal.count}</td>
                     <td className="py-2.5 text-right tabular-nums text-amber-600">{managerAgingTotal.avgDays}</td>
@@ -167,7 +167,7 @@ export default function RopStagesPage() {
                   </tr>
                 </tbody>
               </table>
-              <p className="mt-3 text-xs text-slate-400">{managerAgingNote}</p>
+              <p className="mt-3 text-xs text-faint">{managerAgingNote}</p>
             </Card>
 
             <Card>
@@ -182,7 +182,7 @@ export default function RopStagesPage() {
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 text-xs text-slate-400">{stageSlaNote}</p>
+              <p className="mt-3 text-xs text-faint">{stageSlaNote}</p>
             </Card>
           </div>
         </div>

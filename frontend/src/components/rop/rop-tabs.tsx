@@ -20,14 +20,14 @@ export function RopTabs({
   active: "overview" | "planning" | "pace" | "cash" | "activity" | "stages" | "loss";
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b border-slate-200">
+    <div className="flex flex-wrap items-center gap-1 border-b border-line">
       {TABS.map((t) => {
         if (!t.href) {
           return (
             <span
               key={t.key}
               title="Раздел в разработке"
-              className="cursor-default px-3 py-2 text-sm text-slate-300"
+              className="cursor-default px-3 py-2 text-sm text-faint"
             >
               {t.label}
               <span className="ml-1 align-super text-[9px]">скоро</span>
@@ -41,11 +41,11 @@ export function RopTabs({
             href={t.href}
             className={clsx(
               "relative px-3 py-2 text-sm",
-              isActive ? "font-semibold text-brand-600" : "text-slate-500 hover:text-slate-700",
+              isActive ? "font-semibold text-accent-ink" : "text-muted hover:text-ink",
             )}
           >
             {t.label}
-            {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-brand-600" />}
+            {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-accent" />}
           </Link>
         );
       })}

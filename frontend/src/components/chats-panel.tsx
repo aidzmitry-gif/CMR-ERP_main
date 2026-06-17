@@ -32,15 +32,15 @@ export function ChatsPanel() {
     // Внешний слот фиксирован узким (рейка) — доска не «дышит» при наведении.
     // Видимая панель — absolute-оверлей, раскрывается влево ПОВЕРХ доски по :hover.
     <aside className="relative w-[68px] shrink-0">
-      <div className="group absolute inset-y-0 right-0 z-30 flex w-[68px] flex-col overflow-hidden border-l border-slate-200 bg-white shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3.5">
+      <div className="group absolute inset-y-0 right-0 z-30 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
+        <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
           <h3 className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
             Чаты и дела
           </h3>
           <Link
             href="/crm/deals"
             title="К сделкам"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-sunken"
           >
             <Plus size={16} />
           </Link>
@@ -58,7 +58,7 @@ export function ChatsPanel() {
               <Link
                 key={c.deal_id}
                 href={`/crm/deals/${c.deal_id}`}
-                className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-sunken"
               >
                 <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white">
                   {initials(c.company)}
@@ -86,8 +86,8 @@ export function ChatsPanel() {
           })}
         </div>
 
-        <div className="border-t border-slate-200 px-4 py-3 text-right opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <Link href="/crm/deals" className="text-sm font-medium text-brand-600">
+        <div className="border-t border-line px-4 py-3 text-right opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+          <Link href="/crm/deals" className="text-sm font-medium text-accent-ink">
             Все сделки →
           </Link>
         </div>

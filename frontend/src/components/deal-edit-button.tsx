@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { updateDeal } from "@/lib/api";
 
-const INPUT = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand";
+const INPUT = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
 export function DealEditButton({
   dealId,
@@ -43,7 +43,7 @@ export function DealEditButton({
       <button
         onClick={() => setOpen(true)}
         title="Редактировать сделку"
-        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+        className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted hover:bg-sunken"
       >
         <Pencil size={15} />
       </button>
@@ -54,17 +54,17 @@ export function DealEditButton({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-pop"
+            className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-pop"
           >
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-ink">Редактировать сделку</h3>
-              <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setOpen(false)} className="text-faint hover:text-muted">
                 <X size={20} />
               </button>
             </div>
             <div className="space-y-3">
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-500">Описание</span>
+                <span className="mb-1 block text-xs font-medium text-muted">Описание</span>
                 <input
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -73,7 +73,7 @@ export function DealEditButton({
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-slate-500">Сумма, ₽</span>
+                  <span className="mb-1 block text-xs font-medium text-muted">Сумма, ₽</span>
                   <input
                     type="number"
                     min={0}
@@ -83,7 +83,7 @@ export function DealEditButton({
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-slate-500">Дата</span>
+                  <span className="mb-1 block text-xs font-medium text-muted">Дата</span>
                   <input
                     value={form.deal_date}
                     onChange={(e) => setForm({ ...form, deal_date: e.target.value })}
@@ -93,7 +93,7 @@ export function DealEditButton({
                 </label>
               </div>
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-500">Следующий шаг</span>
+                <span className="mb-1 block text-xs font-medium text-muted">Следующий шаг</span>
                 <input
                   value={form.next_step}
                   onChange={(e) => setForm({ ...form, next_step: e.target.value })}
@@ -104,14 +104,14 @@ export function DealEditButton({
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600"
+                className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted"
               >
                 Отмена
               </button>
               <button
                 onClick={save}
                 disabled={saving}
-                className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
               >
                 {saving ? "Сохранение..." : "Сохранить"}
               </button>

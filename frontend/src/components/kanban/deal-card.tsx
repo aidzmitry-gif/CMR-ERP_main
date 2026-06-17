@@ -33,7 +33,7 @@ export function DealCard({
   return (
     <Link
       href={`/crm/deals/${deal.id}`}
-      className="group block rounded-xl bg-white p-3.5 shadow-card transition-shadow hover:shadow-pop"
+      className="group block rounded-xl bg-surface p-3.5 shadow-card transition-shadow hover:shadow-pop"
     >
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted">№ {deal.number}</span>
@@ -43,7 +43,7 @@ export function DealCard({
             <span
               className={clsx(
                 "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                stuck ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500",
+                stuck ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
               )}
             >
               🕒 {days} дн.
@@ -51,9 +51,9 @@ export function DealCard({
           )}
           <Star
             size={14}
-            className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "text-slate-300")}
+            className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "text-faint")}
           />
-          <MoreHorizontal size={15} className="text-slate-400" />
+          <MoreHorizontal size={15} className="text-faint" />
         </div>
       </div>
 
@@ -62,7 +62,7 @@ export function DealCard({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="font-semibold text-ink">{formatMoney(deal.amount)}</span>
         {probability != null && probability > 0 && weighted != null && (
-          <span className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand-700">
+          <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink">
             {probability}% · ≈ {formatMoney(weighted)}
           </span>
         )}
@@ -83,31 +83,31 @@ export function DealCard({
       ) : null}
 
       {deal.todo ? (
-        <div className="mt-2 space-y-1 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-500">
-          <div className="font-medium text-slate-600">Что нужно сделать:</div>
+        <div className="mt-2 space-y-1 rounded-lg bg-sunken p-2.5 text-xs text-muted">
+          <div className="font-medium text-muted">Что нужно сделать:</div>
           <div>{deal.todo}</div>
           <div className="flex justify-between">
             <span>Время действия:</span>
-            <span className="text-slate-600">{deal.actionTime}</span>
+            <span className="text-ink">{deal.actionTime}</span>
           </div>
           <div className="flex justify-between">
             <span>Дата действия:</span>
-            <span className="text-slate-600">{deal.actionDate}</span>
+            <span className="text-ink">{deal.actionDate}</span>
           </div>
-          <div className="pt-0.5 text-slate-600">
+          <div className="pt-0.5 text-muted">
             Номенклатура: {deal.itemsLabel}, {deal.itemsCount} поз.
           </div>
-          <span className="inline-flex items-center gap-1 pt-0.5 text-brand-600">
+          <span className="inline-flex items-center gap-1 pt-0.5 text-accent-ink">
             <Pencil size={12} /> Редактировать товар
           </span>
         </div>
       ) : deal.closedDate ? (
         <div className="mt-2 text-xs text-muted">
-          Дата закрытия: <span className="text-slate-700">{deal.closedDate}</span>
+          Дата закрытия: <span className="text-ink">{deal.closedDate}</span>
         </div>
       ) : (
         <div className="mt-2 text-xs text-muted">
-          След. шаг: <span className="text-slate-700">{deal.nextStep}</span>
+          След. шаг: <span className="text-ink">{deal.nextStep}</span>
         </div>
       )}
 
@@ -138,15 +138,15 @@ export function DealCard({
       </div>
 
       <div className="mt-2.5 flex gap-2">
-        <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600">
-          <Target size={13} className="text-brand-600" /> Фокус
+        <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line py-1.5 text-xs font-medium text-muted">
+          <Target size={13} className="text-accent-ink" /> Фокус
         </span>
-        <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600">
+        <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line py-1.5 text-xs font-medium text-muted">
           <Flag size={13} className="text-amber-500" /> Приоритет
         </span>
       </div>
 
-      <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+      <div className="mt-2.5 border-t border-line pt-2.5">
         <ChannelRow />
       </div>
     </Link>

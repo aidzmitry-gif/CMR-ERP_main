@@ -39,14 +39,14 @@ export default function RopActivityPage() {
 
           {/* KPI-полоса */}
           <Card className="!p-0">
-            <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+            <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
               {activityKpis.map((k) => (
                 <div key={k.label} className="p-4">
                   <div className={`text-lg font-bold ${k.tone ? TEXT_TONE[k.tone] : "text-ink"}`}>
                     {k.value}
                   </div>
                   <div className="mt-1 text-[11px] leading-tight text-muted">{k.label}</div>
-                  <div className="text-[10px] text-slate-400">{k.sub}</div>
+                  <div className="text-[10px] text-faint">{k.sub}</div>
                 </div>
               ))}
             </div>
@@ -101,7 +101,7 @@ export default function RopActivityPage() {
               <Caption>Активность по менеджерам (неделя)</Caption>
               <table className="mt-3 w-full text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th scope="col" className="pb-2 text-left font-semibold">Менеджер</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Звонки</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Встречи</th>
@@ -112,7 +112,7 @@ export default function RopActivityPage() {
                 </thead>
                 <tbody>
                   {managerActivity.map((m) => (
-                    <tr key={m.name} className="border-t border-slate-100">
+                    <tr key={m.name} className="border-t border-line">
                       <td className="py-2.5">
                         <span className="flex items-center gap-2">
                           <Avatar name={m.name} />
@@ -135,7 +135,7 @@ export default function RopActivityPage() {
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t border-slate-200 font-bold text-ink">
+                  <tr className="border-t border-line font-bold text-ink">
                     <td className="py-2.5">Итого</td>
                     <td className="py-2.5 text-right tabular-nums">{managerActivityTotal.calls}</td>
                     <td className="py-2.5 text-right tabular-nums">{managerActivityTotal.meetings}</td>
@@ -145,7 +145,7 @@ export default function RopActivityPage() {
                   </tr>
                 </tbody>
               </table>
-              <p className="mt-3 text-xs text-slate-400">{managerActivityNote}</p>
+              <p className="mt-3 text-xs text-faint">{managerActivityNote}</p>
             </Card>
 
             <Card>
@@ -155,7 +155,7 @@ export default function RopActivityPage() {
                   <div key={d.name} className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0">
                       <span className="text-sm font-semibold text-ink">{d.name}</span>
-                      <span className="ml-2 text-[11px] text-slate-400">{d.owner}</span>
+                      <span className="ml-2 text-[11px] text-faint">{d.owner}</span>
                       <span className="mt-1 block">
                         <Tag tone={d.idleTone}>{d.idle}</Tag>
                       </span>
@@ -188,7 +188,7 @@ export default function RopActivityPage() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs text-slate-400">{activityRulesNote}</p>
+            <p className="mt-3 text-xs text-faint">{activityRulesNote}</p>
           </Card>
         </div>
       </main>

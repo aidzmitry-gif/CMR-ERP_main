@@ -31,7 +31,7 @@ const SEGMENTS: { id: Stage | "all"; label: string }[] = [{ id: "all", label: "�
 
 function Kpi({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink">{value}</div>
     </div>
@@ -121,14 +121,14 @@ export function ZayavkiTable({
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <div className="inline-flex flex-wrap rounded-lg border border-line bg-sunken p-1">
           {SEGMENTS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSeg(s.id)}
               className={clsx(
                 "rounded-md px-3 py-1.5 text-sm font-medium",
-                seg === s.id ? "bg-white text-brand shadow-sm" : "text-slate-500",
+                seg === s.id ? "bg-surface text-accent-ink shadow-sm" : "text-muted",
               )}
             >
               {s.label}
@@ -136,20 +136,20 @@ export function ZayavkiTable({
           ))}
         </div>
         <div className="relative ml-auto">
-          <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+          <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-faint" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Поиск по № или изделию"
-            className="w-64 rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-brand"
+            className="w-64 rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
       </div>
 
-      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">№</th>
               <th className="px-4 py-2 font-medium">Изделие</th>
               <th className="px-4 py-2 text-right font-medium">Кол-во</th>
@@ -175,9 +175,9 @@ export function ZayavkiTable({
               const coverage = coverageForProduct(boms, o.product);
               const launchable = o.stage === "queue" && norm != null;
               return (
-                <tr key={o.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-4 py-2.5 font-medium text-slate-700">{o.number}</td>
-                  <td className="px-4 py-2.5 text-slate-700">
+                <tr key={o.id} className="border-b border-line last:border-0">
+                  <td className="px-4 py-2.5 font-medium text-muted">{o.number}</td>
+                  <td className="px-4 py-2.5 text-muted">
                     <span className="inline-flex items-center gap-1.5">
                       {o.product}
                       {norm == null && (
@@ -190,12 +190,12 @@ export function ZayavkiTable({
                       )}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{o.qty}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-muted">{o.qty}</td>
                   <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
                     {formatNh(nhTotal(o))}
                   </td>
-                  <td className="px-4 py-2.5 text-slate-600">{o.owner || "—"}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{o.due_date || "—"}</td>
+                  <td className="px-4 py-2.5 text-muted">{o.owner || "—"}</td>
+                  <td className="px-4 py-2.5 text-muted">{o.due_date || "—"}</td>
                   <td className="px-4 py-2.5">
                     <PriorityBadge priority={o.priority as Priority} />
                   </td>
@@ -211,7 +211,7 @@ export function ZayavkiTable({
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {coverage == null ? (
-                      <span className="text-xs text-slate-400">нет BOM</span>
+                      <span className="text-xs text-faint">нет BOM</span>
                     ) : (
                       <span
                         className={clsx(
@@ -230,7 +230,7 @@ export function ZayavkiTable({
                           onClick={() => onLaunch(o.id)}
                           disabled={busy || !launchable}
                           title={launchable ? "Запустить в работу" : "Нет нормы — запуск недоступен"}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-brand-50 hover:text-brand disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-accent-soft hover:text-accent-ink disabled:opacity-50"
                         >
                           <Play size={13} /> В работу
                         </button>
@@ -243,14 +243,14 @@ export function ZayavkiTable({
           </tbody>
         </table>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
           <input
             value={product}
             onChange={(e) => setProduct(e.target.value)}
             placeholder="Изделие новой заявки"
             className={clsx(
-              "min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand",
-              productError ? "border-amber-500" : "border-slate-200",
+              "min-w-0 flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent",
+              productError ? "border-amber-500" : "border-line",
             )}
           />
           <input
@@ -258,12 +258,12 @@ export function ZayavkiTable({
             onChange={(e) => setQty(e.target.value)}
             inputMode="numeric"
             placeholder="Кол-во"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as Priority)}
-            className="shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           >
             {PRIORITIES.map((p) => (
               <option key={p} value={p}>
@@ -275,12 +275,12 @@ export function ZayavkiTable({
             value={due}
             onChange={(e) => setDue(e.target.value)}
             placeholder="Срок"
-            className="w-28 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-28 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <button
             onClick={onCreate}
             disabled={busy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             <Plus size={16} /> Заявка
           </button>

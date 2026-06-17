@@ -225,24 +225,24 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
       {/* лого */}
       <div className="flex items-center gap-2 px-5 py-4">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white">
           <Box size={20} />
         </span>
         <span className="text-lg font-bold text-ink">ERP</span>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4 thin-scroll">
-        <div className="px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <div className="px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wide text-faint">
           Модули
         </div>
         {visible.map((m) => {
           const active = moduleActive(m);
           const cls = clsx(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-            active ? "bg-brand-100 text-brand-600" : "text-slate-600 hover:bg-slate-50",
+            active ? "bg-accent-soft text-accent-ink" : "text-muted hover:bg-sunken",
           );
           return (
             <div key={m.label}>
@@ -263,7 +263,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                     const sactive = !!s.href && pathname === s.href;
                     const scls = clsx(
                       "rounded-lg py-1.5 pl-11 pr-3 text-sm",
-                      sactive ? "font-medium text-brand-600" : "text-slate-500 hover:bg-slate-50",
+                      sactive ? "font-medium text-accent-ink" : "text-muted hover:bg-sunken",
                     );
                     return s.href ? (
                       <Link key={s.label} href={s.href} className={scls}>
@@ -284,7 +284,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
 
       {/* профиль вошедшего сотрудника + выход (dev-логин; реальный — Keycloak, часть 5) */}
       {userName && (
-        <div className="flex items-center gap-3 border-t border-slate-200 px-4 py-3">
+        <div className="flex items-center gap-3 border-t border-line px-4 py-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white">
             {initials(userName)}
           </span>
@@ -297,7 +297,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
             onClick={logout}
             aria-label="Выйти"
             title="Выйти"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-ink"
           >
             <LogOut size={16} />
           </button>

@@ -28,7 +28,7 @@ const STATUS_META: Record<LeadStatus, { label: string; cls: string }> = {
   qualified: { label: "Квалифицирован", cls: "bg-violet-100 text-violet-700" },
   routed: { label: "Распределён", cls: "bg-amber-100 text-amber-700" },
   converted: { label: "В сделке", cls: "bg-green-100 text-green-700" },
-  rejected: { label: "Отклонён", cls: "bg-slate-200 text-slate-600" },
+  rejected: { label: "Отклонён", cls: "bg-sunken text-muted" },
 };
 const FUNNEL_LABELS: Record<string, string> = {
   new: "Новые клиенты",
@@ -37,7 +37,7 @@ const FUNNEL_LABELS: Record<string, string> = {
   project: "Проектные",
 };
 const INPUT =
-  "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
 // --- канбан-колонки по статусу лида (порядок = поток воронки) ---
 const COLUMNS: { key: LeadStatus; title: string; color: string }[] = [
@@ -137,13 +137,13 @@ function StatusBadge({ status }: { status: LeadStatus }) {
 }
 
 function ScoreBadge({ lead }: { lead: Lead }) {
-  if (!lead.qualification) return <span className="text-sm text-slate-400">—</span>;
+  if (!lead.qualification) return <span className="text-sm text-faint">—</span>;
   const target = lead.qualification === "target";
   return (
     <span
       className={clsx(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-        target ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600",
+        target ? "bg-green-100 text-green-700" : "bg-sunken text-muted",
       )}
       title={target ? "Целевой лид" : "Нецелевой лид"}
     >
@@ -155,7 +155,7 @@ function ScoreBadge({ lead }: { lead: Lead }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
       {children}
     </label>
   );
@@ -163,7 +163,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function KpiTile({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-xl bg-white p-3 shadow-card">
+    <div className="rounded-xl bg-surface p-3 shadow-card">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold tracking-tight text-ink">{value}</div>
     </div>
@@ -172,7 +172,7 @@ function KpiTile({ label, value }: { label: string; value: React.ReactNode }) {
 
 function Pin() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-slate-400">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-faint">
       <path d="M12 21s-7-5.2-7-11a7 7 0 0114 0c0 5.8-7 11-7 11z" strokeLinejoin="round" />
       <circle cx="12" cy="10" r="2.4" />
     </svg>
@@ -192,15 +192,15 @@ function LeadCard({
     <div
       onClick={onSelect}
       className={clsx(
-        "cursor-pointer rounded-xl border bg-white p-3 shadow-card transition hover:shadow-pop",
-        selected ? "border-brand ring-1 ring-brand" : "border-slate-100",
+        "cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop",
+        selected ? "border-accent ring-1 ring-accent" : "border-line",
       )}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold tracking-wide text-slate-400">№ ЛИД-{lead.id}</span>
+        <span className="text-[11px] font-semibold tracking-wide text-faint">№ ЛИД-{lead.id}</span>
         <StatusBadge status={lead.status} />
       </div>
-      <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+      <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted">
         <ChannelIcon source={lead.source} size={18} />
         {SOURCE_LABELS[lead.source] ?? lead.source}
       </div>
@@ -245,11 +245,11 @@ function IntakeModal({
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-full max-w-md rounded-2xl bg-white p-5 shadow-pop"
+        className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-pop"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-ink">Принять лид</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={onClose} className="text-faint hover:text-muted">
             <X size={20} />
           </button>
         </div>
@@ -292,10 +292,10 @@ function IntakeModal({
           </Field>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
+          <button type="button" onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted">
             Отмена
           </button>
-          <button type="submit" disabled={saving} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+          <button type="submit" disabled={saving} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60">
             {saving ? "Приём..." : "Принять"}
           </button>
         </div>
@@ -325,7 +325,7 @@ function DetailPanel({
         "w-full rounded-lg px-3 py-2 text-sm font-medium",
         done
           ? "bg-green-50 text-green-700"
-          : "bg-brand text-white hover:bg-brand-700 disabled:opacity-60",
+          : "bg-accent text-white hover:bg-accent-ink disabled:opacity-60",
       )}
     >
       {done ? `✓ ${label}` : busy ? "..." : label}
@@ -357,21 +357,21 @@ function DetailPanel({
       </dl>
 
       {lead.message && (
-        <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{lead.message}</div>
+        <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{lead.message}</div>
       )}
 
       {/* Квалификация */}
-      <div className="rounded-lg border border-slate-200 p-3">
+      <div className="rounded-lg border border-line p-3">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <span className="text-xs font-semibold uppercase tracking-wide text-faint">
             Квалификация
           </span>
           <ScoreBadge lead={lead} />
         </div>
         {lead.reason ? (
-          <p className="text-sm text-slate-600">{lead.reason}</p>
+          <p className="text-sm text-muted">{lead.reason}</p>
         ) : (
-          <p className="text-sm text-slate-400">Ещё не оценён</p>
+          <p className="text-sm text-faint">Ещё не оценён</p>
         )}
         {lead.aiRationale && (
           <div className="mt-2 rounded-lg bg-violet-50 p-2.5 text-sm text-violet-900">
@@ -385,8 +385,8 @@ function DetailPanel({
 
       {/* Распределение */}
       {lead.assignedTo && (
-        <div className="rounded-lg border border-slate-200 p-3 text-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="rounded-lg border border-line p-3 text-sm">
+          <div className="text-xs font-semibold uppercase tracking-wide text-faint">
             Распределение
           </div>
           <div className="mt-1 text-ink">
@@ -507,7 +507,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
           </div>
           <button
             onClick={() => setModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
           >
             <Plus size={16} /> Принять лид
           </button>
@@ -524,17 +524,17 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
             </div>
 
             {/* Каналы — распределение текущих лидов */}
-            <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-card">
+            <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl bg-surface p-3 shadow-card">
               <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-muted">
                 Каналы · текущие лиды
               </span>
               {CHANNELS.map((src) => (
                 <span
                   key={src}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1"
+                  className="inline-flex items-center gap-2 rounded-lg border border-line bg-sunken px-2.5 py-1"
                 >
                   <ChannelIcon source={src} size={20} />
-                  <span className="text-xs font-medium text-slate-600">{SOURCE_LABELS[src]}</span>
+                  <span className="text-xs font-medium text-muted">{SOURCE_LABELS[src]}</span>
                   <span className="text-sm font-bold text-ink">{channelCounts[src] ?? 0}</span>
                 </span>
               ))}
@@ -547,7 +547,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
         {/* Канбан-воронка по статусу лида */}
         {leads.length === 0 ? (
-          <div className="rounded-xl bg-white p-10 text-center text-sm text-muted shadow-card">
+          <div className="rounded-xl bg-surface p-10 text-center text-sm text-muted shadow-card">
             Лидов пока нет — примите первый
           </div>
         ) : (
@@ -557,7 +557,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               return (
                 <div key={col.key} className="flex w-[280px] shrink-0 flex-col">
                   <div
-                    className="mb-3 overflow-hidden rounded-xl border-t-[3px] bg-white p-3 shadow-card"
+                    className="mb-3 overflow-hidden rounded-xl border-t-[3px] bg-surface p-3 shadow-card"
                     style={{ borderTopColor: col.color }}
                   >
                     <div className="flex items-center gap-2 text-sm font-bold text-ink">
@@ -578,7 +578,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                       />
                     ))}
                     {items.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                      <div className="rounded-xl border border-dashed border-line p-4 text-center text-xs text-faint">
                         —
                       </div>
                     )}
@@ -591,7 +591,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
         {/* Итоги по воронке — живые срезы */}
         {leads.length > 0 && (
-          <div className="mt-5 grid grid-cols-2 gap-4 rounded-xl bg-white p-4 shadow-card sm:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-4 rounded-xl bg-surface p-4 shadow-card sm:grid-cols-4">
             <Metric label="Лидов в работе" value={inWork} />
             <Metric label="Конвертировано" value={convertedCount} />
             <Metric label="Целевых" value={targetCount} />
@@ -600,7 +600,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         )}
       </main>
 
-      <aside className="w-[340px] shrink-0 overflow-auto border-l border-slate-200 bg-white">
+      <aside className="w-[340px] shrink-0 overflow-auto border-l border-line bg-surface">
         {selected ? (
           <DetailPanel
             lead={selected}

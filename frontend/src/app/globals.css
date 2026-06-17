@@ -2,6 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Дизайн-токены C+D (светлая/тёмная) как CSS-переменные ───
+   Семантические цвета интерфейса (canvas/surface/ink/…) меняются при .dark на <html>.
+   Любой класс bg-surface / text-ink / border-line автоматически работает в обеих темах.
+   Значения — из утверждённых тем C (Enterprise, light) и D (Dark cockpit). Канон: frontend/DESIGN.md. */
+:root {
+  /* C · Enterprise (светлая) — по умолчанию */
+  --canvas: 238 241 245;       /* #EEF1F5 */
+  --surface: 255 255 255;      /* #FFFFFF */
+  --sunken: 244 246 249;       /* #F4F6F9 */
+  --ink: 15 23 42;             /* #0F172A */
+  --muted: 91 107 130;         /* #5B6B82 */
+  --faint: 147 161 181;        /* #93A1B5 */
+  --line: 226 232 240;         /* #E2E8F0 */
+  --line-strong: 203 213 225;  /* #CBD5E1 */
+  --accent: 30 94 255;         /* #1E5EFF корпоративный синий */
+  --accent-ink: 21 69 204;     /* #1545CC */
+  --accent-soft: 227 236 255;  /* #E3ECFF */
+  --money: 14 124 74;          /* #0E7C4A */
+  --money-soft: 226 243 234;   /* #E2F3EA */
+}
+
+.dark {
+  /* D · Dark cockpit (тёмная) */
+  --canvas: 14 17 22;          /* #0E1116 */
+  --surface: 23 27 34;         /* #171B22 */
+  --sunken: 31 36 44;          /* #1F242C */
+  --ink: 232 234 237;          /* #E8EAED */
+  --muted: 155 163 174;        /* #9BA3AE */
+  --faint: 107 114 128;        /* #6B7280 */
+  --line: 42 48 56;            /* #2A3038 */
+  --line-strong: 58 66 76;     /* #3A424C */
+  --accent: 110 139 255;       /* #6E8BFF */
+  --accent-ink: 138 160 255;   /* #8AA0FF */
+  --accent-soft: 35 42 61;     /* #232A3D */
+  --money: 52 211 153;         /* #34D399 неон — деньги светятся на тёмном */
+  --money-soft: 22 39 31;      /* #16271F */
+}
+
 html,
 body {
   height: 100%;
@@ -10,8 +48,9 @@ body {
 body {
   background-color: theme("colors.canvas");
   color: theme("colors.ink");
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+  font-family: theme("fontFamily.sans");
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05", "ss01";
 }
 
 /* тонкий скроллбар для колонок канбана */

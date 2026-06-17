@@ -94,7 +94,7 @@ function Column({
   const showWeighted = stage.id !== "won" && stage.id !== "lost" && stage.deals.length > 0;
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
-      <div className="overflow-hidden rounded-xl bg-white shadow-card">
+      <div className="overflow-hidden rounded-xl bg-surface shadow-card">
         <div className="h-1" style={{ backgroundColor: stage.color }} />
         <div className="px-4 py-3">
           <div className="font-semibold text-ink">{stage.title}</div>
@@ -102,7 +102,7 @@ function Column({
             {stage.count} {pluralDeals(stage.count)} · {formatMoney(stage.sum)}
           </div>
           {showWeighted && (
-            <div className="mt-0.5 text-[11px] font-semibold text-brand-700">
+            <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
               взвешенно: {formatMoney(stageWeightedSum(stage))}
             </div>
           )}
@@ -112,13 +112,13 @@ function Column({
         ref={setNodeRef}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
-          isOver && "bg-brand-100/60 ring-2 ring-brand-100",
+          isOver && "bg-accent-soft ring-2 ring-accent-soft",
         )}
       >
         {children}
         <button
           onClick={onAdd}
-          className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-medium text-slate-500 hover:bg-white"
+          className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-line-strong py-2.5 text-xs font-medium text-muted hover:bg-sunken"
         >
           <Plus size={14} /> Добавить сделку
         </button>
@@ -288,38 +288,38 @@ export function DealsWorkspace({
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative min-w-[220px] max-w-sm flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск сделок..."
-              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-brand"
+              className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
             />
           </div>
           <button
             onClick={() => setFilterOpen((v) => !v)}
             className={clsx(
-              "inline-flex items-center gap-2 rounded-lg border bg-white px-3.5 py-2 text-sm font-medium hover:bg-slate-50",
+              "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
               priority || filterOpen
-                ? "border-brand text-brand-600"
-                : "border-slate-200 text-slate-600",
+                ? "border-accent text-accent-ink"
+                : "border-line text-muted",
             )}
           >
             <SlidersHorizontal size={16} /> Фильтры
-            {priority && <span className="rounded bg-brand-100 px-1.5 text-xs">{priority}</span>}
+            {priority && <span className="rounded bg-accent-soft px-1.5 text-xs text-accent-ink">{priority}</span>}
           </button>
           <button
             onClick={() => setStuckOnly((v) => !v)}
             className={clsx(
-              "inline-flex items-center gap-2 rounded-lg border bg-white px-3.5 py-2 text-sm font-medium hover:bg-slate-50",
-              stuckOnly ? "border-amber-400 text-amber-700" : "border-slate-200 text-slate-600",
+              "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+              stuckOnly ? "border-amber-400 text-amber-700" : "border-line text-muted",
             )}
           >
             <Clock size={16} /> Только висяки
           </button>
           <button
             onClick={() => openModal(stages[0]?.id ?? "new")}
-            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
           >
             <Plus size={16} /> Создать сделку
           </button>
@@ -336,8 +336,8 @@ export function DealsWorkspace({
                 className={clsx(
                   "rounded-lg px-3 py-1 text-sm font-medium",
                   priority === p
-                    ? "bg-brand-100 text-brand-600"
-                    : "bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50",
+                    ? "bg-accent-soft text-accent-ink"
+                    : "bg-surface text-muted ring-1 ring-line hover:bg-sunken",
                 )}
               >
                 {p ?? "Все"}
@@ -350,7 +350,7 @@ export function DealsWorkspace({
         <section className="mt-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold text-ink">План / Факт</h2>
-            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
+            <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
               {PERIODS.map((p) => (
                 <button
                   key={p.key}
@@ -358,8 +358,8 @@ export function DealsWorkspace({
                   className={clsx(
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                     period === p.key
-                      ? "bg-brand-100 text-brand-600"
-                      : "text-slate-500 hover:text-slate-700",
+                      ? "bg-accent-soft text-accent-ink"
+                      : "text-muted hover:text-ink",
                   )}
                 >
                   {p.label}
@@ -376,13 +376,13 @@ export function DealsWorkspace({
 
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
-          <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
+          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
             <button
               onClick={() => setView("board")}
               title="Канбан"
               className={clsx(
                 "rounded-md p-1.5",
-                view === "board" ? "bg-brand-100 text-brand-600" : "text-slate-400 hover:text-slate-600",
+                view === "board" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
               )}
             >
               <LayoutGrid size={16} />
@@ -392,7 +392,7 @@ export function DealsWorkspace({
               title="Список"
               className={clsx(
                 "rounded-md p-1.5",
-                view === "list" ? "bg-brand-100 text-brand-600" : "text-slate-400 hover:text-slate-600",
+                view === "list" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
               )}
             >
               <List size={16} />
@@ -422,9 +422,9 @@ export function DealsWorkspace({
           </DndContext>
         ) : (
           /* Список */
-          <div className="mt-3 overflow-hidden rounded-xl bg-white shadow-card">
+          <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-card">
             <table className="w-full text-sm">
-              <thead className="border-b border-slate-100 text-left text-xs text-muted">
+              <thead className="border-b border-line text-left text-xs text-muted">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">Номер</th>
                   <th className="px-4 py-2.5 font-medium">Контрагент</th>
@@ -442,14 +442,14 @@ export function DealsWorkspace({
                   </tr>
                 )}
                 {flatDeals.map(({ deal, stageTitle }) => (
-                  <tr key={deal.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <tr key={deal.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-4 py-2.5">
-                      <Link href={`/crm/deals/${deal.id}`} className="font-medium text-brand-600">
+                      <Link href={`/crm/deals/${deal.id}`} className="font-medium text-accent-ink">
                         {deal.number}
                       </Link>
                     </td>
                     <td className="px-4 py-2.5 text-ink">{deal.company}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{deal.description}</td>
+                    <td className="px-4 py-2.5 text-muted">{deal.description}</td>
                     <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-ink">
                       {formatMoney(deal.amount)}

@@ -68,7 +68,7 @@ export function LogisticsAudit() {
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
               placeholder="ГГГГ-ММ"
-              className="w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+              className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
             <GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>
           </div>
@@ -76,7 +76,7 @@ export function LogisticsAudit() {
       >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
-            <thead className="border-b border-slate-100 text-left text-xs text-muted">
+            <thead className="border-b border-line text-left text-xs text-muted">
               <tr>
                 <th className="px-3 py-2 font-medium">Отгрузка</th>
                 <th className="px-3 py-2 font-medium">Перевозчик</th>
@@ -91,21 +91,21 @@ export function LogisticsAudit() {
               {items.map((it) => {
                 const variance = auditVariance(it.invoice_amount, it.expected_amount);
                 return (
-                  <tr key={it.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <tr key={it.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-3 py-2 text-muted">{it.shipment_code}</td>
-                    <td className="px-3 py-2 text-slate-600">{it.carrier_code}</td>
+                    <td className="px-3 py-2 text-muted">{it.carrier_code}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink">{formatByn(it.invoice_amount)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(it.expected_amount)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(it.expected_amount)}</td>
                     <td
                       className={
                         "px-3 py-2 text-right font-semibold tabular-nums " +
-                        (variance > 0 ? "text-red-600" : variance < 0 ? "text-emerald-600" : "text-slate-400")
+                        (variance > 0 ? "text-red-600" : variance < 0 ? "text-emerald-600" : "text-faint")
                       }
                     >
                       {variance > 0 ? "+" : ""}
                       {formatByn(variance)}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{it.reason}</td>
+                    <td className="px-3 py-2 text-muted">{it.reason}</td>
                     <td className="px-3 py-2">
                       <Pill text={it.status} tone={STATUS_TONE[it.status] ?? "slate"} />
                     </td>

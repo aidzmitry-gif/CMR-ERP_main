@@ -12,7 +12,7 @@ export function FunnelTotals({ data }: { data: FunnelData }) {
   ];
 
   return (
-    <div className="mt-4 rounded-xl bg-white p-5 shadow-card">
+    <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-semibold text-ink">Итоги по воронке</h3>
         <span className="text-xs text-muted">По всем сделкам</span>

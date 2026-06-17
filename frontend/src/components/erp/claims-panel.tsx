@@ -24,7 +24,7 @@ const SEGMENTS: { id: ClaimStatus | "all"; label: string }[] = [
 
 function Kpi({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink">{value}</div>
     </div>
@@ -92,14 +92,14 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <div className="inline-flex flex-wrap rounded-lg border border-line bg-sunken p-1">
           {SEGMENTS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSeg(s.id)}
               className={clsx(
                 "rounded-md px-3 py-1.5 text-sm font-medium",
-                seg === s.id ? "bg-white text-brand shadow-sm" : "text-slate-500",
+                seg === s.id ? "bg-surface text-accent-ink shadow-sm" : "text-muted",
               )}
             >
               {s.label}
@@ -107,20 +107,20 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
           ))}
         </div>
         <div className="relative ml-auto">
-          <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+          <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-faint" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Поиск по изделию, наряду, поставщику"
-            className="w-72 rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-brand"
+            className="w-72 rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
       </div>
 
-      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">Наряд</th>
               <th className="px-4 py-2 font-medium">Изделие</th>
               <th className="px-4 py-2 font-medium">Причина</th>
@@ -141,10 +141,10 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
             {rows.map((c) => {
               const isOpen = c.status === "open";
               return (
-                <tr key={c.id} className="border-b border-slate-50 last:border-0 align-top">
-                  <td className="px-4 py-2.5 font-medium text-slate-700">{c.order_code || "—"}</td>
-                  <td className="px-4 py-2.5 text-slate-700">{c.item}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{c.reason || "—"}</td>
+                <tr key={c.id} className="border-b border-line last:border-0 align-top">
+                  <td className="px-4 py-2.5 font-medium text-muted">{c.order_code || "—"}</td>
+                  <td className="px-4 py-2.5 text-muted">{c.item}</td>
+                  <td className="px-4 py-2.5 text-muted">{c.reason || "—"}</td>
                   <td className="px-4 py-2.5">
                     <span className="inline-flex rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">
                       {sourceLabel(c.source)}
@@ -157,10 +157,10 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
                         onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
                         onBlur={() => onSaveSupplier(c)}
                         placeholder="Назначить…"
-                        className="w-40 rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand"
+                        className="w-40 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
                       />
                     ) : (
-                      <span className="text-slate-600">{c.supplier || "—"}</span>
+                      <span className="text-muted">{c.supplier || "—"}</span>
                     )}
                   </td>
                   <td className="px-4 py-2.5">
@@ -181,7 +181,7 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
                             onClick={() => onStatus(c, "resolved")}
                             disabled={busy}
                             title="Отметить решённой"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
                           >
                             <Check size={15} />
                           </button>
@@ -189,7 +189,7 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
                             onClick={() => onStatus(c, "rejected")}
                             disabled={busy}
                             title="Отклонить претензию"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-60"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-muted disabled:opacity-60"
                           >
                             <X size={15} />
                           </button>

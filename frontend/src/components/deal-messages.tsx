@@ -58,16 +58,16 @@ export function DealMessages({ dealId }: { dealId: string }) {
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-200 p-4">
+    <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 font-semibold text-ink">
-          <MessageCircle size={18} className="text-brand-600" /> Сообщения
+          <MessageCircle size={18} className="text-accent-ink" /> Сообщения
           <span className="text-sm font-medium text-muted">({items.length})</span>
         </div>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 outline-none focus:border-brand"
+          className="rounded-lg border border-line bg-surface px-2 py-1 text-xs text-muted outline-none focus:border-accent"
         >
           {CHANNELS.map((c) => (
             <option key={c} value={c}>
@@ -84,7 +84,7 @@ export function DealMessages({ dealId }: { dealId: string }) {
           const Icon = meta.Icon;
           const out = m.direction === "out";
           return (
-            <div key={m.id} className={`rounded-xl p-3 ${out ? "bg-blue-50" : "bg-slate-50"}`}>
+            <div key={m.id} className={`rounded-xl p-3 ${out ? "bg-blue-50" : "bg-sunken"}`}>
               <div className="flex items-center gap-2 text-sm">
                 <span
                   className="flex h-5 w-5 items-center justify-center rounded-full"
@@ -98,7 +98,7 @@ export function DealMessages({ dealId }: { dealId: string }) {
                 <span className="text-muted">• {meta.label}</span>
                 <span className="ml-auto text-xs text-muted">{fmtTime(m.created_at)}</span>
               </div>
-              <p className="mt-1.5 text-sm text-slate-600">{m.text}</p>
+              <p className="mt-1.5 text-sm text-muted">{m.text}</p>
             </div>
           );
         })}
@@ -108,7 +108,7 @@ export function DealMessages({ dealId }: { dealId: string }) {
         <button
           onClick={onAiDraft}
           disabled={aiBusy}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-accent-ink hover:text-accent-ink disabled:opacity-60"
         >
           <Sparkles size={14} /> {aiBusy ? "Генерация…" : "AI-черновик ответа"}
         </button>
@@ -123,12 +123,12 @@ export function DealMessages({ dealId }: { dealId: string }) {
             if (e.key === "Enter") void onSend();
           }}
           placeholder="Написать сообщение..."
-          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-brand"
+          className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
         />
         <button
           onClick={onSend}
           disabled={busy}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white disabled:opacity-60"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-60"
         >
           <Send size={16} />
         </button>

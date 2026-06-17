@@ -19,7 +19,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={clsx("rounded-xl bg-white p-5 shadow-card", className)}>
+    <div className={clsx("rounded-xl bg-surface p-5 shadow-card", className)}>
       {(title || action) && (
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -51,13 +51,13 @@ export function KpiTile({
     emerald: "text-emerald-600",
     amber: "text-amber-600",
     red: "text-red-600",
-    brand: "text-brand-600",
+    brand: "text-accent-ink",
   }[tone];
   return (
-    <div className="rounded-xl bg-white p-4 shadow-card">
+    <div className="rounded-xl bg-surface p-4 shadow-card">
       <div className="text-[11px] leading-tight text-muted">{label}</div>
       <div className={clsx("mt-1 text-xl font-bold tabular-nums", toneCls)}>{value}</div>
-      {sub && <div className="mt-0.5 text-[10px] text-slate-400">{sub}</div>}
+      {sub && <div className="mt-0.5 text-[10px] text-faint">{sub}</div>}
     </div>
   );
 }
@@ -75,13 +75,13 @@ export function EmptyState({
   busy?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl bg-white p-10 text-center shadow-card">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-xl bg-surface p-10 text-center shadow-card">
       <p className="text-sm text-muted">{text}</p>
       {onSeed && (
         <button
           onClick={onSeed}
           disabled={busy}
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
         >
           {busy ? "Заполняем…" : seedLabel}
         </button>
@@ -92,7 +92,7 @@ export function EmptyState({
 
 /** Индикатор загрузки секции. */
 export function Loading() {
-  return <p className="rounded-xl bg-white p-10 text-center text-sm text-muted shadow-card">Загрузка…</p>;
+  return <p className="rounded-xl bg-surface p-10 text-center text-sm text-muted shadow-card">Загрузка…</p>;
 }
 
 /** Бейдж грейда перевозчика A/B/C с цветом. */
@@ -113,7 +113,7 @@ export function GradeBadge({ grade }: { grade: Grade | string }) {
 /** Небольшая статус-пилюля. */
 export function Pill({ text, tone = "slate" }: { text: string; tone?: "slate" | "blue" | "emerald" | "amber" | "violet" }) {
   const cls = {
-    slate: "bg-slate-100 text-slate-600",
+    slate: "bg-sunken text-muted",
     blue: "bg-blue-50 text-blue-600",
     emerald: "bg-emerald-50 text-emerald-600",
     amber: "bg-amber-50 text-amber-600",
@@ -136,7 +136,7 @@ export function GhostButton({
     <button
       onClick={onClick}
       disabled={busy}
-      className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+      className="rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
     >
       {children}
     </button>

@@ -6,12 +6,12 @@ import { type DealInput, lookupCounterparty } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
-const INPUT = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand";
+const INPUT = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
       {children}
     </label>
   );
@@ -79,11 +79,11 @@ export function CreateDealModal({
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-full max-w-md rounded-2xl bg-white p-5 shadow-pop"
+        className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-pop"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-ink">Новая сделка</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={onClose} className="text-faint hover:text-muted">
             <X size={20} />
           </button>
         </div>
@@ -104,13 +104,13 @@ export function CreateDealModal({
                 type="button"
                 onClick={onLookup}
                 disabled={looking}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-sm font-medium text-brand-600 hover:bg-blue-50 disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-accent px-3 py-2 text-sm font-medium text-accent-ink hover:bg-blue-50 disabled:opacity-60"
               >
                 <Search size={15} /> {looking ? "..." : "Найти"}
               </button>
             </div>
           </Field>
-          {lookupMsg && <p className="-mt-1 text-xs text-slate-500">{lookupMsg}</p>}
+          {lookupMsg && <p className="-mt-1 text-xs text-muted">{lookupMsg}</p>}
           <Field label="Компания">
             <input required value={form.counterparty} onChange={(e) => set("counterparty", e.target.value)} placeholder="ООО ..." className={INPUT} />
           </Field>
@@ -148,10 +148,10 @@ export function CreateDealModal({
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
+          <button type="button" onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted">
             Отмена
           </button>
-          <button type="submit" disabled={saving} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+          <button type="submit" disabled={saving} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60">
             {saving ? "Сохранение..." : "Создать"}
           </button>
         </div>

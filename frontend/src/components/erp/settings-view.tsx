@@ -30,7 +30,7 @@ export function SettingsView() {
       {!sys && <p className="mt-5 text-sm text-muted">Загрузка…</p>}
       {sys && (
         <>
-          <section className="mt-5 rounded-2xl bg-white p-5 shadow-card">
+          <section className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">
               Подключённые модули ({sys.loaded_modules.length})
             </h2>
@@ -38,7 +38,7 @@ export function SettingsView() {
               {sys.loaded_modules.map((m) => (
                 <span
                   key={m}
-                  className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-brand-600"
+                  className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-accent-ink"
                 >
                   {m}
                 </span>
@@ -47,9 +47,9 @@ export function SettingsView() {
           </section>
 
           <section className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl bg-white p-5 shadow-card">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
               <h2 className="font-semibold text-ink">API-роуты ({sys.routers.length})</h2>
-              <ul className="mt-3 space-y-1 text-sm text-slate-600">
+              <ul className="mt-3 space-y-1 text-sm text-muted">
                 {sys.routers.map((r, i) => (
                   <li key={i}>
                     <span className="text-muted">{r.module}</span> · {r.prefix || "/"}
@@ -57,9 +57,9 @@ export function SettingsView() {
                 ))}
               </ul>
             </div>
-            <div className="rounded-2xl bg-white p-5 shadow-card">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
               <h2 className="font-semibold text-ink">События шины ({sys.events.length})</h2>
-              <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto text-sm text-slate-600 thin-scroll">
+              <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto text-sm text-muted thin-scroll">
                 {sys.events.map((e, i) => (
                   <li key={i}>
                     {e.event_type} <span className="text-muted">({e.module})</span>
@@ -69,11 +69,11 @@ export function SettingsView() {
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl bg-white p-5 shadow-card">
+          <section className="mt-4 rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">Права RBAC ({sys.permissions.length})</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {sys.permissions.map((p) => (
-                <span key={p} className="rounded-lg bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                <span key={p} className="rounded-lg bg-sunken px-3 py-1 text-xs text-muted">
                   {p}
                 </span>
               ))}

@@ -42,7 +42,7 @@ export function AnalyticsView() {
       </p>
       <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
         {SOURCES.map((s) => (
-          <div key={s.endpoint} className="rounded-2xl bg-white p-5 shadow-card">
+          <div key={s.endpoint} className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="text-sm text-muted">{s.label}</div>
             <div className="mt-2 text-2xl font-bold text-ink">{counts[s.endpoint] ?? "…"}</div>
           </div>

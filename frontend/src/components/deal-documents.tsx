@@ -17,7 +17,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
-  draft: { label: "Черновик", cls: "bg-slate-100 text-slate-600" },
+  draft: { label: "Черновик", cls: "bg-sunken text-muted" },
   pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
   posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
   rejected: { label: "Отклонён", cls: "bg-red-50 text-red-600" },
@@ -52,16 +52,16 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-200 p-4">
+    <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
-        <FileText size={18} className="text-brand-600" /> Документы
+        <FileText size={18} className="text-accent-ink" /> Документы
       </div>
 
       <div className="mt-3 flex gap-2">
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+          className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {KINDS.map((k) => (
             <option key={k.value} value={k.value}>
@@ -72,7 +72,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         <button
           onClick={onCreate}
           disabled={busy}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
         >
           <Plus size={16} /> Сформировать
         </button>
@@ -85,7 +85,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           return (
             <li
               key={d.id}
-              className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg bg-sunken px-3 py-2"
             >
               <div className="min-w-0">
                 <div className="truncate text-sm text-ink">

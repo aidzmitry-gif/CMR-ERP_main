@@ -28,7 +28,7 @@ function Metric({
   tone: string;
 }) {
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-card">
+    <div className="rounded-2xl bg-surface p-5 shadow-card">
       <div className="flex items-center gap-2 text-muted">
         <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${tone}`}>
           <Icon size={18} />
@@ -67,19 +67,19 @@ export default async function OwnerPage() {
         </p>
 
         <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Metric Icon={Workflow} label="Сделок в работе" value={String(activeCount)} tone="bg-blue-50 text-brand-600" />
+          <Metric Icon={Workflow} label="Сделок в работе" value={String(activeCount)} tone="bg-accent-soft text-accent-ink" />
           <Metric Icon={Wallet} label="Сумма в работе" value={formatMoney(activeSum)} tone="bg-emerald-50 text-emerald-600" />
           <Metric Icon={Trophy} label="Выиграно сделок" value={String(wonCount)} tone="bg-amber-50 text-amber-600" />
           <Metric Icon={Gauge} label="Выполнение плана" value={`${avgKpi}%`} tone="bg-indigo-50 text-indigo-600" />
           <Metric Icon={CheckSquare} label="Согласований ждут" value={String(metrics.approvals_pending)} tone="bg-amber-50 text-amber-600" />
           <Metric Icon={Radio} label="Событий в шине" value={String(metrics.events_count)} tone="bg-cyan-50 text-cyan-600" />
-          <Metric Icon={FileText} label="Записей аудита" value={String(metrics.audit_count)} tone="bg-slate-100 text-slate-600" />
+          <Metric Icon={FileText} label="Записей аудита" value={String(metrics.audit_count)} tone="bg-sunken text-muted" />
           <Metric Icon={Users} label="Контрагентов" value={String(metrics.counterparties)} tone="bg-violet-50 text-violet-600" />
         </div>
 
         <OwnerAiInsight />
 
-        <section className="mt-6 rounded-2xl bg-white p-5 shadow-card">
+        <section className="mt-6 rounded-2xl bg-surface p-5 shadow-card">
           <h2 className="font-semibold text-ink">Воронка по стадиям</h2>
           <div className="mt-3 space-y-2">
             {stages.map((s) => (
@@ -95,22 +95,22 @@ export default async function OwnerPage() {
         </section>
 
         <section className="mt-4 grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">Подключённые модули</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {metrics.modules.map((m) => (
-                <span key={m} className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-brand-600">
+                <span key={m} className="rounded-lg bg-accent-soft px-3 py-1 text-sm font-medium text-accent-ink">
                   {m}
                 </span>
               ))}
             </div>
           </div>
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">Виджеты модулей</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {metrics.widgets.length === 0 && <span className="text-sm text-muted">Нет виджетов</span>}
               {metrics.widgets.map((w) => (
-                <span key={w.key} className="rounded-lg bg-slate-100 px-3 py-1 text-sm text-slate-600">
+                <span key={w.key} className="rounded-lg bg-sunken px-3 py-1 text-sm text-muted">
                   {w.title}
                 </span>
               ))}

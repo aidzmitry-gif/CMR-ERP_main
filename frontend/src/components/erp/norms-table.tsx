@@ -18,7 +18,7 @@ import {
 } from "@/lib/production-norms";
 
 const STATUS_STYLES: Record<Norm["status"], string> = {
-  none: "bg-slate-100 text-slate-500",
+  none: "bg-sunken text-muted",
   pending: "bg-amber-50 text-amber-600",
   approved: "bg-green-50 text-green-600",
 };
@@ -30,7 +30,7 @@ const KINDS: { id: NormKind; label: string }[] = [
 
 function Kpi({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink">{value}</div>
     </div>
@@ -94,14 +94,14 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
         <Kpi label="Без нормы" value={counts.none} />
       </div>
 
-      <div className="mt-5 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+      <div className="mt-5 inline-flex rounded-lg border border-line bg-sunken p-1">
         {KINDS.map((k) => (
           <button
             key={k.id}
             onClick={() => setKind(k.id)}
             className={clsx(
               "rounded-md px-3 py-1.5 text-sm font-medium",
-              kind === k.id ? "bg-white text-brand shadow-sm" : "text-slate-500",
+              kind === k.id ? "bg-surface text-accent-ink shadow-sm" : "text-muted",
             )}
           >
             {k.label}
@@ -109,10 +109,10 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
         ))}
       </div>
 
-      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">Название</th>
               <th className="px-4 py-2 text-right font-medium">Н.ч</th>
               <th className="px-4 py-2 font-medium">Статус</th>
@@ -128,8 +128,8 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
               </tr>
             )}
             {rows.map((n) => (
-              <tr key={n.id} className="border-b border-slate-50 last:border-0">
-                <td className="px-4 py-2.5 text-slate-700">{n.title}</td>
+              <tr key={n.id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2.5 text-muted">{n.title}</td>
                 <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
                   {formatNh(n.nh)}
                 </td>
@@ -150,7 +150,7 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
                         onClick={() => onApprove(n.id)}
                         disabled={busy}
                         title="Утвердить норму"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
                       >
                         <Check size={15} />
                       </button>
@@ -159,7 +159,7 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
                       onClick={() => onDelete(n.id)}
                       disabled={busy}
                       title="Удалить норму"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -170,14 +170,14 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
           </tbody>
         </table>
 
-        <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-3">
+        <div className="flex items-center gap-2 border-t border-line px-4 py-3">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={kind === "product" ? "Название изделия" : "Название операции"}
             className={clsx(
-              "min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand",
-              titleError ? "border-amber-500" : "border-slate-200",
+              "min-w-0 flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent",
+              titleError ? "border-amber-500" : "border-line",
             )}
           />
           <input
@@ -185,12 +185,12 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
             onChange={(e) => setNh(e.target.value)}
             inputMode="decimal"
             placeholder="Н.ч"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <button
             onClick={onAdd}
             disabled={busy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             <Plus size={16} /> Добавить
           </button>

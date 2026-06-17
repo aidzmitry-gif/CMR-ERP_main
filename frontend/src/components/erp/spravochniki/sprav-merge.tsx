@@ -30,19 +30,19 @@ function ClusterCard({
   return (
     <div
       className={`rounded-xl p-3 ${
-        isActive ? "ring-2 ring-brand bg-brand-100/30" : "ring-1 ring-slate-200 bg-white"
+        isActive ? "ring-2 ring-accent bg-accent-soft/30" : "ring-1 ring-line bg-surface"
       }`}
     >
       <div className="flex items-center justify-between">
         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
           100% · УНП
         </span>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+        <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
           {dups.length} дубл.
         </span>
       </div>
       {sv && <div className="mt-2 text-sm font-semibold text-ink">{sv.name}</div>}
-      <div className="mt-1 space-y-0.5 text-[12px] text-slate-500">
+      <div className="mt-1 space-y-0.5 text-[12px] text-muted">
         {sv && (
           <div>
             <span className="font-mono text-[13px]">{cpId(sv.id)}</span> · ★ эталон
@@ -55,7 +55,7 @@ function ClusterCard({
         ))}
       </div>
       <button
-        className="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200 hover:bg-slate-50"
+        className="mt-3 w-full rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line hover:bg-sunken"
         onClick={onSelect}
       >
         Разобрать
@@ -80,10 +80,10 @@ function MemberRow({
   onMerge?: () => void;
 }) {
   return (
-    <tr className="hover:bg-slate-50/60">
-      <td className="px-3 py-2.5 font-mono text-[13px] text-slate-500">{cpId(member.id)}</td>
+    <tr className="hover:bg-sunken/60">
+      <td className="px-3 py-2.5 font-mono text-[13px] text-muted">{cpId(member.id)}</td>
       <td className="px-3 py-2.5">{member.name}</td>
-      <td className="px-3 py-2.5 font-mono text-[13px] text-slate-500">{unp}</td>
+      <td className="px-3 py-2.5 font-mono text-[13px] text-muted">{unp}</td>
       <td className="px-3 py-2.5">
         {isSurvivor ? (
           <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
@@ -103,7 +103,7 @@ function MemberRow({
           <button
             disabled={busy || pending}
             onClick={onMerge}
-            className="flex items-center gap-1 rounded-xl bg-brand px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-card disabled:opacity-50 hover:bg-brand-700"
+            className="flex items-center gap-1 rounded-xl bg-accent px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-card disabled:opacity-50 hover:bg-accent-ink"
           >
             <GitMerge size={13} />
             Слить
@@ -141,7 +141,7 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
         </p>
       </div>
 
-      <div className="rounded-2xl bg-brand-100/60 px-4 py-2.5 text-[12px] text-slate-700">
+      <div className="rounded-2xl bg-accent-soft/60 px-4 py-2.5 text-[12px] text-muted">
         Правила:{" "}
         <span className="font-semibold">УНП совпал</span> → авто-кандидат ·{" "}
         <span className="font-semibold">имя+адрес похожи</span> → на проверку человеком · слияние
@@ -149,19 +149,19 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
       </div>
 
       {initial.length === 0 ? (
-        <div className="rounded-2xl bg-white p-10 text-center shadow-card">
+        <div className="rounded-2xl bg-surface p-10 text-center shadow-card">
           <p className="text-muted">Дублей не обнаружено.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Левая колонка: список кластеров */}
           <div className="lg:col-span-1">
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                   Кандидаты на слияние ({total})
                 </div>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                   очередь
                 </span>
               </div>
@@ -182,10 +182,10 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
           <div className="space-y-4 lg:col-span-2">
             {selected && survivor ? (
               <>
-                <div className="rounded-2xl bg-white p-5 shadow-card">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="rounded-2xl bg-surface p-5 shadow-card">
+                  <div className="flex items-center justify-between border-b border-line pb-3">
                     <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                         Разбор кластера · УНП {selected.unp}
                       </div>
                       <div className="mt-1 text-base font-semibold text-ink">{survivor.name}</div>
@@ -198,7 +198,7 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                   <div className="mt-4 overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                        <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                           <th className="px-3 py-2 font-semibold">Запись</th>
                           <th className="px-3 py-2 font-semibold">Наименование</th>
                           <th className="px-3 py-2 font-semibold">УНП</th>
@@ -206,7 +206,7 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                           <th className="px-3 py-2 font-semibold">Действие</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
+                      <tbody className="divide-y divide-line">
                         <MemberRow
                           member={survivor}
                           unp={selected.unp}
@@ -229,16 +229,16 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                     </table>
                   </div>
 
-                  <div className="mt-4 rounded-xl bg-slate-50 p-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="mt-4 rounded-xl bg-sunken p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                       Правило выживания (survivorship)
                     </div>
-                    <p className="mt-1 text-[13px] text-slate-600">
+                    <p className="mt-1 text-[13px] text-muted">
                       при конфликте —{" "}
                       <span className="font-semibold">непустое</span> &gt;{" "}
                       <span className="font-semibold">более свежее</span> &gt;{" "}
                       <span className="font-semibold">из приоритетного источника</span>{" "}
-                      <span className="font-mono text-[12px] text-slate-500">
+                      <span className="font-mono text-[12px] text-muted">
                         (ERP &gt; 1С &gt; Bitrix)
                       </span>
                       .
@@ -246,18 +246,18 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                   </div>
 
                   <div className="mt-4 flex items-center justify-end">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                    <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                       ↶ слияние обратимо (unmerge)
                     </span>
                   </div>
                 </div>
 
                 {/* Карточка движка */}
-                <div className="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="rounded-2xl bg-ink p-5 text-faint shadow-card">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                     Как решает движок
                   </div>
-                  <pre className="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">
+                  <pre className="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-ink">
                     {[
                       `rule  unp_exact       : unp(A) == unp(B)              -> score 1.00 -> auto_merge_candidate`,
                       `rule  name_city_fuzzy : trigram(name) > 0.80 AND city -> score 0.87 -> manual_review`,
@@ -266,14 +266,14 @@ export function SpravMerge({ initial }: { initial: DuplicateCluster[] }) {
                       `result:       golden_record(${cpId(survivor.id)}); merge_reversible = true`,
                     ].join("\n")}
                   </pre>
-                  <p className="mt-3 text-[12px] text-slate-400">
+                  <p className="mt-3 text-[12px] text-faint">
                     Детерминированные ключи (УНП) — автоматически; нечёткое имя — ML-скоринг,
                     итог подтверждает человек.
                   </p>
                 </div>
               </>
             ) : (
-              <div className="rounded-2xl bg-white p-10 text-center shadow-card">
+              <div className="rounded-2xl bg-surface p-10 text-center shadow-card">
                 <p className="text-muted">Выберите кластер для разбора.</p>
               </div>
             )}

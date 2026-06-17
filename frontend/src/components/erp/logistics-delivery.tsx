@@ -66,7 +66,7 @@ export function LogisticsDelivery() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[820px] text-sm">
-              <thead className="border-b border-slate-100 text-left text-xs text-muted">
+              <thead className="border-b border-line text-left text-xs text-muted">
                 <tr>
                   <th className="px-3 py-2 font-medium">№</th>
                   <th className="px-3 py-2 font-medium">Получатель</th>
@@ -80,14 +80,14 @@ export function LogisticsDelivery() {
               </thead>
               <tbody>
                 {shipments.map((s) => (
-                  <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <tr key={s.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-3 py-2 text-muted">{s.number}</td>
                     <td className="px-3 py-2 font-medium text-ink">{s.customer}</td>
-                    <td className="px-3 py-2 text-slate-600">
+                    <td className="px-3 py-2 text-muted">
                       {s.route_from} → {s.route_to}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{s.carrier}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatNumber(s.weight_kg)}</td>
+                    <td className="px-3 py-2 text-muted">{s.carrier}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatNumber(s.weight_kg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink">{formatByn(s.amount)}</td>
                     <td className="px-3 py-2">
                       <Pill
@@ -112,8 +112,8 @@ export function LogisticsDelivery() {
               return (
                 <div key={c.carrier} className="flex items-center gap-3">
                   <span className="w-40 shrink-0 truncate text-sm text-ink">{c.carrier}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full bg-brand" style={{ width: `${(c.cost / max) * 100}%` }} />
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-sunken">
+                    <div className="h-full rounded-full bg-accent" style={{ width: `${(c.cost / max) * 100}%` }} />
                   </div>
                   <span className="w-44 shrink-0 text-right text-sm tabular-nums text-muted">
                     {c.shipments} отгр. · {formatByn(c.cost)}

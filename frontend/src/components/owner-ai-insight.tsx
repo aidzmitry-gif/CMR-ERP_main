@@ -24,12 +24,12 @@ export function OwnerAiInsight() {
         <button
           onClick={run}
           disabled={busy}
-          className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+          className="rounded-lg border border-indigo-200 bg-surface px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
         >
           {busy ? "Анализ…" : "Сгенерировать"}
         </button>
       </div>
-      {text && <p className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-600">{text}</p>}
+      {text && <p className="mt-3 rounded-lg bg-surface p-3 text-sm text-muted">{text}</p>}
     </div>
   );
 }

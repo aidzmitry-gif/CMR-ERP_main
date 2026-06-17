@@ -73,22 +73,22 @@ export function LogisticsFleet() {
       >
         <div className="flex flex-wrap items-end gap-4">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">Вес, кг</span>
+            <span className="mb-1 block text-xs font-medium text-muted">Вес, кг</span>
             <input
               type="number"
               min={0}
               value={weight}
               onChange={(e) => setWeight(Number(e.target.value))}
-              className="w-32 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+              className="w-32 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
           </label>
-          <label className="flex items-center gap-2 pb-2.5 text-sm text-slate-600">
+          <label className="flex items-center gap-2 pb-2.5 text-sm text-muted">
             <input type="checkbox" checked={needsTemp} onChange={(e) => setNeedsTemp(e.target.checked)} />
             Нужен холод (реф)
           </label>
           <button
             onClick={findEligible}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink"
           >
             Подобрать
           </button>
@@ -119,7 +119,7 @@ export function LogisticsFleet() {
       >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="border-b border-slate-100 text-left text-xs text-muted">
+            <thead className="border-b border-line text-left text-xs text-muted">
               <tr>
                 <th className="px-3 py-2 font-medium">Перевозчик</th>
                 <th className="px-3 py-2 font-medium">Тип</th>
@@ -135,17 +135,17 @@ export function LogisticsFleet() {
                   key={c.id}
                   onClick={() => openCarrier(c.code)}
                   className={
-                    "cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50 " +
+                    "cursor-pointer border-b border-line last:border-0 hover:bg-sunken " +
                     (selected === c.code ? "bg-blue-50/50" : "")
                   }
                 >
                   <td className="px-3 py-2 font-medium text-ink">{c.name}</td>
-                  <td className="px-3 py-2 text-slate-600">
+                  <td className="px-3 py-2 text-muted">
                     {c.kind} · {c.mode}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{c.on_time_pct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{c.avg_days} дн</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{c.shipments_count}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{c.on_time_pct}%</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{c.avg_days} дн</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{c.shipments_count}</td>
                   <td className="px-3 py-2">
                     <Pill text={c.active ? "активен" : "выкл"} tone={c.active ? "emerald" : "slate"} />
                   </td>
@@ -160,7 +160,7 @@ export function LogisticsFleet() {
         <Card title={`Парк и допуски · ${selected}`}>
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Транспорт</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Транспорт</div>
               {vehicles.length === 0 ? (
                 <p className="text-sm text-muted">Нет данных по парку.</p>
               ) : (
@@ -170,7 +170,7 @@ export function LogisticsFleet() {
                     return (
                       <li
                         key={v.vehicle_class}
-                        className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm"
+                        className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm"
                       >
                         <span className="text-ink">
                           {v.vehicle_class} · {formatNumber(v.capacity_kg)} кг · {v.volume_m3} м³
@@ -187,7 +187,7 @@ export function LogisticsFleet() {
               )}
             </div>
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Категории грузов</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Категории грузов</div>
               {caps.length === 0 ? (
                 <p className="text-sm text-muted">Нет данных по допускам.</p>
               ) : (
@@ -195,7 +195,7 @@ export function LogisticsFleet() {
                   {caps.map((c) => (
                     <li
                       key={c.category}
-                      className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm"
+                      className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm"
                     >
                       <span className="text-ink">{c.category}</span>
                       <span className="flex items-center gap-1.5">

@@ -101,7 +101,7 @@ export function AccessAdmin() {
       </p>
 
       {/* Вкладки под будущие уровни прав (комбинация правил) */}
-      <div className="mt-5 flex flex-wrap gap-1 border-b border-slate-200">
+      <div className="mt-5 flex flex-wrap gap-1 border-b border-line">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -110,15 +110,15 @@ export function AccessAdmin() {
             className={[
               "relative -mb-px rounded-t-lg px-4 py-2 text-sm font-medium transition",
               tab === t.key
-                ? "border-x border-t border-slate-200 bg-white text-brand-600"
+                ? "border-x border-t border-line bg-surface text-accent-ink"
                 : t.ready
-                  ? "text-slate-600 hover:text-ink"
-                  : "cursor-not-allowed text-slate-300",
+                  ? "text-muted hover:text-ink"
+                  : "cursor-not-allowed text-faint",
             ].join(" ")}
           >
             {t.label}
             {!t.ready && (
-              <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-400">
+              <span className="ml-1.5 rounded bg-sunken px-1.5 py-0.5 text-[10px] text-faint">
                 скоро
               </span>
             )}
@@ -129,11 +129,11 @@ export function AccessAdmin() {
       {tab === "special" ? (
         <SpecialFunctions employees={employees} flash={flash} />
       ) : tab !== "modules" ? (
-        <section className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+        <section className="mt-6 rounded-2xl border border-dashed border-line-strong bg-surface p-10 text-center">
           <p className="text-sm text-muted">
             Этот уровень — следующий шаг. Структура заложена: после согласования экрана
             «Доступ к модулям» сюда добавим гранулярные права (например{" "}
-            <code className="rounded bg-slate-100 px-1 text-xs">sales.deal.approve</code>),
+            <code className="rounded bg-sunken px-1 text-xs">sales.deal.approve</code>),
             шаблонные роли и индивидуальные исключения поверх ролей.
           </p>
         </section>
@@ -154,25 +154,25 @@ export function AccessAdmin() {
           {/* Матрица роль × модуль */}
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted">
             <Legend className="border-emerald-500 bg-emerald-50 text-emerald-600">есть доступ</Legend>
-            <Legend className="border-slate-200 bg-slate-50">нет доступа</Legend>
+            <Legend className="border-line bg-sunken">нет доступа</Legend>
             <Legend className="border-amber-400 bg-amber-50 text-amber-500">
               директор — всегда всё (заблокировано)
             </Legend>
           </div>
 
-          <div className="mt-3 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+          <div className="mt-3 overflow-auto rounded-2xl border border-line bg-surface shadow-card">
             <table className="w-full border-separate border-spacing-0 text-[13px]">
               <thead>
                 <tr>
-                  <th className="sticky left-0 top-0 z-30 min-w-[230px] border-b border-r-2 border-slate-200 bg-slate-50 px-3 py-2 text-left font-semibold text-ink">
+                  <th className="sticky left-0 top-0 z-30 min-w-[230px] border-b border-r-2 border-line bg-sunken px-3 py-2 text-left font-semibold text-ink">
                     Роль / сотрудники
                   </th>
                   {MODULES.map((m) => (
                     <th
                       key={m.slug}
-                      className="sticky top-0 z-20 border-b border-r border-slate-200 bg-slate-50 px-2 py-2 align-bottom"
+                      className="sticky top-0 z-20 border-b border-r border-line bg-sunken px-2 py-2 align-bottom"
                     >
-                      <span className="mx-auto block h-[110px] [writing-mode:vertical-rl] rotate-180 text-xs font-medium text-slate-600">
+                      <span className="mx-auto block h-[110px] [writing-mode:vertical-rl] rotate-180 text-xs font-medium text-muted">
                         {m.label}
                       </span>
                     </th>
@@ -185,7 +185,7 @@ export function AccessAdmin() {
                   const cnt = ALL_SLUGS.filter((s) => matrix[r.slug].has(s)).length;
                   return (
                     <tr key={r.slug} className="group">
-                      <td className="sticky left-0 z-10 border-b border-r-2 border-slate-200 bg-white px-3 py-2 align-top group-hover:bg-blue-50/40">
+                      <td className="sticky left-0 z-10 border-b border-r-2 border-line bg-surface px-3 py-2 align-top group-hover:bg-blue-50/40">
                         <div className="font-semibold text-ink">
                           {r.title} <span className="text-xs font-normal text-muted">· {cnt}</span>
                         </div>
@@ -196,13 +196,13 @@ export function AccessAdmin() {
                           <div className="mt-1.5 flex gap-1.5">
                             <button
                               onClick={() => setRow(r.slug, true)}
-                              className="rounded border border-slate-200 px-2 py-0.5 text-[10px] text-muted hover:border-brand-600 hover:text-ink"
+                              className="rounded border border-line px-2 py-0.5 text-[10px] text-muted hover:border-accent hover:text-ink"
                             >
                               все
                             </button>
                             <button
                               onClick={() => setRow(r.slug, false)}
-                              className="rounded border border-slate-200 px-2 py-0.5 text-[10px] text-muted hover:border-brand-600 hover:text-ink"
+                              className="rounded border border-line px-2 py-0.5 text-[10px] text-muted hover:border-accent hover:text-ink"
                             >
                               очистить
                             </button>
@@ -217,7 +217,7 @@ export function AccessAdmin() {
                             key={m.slug}
                             onClick={() => toggle(r.slug, m.slug)}
                             className={[
-                              "border-b border-r border-slate-200 p-0 text-center align-middle",
+                              "border-b border-r border-line p-0 text-center align-middle",
                               locked ? "cursor-not-allowed" : "cursor-pointer",
                             ].join(" ")}
                           >
@@ -228,7 +228,7 @@ export function AccessAdmin() {
                                   ? "border-amber-400 bg-amber-50 text-amber-500"
                                   : on
                                     ? "border-emerald-500 bg-emerald-50 text-emerald-600"
-                                    : "border-slate-200 bg-slate-50 text-transparent hover:border-brand-600",
+                                    : "border-line bg-sunken text-transparent hover:border-accent",
                               ].join(" ")}
                             >
                               ✓
@@ -247,13 +247,13 @@ export function AccessAdmin() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
               onClick={exportSnapshot}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
             >
               💾 Сохранить снимок
             </button>
             <button
               onClick={reset}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-ink hover:border-brand-600"
+              className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink hover:border-accent"
             >
               Сбросить к предложенному
             </button>
@@ -261,7 +261,7 @@ export function AccessAdmin() {
           </div>
 
           {snapshot && (
-            <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+            <section className="mt-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-ink">
                   Снимок матрицы (JSON) — для переноса на backend
@@ -270,7 +270,7 @@ export function AccessAdmin() {
                   onClick={() => {
                     void navigator.clipboard.writeText(snapshot).then(() => flash("Скопировано ✓"));
                   }}
-                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-ink hover:border-brand-600"
+                  className="rounded-lg border border-line px-3 py-1 text-xs text-ink hover:border-accent"
                 >
                   Копировать
                 </button>
@@ -367,8 +367,8 @@ function SpecialFunctions({
           <article
             key={p.slug}
             className={[
-              "rounded-2xl border bg-white p-5 shadow-card",
-              p.danger ? "border-rose-200" : "border-slate-200",
+              "rounded-2xl border bg-surface p-5 shadow-card",
+              p.danger ? "border-rose-200" : "border-line",
             ].join(" ")}
           >
             <div className="flex flex-wrap items-center gap-2">
@@ -378,7 +378,7 @@ function SpecialFunctions({
                   необратимо
                 </span>
               )}
-              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+              <code className="rounded bg-sunken px-1.5 py-0.5 text-[11px] text-muted">
                 {p.slug}
               </code>
             </div>
@@ -386,7 +386,7 @@ function SpecialFunctions({
 
             {/* Роли */}
             <div className="mt-4">
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-faint">
                 Кому доступно по роли
               </div>
               <div className="flex flex-wrap gap-2">
@@ -405,7 +405,7 @@ function SpecialFunctions({
                           ? "cursor-not-allowed border-amber-300 bg-amber-50 text-amber-600"
                           : on
                             ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:brightness-105"
-                            : "border-slate-200 bg-slate-50 text-slate-500 hover:border-brand-600 hover:text-ink",
+                            : "border-line bg-sunken text-muted hover:border-accent hover:text-ink",
                       ].join(" ")}
                     >
                       {on ? "✓ " : ""}
@@ -419,7 +419,7 @@ function SpecialFunctions({
 
             {/* Поимённая выдача */}
             <div className="mt-4">
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-faint">
                 Выдать отдельному сотруднику
               </div>
               <GrantUser candidates={candidates} onGrant={(u) => grantUser(p.slug, u)} />
@@ -444,7 +444,7 @@ function SpecialFunctions({
               )}
             </div>
 
-            <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-muted">
+            <p className="mt-4 border-t border-line pt-3 text-xs text-muted">
               Сейчас функцию имеют: <b className="text-ink">{holders.length}</b> чел.
               {personal.length > 0 && ` (из них ${personal.length} — персонально)`}
             </p>
@@ -455,14 +455,14 @@ function SpecialFunctions({
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={exportSnapshot}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
         >
           💾 Сохранить снимок
         </button>
       </div>
 
       {snapshot && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <section className="rounded-2xl border border-line bg-surface p-4 shadow-card">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-ink">
               Снимок системных функций (JSON) — для переноса на backend
@@ -471,7 +471,7 @@ function SpecialFunctions({
               onClick={() => {
                 void navigator.clipboard.writeText(snapshot).then(() => flash("Скопировано ✓"));
               }}
-              className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-ink hover:border-brand-600"
+              className="rounded-lg border border-line px-3 py-1 text-xs text-ink hover:border-accent"
             >
               Копировать
             </button>
@@ -502,7 +502,7 @@ function GrantUser({
       <select
         value={pick}
         onChange={(e) => setPick(e.target.value)}
-        className="min-w-[220px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink outline-none focus:border-brand-600"
+        className="min-w-[220px] rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
       >
         <option value="">— выберите сотрудника —</option>
         {candidates.map((e) => (
@@ -518,7 +518,7 @@ function GrantUser({
           setPick("");
         }}
         disabled={!pick}
-        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-ink hover:border-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
       >
         Выдать
       </button>
@@ -554,7 +554,7 @@ function AddEmployee({ onAdd }: { onAdd: (e: Employee) => void }) {
   }
 
   return (
-    <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+    <section className="mt-5 rounded-2xl border border-line bg-surface p-4 shadow-card">
       <h2 className="text-sm font-semibold text-ink">Быстро добавить сотрудника</h2>
       <p className="mt-0.5 text-xs text-muted">
         Заводит сотрудника и сразу ставит роль (группу прав). Логин подставляется
@@ -567,7 +567,7 @@ function AddEmployee({ onAdd }: { onAdd: (e: Employee) => void }) {
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             placeholder="Иванов И.И."
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink outline-none focus:border-brand-600"
+            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -579,7 +579,7 @@ function AddEmployee({ onAdd }: { onAdd: (e: Employee) => void }) {
               setUsername(e.target.value);
             }}
             placeholder="ivanov_i"
-            className="rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-ink outline-none focus:border-brand-600"
+            className="rounded-lg border border-line bg-surface px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -587,7 +587,7 @@ function AddEmployee({ onAdd }: { onAdd: (e: Employee) => void }) {
           <select
             value={role}
             onChange={(e) => setRole(e.target.value)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink outline-none focus:border-brand-600"
+            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           >
             {ROLES.map((r) => (
               <option key={r.slug} value={r.slug}>
@@ -600,7 +600,7 @@ function AddEmployee({ onAdd }: { onAdd: (e: Employee) => void }) {
           <button
             onClick={submit}
             disabled={!fullName.trim() || !login.trim()}
-            className="w-full rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Добавить
           </button>

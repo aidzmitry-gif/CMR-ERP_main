@@ -45,16 +45,16 @@ export function DealApprovals({ dealId }: { dealId: string }) {
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-200 p-4">
+    <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
-        <Gavel size={18} className="text-brand-600" /> Согласования
+        <Gavel size={18} className="text-accent-ink" /> Согласования
       </div>
 
       <div className="mt-3 flex gap-2">
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+          className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {KINDS.map((k) => (
             <option key={k.value} value={k.value}>
@@ -65,7 +65,7 @@ export function DealApprovals({ dealId }: { dealId: string }) {
         <button
           onClick={onRequest}
           disabled={busy}
-          className="shrink-0 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          className="shrink-0 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
         >
           На согласование
         </button>
@@ -78,7 +78,7 @@ export function DealApprovals({ dealId }: { dealId: string }) {
           return (
             <li
               key={a.id}
-              className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg bg-sunken px-3 py-2"
             >
               <div className="min-w-0">
                 <div className="truncate text-sm text-ink">

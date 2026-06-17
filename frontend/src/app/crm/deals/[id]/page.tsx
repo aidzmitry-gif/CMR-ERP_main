@@ -28,7 +28,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         <ArrowLeft size={16} /> К сделкам
       </Link>
 
-      <div className="rounded-2xl bg-white p-5 shadow-card">
+      <div className="rounded-2xl bg-surface p-5 shadow-card">
         {/* Шапка */}
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted">№ {d.number}</span>
@@ -50,18 +50,18 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
         {/* След. шаг */}
         <div className="mt-3 flex items-center gap-2 text-sm">
-          <Flag size={16} className="text-brand-600" />
+          <Flag size={16} className="text-accent-ink" />
           <span className="text-muted">След. шаг:</span>
           <span className="font-medium text-ink">{d.nextStep}</span>
         </div>
 
         {/* Контакт + дата */}
-        <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
           <span className="inline-flex items-center gap-2 text-sm text-ink">
-            <User size={16} className="text-slate-400" /> {d.contact}
+            <User size={16} className="text-faint" /> {d.contact}
           </span>
-          <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink">
-            <Calendar size={15} className="text-brand-600" /> {d.datetime}
+          <span className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm text-ink">
+            <Calendar size={15} className="text-accent-ink" /> {d.datetime}
           </span>
         </div>
 

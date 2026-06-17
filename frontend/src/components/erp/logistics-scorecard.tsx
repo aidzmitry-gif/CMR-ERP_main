@@ -54,7 +54,7 @@ export function LogisticsScorecard() {
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
             placeholder="ГГГГ-ММ"
-            className="w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+            className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>
         </div>
@@ -62,7 +62,7 @@ export function LogisticsScorecard() {
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-sm">
-          <thead className="border-b border-slate-100 text-left text-xs text-muted">
+          <thead className="border-b border-line text-left text-xs text-muted">
             <tr>
               <th className="px-3 py-2 font-medium">Перевозчик</th>
               <th className="px-3 py-2 text-right font-medium">OTD</th>
@@ -77,14 +77,14 @@ export function LogisticsScorecard() {
           </thead>
           <tbody>
             {scored.map((r) => (
-              <tr key={r.carrier_code} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <tr key={r.carrier_code} className="border-b border-line last:border-0 hover:bg-sunken">
                 <td className="px-3 py-2 font-medium text-ink">{r.carrier_code}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{r.otd_pct}%</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{r.otif_pct}%</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{r.damage_free_pct}%</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{r.billing_accuracy_pct}%</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{r.claims_ratio_pct}%</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(r.cost_per_delivery)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{r.otd_pct}%</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{r.otif_pct}%</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{r.damage_free_pct}%</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{r.billing_accuracy_pct}%</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{r.claims_ratio_pct}%</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(r.cost_per_delivery)}</td>
                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-ink">{r.score}</td>
                 <td className="px-3 py-2 text-center">
                   <GradeBadge grade={r.grade} />

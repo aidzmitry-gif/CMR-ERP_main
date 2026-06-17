@@ -22,10 +22,10 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
       <div className="mx-auto max-w-5xl space-y-4">
 
         {/* Header */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-start gap-3">
             <h1 className="text-xl font-bold text-ink">{card.name}</h1>
-            <Star className="mt-1 h-4 w-4 fill-brand text-brand" />
+            <Star className="mt-1 h-4 w-4 fill-accent text-accent" />
             {card.unp && (
               <span className="mt-0.5 font-mono text-[13px] text-muted">УНП {card.unp}</span>
             )}
@@ -34,11 +34,11 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                 Активен
               </span>
             ) : (
-              <span className="mt-0.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+              <span className="mt-0.5 rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                 В архиве
               </span>
             )}
-            <span className="mt-0.5 rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-500">
+            <span className="mt-0.5 rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               #{card.id}
             </span>
           </div>
@@ -50,38 +50,38 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
           {/* Left — Реквизиты + Контакты */}
           <div className="space-y-4">
 
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Реквизиты
               </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
-                  <p className="text-[12px] text-slate-500">Наименование</p>
-                  <div className="mt-1 rounded-xl bg-slate-50 px-3 py-2 text-sm text-ink">
+                  <p className="text-[12px] text-muted">Наименование</p>
+                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 text-sm text-ink">
                     {card.name}
                   </div>
                 </div>
                 <div>
-                  <p className="text-[12px] text-slate-500">УНП</p>
-                  <div className="mt-1 rounded-xl bg-slate-50 px-3 py-2 font-mono text-sm text-ink">
+                  <p className="text-[12px] text-muted">УНП</p>
+                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 font-mono text-sm text-ink">
                     {card.unp ?? "—"}
                   </div>
                 </div>
                 <div>
-                  <p className="text-[12px] text-slate-500">Статус</p>
-                  <div className="mt-1 rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                  <p className="text-[12px] text-muted">Статус</p>
+                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 text-sm">
                     {card.is_active ? (
                       <span className="text-emerald-700">Активен</span>
                     ) : (
-                      <span className="text-slate-500">В архиве</span>
+                      <span className="text-muted">В архиве</span>
                     )}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Контакты
               </p>
               {card.contacts.length === 0 ? (
@@ -89,13 +89,13 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
               ) : (
                 <div className="mt-3 space-y-2">
                   {card.contacts.map((c) => (
-                    <div key={c.id} className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-2">
-                      <User className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                    <div key={c.id} className="flex items-start gap-3 rounded-xl bg-sunken px-3 py-2">
+                      <User className="mt-0.5 h-4 w-4 shrink-0 text-faint" />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium text-ink">{c.full_name}</span>
                           {c.is_primary && (
-                            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] text-brand-600">
+                            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] text-accent-ink">
                               основной
                             </span>
                           )}
@@ -125,12 +125,12 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
           {/* Right — Golden record + Слитые дубли */}
           <div className="space-y-4">
 
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Golden record
               </p>
               <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
-                <Star className="h-4 w-4 fill-brand text-brand" />
+                <Star className="h-4 w-4 fill-accent text-accent" />
                 {sourceCount > 0
                   ? `Собрана из ${sourceCount} ${plural(sourceCount, ["источника", "источника", "источников"])}`
                   : "Эталон без алиасов"}
@@ -142,46 +142,46 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                       key={`${a.source}-${a.external_ref}`}
                       className="flex items-center justify-between gap-2"
                     >
-                      <span className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">
+                      <span className="truncate rounded-full bg-sunken px-2 py-0.5 text-[11px] font-mono text-muted">
                         {a.source} · {a.external_ref}
                       </span>
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                      <span className="shrink-0 rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                         alias
                       </span>
                     </div>
                   ))}
                 </div>
               )}
-              <p className="mt-3 text-[11px] text-slate-400">
+              <p className="mt-3 text-[11px] text-faint">
                 Документы ссылаются только на эталон; дубли хранятся как алиасы.
               </p>
             </div>
 
             {card.merged_duplicates.length > 0 && (
-              <div className="rounded-2xl bg-white p-5 shadow-card">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="rounded-2xl bg-surface p-5 shadow-card">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                   Слитые дубли
                 </p>
                 <div className="mt-3 space-y-2">
                   {card.merged_duplicates.map((d) => (
                     <div key={d.id} className="flex items-center gap-2">
-                      <span className="text-[11px] text-slate-400">🗃</span>
-                      <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{d.name}</span>
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-500">
+                      <span className="text-[11px] text-faint">🗃</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-muted">{d.name}</span>
+                      <span className="shrink-0 rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
                         #{d.id}
                       </span>
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-[11px] text-slate-400">Слияние обратимо.</p>
+                <p className="mt-2 text-[11px] text-faint">Слияние обратимо.</p>
               </div>
             )}
           </div>
         </div>
 
         {/* Audit */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
             История изменений (аудит)
           </p>
           {card.audit.length === 0 ? (
@@ -190,18 +190,18 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
             <div className="mt-3 overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                     <th className="px-3 py-2 font-semibold">Действие</th>
                     <th className="px-3 py-2 font-semibold">Кто</th>
                     <th className="px-3 py-2 font-semibold">Когда</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-line">
                   {card.audit.map((a) => (
-                    <tr key={a.id} className="hover:bg-slate-50/60">
+                    <tr key={a.id} className="hover:bg-sunken/60">
                       <td className="px-3 py-2.5">{a.action}</td>
                       <td className="px-3 py-2.5 text-muted">{a.actor}</td>
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-slate-500">
+                      <td className="px-3 py-2.5 font-mono text-[13px] text-muted">
                         {formatAuditDate(a.ts)}
                       </td>
                     </tr>

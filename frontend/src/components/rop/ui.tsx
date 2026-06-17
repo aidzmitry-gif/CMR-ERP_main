@@ -4,13 +4,15 @@ import type { ReactNode } from "react";
 import type { Tone } from "@/lib/rop-data";
 
 /** Палитры тонов для тегов, баров, текста и левой границы карточек. */
+// green/amber/red/violet/teal — намеренные семантические статусы, читаются в обеих темах.
+// blue (акцент) и slate (нейтраль) — структурные роли → через токены, иначе светлые пятна в тёмной теме.
 export const TAG_TONE: Record<Tone, string> = {
   green: "bg-emerald-50 text-emerald-700",
   amber: "bg-amber-50 text-amber-700",
   red: "bg-red-50 text-red-600",
-  blue: "bg-brand-100 text-brand-600",
+  blue: "bg-accent-soft text-accent",
   violet: "bg-violet-50 text-violet-600",
-  slate: "bg-slate-100 text-slate-600",
+  slate: "bg-sunken text-muted",
   teal: "bg-teal-50 text-teal-700",
 };
 
@@ -18,9 +20,9 @@ export const BAR_TONE: Record<Tone, string> = {
   green: "bg-emerald-500",
   amber: "bg-amber-500",
   red: "bg-red-500",
-  blue: "bg-brand",
+  blue: "bg-accent",
   violet: "bg-violet-500",
-  slate: "bg-slate-400",
+  slate: "bg-line-strong",
   teal: "bg-teal-500",
 };
 
@@ -28,9 +30,9 @@ export const TEXT_TONE: Record<Tone, string> = {
   green: "text-emerald-600",
   amber: "text-amber-600",
   red: "text-red-600",
-  blue: "text-brand-600",
+  blue: "text-accent",
   violet: "text-violet-600",
-  slate: "text-slate-500",
+  slate: "text-muted",
   teal: "text-teal-600",
 };
 
@@ -38,21 +40,21 @@ export const BORDER_TONE: Record<Tone, string> = {
   green: "border-emerald-400",
   amber: "border-amber-400",
   red: "border-red-400",
-  blue: "border-brand",
+  blue: "border-accent",
   violet: "border-violet-400",
-  slate: "border-slate-300",
+  slate: "border-line-strong",
   teal: "border-teal-400",
 };
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <section className={clsx("rounded-2xl bg-white p-5 shadow-card", className)}>{children}</section>
+    <section className={clsx("rounded-2xl border border-line bg-surface p-5 shadow-card", className)}>{children}</section>
   );
 }
 
 export function Caption({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={clsx("text-[11px] font-semibold uppercase tracking-wide text-slate-400", className)}>
+    <div className={clsx("text-[11px] font-semibold uppercase tracking-wide text-faint", className)}>
       {children}
     </div>
   );
@@ -78,7 +80,7 @@ export function Dot({ tone }: { tone: Tone }) {
 export function Avatar({ name }: { name: string }) {
   const letter = name.trim()[0]?.toUpperCase() ?? "?";
   return (
-    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-600">
+    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
       {letter}
     </span>
   );
@@ -86,7 +88,7 @@ export function Avatar({ name }: { name: string }) {
 
 export function Bar({ percent, tone = "blue", className }: { percent: number; tone?: Tone; className?: string }) {
   return (
-    <div className={clsx("h-2 w-full overflow-hidden rounded-full bg-slate-100", className)}>
+    <div className={clsx("h-2 w-full overflow-hidden rounded-full bg-sunken", className)}>
       <div
         className={clsx("h-full rounded-full", BAR_TONE[tone])}
         style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}

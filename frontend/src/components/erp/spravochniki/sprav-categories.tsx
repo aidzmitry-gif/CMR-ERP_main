@@ -65,13 +65,13 @@ function TreeNodeRow({
       <div
         className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
           isSelected
-            ? "bg-brand-100 text-brand-600"
-            : "text-ink hover:bg-slate-50/60"
+            ? "bg-accent-soft text-accent-ink"
+            : "text-ink hover:bg-sunken/60"
         }`}
         onClick={() => onSelect(node)}
       >
         <span
-          className={`w-4 text-center ${isSelected ? "text-brand-600/60" : "text-slate-400"}`}
+          className={`w-4 text-center ${isSelected ? "text-accent-ink/60" : "text-faint"}`}
           onClick={(e) => {
             e.stopPropagation();
             if (hasChildren) onToggle(node.id);
@@ -87,20 +87,20 @@ function TreeNodeRow({
         </span>
         <GripVertical
           size={14}
-          className={isSelected ? "text-brand-600/40" : "text-slate-300"}
+          className={isSelected ? "text-accent-ink/40" : "text-faint"}
         />
         <span className={isSelected ? "font-semibold" : node.parent_id === null ? "font-medium" : ""}>
           {node.name}
         </span>
         {!node.is_active && (
-          <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+          <span className="ml-1 rounded-full bg-sunken px-1.5 py-0.5 text-[10px] text-muted">
             архив
           </span>
         )}
       </div>
 
       {hasChildren && isExpanded && (
-        <ul className="ml-5 space-y-0.5 border-l border-slate-100 pl-2">
+        <ul className="ml-5 space-y-0.5 border-l border-line pl-2">
           {node.children.map((child) => (
             <TreeNodeRow
               key={child.id}
@@ -160,7 +160,7 @@ function AddForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Например: Конденсаторы"
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/20"
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
         />
       </div>
       <div>
@@ -169,7 +169,7 @@ function AddForm({
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="CAT-0200"
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/20"
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
         />
       </div>
       {error && <p className="text-xs text-red-500">{error}</p>}
@@ -177,14 +177,14 @@ function AddForm({
         <button
           type="submit"
           disabled={busy}
-          className="flex-1 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
         >
           {busy ? "Сохранение…" : "Добавить"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+          className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
         >
           Отмена
         </button>
@@ -223,21 +223,21 @@ function RenameForm({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/20"
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
         />
       </div>
       <div className="flex gap-2">
         <button
           type="submit"
           disabled={busy}
-          className="flex-1 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
         >
           {busy ? "Сохранение…" : "Сохранить"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+          className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
         >
           Отмена
         </button>
@@ -283,7 +283,7 @@ function MoveForm({
         <select
           value={parentId ?? ""}
           onChange={(e) => setParentId(e.target.value === "" ? null : Number(e.target.value))}
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/20"
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
         >
           <option value="">— корень —</option>
           {candidates.map((g) => (
@@ -297,14 +297,14 @@ function MoveForm({
         <button
           type="submit"
           disabled={busy}
-          className="flex-1 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
         >
           {busy ? "Перемещение…" : "Переместить"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+          className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
         >
           Отмена
         </button>
@@ -426,24 +426,24 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
       )}
 
       {/* Заголовок + поиск + добавить */}
-      <div className="rounded-2xl bg-white p-5 shadow-card">
+      <div className="rounded-2xl bg-surface p-5 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-bold text-ink">Категории номенклатуры 🌳</h2>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600">
+            <span className="rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               схема: public
             </span>
             <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
               иерархия
             </span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600">
+            <span className="rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               parent_id
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-56 rounded-xl bg-slate-50 px-3 py-2">
+            <div className="w-56 rounded-xl bg-sunken px-3 py-2">
               <input
-                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent text-ink text-sm outline-none placeholder:text-faint"
                 placeholder="Поиск по дереву…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -451,7 +451,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </div>
             <button
               onClick={() => setModal({ kind: "add", parentId: null, parentName: null })}
-              className="flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card"
+              className="flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card"
             >
               <Plus size={14} />
               Добавить категорию
@@ -463,8 +463,8 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
       {/* Двухколоночный grid */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         {/* ЛЕВО: дерево */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
             Дерево категорий
           </div>
 
@@ -490,16 +490,16 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </div>
           )}
 
-          <div className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+          <div className="mt-4 border-t border-line pt-3 text-[11px] text-faint">
             ▾ раскрыт · ▸ свёрнут · ⠿ перетащить для переноса
           </div>
         </div>
 
         {/* ПРАВО: карточка узла / форма */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
           {modal?.kind === "add" ? (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Новая группа
               </div>
               <div className="mt-3">
@@ -512,7 +512,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </>
           ) : modal?.kind === "rename" && selected ? (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Переименовать
               </div>
               <div className="mt-3">
@@ -525,7 +525,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </>
           ) : modal?.kind === "move" && selected ? (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Переместить
               </div>
               <div className="mt-3">
@@ -539,7 +539,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </>
           ) : modal?.kind === "archive" && selected ? (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Архивировать
               </div>
               <div className="mt-4 space-y-3">
@@ -559,7 +559,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                   </button>
                   <button
                     onClick={() => setModal(null)}
-                    className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+                    className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
                   >
                     Отмена
                   </button>
@@ -568,7 +568,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             </>
           ) : selected ? (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Узел
               </div>
               <div className="mt-2 flex items-center gap-2">
@@ -578,16 +578,16 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                     Активна
                   </span>
                 ) : (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                  <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                     Архив
                   </span>
                 )}
               </div>
 
-              <dl className="mt-4 space-y-3 border-t border-slate-100 pt-4 text-sm">
+              <dl className="mt-4 space-y-3 border-t border-line pt-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-muted">Код</dt>
-                  <dd className="font-mono text-[13px] text-slate-500">{selected.code}</dd>
+                  <dd className="font-mono text-[13px] text-muted">{selected.code}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-muted">Наименование</dt>
@@ -599,7 +599,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                 </div>
                 <div className="flex items-start justify-between gap-3">
                   <dt className="text-muted">Путь</dt>
-                  <dd className="text-right font-mono text-[13px] text-slate-500">
+                  <dd className="text-right font-mono text-[13px] text-muted">
                     {buildBreadcrumb(selected.id, groups).join(" › ")}
                   </dd>
                 </div>
@@ -609,7 +609,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                 </div>
               </dl>
 
-              <div className="mt-5 flex flex-col gap-2 border-t border-slate-100 pt-4">
+              <div className="mt-5 flex flex-col gap-2 border-t border-line pt-4">
                 <button
                   onClick={() =>
                     setModal({
@@ -618,7 +618,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                       parentName: selected.name,
                     })
                   }
-                  className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card"
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card"
                 >
                   <FolderPlus size={14} />
                   Добавить подкатегорию
@@ -626,13 +626,13 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setModal({ kind: "rename", node: selected })}
-                    className="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+                    className="flex-1 rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
                   >
                     Переименовать
                   </button>
                   <button
                     onClick={() => setModal({ kind: "move", node: selected })}
-                    className="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+                    className="flex-1 rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
                   >
                     Переместить…
                   </button>
@@ -640,7 +640,7 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                 {selected.is_active && (
                   <button
                     onClick={() => setModal({ kind: "archive", node: selected })}
-                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200"
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
                   >
                     <Archive size={14} />В архив
                   </button>

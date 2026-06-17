@@ -80,7 +80,7 @@ export function PlanMatrix({ initial }: Props) {
 
   if (!board) {
     return (
-      <div className="p-6 text-gray-500 text-sm">
+      <div className="p-6 text-muted text-sm">
         Данные планирования недоступны. Проверьте соединение с сервером.
       </div>
     );
@@ -96,29 +96,29 @@ export function PlanMatrix({ initial }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => loadYear(year - 1)}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
+            className="px-3 py-1 text-sm border border-line rounded hover:bg-sunken"
           >
             ‹
           </button>
           <span className="font-semibold text-lg">{year}</span>
           <button
             onClick={() => loadYear(year + 1)}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
+            className="px-3 py-1 text-sm border border-line rounded hover:bg-sunken"
           >
             ›
           </button>
         </div>
         <div className="flex flex-wrap gap-4 text-sm">
-          <div className="bg-gray-50 rounded px-3 py-1">
-            <span className="text-gray-500">Мощность:</span>{" "}
+          <div className="bg-sunken rounded px-3 py-1">
+            <span className="text-muted">Мощность:</span>{" "}
             <span className="font-medium">{fmtNh(capacity_nh)} н.ч/мес</span>
           </div>
           <div className="bg-blue-50 rounded px-3 py-1">
-            <span className="text-gray-500">План YTD:</span>{" "}
+            <span className="text-muted">План YTD:</span>{" "}
             <span className="font-medium text-blue-700">{fmtNh(totals.plan_ytd)} н.ч</span>
           </div>
           <div className="bg-green-50 rounded px-3 py-1">
-            <span className="text-gray-500">Факт YTD:</span>{" "}
+            <span className="text-muted">Факт YTD:</span>{" "}
             <span className="font-medium text-green-700">{fmtNh(totals.fact_ytd)} н.ч</span>
           </div>
           <div className={`rounded px-3 py-1 ${loadTone(totals.load_pct[totals.peak_month] ?? 0)}`}>
@@ -127,30 +127,30 @@ export function PlanMatrix({ initial }: Props) {
         </div>
       </div>
 
-      {loading && <div className="text-xs text-gray-400">Загрузка…</div>}
+      {loading && <div className="text-xs text-faint">Загрузка…</div>}
 
       {/* Matrix table */}
-      <div className="overflow-x-auto rounded border border-gray-200">
+      <div className="overflow-x-auto rounded border border-line">
         <table className="min-w-full text-xs">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-3 py-2 font-medium text-gray-600 w-48">Изделие</th>
+            <tr className="bg-sunken border-b border-line">
+              <th className="text-left px-3 py-2 font-medium text-muted w-48">Изделие</th>
               {MONTHS.map((m) => (
-                <th key={m} className="text-center px-1 py-2 font-medium text-gray-600 min-w-[52px]">
+                <th key={m} className="text-center px-1 py-2 font-medium text-muted min-w-[52px]">
                   {m}
                 </th>
               ))}
-              <th className="text-center px-2 py-2 font-medium text-gray-600">Итого</th>
+              <th className="text-center px-2 py-2 font-medium text-muted">Итого</th>
               <th className="w-8"></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.product} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-3 py-1.5 text-gray-700 font-medium truncate max-w-[192px]">
+              <tr key={row.product} className="border-b border-line hover:bg-sunken">
+                <td className="px-3 py-1.5 text-muted font-medium truncate max-w-[192px]">
                   {row.product}
                   {row.norm_nh > 0 && (
-                    <span className="ml-1 text-gray-400 font-normal">
+                    <span className="ml-1 text-faint font-normal">
                       ({fmtNh(row.norm_nh)} н.ч)
                     </span>
                   )}
@@ -165,7 +165,7 @@ export function PlanMatrix({ initial }: Props) {
                         <input
                           type="number"
                           min={0}
-                          className="w-12 text-center border rounded px-1 py-0.5 text-xs"
+                          className="w-12 text-center border border-line rounded px-1 py-0.5 text-xs bg-surface text-ink"
                           value={editVal}
                           onChange={(e) => setEditVal(e.target.value)}
                           onBlur={() =>
@@ -181,7 +181,7 @@ export function PlanMatrix({ initial }: Props) {
                       ) : (
                         <button
                           onClick={() => handleCellClick(row.product, cell.month, cell.plan_qty)}
-                          className={`w-12 rounded px-1 py-0.5 text-center ${cell.plan_qty > 0 ? tone : "text-gray-300"} hover:ring-1 hover:ring-blue-300`}
+                          className={`w-12 rounded px-1 py-0.5 text-center ${cell.plan_qty > 0 ? tone : "text-faint"} hover:ring-1 hover:ring-blue-300`}
                           title={`план: ${cell.plan_qty} шт / факт: ${cell.fact_qty} шт`}
                         >
                           {cell.plan_qty || "—"}
@@ -190,13 +190,13 @@ export function PlanMatrix({ initial }: Props) {
                     </td>
                   );
                 })}
-                <td className="px-2 py-1 text-center font-medium text-gray-700">
+                <td className="px-2 py-1 text-center font-medium text-ink">
                   {row.year_qty}
                 </td>
                 <td className="px-1 py-1">
                   <button
                     onClick={() => handleDelete(row.product)}
-                    className="text-gray-300 hover:text-red-500 p-0.5"
+                    className="text-faint hover:text-red-500 p-0.5"
                     title="Удалить позицию"
                   >
                     <Trash2 size={12} />
@@ -206,8 +206,8 @@ export function PlanMatrix({ initial }: Props) {
             ))}
 
             {/* Totals row: plan н.ч */}
-            <tr className="border-b border-gray-200 bg-blue-50">
-              <td className="px-3 py-1.5 text-gray-600 font-medium">Σ план н.ч</td>
+            <tr className="border-b border-line bg-blue-50">
+              <td className="px-3 py-1.5 text-muted font-medium">Σ план н.ч</td>
               {totals.month_nh.map((nh, i) => (
                 <td key={i} className="px-1 py-1 text-center text-blue-700 font-medium">
                   {fmtNh(nh)}
@@ -220,8 +220,8 @@ export function PlanMatrix({ initial }: Props) {
             </tr>
 
             {/* Fact row */}
-            <tr className="border-b border-gray-200 bg-green-50">
-              <td className="px-3 py-1.5 text-gray-600 font-medium">Σ факт н.ч</td>
+            <tr className="border-b border-line bg-green-50">
+              <td className="px-3 py-1.5 text-muted font-medium">Σ факт н.ч</td>
               {totals.fact_nh.map((nh, i) => (
                 <td key={i} className="px-1 py-1 text-center text-green-700 font-medium">
                   {fmtNh(nh)}
@@ -234,8 +234,8 @@ export function PlanMatrix({ initial }: Props) {
             </tr>
 
             {/* Load % row */}
-            <tr className="bg-gray-50">
-              <td className="px-3 py-1.5 text-gray-600 font-medium">Загрузка %</td>
+            <tr className="bg-sunken">
+              <td className="px-3 py-1.5 text-muted font-medium">Загрузка %</td>
               {totals.load_pct.map((pct, i) => (
                 <td key={i} className="px-1 py-1 text-center">
                   <span className={`rounded px-1 py-0.5 text-xs font-medium ${loadTone(pct)}`}>
@@ -252,8 +252,8 @@ export function PlanMatrix({ initial }: Props) {
 
       {/* Capacity chart */}
       <div>
-        <h3 className="text-sm font-medium text-gray-700 mb-3">График мощности (н.ч)</h3>
-        <div className="flex items-end gap-2 h-32 border-b border-gray-200 pb-1">
+        <h3 className="text-sm font-medium text-ink mb-3">График мощности (н.ч)</h3>
+        <div className="flex items-end gap-2 h-32 border-b border-line pb-1">
           {MONTHS.map((m, i) => {
             const planH = Math.round((totals.month_nh[i] / maxBarNh) * 100);
             const factH = Math.round((totals.fact_nh[i] / maxBarNh) * 100);
@@ -272,12 +272,12 @@ export function PlanMatrix({ initial }: Props) {
                     title={`факт: ${fmtNh(totals.fact_nh[i])} н.ч`}
                   />
                 </div>
-                <span className="text-xs text-gray-400">{m}</span>
+                <span className="text-xs text-faint">{m}</span>
               </div>
             );
           })}
         </div>
-        <div className="flex gap-4 mt-1 text-xs text-gray-500">
+        <div className="flex gap-4 mt-1 text-xs text-muted">
           <span className="flex items-center gap-1">
             <span className="inline-block w-3 h-3 bg-amber-200 rounded-sm" /> план
           </span>
@@ -290,29 +290,29 @@ export function PlanMatrix({ initial }: Props) {
       {/* Add position */}
       <div>
         {showAddForm ? (
-          <div className="border rounded p-4 space-y-3 bg-gray-50">
+          <div className="border border-line rounded p-4 space-y-3 bg-sunken">
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700 w-24">Изделие</label>
+              <label className="text-sm font-medium text-muted w-24">Изделие</label>
               <input
                 type="text"
-                className="flex-1 border rounded px-2 py-1 text-sm"
+                className="flex-1 border border-line rounded px-2 py-1 text-sm bg-surface text-ink"
                 placeholder="Название изделия"
                 value={newProduct}
                 onChange={(e) => setNewProduct(e.target.value)}
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">
+              <label className="text-sm font-medium text-muted block mb-1">
                 Плановое кол-во по месяцам (шт)
               </label>
               <div className="grid grid-cols-12 gap-1">
                 {MONTHS.map((m, i) => (
                   <div key={m} className="flex flex-col items-center">
-                    <span className="text-xs text-gray-400 mb-0.5">{m}</span>
+                    <span className="text-xs text-faint mb-0.5">{m}</span>
                     <input
                       type="number"
                       min={0}
-                      className="w-full border rounded px-1 py-0.5 text-xs text-center"
+                      className="w-full border border-line rounded px-1 py-0.5 text-xs text-center bg-surface text-ink"
                       value={newMonthly[i]}
                       onChange={(e) => {
                         const next = [...newMonthly];
@@ -334,7 +334,7 @@ export function PlanMatrix({ initial }: Props) {
               </button>
               <button
                 onClick={() => setShowAddForm(false)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-100"
+                className="px-3 py-1.5 text-sm border border-line rounded hover:bg-sunken"
               >
                 Отмена
               </button>

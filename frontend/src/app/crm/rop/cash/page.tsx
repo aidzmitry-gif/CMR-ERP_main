@@ -38,14 +38,14 @@ export default function RopCashPage() {
 
           {/* KPI-полоса */}
           <Card className="!p-0">
-            <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+            <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
               {cashKpis.map((k) => (
                 <div key={k.label} className="p-4">
                   <div className={`text-lg font-bold ${k.tone ? TEXT_TONE[k.tone] : "text-ink"}`}>
                     {k.value}
                   </div>
                   <div className="mt-1 text-[11px] leading-tight text-muted">{k.label}</div>
-                  <div className="text-[10px] text-slate-400">{k.sub}</div>
+                  <div className="text-[10px] text-faint">{k.sub}</div>
                 </div>
               ))}
             </div>
@@ -85,7 +85,7 @@ export default function RopCashPage() {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-slate-400">{calendarNote}</p>
+              <p className="mt-3 text-xs text-faint">{calendarNote}</p>
             </Card>
           </div>
 
@@ -98,7 +98,7 @@ export default function RopCashPage() {
                   <div key={d.name} className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0">
                       <span className="text-sm font-semibold text-ink">{d.name}</span>
-                      <span className="ml-2 text-[11px] text-slate-400">{d.owner}</span>
+                      <span className="ml-2 text-[11px] text-faint">{d.owner}</span>
                       <span className="mt-1 block">
                         <Tag tone={d.statusTone}>{d.status}</Tag>
                       </span>
@@ -120,7 +120,7 @@ export default function RopCashPage() {
               <Caption>DSO по менеджерам (BYN)</Caption>
               <table className="mt-3 w-full text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th scope="col" className="pb-2 text-left font-semibold">Менеджер</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Долг</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Просрочка</th>
@@ -129,7 +129,7 @@ export default function RopCashPage() {
                 </thead>
                 <tbody>
                   {managerDso.map((m) => (
-                    <tr key={m.name} className="border-t border-slate-100 align-top">
+                    <tr key={m.name} className="border-t border-line align-top">
                       <td className="py-2.5">
                         <span className="flex items-center gap-2">
                           <Avatar name={m.name} />
@@ -146,7 +146,7 @@ export default function RopCashPage() {
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t border-slate-200 font-bold text-ink">
+                  <tr className="border-t border-line font-bold text-ink">
                     <td className="py-2.5">Итого</td>
                     <td className="py-2.5 text-right tabular-nums">{managerDsoTotal.debt}</td>
                     <td className="py-2.5 text-right tabular-nums text-red-600">{managerDsoTotal.overdue}</td>
@@ -170,7 +170,7 @@ export default function RopCashPage() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs text-slate-400">{cashDisciplineNote}</p>
+            <p className="mt-3 text-xs text-faint">{cashDisciplineNote}</p>
           </Card>
         </div>
       </main>

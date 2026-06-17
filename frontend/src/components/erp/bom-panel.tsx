@@ -23,7 +23,7 @@ import {
 } from "@/lib/production-bom";
 
 const STATUS_STYLES: Record<Bom["status"], string> = {
-  draft: "bg-slate-100 text-slate-500",
+  draft: "bg-sunken text-muted",
   approved: "bg-green-50 text-green-600",
 };
 
@@ -40,7 +40,7 @@ function num(n: number): string {
 
 function Kpi({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink">{value}</div>
     </div>
@@ -173,10 +173,10 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
       </div>
 
       <div className="mt-5 text-sm font-semibold text-ink">Справочник спецификаций (BOM)</div>
-      <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-2 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="w-8 px-2 py-2" />
               <th className="px-4 py-2 font-medium">Изделие</th>
               <th className="px-4 py-2 font-medium">Версия</th>
@@ -199,14 +199,14 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
               return (
                 <Fragment key={b.id}>
                   <tr
-                    className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50"
+                    className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken"
                     onClick={() => void toggle(b.id)}
                   >
-                    <td className="px-2 py-2.5 text-slate-400">
+                    <td className="px-2 py-2.5 text-faint">
                       {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </td>
-                    <td className="px-4 py-2.5 text-slate-700">{b.product}</td>
-                    <td className="px-4 py-2.5 text-slate-500">{b.version}</td>
+                    <td className="px-4 py-2.5 text-muted">{b.product}</td>
+                    <td className="px-4 py-2.5 text-muted">{b.version}</td>
                     <td className="px-4 py-2.5">
                       <span
                         className={clsx(
@@ -217,7 +217,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                         {bomStatusLabel(b.status)}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{b.item_count}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted">{b.item_count}</td>
                     <td className="px-4 py-2.5 text-right">
                       <span
                         className={clsx(
@@ -235,7 +235,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                             onClick={() => onApprove(b.id)}
                             disabled={busy}
                             title="Утвердить спецификацию"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
                           >
                             <Check size={15} />
                           </button>
@@ -244,7 +244,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                           onClick={() => onDelete(b.id)}
                           disabled={busy}
                           title="Удалить спецификацию"
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
                         >
                           <Trash2 size={15} />
                         </button>
@@ -252,7 +252,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                     </td>
                   </tr>
                   {open && (
-                    <tr className="bg-slate-50/60">
+                    <tr className="bg-sunken/60">
                       <td colSpan={7} className="px-4 py-3">
                         <BomComposition
                           detail={detail}
@@ -281,26 +281,26 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
           </tbody>
         </table>
 
-        <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-3">
+        <div className="flex items-center gap-2 border-t border-line px-4 py-3">
           <input
             value={product}
             onChange={(e) => setProduct(e.target.value)}
             placeholder="Изделие новой спецификации"
             className={clsx(
-              "min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand",
-              productError ? "border-amber-500" : "border-slate-200",
+              "min-w-0 flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent",
+              productError ? "border-amber-500" : "border-line",
             )}
           />
           <input
             value={version}
             onChange={(e) => setVersion(e.target.value)}
             placeholder="Версия (v1)"
-            className="w-28 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-28 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <button
             onClick={onCreate}
             disabled={busy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             <Plus size={16} /> Спецификация
           </button>
@@ -345,14 +345,14 @@ function BomComposition(props: CompositionProps) {
   return (
     <div>
       <div className="mb-2 flex items-center gap-3 text-xs text-muted">
-        <span className="font-medium text-slate-600">Состав изделия</span>
+        <span className="font-medium text-muted">Состав изделия</span>
         <span>позиций: {detail.items.length}</span>
         {short > 0 && <span className="text-red-600">дефицит: {short}</span>}
       </div>
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-lg border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-3 py-2 font-medium">Комплектующее</th>
               <th className="px-3 py-2 text-right font-medium">Норма</th>
               <th className="px-3 py-2 text-right font-medium">Склад</th>
@@ -371,13 +371,13 @@ function BomComposition(props: CompositionProps) {
               </tr>
             )}
             {detail.items.map((it) => (
-              <tr key={it.id} className="border-b border-slate-50 last:border-0">
-                <td className="px-3 py-2 text-slate-700">{it.component}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+              <tr key={it.id} className="border-b border-line last:border-0">
+                <td className="px-3 py-2 text-muted">{it.component}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">
                   {num(it.norm_qty)} {it.unit}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{num(it.stock)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{num(it.reserved)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{num(it.stock)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted">{num(it.reserved)}</td>
                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-ink">
                   {num(available(it))}
                 </td>
@@ -396,7 +396,7 @@ function BomComposition(props: CompositionProps) {
                     onClick={() => props.onDeleteItem(it.id)}
                     disabled={busy}
                     title="Удалить позицию"
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-faint hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -406,14 +406,14 @@ function BomComposition(props: CompositionProps) {
           </tbody>
         </table>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2.5">
           <input
             value={props.component}
             onChange={(e) => props.setComponent(e.target.value)}
             placeholder="Комплектующее"
             className={clsx(
-              "min-w-0 flex-1 rounded-lg border px-3 py-1.5 text-sm outline-none focus:border-brand",
-              props.componentError ? "border-amber-500" : "border-slate-200",
+              "min-w-0 flex-1 rounded-lg border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent",
+              props.componentError ? "border-amber-500" : "border-line",
             )}
           />
           <input
@@ -421,32 +421,32 @@ function BomComposition(props: CompositionProps) {
             onChange={(e) => props.setNormQty(e.target.value)}
             inputMode="decimal"
             placeholder="Норма"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={props.unit}
             onChange={(e) => props.setUnit(e.target.value)}
             placeholder="Ед."
-            className="w-16 shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand"
+            className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={props.stock}
             onChange={(e) => props.setStock(e.target.value)}
             inputMode="decimal"
             placeholder="Склад"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={props.reserved}
             onChange={(e) => props.setReserved(e.target.value)}
             inputMode="decimal"
             placeholder="Резерв"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
           <button
             onClick={props.onAddItem}
             disabled={busy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             <Plus size={15} /> Позиция
           </button>

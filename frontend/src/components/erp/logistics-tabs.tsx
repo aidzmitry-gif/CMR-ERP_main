@@ -46,7 +46,7 @@ export function LogisticsTabs() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1 border-b border-slate-200">
+        <div className="flex flex-wrap items-center gap-1 border-b border-line">
           {TABS.map((t) => {
             const isActive = t.key === active;
             return (
@@ -55,11 +55,11 @@ export function LogisticsTabs() {
                 onClick={() => setActive(t.key)}
                 className={clsx(
                   "relative px-3 py-2 text-sm",
-                  isActive ? "font-semibold text-brand-600" : "text-slate-500 hover:text-slate-700",
+                  isActive ? "font-semibold text-accent-ink" : "text-muted hover:text-ink",
                 )}
               >
                 {t.label}
-                {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-brand-600" />}
+                {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-accent" />}
               </button>
             );
           })}

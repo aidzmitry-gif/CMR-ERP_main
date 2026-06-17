@@ -33,16 +33,16 @@ export default function RopLossReviewPage() {
 
           {/* Поток статусов */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-500">Активна</span>
-            <span className="text-slate-300">→</span>
+            <span className="rounded-full bg-sunken px-3 py-1 text-muted">Активна</span>
+            <span className="text-faint">→</span>
             <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700 ring-1 ring-amber-200">
               Условно проиграна · проверка РОПа ≤ 24 ч
             </span>
-            <span className="text-slate-300">→</span>
+            <span className="text-faint">→</span>
             <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
               Возврат в работу
             </span>
-            <span className="text-slate-400">или</span>
+            <span className="text-faint">или</span>
             <span className="rounded-full bg-red-50 px-3 py-1 font-semibold text-red-600">
               Проиграна (с уроком)
             </span>
@@ -58,7 +58,7 @@ export default function RopLossReviewPage() {
                   <div
                     key={item.id}
                     className={`rounded-xl border p-3 ${
-                      item.selected ? "border-brand bg-brand-50" : "border-slate-200"
+                      item.selected ? "border-accent bg-accent-soft" : "border-line"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -78,7 +78,7 @@ export default function RopLossReviewPage() {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-slate-400">{lossQueueNorm}</p>
+              <p className="mt-3 text-xs text-faint">{lossQueueNorm}</p>
             </Card>
 
             {/* Разбор сделки */}
@@ -91,33 +91,33 @@ export default function RopLossReviewPage() {
                 <span className="shrink-0 text-sm font-bold text-teal-700">{lossReview.amount}</span>
               </div>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <Caption>На каком этапе ушёл</Caption>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Tag tone="amber">{lossReview.reason}</Tag>
                 <span className="text-sm text-muted">{lossReview.competitor}</span>
-                <button className="text-sm font-medium text-brand-600">изменить причину</button>
+                <button className="text-sm font-medium text-accent-ink">изменить причину</button>
               </div>
 
               <Caption className="mt-4">Что можно было сделать лучше</Caption>
               <ul className="mt-2 space-y-1.5">
                 {lossReview.better.map((b) => (
-                  <li key={b} className="flex items-start gap-2 text-sm text-slate-600">
+                  <li key={b} className="flex items-start gap-2 text-sm text-muted">
                     <Check size={16} className="mt-0.5 shrink-0 text-emerald-600" />
                     {b}
                   </li>
                 ))}
               </ul>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <Caption>Можно ли вернуть сделку?</Caption>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white">
                   Да, попробуем вернуть
                 </button>
-                <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">
+                <button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-muted">
                   Нет — проиграна
                 </button>
               </div>
@@ -133,7 +133,7 @@ export default function RopLossReviewPage() {
                         className={`rounded-lg px-2.5 py-1 text-xs ${
                           i === 0
                             ? "bg-emerald-50 font-semibold text-emerald-700"
-                            : "border border-slate-200 text-slate-600"
+                            : "border border-line text-muted"
                         }`}
                       >
                         {w}
@@ -150,11 +150,11 @@ export default function RopLossReviewPage() {
                   <Caption className="text-red-600">Если нет — что улучшить, чтобы не повторить</Caption>
                   <ul className="mt-2 space-y-1.5">
                     {lossReview.lessons.map((l) => (
-                      <li key={l.text} className="flex items-start gap-2 text-sm text-slate-600">
+                      <li key={l.text} className="flex items-start gap-2 text-sm text-muted">
                         {l.done ? (
                           <CheckSquare size={16} className="mt-0.5 shrink-0 text-emerald-600" />
                         ) : (
-                          <Square size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                          <Square size={16} className="mt-0.5 shrink-0 text-faint" />
                         )}
                         {l.text}
                       </li>
@@ -186,7 +186,7 @@ export default function RopLossReviewPage() {
 
             <Card>
               <Caption>Что улучшаем (по разборам)</Caption>
-              <div className="mt-3 divide-y divide-slate-100">
+              <div className="mt-3 divide-y divide-line">
                 {improvements.map((i) => (
                   <div key={i.text} className="flex items-center gap-3 py-2.5">
                     <span className="flex-1 text-sm text-ink">{i.text}</span>
@@ -195,7 +195,7 @@ export default function RopLossReviewPage() {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-slate-400">{improvementsNote}</p>
+              <p className="mt-3 text-xs text-faint">{improvementsNote}</p>
             </Card>
           </div>
         </div>

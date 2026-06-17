@@ -91,8 +91,8 @@ export function LogisticsInsights() {
         <Card title="Рекомендации" hint="Как снизить стоимость перевозок (на накопленных данных)">
           <ul className="space-y-2">
             {recs.map((r, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-700">
-                <span className="text-brand-600">→</span>
+              <li key={i} className="flex gap-2 text-sm text-muted">
+                <span className="text-accent-ink">→</span>
                 <span>{r}</span>
               </li>
             ))}
@@ -111,7 +111,7 @@ export function LogisticsInsights() {
                 onClick={() => setWeight(w)}
                 className={
                   "rounded-lg px-2.5 py-1.5 text-xs font-medium " +
-                  (w === weight ? "bg-brand text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50")
+                  (w === weight ? "bg-accent text-white" : "border border-line text-muted hover:bg-sunken")
                 }
               >
                 {w} кг
@@ -123,7 +123,7 @@ export function LogisticsInsights() {
       >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="border-b border-slate-100 text-left text-xs text-muted">
+            <thead className="border-b border-line text-left text-xs text-muted">
               <tr>
                 <th className="px-3 py-2 font-medium">Зона</th>
                 <th className="px-3 py-2 font-medium">Перевозчиков</th>
@@ -139,7 +139,7 @@ export function LogisticsInsights() {
                 <tr
                   key={z.zone_code}
                   className={
-                    "border-b border-slate-50 last:border-0 hover:bg-slate-50 " +
+                    "border-b border-line last:border-0 hover:bg-sunken " +
                     (z.zone_code === data?.best_savings_zone ? "bg-amber-50/40" : "")
                   }
                 >
@@ -147,11 +147,11 @@ export function LogisticsInsights() {
                     {z.zone_code}
                     <span className="ml-1 text-xs text-muted">{z.zone_name}</span>
                   </td>
-                  <td className="px-3 py-2 text-slate-600">{z.carriers}</td>
+                  <td className="px-3 py-2 text-muted">{z.carriers}</td>
                   <td className="px-3 py-2 font-medium text-emerald-700">{z.cheapest_carrier_name}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{formatByn(z.cheapest_total)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(z.avg_total)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">{formatByn(z.max_total)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(z.avg_total)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-faint">{formatByn(z.max_total)}</td>
                   <td className="px-3 py-2">
                     <Pill text={`${z.spread_pct.toFixed(0)}%`} tone={spreadTone(z.spread_pct)} />
                   </td>
@@ -166,7 +166,7 @@ export function LogisticsInsights() {
         <Card title="Экономия по заключённым тендерам" hint="Снижение цены торгом: стартовая → выигравшая">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[680px] text-sm">
-              <thead className="border-b border-slate-100 text-left text-xs text-muted">
+              <thead className="border-b border-line text-left text-xs text-muted">
                 <tr>
                   <th className="px-3 py-2 font-medium">Тендер</th>
                   <th className="px-3 py-2 font-medium">Маршрут</th>
@@ -178,11 +178,11 @@ export function LogisticsInsights() {
               </thead>
               <tbody>
                 {tenders.map((t) => (
-                  <tr key={t.rfq_number} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <tr key={t.rfq_number} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-3 py-2 text-muted">{t.rfq_number}</td>
-                    <td className="px-3 py-2 text-slate-600">{t.route}</td>
-                    <td className="px-3 py-2 text-slate-600">{t.carrier}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-400">{formatByn(t.baseline)}</td>
+                    <td className="px-3 py-2 text-muted">{t.route}</td>
+                    <td className="px-3 py-2 text-muted">{t.carrier}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-faint">{formatByn(t.baseline)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink">{formatByn(t.awarded)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums text-emerald-600">
                       {formatByn(t.saved)} <span className="text-xs text-emerald-500">({t.saved_pct.toFixed(0)}%)</span>

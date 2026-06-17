@@ -17,7 +17,7 @@ import {
 
 function Kpi({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink">{value}</div>
     </div>
@@ -77,10 +77,10 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
       </div>
 
       <div className="mt-5 text-sm font-semibold text-ink">Табель и расчёт ЗП</div>
-      <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-2 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">Сборщик</th>
               <th className="px-4 py-2 text-right font-medium">Выработка</th>
               <th className="px-4 py-2 text-right font-medium">Оклад</th>
@@ -98,26 +98,26 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
               </tr>
             )}
             {payroll.rows.map((r, i) => (
-              <tr key={r.id} className="border-b border-slate-50 last:border-0">
+              <tr key={r.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-2.5">
-                  <span className="inline-flex items-center gap-1.5 text-slate-700">
+                  <span className="inline-flex items-center gap-1.5 text-muted">
                     {i === 0 && <Trophy size={14} className="text-amber-500" />}
                     {r.name}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {formatNh(r.nh_output)} н.ч
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {formatByn(r.base)}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {formatByn(r.premium)}
                 </td>
                 <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
                   {formatByn(r.total)}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-brand-600">
+                <td className="px-4 py-2.5 text-right tabular-nums text-accent-ink">
                   {contributionShare(r, total)}%
                 </td>
               </tr>
@@ -125,13 +125,13 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
           </tbody>
         </table>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Имя сборщика"
-            className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand ${
-              nameError ? "border-amber-500" : "border-slate-200"
+            className={`min-w-0 flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent ${
+              nameError ? "border-amber-500" : "border-line"
             }`}
           />
           <input
@@ -139,26 +139,26 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
             onChange={(e) => setSalary(e.target.value)}
             inputMode="decimal"
             placeholder="Оклад BYN"
-            className="w-28 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-28 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={days}
             onChange={(e) => setDays(e.target.value)}
             inputMode="numeric"
             placeholder="Дни"
-            className="w-16 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={nh}
             onChange={(e) => setNh(e.target.value)}
             inputMode="decimal"
             placeholder="Н.ч"
-            className="w-20 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <button
             onClick={onAdd}
             disabled={busy}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
           >
             <Plus size={16} /> Добавить
           </button>

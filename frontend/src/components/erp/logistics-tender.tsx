@@ -107,7 +107,7 @@ export function LogisticsTender() {
               onClick={() => openRfq(r.id)}
               className={
                 "block w-full rounded-lg border px-3 py-2.5 text-left text-sm " +
-                (r.id === selected ? "border-brand bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50")
+                (r.id === selected ? "border-accent bg-blue-50" : "border-line bg-surface hover:bg-sunken")
               }
             >
               <div className="flex items-center justify-between gap-2">
@@ -137,7 +137,7 @@ export function LogisticsTender() {
               <button
                 onClick={onAward}
                 disabled={busy || !best}
-                className="rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                className="rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
               >
                 Присудить лучшему
               </button>
@@ -165,7 +165,7 @@ export function LogisticsTender() {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[560px] text-sm">
-                  <thead className="border-b border-slate-100 text-left text-xs text-muted">
+                  <thead className="border-b border-line text-left text-xs text-muted">
                     <tr>
                       <th className="px-3 py-2 font-medium">Перевозчик</th>
                       <th className="px-3 py-2 text-right font-medium">Цена</th>
@@ -181,7 +181,7 @@ export function LogisticsTender() {
                         <tr
                           key={b.id}
                           className={
-                            "border-b border-slate-50 last:border-0 " + (isBest ? "bg-emerald-50/50" : "")
+                            "border-b border-line last:border-0 " + (isBest ? "bg-emerald-50/50" : "")
                           }
                         >
                           <td className="px-3 py-2">
@@ -191,8 +191,8 @@ export function LogisticsTender() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right font-semibold tabular-nums text-ink">{formatByn(b.price)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-slate-600">{b.eta_days} дн</td>
-                          <td className="px-3 py-2 text-slate-600">{b.vehicle_class}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted">{b.eta_days} дн</td>
+                          <td className="px-3 py-2 text-muted">{b.vehicle_class}</td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted">{b.round}</td>
                         </tr>
                       );
@@ -204,7 +204,7 @@ export function LogisticsTender() {
           )}
 
           {invites.length > 0 && (
-            <div className="mt-4 border-t border-slate-100 pt-3">
+            <div className="mt-4 border-t border-line pt-3">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-medium text-muted">Рассылка приглашений</span>
                 {lastBroadcast && (
@@ -216,14 +216,14 @@ export function LogisticsTender() {
               <div className="space-y-1">
                 {invites.map((inv) => (
                   <div key={inv.id} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="text-slate-600">{inv.carrier_code}</span>
+                    <span className="text-muted">{inv.carrier_code}</span>
                     <div className="flex items-center gap-1.5">
                       <Pill text={inv.channel} tone={inv.channel === "none" ? "slate" : "blue"} />
                       <Pill
                         text={inv.status}
                         tone={inv.status === "responded" ? "emerald" : inv.status === "sent" ? "blue" : "slate"}
                       />
-                      {inv.token && <span className="text-slate-400" title="публичная ссылка на ставку">ссылка …{inv.token.slice(-6)}</span>}
+                      {inv.token && <span className="text-faint" title="публичная ссылка на ставку">ссылка …{inv.token.slice(-6)}</span>}
                     </div>
                   </div>
                 ))}

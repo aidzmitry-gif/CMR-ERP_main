@@ -53,8 +53,8 @@ export default function RopPacePage() {
                     <Tag tone={m.stateTone}>{m.state}</Tag>
                   </div>
                   <Bar percent={m.percent} tone={m.stateTone} className="mt-2" />
-                  <div className="mt-2 text-[12px] text-slate-600">{m.toDate}</div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="mt-2 text-[12px] text-muted">{m.toDate}</div>
+                  <div className="text-[11px] text-faint">
                     {m.forecast}
                     {m.note && <span className={`ml-1 font-semibold ${TEXT_TONE[m.noteTone ?? "slate"]}`}>· {m.note}</span>}
                   </div>
@@ -75,10 +75,10 @@ export default function RopPacePage() {
                 <div
                   key={c.label}
                   className={`rounded-xl border p-3 ${
-                    c.accent ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"
+                    c.accent ? "border-amber-300 bg-amber-50" : "border-line bg-sunken"
                   }`}
                 >
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
                     {c.label}
                   </div>
                   <div className={`mt-1 text-lg font-bold ${c.accent ? "text-amber-700" : "text-ink"}`}>
@@ -138,7 +138,7 @@ export default function RopPacePage() {
                 <Bar percent={marginAvg.percent} tone={marginAvg.tone} className="mt-1.5" />
               </div>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium text-ink">
@@ -148,7 +148,7 @@ export default function RopPacePage() {
               </div>
               <p className="mt-1 text-[12px] text-muted">{discountLeak.note}</p>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <div>
                 <div className="flex items-center justify-between text-sm">
@@ -158,7 +158,7 @@ export default function RopPacePage() {
                 <Bar percent={marginMix.percent} tone={marginMix.tone} className="mt-1.5" />
               </div>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <Caption>Маржа по менеджерам</Caption>
               <div className="mt-2 space-y-2">
@@ -171,7 +171,7 @@ export default function RopPacePage() {
                 ))}
               </div>
               <p className="mt-2 text-[12px] font-semibold text-red-600">{managerMarginsNote}</p>
-              <p className="mt-2 text-xs text-slate-400">{leakageNote}</p>
+              <p className="mt-2 text-xs text-faint">{leakageNote}</p>
             </Card>
 
             {/* Рычаги прибыли */}
@@ -188,10 +188,10 @@ export default function RopPacePage() {
                 ))}
               </ul>
 
-              <hr className="my-3 border-slate-100" />
+              <hr className="my-3 border-line" />
 
               <Caption>Рычаги прибыли — менеджеры</Caption>
-              <div className="mt-2 divide-y divide-slate-100">
+              <div className="mt-2 divide-y divide-line">
                 {profitLeversManagers.map((m) => (
                   <div key={m.name} className="py-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -206,9 +206,9 @@ export default function RopPacePage() {
                 ))}
               </div>
 
-              <hr className="my-3 border-slate-100" />
-              <p className="text-xs font-semibold text-slate-600">{velocityFooter}</p>
-              <p className="mt-1 text-xs text-slate-400">{paceAiFootnote}</p>
+              <hr className="my-3 border-line" />
+              <p className="text-xs font-semibold text-muted">{velocityFooter}</p>
+              <p className="mt-1 text-xs text-faint">{paceAiFootnote}</p>
             </Card>
           </div>
         </div>

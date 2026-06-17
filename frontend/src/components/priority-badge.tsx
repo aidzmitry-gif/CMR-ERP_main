@@ -5,7 +5,7 @@ import type { Priority } from "@/lib/types";
 const STYLES: Record<Priority, string> = {
   Высокий: "bg-red-50 text-red-600",
   Средний: "bg-amber-50 text-amber-600",
-  Низкий: "bg-slate-100 text-slate-500",
+  Низкий: "bg-sunken text-muted",
 };
 
 export function PriorityBadge({

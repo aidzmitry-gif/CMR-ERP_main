@@ -78,8 +78,8 @@ export function LogisticsTariffs() {
               onClick={() => setZone(z.code)}
               className={
                 z.code === zone
-                  ? "rounded-lg border border-brand bg-blue-50 px-3 py-2 text-left text-sm"
-                  : "rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  ? "rounded-lg border border-accent bg-blue-50 px-3 py-2 text-left text-sm"
+                  : "rounded-lg border border-line bg-surface px-3 py-2 text-left text-sm hover:bg-sunken"
               }
             >
               <div className="font-medium text-ink">{z.name}</div>
@@ -97,26 +97,26 @@ export function LogisticsTariffs() {
       >
         <div className="flex flex-wrap items-end gap-4">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">Вес, кг</span>
+            <span className="mb-1 block text-xs font-medium text-muted">Вес, кг</span>
             <input
               type="number"
               min={0}
               value={weight}
               onChange={(e) => setWeight(Number(e.target.value))}
-              className="w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+              className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">Ценность груза (BYN)</span>
+            <span className="mb-1 block text-xs font-medium text-muted">Ценность груза (BYN)</span>
             <input
               type="number"
               min={0}
               value={declaredValue}
               onChange={(e) => setDeclaredValue(Number(e.target.value))}
-              className="w-36 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+              className="w-36 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
           </label>
-          <label className="flex items-center gap-2 pb-2.5 text-sm text-slate-600">
+          <label className="flex items-center gap-2 pb-2.5 text-sm text-muted">
             <input type="checkbox" checked={cod} onChange={(e) => setCod(e.target.checked)} />
             Наложенный платёж
           </label>
@@ -127,7 +127,7 @@ export function LogisticsTariffs() {
         ) : (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="border-b border-slate-100 text-left text-xs text-muted">
+              <thead className="border-b border-line text-left text-xs text-muted">
                 <tr>
                   <th className="px-3 py-2 font-medium">Перевозчик</th>
                   <th className="px-3 py-2 text-right font-medium">до 5 кг</th>
@@ -140,13 +140,13 @@ export function LogisticsTariffs() {
               </thead>
               <tbody>
                 {quotes.map(({ tariff: t, price }) => (
-                  <tr key={t.carrier_code} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <tr key={t.carrier_code} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-3 py-2 font-medium text-ink">{t.carrier_code}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(t.price_w5)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(t.price_w10)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(t.price_w30)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(t.over30_per_kg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{formatByn(t.pickup_fee)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(t.price_w5)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(t.price_w10)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(t.price_w30)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(t.over30_per_kg)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(t.pickup_fee)}</td>
                     <td className="px-3 py-2 text-right">
                       <span className="inline-flex items-center gap-2">
                         <span className="font-semibold tabular-nums text-ink">{formatByn(price)}</span>

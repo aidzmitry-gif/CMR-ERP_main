@@ -103,15 +103,15 @@ const PRIORITY_TONE: Record<string, string> = {
   Срочно: "bg-red-50 text-red-600",
   Средний: "bg-amber-50 text-amber-600",
   Контроль: "bg-amber-50 text-amber-600",
-  Низкий: "bg-slate-100 text-slate-500",
-  Обычный: "bg-slate-100 text-slate-500",
+  Низкий: "bg-sunken text-muted",
+  Обычный: "bg-sunken text-muted",
 };
 
 // Цвет бейджа по типу контента (база знаний) — как в референсе.
 const CONTENT_TONE: Record<string, string> = {
   Видео: "bg-blue-50 text-blue-600",
   Тест: "bg-violet-50 text-violet-600",
-  Документ: "bg-slate-100 text-slate-600",
+  Документ: "bg-sunken text-muted",
   Практика: "bg-emerald-50 text-emerald-600",
   Обязательно: "bg-red-50 text-red-600",
 };
@@ -121,7 +121,7 @@ const TONE_CHIP: Record<FunnelTone, string> = {
   indigo: "bg-indigo-50 text-indigo-600",
   green: "bg-emerald-50 text-emerald-600",
   cyan: "bg-cyan-50 text-cyan-600",
-  slate: "bg-slate-100 text-slate-500",
+  slate: "bg-sunken text-muted",
   amber: "bg-amber-50 text-amber-600",
   violet: "bg-violet-50 text-violet-600",
   red: "bg-red-50 text-red-600",
@@ -132,7 +132,7 @@ const TONE_BAR: Record<FunnelTone, string> = {
   indigo: "bg-indigo-500",
   green: "bg-emerald-500",
   cyan: "bg-cyan-500",
-  slate: "bg-slate-400",
+  slate: "bg-line-strong",
   amber: "bg-amber-500",
   violet: "bg-violet-500",
   red: "bg-red-500",
@@ -157,8 +157,8 @@ const CHANNELS: { key: string; color: string; Icon: React.ComponentType<{ size?:
 const STATE_TONE: Record<string, string> = {
   Пройдено: "bg-emerald-50 text-emerald-600",
   "В процессе": "bg-blue-50 text-blue-600",
-  "Не начат": "bg-slate-100 text-slate-500",
-  Заблокировано: "bg-slate-100 text-slate-400",
+  "Не начат": "bg-sunken text-muted",
+  Заблокировано: "bg-sunken text-faint",
 };
 
 // Мини-иконки действий на карточке (склад: документ/штрихкод/печать/фото).
@@ -203,7 +203,7 @@ function moveCard(stages: FunnelStage[], cardId: number, targetStage: string): F
 
 function KpiTile({ kpi }: { kpi: FunnelKpi }) {
   return (
-    <div className="rounded-xl bg-white p-4 shadow-card">
+    <div className="rounded-xl bg-surface p-4 shadow-card">
       <div className="flex items-center gap-2">
         <span className={clsx("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONE_CHIP[kpi.tone])}>
           <span className="h-2 w-2 rounded-full bg-current" />
@@ -214,7 +214,7 @@ function KpiTile({ kpi }: { kpi: FunnelKpi }) {
         {kpi.value}
         {kpi.target && <span className="text-sm font-normal text-muted"> / {kpi.target}</span>}
       </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
         <div className={clsx("h-full rounded-full", TONE_BAR[kpi.tone])} style={{ width: `${kpi.percent}%` }} />
       </div>
       <div className="mt-1.5 text-xs text-muted">{kpi.note}</div>
@@ -239,7 +239,7 @@ function Card({
     <div
       onClick={onOpen}
       className={clsx(
-        "rounded-xl bg-white p-3.5 shadow-card transition-shadow hover:shadow-pop",
+        "rounded-xl bg-surface p-3.5 shadow-card transition-shadow hover:shadow-pop",
         onOpen && "cursor-pointer",
       )}
     >
@@ -247,7 +247,7 @@ function Card({
         <span className="truncate text-xs text-muted">№ {card.code}</span>
         <div className="flex shrink-0 items-center gap-1.5">
           {card.state && (
-            <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-medium", STATE_TONE[card.state] ?? "bg-slate-100 text-slate-500")}>
+            <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-medium", STATE_TONE[card.state] ?? "bg-sunken text-muted")}>
               {card.state}
             </span>
           )}
@@ -255,7 +255,7 @@ function Card({
             <span
               className={clsx(
                 "rounded-md px-2 py-0.5 text-[11px] font-medium",
-                PRIORITY_TONE[card.priority] ?? "bg-slate-100 text-slate-500",
+                PRIORITY_TONE[card.priority] ?? "bg-sunken text-muted",
               )}
             >
               {card.priority}
@@ -285,8 +285,8 @@ function Card({
 
       {card.progress != null && (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-brand" style={{ width: `${card.progress}%` }} />
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-sunken">
+            <div className="h-full rounded-full bg-accent" style={{ width: `${card.progress}%` }} />
           </div>
           <div className="mt-1 text-[11px] text-muted">{card.progress}% готовности</div>
         </div>
@@ -301,7 +301,7 @@ function Card({
       )}
 
       {card.next_step && (
-        <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600">
+        <div className="mt-2 rounded-lg bg-sunken px-2.5 py-1.5 text-xs text-muted">
           <span className="text-muted">След. шаг: </span>
           {card.next_step}
         </div>
@@ -309,7 +309,7 @@ function Card({
 
       {/* Key-value блок (пересчёт склада / детали претензии) */}
       {card.details && card.details.length > 0 && (
-        <div className="mt-2 space-y-1 rounded-lg bg-slate-50 px-2.5 py-2 text-[11px]">
+        <div className="mt-2 space-y-1 rounded-lg bg-sunken px-2.5 py-2 text-[11px]">
           {card.details.map((d) => (
             <div key={d.k} className="flex justify-between gap-2">
               <span className="text-muted">{d.k}</span>
@@ -331,7 +331,7 @@ function Card({
               key={t}
               className={clsx(
                 "rounded-md px-2 py-0.5 text-[11px] font-medium",
-                CONTENT_TONE[t] ?? "bg-slate-100 font-normal text-slate-600",
+                CONTENT_TONE[t] ?? "bg-sunken font-normal text-muted",
               )}
             >
               {t}
@@ -344,7 +344,7 @@ function Card({
       {card.action && (
         <button
           onClick={(e) => e.stopPropagation()}
-          className="mt-2.5 w-full rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-brand-600 hover:bg-blue-100"
+          className="mt-2.5 w-full rounded-lg bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent-ink hover:bg-accent-soft/70"
         >
           {card.action}
         </button>
@@ -353,17 +353,17 @@ function Card({
       {/* Пилюли «Фокус / Приоритет» */}
       {showFocusPills && (
         <div className="mt-2.5 flex gap-2">
-          <span className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600">
-            <Target size={13} className="text-brand-600" /> Фокус
+          <span className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line py-1.5 text-xs font-medium text-muted">
+            <Target size={13} className="text-accent-ink" /> Фокус
           </span>
-          <span className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600">
+          <span className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line py-1.5 text-xs font-medium text-muted">
             <Flag size={13} className="text-amber-500" /> Приоритет
           </span>
         </div>
       )}
 
       {(card.owner || card.date) && (
-        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-muted">
+        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-line pt-2 text-xs text-muted">
           <span className="flex min-w-0 items-center gap-1.5">
             {card.owner && (
               <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-[9px] font-semibold text-white">
@@ -378,9 +378,9 @@ function Card({
 
       {/* Мини-иконки действий (склад: документ/штрихкод/печать/фото) */}
       {showActions && (
-        <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5">
+        <div className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5">
           {ACTION_ICONS.map((Icon, i) => (
-            <span key={i} className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+            <span key={i} className="flex h-7 w-7 items-center justify-center rounded-lg bg-sunken text-muted">
               <Icon size={14} />
             </span>
           ))}
@@ -388,7 +388,7 @@ function Card({
       )}
 
       {showChannels && (
-        <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5">
+        <div className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5">
           {CHANNELS.map(({ key, color, Icon }) => (
             <span
               key={key}
@@ -443,7 +443,7 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
-      <div className="overflow-hidden rounded-xl bg-white shadow-card">
+      <div className="overflow-hidden rounded-xl bg-surface shadow-card">
         <div className="h-1" style={{ backgroundColor: stage.color }} />
         <div className="px-4 py-3">
           <div className="font-semibold text-ink">{stage.title}</div>
@@ -457,7 +457,7 @@ function Column({
         ref={setNodeRef}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
-          isOver && "bg-brand-100/60 ring-2 ring-brand-100",
+          isOver && "bg-accent-soft ring-2 ring-accent-soft",
         )}
       >
         {children}
@@ -468,16 +468,16 @@ function Column({
 
 function RightPanel({ panel }: { panel: FunnelPanel }) {
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
-      <div className="border-b border-slate-200 px-4 py-3.5 font-semibold text-ink">{panel.title}</div>
+    <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-surface">
+      <div className="border-b border-line px-4 py-3.5 font-semibold text-ink">{panel.title}</div>
       {panel.tabs && panel.tabs.length > 0 && (
-        <div className="flex items-center gap-1 border-b border-slate-200 px-4 py-2">
+        <div className="flex items-center gap-1 border-b border-line px-4 py-2">
           {panel.tabs.map((tab, i) => (
             <span
               key={tab}
               className={clsx(
                 "rounded-md px-2.5 py-1 text-xs font-medium",
-                i === 0 ? "bg-brand-100 text-brand-600" : "text-slate-500",
+                i === 0 ? "bg-accent-soft text-accent-ink" : "text-muted",
               )}
             >
               {tab}
@@ -485,14 +485,14 @@ function RightPanel({ panel }: { panel: FunnelPanel }) {
           ))}
         </div>
       )}
-      <div className="flex-1 divide-y divide-slate-100 overflow-y-auto thin-scroll">
+      <div className="flex-1 divide-y divide-line overflow-y-auto thin-scroll">
         {panel.items.map((it, i) => (
           <div key={i} className="px-4 py-3">
             <div className="flex items-center gap-2">
               <span className={clsx("h-2 w-2 shrink-0 rounded-full", PANEL_TONE[it.tone ?? "info"])} />
               <span className="flex-1 truncate text-sm font-medium text-ink">{it.title}</span>
               {it.badge ? (
-                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white">
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                   {it.badge}
                 </span>
               ) : null}
@@ -521,17 +521,17 @@ function StageTimeline({ stages, currentStageId }: { stages: FunnelStage[]; curr
                 className={clsx(
                   "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold",
                   done && "bg-emerald-500 text-white",
-                  current && "bg-brand text-white",
-                  !done && !current && "bg-slate-100 text-slate-400",
+                  current && "bg-accent text-white",
+                  !done && !current && "bg-sunken text-faint",
                 )}
               >
                 {done ? <Check size={13} /> : i + 1}
               </span>
-              {!last && <span className={clsx("w-0.5 flex-1", done ? "bg-emerald-300" : "bg-slate-200")} style={{ minHeight: 18 }} />}
+              {!last && <span className={clsx("w-0.5 flex-1", done ? "bg-emerald-300" : "bg-line-strong")} style={{ minHeight: 18 }} />}
             </div>
-            <div className={clsx("pb-3 text-sm", current ? "font-semibold text-ink" : "text-slate-500")}>
+            <div className={clsx("pb-3 text-sm", current ? "font-semibold text-ink" : "text-muted")}>
               {s.title}
-              {current && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium text-brand-600">текущий этап</span>}
+              {current && <span className="ml-2 rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent-ink">текущий этап</span>}
             </div>
           </li>
         );
@@ -557,15 +557,15 @@ function DetailDrawer({
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-white shadow-pop thin-scroll"
+        className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-surface shadow-pop thin-scroll"
       >
-        <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-2 border-b border-line px-5 py-4">
           <div className="min-w-0">
             <div className="text-xs text-muted">Детали · № {card.code}</div>
             <h3 className="truncate text-lg font-bold text-ink">{card.title}</h3>
             {card.subtitle && <div className="text-sm text-muted">{card.subtitle}</div>}
           </div>
-          <button onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="shrink-0 text-faint hover:text-muted">
             <X size={20} />
           </button>
         </div>
@@ -573,7 +573,7 @@ function DetailDrawer({
         <div className="space-y-5 p-5">
           <div className="flex flex-wrap items-center gap-2">
             {card.priority && (
-              <span className={clsx("rounded-md px-2 py-0.5 text-xs font-medium", PRIORITY_TONE[card.priority] ?? "bg-slate-100 text-slate-500")}>
+              <span className={clsx("rounded-md px-2 py-0.5 text-xs font-medium", PRIORITY_TONE[card.priority] ?? "bg-sunken text-muted")}>
                 {card.priority}
               </span>
             )}
@@ -590,7 +590,7 @@ function DetailDrawer({
                 <span>Ход работ</span>
                 <span>{card.progress}%</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
                 <div className="h-full rounded-full bg-brand" style={{ width: `${card.progress}%` }} />
               </div>
             </div>
@@ -605,19 +605,19 @@ function DetailDrawer({
 
           {card.next_step && (
             <div>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Следующий шаг</div>
-              <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{card.next_step}</div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Следующий шаг</div>
+              <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{card.next_step}</div>
             </div>
           )}
 
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Маршрут / этапы</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Маршрут / этапы</div>
             <StageTimeline stages={stages} currentStageId={stageId} />
           </div>
 
           {extras?.operations && extras.operations.length > 0 && (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">План / Факт по операциям</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">План / Факт по операциям</div>
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted">
                   <tr>
@@ -629,10 +629,10 @@ function DetailDrawer({
                 </thead>
                 <tbody>
                   {extras.operations.map((op) => (
-                    <tr key={op.name} className="border-t border-slate-100">
+                    <tr key={op.name} className="border-t border-line">
                       <td className="py-1.5 text-ink">{op.name}</td>
-                      <td className="py-1.5 text-slate-600">{op.plan}</td>
-                      <td className="py-1.5 text-slate-600">{op.fact}</td>
+                      <td className="py-1.5 text-muted">{op.plan}</td>
+                      <td className="py-1.5 text-muted">{op.fact}</td>
                       <td
                         className={clsx(
                           "py-1.5 text-right font-medium",
@@ -650,7 +650,7 @@ function DetailDrawer({
 
           {extras?.risk && (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Прогноз риска</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Прогноз риска</div>
               <div className="flex items-start gap-3">
                 <div
                   className={clsx(
@@ -660,7 +660,7 @@ function DetailDrawer({
                 >
                   {extras.risk.percent}%
                 </div>
-                <ul className="flex-1 space-y-1 text-xs text-slate-600">
+                <ul className="flex-1 space-y-1 text-xs text-muted">
                   {extras.risk.notes.map((n, i) => (
                     <li key={i} className="flex items-center gap-1.5">
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
@@ -674,7 +674,7 @@ function DetailDrawer({
 
           {extras?.bom && extras.bom.length > 0 && (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Обеспеченность материалами (BOM)</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Обеспеченность материалами (BOM)</div>
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted">
                   <tr>
@@ -688,10 +688,10 @@ function DetailDrawer({
                   {extras.bom.map((b) => {
                     const ok = b.stock >= b.need;
                     return (
-                      <tr key={b.name} className="border-t border-slate-100">
+                      <tr key={b.name} className="border-t border-line">
                         <td className="py-1.5 text-ink">{b.name}</td>
-                        <td className="py-1.5 text-right text-slate-600">{b.need}</td>
-                        <td className="py-1.5 text-right text-slate-600">{b.stock}</td>
+                        <td className="py-1.5 text-right text-muted">{b.need}</td>
+                        <td className="py-1.5 text-right text-muted">{b.stock}</td>
                         <td className={clsx("py-1.5 text-right font-medium", ok ? "text-emerald-600" : "text-red-600")}>
                           {ok ? "OK" : `−${b.need - b.stock}`}
                         </td>
@@ -705,15 +705,15 @@ function DetailDrawer({
 
           {extras?.equipment && extras.equipment.length > 0 && (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Загрузка оборудования</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Загрузка оборудования</div>
               <div className="space-y-2">
                 {extras.equipment.map((eq) => (
                   <div key={eq.name}>
-                    <div className="mb-1 flex justify-between text-xs text-slate-600">
+                    <div className="mb-1 flex justify-between text-xs text-muted">
                       <span>{eq.name}</span>
                       <span>{eq.load}%</span>
                     </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-sunken">
                       <div
                         className={clsx("h-full rounded-full", eq.load > 85 ? "bg-red-500" : eq.load > 60 ? "bg-amber-500" : "bg-emerald-500")}
                         style={{ width: `${eq.load}%` }}
@@ -843,18 +843,18 @@ export function FunnelBoard({
             {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
           </div>
           <div className="relative ml-auto min-w-[180px] max-w-xs flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск..."
-              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-brand"
+              className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
             />
           </div>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          <button className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken">
             <SlidersHorizontal size={16} /> Фильтры
           </button>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          <button className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken">
             <Settings2 size={16} /> Настроить воронку
           </button>
           <button className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100">
@@ -862,7 +862,7 @@ export function FunnelBoard({
           </button>
           <button
             onClick={() => setOpen((v) => !v)}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink"
           >
             <Plus size={16} /> {createLabel}
           </button>
@@ -879,7 +879,7 @@ export function FunnelBoard({
 
         {/* AI-инсайт */}
         {insight && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-slate-700">
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-muted">
             <Sparkles size={16} className="mt-0.5 shrink-0 text-indigo-500" />
             <span>
               <span className="font-semibold text-indigo-600">AI-инсайт: </span>
@@ -890,10 +890,10 @@ export function FunnelBoard({
 
         {/* Форма создания */}
         {open && (
-          <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl bg-white p-4 shadow-card">
+          <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
             {fields.map((f) => (
               <label key={f.key} className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-500">{f.label}</span>
+                <span className="mb-1 block text-xs font-medium text-muted">{f.label}</span>
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key]}
@@ -903,14 +903,14 @@ export function FunnelBoard({
                       [f.key]: f.type === "number" ? Number(e.target.value) : e.target.value,
                     })
                   }
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+                  className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                 />
               </label>
             ))}
             <button
               onClick={onCreate}
               disabled={busy}
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
             >
               Сохранить
             </button>
@@ -920,24 +920,24 @@ export function FunnelBoard({
         {/* Табы над доской + переключатель вида (база знаний) */}
         {boardTabs && boardTabs.length > 0 && (
           <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
+            <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
               {boardTabs.map((tab, i) => (
                 <span
                   key={tab}
                   className={clsx(
                     "rounded-md px-3 py-1 text-xs font-medium",
-                    i === 0 ? "bg-brand-100 text-brand-600" : "text-slate-500",
+                    i === 0 ? "bg-accent-soft text-accent-ink" : "text-muted",
                   )}
                 >
                   {tab}
                 </span>
               ))}
             </div>
-            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
-              <span className="rounded-md bg-brand-100 p-1.5 text-brand-600">
+            <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+              <span className="rounded-md bg-accent-soft p-1.5 text-accent-ink">
                 <LayoutGrid size={14} />
               </span>
-              <span className="p-1.5 text-slate-400">
+              <span className="p-1.5 text-faint">
                 <List size={14} />
               </span>
             </div>
@@ -978,7 +978,7 @@ export function FunnelBoard({
         </DndContext>
 
         {/* Итоги */}
-        <div className="mt-4 rounded-xl bg-white p-5 shadow-card">
+        <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-ink">Итоги по воронке</h3>
             <span className="text-xs text-muted">за период</span>
@@ -1007,7 +1007,7 @@ export function FunnelBoard({
 
         {/* Конверсия по воронке (реальные счётчики стадий) */}
         {conversion && stages.length > 0 && (
-          <div className="mt-4 rounded-xl bg-white p-5 shadow-card">
+          <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
             <h3 className="mb-4 font-semibold text-ink">Конверсия по воронке</h3>
             <div className="space-y-2">
               {stages.map((s) => {
@@ -1016,7 +1016,7 @@ export function FunnelBoard({
                 return (
                   <div key={s.id} className="flex items-center gap-3">
                     <span className="w-40 shrink-0 truncate text-sm text-ink">{s.title}</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-sunken">
                       <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: s.color }} />
                     </div>
                     <span className="w-24 shrink-0 text-right text-sm text-muted">
@@ -1031,7 +1031,7 @@ export function FunnelBoard({
 
         {/* Лидерборд (топ-рекрутёры) */}
         {leaderboard && leaderboard.length > 0 && (
-          <div className="mt-4 rounded-xl bg-white p-5 shadow-card">
+          <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
             <h3 className="mb-4 font-semibold text-ink">Топ рекрутёры</h3>
             <div className="space-y-3">
               {leaderboard.map((r, i) => (

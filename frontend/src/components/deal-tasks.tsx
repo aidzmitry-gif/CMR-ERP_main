@@ -66,10 +66,10 @@ export function DealTasks({ dealId }: { dealId: string }) {
   const openCount = tasks.filter((t) => t.status === "open").length;
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-200 p-4">
+    <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
-        <ListTodo size={18} className="text-brand-600" />
-        Задачи <span className="font-medium text-brand-600">({openCount} откр.)</span>
+        <ListTodo size={18} className="text-accent-ink" />
+        Задачи <span className="font-medium text-accent-ink">({openCount} откр.)</span>
       </div>
 
       <ul className="mt-3 space-y-2">
@@ -81,14 +81,14 @@ export function DealTasks({ dealId }: { dealId: string }) {
               key={t.id}
               className={clsx(
                 "flex items-center gap-2 rounded-lg px-3 py-2",
-                t.overdue ? "bg-red-50" : "bg-slate-50",
+                t.overdue ? "bg-red-50" : "bg-sunken",
               )}
             >
               <div className="min-w-0 flex-1">
                 <div
                   className={clsx(
                     "truncate text-sm",
-                    done ? "text-slate-400 line-through" : "text-slate-700",
+                    done ? "text-faint line-through" : "text-muted",
                   )}
                 >
                   {t.title}
@@ -96,7 +96,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
                 <span
                   className={clsx(
                     "inline-flex items-center gap-1 text-xs",
-                    t.overdue ? "font-semibold text-red-600" : "text-slate-400",
+                    t.overdue ? "font-semibold text-red-600" : "text-faint",
                   )}
                 >
                   <Clock size={11} />
@@ -111,7 +111,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
                   onClick={() => onDone(t.id)}
                   disabled={busy}
                   title="Выполнено"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
                 >
                   <CheckSquare size={16} />
                 </button>
@@ -126,19 +126,19 @@ export function DealTasks({ dealId }: { dealId: string }) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Что сделать…"
-          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <input
           type="datetime-local"
           value={due}
           onChange={(e) => setDue(e.target.value)}
           title="Срок (необязательно)"
-          className="shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+          className="shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <button
           onClick={onAdd}
           disabled={busy || !title.trim()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
         >
           <Plus size={16} /> Задача
         </button>

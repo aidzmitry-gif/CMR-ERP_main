@@ -17,7 +17,7 @@ const TONES: Record<KpiTone, { chip: string; bar: string }> = {
   indigo: { chip: "bg-indigo-50 text-indigo-600", bar: "bg-indigo-500" },
   green: { chip: "bg-emerald-50 text-emerald-600", bar: "bg-emerald-500" },
   cyan: { chip: "bg-cyan-50 text-cyan-600", bar: "bg-cyan-500" },
-  slate: { chip: "bg-slate-100 text-slate-500", bar: "bg-slate-400" },
+  slate: { chip: "bg-sunken text-muted", bar: "bg-line-strong" },
 };
 
 export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
@@ -27,7 +27,7 @@ export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
   const target = kpi.money ? formatMoney(kpi.target) : kpi.target;
 
   return (
-    <div className="rounded-xl bg-white p-4 shadow-card">
+    <div className="rounded-xl bg-surface p-4 shadow-card">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone.chip}`}>
@@ -39,7 +39,7 @@ export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
           <button
             onClick={onLog}
             title="Отметить (+1)"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-brand-600"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-faint hover:bg-sunken hover:text-accent-ink"
           >
             <Plus size={15} />
           </button>
@@ -48,7 +48,7 @@ export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
       <div className="mt-3 text-lg font-semibold text-ink">
         {value} <span className="text-sm font-normal text-muted">/ {target}</span>
       </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
         <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${kpi.percent}%` }} />
       </div>
       <div className="mt-1.5 text-xs text-muted">{kpi.percent}% выполнено</div>

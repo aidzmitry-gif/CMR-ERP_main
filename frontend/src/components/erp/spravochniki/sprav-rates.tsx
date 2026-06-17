@@ -32,7 +32,7 @@ function StatusBadge({ s }: { s: VersionStatus }) {
       </span>
     );
   return (
-    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+    <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
       🗃 архив
     </span>
   );
@@ -40,10 +40,10 @@ function StatusBadge({ s }: { s: VersionStatus }) {
 
 function barClass(s: VersionStatus) {
   if (s === "current")
-    return "flex h-12 items-center justify-center gap-1.5 rounded-lg bg-brand text-sm font-semibold text-white shadow-card";
+    return "flex h-12 items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-semibold text-white shadow-card";
   if (s === "planned")
     return "flex h-12 items-center justify-center gap-1.5 rounded-lg border border-dashed bg-amber-50 text-sm font-semibold text-amber-700 ring-1 ring-amber-300 ring-inset";
-  return "flex h-12 items-center justify-center rounded-lg bg-slate-200 text-sm font-semibold text-slate-600";
+  return "flex h-12 items-center justify-center rounded-lg bg-line-strong text-sm font-semibold text-muted";
 }
 
 function barLabel(s: VersionStatus, today: string) {
@@ -147,13 +147,13 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
       </div>
 
       {/* Tab bar */}
-      <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">
+      <div className="flex flex-wrap gap-1 rounded-xl bg-sunken p-1">
         {tabs.map((t) => (
           <button
             key={t}
             onClick={() => switchTab(t)}
             className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === t ? "bg-white text-ink shadow-card" : "text-muted hover:text-ink"
+              activeTab === t ? "bg-surface text-ink shadow-card" : "text-muted hover:text-ink"
             }`}
           >
             {t === "НДС" ? (
@@ -174,7 +174,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
       {isCurTab ? (
         <>
           {/* Header card */}
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-ink">
@@ -183,7 +183,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                 <Clock className="h-4 w-4 text-muted" />
               </div>
               <div className="flex flex-wrap gap-2">
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                   /refs/currency_rates
                 </span>
                 <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
@@ -199,8 +199,8 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
 
           {/* Timeline */}
           {curRates.length > 0 ? (
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Периоды действия
               </div>
               <h3 className="mt-1 text-sm font-semibold text-ink">Таймлайн версий курса</h3>
@@ -219,7 +219,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                       <div
                         className={`mt-1.5 text-center text-[11px] ${
                           status === "current"
-                            ? "font-medium text-brand-600"
+                            ? "font-medium text-accent-ink"
                             : status === "planned"
                               ? "text-amber-700"
                               : "text-muted"
@@ -234,10 +234,10 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                 </div>
                 <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-muted">
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-3 w-3 rounded bg-slate-200" /> архивные
+                    <span className="inline-block h-3 w-3 rounded bg-line-strong" /> архивные
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-3 w-3 rounded bg-brand" /> текущая
+                    <span className="inline-block h-3 w-3 rounded bg-accent" /> текущая
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="inline-block h-3 w-3 rounded border border-dashed border-amber-300 bg-amber-50" />{" "}
@@ -247,37 +247,37 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl bg-white p-5 shadow-card text-sm text-muted">
+            <div className="rounded-2xl bg-surface p-5 shadow-card text-sm text-muted">
               Данные о курсах недоступны — бэкенд не отвечает. Проверьте подключение.
             </div>
           )}
 
           {/* Versions table */}
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                   Версии
                 </div>
                 <h3 className="mt-1 text-sm font-semibold text-ink">
                   История значений (SCD Type 2)
                 </h3>
               </div>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+              <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                 {curRates.length} версий
               </span>
             </div>
-            <div className="mt-4 overflow-hidden rounded-xl ring-1 ring-slate-100">
+            <div className="mt-4 overflow-hidden rounded-xl ring-1 ring-line">
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                     <th className="px-3 py-2 font-semibold">Значение, BYN/{activeTab}</th>
                     <th className="px-3 py-2 font-semibold">Действует с</th>
                     <th className="px-3 py-2 font-semibold">По</th>
                     <th className="px-3 py-2 font-semibold">Статус</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-line">
                   {curRates.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-3 py-4 text-center text-muted">
@@ -293,8 +293,8 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                           key={r.id}
                           className={
                             isActive
-                              ? "bg-brand-100/30 hover:bg-brand-100/40"
-                              : "text-slate-400 hover:bg-slate-50/60"
+                              ? "bg-accent-soft/30 hover:bg-accent-soft/40"
+                              : "text-faint hover:bg-sunken/60"
                           }
                         >
                           <td
@@ -334,22 +334,22 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
           {/* 2-col: Add version + As-of */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {/* Add version */}
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Новая версия
               </div>
               <h3 className="mt-1 text-sm font-semibold text-ink">Добавить значение курса</h3>
               <div className="mt-4 space-y-3">
                 <div>
-                  <label className="mb-1 block text-[12px] font-medium text-slate-600">
+                  <label className="mb-1 block text-[12px] font-medium text-muted">
                     Значение (BYN за 1 {activeTab})
                   </label>
-                  <div className="rounded-xl bg-slate-50 px-3 py-2">
+                  <div className="rounded-xl bg-sunken px-3 py-2">
                     <input
                       type="number"
                       step="0.0001"
                       min="0"
-                      className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                      className="w-full bg-transparent text-ink text-sm outline-none placeholder:text-faint"
                       placeholder="например, 3.27"
                       value={newRate}
                       onChange={(e) => setNewRate(e.target.value)}
@@ -357,13 +357,13 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[12px] font-medium text-slate-600">
+                  <label className="mb-1 block text-[12px] font-medium text-muted">
                     Действует с
                   </label>
-                  <div className="rounded-xl bg-slate-50 px-3 py-2">
+                  <div className="rounded-xl bg-sunken px-3 py-2">
                     <input
                       type="date"
-                      className="w-full bg-transparent text-sm outline-none"
+                      className="w-full bg-transparent text-ink text-sm outline-none"
                       value={newStart}
                       onChange={(e) => setNewStart(e.target.value)}
                     />
@@ -377,7 +377,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                   <button
                     onClick={handleAddCur}
                     disabled={addPending || !newRate || !newStart}
-                    className="flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" /> Добавить версию
                   </button>
@@ -393,8 +393,8 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
             </div>
 
             {/* As-of lookup */}
-            <div className="rounded-2xl bg-white p-5 shadow-card">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl bg-surface p-5 shadow-card">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Предпросмотр на дату
               </div>
               <h3 className="mt-1 text-sm font-semibold text-ink">
@@ -402,14 +402,14 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
               </h3>
               <div className="mt-4 space-y-3">
                 <div>
-                  <label className="mb-1 block text-[12px] font-medium text-slate-600">
+                  <label className="mb-1 block text-[12px] font-medium text-muted">
                     Дата документа
                   </label>
                   <div className="flex gap-2">
-                    <div className="flex-1 rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="flex-1 rounded-xl bg-sunken px-3 py-2">
                       <input
                         type="date"
-                        className="w-full bg-transparent text-sm outline-none"
+                        className="w-full bg-transparent text-ink text-sm outline-none"
                         value={asOf}
                         onChange={(e) => {
                           setAsOf(e.target.value);
@@ -420,7 +420,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                     <button
                       onClick={handleAsOf}
                       disabled={!asOf || asOfRes === "pending"}
-                      className="rounded-xl bg-slate-100 px-3 py-2 text-ink hover:bg-slate-200 disabled:opacity-50"
+                      className="rounded-xl bg-sunken px-3 py-2 text-ink hover:bg-sunken disabled:opacity-50"
                       title="Найти курс"
                     >
                       <CalendarDays className="h-4 w-4" />
@@ -429,7 +429,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                 </div>
 
                 {asOfRes === "pending" && (
-                  <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-muted">
+                  <div className="rounded-xl bg-sunken px-4 py-3 text-sm text-muted">
                     Запрос…
                   </div>
                 )}
@@ -449,7 +449,7 @@ export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-muted">
+                    <div className="rounded-xl bg-sunken px-4 py-3 text-sm text-muted">
                       Курс на указанную дату не найден.
                     </div>
                   ))}
@@ -479,7 +479,7 @@ LIMIT  1;`}
       ) : (
         /* ── VAT tab ────────────────────────────────────────────────────────── */
         <>
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-ink">
                 Ставки НДС — история по датам
@@ -495,24 +495,24 @@ LIMIT  1;`}
             </p>
           </div>
 
-          <div className="rounded-2xl bg-white p-5 shadow-card">
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                   Версии
                 </div>
                 <h3 className="mt-1 text-sm font-semibold text-ink">
                   История ставок НДС (SCD Type 2)
                 </h3>
               </div>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+              <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
                 {vatRates.length} версий
               </span>
             </div>
-            <div className="mt-4 overflow-hidden rounded-xl ring-1 ring-slate-100">
+            <div className="mt-4 overflow-hidden rounded-xl ring-1 ring-line">
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                     <th className="px-3 py-2 font-semibold">Код</th>
                     <th className="px-3 py-2 font-semibold">Наименование</th>
                     <th className="px-3 py-2 font-semibold">Ставка, %</th>
@@ -521,7 +521,7 @@ LIMIT  1;`}
                     <th className="px-3 py-2 font-semibold">Статус</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-line">
                   {vatRates.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-3 py-4 text-center text-muted">
@@ -537,8 +537,8 @@ LIMIT  1;`}
                           key={r.id}
                           className={
                             isActive
-                              ? "bg-brand-100/30 hover:bg-brand-100/40"
-                              : "text-slate-400 hover:bg-slate-50/60"
+                              ? "bg-accent-soft/30 hover:bg-accent-soft/40"
+                              : "text-faint hover:bg-sunken/60"
                           }
                         >
                           <td className="px-3 py-2.5 font-mono text-[13px]">{r.code}</td>
@@ -575,13 +575,13 @@ LIMIT  1;`}
       )}
 
       {/* SCD2 explanation (always visible) */}
-      <div className="rounded-2xl bg-white p-5 shadow-card">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+      <div className="rounded-2xl bg-surface p-5 shadow-card">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
           Как это устроено
         </div>
         <ul className="mt-2 space-y-1.5 text-[13px] text-muted">
           <li className="flex gap-2">
-            <Clock className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
+            <Clock className="mt-0.5 h-4 w-4 flex-shrink-0 text-faint" />
             <span>
               Текущая версия = «по» пусто (
               <span className="font-mono">end_date IS NULL</span>); прошлые не
@@ -589,7 +589,7 @@ LIMIT  1;`}
             </span>
           </li>
           <li className="flex gap-2">
-            <span className="mt-0.5 flex-shrink-0 text-slate-400">◷</span>
+            <span className="mt-0.5 flex-shrink-0 text-faint">◷</span>
             <span>
               Интервал полуоткрытый{" "}
               <span className="font-mono">[действует с, по)</span> — дата «по» в период
@@ -597,7 +597,7 @@ LIMIT  1;`}
             </span>
           </li>
           <li className="flex gap-2">
-            <span className="mt-0.5 flex-shrink-0 text-slate-400">🗃</span>
+            <span className="mt-0.5 flex-shrink-0 text-faint">🗃</span>
             <span>
               SCD Type 2 ведётся вручную (сервис-слой), т.к. стек — PostgreSQL 16;
               нативные temporal-таблицы появятся в PG18/19.

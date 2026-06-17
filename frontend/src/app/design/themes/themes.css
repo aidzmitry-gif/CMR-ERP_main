@@ -1,0 +1,176 @@
+/* 3 дизайн-темы как наборы переменных. Один комплект вёрстки → три вида.
+   Применяется классом .theme-A / .theme-B / .theme-C на контейнере. */
+
+.tw-theme {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #F7F7F9;
+  --t-surface: #FFFFFF;
+  --t-sunken: #FBFBFD;
+  --t-ink: #1A1A23;
+  --t-muted: #6B6F76;
+  --t-faint: #9BA0A8;
+  --t-line: #ECECF0;
+  --t-line-strong: #E2E2E8;
+  --t-accent: #635BFF;
+  --t-accent-ink: #4B45D6;
+  --t-accent-soft: #EEEEFF;
+  --t-money: #0F9D58;
+  --t-money-soft: #ECF7F0;
+  --t-amber: #B45309;
+  --t-amber-soft: #FCF1DD;
+  --t-red: #DC2626;
+  --t-red-soft: #FCEAEA;
+  --t-radius: 14px;
+  --t-radius-sm: 10px;
+  --t-shadow: 0 1px 1px rgba(20,20,40,.03), 0 2px 4px rgba(20,20,40,.04), 0 6px 16px rgba(20,20,40,.04), inset 0 1px 0 rgba(255,255,255,.6);
+  --t-card-border: 1px solid var(--t-line);
+  --t-header-weight: 700;
+  --t-pad: 18px;
+}
+
+/* ─── ТЕМА A · Stripe/Notion — светлый, тёплый, воздушный (текущий) ─── */
+.theme-A {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #F7F7F9;
+  --t-surface: #FFFFFF;
+  --t-ink: #1A1A23;
+  --t-accent: #635BFF; --t-accent-ink: #4B45D6; --t-accent-soft: #EEEEFF;
+  --t-money: #0F9D58; --t-money-soft: #ECF7F0;
+  --t-radius: 14px; --t-radius-sm: 10px;
+  --t-shadow: 0 1px 1px rgba(20,20,40,.03), 0 2px 4px rgba(20,20,40,.04), 0 6px 16px rgba(20,20,40,.04), inset 0 1px 0 rgba(255,255,255,.6);
+  --t-card-border: 1px solid #ECECF0;
+  --t-pad: 18px;
+}
+
+/* ─── ТЕМА B · Linear/Vercel — строгий, плотный, графитовый, тонкие границы ─── */
+.theme-B {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #F6F6F7;
+  --t-surface: #FFFFFF;
+  --t-sunken: #FAFAFA;
+  --t-ink: #16161A;
+  --t-muted: #6E6E76;
+  --t-faint: #A0A0A8;
+  --t-line: #E8E8EA;
+  --t-line-strong: #D8D8DC;
+  --t-accent: #5E6AD2;     /* фирменный сине-фиолет Linear */
+  --t-accent-ink: #4954B8;
+  --t-accent-soft: #ECEEFB;
+  --t-money: #14865B;
+  --t-money-soft: #E7F3EE;
+  --t-radius: 8px;         /* меньше скругление — строже */
+  --t-radius-sm: 6px;
+  --t-shadow: 0 0 0 1px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.05);  /* плоская граница вместо мягкой тени */
+  --t-card-border: 1px solid #E4E4E7;
+  --t-header-weight: 600;
+  --t-pad: 16px;
+}
+
+/* ─── ТЕМА C · Enterprise data — деловой, плотный, корпоративный синий, max данных ─── */
+.theme-C {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #EEF1F5;
+  --t-surface: #FFFFFF;
+  --t-sunken: #F4F6F9;
+  --t-ink: #0F172A;
+  --t-muted: #5B6B82;
+  --t-faint: #93A1B5;
+  --t-line: #E2E8F0;
+  --t-line-strong: #CBD5E1;
+  --t-accent: #1E5EFF;     /* корпоративный синий */
+  --t-accent-ink: #1545CC;
+  --t-accent-soft: #E3ECFF;
+  --t-money: #0E7C4A;
+  --t-money-soft: #E2F3EA;
+  --t-amber: #B45309;
+  --t-radius: 6px;         /* строгая сетка, минимум скруглений */
+  --t-radius-sm: 4px;
+  --t-shadow: 0 1px 2px rgba(15,23,42,.08), 0 1px 1px rgba(15,23,42,.04);
+  --t-card-border: 1px solid #D8E0EA;
+  --t-header-weight: 700;
+  --t-pad: 14px;          /* плотнее — больше данных */
+}
+
+/* ─── ТЕМА D · Dark cockpit — тёмная, «командный центр»/мониторинг ─── */
+.theme-D {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #0E1116;
+  --t-surface: #171B22;
+  --t-sunken: #1F242C;
+  --t-ink: #E8EAED;
+  --t-muted: #9BA3AE;
+  --t-faint: #6B7280;
+  --t-line: #2A3038;
+  --t-line-strong: #3A424C;
+  --t-accent: #6E8BFF;     /* светлый сине-фиолет на тёмном */
+  --t-accent-ink: #8AA0FF;
+  --t-accent-soft: #232A3D;
+  --t-money: #34D399;      /* неоново-зелёный — деньги светятся на тёмном */
+  --t-money-soft: #16271F;
+  --t-amber: #FBBF24;
+  --t-amber-soft: #2A2310;
+  --t-red: #F87171;
+  --t-red-soft: #2A1717;
+  --t-radius: 10px;
+  --t-radius-sm: 8px;
+  --t-shadow: 0 2px 8px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+  --t-card-border: 1px solid #2A3038;
+  --t-header-weight: 600;
+  --t-pad: 16px;
+}
+
+/* ─── ТЕМА E · Warm editorial — тёплый, бумажный, премиальный финансовый отчёт ─── */
+.theme-E {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #F4F0E8;     /* бумажный беж */
+  --t-surface: #FBF8F2;
+  --t-sunken: #F0EBE0;
+  --t-ink: #2A2520;        /* тёплый тёмно-коричневый */
+  --t-muted: #7A7066;
+  --t-faint: #A89E90;
+  --t-line: #E5DDCD;
+  --t-line-strong: #D6CBB6;
+  --t-accent: #B0552E;     /* терракота/охра — благородный акцент */
+  --t-accent-ink: #8F4322;
+  --t-accent-soft: #F2E3D6;
+  --t-money: #4A6B3A;      /* приглушённый оливково-зелёный */
+  --t-money-soft: #E8EDDF;
+  --t-amber: #9A6A18;
+  --t-amber-soft: #F2E6CC;
+  --t-red: #A83A2E;
+  --t-red-soft: #F2DCD8;
+  --t-radius: 10px;
+  --t-radius-sm: 8px;
+  --t-shadow: 0 1px 3px rgba(80,60,30,.08), 0 1px 1px rgba(80,60,30,.06);
+  --t-card-border: 1px solid #E5DDCD;
+  --t-header-weight: 700;
+  --t-pad: 18px;
+}
+
+/* ─── ТЕМА F · High-contrast bold — яркий, контрастный, крупная типографика ─── */
+.theme-F {
+  --t-font: "Inter", system-ui, sans-serif;
+  --t-canvas: #FFFFFF;
+  --t-surface: #FFFFFF;
+  --t-sunken: #F5F5F5;
+  --t-ink: #0A0A0A;        /* почти чёрный */
+  --t-muted: #555555;
+  --t-faint: #8A8A8A;
+  --t-line: #1A1A1A;       /* чёрные границы — смелый вид */
+  --t-line-strong: #0A0A0A;
+  --t-accent: #4F39F6;     /* насыщенный электрик-фиолет */
+  --t-accent-ink: #3A28C8;
+  --t-accent-soft: #ECE9FE;
+  --t-money: #008A3C;      /* насыщенный зелёный */
+  --t-money-soft: #D7F5E1;
+  --t-amber: #B45309;
+  --t-amber-soft: #FEF0C7;
+  --t-red: #E11D48;
+  --t-red-soft: #FFE4E9;
+  --t-radius: 4px;
+  --t-radius-sm: 3px;
+  --t-shadow: 3px 3px 0 #0A0A0A;  /* жёсткая «графичная» тень — фишка стиля */
+  --t-card-border: 1.5px solid #0A0A0A;
+  --t-header-weight: 800;
+  --t-pad: 16px;
+}

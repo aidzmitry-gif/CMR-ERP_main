@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useState } from "react";
 import type { LossReason } from "@/lib/types";
 
-const SELECT = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand";
+const SELECT = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
 /** Модалка закрытия сделки в отказ (SALES-40): причина обязательна, комментарий — опционально.
  * Без выбранной причины кнопка «Закрыть в отказ» заблокирована — нельзя слить сделку молча. */
@@ -34,18 +34,18 @@ export function LoseDealModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop"
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-surface shadow-pop"
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <h3 className="text-base font-semibold text-ink">Закрыть сделку в отказ</h3>
-          <button type="button" onClick={onCancel} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={onCancel} className="text-faint hover:text-muted">
             <X size={20} />
           </button>
         </div>
 
         <div className="px-5 py-4">
           <p className="mb-3 text-xs text-muted">{dealLabel}</p>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+          <label className="mb-1.5 block text-xs font-semibold text-muted">
             Причина отказа <span className="text-red-500">*</span>
           </label>
           <select
@@ -69,11 +69,11 @@ export function LoseDealModal({
           />
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3.5">
+        <div className="flex justify-end gap-2 border-t border-line px-5 py-3.5">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted hover:bg-sunken"
           >
             Отмена
           </button>

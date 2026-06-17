@@ -49,7 +49,7 @@ export default function RopPlanningPage() {
               </Card>
             ))}
           </div>
-          <p className="text-xs text-slate-400">{planCardsNote}</p>
+          <p className="text-xs text-faint">{planCardsNote}</p>
 
           {/* Ёмкость по менеджерам */}
           <Card>
@@ -57,7 +57,7 @@ export default function RopPlanningPage() {
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[920px] text-sm">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                  <tr className="text-[10px] uppercase tracking-wide text-faint">
                     <th scope="col" className="pb-2 text-left font-semibold">Менеджер</th>
                     <th scope="col" className="pb-2 text-right font-semibold">План</th>
                     <th scope="col" className="pb-2 text-right font-semibold">Прогноз</th>
@@ -70,7 +70,7 @@ export default function RopPlanningPage() {
                 </thead>
                 <tbody>
                   {capacity.map((r) => (
-                    <tr key={r.name} className="border-t border-slate-100 align-top">
+                    <tr key={r.name} className="border-t border-line align-top">
                       <td className="py-3">
                         <span className="flex items-center gap-2">
                           <Avatar name={r.name} />
@@ -93,12 +93,12 @@ export default function RopPlanningPage() {
                         <div className="mt-1 text-[11px] text-muted">{r.verdictNote}</div>
                       </td>
                       <td className="py-3">
-                        <div className="text-[12px] text-slate-600">{r.stage}</div>
-                        <div className="text-[11px] text-slate-400">{r.coaching}</div>
+                        <div className="text-[12px] text-muted">{r.stage}</div>
+                        <div className="text-[11px] text-faint">{r.coaching}</div>
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t border-slate-200 font-bold text-ink">
+                  <tr className="border-t border-line-strong font-bold text-ink">
                     <td className="py-3">Итого</td>
                     <td className="py-3 text-right tabular-nums">{capacityTotal.plan}</td>
                     <td className="py-3 text-right tabular-nums">{capacityTotal.forecast}</td>
@@ -111,7 +111,7 @@ export default function RopPlanningPage() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-xs text-slate-400">{capacityNote}</p>
+            <p className="mt-3 text-xs text-faint">{capacityNote}</p>
           </Card>
 
           {/* План действий + рычаги конверсии */}
@@ -130,14 +130,14 @@ export default function RopPlanningPage() {
                   </li>
                 ))}
               </ul>
-              <hr className="my-3 border-slate-100" />
-              <p className="text-xs text-slate-400">{planRule}</p>
-              <p className="mt-1 text-xs text-slate-400">{planNorm}</p>
+              <hr className="my-3 border-line" />
+              <p className="text-xs text-faint">{planRule}</p>
+              <p className="mt-1 text-xs text-faint">{planNorm}</p>
             </Card>
 
             <Card>
               <Caption>Рычаги конверсии по этапам</Caption>
-              <div className="mt-3 divide-y divide-slate-100">
+              <div className="mt-3 divide-y divide-line">
                 {conversionLevers.map((l) => (
                   <div key={l.title} className="py-2.5">
                     <div className="text-sm font-semibold text-ink">{l.title}</div>
@@ -145,7 +145,7 @@ export default function RopPlanningPage() {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-slate-400">{leversNote}</p>
+              <p className="mt-3 text-xs text-faint">{leversNote}</p>
             </Card>
           </div>
         </div>

@@ -74,14 +74,14 @@ const HOW_IT_WORKS = [
 
 function stepClass(state: "done" | "active" | "idle") {
   if (state === "done") return "flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 font-medium text-emerald-700";
-  if (state === "active") return "flex items-center gap-2 rounded-xl bg-brand-100 px-3 py-2 font-semibold text-brand-600";
-  return "flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 font-medium text-slate-400";
+  if (state === "active") return "flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 font-semibold text-accent-ink";
+  return "flex items-center gap-2 rounded-xl bg-sunken px-3 py-2 font-medium text-faint";
 }
 
 function stepNumClass(state: "done" | "active" | "idle") {
   if (state === "done") return "flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-[11px]";
-  if (state === "active") return "flex h-5 w-5 items-center justify-center rounded-full bg-brand text-[11px] text-white";
-  return "flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[11px] text-slate-500";
+  if (state === "active") return "flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] text-white";
+  return "flex h-5 w-5 items-center justify-center rounded-full bg-line-strong text-[11px] text-muted";
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -128,16 +128,16 @@ export function SpravImport() {
         </div>
 
         {/* ── LIVE: Sync card ─────────────────────────────────────────────────── */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">LIVE</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">LIVE</div>
               <h2 className="mt-0.5 text-base font-semibold text-ink">Синхронизация с 1С</h2>
             </div>
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60"
             >
               <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
               {syncing ? "Синхронизируется…" : "Синхронизировать"}
@@ -153,7 +153,7 @@ export function SpravImport() {
           {summaryItems && (
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {summaryItems.map((item) => (
-                <div key={item.label} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                <div key={item.label} className="rounded-xl bg-sunken px-3 py-2.5">
                   <div className="text-xl font-bold text-ink">{item.value.toLocaleString("ru-RU")}</div>
                   <div className="mt-0.5 text-[12px] text-muted">{item.label}</div>
                 </div>
@@ -179,11 +179,11 @@ export function SpravImport() {
         </div>
 
         {/* DEMO: Stepper */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             {STEPPER.map((step, i) => (
               <Fragment key={step.n}>
-                {i > 0 && <div className="h-px w-6 bg-slate-200" />}
+                {i > 0 && <div className="h-px w-6 bg-line-strong" />}
                 <div className={stepClass(step.state)}>
                   <span className={stepNumClass(step.state)}>
                     {step.state === "done" ? "✓" : step.n}
@@ -196,22 +196,22 @@ export function SpravImport() {
         </div>
 
         {/* DEMO: Field mapping (step 2 — confirmed) */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
+          <div className="flex items-center justify-between border-b border-line pb-3">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Шаг 2 · подтверждено
               </div>
               <h2 className="mt-0.5 text-base font-semibold text-ink">Маппинг полей</h2>
             </div>
-            <button className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">
+            <button className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line">
               Изменить маппинг
             </button>
           </div>
-          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-100">
+          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-line">
             <table className="w-full">
               <thead>
-                <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                   <th className="px-3 py-2 font-semibold">Поле 1С</th>
                   <th className="px-3 py-2 font-semibold" />
                   <th className="px-3 py-2 font-semibold">Поле ERP</th>
@@ -219,26 +219,26 @@ export function SpravImport() {
                   <th className="px-3 py-2 font-semibold">Ключ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-line">
                 {MAPPING_ROWS.map((row) => (
                   <tr
                     key={row.dst}
                     className={
                       row.dst === "unp"
                         ? "bg-amber-50/40 hover:bg-amber-50/60"
-                        : "hover:bg-slate-50/60"
+                        : "hover:bg-sunken/60"
                     }
                   >
                     <td className="px-3 py-2.5 text-sm">{row.src}</td>
-                    <td className="px-3 py-2.5 text-center text-slate-400">→</td>
-                    <td className="px-3 py-2.5 font-mono text-[13px] text-slate-500">{row.dst}</td>
+                    <td className="px-3 py-2.5 text-center text-faint">→</td>
+                    <td className="px-3 py-2.5 font-mono text-[13px] text-muted">{row.dst}</td>
                     <td className="px-3 py-2.5 text-sm text-muted">{row.type}</td>
                     <td className="px-3 py-2.5">
                       {row.keyBadge && (
                         <span
                           className={
                             row.keyBadge === "alias"
-                              ? "rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
+                              ? "rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted"
                               : "rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700"
                           }
                         >
@@ -254,10 +254,10 @@ export function SpravImport() {
         </div>
 
         {/* DEMO: Preview + conflicts (step 3 — current) */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Шаг 3 · текущий
               </div>
               <h2 className="mt-0.5 text-base font-semibold text-ink">Предпросмотр (218 строк)</h2>
@@ -272,35 +272,35 @@ export function SpravImport() {
 
           {/* Search bar (static demo) */}
           <div className="mt-3 flex items-center gap-3">
-            <div className="flex-1 rounded-xl bg-slate-50 px-3 py-2">
+            <div className="flex-1 rounded-xl bg-sunken px-3 py-2">
               <input
-                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-faint"
                 placeholder="Поиск по наименованию или УНП…"
                 readOnly
               />
             </div>
-            <button className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">
+            <button className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line">
               Только конфликты
             </button>
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-100">
+          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-line">
             <table className="w-full">
               <thead>
-                <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                   <th className="px-3 py-2 font-semibold">Наименование</th>
                   <th className="px-3 py-2 font-semibold">УНП</th>
                   <th className="px-3 py-2 font-semibold">Действие</th>
                   <th className="px-3 py-2 font-semibold">Комментарий</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-line">
                 {PREVIEW_ROWS.map((row) => {
                   const badge = ACTION_BADGE[row.action];
                   return (
-                    <tr key={row.name} className={`${ROW_HIGHLIGHT[row.action]} hover:bg-slate-50/60`}>
+                    <tr key={row.name} className={`${ROW_HIGHLIGHT[row.action]} hover:bg-sunken/60`}>
                       <td className="px-3 py-2.5 text-sm">{row.name}</td>
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-slate-500">{row.unp}</td>
+                      <td className="px-3 py-2.5 font-mono text-[13px] text-muted">{row.unp}</td>
                       <td className="px-3 py-2.5">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] ${badge.cls}`}>
                           {badge.label}
@@ -321,13 +321,13 @@ export function SpravImport() {
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               disabled
-              className="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card opacity-50"
+              className="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card opacity-50"
             >
               Импортировать 216
             </button>
             <button
               disabled
-              className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200 opacity-50"
+              className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line opacity-50"
             >
               Скачать отчёт
             </button>
@@ -335,19 +335,19 @@ export function SpravImport() {
         </div>
 
         {/* DEMO: Dry-run log */}
-        <div className="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+        <div className="rounded-2xl bg-ink p-5 text-faint shadow-card">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Лог · сухой прогон (dry-run)
               </div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-200">Что произойдёт при импорте</div>
+              <div className="mt-0.5 text-sm font-semibold text-ink">Что произойдёт при импорте</div>
             </div>
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
               🤖 идемпотентно
             </span>
           </div>
-          <pre className="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">
+          <pre className="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-ink">
 {`scan       source=1c gateway=integrations rows=218
 matched    by УНП 100345678 -> CP-000312   (update phone)
 matched    by УНП 191007788 -> CP-000877   (update address)
@@ -362,12 +362,12 @@ summary    created=140 updated=62 merged=14 skipped=2  → apply=216`}
         </div>
 
         {/* DEMO: How it works */}
-        <div className="rounded-2xl bg-white p-5 shadow-card">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Как это работает</div>
+        <div className="rounded-2xl bg-surface p-5 shadow-card">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">Как это работает</div>
           <ul className="mt-2 space-y-2">
             {HOW_IT_WORKS.map((item) => (
               <li key={item.title} className="flex gap-2 text-sm text-muted">
-                <span className="text-slate-400">{item.icon}</span>
+                <span className="text-faint">{item.icon}</span>
                 <span>
                   <span className="font-medium text-ink">{item.title}</span> {item.body}
                 </span>
@@ -376,7 +376,7 @@ summary    created=140 updated=62 merged=14 skipped=2  → apply=216`}
           </ul>
         </div>
 
-        <p className="px-1 text-[11px] text-slate-400">
+        <p className="px-1 text-[11px] text-faint">
           Макет, демо-данные. Концепция — coordination/db-and-reference-data-concept.md (v3).
         </p>
       </div>

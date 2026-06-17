@@ -8,7 +8,7 @@ const PRIORITY_CYCLE = ["Высокий", "Средний", "Низкий"];
 const PRIORITY_TONE: Record<string, string> = {
   Высокий: "bg-red-50 text-red-600",
   Средний: "bg-amber-50 text-amber-600",
-  Низкий: "bg-slate-100 text-slate-600",
+  Низкий: "bg-sunken text-muted",
 };
 
 export function DealActions({
@@ -58,7 +58,7 @@ export function DealActions({
         onClick={toggleFocus}
         disabled={busy}
         className={`flex items-center justify-center gap-2 rounded-xl py-3 font-medium disabled:opacity-60 ${
-          focus ? "bg-brand text-white" : "bg-blue-50 text-brand-600"
+          focus ? "bg-accent text-white" : "bg-blue-50 text-accent-ink"
         }`}
       >
         <Target size={18} /> Фокус

@@ -24,7 +24,7 @@ const DECISION_STYLES: Record<QcDecision, string> = {
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className={clsx("mt-1 text-2xl font-bold", tone ?? "text-ink")}>{value}</div>
     </div>
@@ -79,26 +79,26 @@ export function OtkPanel({
         <Kpi label="Брак" value={String(stats.scrap)} tone="text-red-600" />
       </div>
 
-      <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mt-5 rounded-xl border border-line bg-surface p-4">
         <div className="text-sm font-semibold text-ink">Решение ОТК</div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <input
             value={order}
             onChange={(e) => setOrder(e.target.value)}
             placeholder="№ наряда"
-            className="w-28 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-28 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={product}
             onChange={(e) => setProduct(e.target.value)}
             placeholder="Изделие"
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <input
             value={inspector}
             onChange={(e) => setInspector(e.target.value)}
             placeholder="Контролёр"
-            className="w-32 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+            className="w-32 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -107,7 +107,7 @@ export function OtkPanel({
             onChange={(e) => setReason(e.target.value)}
             list="otk-reasons"
             placeholder="Причина (для доработки/брака) — можно выбрать или ввести свою"
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <datalist id="otk-reasons">
             {REWORK_REASONS.map((r) => (
@@ -144,10 +144,10 @@ export function OtkPanel({
       </div>
 
       <div className="mt-5 text-sm font-semibold text-ink">Журнал ОТК</div>
-      <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-2 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">№</th>
               <th className="px-4 py-2 font-medium">Изделие</th>
               <th className="px-4 py-2 font-medium">Решение</th>
@@ -164,9 +164,9 @@ export function OtkPanel({
               </tr>
             )}
             {journal.map((r) => (
-              <tr key={r.id} className="border-b border-slate-50 last:border-0">
-                <td className="px-4 py-2.5 text-slate-500">{r.order_code || "—"}</td>
-                <td className="px-4 py-2.5 text-slate-700">{r.product || "—"}</td>
+              <tr key={r.id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2.5 text-muted">{r.order_code || "—"}</td>
+                <td className="px-4 py-2.5 text-muted">{r.product || "—"}</td>
                 <td className="px-4 py-2.5">
                   <span
                     className={clsx(
@@ -177,8 +177,8 @@ export function OtkPanel({
                     {decisionLabel(r.decision)}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-slate-600">{r.reason || "—"}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.inspector || "—"}</td>
+                <td className="px-4 py-2.5 text-muted">{r.reason || "—"}</td>
+                <td className="px-4 py-2.5 text-muted">{r.inspector || "—"}</td>
               </tr>
             ))}
           </tbody>

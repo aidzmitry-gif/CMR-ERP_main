@@ -80,10 +80,10 @@ interface SearchBoxProps {
 
 function SearchBox({ value, onChange, placeholder }: SearchBoxProps) {
   return (
-    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-      <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+    <div className="flex items-center gap-2 rounded-xl bg-sunken px-3 py-2">
+      <Search className="h-3.5 w-3.5 shrink-0 text-faint" />
       <input
-        className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+        className="w-full bg-transparent text-ink text-sm outline-none placeholder:text-faint"
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -142,8 +142,8 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
   return (
     <div className="space-y-4">
       {/* Info banner — registry pattern explanation */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl bg-brand-100/60 px-4 py-2.5 text-[12px] text-slate-600">
-        <span className="font-semibold text-brand-600">Как это устроено:</span>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl bg-accent-soft/60 px-4 py-2.5 text-[12px] text-muted">
+        <span className="font-semibold text-accent-ink">Как это устроено:</span>
         <span>
           📇 это <b>реестр-витрина</b>, а не второе хранилище
         </span>
@@ -163,11 +163,11 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
           <Link
             key={link.href}
             href={link.href}
-            className="rounded-2xl bg-white p-3 shadow-card ring-1 ring-slate-100 transition-shadow hover:ring-2 hover:ring-brand/40"
+            className="rounded-2xl bg-surface p-3 shadow-card ring-1 ring-line transition-shadow hover:ring-2 hover:ring-accent/40"
           >
             <div className="text-sm font-semibold text-ink">
               {link.badge && (
-                <span className="mr-1 text-brand-600">{link.badge}</span>
+                <span className="mr-1 text-accent-ink">{link.badge}</span>
               )}
               {link.label}
             </div>
@@ -177,7 +177,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-faint">
         <span>Значки:</span>
         <span>★ мастер-данные (golden record)</span>
         <span>🕘 версионный (история по датам)</span>
@@ -190,7 +190,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
         {/* Left: department tree */}
         <aside className="space-y-3 lg:sticky lg:top-6 lg:self-start">
           {/* Tree search */}
-          <div className="rounded-2xl bg-white p-2 shadow-card">
+          <div className="rounded-2xl bg-surface p-2 shadow-card">
             <SearchBox
               value={treeSearch}
               onChange={setTreeSearch}
@@ -199,7 +199,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
           </div>
 
           {/* Nav tree */}
-          <nav className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-2xl bg-white p-2 shadow-card text-[13px]">
+          <nav className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-2xl bg-surface p-2 shadow-card text-[13px]">
             {groups.length === 0 ? (
               <div className="px-2 py-6 text-center text-sm text-muted">
                 Каталог недоступен
@@ -211,7 +211,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
             ) : (
               filteredGroups.map((group) => (
                 <div key={group.dept}>
-                  <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     {group.icon} {group.dept}
                   </div>
                   <ul className="mb-1">
@@ -224,8 +224,8 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                             onClick={() => void selectRef(ref)}
                             className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors ${
                               isActive
-                                ? "bg-brand-100 font-semibold text-brand-600"
-                                : "hover:bg-slate-50"
+                                ? "bg-accent-soft font-semibold text-accent-ink"
+                                : "hover:bg-sunken"
                             }`}
                           >
                             <span>{ref.title}</span>
@@ -251,9 +251,9 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
         {/* Right: reference table */}
         <section>
           {selected ? (
-            <div className="rounded-2xl bg-white shadow-card">
+            <div className="rounded-2xl bg-surface shadow-card">
               {/* Ref header */}
-              <div className="border-b border-slate-100 p-5">
+              <div className="border-b border-line p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-bold text-ink">
@@ -270,10 +270,10 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                    <span className="rounded-full bg-sunken px-2 py-0.5 font-medium text-muted">
                       схема: {selected.owner_schema}
                     </span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-slate-600">
+                    <span className="rounded-full bg-sunken px-2 py-0.5 font-mono text-muted">
                       {selected.endpoint}
                     </span>
                     {selected.ai_exposed && (
@@ -307,7 +307,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                   Загрузка…
                 </div>
               ) : rowsSource(selected) === "lookup-only" ? (
-                <div className="rounded-xl bg-slate-50 px-5 py-8 text-center text-sm text-muted">
+                <div className="rounded-xl bg-sunken px-5 py-8 text-center text-sm text-muted">
                   Данные у владельца — список не выгружается целиком.
                   <br />
                   Точечный доступ: карточка эталона, дедупликация или структурный запрос AI
@@ -321,7 +321,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
                         {selected.columns.map((col) => (
                           <th
                             key={col.name}
@@ -332,7 +332,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody className="divide-y divide-line">
                       {visibleRows.length === 0 ? (
                         <tr>
                           <td
@@ -346,7 +346,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                         visibleRows.map((row, i) => (
                           <tr
                             key={String(row.id ?? row.code ?? i)}
-                            className={`hover:bg-slate-50/60 ${!row.is_active && row.is_active != null ? "opacity-50" : ""}`}
+                            className={`hover:bg-sunken/60 ${!row.is_active && row.is_active != null ? "opacity-50" : ""}`}
                           >
                             {selected.columns.map((col) => {
                               const val = row[col.name];
@@ -354,7 +354,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                                 return (
                                   <td key={col.name} className="px-4 py-2.5">
                                     {!val && val != null ? (
-                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                                      <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">
                                         Архив
                                       </span>
                                     ) : (
@@ -370,7 +370,7 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
                                   {val != null ? (
                                     String(val)
                                   ) : (
-                                    <span className="text-slate-300">—</span>
+                                    <span className="text-faint">—</span>
                                   )}
                                 </td>
                               );
@@ -385,13 +385,13 @@ export function SpravCatalog({ catalog, initialRef, initialRows }: Props) {
 
               {/* Footer */}
               {selected.archivable && (
-                <div className="border-t border-slate-100 px-5 py-3 text-[12px] text-muted">
+                <div className="border-t border-line px-5 py-3 text-[12px] text-muted">
                   Записи архивируются, не удаляются — на них могут ссылаться документы.
                 </div>
               )}
             </div>
           ) : (
-            <div className="rounded-2xl bg-white p-8 text-center shadow-card">
+            <div className="rounded-2xl bg-surface p-8 text-center shadow-card">
               <p className="text-sm text-muted">Выберите справочник в дереве слева</p>
             </div>
           )}
