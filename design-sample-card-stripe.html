@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Карточка сделки — дизайн по приоритетам (деньги→безопасность→функция→эстетика)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --canvas:#F7F7F9; --surface:#fff; --sunken:#FBFBFD;
+    --ink:#1A1A23; --muted:#6B6F76; --faint:#9BA0A8;
+    --accent:#635BFF; --accent-ink:#4B45D6; --accent-soft:#EEEEFF;
+    --emerald:#0F9D58; --emerald-soft:#E6F4EA;
+    --teal:#0E9384;    --teal-soft:#E4F5F2;
+    --amber:#B45309;   --amber-soft:#FCF1DD;
+    --red:#DC2626;     --red-soft:#FCEAEA;
+    --violet:#7C3AED;  --violet-soft:#F2EBFE;
+    --money:#0F9D58;   --money-bg:#ECF7F0;    /* зелёный «денег» */
+    --border:#ECECF0; --border-strong:#E2E2E8;
+    --radius:14px;
+    --shadow-card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04),inset 0 1px 0 rgba(255,255,255,.6);
+    --shadow-pop:0 1px 2px rgba(20,20,40,.06),0 12px 28px rgba(20,20,40,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"cv05","ss01"}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+  /* ─── КНОПКИ ─── */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font-family:var(--font);font-weight:600;line-height:1;cursor:pointer;border:1px solid transparent;border-radius:10px;transition:all .14s ease;white-space:nowrap;font-size:13px;padding:10px 16px}
+  .btn .i{font-size:15px;line-height:0}
+  .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(99,91,255,.35)}
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(75,69,214,.4),0 2px 8px rgba(99,91,255,.28),inset 0 1px 0 rgba(255,255,255,.22)}
+  .btn-primary:hover{background:var(--accent-ink)}
+  .btn-primary:active{transform:translateY(1px)}
+  .btn-hero{font-size:14.5px;padding:13px 22px;border-radius:11px;font-weight:700}
+  .btn-secondary{background:var(--surface);color:var(--ink);border-color:var(--border-strong);box-shadow:0 1px 1px rgba(20,20,40,.04)}
+  .btn-secondary:hover{background:var(--sunken);border-color:#CFCFD8}
+  .btn-ghost{background:transparent;color:var(--muted)}
+  .btn-ghost:hover{background:#EFEFF3;color:var(--ink)}
+  .btn-violet{background:var(--violet);color:#fff;box-shadow:0 1px 2px rgba(109,40,217,.35),0 2px 8px rgba(124,58,237,.24)}
+  .btn-violet:hover{filter:brightness(1.06)}
+  .btn-money{background:var(--money);color:#fff;box-shadow:0 1px 2px rgba(15,157,88,.3),0 2px 8px rgba(15,157,88,.22)}
+  .btn-money:hover{filter:brightness(1.05)}
+  /* телефония */
+  .btn-call{background:var(--emerald);color:#fff;box-shadow:0 1px 2px rgba(15,157,88,.3)}
+  .btn-call:hover{filter:brightness(1.05)}
+  .btn-hangup{background:var(--red);color:#fff}
+  /* безопасность: необратимое действие — обводка-предупреждение + замок */
+  .btn-guard{background:var(--surface);color:var(--amber);border-color:#EAC98A}
+  .btn-guard:hover{background:var(--amber-soft)}
+  .btn-sm{font-size:12px;padding:7px 12px;border-radius:8px;gap:5px}.btn-sm .i{font-size:13px}
+  .btn-xs{font-size:11.5px;padding:5px 9px;border-radius:7px;gap:4px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
+
+  /* topnav */
+  .topnav{background:var(--surface);border-bottom:1px solid var(--border);padding:11px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:60}
+  .back{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--accent-ink);text-decoration:none;background:var(--accent-soft);border-radius:8px;padding:7px 12px}
+  .crumb{font-size:12.5px;color:var(--muted)}.crumb b{color:var(--ink)}
+  .nav-right{margin-left:auto;display:flex;gap:8px}
+
+  main{max-width:1340px;margin:0 auto;padding:0 24px 48px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-card)}
+
+  /* badges */
+  .bdg{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;border-radius:7px;padding:3px 9px}
+  .b-emerald{background:var(--emerald-soft);color:var(--emerald)}
+  .b-teal{background:var(--teal-soft);color:var(--teal)}
+  .b-amber{background:var(--amber-soft);color:var(--amber)}
+  .b-red{background:var(--red-soft);color:var(--red)}
+  .b-violet{background:var(--violet-soft);color:var(--violet)}
+  .b-accent{background:var(--accent-soft);color:var(--accent-ink)}
+  .b-slate{background:#F0F0F3;color:var(--muted)}
+
+  /* ─── ШАПКА ─── */
+  .head{padding:16px 20px 14px;margin:18px 0 0}
+  .h-top{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .h-id .id{font-size:12px;color:var(--faint);font-weight:600}
+  .h-id h1{font-size:20px;font-weight:700;letter-spacing:-.02em;line-height:1.12;margin-top:2px}
+  .h-id .desc{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .h-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .h-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ── ДЕНЬГИ: банк-полоса, маржа — главное число ── */
+  .money-row{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr;gap:1px;margin-top:15px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .money-cell{background:var(--surface);padding:13px 16px}
+  .money-cell.hero{background:var(--money-bg)}
+  .money-cell.arrive{background:var(--amber-soft)}
+  .money-cell.arrive .ml{color:var(--amber)}
+  .money-cell.arrive .mv{color:#8a4a0a}
+  .money-cell.arrive .ms{color:var(--amber)}
+  .money-cell .ml{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;font-weight:700;display:flex;align-items:center;gap:5px}
+  .money-cell .mv{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:5px}
+  .money-cell.hero .mv{font-size:25px;color:var(--money)}
+  .money-cell .ms{font-size:11px;color:var(--muted);margin-top:2px}
+  .money-cell.hero .ms{color:#3f7a5a;font-weight:500}
+  .marginbar{height:5px;border-radius:99px;background:#D6EBDF;overflow:hidden;margin-top:8px}
+  .marginbar i{display:block;height:100%;background:var(--money)}
+
+  .stages{margin-top:16px;display:flex;align-items:flex-start}
+  .stg{flex:1;text-align:center;position:relative;min-width:0}
+  .stg .ln{position:absolute;top:9px;left:50%;width:100%;height:2px;background:var(--border-strong);z-index:0}
+  .stg:last-child .ln{display:none}
+  .stg .nd{position:relative;z-index:1;width:19px;height:19px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:9px;background:#E4E4EA;color:#fff;font-weight:700}
+  .stg.done .nd{background:var(--accent)}.stg.done .ln{background:var(--accent)}
+  .stg.cur .nd{background:var(--amber);box-shadow:0 0 0 4px rgba(180,83,9,.16)}
+  .stg .tl{font-size:10px;margin-top:6px;line-height:1.15;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 2px}
+  .stg.done .tl,.stg.cur .tl{color:var(--ink);font-weight:600}
+  .stg .dt{font-size:9.5px;color:var(--amber);font-weight:700;margin-top:2px;display:none}.stg.cur .dt{display:block}
+
+  /* ─── ACTION-BAR: «что сделать сейчас», нацелено на деньги ─── */
+  .actionbar{position:sticky;top:57px;z-index:40;margin-top:14px;background:linear-gradient(180deg,#FBFAFF,#F6F4FF);border:1px solid #E2D9FB;border-radius:var(--radius);box-shadow:var(--shadow-card);overflow:hidden}
+  .ab-main{display:flex;align-items:center;gap:18px;padding:15px 20px;flex-wrap:wrap}
+  .ab-nba{flex:1;min-width:280px}
+  .ab-nba .lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--violet);display:flex;align-items:center;gap:6px}
+  .ab-nba .act{font-size:17px;font-weight:700;letter-spacing:-.01em;margin-top:5px;line-height:1.25}
+  .ab-nba .why{font-size:12.5px;color:#6d5a9c;margin-top:4px;line-height:1.4}
+  .ab-nba .why b{color:var(--money)}
+  .ab-cta{display:flex;gap:9px;flex-shrink:0;flex-wrap:wrap}
+  .ab-quick{display:flex;gap:8px;padding:10px 20px;border-top:1px solid #EBE3FB;background:rgba(255,255,255,.5);flex-wrap:wrap;align-items:center}
+  .ab-quick .ql{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-right:2px}
+
+  /* ─── РАБОЧИЙ СТОЛ ─── */
+  .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;align-items:start;margin-top:16px}
+  .grid > .col{min-width:0}
+  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .panel{overflow:hidden}
+  .ph{padding:12px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .ph .meta{margin-left:auto;font-size:11.5px;font-weight:500;color:var(--muted)}
+  .ph .add{margin-left:auto;font-size:12px;color:var(--accent-ink);font-weight:600;cursor:pointer}
+  .pb{padding:14px 18px}
+
+  /* секция с пометкой безопасности */
+  .guard-note{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--amber);background:var(--amber-soft);border:1px solid #F0DCB0;border-radius:9px;padding:8px 11px;margin-top:11px}
+
+  /* items */
+  .items{font-size:13px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .items-inner{min-width:460px}
+  .items .ih,.items .ir,.items .tot{display:grid;grid-template-columns:minmax(120px,1fr) 46px 74px 64px 80px;gap:8px;align-items:center}
+  .items .ih{font-size:10px;text-transform:uppercase;color:var(--faint);font-weight:600;letter-spacing:.04em;padding-bottom:9px;border-bottom:1px solid var(--border)}
+  .items .ir{padding:9px 0;border-top:1px solid var(--border)}
+  .items .ir:first-of-type{border-top:none}
+  .items .nm{font-weight:500}.items .nm small{color:var(--faint);display:block;font-size:11px;font-weight:400}
+  .items .r{text-align:right}
+  .items .pf{text-align:right;color:var(--money);font-weight:700;font-size:12px}
+  .items .pf.low{color:var(--red)}
+  .items .tot{font-weight:700;padding-top:11px;margin-top:5px;border-top:1px solid var(--border-strong)}
+
+  /* скидка → влияние на маржу (деньги + безопасность) */
+  .disc{margin-top:13px;background:var(--sunken);border:1px solid var(--border);border-radius:11px;padding:12px 14px}
+  .disc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .disc-row label{font-size:12px;color:var(--muted);font-weight:600}
+  .disc-input{width:64px;border:1px solid var(--border-strong);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;text-align:right;font-variant-numeric:tabular-nums}
+  .disc-impact{margin-top:10px;font-size:12.5px;display:flex;justify-content:space-between;gap:8px}
+  .disc-warn{margin-top:9px;font-size:12px;color:var(--red);background:var(--red-soft);border-radius:8px;padding:8px 11px;display:flex;align-items:center;gap:7px;font-weight:500}
+
+  /* pay */
+  .pay-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .pay-grid .cell{background:var(--sunken);border:1px solid var(--border);border-radius:11px;padding:10px 12px}
+  .pay-grid .cell .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-weight:600}
+  .pay-grid .cell .v{font-size:16px;font-weight:700;letter-spacing:-.02em;margin-top:3px}
+  .paybar{height:9px;border-radius:99px;background:#EEEEF1;overflow:hidden;margin:13px 0 5px}
+  .paybar i{display:block;height:100%;background:var(--money)}
+
+  /* docs */
+  .doc{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+  .doc:first-of-type{border-top:none}
+  .doc .dn{flex:1;min-width:0;font-size:13px;font-weight:500}
+  .doc .dn small{display:block;color:var(--faint);font-size:11px;font-weight:400}
+
+  /* contact */
+  .contact{display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--border)}
+  .contact:first-of-type{border-top:none}
+  .c-ava{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .contact.main .c-ava{background:var(--emerald-soft);color:var(--emerald)}
+  .c-info{flex:1;min-width:0}
+  .c-name{font-size:13px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .c-role{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .c-phone{font-size:12px;color:#334155;margin-top:2px;font-variant-numeric:tabular-nums}
+  .c-acts{display:flex;gap:6px;margin-top:7px}
+
+  .call-ai{background:var(--violet-soft);border:1px solid #E4DBFB;border-radius:11px;padding:11px 13px;margin-top:11px}
+  .call-ai .l{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--violet)}
+  .call-ai .s{font-size:12.5px;color:#3b2d63;margin-top:5px;line-height:1.45}
+  .ctags{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+
+  .shipbar{display:flex;align-items:center;gap:10px;background:var(--amber-soft);border:1px solid #F0D9A8;border-radius:11px;padding:10px 13px;flex-wrap:wrap}
+  .shipbar .t{font-weight:700;font-size:12.5px;color:#8a4a0a}
+  .shipbar .s{font-size:11px;color:var(--amber)}
+  .shipbar .eta{margin-left:auto;text-align:right}
+  .shipbar .eta .l{font-size:9.5px;color:var(--amber);text-transform:uppercase;font-weight:600}.shipbar .eta .v{font-size:15px;font-weight:700;color:#8a4a0a}
+
+  .feed{position:relative;padding-left:18px;margin-top:4px}
+  .feed::before{content:'';position:absolute;left:5px;top:4px;bottom:4px;width:2px;background:var(--border)}
+  .ev{position:relative;padding:0 0 13px}.ev:last-child{padding-bottom:0}
+  .ev::before{content:'';position:absolute;left:-16px;top:3px;width:11px;height:11px;border-radius:50%;background:#fff;border:2px solid #CDCDD6}
+  .ev.stage::before{border-color:var(--accent);background:var(--accent)}
+  .ev.pay::before{border-color:var(--money);background:var(--money)}
+  .ev.call::before{border-color:var(--teal);background:var(--teal)}
+  .ev .et{font-size:12.5px;font-weight:600}.ev .em{font-size:11px;color:var(--muted);margin-top:1px}
+
+  .toolbar{position:sticky;top:0;z-index:70;background:rgba(247,247,249,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:9px 24px;font-size:12.5px}
+  .toolbar b{font-weight:700}.toolbar span{color:var(--muted)}
+
+  /* ═══ ТЕЛЕФОН ═══ */
+  @media(max-width:560px){
+    main{padding:0 12px 32px}.topnav{padding:10px 12px}.toolbar{padding:9px 12px;font-size:11px}
+    .head{padding:14px 14px 12px;border-radius:12px}.h-id h1{font-size:18px}
+    .h-actions{width:100%;margin-left:0;margin-top:10px}.h-actions .btn{flex:1}
+    .money-row{grid-template-columns:1fr 1fr}
+    .money-cell.hero{grid-column:1 / -1}
+    .stages{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}.stg{flex:0 0 64px}
+    .actionbar{position:static}
+    .ab-main{flex-direction:column;align-items:stretch;gap:12px;padding:14px}
+    .ab-cta{width:100%}.ab-cta .btn-hero{flex:1}
+    .ab-quick{padding:12px 14px}.ab-quick .btn{flex:1 1 auto}
+    .items{overflow:visible}.items-inner{min-width:0}
+    .items .ih{display:none}
+    .items .ir{grid-template-columns:1fr auto;grid-auto-rows:min-content;gap:4px 10px;padding:11px 0}
+    .items .ir .nm{grid-column:1 / -1}
+    .items .ir .r,.items .ir .pf{font-size:12px}
+    .items .ir .r::before{content:attr(data-l) " ";color:var(--faint);font-weight:500;font-size:10.5px;text-transform:uppercase}
+    .items .pf::before{content:"маржа ";color:var(--faint);font-weight:500;font-size:10.5px;text-transform:uppercase}
+    .items .tot{grid-template-columns:1fr auto;gap:4px}
+    .items .tot > :nth-child(2),.items .tot > :nth-child(3){display:none}
+    .pay-grid{grid-template-columns:1fr 1fr}.pay-grid .cell:last-child{grid-column:1 / -1}
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar"><b>Карточка сделки · дизайн по приоритетам платформы</b> <span>· 1)деньги 2)безопасность 3)функция 4)эстетика</span></div>
+
+<div class="topnav">
+  <a class="back" href="#">← К сделкам</a>
+  <span class="crumb">Сделки · <b>CRM-1029</b> · ООО «БелТранс»</span>
+  <div class="nav-right">
+    <button class="btn btn-ghost btn-sm"><span class="i">⚙</span>Блоки</button>
+  </div>
+</div>
+
+<main>
+  <!-- ШАПКА -->
+  <div class="card head">
+    <div class="h-top">
+      <div class="h-id">
+        <div class="id num">CRM-1029 · в работе 11 дн</div>
+        <h1>ООО «БелТранс» — поставка АКБ</h1>
+        <div class="desc">Аккумуляторные батареи 6СТ-190 · 12 шт · рейс CN→MSK</div>
+        <div class="h-badges">
+          <span class="bdg b-emerald">★ Постоянный клиент</span>
+          <span class="bdg b-red">Высокий приоритет</span>
+          <span class="bdg b-amber">🚚 Едет в машине</span>
+          <span class="bdg b-slate">4 дня в стадии «Счёт»</span>
+        </div>
+      </div>
+      <div class="h-actions">
+        <button class="btn btn-call btn-sm"><span class="i">📞</span>Позвонить</button>
+        <button class="btn btn-violet btn-sm"><span class="i">✦</span>Спросить AI</button>
+      </div>
+    </div>
+
+    <!-- ДЕНЬГИ: маржа — главное число (приоритет №1) -->
+    <div class="money-row">
+      <div class="money-cell hero">
+        <div class="ml">💰 Маржа сделки</div>
+        <div class="mv num">+12 400 BYN</div>
+        <div class="ms num">26.5% · норма ≥ 18% · landed cost 34 400 BYN</div>
+        <div class="marginbar"><i style="width:74%"></i></div>
+      </div>
+      <div class="money-cell">
+        <div class="ml">Сумма</div>
+        <div class="mv num">46 800</div>
+        <div class="ms">счёт СЧ-0462 · BYN</div>
+      </div>
+      <div class="money-cell">
+        <div class="ml">Оплачено</div>
+        <div class="mv num" style="color:var(--money)">20 000</div>
+        <div class="ms num">43% · аванс</div>
+      </div>
+      <div class="money-cell">
+        <div class="ml">К доплате</div>
+        <div class="mv num">26 800</div>
+        <div class="ms">остаток до отгрузки</div>
+      </div>
+      <div class="money-cell arrive">
+        <div class="ml">🚚 Товар приедет</div>
+        <div class="mv num">18.06</div>
+        <div class="ms">рейс CN→MSK · резерв до 19.06</div>
+      </div>
+    </div>
+
+    <div class="stages">
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">Новая</div></div>
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">В работе</div></div>
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">Квалиф.</div></div>
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">Цена запр.</div></div>
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">Есть цена</div></div>
+      <div class="stg done"><div class="ln"></div><div class="nd">✓</div><div class="tl">Встреча</div></div>
+      <div class="stg cur"><div class="ln"></div><div class="nd">7</div><div class="tl">Счёт</div><div class="dt">сейчас</div></div>
+      <div class="stg"><div class="ln"></div><div class="nd">8</div><div class="tl">Защищён</div></div>
+      <div class="stg"><div class="nd">9</div><div class="tl">Договор</div></div>
+    </div>
+  </div>
+
+  <!-- ACTION-BAR: следующее действие → деньги -->
+  <div class="actionbar">
+    <div class="ab-main">
+      <div class="ab-nba">
+        <div class="lbl"><span>✦</span> Следующее лучшее действие · AI</div>
+        <div class="act">Дожать доплату 26 800 BYN и отправить договор</div>
+        <div class="why">Аванс 43% получен. До отгрузки 18.06 нужно закрыть остаток <b>26 800 BYN</b> — иначе товар уедет неоплаченным. Резерв истекает 19.06. Маржа сделки — <b>+12 400 BYN</b>.</div>
+      </div>
+      <div class="ab-cta">
+        <button class="btn btn-money btn-hero"><span class="i">💳</span>Запросить доплату</button>
+        <button class="btn btn-ghost">Позже</button>
+      </div>
+    </div>
+    <div class="ab-quick">
+      <span class="ql">Стадия «Счёт»:</span>
+      <button class="btn btn-primary btn-sm"><span class="i">✉</span>Отправить счёт</button>
+      <button class="btn btn-secondary btn-sm"><span class="i">🔗</span>Договор на подпись</button>
+      <button class="btn btn-call btn-sm"><span class="i">📞</span>Позвонить ЛПР</button>
+      <button class="btn btn-money btn-sm" style="margin-left:auto"><span class="i">✓</span>Перевести в «Защищён»</button>
+    </div>
+  </div>
+
+  <!-- РАБОЧИЙ СТОЛ -->
+  <div class="grid">
+    <div class="col">
+
+      <!-- СОСТАВ + ДЕНЬГИ/БЕЗОПАСНОСТЬ -->
+      <div class="card panel">
+        <div class="ph">📦 Состав счёта и маржа <span class="add">＋ со склада</span></div>
+        <div class="pb">
+          <div class="items">
+            <div class="items-inner">
+              <div class="ih"><div>Позиция</div><div class="r">Кол-во</div><div class="r">Цена</div><div class="r">Маржа</div><div class="r">Сумма</div></div>
+              <div class="ir"><div class="nm">АКБ 6СТ-190 <small>Минск · свободно 40</small></div><div class="r num" data-l="кол-во">12</div><div class="r num" data-l="цена">3 600</div><div class="pf num">+24%</div><div class="r num" data-l="сумма">43 200</div></div>
+              <div class="ir"><div class="nm">Доставка по Минску <small>авто рейса</small></div><div class="r num" data-l="кол-во">1</div><div class="r num" data-l="цена">600</div><div class="pf num">+40%</div><div class="r num" data-l="сумма">600</div></div>
+              <div class="ir"><div class="nm">Утилизация старых АКБ <small>допуслуга</small></div><div class="r num" data-l="кол-во">12</div><div class="r num" data-l="цена">250</div><div class="pf num">+62%</div><div class="r num" data-l="сумма">3 000</div></div>
+              <div class="tot"><div>Итого · маржа 26.5%</div><div></div><div></div><div class="pf num" style="font-size:13px">+12 400</div><div class="r num">46 800</div></div>
+            </div>
+          </div>
+
+          <!-- скидка → влияние на прибыль (деньги) + порог (безопасность) -->
+          <div class="disc">
+            <div class="disc-row">
+              <label>Скидка на счёт</label>
+              <input class="disc-input num" value="0" id="disc"> %
+              <span style="font-size:11.5px;color:var(--muted)">порог без согласования — до 10%</span>
+            </div>
+            <div class="disc-impact">
+              <span style="color:var(--muted)">При скидке <b id="dp" class="num">15%</b> прибыль:</span>
+              <span><b class="num" style="color:var(--money)">+12 400</b> <span style="color:var(--faint)">→</span> <b class="num" style="color:var(--red)">+5 380 BYN</b></span>
+            </div>
+            <div class="disc-warn">🔒 Скидка 15% превышает порог 10% — <b>требует согласования РОПа</b>. Отправка счёта заблокирована до согласования.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- КАССА -->
+      <div class="card panel">
+        <div class="ph">💰 Касса по сделке <span class="meta">landed cost 34 400 BYN</span></div>
+        <div class="pb">
+          <div class="pay-grid">
+            <div class="cell"><div class="l">Оплачено</div><div class="v num" style="color:var(--money)">20 000</div></div>
+            <div class="cell"><div class="l">К доплате</div><div class="v num">26 800</div></div>
+            <div class="cell"><div class="l">Прибыль</div><div class="v num" style="color:var(--money)">+12 400</div></div>
+          </div>
+          <div class="paybar"><i style="width:43%"></i></div>
+          <div style="font-size:12px;color:var(--muted)" class="num">43% оплачено · остаток 26 800 BYN до отгрузки 18.06</div>
+          <div class="guard-note">🔒 Отгрузка при неполной оплате — только с подтверждения РОПа. Сейчас остаток не закрыт.</div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn btn-money btn-sm"><span class="i">💳</span>Запросить доплату</button>
+            <button class="btn btn-secondary btn-sm">Сверка платежей</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ДОКУМЕНТЫ -->
+      <div class="card panel">
+        <div class="ph">📄 Документы <span class="meta">пакет по сделке</span></div>
+        <div class="pb">
+          <div class="doc"><div class="dn">Счёт СЧ-0462 <small>от 14.06 · 46 800 BYN</small></div><span class="bdg b-emerald">Проведён</span><button class="btn btn-ghost btn-xs">Открыть</button></div>
+          <div class="doc"><div class="dn">Договор поставки ДГ-0125 <small>черновик · ждёт подписи</small></div><span class="bdg b-amber">Черновик</span><button class="btn btn-violet btn-xs"><span class="i">🔗</span>На подпись</button></div>
+          <div class="doc"><div class="dn">Заказ-наряд ЗН-0207 <small>комплектация и отгрузка</small></div><span class="bdg b-accent">В работе</span><button class="btn btn-ghost btn-xs">Открыть</button></div>
+          <div class="doc"><div class="dn">ТТН (отгрузка) <small>формирует логистика · при отгрузке</small></div><span class="bdg b-slate">При отгрузке</span><button class="btn btn-ghost btn-xs" disabled>Создать</button></div>
+          <div class="doc"><div class="dn">Спецификация <small>не создана</small></div><span class="bdg b-slate">Нет</span><button class="btn btn-secondary btn-xs">Создать</button></div>
+          <div class="doc"><div class="dn">Акт приёма-передачи <small>после доставки 18.06</small></div><span class="bdg b-slate">Нет</span><button class="btn btn-secondary btn-xs">Создать</button></div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:13px;padding-top:13px;border-top:1px dashed var(--border-strong)">
+            <span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);width:100%;margin-bottom:1px">Создать документ</span>
+            <button class="btn btn-secondary btn-xs"><span class="i">🧾</span>Счёт</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">📄</span>Договор</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">📋</span>Спецификация</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">🔧</span>Заказ-наряд</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">🚚</span>ТТН</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">✍</span>Акт</button>
+            <button class="btn btn-secondary btn-xs"><span class="i">📑</span>КП</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="col">
+
+      <!-- AI на деньги -->
+      <div class="card panel" style="border-color:#E4DBFB">
+        <div class="ph" style="color:#5B21B6;border-bottom-color:#EBE3FB">✦ AI · возможности заработать</div>
+        <div class="pb">
+          <div style="font-size:12.5px;color:#3b2d63;line-height:1.5">Клиент платит вовремя, парк вырос до 40 машин. Реальные деньги «на столе»:</div>
+          <div class="call-ai" style="margin-top:11px">
+            <div class="l">💡 Допродажа</div>
+            <div class="s">Предложить годовой контракт на обслуживание парка — <b style="color:var(--money)">+48 000 BYN/год</b>, маржа выше разовой.</div>
+          </div>
+          <div class="call-ai" style="margin-top:9px;background:var(--money-bg);border-color:#CDE8D7">
+            <div class="l" style="color:var(--money)">🔒 Защита прибыли</div>
+            <div class="s">Не давать скидку ниже <b>10%</b> — при 15% прибыль падает с 12 400 до 5 380 BYN.</div>
+          </div>
+          <button class="btn btn-violet btn-sm btn-block" style="margin-top:11px;width:100%"><span class="i">✦</span>Предложить годовой контракт</button>
+        </div>
+      </div>
+
+      <!-- Отгрузка -->
+      <div class="card panel">
+        <div class="ph">🚚 Отгрузка · рейс CN→MSK</div>
+        <div class="pb">
+          <div class="shipbar">
+            <div><div class="t">Машина MAR-218 в пути</div><div class="s">Граница пройдена · едет в Минск</div></div>
+            <div class="eta"><div class="l">ETA</div><div class="v num">18.06</div></div>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:10px">⚠ Резерв под счёт истекает <b style="color:var(--ink)" class="num">19.06</b> — синхронизировано с прибытием рейса.</div>
+        </div>
+      </div>
+
+      <!-- Контакты -->
+      <div class="card panel">
+        <div class="ph">👤 Контакты <span class="add">＋</span></div>
+        <div class="pb">
+          <div class="contact main">
+            <div class="c-ava">ИП</div>
+            <div class="c-info">
+              <div class="c-name">Иван Петров <span class="bdg b-emerald">ЛПР</span></div>
+              <div class="c-role">Директор по закупкам</div>
+              <div class="c-phone num">+375 29 612-34-56</div>
+              <div class="c-acts">
+                <button class="btn btn-call btn-xs"><span class="i">📞</span>Звонок</button>
+                <button class="btn btn-secondary btn-xs">✉</button>
+                <button class="btn btn-secondary btn-xs">💬</button>
+              </div>
+            </div>
+          </div>
+          <div class="contact">
+            <div class="c-ava">СК</div>
+            <div class="c-info">
+              <div class="c-name">Светлана Кузьмина</div>
+              <div class="c-role">Бухгалтер · оплаты</div>
+              <div class="c-phone num">+375 33 701-88-90</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Хронология -->
+      <div class="card panel">
+        <div class="ph">🕓 Хронология</div>
+        <div class="pb">
+          <div class="feed">
+            <div class="ev call"><div class="et">Входящий звонок · 4:12</div><div class="em num">вчера 14:32 · позитив</div></div>
+            <div class="ev pay"><div class="et">Аванс 20 000 BYN получен</div><div class="em num">12.06 · 43% суммы</div></div>
+            <div class="ev stage"><div class="et">Стадия → «Счёт»</div><div class="em num">12.06 · СЧ-0462 выставлен</div></div>
+            <div class="ev"><div class="et">Встреча с ЛПР проведена</div><div class="em num">08.06 · согласована скидка</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>
+</body>
+</html>
