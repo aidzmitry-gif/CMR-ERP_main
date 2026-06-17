@@ -5,8 +5,8 @@ const field =
   "w-full rounded-[10px] border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors " +
   "placeholder:text-faint focus:border-accent focus:ring-[3px] focus:ring-accent/15 " +
   "disabled:bg-sunken disabled:text-faint disabled:cursor-not-allowed";
-const normal = "border-line-strong";
-const invalid = "border-[#F2C4C4] focus:border-red-400 focus:ring-red-400/15";
+const normalCls = "border-line-strong";
+const invalidCls = "border-[#F2C4C4] focus:border-red-400 focus:ring-red-400/15";
 
 /** Текстовое поле. icon — иконка слева; invalid — ошибочное состояние. */
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -18,24 +18,24 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     icon ? (
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint [&_svg]:size-4">{icon}</span>
-        <input ref={ref} className={cn(field, invalid ? invalid : normal, "pl-9", className)} {...props} />
+        <input ref={ref} className={cn(field, invalid ? invalidCls : normalCls, "pl-9", className)} {...props} />
       </div>
     ) : (
-      <input ref={ref} className={cn(field, invalid ? invalid : normal, className)} {...props} />
+      <input ref={ref} className={cn(field, invalid ? invalidCls : normalCls, className)} {...props} />
     ),
 );
 Input.displayName = "Input";
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }>(
   ({ className, invalid, ...props }, ref) => (
-    <textarea ref={ref} className={cn(field, invalid ? invalid : normal, "min-h-[76px] resize-y", className)} {...props} />
+    <textarea ref={ref} className={cn(field, invalid ? invalidCls : normalCls, "min-h-[76px] resize-y", className)} {...props} />
   ),
 );
 Textarea.displayName = "Textarea";
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }>(
   ({ className, invalid, children, ...props }, ref) => (
-    <select ref={ref} className={cn(field, invalid ? invalid : normal, "cursor-pointer pr-8", className)} {...props}>
+    <select ref={ref} className={cn(field, invalid ? invalidCls : normalCls, "cursor-pointer pr-8", className)} {...props}>
       {children}
     </select>
   ),

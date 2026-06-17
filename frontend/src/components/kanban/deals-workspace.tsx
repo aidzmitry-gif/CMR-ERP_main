@@ -112,7 +112,7 @@ function Column({
         ref={setNodeRef}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
-          isOver && "bg-accent-soft ring-2 ring-accent-soft",
+          isOver && "bg-accent-soft ring-2 ring-accent",
         )}
       >
         {children}

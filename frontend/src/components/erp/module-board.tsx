@@ -188,7 +188,7 @@ export function ModuleBoard({
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => onAction(row)}
-                      className="rounded-lg border border-accent px-3 py-1 text-xs font-medium text-accent-ink hover:bg-blue-50"
+                      className="rounded-lg border border-accent px-3 py-1 text-xs font-medium text-accent-ink hover:bg-accent-soft"
                     >
                       {action.label}
                     </button>

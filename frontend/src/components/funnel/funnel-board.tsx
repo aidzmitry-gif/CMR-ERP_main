@@ -344,7 +344,7 @@ function Card({
       {card.action && (
         <button
           onClick={(e) => e.stopPropagation()}
-          className="mt-2.5 w-full rounded-lg bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent-ink hover:bg-accent-soft/70"
+          className="mt-2.5 w-full rounded-lg bg-accent-soft/70 px-3 py-1.5 text-xs font-medium text-accent-ink hover:bg-accent-soft"
         >
           {card.action}
         </button>
@@ -457,7 +457,7 @@ function Column({
         ref={setNodeRef}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
-          isOver && "bg-accent-soft ring-2 ring-accent-soft",
+          isOver && "bg-accent-soft ring-2 ring-accent",
         )}
       >
         {children}

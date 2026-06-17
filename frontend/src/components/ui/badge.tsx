@@ -10,7 +10,7 @@ const tones: Record<BadgeTone, string> = {
   red: "bg-[#FCEAEA] text-[#DC2626]",
   violet: "bg-[#F2EBFE] text-[#7C3AED]",
   accent: "bg-accent-soft text-accent-ink",
-  slate: "bg-[#F0F0F3] text-muted",
+  slate: "bg-sunken text-muted",
 };
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
