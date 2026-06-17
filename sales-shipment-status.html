@@ -3,23 +3,46 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
+/* демо-отклик: кнопки без своего действия показывают тост (чтобы не было «ничего не произошло») */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,.btn,[class*="btn"],.abtn,.chip,.seg button,.tab,a[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(getComputedStyle(el).cursor!=='pointer'&&el.tagName!=='BUTTON')return;
+    var label=(el.textContent||'').trim().slice(0,32)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+
+</script>
 <title>Статус машины — сквозной (все отделы + кабинет клиента)</title>
 <style>
   :root{
-    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --brand:#1E5EFF; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1545CC;
     --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
     --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
     --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
   h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
 
-  .intro{background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:#475467;display:flex;gap:9px}
+  .intro{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:var(--muted);display:flex;gap:9px}
   .intro b{color:var(--ink)}
 
   /* шапка рейса */
-  .ship-head{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:14px}
+  .ship-head{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:14px}
   .sh-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .sh-truck{width:46px;height:46px;border-radius:12px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:22px}
   .sh-id .t{font-weight:800;font-size:16px}
@@ -27,53 +50,118 @@
   .sh-eta{margin-left:auto;text-align:right}
   .sh-eta .lbl{font-size:11px;color:var(--muted)}
   .sh-eta .v{font-size:18px;font-weight:800;color:var(--brand-700)}
-  .sh-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:99px;padding:4px 11px;background:#FFFBEB;color:#B45309;margin-left:12px}
+  .sh-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:99px;padding:4px 11px;background:var(--amber-soft);color:var(--amber-ink);margin-left:12px}
   .sh-status .dot{width:7px;height:7px;border-radius:50%;background:var(--warn)}
-  .sh-meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:13px;padding-top:13px;border-top:1px solid #F1F3F5;font-size:12.5px}
+  .sh-meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:13px;padding-top:13px;border-top:1px solid var(--line);font-size:12.5px}
   .sh-meta .k{color:var(--muted)}.sh-meta b{font-weight:600}
 
   /* ── ТАЙМЛАЙН этапов ── */
   .track{display:flex;align-items:flex-start;margin:26px 6px 8px;position:relative}
   .step{flex:1;position:relative;text-align:center;min-width:0}
-  .step .line{position:absolute;top:13px;left:50%;width:100%;height:3px;background:#E5E7EB;z-index:0}
+  .step .line{position:absolute;top:13px;left:50%;width:100%;height:3px;background:var(--sunken);z-index:0}
   .step:last-child .line{display:none}
-  .step .node{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;background:#E5E7EB;color:#fff}
+  .step .node{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--sunken);color:#fff}
   .step.done .node{background:var(--ok)}
   .step.done .line{background:var(--ok)}
   .step.cur .node{background:var(--warn);box-shadow:0 0 0 5px rgba(245,158,11,.18);animation:pulse 1.8s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 4px rgba(245,158,11,.25)}70%{box-shadow:0 0 0 9px rgba(245,158,11,0)}100%{box-shadow:0 0 0 4px rgba(245,158,11,0)}}
   .step .ttl{font-size:11.5px;font-weight:600;margin-top:8px;line-height:1.25;padding:0 4px}
-  .step.future .ttl{color:#9aa3b0}
+  .step.future .ttl{color:var(--faint)}
   .step .dt{font-size:10.5px;color:var(--muted);margin-top:3px}
-  .step.cur .dt{color:#B45309;font-weight:700}
+  .step.cur .dt{color:var(--amber-ink);font-weight:700}
   .now-tag{position:absolute;top:-22px;left:50%;transform:translateX(-50%);background:var(--warn);color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap}
   .now-tag::after{content:'';position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:var(--warn)}
 
   /* две панели: внутренний vs кабинет клиента */
   .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
   @media(max-width:900px){.cols{grid-template-columns:1fr}}
-  .panel{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
-  .panel .ph{padding:12px 16px;border-bottom:1px solid #F1F3F5;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
-  .panel.client .ph{background:#F0FDF4;color:#047857}
-  .panel.intern .ph{background:#EFF5FF;color:var(--brand-700)}
-  .ph .who{margin-left:auto;font-size:11px;font-weight:500;color:#9aa3b0}
+  .panel{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
+  .panel .ph{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .panel.client .ph{background:var(--green-soft);color:var(--green-ink)}
+  .panel.intern .ph{background:var(--blue-soft);color:var(--brand-700)}
+  .ph .who{margin-left:auto;font-size:11px;font-weight:500;color:var(--faint)}
   .pbody{padding:14px 16px}
   .goods{font-size:13px}
   .goods .row{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #F6F7F9}
   .goods .row:first-child{border-top:none}
-  .goods .nm small{color:#9aa3b0;display:block;font-size:11px}
+  .goods .nm small{color:var(--faint);display:block;font-size:11px}
   .kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0}.kv .k{color:var(--muted)}
-  .lock{font-size:11px;color:#9aa3b0;font-style:italic}
-  .map{height:120px;border-radius:10px;background:linear-gradient(135deg,#EFF6FF,#ECFDF5);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;margin-top:10px;position:relative;overflow:hidden}
+  .lock{font-size:11px;color:var(--faint);font-style:italic}
+  .map{height:120px;border-radius:10px;background:linear-gradient(135deg,#EFF6FF,#ECFDF5);display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12px;margin-top:10px;position:relative;overflow:hidden}
   .map .pin{position:absolute;top:46%;left:62%;font-size:20px}
-  .note{margin-top:16px;font-size:12px;color:#9aa3b0;display:flex;gap:8px}
+  .note{margin-top:16px;font-size:12px;color:var(--faint);display:flex;gap:8px}
   .note b{color:var(--ink)}
   .seen{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-  .seen span{font-size:11px;background:#F1F5F9;color:#475569;border-radius:7px;padding:3px 9px}
+  .seen span{font-size:11px;background:var(--sunken);color:var(--muted);border-radius:7px;padding:3px 9px}
+
+/* ═══ ДИЗАЙН-СИСТЕМА: 2 темы (C/D). Аппенд-слой перекрывает значения переменных файла. ═══ */
+:root{
+  --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --canvas:#EEF1F5; --surface:#fff; --sunken:#F4F6F9;
+  --ink:#0F172A; --muted:#5B6B82; --faint:#93A1B5;
+  --line:#E2E8F0; --line-strong:#CBD5E1;
+  --brand:#1E5EFF; --brand-50:#E3ECFF; --brand50:#E3ECFF; --brand-100:#E3ECFF; --brand100:#E3ECFF;
+  --brand-700:#1545CC; --brand700:#1545CC;
+  --accent:#1E5EFF; --accent-ink:#1545CC; --accent-soft:#E3ECFF;
+  --money:#0E7C4A; --money-soft:#E2F3EA;
+  --ok:#0E7C4A; --warn:#B45309; --bad:#DC2626;
+  --ai:#7C3AED; --ai-50:#F2EBFE;
+  /* статус-софт фоны (светлые в C, тёмные в D) — для бейджей/полос/шапок */
+  --green-soft:#ECFDF5; --green-ink:#047857;
+  --amber-soft:#FFFBEB; --amber-ink:#B45309;
+  --red-soft:#FEF2F2; --red-ink:#B91C1C;
+  --blue-soft:#EFF5FF; --blue-ink:#1D4ED8;
+  --violet-soft:#EDE9FE; --violet-ink:#6D28D9;
+  --shadow-card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --pop:0 1px 2px rgba(20,20,40,.06),0 12px 28px rgba(20,20,40,.12);
+}
+html.dark{
+  --canvas:#0E1116; --surface:#171B22; --sunken:#1F242C;
+  --ink:#E8EAED; --muted:#9BA3AE; --faint:#6B7280;
+  --line:#2A3038; --line-strong:#3A424C;
+  --brand:#6E8BFF; --brand-50:#232A3D; --brand50:#232A3D; --brand-100:#232A3D; --brand100:#232A3D;
+  --brand-700:#8AA0FF; --brand700:#8AA0FF;
+  --accent:#6E8BFF; --accent-ink:#8AA0FF; --accent-soft:#232A3D;
+  --money:#34D399; --money-soft:#16271F;
+  --ok:#34D399; --warn:#FBBF24; --bad:#F87171;
+  --ai:#A78BFA; --ai-50:#241B3A;
+  --green-soft:#16271F; --green-ink:#34D399;
+  --amber-soft:#2A2114; --amber-ink:#FBBF24;
+  --red-soft:#3A1D1D; --red-ink:#F87171;
+  --blue-soft:#1B2740; --blue-ink:#7FA8FF;
+  --violet-soft:#241B3A; --violet-ink:#C4B5FD;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --pop:0 2px 4px rgba(0,0,0,.5),0 18px 40px rgba(0,0,0,.55);
+}
+html,body{background:var(--canvas);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;font-feature-settings:"cv05","ss01";transition:background .2s,color .2s}
+/* поля ввода — на токены (иначе белый фон + чёрный текст в тёмной) */
+input,select,textarea{background:var(--surface);color:var(--ink)}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+option{background:var(--surface);color:var(--ink)}
+/* нестилизованные ссылки (дефолт-синие) → accent, читаемо в обеих темах */
+a:not([class]){color:var(--accent)}
+/* приглушить светлые статус-фоны в тёмной (бейджи/полосы), смысл-цвет сохраняем */
+html.dark .st.posted,html.dark .ds.done,html.dark .c-main,html.dark .sent.pos,html.dark .ctag.sig{background:#16271F!important;color:#34D399!important}
+html.dark .st.pending,html.dark .cd-badge{background:#2A2114!important;color:#FBBF24!important}
+html.dark .st.paid{background:#1B2740!important;color:#7FA8FF!important}
+html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!important}
+/* бренд-цвета каналов (channels.tsx / DESIGN.md §4.1) */
+.cbtn.call{background:#22C55E!important;border-color:#22C55E!important;color:#fff!important}
+.cbtn.wa{background:#25D366!important;border-color:#25D366!important;color:#fff!important}
+.cbtn.tg{background:#229ED9!important;border-color:#229ED9!important;color:#fff!important}
+.chi{font-style:normal;font-size:11px;line-height:1}
+/* переключатель темы (иконка + текст) — фикс. в правом нижнем углу */
+.theme-tgl{position:fixed;right:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 13px;height:auto;cursor:pointer;transition:.14s;white-space:nowrap;box-shadow:0 4px 14px rgba(16,24,40,.12)}
+.theme-tgl:hover{background:var(--sunken)}
+.theme-tgl #themeIco{font-size:15px;line-height:0}
+
 </style>
 </head>
 <body>
-<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+<button class="theme-tgl" id="themeTgl" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
   <h1>Статус машины — сквозной</h1>
   <div class="sub">Весь путь: поставщик → наш склад → клиент · один источник истины (логистика) · все видят одно и то же</div>
 
@@ -122,8 +210,8 @@
         <div class="kv"><span class="k">Закупщик</span><span>Романюк Д.</span></div>
         <div class="kv"><span class="k">Себестоимость (landed)</span><span><b>38 400 Br</b></span></div>
         <div class="kv"><span class="k">Выручка по рейсу</span><span><b>61 200 Br</b></span></div>
-        <div class="kv"><span class="k">Валовая прибыль</span><span style="color:#047857;font-weight:700">22 800 Br · 37%</span></div>
-        <div style="font-size:11.5px;font-weight:700;color:#9aa3b0;text-transform:uppercase;margin:12px 0 6px">Товары в машине</div>
+        <div class="kv"><span class="k">Валовая прибыль</span><span style="color:var(--green-ink);font-weight:700">22 800 Br · 37%</span></div>
+        <div style="font-size:11.5px;font-weight:700;color:var(--faint);text-transform:uppercase;margin:12px 0 6px">Товары в машине</div>
         <div class="goods">
           <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)<small>для ОАО «Белтранс» · сделка CRM-1029</small></div><div>38 шт</div></div>
           <div class="row"><div class="nm">АКБ 6СТ-225<small>для УП «Минскэлектро» · CRM-0998</small></div><div>14 шт</div></div>
@@ -138,15 +226,15 @@
       <div class="ph">👤 Кабинет клиента <span class="who">ОАО «Белтранс»</span></div>
       <div class="pbody">
         <div class="kv"><span class="k">Ваш заказ</span><span><b>№ CRM-1029</b></span></div>
-        <div class="kv"><span class="k">Статус</span><span style="color:#B45309;font-weight:700">В пути до склада → к вам</span></div>
+        <div class="kv"><span class="k">Статус</span><span style="color:var(--amber-ink);font-weight:700">В пути до склада → к вам</span></div>
         <div class="kv"><span class="k">Ожидаемая доставка</span><span style="color:var(--brand-700);font-weight:700">18 июня, ~14:00</span></div>
-        <div style="font-size:11.5px;font-weight:700;color:#9aa3b0;text-transform:uppercase;margin:12px 0 6px">Ваши товары</div>
+        <div style="font-size:11.5px;font-weight:700;color:var(--faint);text-transform:uppercase;margin:12px 0 6px">Ваши товары</div>
         <div class="goods">
           <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)</div><div>38 шт</div></div>
         </div>
         <div class="kv" style="margin-top:6px"><span class="k">Поставщик / себестоимость</span><span class="lock">🔒 скрыто</span></div>
         <div class="map">карта маршрута <span class="pin">📍</span></div>
-        <div style="font-size:11.5px;color:#9aa3b0;margin-top:8px">Клиент видит только свою часть и ETA. Позвонил — менеджер видит ровно этот же статус.</div>
+        <div style="font-size:11.5px;color:var(--faint);margin-top:8px">Клиент видит только свою часть и ETA. Позвонил — менеджер видит ровно этот же статус.</div>
       </div>
     </div>
   </div>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Статус машины — сквозной (все отделы + кабинет клиента)</title>
+<style>
+  :root{
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1D4FD7;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
+  h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
+
+  .intro{background:#fff;border:1px solid #EEF0F2;border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:#475467;display:flex;gap:9px}
+  .intro b{color:var(--ink)}
+
+  /* шапка рейса */
+  .ship-head{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:14px}
+  .sh-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .sh-truck{width:46px;height:46px;border-radius:12px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:22px}
+  .sh-id .t{font-weight:800;font-size:16px}
+  .sh-id .s{font-size:12.5px;color:var(--muted)}
+  .sh-eta{margin-left:auto;text-align:right}
+  .sh-eta .lbl{font-size:11px;color:var(--muted)}
+  .sh-eta .v{font-size:18px;font-weight:800;color:var(--brand-700)}
+  .sh-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:99px;padding:4px 11px;background:#FFFBEB;color:#B45309;margin-left:12px}
+  .sh-status .dot{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+  .sh-meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:13px;padding-top:13px;border-top:1px solid #F1F3F5;font-size:12.5px}
+  .sh-meta .k{color:var(--muted)}.sh-meta b{font-weight:600}
+
+  /* ── ТАЙМЛАЙН этапов ── */
+  .track{display:flex;align-items:flex-start;margin:26px 6px 8px;position:relative}
+  .step{flex:1;position:relative;text-align:center;min-width:0}
+  .step .line{position:absolute;top:13px;left:50%;width:100%;height:3px;background:#E5E7EB;z-index:0}
+  .step:last-child .line{display:none}
+  .step .node{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;background:#E5E7EB;color:#fff}
+  .step.done .node{background:var(--ok)}
+  .step.done .line{background:var(--ok)}
+  .step.cur .node{background:var(--warn);box-shadow:0 0 0 5px rgba(245,158,11,.18);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 4px rgba(245,158,11,.25)}70%{box-shadow:0 0 0 9px rgba(245,158,11,0)}100%{box-shadow:0 0 0 4px rgba(245,158,11,0)}}
+  .step .ttl{font-size:11.5px;font-weight:600;margin-top:8px;line-height:1.25;padding:0 4px}
+  .step.future .ttl{color:#9aa3b0}
+  .step .dt{font-size:10.5px;color:var(--muted);margin-top:3px}
+  .step.cur .dt{color:#B45309;font-weight:700}
+  .now-tag{position:absolute;top:-22px;left:50%;transform:translateX(-50%);background:var(--warn);color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .now-tag::after{content:'';position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:var(--warn)}
+
+  /* две панели: внутренний vs кабинет клиента */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+  .panel{background:#fff;border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
+  .panel .ph{padding:12px 16px;border-bottom:1px solid #F1F3F5;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .panel.client .ph{background:#F0FDF4;color:#047857}
+  .panel.intern .ph{background:#EFF5FF;color:var(--brand-700)}
+  .ph .who{margin-left:auto;font-size:11px;font-weight:500;color:#9aa3b0}
+  .pbody{padding:14px 16px}
+  .goods{font-size:13px}
+  .goods .row{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #F6F7F9}
+  .goods .row:first-child{border-top:none}
+  .goods .nm small{color:#9aa3b0;display:block;font-size:11px}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0}.kv .k{color:var(--muted)}
+  .lock{font-size:11px;color:#9aa3b0;font-style:italic}
+  .map{height:120px;border-radius:10px;background:linear-gradient(135deg,#EFF6FF,#ECFDF5);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;margin-top:10px;position:relative;overflow:hidden}
+  .map .pin{position:absolute;top:46%;left:62%;font-size:20px}
+  .note{margin-top:16px;font-size:12px;color:#9aa3b0;display:flex;gap:8px}
+  .note b{color:var(--ink)}
+  .seen{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .seen span{font-size:11px;background:#F1F5F9;color:#475569;border-radius:7px;padding:3px 9px}
+</style>
+</head>
+<body>
+<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:#1D4FD7;text-decoration:none;background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+  <h1>Статус машины — сквозной</h1>
+  <div class="sub">Весь путь: поставщик → наш склад → клиент · один источник истины (логистика) · все видят одно и то же</div>
+
+  <div class="intro"><span>ℹ️</span><span>Один статус рейса виден <b>менеджеру, закупщику, директору</b> и <b>клиенту в личном кабинете</b>. Меняет его только логистика — остальные читают. Клиент видит «свою» часть (без поставщика и себестоимости).</span></div>
+
+  <!-- шапка рейса -->
+  <div class="ship-head">
+    <div class="sh-top">
+      <div class="sh-truck">🚚</div>
+      <div class="sh-id">
+        <div class="t">Рейс № TR-2026-0418 · авто AB 7421-7 <span class="sh-status"><span class="dot"></span>В пути до склада</span></div>
+        <div class="s">Маршрут: Минский склад поставщика → склад Гомель → клиенты · водитель Кравцов А.</div>
+      </div>
+      <div class="sh-eta">
+        <div class="lbl">Прибытие к клиенту (ETA)</div>
+        <div class="v">18 июня, ~14:00</div>
+      </div>
+    </div>
+    <div class="sh-meta">
+      <span><span class="k">Сделок в рейсе:</span> <b>3</b></span>
+      <span><span class="k">Позиций:</span> <b>64 АКБ + ЗУ</b></span>
+      <span><span class="k">Вес:</span> <b>1 280 кг</b></span>
+      <span><span class="k">Сейчас:</span> <b>трасса М5, 120 км до склада</b></span>
+    </div>
+  </div>
+
+  <!-- таймлайн полного пути -->
+  <div class="ship-head">
+    <div class="track">
+      <div class="step done"><div class="line"></div><div class="node">✓</div><div class="ttl">Заказано у поставщика</div><div class="dt">10.06</div></div>
+      <div class="step done"><div class="line"></div><div class="node">✓</div><div class="ttl">Отгружено поставщиком</div><div class="dt">14.06</div></div>
+      <div class="step cur"><div class="line"></div><div class="now-tag">сейчас здесь</div><div class="node">🚚</div><div class="ttl">В пути до нашего склада</div><div class="dt">ETA 16.06</div></div>
+      <div class="step future"><div class="line"></div><div class="node"></div><div class="ttl">На нашем складе · комплектация</div><div class="dt">~16–17.06</div></div>
+      <div class="step future"><div class="line"></div><div class="node"></div><div class="ttl">Доставка клиенту (в пути)</div><div class="dt">~18.06</div></div>
+      <div class="step future"><div class="node"></div><div class="ttl">Доставлено клиенту</div><div class="dt">~18.06</div></div>
+    </div>
+  </div>
+
+  <!-- две панели -->
+  <div class="cols">
+    <!-- внутренний вид -->
+    <div class="panel intern">
+      <div class="ph">🏢 Внутренний вид <span class="who">менеджер · закупщик · директор</span></div>
+      <div class="pbody">
+        <div class="kv"><span class="k">Поставщик</span><span><b>ТД «АКБ-Импорт»</b> (УНП 19283746)</span></div>
+        <div class="kv"><span class="k">Закупщик</span><span>Романюк Д.</span></div>
+        <div class="kv"><span class="k">Себестоимость (landed)</span><span><b>38 400 Br</b></span></div>
+        <div class="kv"><span class="k">Выручка по рейсу</span><span><b>61 200 Br</b></span></div>
+        <div class="kv"><span class="k">Валовая прибыль</span><span style="color:#047857;font-weight:700">22 800 Br · 37%</span></div>
+        <div style="font-size:11.5px;font-weight:700;color:#9aa3b0;text-transform:uppercase;margin:12px 0 6px">Товары в машине</div>
+        <div class="goods">
+          <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)<small>для ОАО «Белтранс» · сделка CRM-1029</small></div><div>38 шт</div></div>
+          <div class="row"><div class="nm">АКБ 6СТ-225<small>для УП «Минскэлектро» · CRM-0998</small></div><div>14 шт</div></div>
+          <div class="row"><div class="nm">ЗУ + тестеры<small>для Автопарк №7 · CRM-1024</small></div><div>12 шт</div></div>
+        </div>
+        <div class="seen"><span>👁 видит логистика (меняет статус)</span><span>👁 продажи</span><span>👁 закупки</span><span>👁 директор</span></div>
+      </div>
+    </div>
+
+    <!-- кабинет клиента -->
+    <div class="panel client">
+      <div class="ph">👤 Кабинет клиента <span class="who">ОАО «Белтранс»</span></div>
+      <div class="pbody">
+        <div class="kv"><span class="k">Ваш заказ</span><span><b>№ CRM-1029</b></span></div>
+        <div class="kv"><span class="k">Статус</span><span style="color:#B45309;font-weight:700">В пути до склада → к вам</span></div>
+        <div class="kv"><span class="k">Ожидаемая доставка</span><span style="color:var(--brand-700);font-weight:700">18 июня, ~14:00</span></div>
+        <div style="font-size:11.5px;font-weight:700;color:#9aa3b0;text-transform:uppercase;margin:12px 0 6px">Ваши товары</div>
+        <div class="goods">
+          <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)</div><div>38 шт</div></div>
+        </div>
+        <div class="kv" style="margin-top:6px"><span class="k">Поставщик / себестоимость</span><span class="lock">🔒 скрыто</span></div>
+        <div class="map">карта маршрута <span class="pin">📍</span></div>
+        <div style="font-size:11.5px;color:#9aa3b0;margin-top:8px">Клиент видит только свою часть и ETA. Позвонил — менеджер видит ровно этот же статус.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><span>🔗</span><span><b>Источник истины — логистика</b> (рейс/ETA/этап). Sales-карточка и кабинет клиента подписаны на событие <b>shipment.status.changed</b> и показывают линию read-only. Себестоимость/поставщик — из закупок, клиенту не видны.</span></div>
+</body>
+</html>
