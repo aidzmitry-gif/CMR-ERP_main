@@ -4,42 +4,66 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Закупки · Мониторинг цен — превью</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            canvas: "#f6f7f9",
-            ink: "#0f172a",
-            muted: "#64748b",
-            brand: { DEFAULT: "#2563eb", 100: "#dbeafe", 600: "#2563eb" },
-          },
-          boxShadow: { card: "0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      darkMode: "class",
+      theme: { extend: {
+        colors: {
+          canvas: "rgb(var(--canvas) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          sunken: "rgb(var(--sunken) / <alpha-value>)",
+          ink: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--muted) / <alpha-value>)",
+          faint: "rgb(var(--faint) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          "line-strong": "rgb(var(--line-strong) / <alpha-value>)",
+          accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", ink: "rgb(var(--accent-ink) / <alpha-value>)", soft: "rgb(var(--accent-soft) / <alpha-value>)" },
+          money: { DEFAULT: "rgb(var(--money) / <alpha-value>)", soft: "rgb(var(--money-soft) / <alpha-value>)" },
         },
-      },
+        fontFamily: { sans: ["Inter","system-ui","-apple-system","Segoe UI","Roboto","Arial","sans-serif"] },
+        boxShadow: {
+          card: "0 1px 1px rgba(20,20,40,0.03), 0 2px 4px rgba(20,20,40,0.04), 0 6px 16px rgba(20,20,40,0.04), inset 0 1px 0 rgba(255,255,255,0.6)",
+          pop: "0 1px 2px rgba(20,20,40,0.06), 0 12px 28px rgba(20,20,40,0.12)",
+        },
+        borderRadius: { lg: "10px", xl: "12px", "2xl": "14px" },
+      } },
     };
   </script>
   <style>
-    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    :root{ --canvas:238 241 245; --surface:255 255 255; --sunken:244 246 249; --ink:15 23 42; --muted:91 107 130; --faint:147 161 181; --line:226 232 240; --line-strong:203 213 225; --accent:30 94 255; --accent-ink:21 69 204; --accent-soft:227 236 255; --money:14 124 74; --money-soft:226 243 234; }
+    .dark{ --canvas:14 17 22; --surface:23 27 34; --sunken:31 36 44; --ink:232 234 237; --muted:155 163 174; --faint:107 114 128; --line:42 48 56; --line-strong:58 66 76; --accent:110 139 255; --accent-ink:138 160 255; --accent-soft:35 42 61; --money:52 211 153; --money-soft:22 39 31; }
+    body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-feature-settings:"cv05","ss01";-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
     /* ── Панель чатов поставщиков (рейка → раскрытие по hover, overlay) — эталон из cockpit ── */
     .chatrail{position:fixed;top:0;right:0;height:100vh;width:68px;z-index:40;
-      background:#fff;border-left:1px solid #e2e8f0;transition:width .22s ease;overflow:hidden;
-      box-shadow:-8px 0 24px rgba(15,23,42,.04)}
-    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(15,23,42,.10)}
+      background:rgb(var(--surface));border-left:1px solid rgb(var(--line));transition:width .22s ease;overflow:hidden;
+      box-shadow:-8px 0 24px rgba(20,20,40,.05)}
+    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(20,20,40,.14)}
     .chatrail .lbl{opacity:0;transition:opacity .18s ease;white-space:nowrap}
     .chatrail:hover .lbl{opacity:1}
-    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid #f1f5f9}
+    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid rgb(var(--line))}
     .chatrow{display:flex;align-items:center;gap:.6rem;padding:9px 14px;cursor:pointer}
-    .chatrow:hover{background:#f8fafc}
+    .chatrow:hover{background:rgb(var(--sunken))}
     .av{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:9999px;
       display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff}
     .badge{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9999px;
-      background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
-    .ch-flag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:9999px;line-height:1.4}
+      background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid rgb(var(--surface))}
+        .ch-flag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:9999px;line-height:1.4}
+    .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:70;height:40px;padding:0 14px;border-radius:9999px;background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);display:flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;font-weight:600;color:rgb(var(--ink))}
+    .theme-toggle:hover{border-color:rgb(var(--accent))}
+    .theme-lbl{font-size:13px}
   </style>
 </head>
 <body class="bg-canvas text-ink">
+  <button class="theme-toggle" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему"><span id="themeIcon">🌙</span><span class="theme-lbl">Тёмная</span></button>
+  <script>
+    function applyTheme(d){ document.documentElement.classList.toggle('dark', d); const i=document.getElementById('themeIcon'), l=document.querySelector('.theme-lbl'); if(i) i.textContent=d?'☀️':'🌙'; if(l) l.textContent=d?'Светлая':'Тёмная'; }
+    function toggleTheme(){ const d=!document.documentElement.classList.contains('dark'); applyTheme(d); try{localStorage.setItem('zak-theme', d?'dark':'light')}catch(e){} }
+    (function(){ const p=new URLSearchParams(location.search).get('theme'); let s; try{s=localStorage.getItem('zak-theme')}catch(e){} applyTheme(p ? p==='dark' : s==='dark'); })();
+  </script>
   <!-- ⚠️ Статичный снимок будущего Next.js-экрана /crm/procurement (Мониторинг цен). Демо-данные. -->
 
   <!-- ============ ПАНЕЛЬ ЧАТОВ ПОСТАВЩИКОВ (right rail) — дословно из эталона cockpit ============ -->
@@ -111,7 +135,7 @@
         <span class="block truncate text-[12px] text-muted">QC report ready, photos sent</span>
       </span>
     </div>
-    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-slate-400">
+    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-faint">
       ИИ переводит, отвечает по шаблону и поднимает важное наверх. Канал, тон и история — в карточке диалога.
     </div>
   </aside>
@@ -130,74 +154,74 @@
 
     <!-- Вкладки закупок (Мониторинг цен активна) -->
     <div class="flex flex-wrap gap-1.5 text-[13px]">
-      <a href="zak-cockpit-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Обзор</a>
-      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Запросы цены</a>
-      <a href="zak-board-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Воронка</a>
-      <a href="zak-shipment-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Машины</a>
-      <a href="zak-ai-comms-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">AI-переписка</a>
-      <span class="rounded-full bg-brand px-3 py-1.5 font-semibold text-white shadow-card">Мониторинг цен</span>
-      <a href="zak-landed-cost-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Себестоимость</a>
+      <a href="zak-cockpit-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Обзор</a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
+      <a href="zak-board-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Воронка</a>
+      <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
+      <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Мониторинг цен</span>
+      <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
     </div>
 
     <!-- Метрики -->
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Товаров на контроле</div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Товаров на контроле</div>
         <div class="mt-1 text-2xl font-bold text-ink">64</div>
         <div class="mt-1 text-[12px] text-muted">постоянная закупка</div>
       </div>
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Алертов за неделю</div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Алертов за неделю</div>
         <div class="mt-1 text-2xl font-bold text-amber-600">5</div>
         <div class="mt-1 text-[12px] text-muted">рост цены / дефицит</div>
       </div>
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Экономия</div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Экономия</div>
         <div class="mt-1 text-2xl font-bold text-emerald-600">~6 200</div>
         <div class="mt-1 text-[12px] text-muted">BYN/мес · переключение на аналоги</div>
       </div>
-      <div class="rounded-2xl bg-white p-4 shadow-card">
-        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Контрагентов на проверке</div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Контрагентов на проверке</div>
         <div class="mt-1 text-2xl font-bold text-ink">3</div>
         <div class="mt-1 text-[12px] text-red-600">1 — риск</div>
       </div>
     </div>
 
     <!-- Алерты цен -->
-    <section class="rounded-2xl bg-white p-5 shadow-card">
-      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Алерты цен · требуют решения</div>
+    <section class="rounded-2xl bg-surface p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Алерты цен · требуют решения</div>
       <div class="mt-3 space-y-2.5">
         <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 p-3">
           <span class="min-w-0">
             <span class="block text-sm font-semibold text-ink">STM32F103C8T6 <span class="ml-1 font-bold text-red-600">↑ +12%</span> за неделю</span>
             <span class="block text-[12px] text-muted">1688 · ¥3.85 → ¥4.31 · есть аналог GD32F103 у Hangxin <span class="font-semibold text-emerald-600">−8%</span></span>
           </span>
-          <span class="shrink-0 inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600">Переключить поставщика</span>
+          <span class="shrink-0 inline-flex items-center rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted">Переключить поставщика</span>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
           <span class="min-w-0">
             <span class="block text-sm font-semibold text-ink">Конденсатор 470мкФ 25В <span class="ml-1 font-bold text-amber-600">↑ +6%</span></span>
             <span class="block text-[12px] text-muted">Taobao · ¥0.42 → ¥0.445 · порог алерта +5% превышен</span>
           </span>
-          <span class="shrink-0 inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600">Сравнить площадки</span>
+          <span class="shrink-0 inline-flex items-center rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted">Сравнить площадки</span>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
           <span class="min-w-0">
             <span class="block text-sm font-semibold text-ink">Разъём USB-C 24pin <span class="ml-1 font-bold text-emerald-600">↓ −9%</span></span>
             <span class="block text-[12px] text-muted">Alibaba · ¥1.10 → ¥1.00 · удачный момент закупить под пополнение</span>
           </span>
-          <span class="shrink-0 inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600">В заявку</span>
+          <span class="shrink-0 inline-flex items-center rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-muted">В заявку</span>
         </div>
       </div>
     </section>
 
     <!-- Watchlist -->
-    <section class="rounded-2xl bg-white p-5 shadow-card">
-      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Список наблюдения (watchlist)</div>
+    <section class="rounded-2xl bg-surface p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Список наблюдения (watchlist)</div>
       <div class="mt-3 overflow-x-auto">
         <table class="w-full min-w-[760px] text-sm">
           <thead>
-            <tr class="border-b border-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <tr class="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wide text-faint">
               <th class="py-2 pr-3 font-semibold">Товар</th>
               <th class="py-2 pr-3 font-semibold">Площадка</th>
               <th class="py-2 pr-3 font-semibold">Цена ¥</th>
@@ -215,7 +239,7 @@
               <td class="py-2.5 pr-3">4.31</td>
               <td class="py-2.5 pr-3 font-semibold text-red-600">↑ +12%</td>
               <td class="py-2.5 pr-3 text-muted">+10%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:40%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:45%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:42%"></span><span class="w-1.5 rounded-sm bg-amber-400" style="height:60%"></span><span class="w-1.5 rounded-sm bg-red-500" style="height:85%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:40%"></span><span class="w-1.5 rounded-sm bg-line" style="height:45%"></span><span class="w-1.5 rounded-sm bg-line" style="height:42%"></span><span class="w-1.5 rounded-sm bg-amber-400" style="height:60%"></span><span class="w-1.5 rounded-sm bg-red-500" style="height:85%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Yuxin</td>
               <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">2 дешевле</span></td>
             </tr>
@@ -225,9 +249,9 @@
               <td class="py-2.5 pr-3">0.445</td>
               <td class="py-2.5 pr-3 font-semibold text-amber-600">↑ +6%</td>
               <td class="py-2.5 pr-3 text-muted">+5%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:50%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:48%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:52%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:55%"></span><span class="w-1.5 rounded-sm bg-amber-400" style="height:68%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:50%"></span><span class="w-1.5 rounded-sm bg-line" style="height:48%"></span><span class="w-1.5 rounded-sm bg-line" style="height:52%"></span><span class="w-1.5 rounded-sm bg-line" style="height:55%"></span><span class="w-1.5 rounded-sm bg-amber-400" style="height:68%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Suzhou</td>
-              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">1 аналог</span></td>
+              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">1 аналог</span></td>
             </tr>
             <tr>
               <td class="py-2.5 pr-3 font-medium text-ink">Разъём USB-C 24pin</td>
@@ -235,19 +259,19 @@
               <td class="py-2.5 pr-3">1.00</td>
               <td class="py-2.5 pr-3 font-semibold text-emerald-600">↓ −9%</td>
               <td class="py-2.5 pr-3 text-muted">±8%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:75%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:72%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:68%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:60%"></span><span class="w-1.5 rounded-sm bg-emerald-500" style="height:48%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:75%"></span><span class="w-1.5 rounded-sm bg-line" style="height:72%"></span><span class="w-1.5 rounded-sm bg-line" style="height:68%"></span><span class="w-1.5 rounded-sm bg-line" style="height:60%"></span><span class="w-1.5 rounded-sm bg-emerald-500" style="height:48%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Shenzhen Hangxin</td>
-              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">3 аналога</span></td>
+              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">3 аналога</span></td>
             </tr>
             <tr>
               <td class="py-2.5 pr-3 font-medium text-ink">Реле SRD-05VDC 10A</td>
               <td class="py-2.5 pr-3"><span class="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-600">1688</span></td>
               <td class="py-2.5 pr-3">0.78</td>
-              <td class="py-2.5 pr-3 font-semibold text-slate-500">→ 0%</td>
+              <td class="py-2.5 pr-3 font-semibold text-muted">→ 0%</td>
               <td class="py-2.5 pr-3 text-muted">+7%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:55%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:54%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:55%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:53%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:55%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:55%"></span><span class="w-1.5 rounded-sm bg-line" style="height:54%"></span><span class="w-1.5 rounded-sm bg-line" style="height:55%"></span><span class="w-1.5 rounded-sm bg-line" style="height:53%"></span><span class="w-1.5 rounded-sm bg-line" style="height:55%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Yuxin</td>
-              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">2 аналога</span></td>
+              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">2 аналога</span></td>
             </tr>
             <tr>
               <td class="py-2.5 pr-3 font-medium text-ink">Дроссель 100мкГн SMD</td>
@@ -255,19 +279,19 @@
               <td class="py-2.5 pr-3">0.31</td>
               <td class="py-2.5 pr-3 font-semibold text-emerald-600">↓ −3%</td>
               <td class="py-2.5 pr-3 text-muted">±6%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:60%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:58%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:57%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:55%"></span><span class="w-1.5 rounded-sm bg-emerald-500" style="height:52%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:60%"></span><span class="w-1.5 rounded-sm bg-line" style="height:58%"></span><span class="w-1.5 rounded-sm bg-line" style="height:57%"></span><span class="w-1.5 rounded-sm bg-line" style="height:55%"></span><span class="w-1.5 rounded-sm bg-emerald-500" style="height:52%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Suzhou Precision</td>
-              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">1 аналог</span></td>
+              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">1 аналог</span></td>
             </tr>
             <tr>
               <td class="py-2.5 pr-3 font-medium text-ink">LED 5мм красный</td>
               <td class="py-2.5 pr-3"><span class="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-600">1688</span></td>
               <td class="py-2.5 pr-3">0.07</td>
-              <td class="py-2.5 pr-3 font-semibold text-slate-500">→ +1%</td>
+              <td class="py-2.5 pr-3 font-semibold text-muted">→ +1%</td>
               <td class="py-2.5 pr-3 text-muted">+8%</td>
-              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-slate-300" style="height:50%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:50%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:51%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:50%"></span><span class="w-1.5 rounded-sm bg-slate-300" style="height:51%"></span></span></td>
+              <td class="py-2.5 pr-3"><span class="flex items-end gap-0.5 h-8"><span class="w-1.5 rounded-sm bg-line" style="height:50%"></span><span class="w-1.5 rounded-sm bg-line" style="height:50%"></span><span class="w-1.5 rounded-sm bg-line" style="height:51%"></span><span class="w-1.5 rounded-sm bg-line" style="height:50%"></span><span class="w-1.5 rounded-sm bg-line" style="height:51%"></span></span></td>
               <td class="py-2.5 pr-3 text-muted">Shenzhen Hangxin</td>
-              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">4 аналога</span></td>
+              <td class="py-2.5"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">4 аналога</span></td>
             </tr>
           </tbody>
         </table>
@@ -275,12 +299,12 @@
     </section>
 
     <!-- Проверка контрагентов -->
-    <section class="rounded-2xl bg-white p-5 shadow-card">
-      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Проверка контрагентов в Китае · реестр</div>
+    <section class="rounded-2xl bg-surface p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Проверка контрагентов в Китае · реестр</div>
       <div class="mt-3 overflow-x-auto">
         <table class="w-full min-w-[760px] text-sm">
           <thead>
-            <tr class="border-b border-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <tr class="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wide text-faint">
               <th class="py-2 pr-3 font-semibold">Контрагент</th>
               <th class="py-2 pr-3 font-semibold">Площадка</th>
               <th class="py-2 pr-3 font-semibold">Лет на рынке</th>
@@ -349,7 +373,7 @@
       </div>
     </div>
 
-    <p class="text-xs text-slate-400">Превью-снимок. Демо-данные (BYN/¥). Работает навигация по вкладкам и наведение на панель чатов справа.</p>
+    <p class="text-xs text-faint">Превью-снимок. Демо-данные (BYN/¥). Работает навигация по вкладкам и наведение на панель чатов справа.</p>
   </div>
 </body>
 </html>

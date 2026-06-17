@@ -4,61 +4,90 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Закупки · Воронка закупок — превью</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    // Те же кастомные токены, что в Tailwind-конфиге проекта (canvas/ink/muted/brand/shadow-card).
+    // Утверждённый дизайн (frontend/DESIGN.md, 2026-06-17): токены C+D, Inter, мягкие тени, акцент/деньги.
     tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            canvas: "#f6f7f9",
-            ink: "#0f172a",
-            muted: "#64748b",
-            brand: { DEFAULT: "#2563eb", 100: "#dbeafe", 600: "#2563eb" },
-          },
-          boxShadow: { card: "0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      darkMode: "class",
+      theme: { extend: {
+        colors: {
+          canvas: "rgb(var(--canvas) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          sunken: "rgb(var(--sunken) / <alpha-value>)",
+          ink: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--muted) / <alpha-value>)",
+          faint: "rgb(var(--faint) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          "line-strong": "rgb(var(--line-strong) / <alpha-value>)",
+          accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", ink: "rgb(var(--accent-ink) / <alpha-value>)", soft: "rgb(var(--accent-soft) / <alpha-value>)" },
+          money: { DEFAULT: "rgb(var(--money) / <alpha-value>)", soft: "rgb(var(--money-soft) / <alpha-value>)" },
         },
-      },
+        fontFamily: { sans: ["Inter","system-ui","-apple-system","Segoe UI","Roboto","Arial","sans-serif"] },
+        boxShadow: {
+          card: "0 1px 1px rgba(20,20,40,0.03), 0 2px 4px rgba(20,20,40,0.04), 0 6px 16px rgba(20,20,40,0.04), inset 0 1px 0 rgba(255,255,255,0.6)",
+          pop: "0 1px 2px rgba(20,20,40,0.06), 0 12px 28px rgba(20,20,40,0.12)",
+        },
+        borderRadius: { lg: "10px", xl: "12px", "2xl": "14px" },
+      } },
     };
   </script>
   <style>
-    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-    /* ── Панель чатов поставщиков (рейка → раскрытие по hover, overlay) — эталон ── */
+    /* Токены тем C (светлая, по умолчанию) и D (тёмная, .dark на <html>) — из frontend/globals.css. */
+    :root{ --canvas:238 241 245; --surface:255 255 255; --sunken:244 246 249; --ink:15 23 42; --muted:91 107 130; --faint:147 161 181; --line:226 232 240; --line-strong:203 213 225; --accent:30 94 255; --accent-ink:21 69 204; --accent-soft:227 236 255; --money:14 124 74; --money-soft:226 243 234; }
+    .dark{ --canvas:14 17 22; --surface:23 27 34; --sunken:31 36 44; --ink:232 234 237; --muted:155 163 174; --faint:107 114 128; --line:42 48 56; --line-strong:58 66 76; --accent:110 139 255; --accent-ink:138 160 255; --accent-soft:35 42 61; --money:52 211 153; --money-soft:22 39 31; }
+    body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-feature-settings:"cv05","ss01";-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+    /* ── Панель чатов поставщиков (рейка → раскрытие по hover) — адаптируется к теме ── */
     .chatrail{position:fixed;top:0;right:0;height:100vh;width:68px;z-index:30;
-      background:#fff;border-left:1px solid #e2e8f0;transition:width .22s ease;overflow:hidden;
-      box-shadow:-8px 0 24px rgba(15,23,42,.04)}
-    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(15,23,42,.10)}
+      background:rgb(var(--surface));border-left:1px solid rgb(var(--line));transition:width .22s ease;overflow:hidden;
+      box-shadow:-8px 0 24px rgba(20,20,40,.05)}
+    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(20,20,40,.14)}
     .chatrail .lbl{opacity:0;transition:opacity .18s ease;white-space:nowrap}
     .chatrail:hover .lbl{opacity:1}
-    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid #f1f5f9}
+    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid rgb(var(--line))}
     .chatrow{display:flex;align-items:center;gap:.6rem;padding:9px 14px;cursor:pointer}
-    .chatrow:hover{background:#f8fafc}
+    .chatrow:hover{background:rgb(var(--sunken))}
     .av{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:9999px;
       display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff}
     .badge{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9999px;
-      background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
-    .ch-flag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:9999px;line-height:1.4}
+      background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid rgb(var(--surface))}
+    .ch-flag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:9999px;line-height:1.4}
     /* ── Слайд-овер карточки заявки (как в CRM: клик / двойной клик по карточке) ── */
-    .ovl{position:fixed;inset:0;background:rgba(15,23,42,.40);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+    .ovl{position:fixed;inset:0;background:rgba(8,10,16,.50);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
     .ovl.show{opacity:1;pointer-events:auto}
-    .drw{position:fixed;top:0;right:0;height:100vh;width:560px;max-width:96vw;background:#fff;
-      box-shadow:-12px 0 40px rgba(15,23,42,.18);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+    .drw{position:fixed;top:0;right:0;height:100vh;width:560px;max-width:96vw;background:rgb(var(--surface));
+      box-shadow:-12px 0 40px rgba(8,10,16,.30);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
       z-index:60;display:flex;flex-direction:column}
     .drw.show{transform:translateX(0)}
     /* компактное превью (один клик) — узкий слайд-овер */
-    .drw2{position:fixed;top:0;right:0;height:100vh;width:380px;max-width:92vw;background:#fff;
-      box-shadow:-12px 0 40px rgba(15,23,42,.18);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+    .drw2{position:fixed;top:0;right:0;height:100vh;width:380px;max-width:92vw;background:rgb(var(--surface));
+      box-shadow:-12px 0 40px rgba(8,10,16,.30);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
       z-index:60;display:flex;flex-direction:column}
     .drw2.show{transform:translateX(0)}
     .card{cursor:pointer}
-    .card:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)}
+    .card:hover{box-shadow:0 12px 28px rgba(20,20,40,.12)}
     .card:active{transform:scale(.995)}
     /* переключатель поставщиков в переписке */
-    .zth-pill{font-size:11px;font-weight:600;padding:4px 9px;border-radius:9999px;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer}
-    .zth-pill.zth-on{background:#2563eb;color:#fff;border-color:#2563eb}
+    .zth-pill{font-size:11px;font-weight:600;padding:4px 9px;border-radius:9999px;border:1px solid rgb(var(--line));background:rgb(var(--surface));color:rgb(var(--muted));cursor:pointer}
+    .zth-pill.zth-on{background:rgb(var(--accent));color:#fff;border-color:rgb(var(--accent))}
+    /* тоггл светлая/тёмная */
+    .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:70;height:40px;padding:0 14px;border-radius:9999px;
+      background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);
+      display:flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;font-weight:600;color:rgb(var(--ink))}
+    .theme-toggle:hover{border-color:rgb(var(--accent))}
+    .theme-lbl{font-size:13px}
   </style>
 </head>
 <body class="bg-canvas text-ink">
+  <!-- тоггл светлая/тёмная тема (утв. дизайн C+D) -->
+  <button class="theme-toggle" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему"><span id="themeIcon">🌙</span><span class="theme-lbl">Тёмная</span></button>
+  <script>
+    function applyTheme(d){ document.documentElement.classList.toggle('dark', d); const i=document.getElementById('themeIcon'), l=document.querySelector('.theme-lbl'); if(i) i.textContent=d?'☀️':'🌙'; if(l) l.textContent=d?'Светлая':'Тёмная'; }
+    function toggleTheme(){ const d=!document.documentElement.classList.contains('dark'); applyTheme(d); try{localStorage.setItem('zak-theme', d?'dark':'light')}catch(e){} }
+    (function(){ const p=new URLSearchParams(location.search).get('theme'); let s; try{s=localStorage.getItem('zak-theme')}catch(e){} applyTheme(p ? p==='dark' : s==='dark'); })();
+  </script>
   <!-- ⚠️ Статичный снимок будущего Next.js-экрана /crm/procurement/board. 9 стадий из stages.py.
        План/факт целей отдела + карточка заявки по клику (как сделка в CRM). Демо-данные, BYN/¥. -->
 
@@ -131,7 +160,7 @@
         <span class="block truncate text-[12px] text-muted">QC report ready, photos sent</span>
       </span>
     </div>
-    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-slate-400">
+    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-faint">
       ИИ переводит, отвечает по шаблону и поднимает важное наверх. Канал, тон и история — в карточке диалога.
     </div>
   </aside>
@@ -150,74 +179,74 @@
 
     <!-- Вкладки закупок (Воронка активна) -->
     <div class="flex flex-wrap gap-1.5 text-[13px]">
-      <a href="zak-cockpit-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Обзор</a>
-      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Запросы цены</a>
-      <span class="rounded-full bg-brand px-3 py-1.5 font-semibold text-white shadow-card">Воронка</span>
-      <a href="zak-shipment-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Машины</a>
-      <a href="zak-ai-comms-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">AI-переписка</a>
-      <a href="zak-price-monitor-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Мониторинг цен</a>
-      <a href="zak-landed-cost-preview.html" class="rounded-full bg-white px-3 py-1.5 font-medium text-slate-500 shadow-card hover:text-brand-600">Себестоимость</a>
+      <a href="zak-cockpit-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Обзор</a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
+      <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Воронка</span>
+      <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
+      <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
+      <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
     </div>
 
     <!-- ════ ПЛАН / ФАКТ — цели отдела закупок (как в продажах) ════ -->
-    <section class="rounded-2xl bg-white p-5 shadow-card">
+    <section class="rounded-2xl bg-surface p-5 shadow-card">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Цели отдела закупок · план / факт</span>
-          <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">июнь · день 12 из 30</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">Цели отдела закупок · план / факт</span>
+          <span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">июнь · день 12 из 30</span>
         </div>
         <span class="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">demo · BYN</span>
       </div>
 
       <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <!-- 1 · Экономия (↓ себестоимость) -->
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Экономия закупок</span>
-            <span class="inline-flex items-center rounded-full bg-brand-100 px-1.5 py-0.5 text-[9px] font-semibold text-brand-600">↓ себест.</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Экономия закупок</span>
+            <span class="inline-flex items-center rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold text-accent">↓ себест.</span>
           </div>
           <div class="mt-1 text-lg font-bold text-ink">18 400 <span class="text-[12px] font-medium text-muted">/ 30 000</span></div>
-          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-amber-500" style="width:61%"></div></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-amber-500" style="width:61%"></div></div>
           <div class="mt-1 text-[11px] text-muted">61% плана · торг + объём + аналоги</div>
         </div>
         <!-- 2 · Снижение себестоимости -->
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Себестоимость (landed)</span>
-            <span class="inline-flex items-center rounded-full bg-brand-100 px-1.5 py-0.5 text-[9px] font-semibold text-brand-600">↓ себест.</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Себестоимость (landed)</span>
+            <span class="inline-flex items-center rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-semibold text-accent">↓ себест.</span>
           </div>
           <div class="mt-1 text-lg font-bold text-emerald-600">−7.2% <span class="text-[12px] font-medium text-muted">/ −10%</span></div>
-          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-emerald-500" style="width:72%"></div></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-emerald-500" style="width:72%"></div></div>
           <div class="mt-1 text-[11px] text-muted">к прошл. кварталу · цель −10%</div>
         </div>
         <!-- 3 · SLA ответа продавцу (автоматизация) -->
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Запросы цены в SLA</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Запросы цены в SLA</span>
             <span class="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-600">авто · ИИ</span>
           </div>
           <div class="mt-1 text-lg font-bold text-ink">17 <span class="text-[12px] font-medium text-muted">/ 22</span></div>
-          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-amber-500" style="width:77%"></div></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-amber-500" style="width:77%"></div></div>
           <div class="mt-1 text-[11px] text-muted">ответ продавцу ≤24ч · 3 просрочены</div>
         </div>
         <!-- 4 · Качество приёмки (↑ качество) -->
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Качество приёмки</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Качество приёмки</span>
             <span class="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">↑ качество</span>
           </div>
           <div class="mt-1 text-lg font-bold text-amber-600">96.5% <span class="text-[12px] font-medium text-muted">/ 98%</span></div>
-          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-amber-500" style="width:88%"></div></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-amber-500" style="width:88%"></div></div>
           <div class="mt-1 text-[11px] text-muted">приёмка без брака · 2 претензии</div>
         </div>
         <!-- 5 · OTD машин (надёжность) -->
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Машины в срок (OTD)</span>
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Машины в срок (OTD)</span>
             <span class="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">отношения</span>
           </div>
           <div class="mt-1 text-lg font-bold text-ink">4 <span class="text-[12px] font-medium text-muted">/ 5</span></div>
-          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div class="h-full rounded-full bg-emerald-500" style="width:80%"></div></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-emerald-500" style="width:80%"></div></div>
           <div class="mt-1 text-[11px] text-muted">доставка в график · 1 риск</div>
         </div>
       </div>
@@ -226,13 +255,13 @@
     <!-- Фильтр + сводка -->
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap gap-1.5 text-[12px]">
-        <span class="rounded-full bg-brand px-3 py-1 font-semibold text-white shadow-card">Все · 23</span>
-        <span class="rounded-full bg-white px-3 py-1 font-medium text-slate-500 shadow-card">Под сделки · 14</span>
-        <span class="rounded-full bg-white px-3 py-1 font-medium text-slate-500 shadow-card">Пополнение · 9</span>
-        <span class="rounded-full bg-white px-3 py-1 font-medium text-amber-600 shadow-card">Заморожены · 2</span>
+        <span class="rounded-full bg-accent px-3 py-1 font-semibold text-white shadow-card">Все · 23</span>
+        <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Под сделки · 14</span>
+        <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Пополнение · 9</span>
+        <span class="rounded-full bg-surface px-3 py-1 font-medium text-amber-600 shadow-card">Заморожены · 2</span>
       </div>
       <div class="relative">
-        <input type="text" placeholder="Поиск заявки, товара, поставщика…" class="w-64 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-[12px] text-slate-500 shadow-card" />
+        <input type="text" placeholder="Поиск заявки, товара, поставщика…" class="w-64 rounded-full border border-line bg-surface px-4 py-1.5 text-[12px] text-muted shadow-card" />
       </div>
     </div>
 
@@ -247,20 +276,20 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#3B82F6"></span>
           <span class="text-[12px] font-semibold text-ink">Потребность</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · BYN 4 040</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">2 · BYN 4 040</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-blue-200" data-z="cap470" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-blue-200" data-z="cap470" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Конденсатор 470мкФ 25В</div>
             <div class="mt-1 text-[11px] text-muted">5 000 шт · BYN ~2 600</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2287</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">Иванов П. · ZPR-2026-041</div>
+            <div class="mt-1 text-[10px] text-faint">Иванов П. · ZPR-2026-041</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-blue-200" data-z="esp32" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-blue-200" data-z="esp32" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Чип ESP32-C3-WROOM-02</div>
             <div class="mt-1 text-[11px] text-muted">1 000 шт · BYN ~1 440</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">автозаявка · мин. остаток</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span></div>
+            <div class="mt-1 text-[10px] text-faint">автозаявка · мин. остаток</div>
           </div>
         </div>
       </div>
@@ -270,26 +299,26 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#8B5CF6"></span>
           <span class="text-[12px] font-semibold text-ink">Поиск поставщиков</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">3 · BYN 8 240</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">3 · BYN 8 240</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="relay_srd" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="relay_srd" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Реле SRD-05VDC 10A</div>
             <div class="mt-1 text-[11px] text-muted">1 200 шт · BYN ~1 440</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2290</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">Петрова А. · ZPR-2026-042</div>
+            <div class="mt-1 text-[10px] text-faint">Петрова А. · ZPR-2026-042</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="usbc" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="usbc" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Разъём USB-C 24pin SMD</div>
             <div class="mt-1 text-[11px] text-muted">20 000 шт · BYN ~4 800</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2291</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">Сидоров К. · ZPR-2026-043</div>
+            <div class="mt-1 text-[10px] text-faint">Сидоров К. · ZPR-2026-043</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="res10k" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200" data-z="res10k" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Резистор 10кОм 1% 0.25W</div>
             <div class="mt-1 text-[11px] text-muted">100 000 шт · BYN ~2 000</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">автозаявка · Ковалёв А.</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span></div>
+            <div class="mt-1 text-[10px] text-faint">автозаявка · Ковалёв А.</div>
           </div>
         </div>
       </div>
@@ -299,20 +328,20 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#F59E0B"></span>
           <span class="text-[12px] font-semibold text-ink">Переговоры</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · ¥38 000</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">2 · ¥38 000</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-amber-200" data-z="cap100" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-amber-200" data-z="cap100" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Конденсатор 100мкФ 16В</div>
             <div class="mt-1 text-[11px] text-muted">10 000 шт · Yuxin ¥0.12</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2288</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">ведёт ИИ · WeChat</div>
+            <div class="mt-1 text-[10px] text-faint">ведёт ИИ · WeChat</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-amber-200" data-z="diode" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-amber-200" data-z="diode" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Диод 1N4007</div>
             <div class="mt-1 text-[11px] text-muted">50 000 шт · Hangxin ¥0.06</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">ведёт ИИ · просит скидку 5%</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span></div>
+            <div class="mt-1 text-[10px] text-faint">ведёт ИИ · просит скидку 5%</div>
           </div>
         </div>
       </div>
@@ -322,20 +351,20 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#06B6D4"></span>
           <span class="text-[12px] font-semibold text-ink">Анализ поставщика</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">2</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">2</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-cyan-200" data-z="bc547" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-cyan-200" data-z="bc547" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Транзистор BC547</div>
             <div class="mt-1 text-[11px] text-muted">5 000 шт · Suzhou Precision</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2285</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">企信宝 проверка · ИИ</div>
+            <div class="mt-1 text-[10px] text-faint">企信宝 проверка · ИИ</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-cyan-200" data-z="choke" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-cyan-200" data-z="choke" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Дроссель 100мкГн SMD</div>
             <div class="mt-1 text-[11px] text-muted">2 000 шт · Suzhou Precision</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">сравнение: 2 поставщика</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span></div>
+            <div class="mt-1 text-[10px] text-faint">сравнение: 2 поставщика</div>
           </div>
         </div>
       </div>
@@ -345,17 +374,17 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#EC4899"></span>
           <span class="text-[12px] font-semibold text-ink">Согласование</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">1 · BYN 2 400</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">1 · BYN 2 400</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-pink-200 ring-1 ring-amber-300" data-z="esp8266" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-pink-200 ring-1 ring-amber-300" data-z="esp8266" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Модуль ESP8266-12F</div>
             <div class="mt-1 text-[11px] text-muted">800 шт · BYN 2 400</div>
             <div class="mt-1.5 flex flex-wrap gap-1">
               <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2280</span>
               <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">ждёт руков.</span>
             </div>
-            <div class="mt-1 text-[10px] text-slate-400">Сидоров К. · 2-й день</div>
+            <div class="mt-1 text-[10px] text-faint">Сидоров К. · 2-й день</div>
           </div>
         </div>
       </div>
@@ -365,20 +394,20 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#14B8A6"></span>
           <span class="text-[12px] font-semibold text-ink">Заказ / PO</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · ¥5 300</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">2 · ¥5 300</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-teal-200" data-z="stm32" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-teal-200" data-z="stm32" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">STM32F103C8T6</div>
             <div class="mt-1 text-[11px] text-muted">1 000 шт · Hangxin ¥3.85</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2278</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">PO отправлен · 10 июн</div>
+            <div class="mt-1 text-[10px] text-faint">PO отправлен · 10 июн</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-teal-200" data-z="led" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-teal-200" data-z="led" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">LED 5мм красный</div>
             <div class="mt-1 text-[11px] text-muted">20 000 шт · 1688 ¥0.07</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">PO в 1688 · авт. ответ</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span></div>
+            <div class="mt-1 text-[10px] text-faint">PO в 1688 · авт. ответ</div>
           </div>
         </div>
       </div>
@@ -388,29 +417,29 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#6366F1"></span>
           <span class="text-[12px] font-semibold text-ink">Производство</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">3 · ¥68 400</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">3 · ¥68 400</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-indigo-200" data-z="cap1000" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200" data-z="cap1000" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Конд. алюм. 1000мкФ 35В</div>
             <div class="mt-1 text-[11px] text-muted">8 000 шт · ¥0.38/шт</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-015</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">ETA склад Китай 20 июн</div>
+            <div class="mt-1 text-[10px] text-faint">ETA склад Китай 20 июн</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-indigo-200" data-z="relay24" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200" data-z="relay24" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Реле 24VDC SPDT 10A</div>
             <div class="mt-1 text-[11px] text-muted">600 шт · ¥4.80/шт</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-015</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">ETA склад Китай 20 июн</div>
+            <div class="mt-1 text-[10px] text-faint">ETA склад Китай 20 июн</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-indigo-200 ring-1 ring-emerald-300" data-z="trafo" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200 ring-1 ring-emerald-300" data-z="trafo" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Трансформатор ТП-20</div>
             <div class="mt-1 text-[11px] text-muted">100 шт · ¥36/шт</div>
             <div class="mt-1.5 flex flex-wrap gap-1">
               <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">MO-2026-014</span>
               <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">готов → QC</span>
             </div>
-            <div class="mt-1 text-[10px] text-slate-400">поставщик уведомил ИИ</div>
+            <div class="mt-1 text-[10px] text-faint">поставщик уведомил ИИ</div>
           </div>
         </div>
       </div>
@@ -420,10 +449,10 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#F97316"></span>
           <span class="text-[12px] font-semibold text-ink">Приёмка / QC</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">1 · BYN 980</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">1 · BYN 980</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-orange-200" data-z="db9" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-orange-200" data-z="db9" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Разъём DB9 9pin Male</div>
             <div class="mt-1 text-[11px] text-muted">500 шт · MO-2026-014</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">под сделку СД-2275</span></div>
@@ -437,23 +466,23 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:#22C55E"></span>
           <span class="text-[12px] font-semibold text-ink">Завершено</span>
-          <span class="ml-auto text-[10px] text-slate-400 font-medium">2 · этот мес.</span>
+          <span class="ml-auto text-[10px] text-faint font-medium">2 · этот мес.</span>
         </div>
         <div class="space-y-2">
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-green-200 opacity-75" data-z="photo" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-green-200 opacity-75" data-z="photo" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Фотоэлемент FD-1</div>
             <div class="mt-1 text-[11px] text-muted">300 шт · MO-2026-013</div>
             <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">оприходован ✓</span></div>
-            <div class="mt-1 text-[10px] text-slate-400">10 июн · landed cost записан</div>
+            <div class="mt-1 text-[10px] text-faint">10 июн · landed cost записан</div>
           </div>
-          <div class="card rounded-xl bg-white p-3 shadow-card hover:ring-1 hover:ring-green-200 opacity-75" data-z="hdmi" title="Двойной клик — открыть карточку">
+          <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-green-200 opacity-75" data-z="hdmi" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Кабель HDMI 2м</div>
             <div class="mt-1 text-[11px] text-muted">200 шт · MO-2026-013</div>
             <div class="mt-1.5 flex flex-wrap gap-1">
-              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">пополнение</span>
+              <span class="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">пополнение</span>
               <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">оприходован ✓</span>
             </div>
-            <div class="mt-1 text-[10px] text-slate-400">8 июн · landed cost записан</div>
+            <div class="mt-1 text-[10px] text-faint">8 июн · landed cost записан</div>
           </div>
         </div>
       </div>
@@ -487,7 +516,7 @@
       </div>
     </div>
 
-    <p class="text-xs text-slate-400">Превью-снимок. Стадии — из stages.py (9 стадий). Демо-данные (BYN/¥). Двойной клик по карточке — полная карточка заявки.</p>
+    <p class="text-xs text-faint">Превью-снимок. Стадии — из stages.py (9 стадий). Демо-данные (BYN/¥). Двойной клик по карточке — полная карточка заявки.</p>
   </div>
 
   <!-- ============ ОВЕРЛЕЙ (общий) ============ -->
@@ -495,12 +524,12 @@
 
   <!-- ============ КОМПАКТНОЕ ПРЕВЬЮ (ОДИН клик) ============ -->
   <aside class="drw2" id="drw2">
-    <div class="border-b border-slate-100 p-4">
+    <div class="border-b border-line p-4">
       <div class="flex items-center justify-between">
-        <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Превью заявки</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">Превью заявки</span>
         <div class="flex gap-1.5">
-          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-brand-600 hover:bg-slate-50" title="Открыть полный вид" onclick="goFull()">⤢ Полный вид</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Закрыть" onclick="closeAll()">✕</button>
+          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-accent hover:bg-sunken" title="Открыть полный вид" onclick="goFull()">⤢ Полный вид</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Закрыть" onclick="closeAll()">✕</button>
         </div>
       </div>
       <h2 class="mt-2 text-[15px] font-bold text-ink leading-tight" id="c-title">—</h2>
@@ -508,22 +537,22 @@
       <div class="mt-2 flex flex-wrap gap-1.5" id="c-chips"></div>
     </div>
     <div class="flex-1 overflow-y-auto p-4" id="c-body"></div>
-    <div class="border-t border-slate-100 p-3">
-      <button class="w-full rounded-lg bg-brand py-2.5 text-[13px] font-semibold text-white" onclick="goFull()">Открыть полную карточку →</button>
-      <div class="mt-1.5 text-center text-[10px] text-slate-400">или двойной клик по карточке</div>
+    <div class="border-t border-line p-3">
+      <button class="w-full rounded-lg bg-accent py-2.5 text-[13px] font-semibold text-white" onclick="goFull()">Открыть полную карточку →</button>
+      <div class="mt-1.5 text-center text-[10px] text-faint">или двойной клик по карточке</div>
     </div>
   </aside>
 
   <!-- ============ ПОЛНЫЙ ВИД (ДВОЙНОЙ клик) ============ -->
   <aside class="drw" id="drw">
     <!-- шапка -->
-    <div class="border-b border-slate-100 p-5">
+    <div class="border-b border-line p-5">
       <div class="flex items-center justify-between">
         <span class="text-[12px] text-muted" id="z-num">ZPR-2026-041</span>
         <div class="flex gap-1.5">
-          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-50" title="Свернуть в превью" onclick="backToCompact()">← Превью</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Редактировать">✎</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50" title="Закрыть" onclick="closeAll()">✕</button>
+          <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-muted hover:bg-sunken" title="Свернуть в превью" onclick="backToCompact()">← Превью</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Редактировать">✎</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Закрыть" onclick="closeAll()">✕</button>
         </div>
       </div>
       <h2 class="mt-2 text-lg font-bold text-ink" id="z-title">Конденсатор 470мкФ 25В</h2>
@@ -533,10 +562,10 @@
     <!-- тело -->
     <div class="flex-1 overflow-y-auto p-5 space-y-0" id="z-body"></div>
     <!-- футер -->
-    <div class="border-t border-slate-100 p-4 flex gap-2">
-      <button class="flex-1 rounded-lg bg-brand py-2.5 text-[13px] font-semibold text-white">→ Следующая стадия</button>
-      <button class="rounded-lg border border-slate-200 px-3 py-2.5 text-[13px] font-semibold text-slate-600">Создать PO</button>
-      <button class="rounded-lg border border-slate-200 px-3 py-2.5 text-[13px] font-semibold text-slate-600">Образец</button>
+    <div class="border-t border-line p-4 flex gap-2">
+      <button class="flex-1 rounded-lg bg-accent py-2.5 text-[13px] font-semibold text-white">→ Следующая стадия</button>
+      <button class="rounded-lg border border-line px-3 py-2.5 text-[13px] font-semibold text-muted">Создать PO</button>
+      <button class="rounded-lg border border-line px-3 py-2.5 text-[13px] font-semibold text-muted">Образец</button>
     </div>
   </aside>
 
@@ -546,7 +575,7 @@
     // helper-бейдж качества/надёжности
     const relColor = r => r==="Надёжный"||r==="Стратегич." ? "bg-emerald-50 text-emerald-700"
                         : r==="Осторожно" ? "bg-amber-50 text-amber-700"
-                        : r==="Риск"||r==="Не проверен" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500";
+                        : r==="Риск"||r==="Не проверен" ? "bg-red-50 text-red-600" : "bg-sunken text-muted";
 
     // ── Данные заявок (демо). Полные карточки: cap470, relay_srd, cap100, bc547, esp8266, stm32, trafo ──
     const Z = {
@@ -700,11 +729,11 @@
 
     function stepper(idx){
       let s='<div class="flex gap-1 mt-3">';
-      for(let i=0;i<9;i++){ const c=i<idx?'bg-brand':i===idx?'bg-amber-400':'bg-slate-200'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
-      s+='</div><div class="flex justify-between mt-1.5 text-[10px] text-slate-400"><span>'+STAGES[0]+'</span><span class="font-semibold text-amber-600">'+STAGES[idx]+'</span><span>'+STAGES[8]+'</span></div>';
+      for(let i=0;i<9;i++){ const c=i<idx?'bg-accent':i===idx?'bg-amber-400':'bg-line'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
+      s+='</div><div class="flex justify-between mt-1.5 text-[10px] text-faint"><span>'+STAGES[0]+'</span><span class="font-semibold text-amber-600">'+STAGES[idx]+'</span><span>'+STAGES[8]+'</span></div>';
       return s;
     }
-    const sec = (title, inner, add) => `<div class="py-4 border-b border-slate-100"><div class="flex items-center justify-between mb-2.5"><span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">${title}</span>${add?`<span class="text-[11px] font-semibold text-brand-600">${add}</span>`:''}</div>${inner}</div>`;
+    const sec = (title, inner, add) => `<div class="py-4 border-b border-line"><div class="flex items-center justify-between mb-2.5"><span class="text-[11px] font-semibold uppercase tracking-wide text-faint">${title}</span>${add?`<span class="text-[11px] font-semibold text-accent">${add}</span>`:''}</div>${inner}</div>`;
 
     function buildBody(d){
       let h='';
@@ -714,14 +743,14 @@
 
       // сравнение поставщиков (TCO) — ключевой блок (↓себестоимость + ↑качество)
       if(d.suppliers){
-        let rows=d.suppliers.map(s=>`<tr class="border-t border-slate-100 ${s.best?'bg-emerald-50/40':''}">
+        let rows=d.suppliers.map(s=>`<tr class="border-t border-line ${s.best?'bg-emerald-50/40':''}">
           <td class="py-2 pr-2"><div class="font-medium text-ink text-[12px]">${s.n}</div>${s.best?'<span class="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 mt-0.5">✓ лучший по TCO</span>':''}</td>
           <td class="py-2 px-1 text-right">${s.price}</td><td class="py-2 px-1 text-right text-muted">${s.lead}</td>
           <td class="py-2 px-1 text-right ${parseFloat(s.defect)>1.5?'text-amber-600 font-semibold':'text-emerald-600'}">${s.defect}</td>
           <td class="py-2 px-1 text-right"><span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${relColor(s.rel)}">${s.rel}</span></td>
           <td class="py-2 pl-1 text-right font-semibold text-ink">${s.landed}</td></tr>`).join('');
         h+=sec("Сравнение поставщиков · по себестоимости (TCO), не по цене",
-          `<table class="w-full text-[11px]"><thead><tr class="text-[10px] uppercase tracking-wide text-slate-400 text-right"><th class="text-left font-semibold">Поставщик</th><th class="font-semibold px-1">цена</th><th class="font-semibold px-1">срок</th><th class="font-semibold px-1">брак</th><th class="font-semibold px-1">рейтинг</th><th class="font-semibold pl-1">landed</th></tr></thead><tbody>${rows}</tbody></table>
+          `<table class="w-full text-[11px]"><thead><tr class="text-[10px] uppercase tracking-wide text-faint text-right"><th class="text-left font-semibold">Поставщик</th><th class="font-semibold px-1">цена</th><th class="font-semibold px-1">срок</th><th class="font-semibold px-1">брак</th><th class="font-semibold px-1">рейтинг</th><th class="font-semibold pl-1">landed</th></tr></thead><tbody>${rows}</tbody></table>
           ${d.verdict?`<div class="mt-2.5 rounded-lg bg-violet-50 border border-violet-100 p-2.5 text-[12px] text-violet-700"><span class="font-semibold text-violet-600">✦ Вывод ИИ:</span> ${d.verdict}</div>`:''}`,"＋ запросить ещё");
       }
 
@@ -731,10 +760,10 @@
           `<div class="space-y-1 text-[12px]">
             <div class="flex justify-between"><span class="text-muted">Цена инвойса</span><span class="font-medium">${d.landed.invoice}</span></div>
             <div class="flex justify-between"><span class="text-muted">Накладные расходы</span><span class="font-medium text-amber-600">${d.landed.over}</span></div>
-            <div class="flex justify-between border-t border-slate-100 pt-1"><span class="text-muted">Себестоимость ед.</span><span class="font-bold text-ink">${d.landed.unit}</span></div>
+            <div class="flex justify-between border-t border-line pt-1"><span class="text-muted">Себестоимость ед.</span><span class="font-bold text-ink">${d.landed.unit}</span></div>
             <div class="flex justify-between"><span class="text-muted">Партия</span><span class="font-medium">${d.landed.batch}</span></div>
             <div class="flex justify-between"><span class="text-muted">Рекоменд. цена продажи</span><span class="font-semibold text-emerald-600">${d.landed.price}</span></div>
-          </div>`,'<a class="text-brand-600" href="zak-landed-cost-preview.html">расчёт →</a>');
+          </div>`,'<a class="text-accent" href="zak-landed-cost-preview.html">расчёт →</a>');
       }
 
       // качество (↑качество)
@@ -760,13 +789,13 @@
       }
 
       // переписка — по поставщикам (переключатель) либо один тред
-      const renderMsgs = arr => arr.map(x=>`<div class="${x.d==='out'?'ml-auto bg-brand text-white':'bg-slate-100 text-ink'} max-w-[88%] rounded-xl px-3 py-2 text-[12px] mb-1.5">${x.t}<div class="text-[10px] mt-0.5 ${x.d==='out'?'text-blue-100':'text-slate-400'}">${x.m}</div></div>`).join('');
+      const renderMsgs = arr => arr.map(x=>`<div class="${x.d==='out'?'ml-auto bg-accent text-white':'bg-sunken text-ink'} max-w-[88%] rounded-xl px-3 py-2 text-[12px] mb-1.5">${x.t}<div class="text-[10px] mt-0.5 ${x.d==='out'?'text-blue-100':'text-faint'}">${x.m}</div></div>`).join('');
       if(d.threads){
         const pills=d.threads.map((t,i)=>`<button class="zth-pill ${i===0?'zth-on':''}" onclick="zThread(this,${i})">${t.sup} <span class="inline-flex items-center rounded-full px-1 py-0.5 text-[8px] font-bold ${relColor(t.rel)}">${t.rel}</span></button>`).join('');
         const panels=d.threads.map((t,i)=>`<div class="zth-panel" data-i="${i}" style="${i?'display:none':''}"><div class="mb-1.5 flex items-center justify-between text-[11px]"><span class="font-semibold text-ink">${t.sup}</span><span class="text-muted">${t.ch} · ${t.price}</span></div><div class="flex flex-col">${renderMsgs(t.msgs)}</div></div>`).join('');
-        h+=sec("Переписка по поставщикам (ведёт ИИ)",`<div data-threads><div class="flex flex-wrap gap-1.5 mb-2.5">${pills}</div>${panels}</div>`,'<a class="text-brand-600" href="zak-ai-comms-preview.html">все диалоги →</a>');
+        h+=sec("Переписка по поставщикам (ведёт ИИ)",`<div data-threads><div class="flex flex-wrap gap-1.5 mb-2.5">${pills}</div>${panels}</div>`,'<a class="text-accent" href="zak-ai-comms-preview.html">все диалоги →</a>');
       } else if(d.msgs){
-        h+=sec("Переписка (ведёт ИИ)",`<div class="flex flex-col">${renderMsgs(d.msgs)}</div>`,'<a class="text-brand-600" href="zak-ai-comms-preview.html">открыть →</a>');
+        h+=sec("Переписка (ведёт ИИ)",`<div class="flex flex-col">${renderMsgs(d.msgs)}</div>`,'<a class="text-accent" href="zak-ai-comms-preview.html">открыть →</a>');
       }
 
       // документы по сделке (счёт поставщика, договор, спецификация, ДТ…)
@@ -779,7 +808,7 @@
       if(d.contract){
         const c=d.contract, t=c.terms;
         const stColor = c.status==='подписан'?'bg-emerald-50 text-emerald-700':c.status.indexOf('согласован')>=0?'bg-amber-50 text-amber-700':'bg-violet-50 text-violet-600';
-        const row=(k,v)=>`<div class="flex justify-between gap-3 py-1 border-t border-slate-50 text-[12px]"><span class="text-muted shrink-0">${k}</span><span class="text-right font-medium text-ink">${v}</span></div>`;
+        const row=(k,v)=>`<div class="flex justify-between gap-3 py-1 border-t border-line text-[12px]"><span class="text-muted shrink-0">${k}</span><span class="text-right font-medium text-ink">${v}</span></div>`;
         h+=sec("Договор с поставщиком · условия",
           `<div class="flex items-center justify-between gap-2 mb-2">
              <span class="text-[12px] font-semibold text-ink">${c.template}</span>
@@ -787,7 +816,7 @@
            </div>
            ${row('Incoterms',t.incoterms)}${row('Валюта / оплата',t.currency)}${row('Условия оплаты',t.pay)}${row('Срок поставки',t.lead)}${row('MOQ',t.moq)}${row('Упаковка / маркировка',t.packing)}${row('Качество',t.quality)}${row('Штрафы',t.penalty)}${row('Гарантия',t.warranty)}${row('Форс-мажор',t.fm)}${row('Арбитраж',t.arb)}
            <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
-             <span class="text-[10px] text-slate-400 mr-1">Шаблон:</span>
+             <span class="text-[10px] text-faint mr-1">Шаблон:</span>
              <span class="zth-pill zth-on">Рамочный</span><span class="zth-pill">Разовый</span><span class="zth-pill">Пробная партия</span>
            </div>
            <div class="mt-2 text-[11px] text-violet-600">✦ ИИ заполняет договор по реквизитам поставщика (УНП/банк) и подставляет согласованные в переписке условия (цена, срок, AQL).</div>`,
@@ -805,7 +834,7 @@
     let _lastKey=null;
 
     function chipsFor(d){
-      const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 text-blue-600':'bg-slate-100 text-slate-500';
+      const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 text-blue-600':'bg-sunken text-muted';
       return `<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">● ${STAGES[d.stageIdx]}</span>
         <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${srcColor}">${d.source}</span>`;
     }
@@ -817,8 +846,8 @@
       h+=`<div class="flex items-baseline gap-2 mb-1"><span class="text-xl font-bold text-ink">${d.qty}</span><span class="text-[12px] text-muted">· ${d.budget}</span></div>`;
       h+=stepper(d.stageIdx);
       if(best){
-        h+=`<div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Лучший поставщик (по TCO)</div>
+        h+=`<div class="mt-4 rounded-xl border border-line bg-sunken p-3">
+          <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Лучший поставщик (по TCO)</div>
           <div class="mt-1 text-[13px] font-semibold text-ink">${best.n}</div>
           <div class="mt-1.5 grid grid-cols-2 gap-y-1 text-[12px]">
             <span class="text-muted">Цена</span><span class="text-right font-medium">${best.price}</span>
@@ -829,7 +858,7 @@
         </div>`;
       }
       if(d.verdict){ h+=`<div class="mt-2.5 rounded-lg bg-violet-50 border border-violet-100 p-2.5 text-[12px] text-violet-700"><span class="font-semibold text-violet-600">✦ ИИ:</span> ${d.verdict}</div>`; }
-      h+=`<div class="mt-3 text-[11px] text-slate-400">Полное сравнение поставщиков, качество, отношения, переписка и документы — в полном виде.</div>`;
+      h+=`<div class="mt-3 text-[11px] text-faint">Полное сравнение поставщиков, качество, отношения, переписка и документы — в полном виде.</div>`;
       return h;
     }
 
