@@ -46,3 +46,16 @@
 - ОТЛОЖЕНО как известный долг (решение пользователя «оставить как есть»): 37 react-hooks errors
   (22 set-state-in-effect, 11 refs, 3 static-components, 1 immutability acc+= в charts) — новые
   строгие правила React 19, код работает в проде. Метрика eslint=37 честно это показывает.
+
+## 2026-06-19 — флот воркеров (Sonnet) закрыл 37 react-hooks: eslint 37 → 0
+- 3 воркера на Sonnet от ветки sales-2.0-redesign, файлы не пересекались:
+  - hooks-refs: 11× refs в sprav-ai.tsx — `ref` был именем пропа (конфликт с React 19
+    forwarded-ref) → переименован в reference/item.
+  - hooks-setstate: 22× set-state-in-effect в 22 файлах — lazy useState / .then(setState) / queueMicrotask.
+  - hooks-structure: 3× static-components (leads-workspace: Action вынесен из тела) +
+    1× immutability (charts: DonutChart без acc+= мутации, предвычисление offset).
+- Все 3 интегрированы (merge + boot-smoke OK), worktree снесены.
+- Адверсариальная проверка ПОСЛЕ слияния всех: eslint=0 errors/0 warnings, tsc=0. Регрессий нет.
+- Метрика: eslint 37 → **0**. tsc=0, high_crit=0. Frontend полностью чист по линту/типам.
+- ⚠️ Гочи: integrate без acceptance-gate просто мержит; untracked coordination/*-scope.md в
+  основном чекауте конфликтуют с merge — убирал их перед integrate (версия приходит из воркера).
