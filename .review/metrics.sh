@@ -66,8 +66,10 @@ ESLINT="null"   # eslint во фронте не установлен — мер�
 AUDIT_TOTAL="null"; AUDIT_HIGHCRIT="null"
 if [ -f "$FE/package.json" ] && command -v npm >/dev/null 2>&1; then
   AJ=$( (cd "$FE" && npm audit --json 2>/dev/null) || echo '{}' )
-  AUDIT_TOTAL=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities||{};console.log(v.total||0)}catch{console.log(0)}})")
-  AUDIT_HIGHCRIT=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities||{};console.log((v.high||0)+(v.critical||0))}catch{console.log(0)}})")
+  # null (не 0!) если audit не дал metadata.vulnerabilities: 0 значит «проверено-и-чисто»,
+  # null значит «audit не отработал» (нет реестра/lockfile). Иначе метрика главной цели врёт зелёным.
+  AUDIT_TOTAL=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities;console.log(v?(v.total||0):'null')}catch{console.log('null')}})")
+  AUDIT_HIGHCRIT=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities;console.log(v?((v.high||0)+(v.critical||0)):'null')}catch{console.log('null')}})")
 fi
 # ruff — Python-корень; парс через node
 RUFF=0
@@ -75,7 +77,8 @@ if command -v ruff >/dev/null 2>&1; then
   # ruff exit=1 при найденных проблемах — под pipefail это валит пайп; снимаем локально.
   RUFF=$(set +o pipefail; ruff check . --output-format=json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).length)}catch{console.log(0)}})")
 fi
-TODO=$(git grep -nE 'TODO|FIXME|HACK|XXX' 2>/dev/null | grep -c '' || true)
+# исключаем .review/ — иначе паттерн ниже считает сам себя (ложная инфляция долга)
+TODO=$(git grep -nE 'TODO|FIXME|HACK|XXX' -- ':!.review' 2>/dev/null | grep -c '' || true)
 
 # === Покрытие автоматизацией ===
 NPM_SCRIPTS=0
