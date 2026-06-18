@@ -215,22 +215,21 @@ function LineAreaChart({ data }: { data: { m: string; rev: number; margin: numbe
 function DonutChart({ data }: { data: { label: string; v: number; tone: string }[] }) {
   const total = data.reduce((s, d) => s + d.v, 0);
   const R = 52, SW = 18, C0 = 2 * Math.PI * R;
-  let acc = 0;
+  const segments = data.map((d, i) => ({
+    ...d,
+    len: (d.v / total) * C0,
+    offset: data.slice(0, i).reduce((s, x) => s + (x.v / total) * C0, 0),
+  }));
   return (
     <svg viewBox="0 0 130 130" className="size-[130px] flex-shrink-0 -rotate-90">
       <circle cx="65" cy="65" r={R} fill="none" stroke="#EEEEF1" strokeWidth={SW} />
-      {data.map((d) => {
-        const len = (d.v / total) * C0;
-        const seg = (
-          <circle
-            key={d.label}
-            cx="65" cy="65" r={R} fill="none" stroke={d.tone} strokeWidth={SW}
-            strokeDasharray={`${len} ${C0 - len}`} strokeDashoffset={-acc}
-          />
-        );
-        acc += len;
-        return seg;
-      })}
+      {segments.map((d) => (
+        <circle
+          key={d.label}
+          cx="65" cy="65" r={R} fill="none" stroke={d.tone} strokeWidth={SW}
+          strokeDasharray={`${d.len} ${C0 - d.len}`} strokeDashoffset={-d.offset}
+        />
+      ))}
     </svg>
   );
 }

@@ -304,20 +304,18 @@ function IntakeModal({
   );
 }
 
-function DetailPanel({
-  lead,
+function Action({
+  label,
+  onClick,
+  done,
   busy,
-  onQualify,
-  onRoute,
-  onConvert,
 }: {
-  lead: Lead;
+  label: string;
+  onClick: () => void;
+  done: boolean;
   busy: boolean;
-  onQualify: () => void;
-  onRoute: () => void;
-  onConvert: () => void;
 }) {
-  const Action = ({ label, onClick, done }: { label: string; onClick: () => void; done: boolean }) => (
+  return (
     <button
       onClick={onClick}
       disabled={busy || done}
@@ -331,7 +329,21 @@ function DetailPanel({
       {done ? `✓ ${label}` : busy ? "..." : label}
     </button>
   );
+}
 
+function DetailPanel({
+  lead,
+  busy,
+  onQualify,
+  onRoute,
+  onConvert,
+}: {
+  lead: Lead;
+  busy: boolean;
+  onQualify: () => void;
+  onRoute: () => void;
+  onConvert: () => void;
+}) {
   const qualified = lead.status !== "new";
   const routed = lead.status === "routed" || lead.status === "converted";
   const converted = lead.status === "converted";
@@ -398,8 +410,8 @@ function DetailPanel({
 
       {/* Действия по этапам */}
       <div className="space-y-2">
-        <Action label="Квалифицировать" onClick={onQualify} done={qualified} />
-        <Action label="Распределить" onClick={onRoute} done={routed} />
+        <Action label="Квалифицировать" onClick={onQualify} done={qualified} busy={busy} />
+        <Action label="Распределить" onClick={onRoute} done={routed} busy={busy} />
         {converted && lead.dealId ? (
           <Link
             href={`/crm/deals/${lead.dealId}`}
@@ -408,7 +420,7 @@ function DetailPanel({
             Открыть сделку →
           </Link>
         ) : (
-          <Action label="В сделку" onClick={onConvert} done={converted} />
+          <Action label="В сделку" onClick={onConvert} done={converted} busy={busy} />
         )}
       </div>
     </div>
