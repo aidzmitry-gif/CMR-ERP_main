@@ -13,3 +13,13 @@
   цели «0 crit» врала зелёным. Теперь null, если нет metadata.vulnerabilities.
 - TODO-grep считал собственный паттерн в metrics.sh (+3 ложных, 12→15). Исключён `:!.review`.
 - Перепрогон: audit=null, todo=12 (верно), tsc=0, ruff=1. Baseline jsonl пересоздан чистым.
+
+## 2026-06-16 — закрыто eslint-слепое пятно + всплыла 1 high-уязвимость
+- Установлены eslint 9 + eslint-config-next@16 (flat-config eslint.config.mjs, БЕЗ FlatCompat —
+  он несовместим с ESLint 9). lint-скрипт: next lint (deprecated, удалён в Next 16) → eslint.
+- eslint метрика: null → **48** (37 errors, 11 warnings) на текущем коде. Слепое пятно закрыто.
+- После установки deps npm audit заработал и нашёл **3 уязвимости (1 high: undici TLS-bypass)** —
+  ровно то, что прятал ложный зелёный. Метрика «0 crit» теперь честная.
+- metrics.sh: audit-парсер переписан устойчивым к сдвоенному JSON-выводу npm на Windows
+  (брал position-3023-ошибку → null). Теперь audit=3/high_crit=1 верно.
+- Долг: undici high чинится `npm audit fix` (тронет lockfile — отдельным шагом по согласованию).

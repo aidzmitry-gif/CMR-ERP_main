@@ -57,19 +57,30 @@ if [ -x "$FE/node_modules/.bin/tsc" ]; then
   # pipefail off локально: grep -c при 0 совпадений даёт exit 1 — это не ошибка, а «0 ошибок типов».
   TSC=$( set +o pipefail; cd "$FE" && node_modules/.bin/tsc --noEmit 2>&1 | grep -cE 'error TS' )
 fi
-ESLINT="null"   # eslint во фронте не установлен — мерить нечем (см. шапку); если поставят, раскомментить:
-# if [ -x "$FE/node_modules/.bin/eslint" ]; then
-#   ESLINT=$( (cd "$FE" && node_modules/.bin/eslint . -f json 2>/dev/null \
-#     | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).reduce((a,f)=>a+f.messages.length,0))}catch{console.log(0)}})") || echo 0 )
-# fi
+ESLINT="null"
+if [ -x "$FE/node_modules/.bin/eslint" ]; then
+  # eslint exit=1 при находках — снимаем pipefail локально; null если парс упал (инструмент сломан, не «чисто»).
+  ESLINT=$( set +o pipefail; cd "$FE" && node_modules/.bin/eslint . -f json 2>/dev/null \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).reduce((a,f)=>a+f.messages.length,0))}catch{console.log('null')}})" )
+fi
 # npm audit — только если у фронта есть lockfile
 AUDIT_TOTAL="null"; AUDIT_HIGHCRIT="null"
 if [ -f "$FE/package.json" ] && command -v npm >/dev/null 2>&1; then
   AJ=$( (cd "$FE" && npm audit --json 2>/dev/null) || echo '{}' )
-  # null (не 0!) если audit не дал metadata.vulnerabilities: 0 значит «проверено-и-чисто»,
-  # null значит «audit не отработал» (нет реестра/lockfile). Иначе метрика главной цели врёт зелёным.
-  AUDIT_TOTAL=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities;console.log(v?(v.total||0):'null')}catch{console.log('null')}})")
-  AUDIT_HIGHCRIT=$(printf '%s' "$AJ" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).metadata.vulnerabilities;console.log(v?((v.high||0)+(v.critical||0)):'null')}catch{console.log('null')}})")
+  # null (не 0!) если audit не дал metadata.vulnerabilities: 0 = «проверено-и-чисто»,
+  # null = «audit не отработал». Парсер устойчив к сдвоенному выводу npm на Windows
+  # (берём первый сбалансированный {...}). Один разбор → обе цифры "total highcrit".
+  AUDIT=$(printf '%s' "$AJ" | node -e "
+let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+  try{
+    let depth=0,start=s.indexOf('{'),end=-1;
+    for(let i=start;i<s.length;i++){if(s[i]==='{')depth++;else if(s[i]==='}'){depth--;if(depth===0){end=i;break;}}}
+    const v=JSON.parse(s.slice(start,end+1)).metadata.vulnerabilities;
+    console.log(v?(v.total||0):'null', v?((v.high||0)+(v.critical||0)):'null');
+  }catch{console.log('null null');}
+});")
+  AUDIT_TOTAL=${AUDIT% *}
+  AUDIT_HIGHCRIT=${AUDIT#* }
 fi
 # ruff — Python-корень; парс через node
 RUFF=0
