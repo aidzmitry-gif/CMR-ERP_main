@@ -22,7 +22,6 @@ export function LogisticsScorecard() {
 
   useEffect(() => {
     void load(period);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
   async function onSeed() {

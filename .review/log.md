@@ -37,3 +37,12 @@
 - Осознанный долг: 2 moderate (postcss внутри next). Фикс только через ломающий откат next →
   ждём апстрим-патч next, руками не лезем.
 - tsc=0 после обновления (фронт цел). Изменён только package-lock.json.
+
+## 2026-06-19 — разбор eslint: 48 → 37 (закрыто тривиальное, React-hooks отложено)
+- coverage/** добавлен в ignores (сгенерированные артефакты, git-ignored — не линтить).
+- eslint --fix снял мёртвые eslint-disable директивы (от старого next lint) + прочее автофиксимое.
+- Руками: postcss.config.mjs (анонимный экспорт → const config), убран unused Badge (charts),
+  удалена мёртвая функция barLabel (sprav-rates). warnings 11 → 0. tsc=0.
+- ОТЛОЖЕНО как известный долг (решение пользователя «оставить как есть»): 37 react-hooks errors
+  (22 set-state-in-effect, 11 refs, 3 static-components, 1 immutability acc+= в charts) — новые
+  строгие правила React 19, код работает в проде. Метрика eslint=37 честно это показывает.

@@ -36,7 +36,6 @@ export function LogisticsInsights() {
 
   useEffect(() => {
     void load(weight);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weight]);
 
   async function onSeed() {

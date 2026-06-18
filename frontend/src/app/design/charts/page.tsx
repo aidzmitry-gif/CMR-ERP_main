@@ -1,4 +1,4 @@
-import { Card, CardHeader, CardBody, Badge } from "@/components/ui";
+import { Card, CardHeader, CardBody } from "@/components/ui";
 
 /**
  * ДЕМО: как будут выглядеть графики для анализа в нашем стиле (Stripe/Notion).

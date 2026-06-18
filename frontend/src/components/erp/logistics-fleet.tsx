@@ -39,7 +39,6 @@ export function LogisticsFleet() {
 
   useEffect(() => {
     void loadCarriers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onSeed() {

@@ -35,7 +35,6 @@ export function LogisticsTariffs() {
 
   useEffect(() => {
     void loadZones();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

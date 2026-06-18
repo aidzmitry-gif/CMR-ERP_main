@@ -46,7 +46,6 @@ export function LogisticsTender() {
 
   useEffect(() => {
     void loadRfqs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function openRfq(id: number) {

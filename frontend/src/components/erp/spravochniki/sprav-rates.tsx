@@ -46,12 +46,6 @@ function barClass(s: VersionStatus) {
   return "flex h-12 items-center justify-center rounded-lg bg-line-strong text-sm font-semibold text-muted";
 }
 
-function barLabel(s: VersionStatus, today: string) {
-  const since = formatDate(today);
-  if (s === "current") return `с ${since} →`;
-  return since;
-}
-
 type BarItem<T> = { row: T; status: VersionStatus; w: number };
 
 function computeBars<T extends { start_date: string; end_date: string | null }>(
