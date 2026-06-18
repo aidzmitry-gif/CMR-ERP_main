@@ -114,7 +114,9 @@ JSON=$(M_DATE="$M_DATE" M_WINDOW="$WINDOW" \
   M_NPMS="${NPM_SCRIPTS:-0}" M_HOOKS="${GIT_HOOKS:-0}" M_CLAUDEHOOKS="${CLAUDE_HOOKS:-0}" M_CI="${CI_STEPS:-0}" M_DELTA="${DELTA_BYTES:-0}" \
   node -e '
 const env = process.env;
-const num = (k) => { const v = env[k]; if (v === "null" || v === undefined) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+// "" → null (а не 0!): пустая строка значит «шаг упал, node не отдал stdout», не «чисто».
+// Number("") === 0 и финитно, поэтому без явной проверки метрика главной цели врала бы зелёным.
+const num = (k) => { const v = env[k]; if (v === "null" || v === undefined || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 const o = {
   date: env.M_DATE, window: env.M_WINDOW,
   throughput_feat: num("M_THROUGHPUT"), commits_total: num("M_COMMITS"), merges: num("M_MERGES"),
