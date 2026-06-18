@@ -1,7 +1,7 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 /**
  * Переключатель тем C (светлая) ⇄ D (тёмная).
@@ -9,12 +9,10 @@ import { useEffect, useState } from "react";
  * Начальное состояние ставит THEME_INIT_SCRIPT в <head> (без мигания) — здесь только синхронизируемся.
  */
 export function ThemeToggle() {
-  const [dark, setDark] = useState(false);
-
-  // при монтировании читаем фактический класс, выставленный анти-мигающим скриптом
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
+  // читаем фактический класс, выставленный анти-мигающим скриптом; lazy init безопасен на клиенте
+  const [dark, setDark] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  );
 
   function toggle() {
     const next = !dark;

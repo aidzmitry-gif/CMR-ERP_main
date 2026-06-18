@@ -26,8 +26,7 @@ export function DealApprovals({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchApprovals({ entityRef: `deal:${dealId}` }).then(setItems);
   }, [dealId]);
 
   async function onRequest() {

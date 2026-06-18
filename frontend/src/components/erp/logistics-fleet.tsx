@@ -38,7 +38,10 @@ export function LogisticsFleet() {
   }
 
   useEffect(() => {
-    void loadCarriers();
+    void fetchCarriers().then((carriers) => {
+      setCarriers(carriers);
+      setLoading(false);
+    });
   }, []);
 
   async function onSeed() {

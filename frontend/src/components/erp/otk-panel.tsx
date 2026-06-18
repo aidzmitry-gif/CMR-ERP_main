@@ -53,7 +53,10 @@ export function OtkPanel({
   }
 
   useEffect(() => {
-    void refresh();
+    void Promise.all([fetchStats(), fetchDecisions()]).then(([s, j]) => {
+      setStats(s);
+      setJournal(j);
+    });
   }, []);
 
   async function decide(decision: QcDecision) {

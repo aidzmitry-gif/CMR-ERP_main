@@ -42,8 +42,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchDealTasks(dealId).then(setTasks);
   }, [dealId]);
 
   async function onAdd() {

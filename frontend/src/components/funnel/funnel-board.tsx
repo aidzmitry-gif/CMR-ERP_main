@@ -767,8 +767,7 @@ export function FunnelBoard({
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchFunnelBoard(boardPath).then(setStages);
   }, [boardPath]);
 
   function handleDragStart(e: DragStartEvent) {

@@ -34,7 +34,11 @@ export function LogisticsTariffs() {
   }
 
   useEffect(() => {
-    void loadZones();
+    void fetchZones().then((z) => {
+      setZones(z);
+      if (z.length > 0) setZone((cur) => cur || z[0].code);
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => {

@@ -41,7 +41,10 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
   }
 
   useEffect(() => {
-    void refresh();
+    void Promise.all([fetchPayroll(), fetchWorkers()]).then(([p, w]) => {
+      setPayroll(p);
+      setWorkers(w);
+    });
   }, []);
 
   const total = totalContribution(payroll.rows);
