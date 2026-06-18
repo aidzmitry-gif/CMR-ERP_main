@@ -11,13 +11,13 @@ const DEMO_BADGE = (
   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">демо</span>
 );
 
-function RefIcon({ ref }: { ref: AiReference }) {
-  if (ref.versioned) return <Clock className="h-3.5 w-3.5 shrink-0 text-muted" />;
-  if (ref.key.includes("group") || ref.key.includes("categor")) return <TreePine className="h-3.5 w-3.5 shrink-0 text-muted" />;
+function RefIcon({ reference }: { reference: AiReference }) {
+  if (reference.versioned) return <Clock className="h-3.5 w-3.5 shrink-0 text-muted" />;
+  if (reference.key.includes("group") || reference.key.includes("categor")) return <TreePine className="h-3.5 w-3.5 shrink-0 text-muted" />;
   return <Bot className="h-3.5 w-3.5 shrink-0 text-accent-ink" />;
 }
 
-function CatalogEntry({ ref, active, onClick }: { ref: AiReference; active: boolean; onClick: () => void }) {
+function CatalogEntry({ reference, active, onClick }: { reference: AiReference; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -30,14 +30,14 @@ function CatalogEntry({ ref, active, onClick }: { ref: AiReference; active: bool
       ].join(" ")}
     >
       <div className="flex items-center gap-1.5">
-        <RefIcon ref={ref} />
-        <span className="text-sm font-semibold text-ink">{ref.title}</span>
-        {ref.versioned && (
+        <RefIcon reference={reference} />
+        <span className="text-sm font-semibold text-ink">{reference.title}</span>
+        {reference.versioned && (
           <span className="ml-auto rounded-full bg-sunken px-1.5 py-0.5 text-[10px] text-muted">SCD2</span>
         )}
       </div>
-      <div className="mt-0.5 font-mono text-[11px] text-muted">{ref.endpoint}</div>
-      <p className="mt-1 text-[12px] text-muted">{ref.description}</p>
+      <div className="mt-0.5 font-mono text-[11px] text-muted">{reference.endpoint}</div>
+      <p className="mt-1 text-[12px] text-muted">{reference.description}</p>
     </button>
   );
 }
@@ -139,12 +139,12 @@ export function SpravAi({ initial }: { initial: AiCatalog | null }) {
           </div>
 
           <div className="mt-4 space-y-2">
-            {catalog.references.map((ref) => (
+            {catalog.references.map((item) => (
               <CatalogEntry
-                key={ref.key}
-                ref={ref}
-                active={ref.key === selectedRef}
-                onClick={() => setSelectedRef(ref.key)}
+                key={item.key}
+                reference={item}
+                active={item.key === selectedRef}
+                onClick={() => setSelectedRef(item.key)}
               />
             ))}
             {catalog.references.length === 0 && (
