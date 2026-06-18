@@ -33,8 +33,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchDocuments(dealId).then(setItems);
   }, [dealId]);
 
   async function onCreate() {

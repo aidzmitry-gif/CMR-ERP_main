@@ -17,8 +17,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchContacts(dealId).then(setItems);
   }, [dealId]);
 
   async function onAdd() {

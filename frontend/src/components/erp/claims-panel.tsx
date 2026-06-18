@@ -44,7 +44,7 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
 
   useEffect(() => {
     // первичные данные пришли с SSR; тихо перечитываем на клиенте
-    void refresh();
+    void fetchClaims().then(setClaims);
   }, []);
 
   const counts = useMemo(() => claimCounts(claims), [claims]);

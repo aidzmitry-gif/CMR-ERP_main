@@ -51,7 +51,7 @@ export function NormsTable({ initial }: { initial: Norm[] }) {
 
   useEffect(() => {
     // первичные данные пришли с SSR; тихо перечитываем на клиенте
-    void refresh();
+    void fetchNorms().then(setNorms);
   }, []);
 
   const rows = useMemo(() => filterByKind(norms, kind), [norms, kind]);

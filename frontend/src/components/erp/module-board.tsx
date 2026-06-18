@@ -59,8 +59,10 @@ export function ModuleBoard({
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetch(`/api${endpoint}`, { cache: "no-store" })
+      .then((res) => (res.ok ? (res.json() as Promise<Row[]>) : Promise.reject()))
+      .then((data) => setRows(data))
+      .catch(() => {});
   }, [endpoint]);
 
   async function onCreate() {

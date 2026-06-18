@@ -45,7 +45,10 @@ export function LogisticsTender() {
   }
 
   useEffect(() => {
-    void loadRfqs();
+    void fetchRfqs().then((list) => {
+      setRfqs(list);
+      setLoading(false);
+    });
   }, []);
 
   async function openRfq(id: number) {

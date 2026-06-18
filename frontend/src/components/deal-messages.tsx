@@ -35,8 +35,7 @@ export function DealMessages({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchMessages(dealId).then(setItems);
   }, [dealId]);
 
   async function onSend() {

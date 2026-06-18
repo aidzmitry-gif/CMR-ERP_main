@@ -70,7 +70,11 @@ export function ZayavkiTable({
 
   useEffect(() => {
     // первичные данные пришли с SSR; тихо перечитываем на клиенте
-    void refresh();
+    void Promise.all([fetchOrders(), fetchNorms(), fetchBoms()]).then(([o, n, b]) => {
+      setOrders(o);
+      setNorms(n);
+      setBoms(b);
+    });
   }, []);
 
   const counts = useMemo(() => zayavkiCounts(orders, norms, boms), [orders, norms, boms]);

@@ -28,7 +28,10 @@ export function LogisticsAudit() {
   }
 
   useEffect(() => {
-    void load(period);
+    void fetchAudit(period).then((data) => {
+      setReport(data);
+      setLoading(false);
+    });
   }, [period]);
 
   async function onSeed() {

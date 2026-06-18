@@ -24,12 +24,11 @@ export function DealItems({ dealId }: { dealId: string }) {
   }
 
   useEffect(() => {
-    void refresh();
+    void fetchDealItems(dealId).then(setItems);
     void fetchSkus().then((s) => {
       setSkus(s);
       if (s.length) setSkuId(s[0].id);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
   async function onAdd() {

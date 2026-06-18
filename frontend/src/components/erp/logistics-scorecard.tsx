@@ -21,7 +21,10 @@ export function LogisticsScorecard() {
   }
 
   useEffect(() => {
-    void load(period);
+    void fetchScorecard(period).then((scoreRows) => {
+      setRows(scoreRows);
+      setLoading(false);
+    });
   }, [period]);
 
   async function onSeed() {

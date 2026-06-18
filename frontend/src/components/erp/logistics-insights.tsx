@@ -35,7 +35,10 @@ export function LogisticsInsights() {
   }
 
   useEffect(() => {
-    void load(weight);
+    void fetchCostInsights(weight).then((data) => {
+      setData(data);
+      setLoading(false);
+    });
   }, [weight]);
 
   async function onSeed() {

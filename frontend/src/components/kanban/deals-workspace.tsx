@@ -153,7 +153,7 @@ export function DealsWorkspace({
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
   // и фильтр висяков ничего не показывают. Заодно тянем актуальный справочник причин отказа.
   useEffect(() => {
-    setNow(Date.now());
+    queueMicrotask(() => setNow(Date.now()));
     void fetchLossReasons().then((reasons) => {
       if (reasons.length) setLossReasons(reasons);
     });

@@ -72,7 +72,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
 
   useEffect(() => {
     // первичные данные пришли с SSR; тихо перечитываем на клиенте
-    void refreshList();
+    void fetchBoms().then(setBoms);
   }, []);
 
   const counts = useMemo(() => bomCounts(boms), [boms]);
