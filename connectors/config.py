@@ -5,7 +5,9 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Грузим .env, лежащий РЯДОМ с этим файлом (connectors/.env), а не из текущего
+# рабочего каталога — иначе при запуске из корня подхватывается чужой корневой .env.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
 def _split(env: str, sep: str = ",") -> list[str]:
@@ -31,11 +33,38 @@ ONEC_PASSWORD = os.getenv("ONEC_PASSWORD", "")
 # Список выгружаемых объектов 1С. Зависит от вашей конфигурации — отредактируйте.
 #   name       — имя набора сущностей OData (Catalog_*, Document_*, AccumulationRegister_* ...)
 #   key_field  — поле ключа (обычно Ref_Key)
-#   date_field — поле даты изменения для инкремента (опционально)
+#   date_field — поле даты изменения для инкремента (опционально; у документов обычно "Date")
 #   select     — список полей через запятую (опционально, ускоряет выгрузку)
+#
+# Шаблон ниже — под «1С:Комплексная автоматизация 2.4 для РБ» (база ERP/УТ 11).
+# Имена ТИПОВЫЕ — финал сверить по $metadata живой базы (раскомментировать нужное и
+# поправить имена/доработки). Цель: досье клиента (см. memory client-360-bitrix-1c).
 ONEC_ENTITY_SETS: list[dict] = [
+    # --- 1. Реквизиты клиента (склейка с Bitrix по УНП) ---
     # {"name": "Catalog_Контрагенты", "key_field": "Ref_Key"},
+    # {"name": "Catalog_КонтактныеЛица", "key_field": "Ref_Key"},
+    # {"name": "Catalog_ДоговорыКонтрагентов", "key_field": "Ref_Key"},
+    # {"name": "InformationRegister_КонтактнаяИнформация", "key_field": "Объект"},
+
+    # --- 2. История покупок (что/когда/на сколько) — инкремент по дате документа ---
     # {"name": "Document_РеализацияТоваровУслуг", "key_field": "Ref_Key", "date_field": "Date"},
+    # {"name": "Document_РеализацияТоваровУслуг_Товары", "key_field": "Ref_Key"},  # позиции (таб.часть)
+    # {"name": "Document_ЗаказКлиента", "key_field": "Ref_Key", "date_field": "Date"},
+    # {"name": "Document_ЗаказКлиента_Товары", "key_field": "Ref_Key"},
+
+    # --- 3. Деньги / дебиторка ---
+    # {"name": "Document_СчетНаОплатуКлиенту", "key_field": "Ref_Key", "date_field": "Date"},
+    # {"name": "Document_ПоступлениеБезналичныхДенежныхСредств", "key_field": "Ref_Key", "date_field": "Date"},
+    # дебиторка — регистр накопления (выборка/виртуальные таблицы уточняются под КА):
+    # {"name": "AccumulationRegister_РасчетыСКлиентами", "key_field": "Recorder"},
+
+    # --- 4. Номенклатура с карточкой (вес, код ТНВЭД, группы) + история цен ---
+    # {"name": "Catalog_Номенклатура", "key_field": "Ref_Key"},
+    # {"name": "InformationRegister_ЦеныНоменклатуры", "key_field": "Период"},
+
+    # --- 5. Сборки / комплектация (если под клиента собирали товар) ---
+    # {"name": "Document_СборкаРазборкаТоваров", "key_field": "Ref_Key", "date_field": "Date"},
+    # {"name": "Catalog_РесурсныеСпецификации", "key_field": "Ref_Key"},  # состав (BOM)
 ]
 
 # --- Google ---
