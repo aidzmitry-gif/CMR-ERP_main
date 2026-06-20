@@ -94,6 +94,22 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .seen{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .seen span{font-size:11px;background:var(--sunken);color:var(--muted);border-radius:7px;padding:3px 9px}
 
+  /* переключатели ролей / видимости */
+  .role-seg{margin-left:auto;display:inline-flex;gap:3px;flex-wrap:wrap}
+  .role-seg button{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:7px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer}
+  .role-seg button.on{background:var(--brand-100);border-color:var(--brand);color:var(--brand-700)}
+  .role-note{font-size:11.5px;color:var(--faint);line-height:1.45;margin:12px 0 6px;padding:8px 11px;background:var(--sunken);border-radius:9px}
+  .goods .nm small .for{margin-right:6px}
+  .goods .nm small .for:empty{margin:0}
+  .goods .nm small .for::before{content:'для '}
+  .goods .nm small .for:empty::before{content:''}
+  .goods .nm small .deal::before{content:'· '}
+  .goods .nm small .deal:first-child::before{content:''}
+  .cvis-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:11px;border-bottom:1px dashed var(--line)}
+  .cvis-lbl{font-size:11.5px;font-weight:600;color:var(--muted)}
+  .cvis-ctl .role-seg{margin-left:0}
+  .cv-hidden{display:none!important}
+
 /* ═══ ДИЗАЙН-СИСТЕМА: 2 темы (C/D). Аппенд-слой перекрывает значения переменных файла. ═══ */
 :root{
   --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
@@ -204,20 +220,30 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   <div class="cols">
     <!-- внутренний вид -->
     <div class="panel intern">
-      <div class="ph">🏢 Внутренний вид <span class="who">менеджер · закупщик · директор</span></div>
+      <div class="ph">🏢 Внутренний вид
+        <span class="role-seg" id="roleSeg">
+          <button data-role="sales" class="on">Продавец</button>
+          <button data-role="buyer">Закупщик</button>
+          <button data-role="dir">Директор</button>
+        </span>
+      </div>
       <div class="pbody">
-        <div class="kv"><span class="k">Поставщик</span><span><b>ТД «АКБ-Импорт»</b> (УНП 19283746)</span></div>
-        <div class="kv"><span class="k">Закупщик</span><span>Романюк Д.</span></div>
-        <div class="kv"><span class="k">Себестоимость (landed)</span><span><b>38 400 Br</b></span></div>
-        <div class="kv"><span class="k">Выручка по рейсу</span><span><b>61 200 Br</b></span></div>
-        <div class="kv"><span class="k">Валовая прибыль</span><span style="color:var(--green-ink);font-weight:700">22 800 Br · 37%</span></div>
+        <!-- видит закупщик/директор; продавцу поставщик/закупщик/себестоимость скрыты -->
+        <div class="kv" data-vis="buyer dir"><span class="k">Поставщик</span><span><b>ТД «АКБ-Импорт»</b> (УНП 19283746)</span></div>
+        <div class="kv" data-vis="buyer dir"><span class="k">Закупщик</span><span>Романюк Д.</span></div>
+        <div class="kv" data-vis="buyer dir"><span class="k">Себестоимость (landed)</span><span><b>38 400 Br</b></span></div>
+        <!-- выручка/прибыль — продажи и директор (закупщик не видит маржу продаж) -->
+        <div class="kv" data-vis="sales dir"><span class="k">Выручка по рейсу</span><span><b>61 200 Br</b></span></div>
+        <div class="kv" data-vis="sales dir"><span class="k">Валовая прибыль</span><span style="color:var(--green-ink);font-weight:700">22 800 Br · 37%</span></div>
         <div style="font-size:11.5px;font-weight:700;color:var(--faint);text-transform:uppercase;margin:12px 0 6px">Товары в машине</div>
         <div class="goods">
-          <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)<small>для ОАО «Белтранс» · сделка CRM-1029</small></div><div>38 шт</div></div>
-          <div class="row"><div class="nm">АКБ 6СТ-225<small>для УП «Минскэлектро» · CRM-0998</small></div><div>14 шт</div></div>
-          <div class="row"><div class="nm">ЗУ + тестеры<small>для Автопарк №7 · CRM-1024</small></div><div>12 шт</div></div>
+          <!-- data-for = название клиента (видят продавец/директор); data-deal = № сделки (видят все роли) -->
+          <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)<small><span class="for" data-for="ОАО «Белтранс»"></span><span class="deal">CRM-1029</span></small></div><div>38 шт</div></div>
+          <div class="row"><div class="nm">АКБ 6СТ-225<small><span class="for" data-for="УП «Минскэлектро»"></span><span class="deal">CRM-0998</span></small></div><div>14 шт</div></div>
+          <div class="row"><div class="nm">ЗУ + тестеры<small><span class="for" data-for="Автопарк №7"></span><span class="deal">CRM-1024</span></small></div><div>12 шт</div></div>
         </div>
-        <div class="seen"><span>👁 видит логистика (меняет статус)</span><span>👁 продажи</span><span>👁 закупки</span><span>👁 директор</span></div>
+        <div class="role-note" id="roleNote"></div>
+        <div class="seen"><span>👁 логистика (меняет статус)</span><span>👁 продажи</span><span>👁 закупки</span><span>👁 директор</span></div>
       </div>
     </div>
 
@@ -225,20 +251,78 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
     <div class="panel client">
       <div class="ph">👤 Кабинет клиента <span class="who">ОАО «Белтранс»</span></div>
       <div class="pbody">
+        <!-- настройка: что из статуса показывать клиенту -->
+        <div class="cvis-ctl">
+          <span class="cvis-lbl">Видимость статуса клиенту:</span>
+          <span class="role-seg" id="cvisSeg">
+            <button data-vis="full" class="on">Полный</button>
+            <button data-vis="short">Сокращённый</button>
+            <button data-vis="eta">Только дата</button>
+            <button data-vis="hide">Скрыть</button>
+          </span>
+        </div>
         <div class="kv"><span class="k">Ваш заказ</span><span><b>№ CRM-1029</b></span></div>
-        <div class="kv"><span class="k">Статус</span><span style="color:var(--amber-ink);font-weight:700">В пути до склада → к вам</span></div>
-        <div class="kv"><span class="k">Ожидаемая доставка</span><span style="color:var(--brand-700);font-weight:700">18 июня, ~14:00</span></div>
+        <div class="kv" id="cv-status"><span class="k">Статус</span><span style="color:var(--amber-ink);font-weight:700" id="cv-status-v">В пути до склада → к вам</span></div>
+        <div class="kv" id="cv-eta"><span class="k">Ожидаемая доставка</span><span style="color:var(--brand-700);font-weight:700">18 июня, ~14:00</span></div>
         <div style="font-size:11.5px;font-weight:700;color:var(--faint);text-transform:uppercase;margin:12px 0 6px">Ваши товары</div>
         <div class="goods">
           <div class="row"><div class="nm">АКБ 6СТ-190 (Зубр)</div><div>38 шт</div></div>
         </div>
-        <div class="kv" style="margin-top:6px"><span class="k">Поставщик / себестоимость</span><span class="lock">🔒 скрыто</span></div>
         <div class="map">карта маршрута <span class="pin">📍</span></div>
-        <div style="font-size:11.5px;color:var(--faint);margin-top:8px">Клиент видит только свою часть и ETA. Позвонил — менеджер видит ровно этот же статус.</div>
+        <div style="font-size:11.5px;color:var(--faint);margin-top:8px">Клиент видит только свою часть заказа и статус. Внутренние данные в кабинет не выводятся вовсе. Объём статуса настраивается переключателем выше.</div>
       </div>
     </div>
   </div>
 
   <div class="note"><span>🔗</span><span><b>Источник истины — логистика</b> (рейс/ETA/этап). Sales-карточка и кабинет клиента подписаны на событие <b>shipment.status.changed</b> и показывают линию read-only. Себестоимость/поставщик — из закупок, клиенту не видны.</span></div>
+
+<script>
+  // ═══ Видимость внутреннего вида по роли ═══
+  // Продавец: товары + ДЛЯ КОГО (клиент/сделка), без поставщика/закупщика/себестоимости.
+  // Закупщик: поставщик + себестоимость + товары, но «для кого» скрыт — только № сделки.
+  // Директор: видит всё.
+  const ROLE_NOTE = {
+    sales: 'Продавец видит, кому и по какой сделке идёт товар, выручку и маржу. Поставщик и себестоимость скрыты.',
+    buyer: 'Закупщик видит поставщика и себестоимость, товары и номера сделок — но НЕ видит, какому клиенту они идут.',
+    dir:   'Директор видит всё: поставщика, себестоимость, выручку, маржу и клиентов.',
+  };
+  function applyRole(role){
+    document.querySelectorAll('#roleSeg button').forEach(b=>b.classList.toggle('on', b.dataset.role===role));
+    document.querySelectorAll('.panel.intern [data-vis]').forEach(el=>{
+      el.classList.toggle('cv-hidden', !el.dataset.vis.split(' ').includes(role));
+    });
+    // «для кого» (название клиента) видят продавец и директор; закупщик — только № сделки
+    const showFor = role==='sales' || role==='dir';
+    document.querySelectorAll('.goods .nm small .for').forEach(s=>{
+      s.textContent = showFor ? s.dataset.for : '';
+    });
+    document.getElementById('roleNote').textContent = ROLE_NOTE[role];
+  }
+  document.getElementById('roleSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button[data-role]'); if(b) applyRole(b.dataset.role);
+  });
+  applyRole('sales');
+
+  // ═══ Видимость статуса для клиента ═══
+  const CV_STATUS = {
+    full:  'В пути до склада → к вам',
+    short: 'В обработке',     // сокращённый — без деталей этапа
+  };
+  function applyClientVis(mode){
+    document.querySelectorAll('#cvisSeg button').forEach(b=>b.classList.toggle('on', b.dataset.vis===mode));
+    const stRow=document.getElementById('cv-status'), etaRow=document.getElementById('cv-eta');
+    const stV=document.getElementById('cv-status-v');
+    // статус: full/short показываем (текст разный), eta/hide — прячем строку статуса
+    const showStatus = mode==='full' || mode==='short';
+    stRow.classList.toggle('cv-hidden', !showStatus);
+    if(showStatus) stV.textContent = CV_STATUS[mode];
+    // дата доставки: видна всегда, кроме «Скрыть»
+    etaRow.classList.toggle('cv-hidden', mode==='hide');
+  }
+  document.getElementById('cvisSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button[data-vis]'); if(b) applyClientVis(b.dataset.vis);
+  });
+  applyClientVis('full');
+</script>
 </body>
 </html>

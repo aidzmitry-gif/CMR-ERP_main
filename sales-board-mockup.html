@@ -40,15 +40,26 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
        background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
   .app{display:flex;min-height:100vh}
 
-  /* ── Sidebar (заглушка, чтобы передать контекст приложения) ── */
-  .side{width:230px;background:var(--surface);border-right:1px solid var(--line);flex-shrink:0;padding:18px 14px}
-  .side .logo{font-weight:800;font-size:16px;color:var(--ink);padding:6px 10px 18px;display:flex;gap:8px;align-items:center}
-  .side .logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px}
-  .nav-group{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:14px 10px 6px}
-  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--muted);font-size:13.5px;cursor:pointer}
+  /* ── Sidebar (сворачиваемая, раскрывается по наведению — как правая рейка чатов) ── */
+  .side{position:relative;width:64px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--line);z-index:31}
+  .side-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);
+       border-right:1px solid var(--line);padding:18px 12px;overflow:hidden;white-space:nowrap;
+       transition:width .22s cubic-bezier(.4,0,.2,1);box-shadow:none}
+  .side:hover .side-inner{width:230px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+  .side .logo{font-weight:800;font-size:16px;color:var(--ink);padding:6px 8px 18px;display:flex;gap:10px;align-items:center}
+  .side .logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+  .side .logo .lbl{opacity:0;transition:opacity .18s}
+  .side:hover .logo .lbl{opacity:1}
+  .nav-group{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:14px 8px 6px;opacity:0;transition:opacity .18s}
+  .side:hover .nav-group{opacity:1}
+  .nav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;color:var(--muted);font-size:13.5px;cursor:pointer}
   .nav-item:hover{background:#F7F8FA}
   .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
-  .nav-item .ic{width:18px;height:18px;opacity:.7}
+  .nav-item .ic{width:24px;text-align:center;flex-shrink:0;opacity:.85}
+  .nav-item .lbl{opacity:0;transition:opacity .18s}
+  .side:hover .nav-item .lbl{opacity:1}
+  .side-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:#cbd5e1;opacity:0;transition:opacity .18s}
+  .side:hover .side-hint{opacity:1}
 
   /* ── Main ── */
   main{flex:1;overflow:auto;padding:22px 24px;min-width:0}
@@ -209,6 +220,7 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .days.stuck{background:var(--amber-soft);color:var(--amber-ink)}
   .star{color:#CBD5E1;font-size:13px}
   .star.on{color:#F59E0B}
+  .inc-badge{font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px;background:var(--amber-soft);color:var(--amber-ink);white-space:nowrap}
   /* бейдж действия «сегодня/завтра» (виден и в стадийном канбане) */
   .act-badge{font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 6px;white-space:nowrap}
   .act-badge.today{background:var(--red-soft);color:var(--red-ink)}
@@ -263,16 +275,24 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .amt{font-size:28px;font-weight:800;letter-spacing:-.02em}
   .amt-sub{font-size:12.5px;color:var(--muted);margin-top:3px}.amt-sub b{color:var(--brand-700)}
   .stepper{display:flex;gap:3px;margin-top:12px}
-  .stp{flex:1;height:6px;border-radius:99px;background:var(--sunken)}.stp.done{background:var(--brand)}.stp.cur{background:var(--warn)}
+  .stp{flex:1;height:8px;border-radius:99px;background:var(--sunken);cursor:pointer;transition:filter .12s,transform .12s}
+  .stp:hover{filter:brightness(.92);transform:scaleY(1.25)}
+  .stp.done{background:var(--brand)}.stp.cur{background:var(--warn)}
   .stp-l{display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-top:6px}
   .kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0}.kv .k{color:var(--muted)}.kv .v{font-weight:500}
   .open-hint{font-size:11.5px;color:var(--faint);background:var(--sunken);border:1px dashed #E2E8F0;border-radius:9px;padding:9px 11px;text-align:center}
-  .dfoot{border-top:1px solid var(--line);padding:12px 20px;display:flex;gap:8px}
+  .dfoot{border-top:1px solid var(--line);padding:12px 20px;display:flex;flex-wrap:wrap;gap:8px}
   .fbtn{flex:1;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
   .fbtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
   .fbtn.danger{flex:0 0 auto;padding:10px 13px;border-color:#FECACA;color:var(--red-ink)}
+  .foot-stock{flex-basis:100%;order:-1;font-size:11.5px;font-weight:600;color:var(--money-ink,#0E7C4A);background:var(--money-soft,#E2F3EA);border-radius:8px;padding:5px 10px;text-align:center}
   .channels{display:flex;gap:8px}
-  .chbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;background:var(--surface)}
+  .chbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--surface);color:#fff;transition:filter .14s}
+  .chbtn:hover{filter:brightness(1.08)}
+  .chbtn.call{background:#22C55E;border-color:#22C55E}
+  .chbtn.wa{background:#25D366;border-color:#25D366}
+  .chbtn.tg{background:#229ED9;border-color:#229ED9}
+  .chbtn.em{background:#3B82F6;border-color:#3B82F6}
 
   /* fullscreen «проваливание» в сделку */
   .full{position:fixed;inset:0;background:var(--canvas);transform:scale(.98);opacity:0;pointer-events:none;
@@ -337,6 +357,22 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .seg-mini{display:inline-flex;gap:4px;flex-wrap:wrap}
   .seg-mini button{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer;color:var(--muted)}
   .seg-mini button.on{background:var(--brand-100);border-color:var(--brand);color:var(--brand-700);font-weight:600}
+
+  /* модалка Задача/Звонок */
+  .task-tabs{display:flex;gap:6px}
+  .task-tabs button{flex:1;padding:9px;font-size:13px}
+  .task-hint{font-size:11.5px;color:var(--faint);line-height:1.45;margin-top:6px}
+  select[multiple]{padding:4px}
+  .call-who{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .call-ava{width:46px;height:46px;border-radius:50%;background:var(--money-soft,#E2F3EA);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+  .call-nm{font-weight:700;font-size:15px}.call-ph{font-size:13px;color:var(--muted)}
+  .call-status{font-size:13.5px;font-weight:600;color:var(--brand-700);margin-bottom:10px}
+  .call-pulse{display:flex;gap:7px;justify-content:center;padding:6px 0 4px}
+  .call-pulse span{width:11px;height:11px;border-radius:50%;background:var(--brand);animation:callpulse 1s infinite}
+  .call-pulse span:nth-child(2){animation-delay:.2s}.call-pulse span:nth-child(3){animation-delay:.4s}
+  @keyframes callpulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+  #call-result button.danger{border-color:#FECACA;color:var(--red-ink)}
+  .call-next{margin-top:6px;display:none}.call-next.on{display:block}
 
   /* плотность карточек */
   .board.compact .card{padding:9px}
@@ -429,6 +465,8 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 .chi{font-style:normal;font-size:11px;line-height:1}
 /* переключатель темы (иконка + текст) — фикс. в правом нижнем углу */
 .theme-tgl{position:fixed;right:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 13px;height:auto;cursor:pointer;transition:.14s;white-space:nowrap;box-shadow:0 4px 14px rgba(16,24,40,.12)}
+/* drawer/полный экран открыт — прячем тоггл, чтобы не налезал на кнопки действий */
+body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;pointer-events:none}
 .theme-tgl:hover{background:var(--sunken)}
 .theme-tgl #themeIco{font-size:15px;line-height:0}
 
@@ -441,15 +479,18 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 
   <!-- Sidebar заглушка -->
   <aside class="side">
-    <div class="logo"><span class="mark">A</span> AI-First OS</div>
+   <div class="side-inner">
+    <div class="logo"><span class="mark">A</span><span class="lbl">AI-First OS</span></div>
     <div class="nav-group">CRM</div>
-    <div class="nav-item active">▦ Сделки</div>
-    <div class="nav-item">◔ Лиды</div>
-    <div class="nav-item">◑ РОП</div>
+    <div class="nav-item active"><span class="ic">▦</span><span class="lbl">Сделки</span></div>
+    <div class="nav-item"><span class="ic">◔</span><span class="lbl">Лиды</span></div>
+    <div class="nav-item"><span class="ic">◑</span><span class="lbl">РОП</span></div>
     <div class="nav-group">ERP</div>
-    <div class="nav-item">▣ Производство</div>
-    <div class="nav-item">⛓ Закупки</div>
-    <div class="nav-item">⚖ Финансы</div>
+    <div class="nav-item"><span class="ic">▣</span><span class="lbl">Производство</span></div>
+    <div class="nav-item"><span class="ic">⛓</span><span class="lbl">Закупки</span></div>
+    <div class="nav-item"><span class="ic">⚖</span><span class="lbl">Финансы</span></div>
+    <div class="side-hint">наведи — раскрыть</div>
+   </div>
   </aside>
 
   <main>
@@ -545,7 +586,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
             <div class="ch-weight">взвешенно: 4 810 Br</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" data-stock="in">
           <div class="c-top"><span class="num">№ CRM-1042</span>
             <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star">★</span></div></div>
           <div class="company">ТД «ВольтАвто»</div><div class="desc">АКБ 6СТ-190, 12 шт</div>
@@ -603,7 +644,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
             <div class="ch-weight">взвешенно: 22 400 Br</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" data-stock="in" data-incoming="АКБ 6СТ-190 (перезаказ)|05.07|рейс TR-0430">
           <div class="c-top"><span class="num">№ CRM-1029</span>
             <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 2 дн</span><span class="star on">★</span></div></div>
           <div class="company">ОАО «Белтранс»</div><div class="desc">Парк 40 ед., АКБ 6СТ-190</div>
@@ -666,7 +707,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
             <div class="ch-weight">взвешенно: 34 405 Br</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" data-incoming="АКБ годовой объём|12.07|рейс TR-0433">
           <div class="c-top"><span class="num">№ CRM-1024</span>
             <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star on">★</span></div></div>
           <div class="company">Автопарк №7</div><div class="desc">Поставка АКБ на год</div>
@@ -892,11 +933,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
       <div class="chips" id="dk-chips"></div>
     </div>
     <div class="dbody" id="dk-body"></div>
-    <div class="dfoot">
-      <button class="fbtn primary" onclick="drawerStage()">→ Следующая стадия</button>
-      <button class="fbtn" onclick="drawerTask()">✎ Задача</button>
-      <button class="fbtn danger" onclick="drawerReject()">✕ Отказ</button>
-    </div>
+    <div class="dfoot" id="dk-foot"></div>
   </aside>
 
   <!-- fullscreen «проваливание» в сделку (2 клика) -->
@@ -982,6 +1019,76 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
         <label class="chk"><input type="checkbox" data-flt="reg"> Только постоянные клиенты</label>
       </div>
       <div class="m-foot"><button class="mbtn ghost" id="flt-reset">Сбросить</button><button class="mbtn primary" id="flt-apply">Применить</button></div>
+    </div>
+  </div>
+
+  <!-- ════ Модалка: Задача / Звонок ════ -->
+  <div class="modal-ov" id="m-task">
+    <div class="modal">
+      <div class="m-head"><h2 id="task-title">Поставить задачу</h2><button class="x" data-close>✕</button></div>
+      <div class="m-body">
+        <div class="seg-mini task-tabs" id="task-tabs" style="margin-bottom:14px">
+          <button class="on" data-tab="task">✎ Задача</button>
+          <button data-tab="call">☎ Звонок</button>
+        </div>
+
+        <!-- вкладка ЗАДАЧА -->
+        <div id="tab-task">
+          <div class="fld"><label>Что нужно сделать</label><input id="t-what" placeholder="Например: подготовить КП и отправить"></div>
+          <div class="fld"><label>Ожидаемый результат</label><textarea id="t-result" rows="2" placeholder="Что хотим получить по итогу: согласие на встречу, подписанный счёт…"></textarea></div>
+          <div class="fld-row">
+            <div class="fld"><label>Крайний срок — дата</label><input id="t-date" type="date"></div>
+            <div class="fld"><label>Время</label><input id="t-time" type="time" value="10:00"></div>
+          </div>
+          <div class="fld"><label>Ответственный (кто выполняет)</label>
+            <select id="t-owner"><option>Я (текущий менеджер)</option><option>Орлов И.</option><option>Петрова А.</option><option>Сидоров К.</option><option>РОП · Лебедев М.</option></select>
+          </div>
+          <div class="fld-row">
+            <div class="fld"><label>Соисполнители</label>
+              <select id="t-co" multiple size="3"><option>Орлов И.</option><option>Петрова А.</option><option>Сидоров К.</option><option>Закупки · Кузьмин</option></select>
+            </div>
+            <div class="fld"><label>Наблюдатели</label>
+              <select id="t-watch" multiple size="3"><option>РОП · Лебедев М.</option><option>Орлов И.</option><option>Петрова А.</option><option>Финансы · Седова</option></select>
+            </div>
+          </div>
+          <div class="task-hint">Несколько — с Ctrl/Cmd. Соисполнители помогают выполнить, наблюдатели только видят ход.</div>
+        </div>
+
+        <!-- вкладка ЗВОНОК -->
+        <div id="tab-call" style="display:none">
+          <!-- состояние: набор -->
+          <div id="call-dial" class="call-stage">
+            <div class="call-who"><span class="call-ava">📞</span><div><div class="call-nm" id="call-nm">—</div><div class="call-ph" id="call-ph">+375 …</div></div></div>
+            <div class="call-status" id="call-status">Система дозванивается клиенту… гудки</div>
+            <div class="call-pulse"><span></span><span></span><span></span></div>
+            <div class="task-hint">Авто-набор работает, пока менеджер в программе. Можно прервать и зафиксировать исход вручную.</div>
+          </div>
+          <!-- состояние: исход -->
+          <div id="call-outcome" class="call-stage" style="display:none">
+            <div class="fld"><label>Итог звонка</label>
+              <div class="seg-mini" id="call-result">
+                <button data-r="done">✓ Дозвонился</button>
+                <button data-r="noans">Не ответил</button>
+                <button data-r="drop">Сбросили</button>
+                <button data-r="busy">Занято</button>
+                <button data-r="bad">Проблема связи</button>
+              </div>
+            </div>
+            <div class="fld"><label>Комментарий</label><textarea id="call-note" rows="2" placeholder="О чём договорились / почему не дозвонился"></textarea></div>
+            <div class="call-next" id="call-next">
+              <div class="task-hint" style="margin:0 0 8px">Не дозвонились — назначьте следующий звонок:</div>
+              <div class="fld-row">
+                <div class="fld"><label>След. звонок — дата</label><input id="call-date" type="date"></div>
+                <div class="fld"><label>Время</label><input id="call-time" type="time" value="10:00"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="m-foot">
+        <button class="mbtn ghost" data-close>Отмена</button>
+        <button class="mbtn primary" id="task-save">Сохранить задачу</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1137,6 +1244,55 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
     "Цена запрошена","Есть цена","Счёт отправлен","Счёт защищён","Договор / Предоплата"];
   const STAGE_SHORT = ["Новая","В работе","Квалиф.","Встреча","Цена","Есть цена","Счёт","Защищён","Договор"];
 
+  // Главное действие на каждой стадии — одна кнопка, которая сразу двигает воронку дальше.
+  // to: индекс целевой стадии. note: что произойдёт «за кадром» (зависимость/связь с другим модулем).
+  const STAGE_ACTION = {
+    0: {label:'☎ Связаться с клиентом', hint:'звонок/сообщение переведёт в «В работе»', auto:false},
+    1: {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
+    2: {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
+    3: {label:'💰 Запросить цену', to:4, note:'Запрос ушёл в Закупки'},
+    4: {label:'✓ Цена получена', to:5, note:'Закупки вернули цену', wait:'⏳ Ждём цену из Закупок'},
+    5: {label:'🧾 Отправить счёт', to:6, note:'Счёт сформирован и отправлен'},
+    6: {label:'🛡 Счёт защищён', to:7, note:'Счёт согласован клиентом'},
+    7: {label:'✅ Оплата / Договор', to:8, note:'Предоплата получена'},
+    8: null, // финальная — без «следующего»
+  };
+
+  // Перерисовать футер drawer: одна осмысленная кнопка по стадии + Задача + Отказ.
+  // inStock: товар в наличии → цена уже известна, этап «Запросить цену» не нужен,
+  // сразу даём «Отправить счёт» (с любой стадии от «Встречи» до «Есть цена»).
+  function renderFoot(stageTitle, inStock){
+    const foot = document.getElementById('dk-foot');
+    const idx = STAGE_ORDER.indexOf(stageTitle);
+    const SEND = 6; // «Счёт отправлен»
+    let act = STAGE_ACTION[idx];
+    // товар в наличии = цена известна: с рабочих стадий (Квалиф.→Есть цена) сразу даём «Отправить счёт»,
+    // минуя «Запросить цену». Встречу при этом никто не запрещает — она в блоке «Связаться»/задаче.
+    if(inStock && idx >= 2 && idx <= 5){
+      act = {label:'🧾 Отправить счёт', to:SEND, note:'Товар в наличии · счёт отправлен'};
+    }
+    let main = '';
+    if(idx < 0){ main = ''; } // терминал (Отказ/Успех) — без основного действия
+    else if(act && act.to !== undefined){
+      const dep = act.wait ? ` title="${act.wait}"` : '';
+      main = `<button class="fbtn primary" onclick="stageAction(${act.to},'${act.note}')"${dep}>${act.label}</button>`;
+    } else if(act && act.auto === false){
+      main = `<button class="fbtn primary" onclick="toast('Свяжитесь через блок «Связаться» выше — стадия сдвинется сама')">${act.label}</button>`;
+    }
+    const stockBadge = inStock ? `<span class="foot-stock" title="Товар в наличии — цена известна">✓ в наличии</span>` : '';
+    foot.innerHTML = main +
+      `<button class="fbtn" onclick="drawerTask()">✎ Задача</button>` +
+      `<button class="fbtn danger" onclick="drawerReject()">✕ Отказ</button>` + stockBadge;
+  }
+
+  // Нажатие основной кнопки стадии = авто-переход на целевую (минимум кликов).
+  function stageAction(toIdx, note){
+    const card = window._lastCard;
+    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
+    if(curGroup!=='stage'){ toast('Смена стадии доступна в виде «По стадиям»'); return; }
+    if(autoAdvance(card, toIdx, note)) closeAll();
+  }
+
   // вытащить данные из DOM карточки (без дублирования — единый источник на доске)
   function readCard(card){
     const col = card.closest('.col');
@@ -1150,14 +1306,30 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
       owner: txt('.owner span'), date: card.querySelectorAll('.owner span')[1]?.textContent.trim() || '',
       days: txt('.days'), stuck: card.querySelector('.days')?.classList.contains('stuck'),
       stageTitle, color: stripe ? stripe.style.background : '#3B82F6', res,
+      inStock: card.dataset.stock === 'in', // товар в наличии → цена уже известна
+      pri: priLevel(card), // приоритет сделки: high/mid/low
+      incoming: parseIncoming(card.dataset.incoming), // {good, when, ship} — под приходящий товар
     };
   }
+  // «под приход»: "товар|дата|рейс" → объект (связь с планом/логистикой)
+  function parseIncoming(raw){
+    if(!raw) return null;
+    const [good, when, ship] = raw.split('|');
+    return { good: good||'', when: when||'', ship: ship||'' };
+  }
+  // текущий приоритет карточки по классу .pri
+  function priLevel(card){
+    const p = card.querySelector('.pri');
+    if(!p) return 'mid';
+    return p.classList.contains('high') ? 'high' : p.classList.contains('low') ? 'low' : 'mid';
+  }
+  const PRI_LABEL = {high:'🔥 Высокий', mid:'Средний', low:'Низкий'};
 
   function stepperHtml(stageTitle){
     const idx = STAGE_ORDER.indexOf(stageTitle);
     if(idx < 0) return ''; // терминал — без степпера
-    let s = '<div class="stepper">';
-    for(let i=0;i<9;i++) s += `<div class="stp ${i<idx?'done':i===idx?'cur':''}"></div>`;
+    let s = '<div class="stepper" id="dk-stepper">';
+    for(let i=0;i<9;i++) s += `<div class="stp ${i<idx?'done':i===idx?'cur':''}" data-i="${i}" title="${STAGE_ORDER[i]}" onclick="stepTo(${i})"></div>`;
     s += `</div><div class="stp-l"><span>${STAGE_SHORT[0]}</span><span>${STAGE_SHORT[idx]}</span><span>${STAGE_SHORT[8]}</span></div>`;
     return s;
   }
@@ -1183,19 +1355,49 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
       </div>
       <div class="sec"><h3>Данные сделки</h3>
         <div class="kv"><span class="k">Стадия</span><span class="v">${d.stageTitle}</span></div>
+        <div class="kv"><span class="k">Приоритет</span>
+          <span class="seg-mini" id="dk-pri">
+            <button data-p="high" class="${d.pri==='high'?'on':''}">🔥 Высокий</button>
+            <button data-p="mid" class="${d.pri==='mid'?'on':''}">Средний</button>
+            <button data-p="low" class="${d.pri==='low'?'on':''}">Низкий</button>
+          </span>
+        </div>
+        ${d.inStock?`<div class="kv"><span class="k">Товар</span><span class="v" style="color:var(--money-ink,#0E7C4A);font-weight:600">✓ в наличии · цена известна</span></div>`:''}
+        ${d.incoming?`<div class="kv"><span class="k">Под приход</span><span class="v" style="color:var(--amber-ink,#B45309);font-weight:600">🚚 ${d.incoming.good} · придёт ${d.incoming.when}</span></div>`:''}
         <div class="kv"><span class="k">Ответственный</span><span class="v">${d.owner||'—'}</span></div>
         ${d.date?`<div class="kv"><span class="k">Дата</span><span class="v">${d.date}</span></div>`:''}
         ${d.next?`<div class="kv"><span class="k">След. шаг</span><span class="v">${d.next.replace(/^След:?\s*/,'')}</span></div>`:''}
         ${d.res?`<div class="kv"><span class="k">Результат</span><span class="v">${d.res}</span></div>`:''}
       </div>
       <div class="sec"><h3>Связаться</h3>
-        <div class="channels"><div class="chbtn" onclick="chCh('Звонок')">📞</div><div class="chbtn" onclick="chCh('WhatsApp')">🟢</div><div class="chbtn" onclick="chCh('Telegram')">✈</div><div class="chbtn" onclick="chCh('Email')">✉</div></div>
+        <div class="channels"><div class="chbtn call" title="Позвонить" onclick="chCh('Звонок')"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .8-.3 1l-2.2 2.2z"/></svg></div><div class="chbtn wa" title="WhatsApp" onclick="chCh('WhatsApp')"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.5 15.2L2 22l4.9-1.3A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.5-3.9-4.7-4.1-.1-.2-1.1-1.4-1.1-2.7 0-1.3.7-1.9.9-2.2.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.3 0 .5l-.4.6c-.1.1-.3.3-.1.5.1.3.7 1.1 1.4 1.7.9.8 1.7 1.1 1.9 1.2.2.1.4.1.5-.1l.6-.8c.2-.2.3-.2.5-.1l1.8.9c.2.1.4.2.4.3.1.1.1.6-.1 1.2z"/></svg></div><div class="chbtn tg" title="Telegram" onclick="chCh('Telegram')"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M21.9 4.3 2.9 11.6c-.9.4-.9 1 0 1.3l4.8 1.5 1.8 5.9c.2.5.4.6.9.2l2.7-2 4.7 3.5c.5.3.9.1 1-.5l3.3-15.5c.2-.7-.3-1-.9-.7z"/></svg></div><div class="chbtn em" title="Email" onclick="chCh('Email')"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm9 7.2 8-5.2H4l8 5.2zM4 8.4V18h16V8.4l-8 5.2-8-5.2z"/></svg></div></div>
       </div>
       <div class="sec"><div class="open-hint">Задачи, позиции, переписка и документы — в полном виде. Двойной клик по карточке или ⤢</div></div>`;
     document.getElementById('dk-body').scrollTop = 0;
+    renderFoot(d.stageTitle, d.inStock);
+    bindPriPicker(card);
     document.getElementById('ov').classList.add('show');
     document.getElementById('drawer').classList.add('show');
     window._lastCard = card;
+  }
+
+  // переключатель приоритета в drawer — меняет бейдж на карточке доски
+  function bindPriPicker(card){
+    const seg = document.getElementById('dk-pri'); if(!seg) return;
+    seg.addEventListener('click', e=>{
+      const b = e.target.closest('button[data-p]'); if(!b) return;
+      const p = b.dataset.p;
+      seg.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+      setCardPriority(card, p);
+      toast('Приоритет → '+PRI_LABEL[p].replace('🔥 ',''));
+    });
+  }
+  function setCardPriority(card, p){
+    const badge = card.querySelector('.pri');
+    if(badge){
+      badge.classList.remove('high','mid','low'); badge.classList.add(p);
+      badge.textContent = {high:'Высокий',mid:'Средний',low:'Низкий'}[p];
+    }
   }
 
   function openFull(card){
@@ -1244,42 +1446,176 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
     document.getElementById('drawer').classList.remove('show');
     document.getElementById('full').classList.remove('show');
   }
-  function toast(msg){
+  function toast(msg, undo){
     let t=document.getElementById('toast');
     if(!t){ t=document.createElement('div'); t.id='toast';
-      t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center';
+      t.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:opacity .3s;max-width:80vw;text-align:center;display:flex;align-items:center;gap:14px;justify-content:center';
       document.body.appendChild(t); }
-    t.textContent=msg; t.style.opacity='1';
-    clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; },3000);
+    t.innerHTML='';
+    const span=document.createElement('span'); span.textContent=msg; t.appendChild(span);
+    if(undo){ const a=document.createElement('a'); a.textContent='Отменить'; a.href='#';
+      a.style.cssText='color:#93C5FD;font-weight:700;text-decoration:none;cursor:pointer;flex-shrink:0';
+      a.onclick=e=>{ e.preventDefault(); t.style.opacity='0'; undo(); }; t.appendChild(a); }
+    t.style.opacity='1';
+    clearTimeout(window._toastT); window._toastT=setTimeout(()=>{ t.style.opacity='0'; }, undo?5000:3000);
   }
   function favDeal(btn){ const on=btn.textContent.trim()==='★'; btn.textContent=on?'☆':'★'; toast(on?'Убрано из избранного':'★ В избранном'); }
   function colStage(col){ return col?.querySelector('.ch-title')?.firstChild?.textContent.trim() || ''; }
   function updateColCount(col){ if(!col) return; const n=col.querySelector('.ch-title .n'); if(n) n.textContent=col.querySelectorAll('.card').length; }
-  function drawerStage(){
-    const card = window._lastCard;
-    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
-    if(curGroup!=='stage'){ toast('Перемещение по стадиям доступно в виде «По стадиям»'); return; }
+  // Переместить карточку на стадию по индексу STAGE_ORDER. Вернёт true при успехе.
+  function moveToStage(card, targetIdx){
+    if(!card || !card.closest('.col')) return false;
     const col = card.closest('.col');
-    const cur = colStage(col);
-    const idx = STAGE_ORDER.indexOf(cur);
-    if(idx < 0){ toast('Стадия колонки не распознана'); return; }
-    if(idx >= STAGE_ORDER.length-1){ toast('Сделка уже на финальной стадии воронки'); return; }
-    const nextTitle = STAGE_ORDER[idx+1];
+    const curIdx = STAGE_ORDER.indexOf(colStage(col));
+    if(curIdx < 0){ toast('Стадия колонки не распознана'); return false; }
+    if(targetIdx === curIdx) return false;
+    if(targetIdx < 0 || targetIdx > STAGE_ORDER.length-1) return false;
+    const title = STAGE_ORDER[targetIdx];
     const cols = [...boardEl.querySelectorAll('.col')];
-    const matches = cols.filter(c => colStage(c) === nextTitle);
-    // в составном виде берём ближайшую следующую колонку той же воронки
-    const target = matches.find(c => col.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) || matches[0];
-    if(!target){ toast('В текущем виде нет колонки «'+nextTitle+'»'); return; }
+    const matches = cols.filter(c => colStage(c) === title);
+    // ближайшая колонка той же воронки в нужную сторону
+    const dir = targetIdx > curIdx ? Node.DOCUMENT_POSITION_FOLLOWING : Node.DOCUMENT_POSITION_PRECEDING;
+    const target = matches.find(c => col.compareDocumentPosition(c) & dir) || matches[0];
+    if(!target){ toast('В текущем виде нет колонки «'+title+'»'); return false; }
     const add = target.querySelector('.add-card');
     if(add) target.insertBefore(card, add); else target.appendChild(card);
     updateColCount(col); updateColCount(target);
     markActionDates(); applyActFilter();
-    closeAll();
-    toast('Стадия → '+nextTitle);
+    return true;
   }
-  function drawerTask(){ toast('✎ Задача поставлена по сделке'); }
+
+  // Авто-переход стадии по действию продавца: двигаем ТОЛЬКО вперёд до целевой,
+  // сразу, с toast «… → X · Отменить». Возвращает true, если сдвинули.
+  function autoAdvance(card, toIdx, reason){
+    if(!card || !card.closest('.col')) return false;
+    if(curGroup!=='stage') return false; // авто-стадии живут в виде «По стадиям»
+    const fromIdx = STAGE_ORDER.indexOf(colStage(card.closest('.col')));
+    if(fromIdx < 0 || toIdx <= fromIdx) return false; // уже там или дальше — не трогаем
+    if(!moveToStage(card, toIdx)) return false;
+    const undo = ()=>{ if(moveToStage(card, fromIdx)) toast('Стадия возвращена: '+STAGE_ORDER[fromIdx]); };
+    toast(`${reason} · стадия → ${STAGE_ORDER[toIdx]}`, undo);
+    return true;
+  }
+
+  function drawerStage(){
+    const card = window._lastCard;
+    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
+    if(curGroup!=='stage'){ toast('Перемещение по стадиям доступно в виде «По стадиям»'); return; }
+    const idx = STAGE_ORDER.indexOf(colStage(card.closest('.col')));
+    if(idx >= STAGE_ORDER.length-1){ toast('Сделка уже на финальной стадии воронки'); return; }
+    if(moveToStage(card, idx+1)){ closeAll(); toast('Стадия → '+STAGE_ORDER[idx+1]); }
+  }
+
+  // клик по сегменту линии-степпера в drawer — перевод на любую стадию
+  function stepTo(i){
+    const card = window._lastCard;
+    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
+    if(curGroup!=='stage'){ toast('Смена стадии доступна в виде «По стадиям»'); return; }
+    const curIdx = STAGE_ORDER.indexOf(colStage(card.closest('.col')));
+    if(i === curIdx) return;
+    if(moveToStage(card, i)){ closeAll(); toast('Стадия → '+STAGE_ORDER[i]); }
+  }
   function drawerReject(){ toast('✕ Сделка переведена в «Отказ»'); }
-  function chCh(ch){ toast('Связь · '+ch); }
+
+  // ═══════════ Задача / Звонок ═══════════
+  let _callTimer = null, _taskCardName = '';
+  function drawerTask(tab){
+    const card = window._lastCard;
+    _taskCardName = card ? (readCard(card).company || 'сделке') : 'сделке';
+    // дефолт срока — завтра
+    const di = document.getElementById('t-date'); if(di && !di.value) di.value = tomorrowISO();
+    const cd = document.getElementById('call-date'); if(cd && !cd.value) cd.value = tomorrowISO();
+    switchTaskTab(tab === 'call' ? 'call' : 'task');
+    openModal('m-task');
+  }
+  function tomorrowISO(){
+    // без Date.now(): берём «сегодня» из demo-контекста (12.06.2026) +1 день — фиксированно для макета
+    return '2026-06-13';
+  }
+  function switchTaskTab(tab){
+    document.querySelectorAll('#task-tabs button').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
+    document.getElementById('tab-task').style.display = tab==='task' ? '' : 'none';
+    document.getElementById('tab-call').style.display = tab==='call' ? '' : 'none';
+    document.getElementById('task-title').textContent = tab==='call' ? 'Звонок клиенту' : 'Поставить задачу';
+    document.getElementById('task-save').textContent  = tab==='call' ? 'Сохранить звонок' : 'Сохранить задачу';
+    if(tab==='call') startCall(); else stopCall();
+  }
+  function startCall(){
+    document.getElementById('call-nm').textContent = _taskCardName;
+    document.getElementById('call-ph').textContent = '+375 29 ' + '123-45-67';
+    document.getElementById('call-dial').style.display = '';
+    document.getElementById('call-outcome').style.display = 'none';
+    document.getElementById('call-status').textContent = 'Система дозванивается клиенту… гудки';
+    document.getElementById('task-save').style.display = 'none'; // во время набора скрываем
+    clearTimeout(_callTimer);
+    // симуляция: через 3с — «не дозвонился» → показать окно исхода
+    _callTimer = setTimeout(()=>{ showCallOutcome('noans'); }, 3000);
+  }
+  function stopCall(){ clearTimeout(_callTimer); document.getElementById('task-save').style.display=''; }
+  function showCallOutcome(pre){
+    clearTimeout(_callTimer);
+    document.getElementById('call-dial').style.display = 'none';
+    document.getElementById('call-outcome').style.display = '';
+    document.getElementById('task-save').style.display = '';
+    // предвыбрать исход
+    document.querySelectorAll('#call-result button').forEach(b=>{
+      b.classList.toggle('on', b.dataset.r===pre);
+      b.classList.toggle('danger', ['noans','drop','busy','bad'].includes(b.dataset.r));
+    });
+    toggleCallNext(pre);
+  }
+  // показать перенос след. звонка, если не дозвонились
+  function toggleCallNext(r){
+    const need = ['noans','drop','busy','bad'].includes(r);
+    document.getElementById('call-next').classList.toggle('on', need);
+  }
+  function saveTask(){
+    const ov = document.getElementById('m-task');
+    const isCall = document.querySelector('#task-tabs button.on')?.dataset.tab === 'call';
+    if(isCall){
+      const r = document.querySelector('#call-result button.on')?.dataset.r;
+      const map = {done:'дозвонился',noans:'не ответил',drop:'сбросили',busy:'занято',bad:'проблема связи'};
+      if(!r){ toast('Выберите итог звонка'); return; }
+      if(r==='done'){ toast('☎ Звонок зафиксирован: дозвонился'); }
+      else {
+        const d = document.getElementById('call-date').value, t = document.getElementById('call-time').value;
+        toast(`☎ ${map[r]} · след. звонок ${d||'—'} ${t||''}`.trim());
+      }
+    } else {
+      const what = document.getElementById('t-what').value.trim();
+      const d = document.getElementById('t-date').value, t = document.getElementById('t-time').value;
+      const owner = document.getElementById('t-owner').value;
+      if(!what){ toast('Опишите, что нужно сделать'); return; }
+      toast(`✎ Задача «${what.slice(0,30)}${what.length>30?'…':''}» · ${owner} · до ${d||'—'} ${t||''}`.trim());
+    }
+    stopCall(); closeModal(ov);
+  }
+
+  // Связь с клиентом: «Звонок» — авто-набор (вкладка звонка); прочие каналы фиксируются.
+  // По «Новой заявке» любое обращение авто-переводит в «Взят в работу».
+  function chCh(ch){
+    const card = window._lastCard;
+    const NEW = STAGE_ORDER.indexOf('Новая заявка'), WORK = STAGE_ORDER.indexOf('Взят в работу');
+    const onNew = card && card.closest('.col') && STAGE_ORDER.indexOf(colStage(card.closest('.col')))===NEW;
+    if(ch==='Звонок'){ drawerTask('call'); if(onNew) autoAdvance(card, WORK, 'Звонок зафиксирован'); return; }
+    if(onNew && autoAdvance(card, WORK, ch+' зафиксирован')) return;
+    toast('Связь · '+ch+' · зафиксировано в сделке');
+  }
+
+  // обработчики модалки задачи/звонка
+  document.getElementById('task-tabs').addEventListener('click', e=>{
+    const b = e.target.closest('button[data-tab]'); if(b) switchTaskTab(b.dataset.tab);
+  });
+  document.getElementById('call-result').addEventListener('click', e=>{
+    const b = e.target.closest('button[data-r]'); if(!b) return;
+    document.querySelectorAll('#call-result button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); toggleCallNext(b.dataset.r);
+  });
+  document.getElementById('task-save').addEventListener('click', saveTask);
+  document.getElementById('m-task').addEventListener('click', e=>{
+    if(e.target.id==='m-task' || e.target.closest('[data-close]')) stopCall();
+  });
+
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAll(); });
 
   /* ════════ Фильтр «Только висяки» ════════ */
@@ -1315,6 +1651,20 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   // 1-клик / 2-клика — делегированием на доску (работает и для новых карточек)
   let clickTimer = null;
   const boardEl = document.querySelector('.board');
+
+  // проставить бейдж «🚚 под приход» карточкам со связью с приходящим товаром (видит продавец)
+  function markIncoming(){
+    document.querySelectorAll('.board .card[data-incoming]').forEach(card=>{
+      const badges = card.querySelector('.c-badges'); if(!badges || badges.querySelector('.inc-badge')) return;
+      const inc = parseIncoming(card.dataset.incoming);
+      const b = document.createElement('span');
+      b.className = 'inc-badge';
+      b.title = `Под приход: ${inc.good} · придёт ${inc.when} · ${inc.ship}`;
+      b.textContent = '🚚 ' + inc.when;
+      badges.insertBefore(b, badges.firstChild);
+    });
+  }
+  markIncoming();
 
   /* ════════════════ ПЕРЕКЛЮЧАТЕЛЬ ВОРОНОК (одна доска) ════════════════ */
   const FUNNEL_NEW = boardEl.innerHTML; // сохранить исходную воронку новых клиентов
