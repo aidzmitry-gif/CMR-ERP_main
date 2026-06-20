@@ -1244,31 +1244,31 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     "Цена запрошена","Есть цена","Счёт отправлен","Счёт защищён","Договор / Предоплата"];
   const STAGE_SHORT = ["Новая","В работе","Квалиф.","Встреча","Цена","Есть цена","Счёт","Защищён","Договор"];
 
-  // Главное действие на каждой стадии — одна кнопка, которая сразу двигает воронку дальше.
-  // to: индекс целевой стадии. note: что произойдёт «за кадром» (зависимость/связь с другим модулем).
-  const STAGE_ACTION = {
-    0: {label:'☎ Связаться с клиентом', hint:'звонок/сообщение переведёт в «В работе»', auto:false},
-    1: {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
-    2: {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
-    3: {label:'💰 Запросить цену', to:4, note:'Запрос ушёл в Закупки'},
-    4: {label:'✓ Цена получена', to:5, note:'Закупки вернули цену', wait:'⏳ Ждём цену из Закупок'},
-    5: {label:'🧾 Отправить счёт', to:6, note:'Счёт сформирован и отправлен'},
-    6: {label:'🛡 Счёт защищён', to:7, note:'Счёт согласован клиентом'},
-    7: {label:'✅ Оплата / Договор', to:8, note:'Предоплата получена'},
-    8: null, // финальная — без «следующего»
-  };
+  // Главное действие на каждой стадии (по индексу STAGE_ORDER): одна кнопка, двигающая воронку дальше.
+  // to: индекс целевой стадии. note: что произойдёт «за кадром». auto:false — действие не двигает само.
+  // Индекс 8 (финал) опущен → STAGE_ACTION[8] === undefined (нет «следующего»).
+  const STAGE_ACTION = [
+    {label:'☎ Связаться с клиентом', auto:false},
+    {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
+    {label:'📅 Назначить встречу', to:3, note:'Встреча назначена'},
+    {label:'💰 Запросить цену', to:4, note:'Запрос ушёл в Закупки'},
+    {label:'✓ Цена получена', to:5, note:'Закупки вернули цену', wait:'⏳ Ждём цену из Закупок'},
+    {label:'🧾 Отправить счёт', to:6, note:'Счёт сформирован и отправлен'},
+    {label:'🛡 Счёт защищён', to:7, note:'Счёт согласован клиентом'},
+    {label:'✅ Оплата / Договор', to:8, note:'Предоплата получена'},
+  ];
 
   // Перерисовать футер drawer: одна осмысленная кнопка по стадии + Задача + Отказ.
   // inStock: товар в наличии → цена уже известна, этап «Запросить цену» не нужен,
-  // сразу даём «Отправить счёт» (с любой стадии от «Встречи» до «Есть цена»).
+  // сразу даём «Отправить счёт» (с рабочих стадий Квалиф.→Есть цена, минуя запрос цены).
   function renderFoot(stageTitle, inStock){
     const foot = document.getElementById('dk-foot');
     const idx = STAGE_ORDER.indexOf(stageTitle);
-    const SEND = 6; // «Счёт отправлен»
+    const SEND = STAGE_ORDER.indexOf('Счёт отправлен');
     let act = STAGE_ACTION[idx];
-    // товар в наличии = цена известна: с рабочих стадий (Квалиф.→Есть цена) сразу даём «Отправить счёт»,
-    // минуя «Запросить цену». Встречу при этом никто не запрещает — она в блоке «Связаться»/задаче.
-    if(inStock && idx >= 2 && idx <= 5){
+    // товар в наличии → пропускаем стадии запроса цены (Квалиф.…Есть цена) и сразу шлём счёт.
+    const QUAL = STAGE_ORDER.indexOf('Квалифицирован'), PRICED = STAGE_ORDER.indexOf('Есть цена');
+    if(inStock && idx >= QUAL && idx <= PRICED){
       act = {label:'🧾 Отправить счёт', to:SEND, note:'Товар в наличии · счёт отправлен'};
     }
     let main = '';
@@ -1500,15 +1500,6 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     const undo = ()=>{ if(moveToStage(card, fromIdx)) toast('Стадия возвращена: '+STAGE_ORDER[fromIdx]); };
     toast(`${reason} · стадия → ${STAGE_ORDER[toIdx]}`, undo);
     return true;
-  }
-
-  function drawerStage(){
-    const card = window._lastCard;
-    if(!card || !card.closest('.col')){ toast('Сначала откройте сделку'); return; }
-    if(curGroup!=='stage'){ toast('Перемещение по стадиям доступно в виде «По стадиям»'); return; }
-    const idx = STAGE_ORDER.indexOf(colStage(card.closest('.col')));
-    if(idx >= STAGE_ORDER.length-1){ toast('Сделка уже на финальной стадии воронки'); return; }
-    if(moveToStage(card, idx+1)){ closeAll(); toast('Стадия → '+STAGE_ORDER[idx+1]); }
   }
 
   // клик по сегменту линии-степпера в drawer — перевод на любую стадию
@@ -2018,7 +2009,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       col.querySelectorAll('.card').forEach(c=>{
         let ok=true;
         if(owner){ const o=c.querySelector('.owner span')?.textContent||''; if(!o.includes(owner.split(' ')[0])) ok=false; }
-        if(pris.length){ const cls=c.querySelector('.pri'); const p=cls?(cls.classList.contains('high')?'high':cls.classList.contains('mid')?'mid':'low'):''; if(!pris.includes(p)) ok=false; }
+        if(pris.length && !pris.includes(priLevel(c))) ok=false;
         if(ok && (min||max!==Infinity)){ const v=parseInt(c.querySelector('.money')?.textContent.replace(/\D/g,''))||0; if(v<min||v>max) ok=false; }
         if(ok && stuckF && !c.querySelector('.days.stuck')) ok=false;
         if(ok && regF){ const nm=c.querySelector('.company')?.textContent||''; if(!REG_CLIENTS.some(r=>nm.includes(r))) ok=false; }
