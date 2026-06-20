@@ -40,16 +40,25 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   body{margin:0;background:#d8dce3;color:var(--ink);font:14px/1.4 var(--font)}
   .app{display:flex;min-height:100vh}
   /* sidebar */
-  .side{width:210px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;flex:0 0 auto}
-  .side .logo{padding:16px;font-weight:700;font-size:15px;border-bottom:1px solid var(--line)}
+  /* сворачиваемая боковая навигация — раскрывается по наведению (как правая рейка чатов) */
+  .side{position:relative;width:64px;flex:0 0 auto;background:var(--surface);border-right:1px solid var(--line);z-index:31}
+  .side-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);border-right:1px solid var(--line);
+       display:flex;flex-direction:column;overflow:hidden;white-space:nowrap;transition:width .22s cubic-bezier(.4,0,.2,1)}
+  .side:hover .side-inner{width:210px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+  .side .logo{padding:16px 18px;font-weight:700;font-size:15px;border-bottom:1px solid var(--line);overflow:hidden}
+  .side .logo .lbl,.side .logo small{opacity:0;transition:opacity .18s}.side:hover .logo .lbl,.side:hover .logo small{opacity:1}
   .side .logo small{display:block;color:var(--muted);font-weight:500;font-size:11px}
   .nav{padding:8px;display:flex;flex-direction:column;gap:2px}
-  .nav a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;color:var(--muted);text-decoration:none;font-weight:500;font-size:13px}
+  .nav a{display:flex;align-items:center;gap:12px;padding:8px 9px;border-radius:9px;color:var(--muted);text-decoration:none;font-weight:500;font-size:13px}
   .nav a.active{background:var(--brand100);color:var(--brand700)}
   .nav a:hover:not(.active){background:var(--sunken)}
-  .nav .dot{width:7px;height:7px;border-radius:50%}
-  .side .role{margin-top:auto;border-top:1px solid var(--line);padding:12px;font-size:12px;color:var(--muted)}
+  .nav .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin:0 1px}
+  .nav a .lbl{opacity:0;transition:opacity .18s}.side:hover .nav a .lbl{opacity:1}
+  .side .role{margin-top:auto;border-top:1px solid var(--line);padding:12px 14px;font-size:12px;color:var(--muted);overflow:hidden;opacity:0;transition:opacity .18s}
+  .side:hover .role{opacity:1}
   .side .role b{color:var(--ink)}
+  .side-hint{padding:6px 0 10px;text-align:center;font-size:10px;color:#cbd5e1;opacity:0;transition:opacity .18s}
+  .side:hover .side-hint{opacity:1}
   /* center column */
   .center{flex:1;min-width:0;display:flex;flex-direction:column}
   .top{display:flex;align-items:center;gap:10px;padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
@@ -275,15 +284,18 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 <div class="app">
   <!-- sidebar -->
   <div class="side">
-    <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+   <div class="side-inner">
+    <div class="logo"><span class="lbl">AI-First OS</span><small>CRM / ERP</small></div>
     <nav class="nav">
-      <a class="active" href="#"><span class="dot" style="background:var(--brand)"></span> Сделки</a>
-      <a href="#"><span class="dot" style="background:#8B5CF6"></span> Лиды</a>
-      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Чаты и дела</a>
-      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Контрагенты</a>
-      <a href="#"><span class="dot" style="background:#9CA3AF"></span> Аналитика</a>
+      <a class="active" href="#"><span class="dot" style="background:var(--brand)"></span><span class="lbl">Сделки</span></a>
+      <a href="#"><span class="dot" style="background:#8B5CF6"></span><span class="lbl">Лиды</span></a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span><span class="lbl">Чаты и дела</span></a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span><span class="lbl">Контрагенты</span></a>
+      <a href="#"><span class="dot" style="background:#9CA3AF"></span><span class="lbl">Аналитика</span></a>
     </nav>
+    <div class="side-hint">наведи — раскрыть</div>
     <div class="role">Вы вошли как<br><b>Иванов И.И.</b> · Менеджер</div>
+   </div>
   </div>
 
   <!-- center -->

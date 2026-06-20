@@ -37,11 +37,22 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px}
   .app{display:flex;min-height:100vh}
-  .side{width:210px;background:var(--surface);border-right:1px solid var(--line);flex-shrink:0;padding:16px 12px}
-  .logo{font-weight:800;font-size:15px;padding:4px 8px 16px}.logo small{display:block;color:var(--faint);font-size:10px;font-weight:500}
-  .nav-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:12px 10px 5px}
-  .nav-item{display:flex;gap:9px;align-items:center;padding:8px 10px;border-radius:8px;color:var(--muted);font-size:13px;cursor:pointer}
+  /* сворачиваемая боковая навигация — раскрывается по наведению (как правая рейка чатов) */
+  .side{position:relative;width:64px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--line);z-index:31}
+  .side-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);border-right:1px solid var(--line);
+       padding:16px 12px;overflow:hidden;white-space:nowrap;transition:width .22s cubic-bezier(.4,0,.2,1)}
+  .side:hover .side-inner{width:210px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+  .logo{font-weight:800;font-size:15px;padding:4px 4px 16px;display:flex;flex-direction:column;justify-content:center;height:30px;overflow:hidden}
+  .logo .lbl,.logo small{opacity:0;transition:opacity .18s}.side:hover .logo .lbl,.side:hover .logo small{opacity:1}
+  .logo small{display:block;color:var(--faint);font-size:10px;font-weight:500}
+  .nav-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:12px 8px 5px;opacity:0;transition:opacity .18s}
+  .side:hover .nav-group{opacity:1}
+  .nav-item{display:flex;gap:12px;align-items:center;padding:8px;border-radius:8px;color:var(--muted);font-size:13px;cursor:pointer}
   .nav-item:hover{background:#F7F8FA}.nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  .nav-item .ic{width:24px;text-align:center;flex-shrink:0;opacity:.85}
+  .nav-item .lbl{opacity:0;transition:opacity .18s}.side:hover .nav-item .lbl{opacity:1}
+  .side-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:#cbd5e1;opacity:0;transition:opacity .18s}
+  .side:hover .side-hint{opacity:1}
   main{flex:1;padding:22px 26px;overflow:auto}
   h1{font-size:21px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin-top:3px;margin-bottom:18px}
 
@@ -166,13 +177,16 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 <a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
 <div class="app">
   <aside class="side">
-    <div class="logo">AI-First OS<small>CRM / ERP</small></div>
+   <div class="side-inner">
+    <div class="logo"><span class="lbl">AI-First OS</span><small>CRM / ERP</small></div>
     <div class="nav-group">CRM</div>
-    <div class="nav-item">▦ Сделки</div>
-    <div class="nav-item">◔ Лиды</div>
-    <div class="nav-item active">♻ Постоянные клиенты</div>
-    <div class="nav-item">◑ РОП</div>
-    <div class="nav-item">▣ Контрагенты</div>
+    <div class="nav-item"><span class="ic">▦</span><span class="lbl">Сделки</span></div>
+    <div class="nav-item"><span class="ic">◔</span><span class="lbl">Лиды</span></div>
+    <div class="nav-item active"><span class="ic">♻</span><span class="lbl">Постоянные клиенты</span></div>
+    <div class="nav-item"><span class="ic">◑</span><span class="lbl">РОП</span></div>
+    <div class="nav-item"><span class="ic">▣</span><span class="lbl">Контрагенты</span></div>
+    <div class="side-hint">наведи — раскрыть</div>
+   </div>
   </aside>
 
   <main>
