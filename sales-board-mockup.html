@@ -1317,9 +1317,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     const [good, when, ship] = raw.split('|');
     return { good: good||'', when: when||'', ship: ship||'' };
   }
-  // текущий приоритет карточки по классу .pri
+  // badge приоритета карточки (именно .pri.high/.mid/.low — не метку «★ Пост.»,
+  // у которой класс .pri без уровня; у постоянных клиентов два .pri-спана)
+  function priBadge(card){
+    return card.querySelector('.pri.high, .pri.mid, .pri.low');
+  }
+  // текущий приоритет карточки по классу badge'а приоритета
   function priLevel(card){
-    const p = card.querySelector('.pri');
+    const p = priBadge(card);
     if(!p) return 'mid';
     return p.classList.contains('high') ? 'high' : p.classList.contains('low') ? 'low' : 'mid';
   }
@@ -1393,7 +1398,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     });
   }
   function setCardPriority(card, p){
-    const badge = card.querySelector('.pri');
+    const badge = priBadge(card); // не трогаем метку «★ Пост.»
     if(badge){
       badge.classList.remove('high','mid','low'); badge.classList.add(p);
       badge.textContent = {high:'Высокий',mid:'Средний',low:'Низкий'}[p];
@@ -1576,11 +1581,13 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       const r = document.querySelector('#call-result button.on')?.dataset.r;
       const map = {done:'дозвонился',noans:'не ответил',drop:'сбросили',busy:'занято',bad:'проблема связи'};
       if(!r){ toast('Выберите итог звонка'); return; }
-      if(r==='done'){ toast('☎ Звонок зафиксирован: дозвонился'); }
-      else {
-        const d = document.getElementById('call-date').value, t = document.getElementById('call-time').value;
-        toast(`☎ ${map[r]} · след. звонок ${d||'—'} ${t||''}`.trim());
-      }
+      const msg = r==='done' ? '☎ Звонок зафиксирован: дозвонился'
+        : (()=>{ const d=document.getElementById('call-date').value, t=document.getElementById('call-time').value;
+                 return `☎ ${map[r]} · след. звонок ${d||'—'} ${t||''}`.trim(); })();
+      stopCall(); closeModal(ov);
+      // обращение зафиксировано → «Новую» переводим в «Взят в работу» (с тостом+отменой)
+      if(!advanceOnContact(msg)) toast(msg);
+      return;
     } else {
       const what = document.getElementById('t-what').value.trim();
       const d = document.getElementById('t-date').value, t = document.getElementById('t-time').value;
@@ -1591,14 +1598,18 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     stopCall(); closeModal(ov);
   }
 
-  // Связь с клиентом: «Звонок» — авто-набор (вкладка звонка); прочие каналы фиксируются.
-  // По «Новой заявке» любое обращение авто-переводит в «Взят в работу».
-  function chCh(ch){
+  // «Новая заявка» → «Взят в работу» при фиксации обращения (не раньше).
+  function advanceOnContact(reason){
     const card = window._lastCard;
     const NEW = STAGE_ORDER.indexOf('Новая заявка'), WORK = STAGE_ORDER.indexOf('Взят в работу');
     const onNew = card && card.closest('.col') && STAGE_ORDER.indexOf(colStage(card.closest('.col')))===NEW;
-    if(ch==='Звонок'){ drawerTask('call'); if(onNew) autoAdvance(card, WORK, 'Звонок зафиксирован'); return; }
-    if(onNew && autoAdvance(card, WORK, ch+' зафиксирован')) return;
+    return onNew && autoAdvance(card, WORK, reason);
+  }
+  // Связь с клиентом: «Звонок» — открыть окно дозвона (стадия сдвинется при фиксации исхода);
+  // прочие каналы фиксируются сразу и двигают «Новую» в «Взят в работу».
+  function chCh(ch){
+    if(ch==='Звонок'){ drawerTask('call'); return; }
+    if(advanceOnContact(ch+' зафиксирован')) return;
     toast('Связь · '+ch+' · зафиксировано в сделке');
   }
 
@@ -1616,7 +1627,12 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     if(e.target.id==='m-task' || e.target.closest('[data-close]')) stopCall();
   });
 
-  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAll(); });
+  document.addEventListener('keydown', e=>{
+    if(e.key!=='Escape') return;
+    const t=document.getElementById('m-task');
+    if(t.classList.contains('show')){ stopCall(); closeModal(t); return; } // окно задачи/звонка: гасим таймер
+    closeAll();
+  });
 
   /* ════════ Фильтр «Только висяки» ════════ */
   const stuckBtn = document.getElementById('stuckBtn');

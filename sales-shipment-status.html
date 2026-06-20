@@ -105,6 +105,8 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .goods .nm small .for:empty::before{content:''}
   .goods .nm small .deal::before{content:'· '}
   .goods .nm small .deal:first-child::before{content:''}
+  /* «для кого» скрыт (роль закупщик) — пустой .for остаётся первым, убираем ведущий «· » */
+  .goods .nm small .for:empty + .deal::before{content:''}
   .cvis-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:11px;border-bottom:1px dashed var(--line)}
   .cvis-lbl{font-size:11.5px;font-weight:600;color:var(--muted)}
   .cvis-ctl .role-seg{margin-left:0}
