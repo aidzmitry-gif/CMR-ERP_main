@@ -1155,13 +1155,12 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   /* ════════════════ ЮР-ЛИЦА + МУЛЬТИВАЛЮТА (объявлено первым — используется везде ниже) ════════════════
      Граница раздельного учёта = юр-лицо (company). Доступ — на уровне ПОЛЬЗОВАТЕЛЯ:
      показываем только доступные; глазок = «скрыть из переключателя» (право остаётся).
-     РАЗДЕЛЬНЫЙ УЧЁТ: у каждого ЮЛ свои сделки и СВОИ итоги в СВОЕЙ базовой валюте.
-     Цифры скорборда/воронки — нативные для ЮЛ (НЕ перекраска BYN в евро): cf = «размер бизнеса»
-     этого ЮЛ в его валюте (демо-множитель, не курс). Сделки в инвалюте → база ЮЛ по курсу НБ РБ. */
+     РАЗДЕЛЬНЫЙ УЧЁТ: у каждого ЮЛ свои сделки; итоги показываются в базовой валюте ЮЛ
+     по курсу НБ РБ (единая модель со всеми экранами через sales-cur.js — без расхождений). */
   const COMPANIES = [
-    {id:'by', name:'ООО «АкуМир»',       country:'Беларусь', flag:'🇧🇾', base:'BYN', cf:1},
-    {id:'ru', name:'ООО «АкуМир-РУС»',   country:'Россия',   flag:'🇷🇺', base:'RUB', cf:40},
-    {id:'pl', name:'AkuMir Sp. z o.o.',  country:'Польша',   flag:'🇵🇱', base:'EUR', cf:0.12},
+    {id:'by', name:'ООО «АкуМир»',       country:'Беларусь', flag:'🇧🇾', base:'BYN'},
+    {id:'ru', name:'ООО «АкуМир-РУС»',   country:'Россия',   flag:'🇷🇺', base:'RUB'},
+    {id:'pl', name:'AkuMir Sp. z o.o.',  country:'Польша',   flag:'🇵🇱', base:'EUR'},
   ];
   // доступ пользователя (демо): к каким ЮЛ привязан. В бэкенде — из профиля + проверка company_id на сервере.
   const userAccess = new Set(['by','ru','pl']);
@@ -1176,7 +1175,6 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   const co = id => COMPANIES.find(c=>c.id===id);
   const curBase = () => co(curCompany).base;          // базовая валюта текущего ЮЛ
   const curSign = () => CUR_SIGN[curBase()] || curBase();
-  const curCf   = () => co(curCompany).cf;            // размер бизнеса ЮЛ (раздельный учёт)
   const fmtCur = (amt, cur) => Math.round(amt).toLocaleString('ru-RU') + ' ' + (CUR_SIGN[cur]||cur);
   // пересчёт суммы из валюты сделки в базовую валюту ЮЛ
   function toBase(amt, cur, base){ return amt * (FX[cur]||1) / (FX[base]||1); }
@@ -1248,14 +1246,15 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   };
 
   // Денежные форматтеры скорборда. Вход — сумма в BYN-базе (демо); на выходе — в валюте
-  // ТЕКУЩЕГО ЮЛ с его множителем размера бизнеса (cf). Раздельный учёт: РФ-ЮЛ → ₽, PL → €.
+  // ТЕКУЩЕГО ЮЛ по курсу НБ РБ (та же модель, что в sales-cur.js на остальных экранах).
+  const toCur = n => n / (FX[curBase()] || 1);   // BYN → валюта ЮЛ
   function fmtMoney(n){
-    const s = n*curCf(), sign = curSign();
+    const s = toCur(n), sign = curSign();
     if(s>=1000000) return (s/1000000).toFixed(2).replace('.',',')+" млн "+sign;
     return Math.round(s).toLocaleString('ru-RU').replace(/,/g,' ')+" "+sign;
   }
   function fmtShort(n){ // компактно для прогноза: 735к / 1,76 млн
-    const s = n*curCf(), sign = curSign();
+    const s = toCur(n), sign = curSign();
     if(s>=1000000) return (s/1000000).toFixed(2).replace('.',',')+" млн "+sign;
     if(s>=1000) return Math.round(s/1000)+"к "+sign;
     return Math.round(s)+" "+sign;
@@ -2052,11 +2051,15 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   }
   function colTitle(col){ return col.querySelector('.ch-title').firstChild.textContent.trim(); }
   function colColor(col){ return col.querySelector('.stripe').style.background || '#3B82F6'; }
+  // сумма карточки в BYN-базе: инвалютная сделка (data-cur) → по курсу НБ РБ; иначе из .money (BYN)
+  const cardBYN = c => c.dataset.cur
+    ? toBase(parseFloat(c.dataset.amt)||0, c.dataset.cur, 'BYN')
+    : (parseInt((c.querySelector('.money')?.textContent||'').replace(/\D/g,''))||0);
   function recount(col){
-    const cards=col.querySelectorAll('.card'); let sum=0;
-    cards.forEach(c=>{ const m=c.querySelector('.money'); if(m) sum+=parseInt(m.textContent.replace(/\D/g,''))||0; });
+    const cards=col.querySelectorAll('.card');
+    const sum=[...cards].reduce((s,c)=>s+cardBYN(c),0);
     const n=col.querySelector('.ch-title .n'); if(n) n.textContent=cards.length;
-    const meta=col.querySelector('.ch-meta'); if(meta) meta.textContent=`${cards.length} · ${sum.toLocaleString('ru-RU').replace(/,/g,' ')} Br`;
+    const meta=col.querySelector('.ch-meta'); if(meta) meta.textContent=`${cards.length} · ${fmtMoney(sum)}`; // в валюте ЮЛ
   }
 
   /* ════════════════ СОЗДАТЬ СДЕЛКУ ════════════════ */
@@ -2206,7 +2209,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
         let ok=true;
         if(owner){ const o=c.querySelector('.owner span')?.textContent||''; if(!o.includes(owner.split(' ')[0])) ok=false; }
         if(pris.length && !pris.includes(priLevel(c))) ok=false;
-        if(ok && (min||max!==Infinity)){ const v=parseInt(c.querySelector('.money')?.textContent.replace(/\D/g,''))||0; if(v<min||v>max) ok=false; }
+        if(ok && (min||max!==Infinity)){ const v=cardBYN(c); if(v<min||v>max) ok=false; }
         if(ok && stuckF && !c.querySelector('.days.stuck')) ok=false;
         if(ok && regF){ const nm=c.querySelector('.company')?.textContent||''; if(!REG_CLIENTS.some(r=>nm.includes(r))) ok=false; }
         c.style.display=ok?'':'none';
