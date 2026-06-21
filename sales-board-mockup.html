@@ -1403,6 +1403,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       badge.classList.remove('high','mid','low'); badge.classList.add(p);
       badge.textContent = {high:'Высокий',mid:'Средний',low:'Низкий'}[p];
     }
+    const col = card.closest('.col'); if(col) sortColumnByPriority(col); // высокий — выше
   }
 
   function openFull(card){
@@ -1484,6 +1485,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     if(!target){ toast('В текущем виде нет колонки «'+title+'»'); return false; }
     const add = target.querySelector('.add-card');
     if(add) target.insertBefore(card, add); else target.appendChild(card);
+    sortColumnByPriority(target); // встать по приоритету в новой колонке
     updateColCount(col); updateColCount(target);
     markActionDates(); applyActFilter();
     return true;
@@ -1673,6 +1675,19 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   }
   markIncoming();
 
+  // сортировка карточек в колонке по приоритету: Высокий → Средний → Низкий (стабильно)
+  const PRI_RANK = {high:0, mid:1, low:2};
+  function sortColumnByPriority(col){
+    const cards = [...col.querySelectorAll('.card')];
+    const add = col.querySelector('.add-card'); // якорь снизу — карточки ставим перед ним
+    cards
+      .map((c,i)=>({c, rank:PRI_RANK[priLevel(c)] ?? 1, i})) // i — стабильность внутри ранга
+      .sort((a,b)=> a.rank-b.rank || a.i-b.i)
+      .forEach(({c})=> add ? col.insertBefore(c, add) : col.appendChild(c));
+  }
+  function sortAllColumns(){ document.querySelectorAll('.board .col').forEach(sortColumnByPriority); }
+  sortAllColumns(); // исходную доску сортируем до снапшота воронок
+
   /* ════════════════ ПЕРЕКЛЮЧАТЕЛЬ ВОРОНОК (одна доска) ════════════════ */
   const FUNNEL_NEW = boardEl.innerHTML; // сохранить исходную воронку новых клиентов
   function col(color,title,n,meta,weight,cards){
@@ -1750,6 +1765,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     else { boardEl.classList.remove('stacked');
       boardEl.innerHTML = curFunnel==='repeat'?FUNNEL_REPEAT : curFunnel==='tender'?FUNNEL_TENDER : FUNNEL_NEW; }
     applyCardFields();
+    sortAllColumns(); // карточки по приоритету: высокий выше
     markActionDates(); applyActFilter();
     annotateMargin();
     document.getElementById('filterBtn').classList.remove('warn');
@@ -1893,6 +1909,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       ${next?`<div class="next">След. шаг: <b>${next}</b></div>`:''}
       <div class="owner"><span>👤 ${owner}</span><span>📅 сегодня</span></div>`;
     const add=col.querySelector('.add-card'); col.insertBefore(card, add||null);
+    sortColumnByPriority(col); // встать по приоритету
     applyCardFields(); markActionDates(); recount(col); applyActFilter();
     closeModal(document.getElementById('m-create'));
   });
