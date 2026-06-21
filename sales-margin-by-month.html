@@ -512,10 +512,17 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   const FACT_PRIOR  = 280000;
   const MONTH_TARGET = [70000, 70000, 70000, 270000]; // июнь, июль, август, сентябрь+ (4 мес)
 
+  // Расчёт всегда из BYN-базы: .fin .v закреплены в data-byn (исходный BYN), дисплей конвертирует sales-cur.js.
   function shipFin(ship){
     const v = ship.querySelectorAll('.fin .v');
-    return { rev:num(v[0]?.textContent), cost:num(v[1]?.textContent), gp:num(v[2]?.textContent) };
+    const g = el => +((el && el.dataset.byn != null) ? el.dataset.byn : num(el && el.textContent));
+    return { rev:g(v[0]), cost:g(v[1]), gp:g(v[2]) };
   }
+  // Закрепить исходный BYN в data-byn и добавить « Br» к дисплею — тогда sales-cur.js конвертирует
+  // ПОКАЗ, а shipFin берёт BYN из data-byn (независимо от выбранной валюты).
+  document.querySelectorAll('.ship .fin .v').forEach(v=>{
+    if(v.dataset.byn==null){ v.dataset.byn = num(v.textContent); v.textContent = v.textContent.trim()+' Br'; }
+  });
 
   // Плановая прибыль месяца (все менеджеры) — для годовой шапки (planAhead).
   // Доля каждой машины считается в apply() от ВИДИМОГО плана месяца (согласовано с шапкой при фильтре).
@@ -559,13 +566,13 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
       // обновить шапку колонки
       const ch=col.querySelector('.col-head');
       ch.querySelector('.ct').innerHTML = `${shortCap[i]} <span class="n">${mch(shown)}</span>`;
-      ch.querySelector('.cm').textContent = `выручка ${fmt(rev)} · с/с ${fmt(cost)}`;
+      ch.querySelector('.cm').textContent = `выручка ${fmt(rev)} Br · с/с ${fmt(cost)} Br`;
       ch.querySelector('.cgp').textContent = `▲ вал. прибыль ${fmt(gp)} Br (${mrg}%)`;
       // обновить мес-карточку
       const card=cards[i]; if(!card) return;
       card.querySelector('.gp').textContent = `${fmt(gp)} Br`;
-      card.querySelector('.mrg').textContent = `маржа ${mrg}% · выручка ${fmt(rev)}`;
-      card.querySelector('.small').innerHTML = `<span>Себестоимость ${fmt(cost)}</span><span>${mch(shown)}</span>`;
+      card.querySelector('.mrg').textContent = `маржа ${mrg}% · выручка ${fmt(rev)} Br`;
+      card.querySelector('.small').innerHTML = `<span>Себестоимость ${fmt(cost)} Br</span><span>${mch(shown)}</span>`;
       const bar=card.querySelector('.load span'); if(bar) bar.style.width = load+'%';
       card.querySelector('.loadl').textContent = mgr==='all'
         ? (load>=100?'загрузка 100% · нужна ещё машина':load>=80?`загрузка ~${load}% · ещё есть место`:`загрузка ~${load}% · добирать сделками`)
