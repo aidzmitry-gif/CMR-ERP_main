@@ -90,6 +90,31 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .chats:hover .chats-hint{opacity:1}
 
   .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:18px}
+  /* ── Селектор юр-лица (граница раздельного учёта) ── */
+  .co-pick{position:relative}
+  .co-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);
+       color:var(--ink);border-radius:8px;padding:8px 11px;font-size:13px;font-weight:600;cursor:pointer;transition:.14s;white-space:nowrap}
+  .co-btn:hover{background:var(--sunken)}
+  .co-btn .flag{font-size:14px;line-height:0}
+  .co-btn .base{font-weight:600;color:var(--faint);font-size:11.5px;border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  .co-btn .car{color:var(--faint);font-size:10px}
+  .co-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:120;min-width:280px;background:var(--surface);
+       border:1px solid var(--line);border-radius:11px;box-shadow:0 14px 40px rgba(16,24,40,.18);padding:6px;display:none}
+  .co-menu.show{display:block}
+  .co-menu .co-grp{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);padding:8px 9px 4px}
+  .co-opt{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;cursor:pointer;transition:.12s}
+  .co-opt:hover{background:var(--sunken)}
+  .co-opt.on{background:var(--brand-50,rgba(30,94,255,.08))}
+  .co-opt .flag{font-size:16px}
+  .co-opt .co-name{font-weight:600;font-size:13px}
+  .co-opt .co-sub{font-size:11px;color:var(--muted)}
+  .co-opt .co-base{margin-left:auto;font-size:11px;font-weight:600;color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .co-opt .co-check{color:var(--brand);font-weight:700;font-size:13px;width:14px;text-align:center}
+  .co-eye{margin-left:8px;font-size:13px;opacity:.55;cursor:pointer;border-radius:5px;padding:2px 4px}
+  .co-eye:hover{opacity:1;background:var(--sunken)}
+  .co-opt.hidden-co{opacity:.5}
+  .co-menu .co-divider{height:1px;background:var(--line);margin:6px 4px}
+  .co-menu .co-foot{font-size:11px;color:var(--muted);padding:7px 9px 4px;line-height:1.4}
   .search{position:relative;min-width:240px;flex:1;max-width:380px}
   .search input{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:8px;
        padding:9px 12px 9px 34px;font-size:13.5px;outline:none}
@@ -230,6 +255,7 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .card.act-today:hover,.card.act-tom:hover{box-shadow:inset 3px 0 0 currentColor, var(--shadow-pop)}
   .card .company{font-weight:600;color:var(--ink);margin-top:8px;font-size:14px}
   .card .desc{font-size:12px;color:var(--muted);margin-top:1px}
+  .card.co-off{display:none}  /* сделка другого юр-лица — раздельный учёт */
   .money-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px}
   .money{font-weight:700;color:var(--ink);font-size:14.5px}
   .wbadge{background:var(--brand-50);color:var(--brand-700);border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600}
@@ -496,6 +522,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   <main>
     <!-- Тулбар -->
     <div class="toolbar">
+      <!-- Селектор юр-лица: граница раздельного учёта. Доступ — на уровне пользователя; глазок = скрыть из переключателя (право остаётся). -->
+      <div class="co-pick">
+        <button class="co-btn" id="coBtn" onclick="toggleCoMenu(event)" title="Юридическое лицо · контур учёта">
+          <span class="flag" id="coFlag">🇧🇾</span><span id="coName">ООО «АкуМир»</span>
+          <span class="base" id="coBase">BYN</span><span class="car">▾</span>
+        </button>
+        <div class="co-menu" id="coMenu"><!-- заполняется JS --></div>
+      </div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <input placeholder="Поиск сделок...">
@@ -586,7 +620,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
             <div class="ch-weight">взвешенно: 4 810 Br</div>
           </div>
         </div>
-        <div class="card" data-stock="in">
+        <div class="card" data-stock="in" data-company="by" data-cur="USD" data-amt="5660">
           <div class="c-top"><span class="num">№ CRM-1042</span>
             <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star">★</span></div></div>
           <div class="company">ТД «ВольтАвто»</div><div class="desc">АКБ 6СТ-190, 12 шт</div>
@@ -601,6 +635,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
           <div class="money-row"><span class="money">9 800 Br</span><span class="wbadge">5% · ≈ 490 Br</span></div>
           <div class="next">След. шаг: <b>отправить каталог</b></div>
           <div class="owner"><span>👤 Орлов И.</span><span>📅 11.06</span></div>
+        </div>
+        <div class="card" data-company="pl" data-cur="EUR" data-amt="4200">
+          <div class="c-top"><span class="num">№ PL-3007</span>
+            <div class="c-badges"><span class="pri mid">Средний</span><span class="days">🕒 2 дн</span><span class="star">★</span></div></div>
+          <div class="company">Auto-Hurt Sp. z o.o.</div><div class="desc">Akumulatory rozruchowe</div>
+          <div class="money-row"><span class="money">4 200 €</span><span class="wbadge">5% · ≈ 210 €</span></div>
+          <div class="next">След. шаг: <b>wysłać katalog</b></div>
+          <div class="owner"><span>👤 Kowalski</span><span>📅 11.06</span></div>
         </div>
         <div class="add-card">＋ Добавить сделку</div>
       </div>
@@ -623,11 +665,11 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
           <div class="next">След. шаг: <b>квалифицировать ЛПР</b></div>
           <div class="owner"><span>👤 Петрова А.</span><span>📅 03.06</span></div>
         </div>
-        <div class="card">
+        <div class="card" data-company="ru" data-cur="RUB" data-amt="86500">
           <div class="c-top"><span class="num">№ CRM-1035</span>
             <div class="c-badges"><span class="pri low">Низкий</span><span class="days">🕒 3 дн</span><span class="star">★</span></div></div>
-          <div class="company">ИП Ковальчук</div><div class="desc">Розница, АКБ легковые</div>
-          <div class="money-row"><span class="money">3 200 Br</span><span class="wbadge">10% · ≈ 320 Br</span></div>
+          <div class="company">ООО «АвтоРесурс» (РФ)</div><div class="desc">Розница, АКБ легковые</div>
+          <div class="money-row"><span class="money">86 500 ₽</span><span class="wbadge">10% · ≈ 8 650 ₽</span></div>
           <div class="next">След. шаг: <b>выяснить объём</b></div>
           <div class="owner"><span>👤 Петрова А.</span><span>📅 09.06</span></div>
         </div>
@@ -652,6 +694,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
           <div class="next">След. шаг: <b>назначить встречу с гл.инж.</b></div>
           <div class="owner"><span>👤 Сидоров К.</span><span>📅 10.06</span></div>
         </div>
+        <div class="card" data-company="ru" data-cur="RUB" data-amt="540000">
+          <div class="c-top"><span class="num">№ RU-4012</span>
+            <div class="c-badges"><span class="pri high">Высокий</span><span class="days">🕒 1 дн</span><span class="star on">★</span></div></div>
+          <div class="company">АО «ТрансАвто» (РФ)</div><div class="desc">Автопарк, АКБ тяговые</div>
+          <div class="money-row"><span class="money">540 000 ₽</span><span class="wbadge">20% · ≈ 108 000 ₽</span></div>
+          <div class="next">След. шаг: <b>согласовать встречу</b></div>
+          <div class="owner"><span>👤 Сидоров К.</span><span>📅 12.06</span></div>
+        </div>
         <div class="add-card">＋ Добавить сделку</div>
       </div>
 
@@ -672,6 +722,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
           <div class="money-row"><span class="money">31 600 Br</span><span class="wbadge">45% · ≈ 14 220 Br</span></div>
           <div class="next">След. шаг: <b>посчитать цену из закупки</b></div>
           <div class="owner"><span>👤 Петрова А.</span><span>📅 12.06</span></div>
+        </div>
+        <div class="card" data-company="pl" data-cur="EUR" data-amt="11800">
+          <div class="c-top"><span class="num">№ PL-3011</span>
+            <div class="c-badges"><span class="pri mid">Средний</span><span class="days">🕒 2 дн</span><span class="star">★</span></div></div>
+          <div class="company">Trans-Bat Sp. z o.o.</div><div class="desc">Akumulatory trakcyjne, 8 szt</div>
+          <div class="money-row"><span class="money">11 800 €</span><span class="wbadge">45% · ≈ 5 310 €</span></div>
+          <div class="next">След. шаг: <b>obliczyć cenę</b></div>
+          <div class="owner"><span>👤 Nowak</span><span>📅 12.06</span></div>
         </div>
         <div class="add-card">＋ Добавить сделку</div>
       </div>
@@ -1094,15 +1152,45 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
 </div>
 
 <script>
+  /* ════════════════ ЮР-ЛИЦА + МУЛЬТИВАЛЮТА (объявлено первым — используется везде ниже) ════════════════
+     Граница раздельного учёта = юр-лицо (company). Доступ — на уровне ПОЛЬЗОВАТЕЛЯ:
+     показываем только доступные; глазок = «скрыть из переключателя» (право остаётся).
+     РАЗДЕЛЬНЫЙ УЧЁТ: у каждого ЮЛ свои сделки и СВОИ итоги в СВОЕЙ базовой валюте.
+     Цифры скорборда/воронки — нативные для ЮЛ (НЕ перекраска BYN в евро): cf = «размер бизнеса»
+     этого ЮЛ в его валюте (демо-множитель, не курс). Сделки в инвалюте → база ЮЛ по курсу НБ РБ. */
+  const COMPANIES = [
+    {id:'by', name:'ООО «АкуМир»',       country:'Беларусь', flag:'🇧🇾', base:'BYN', cf:1},
+    {id:'ru', name:'ООО «АкуМир-РУС»',   country:'Россия',   flag:'🇷🇺', base:'RUB', cf:40},
+    {id:'pl', name:'AkuMir Sp. z o.o.',  country:'Польша',   flag:'🇵🇱', base:'EUR', cf:0.12},
+  ];
+  // доступ пользователя (демо): к каким ЮЛ привязан. В бэкенде — из профиля + проверка company_id на сервере.
+  const userAccess = new Set(['by','ru','pl']);
+  const hiddenCo = new Set();          // скрытые глазком из переключателя (UI-фильтр, не право)
+  // выбор ЮЛ общий со всеми экранами CRM (sales-cur.js использует тот же ключ)
+  let curCompany = (()=>{ try{ return localStorage.getItem('salesCompany')||'by'; }catch(e){ return 'by'; } })();
+  if(!['by','ru','pl'].includes(curCompany)) curCompany='by';
+
+  // Курс к BYN (демо НБ РБ). base_amount = amount * FX[cur] / FX[base].
+  const FX = {BYN:1, USD:3.25, EUR:3.55, RUB:0.037, PLN:0.82};
+  const CUR_SIGN = {BYN:'Br', USD:'$', EUR:'€', RUB:'₽', PLN:'zł'};
+  const co = id => COMPANIES.find(c=>c.id===id);
+  const curBase = () => co(curCompany).base;          // базовая валюта текущего ЮЛ
+  const curSign = () => CUR_SIGN[curBase()] || curBase();
+  const curCf   = () => co(curCompany).cf;            // размер бизнеса ЮЛ (раздельный учёт)
+  const fmtCur = (amt, cur) => Math.round(amt).toLocaleString('ru-RU') + ' ' + (CUR_SIGN[cur]||cur);
+  // пересчёт суммы из валюты сделки в базовую валюту ЮЛ
+  function toBase(amt, cur, base){ return amt * (FX[cur]||1) / (FX[base]||1); }
+
   // ── Метрики скорборда: на каждый период свои факт/план (BYN, демо) ──
   // headline=true — крупная ячейка. money=true — формат BYN.
   // el = % прошедшего времени периода (для метки темпа «где должен быть»)
+  // pl.sum / pl.weight — сырые числа в BYN-базе; форматируются в render() в валюте текущего ЮЛ.
   const PERIODS = {
-    day:     { el:55, sub:"— 12 июня 2026 · сегодня", pl:{count:5,sum:"38 200 Br",weight:"≈ 19 400 Br",stuck:1,chip:"День в графике (~104%)"} },
-    week:    { el:70, sub:"— Неделя 24 (09–15.06) · план согласован", pl:{count:18,sum:"142 600 Br",weight:"≈ 74 800 Br",stuck:3,chip:"Прогноз недели: ~103% плана"} },
-    month:   { el:40, sub:"— Июнь 2026 · план продаж согласован РОПом", pl:{count:47,sum:"312 400 Br",weight:"≈ 168 200 Br",stuck:6,chip:"Прогноз закрытия: ~105% плана"} },
-    quarter: { el:81, sub:"— II квартал 2026 (апр–июн)", pl:{count:131,sum:"884 100 Br",weight:"≈ 491 300 Br",stuck:14,chip:"Прогноз квартала: ~86% — отстаём"} },
-    year:    { el:45, sub:"— 2026 год", pl:{count:512,sum:"3 240 000 Br",weight:"≈ 1 760 000 Br",stuck:38,chip:"Прогноз года: ~111% плана"} },
+    day:     { el:55, sub:"— 12 июня 2026 · сегодня", pl:{count:5,sum:38200,weight:19400,stuck:1,chip:"День в графике (~104%)"} },
+    week:    { el:70, sub:"— Неделя 24 (09–15.06) · план согласован", pl:{count:18,sum:142600,weight:74800,stuck:3,chip:"Прогноз недели: ~103% плана"} },
+    month:   { el:40, sub:"— Июнь 2026 · план продаж согласован РОПом", pl:{count:47,sum:312400,weight:168200,stuck:6,chip:"Прогноз закрытия: ~105% плана"} },
+    quarter: { el:81, sub:"— II квартал 2026 (апр–июн)", pl:{count:131,sum:884100,weight:491300,stuck:14,chip:"Прогноз квартала: ~86% — отстаём"} },
+    year:    { el:45, sub:"— 2026 год", pl:{count:512,sum:3240000,weight:1760000,stuck:38,chip:"Прогноз года: ~111% плана"} },
   };
 
   // факт/план по метрикам для каждого периода. [факт, план, формат, единица]
@@ -1159,14 +1247,18 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     ],
   };
 
+  // Денежные форматтеры скорборда. Вход — сумма в BYN-базе (демо); на выходе — в валюте
+  // ТЕКУЩЕГО ЮЛ с его множителем размера бизнеса (cf). Раздельный учёт: РФ-ЮЛ → ₽, PL → €.
   function fmtMoney(n){
-    if(n>=1000000) return (n/1000000).toFixed(2).replace('.',',')+" млн Br";
-    return n.toLocaleString('ru-RU').replace(/,/g,' ')+" Br";
+    const s = n*curCf(), sign = curSign();
+    if(s>=1000000) return (s/1000000).toFixed(2).replace('.',',')+" млн "+sign;
+    return Math.round(s).toLocaleString('ru-RU').replace(/,/g,' ')+" "+sign;
   }
   function fmtShort(n){ // компактно для прогноза: 735к / 1,76 млн
-    if(n>=1000000) return (n/1000000).toFixed(2).replace('.',',')+" млн Br";
-    if(n>=1000) return Math.round(n/1000)+"к Br";
-    return n+" Br";
+    const s = n*curCf(), sign = curSign();
+    if(s>=1000000) return (s/1000000).toFixed(2).replace('.',',')+" млн "+sign;
+    if(s>=1000) return Math.round(s/1000)+"к "+sign;
+    return Math.round(s)+" "+sign;
   }
   function fmtVal(v,kind){
     if(kind==="money") return fmtMoney(v);
@@ -1179,7 +1271,9 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     return {c:'var(--bad)',label:'🔴'};
   }
 
+  let curPeriod = 'month';
   function render(period){
+    curPeriod = period;
     const m = PERIODS[period];
     const elapsed = m.el; // % прошедшего времени периода
     const rows = DATA[period];
@@ -1223,11 +1317,13 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
 
     document.getElementById('sb-sub').textContent = m.sub;
     document.getElementById('pl-count').textContent = m.pl.count;
-    document.getElementById('pl-sum').textContent = m.pl.sum;
-    document.getElementById('pl-weight').textContent = m.pl.weight;
+    document.getElementById('pl-sum').textContent = fmtMoney(m.pl.sum);
+    document.getElementById('pl-weight').textContent = '≈ ' + fmtMoney(m.pl.weight);
     document.querySelector('.pipeline .chip').textContent = m.pl.chip;
     document.getElementById('pl-stuck').textContent = m.pl.stuck;
-    annotateMargin();   // пересчитать прогноз маржи под новую взвешенную выручку
+    // прогноз маржи pipeline = взвешенная выручка × демо-ставка, в валюте текущего ЮЛ
+    const plMargin = document.getElementById('pl-margin');
+    if(plMargin) plMargin.textContent = '≈ ' + fmtMoney(m.pl.weight*0.22);
   }
 
   document.getElementById('periods').addEventListener('click', e=>{
@@ -1309,6 +1405,7 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       inStock: card.dataset.stock === 'in', // товар в наличии → цена уже известна
       pri: priLevel(card), // приоритет сделки: high/mid/low
       incoming: parseIncoming(card.dataset.incoming), // {good, when, ship} — под приходящий товар
+      cur: card.dataset.cur || '', amt: parseFloat(card.dataset.amt), company: card.dataset.company || 'by',
     };
   }
   // «под приход»: "товар|дата|рейс" → объект (связь с планом/логистикой)
@@ -1346,6 +1443,14 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     return h;
   }
 
+  // строка «валюта сделки + курс НБ РБ → база» — только если сделка не в базовой валюте ЮЛ
+  function curRow(d){
+    const base = co(d.company).base;
+    if(!d.cur || isNaN(d.amt) || d.cur===base) return '';
+    const rate = (FX[d.cur]/FX[base]).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+    return `<div class="kv"><span class="k">Валюта сделки</span><span class="v">${fmtCur(d.amt,d.cur)}
+      <span style="color:var(--faint);font-weight:400">· курс НБ РБ ${rate} → ${fmtCur(toBase(d.amt,d.cur,base),base)}</span></span></div>`;
+  }
   function openDrawer(card){
     const d = readCard(card);
     document.getElementById('dk-num').textContent = d.num;
@@ -1369,6 +1474,8 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
         </div>
         ${d.inStock?`<div class="kv"><span class="k">Товар</span><span class="v" style="color:var(--money-ink,#0E7C4A);font-weight:600">✓ в наличии · цена известна</span></div>`:''}
         ${d.incoming?`<div class="kv"><span class="k">Под приход</span><span class="v" style="color:var(--amber-ink,#B45309);font-weight:600">🚚 ${d.incoming.good} · придёт ${d.incoming.when}</span></div>`:''}
+        <div class="kv"><span class="k">Юр-лицо</span><span class="v">${co(d.company).flag} ${co(d.company).name} · база ${co(d.company).base}</span></div>
+        ${curRow(d)}
         <div class="kv"><span class="k">Ответственный</span><span class="v">${d.owner||'—'}</span></div>
         ${d.date?`<div class="kv"><span class="k">Дата</span><span class="v">${d.date}</span></div>`:''}
         ${d.next?`<div class="kv"><span class="k">След. шаг</span><span class="v">${d.next.replace(/^След:?\s*/,'')}</span></div>`:''}
@@ -1675,6 +1782,75 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
   }
   markIncoming();
 
+  // (контекст юр-лиц/валют объявлен в начале скрипта — см. блок «ЮР-ЛИЦА + МУЛЬТИВАЛЮТА»)
+  function renderCoMenu(){
+    const cur = co(curCompany);
+    document.getElementById('coFlag').textContent = cur.flag;
+    document.getElementById('coName').textContent = cur.name;
+    document.getElementById('coBase').textContent = cur.base;
+    const list = COMPANIES.filter(c=>userAccess.has(c.id));
+    const opts = list.map(c=>{
+      const on = c.id===curCompany, hid = hiddenCo.has(c.id);
+      return `<div class="co-opt ${on?'on':''} ${hid?'hidden-co':''}" onclick="pickCompany('${c.id}')">
+        <span class="co-check">${on?'✓':''}</span>
+        <span class="flag">${c.flag}</span>
+        <span><div class="co-name">${c.name}</div><div class="co-sub">${c.country}</div></span>
+        <span class="co-base">${c.base}</span>
+        <span class="co-eye" onclick="event.stopPropagation();toggleHideCo('${c.id}')" title="${hid?'Показывать в переключателе':'Скрыть из переключателя (доступ остаётся)'}">${hid?'🚫':'👁'}</span>
+      </div>`;
+    }).join('');
+    document.getElementById('coMenu').innerHTML =
+      `<div class="co-grp">Юр-лицо · контур учёта</div>${opts}
+       <div class="co-divider"></div>
+       <div class="co-foot">Видите только доступные вам юр-лица. 👁 скрывает из списка, не лишая доступа. Цифры и сделки — раздельно по каждому ЮЛ.</div>`;
+  }
+  window.toggleCoMenu = function(e){ e.stopPropagation(); document.getElementById('coMenu').classList.toggle('show'); };
+  window.toggleHideCo = function(id){
+    if(id===curCompany) return;             // нельзя скрыть текущее
+    hiddenCo.has(id) ? hiddenCo.delete(id) : hiddenCo.add(id);
+    renderCoMenu();
+  };
+  window.pickCompany = function(id){
+    if(!userAccess.has(id)) return;         // граница доступа (в бэкенде — 403 на сервере)
+    curCompany = id;
+    try{ localStorage.setItem('salesCompany', id); }catch(e){}  // общий выбор для всех экранов
+    document.getElementById('coMenu').classList.remove('show');
+    renderCoMenu();
+    render(curPeriod);   // скорборд + pipeline в валюте нового ЮЛ
+    renderBoard();       // доска + суммы колонок (внутри: applyCompany + recomputeColumnSums)
+    toast('Юр-лицо → '+co(id).name+' · база '+co(id).base);
+  };
+  document.addEventListener('click', e=>{ if(!e.target.closest('.co-pick')) document.getElementById('coMenu').classList.remove('show'); });
+
+  // применить контекст ЮЛ: показать только его сделки (раздельный учёт)
+  function applyCompany(){
+    document.querySelectorAll('.board .card').forEach(card=>{
+      const owner = card.dataset.company || 'by';   // без метки → основное ЮЛ
+      card.classList.toggle('co-off', owner!==curCompany);
+    });
+  }
+
+  // дописать в money-row карточки её валюту + пересчёт в базовую (если сделка не в базовой)
+  function annotateCardCurrency(){
+    document.querySelectorAll('.board .card[data-cur]').forEach(card=>{
+      const cur = card.dataset.cur, amt = parseFloat(card.dataset.amt);
+      const base = co(card.dataset.company||'by').base;
+      if(!cur || isNaN(amt) || cur===base) return;
+      const moneyEl = card.querySelector('.money'); if(!moneyEl) return;
+      moneyEl.textContent = fmtCur(amt, cur);     // показываем в валюте сделки
+      moneyEl.title = '≈ '+fmtCur(toBase(amt,cur,base), base)+' (курс НБ РБ на дату)';
+      if(!card.querySelector('.cur-base')){
+        const b = document.createElement('span'); b.className='cur-base';
+        b.style.cssText='font-size:11px;color:var(--faint)';
+        b.textContent = '≈ '+fmtCur(toBase(amt,cur,base), base);
+        moneyEl.parentNode.insertBefore(b, moneyEl.nextSibling);
+      }
+    });
+  }
+  annotateCardCurrency();
+  renderCoMenu();
+  applyCompany();
+
   // сортировка карточек в колонке по приоритету: Высокий → Средний → Низкий (стабильно)
   const PRI_RANK = {high:0, mid:1, low:2};
   function sortColumnByPriority(col){
@@ -1696,8 +1872,8 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
       <div class="ch-meta">${meta}</div>${weight?`<div class="ch-weight">${weight}</div>`:''}</div></div>
       ${cards}<div class="add-card">＋ Добавить</div></div>`;
   }
-  function rcard(num,reg,pri,priLbl,days,stuck,company,desc,money,wbadge,next,owner,date){
-    return `<div class="card"><div class="c-top"><span class="num">${num}</span>
+  function rcard(num,reg,pri,priLbl,days,stuck,company,desc,money,wbadge,next,owner,date,attrs){
+    return `<div class="card" ${attrs||''}><div class="c-top"><span class="num">${num}</span>
       <div class="c-badges">${reg?'<span class="pri" style="background:var(--green-soft);color:var(--green-ink)">★ Пост.</span>':''}<span class="pri ${pri}">${priLbl}</span>${days?`<span class="days ${stuck?'stuck':''}">🕒 ${days}</span>`:''}<span class="star on">★</span></div></div>
       <div class="company">${company}</div><div class="desc">${desc}</div>
       <div class="money-row"><span class="money">${money}</span>${wbadge?`<span class="wbadge">${wbadge}</span>`:''}</div>
@@ -1767,32 +1943,35 @@ body:has(.drawer.show) .theme-tgl, body:has(.ov.show) .theme-tgl{opacity:0;point
     applyCardFields();
     sortAllColumns(); // карточки по приоритету: высокий выше
     markActionDates(); applyActFilter();
-    annotateMargin();
+    annotateCardCurrency(); applyCompany(); // сначала валюта карточек + фильтр по ЮЛ
+    recomputeColumnSums();                  // потом суммы/счётчики колонок из видимых карточек
     document.getElementById('filterBtn').classList.remove('warn');
     document.getElementById('stuckBtn').classList.remove('on');
   }
-  // ── второй взвешенный показатель: «прогноз маржи» = взвешенная выручка × демо-ставка маржи ──
-  // hoisted-функция со всеми хелперами ВНУТРИ: вызывается и из ранней render() (до const boardEl/helpers — TDZ)
-  // ponytail: демо-ставка-константа; в проде — маржа из landed cost по строкам (методика цены, задача №0)
-  function annotateMargin(){
-    const DEMO_MARGIN = 0.22;
-    const fmtBr = n => Math.round(n).toLocaleString('ru-RU').replace(/,/g,' ') + ' Br';
-    const numOf = s => parseInt((s||'').replace(/[^\d]/g,'')) || 0;   // «взвешенно: 8 450 Br» → 8450
-    // по колонкам: под строкой «взвешенно/прогноз: N Br» добавить «прогноз маржи ~M Br»
-    const board = document.querySelector('.board');
-    board && board.querySelectorAll('.ch-weight').forEach(w=>{
-      w.parentElement.querySelector('.ch-margin')?.remove();
-      const rev = numOf(w.textContent);
-      if(!rev) return;
-      const m = document.createElement('div');
-      m.className = 'ch-margin';
-      m.textContent = `прогноз маржи: ~${fmtBr(rev*DEMO_MARGIN)}`;
-      w.insertAdjacentElement('afterend', m);
+  // ── Раздельный учёт по колонкам: счётчик и сумма колонки считаются ИЗ ВИДИМЫХ карточек
+  //    текущего ЮЛ и показываются в ЕГО валюте. Взвешенный прогноз = сумма × вероятность стадии
+  //    (берётся из исходной BY-разметки колонки), маржа = взвешенно × демо-ставка.
+  //    ponytail: демо-ставка-константа; в проде — маржа из landed cost по строкам (методика цены). ──
+  const DEMO_MARGIN = 0.22;
+  // Заменить денежные токены «NNN Br» в строке на сумму в валюте текущего ЮЛ (cf + знак).
+  // Вход — исходная BY-разметка (Br); fmtMoney сам умножит на cf и поставит знак валюты.
+  const reMoney = text => text.replace(/([\d][\d\s]*)\s*Br/g,
+    (_, num) => fmtMoney(parseInt(num.replace(/\s/g,''))||0));
+  // Колонки воронки: счётчики сделок сохраняем, денежные суммы — в валюте текущего ЮЛ.
+  function recomputeColumnSums(){
+    document.querySelectorAll('.board .col').forEach(col=>{
+      const meta = col.querySelector('.ch-meta');
+      const wEl  = col.querySelector('.ch-weight');
+      if(meta) meta.textContent = reMoney(meta.textContent);
+      col.querySelector('.ch-margin')?.remove();
+      if(wEl){
+        const wBY = parseInt(wEl.textContent.replace(/[^\d]/g,''))||0; // взвешенная выручка (BY-база)
+        wEl.textContent = reMoney(wEl.textContent);
+        if(wBY>0){ const mg=document.createElement('div'); mg.className='ch-margin';
+          mg.textContent = `прогноз маржи: ~${fmtMoney(wBY*DEMO_MARGIN)}`;
+          wEl.insertAdjacentElement('afterend', mg); }
+      }
     });
-    // шапка pipeline: прогноз маржи из взвешенной выручки
-    const plMargin = document.getElementById('pl-margin');
-    if(plMargin){ const rev = numOf(document.getElementById('pl-weight').textContent);
-      plMargin.textContent = '≈ ' + fmtBr(rev*DEMO_MARGIN); }
   }
   // подсветить карточки с действием сегодня/завтра (видно в стадийном канбане)
   function markActionDates(){
