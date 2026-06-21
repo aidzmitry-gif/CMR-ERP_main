@@ -106,6 +106,57 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s;pointer-events:none;max-width:80vw;text-align:center}
   .toast.show{opacity:1}
 
+
+/* ═══ ПРАВАЯ РЕЙКА ЧАТОВ (плавающая, сворачиваемая — как в Сделках) ═══ */
+body{padding-right:88px}                     /* место под свёрнутую рейку */
+.chats{position:fixed;top:0;right:0;height:100vh;width:72px;z-index:60}
+.chats-inner{position:absolute;top:0;right:0;height:100%;width:72px;background:var(--surface);
+     transition:width .22s cubic-bezier(.4,0,.2,1);overflow-y:auto;overflow-x:hidden;box-shadow:none;border-left:1px solid var(--line)}
+.chats:hover .chats-inner{width:308px;box-shadow:-12px 0 28px rgba(16,24,40,.10)}
+.chats-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;white-space:nowrap}
+.chats-head .ttl{font-weight:700;font-size:14px;opacity:0;transition:opacity .18s}
+.chats:hover .chats-head .ttl{opacity:1}
+.chats-head .ico{width:40px;display:flex;justify-content:center;flex-shrink:0;font-size:17px;color:var(--muted)}
+.chats-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);
+     padding:8px 16px 4px;opacity:0;transition:opacity .18s;white-space:nowrap}
+.chats:hover .chats-group{opacity:1}
+.chat-row{display:flex;align-items:center;gap:11px;padding:8px 16px;cursor:pointer;white-space:nowrap;position:relative}
+.chat-row:hover{background:var(--sunken)}
+.chats .avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+     font-weight:700;font-size:14px;color:#fff;position:relative}
+.chats .avatar .unread{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:99px;background:var(--bad);
+     color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--surface)}
+.chat-meta{min-width:0;opacity:0;transition:opacity .18s}
+.chats:hover .chat-meta{opacity:1}
+.chat-meta .nm{font-weight:600;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+.chat-meta .last{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.chats-hint{position:sticky;bottom:0;text-align:center;font-size:10px;color:var(--faint);opacity:0;transition:opacity .18s;padding:10px 0;background:var(--surface)}
+.chats:hover .chats-hint{opacity:1}
+/* окно чата */
+.chatwin{position:fixed;bottom:0;right:84px;width:340px;height:480px;max-height:80vh;background:var(--surface);
+     border-radius:14px 14px 0 0;box-shadow:0 -8px 40px rgba(15,23,42,.22);display:none;flex-direction:column;z-index:65;overflow:hidden}
+.chatwin.show{display:flex}
+.cw-head{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--line);background:var(--surface)}
+.cw-av{width:36px;height:36px;border-radius:50%;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cw-id{min-width:0;flex:1}
+.cw-id .nm{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cw-id .st{font-size:11px;color:var(--ok,#16a34a)}
+.cw-x{width:28px;height:28px;border:none;background:var(--sunken);border-radius:7px;cursor:pointer;color:var(--muted);font-size:13px}
+.cw-body{flex:1;overflow-y:auto;padding:14px 13px;background:var(--sunken);display:flex;flex-direction:column;gap:8px}
+.cw-bub{font-size:12.5px;padding:8px 11px;border-radius:12px;max-width:82%;line-height:1.4;position:relative}
+.cw-bub.in{background:var(--surface);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:4px;color:var(--ink)}
+.cw-bub.out{background:var(--brand);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.cw-bub .bm{font-size:9.5px;margin-top:4px;opacity:.6}
+.cw-day{align-self:center;font-size:10px;color:var(--faint);background:var(--sunken);border:1px solid var(--line);border-radius:99px;padding:2px 10px;margin:2px 0}
+.cw-chan{display:flex;gap:5px;padding:8px 11px 0}
+.cw-chan button{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;color:var(--muted)}
+.cw-chan button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:600}
+.cw-compose{display:flex;gap:8px;align-items:flex-end;padding:9px 11px 11px;border-top:1px solid var(--line);background:var(--surface)}
+.cw-compose textarea{flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;resize:none;height:38px;max-height:90px;outline:none;font-family:inherit;background:var(--surface);color:var(--ink)}
+.cw-compose textarea:focus{border-color:var(--brand)}
+.cw-send{width:38px;height:38px;border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:16px;cursor:pointer;flex-shrink:0}
+.cw-send:hover{filter:brightness(1.08)}
+
 /* ═══ ДИЗАЙН-СИСТЕМА: 2 темы (C/D). Аппенд-слой перекрывает значения переменных файла. ═══ */
 :root{
   --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
@@ -172,6 +223,29 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 </style>
 </head>
 <body>
+
+<!-- ═══ Правая рейка чатов (плавающая, как в Сделках) ═══ -->
+<aside class="chats" id="chatRailMarker">
+  <div class="chats-inner">
+    <div class="chats-head"><span class="ico">💬</span><span class="ttl">Чаты и дела</span></div>
+    <div class="chats-group">Клиенты</div>
+    <div class="chat-row" data-chat="beltrans"><div class="avatar" style="background:var(--brand)">БТ<span class="unread">3</span></div><div class="chat-meta"><div class="nm">ОАО «Белтранс»</div><div class="last">Когда подъедете на осмотр парка?</div></div></div>
+    <div class="chat-row" data-chat="park7"><div class="avatar" style="background:#F59E0B">А7<span class="unread">1</span></div><div class="chat-meta"><div class="nm">Автопарк №7</div><div class="last">Жду предложение по году</div></div></div>
+    <div class="chat-row" data-chat="minskelektro"><div class="avatar" style="background:#14B8A6">МЭ</div><div class="chat-meta"><div class="nm">УП «Минскэлектро»</div><div class="last">Счёт передали на оплату</div></div></div>
+    <div class="chat-row" data-chat="voltavto"><div class="avatar" style="background:#8B5CF6">ВА<span class="unread">2</span></div><div class="chat-meta"><div class="nm">ТД «ВольтАвто»</div><div class="last">Интересуют АКБ на 12 машин</div></div></div>
+    <div class="chats-group">Коллеги</div>
+    <div class="chat-row" data-chat="rop"><div class="avatar" style="background:#0EA5E9">СК</div><div class="chat-meta"><div class="nm">Сидоров К. · РОП</div><div class="last">Согласовал план на июнь</div></div></div>
+    <div class="chat-row" data-chat="petrova"><div class="avatar" style="background:#64748B">ПА</div><div class="chat-meta"><div class="nm">Петрова А.</div><div class="last">Передай контакт по Гомелю</div></div></div>
+    <div class="chats-hint">наведи — раскрыть</div>
+  </div>
+</aside>
+<div class="chatwin" id="chatwin">
+  <div class="cw-head"><div class="cw-av" id="cw-av">БТ</div><div class="cw-id"><div class="nm" id="cw-nm">—</div><div class="st" id="cw-st">● онлайн · WhatsApp</div></div><button class="cw-x" onclick="closeChat()">✕</button></div>
+  <div class="cw-body" id="cw-body"></div>
+  <div class="cw-chan" id="cw-chan"><button class="on" data-ch="WhatsApp">WhatsApp</button><button data-ch="Telegram">Telegram</button><button data-ch="Email">Email</button><button data-ch="Звонок">☎ Звонок</button></div>
+  <div class="cw-compose"><textarea id="cw-input" placeholder="Написать сообщение…"></textarea><button class="cw-send" id="cw-send" title="Отправить">➤</button></div>
+</div>
+
 <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
   <div class="backbar"><a href="sales-2.0-index.html">← К списку макетов</a><span class="crumb">Реестр документов · <b>все документы CRM</b> · общий + врезка в отдел</span></div>
 
@@ -388,5 +462,55 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   if(_qr && ROLE[_qr]){ curRole=_qr; document.querySelectorAll('#roleseg button').forEach(b=>b.classList.toggle('on', b.dataset.role===_qr)); }
   fillFilters(); render();
 </script>
+
+<script>
+(function(){
+  const CHATS={
+    beltrans:{av:'БТ',c:'var(--brand)',nm:'ОАО «Белтранс»',chan:'WhatsApp',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Здравствуйте! Получили ваше КП по парку.',m:'WhatsApp · 09:40'},{d:'in',t:'Когда сможете подъехать на осмотр парка?',m:'WhatsApp · 09:41'},{d:'out',t:'Добрый день! Готовы 13.06 в 11:00, подойдёт?',m:'WhatsApp · 10:05 ✓✓'}]},
+    park7:{av:'А7',c:'#F59E0B',nm:'Автопарк №7',chan:'Email',msgs:[{d:'day',t:'Вчера'},{d:'out',t:'Подготовили предложение по годовой поставке, во вложении.',m:'Email · 16:00'},{d:'in',t:'Спасибо, изучаем. Жду предложение по году.',m:'Email · 17:20'}]},
+    minskelektro:{av:'МЭ',c:'#14B8A6',nm:'УП «Минскэлектро»',chan:'Email',msgs:[{d:'day',t:'Сегодня'},{d:'out',t:'Счёт СЧ-0421 выставлен, направил на почту.',m:'Email · 11:10'},{d:'in',t:'Счёт получили, передали на оплату.',m:'Email · 12:00'}]},
+    voltavto:{av:'ВА',c:'#8B5CF6',nm:'ТД «ВольтАвто»',chan:'WhatsApp',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Интересуют АКБ на 12 машин, что есть в наличии?',m:'Сайт · 10:02'},{d:'in',t:'И цену опт, пожалуйста.',m:'WhatsApp · 10:03'}]},
+    rop:{av:'СК',c:'#0EA5E9',nm:'Сидоров К. · РОП',chan:'Telegram',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Согласовал твой план на июнь. Держим темп по Белтрансу.',m:'Telegram · 08:30'}]},
+    petrova:{av:'ПА',c:'#64748B',nm:'Петрова А.',chan:'Telegram',msgs:[{d:'day',t:'Вчера'},{d:'in',t:'Передай контакт по Гомелю, у меня там встреча.',m:'Telegram · 15:12'}]},
+  };
+  let curChat=null;
+  function renderThread(key){
+    const c=CHATS[key]; const body=document.getElementById('cw-body'); body.innerHTML='';
+    c.msgs.forEach(m=>{
+      if(m.d==='day'){ const d=document.createElement('div'); d.className='cw-day'; d.textContent=m.t; body.appendChild(d); return; }
+      const b=document.createElement('div'); b.className='cw-bub '+m.d; b.innerHTML=m.t+'<div class="bm">'+m.m+'</div>'; body.appendChild(b);
+    });
+    body.scrollTop=body.scrollHeight;
+  }
+  function openChat(key){
+    const c=CHATS[key]; if(!c) return; curChat=key;
+    document.getElementById('cw-av').textContent=c.av;
+    document.getElementById('cw-av').style.background=c.c;
+    document.getElementById('cw-nm').textContent=c.nm;
+    document.getElementById('cw-st').textContent='● онлайн · '+c.chan;
+    document.querySelectorAll('#cw-chan button').forEach(b=>b.classList.toggle('on', b.dataset.ch===c.chan));
+    renderThread(key);
+    document.getElementById('chatwin').classList.add('show');
+    document.getElementById('cw-input').focus();
+  }
+  window.closeChat=function(){ document.getElementById('chatwin').classList.remove('show'); };
+  document.querySelectorAll('.chat-row').forEach(row=>row.addEventListener('click', ()=>openChat(row.dataset.chat)));
+  document.getElementById('cw-chan').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#cw-chan button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    document.getElementById('cw-st').textContent='● онлайн · '+b.dataset.ch;
+  });
+  function sendMsg(){
+    const inp=document.getElementById('cw-input'); const txt=inp.value.trim(); if(!txt||!curChat) return;
+    const chan=document.querySelector('#cw-chan button.on')?.dataset.ch||'WhatsApp';
+    CHATS[curChat].msgs.push({d:'out',t:txt,m:chan+' · сейчас ✓'});
+    renderThread(curChat); inp.value='';
+    setTimeout(()=>{ if(curChat){ CHATS[curChat].msgs.push({d:'in',t:'Принял, спасибо!',m:chan+' · сейчас'}); if(document.getElementById('chatwin').classList.contains('show')) renderThread(curChat); } }, 1400);
+  }
+  document.getElementById('cw-send').addEventListener('click', sendMsg);
+  document.getElementById('cw-input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+})();
+</script>
+
 </body>
 </html>
