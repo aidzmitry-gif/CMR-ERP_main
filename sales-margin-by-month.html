@@ -79,6 +79,31 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .note{margin-top:16px;font-size:12px;color:var(--faint);display:flex;gap:8px}
   .note b{color:var(--ink)}
 
+  /* ═══ ГОДОВАЯ ЦЕЛЬ (валовая прибыль) — декомпозиция и «добрать» ═══ */
+  .goal{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:16px}
+  .goal-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .goal-ttl{font-weight:800;font-size:14px}
+  .goal-ttl .yr{color:var(--faint);font-weight:600;font-size:12px}
+  .goal-target{font-size:20px;font-weight:800;letter-spacing:-.01em}
+  .goal-bar{display:flex;height:10px;border-radius:99px;background:var(--sunken);overflow:hidden;margin:11px 0 9px}
+  .goal-bar .seg{height:100%}
+  .goal-bar .seg.fact{background:var(--ok)}.goal-bar .seg.plan{background:var(--brand)}
+  .goal-legend{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .goal-legend b{color:var(--ink);font-weight:700}
+  .goal-legend em{font-style:normal;color:var(--faint)}
+  .goal-legend .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  .goal-legend .dot.fact{background:var(--ok)}.goal-legend .dot.plan{background:var(--brand)}.goal-legend .dot.gap{background:var(--line-strong)}
+  /* строка «цель месяца / добрать» в карточке месяца */
+  .mcard .tgt{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+  .mcard .tgt .need{font-weight:700}
+  .mcard .tgt .need.ok{color:var(--green-ink)}.mcard .tgt .need.gap{color:var(--amber-ink,#B45309)}
+  .mcard .tgt .yr{color:var(--faint);white-space:nowrap}
+  /* доля машины в прибыли месяца */
+  .ship .share{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:10.5px;color:var(--muted)}
+  .ship .share .sbar{flex:1;height:4px;border-radius:99px;background:var(--sunken);overflow:hidden}
+  .ship .share .sbar span{display:block;height:100%;background:var(--brand);border-radius:99px}
+  .ship .share b{color:var(--brand-700);font-weight:700;white-space:nowrap}
+
 
 /* ═══ ЛЕВОЕ МЕНЮ (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ */
 body{padding-left:84px}                       /* место под свёрнутое меню */
@@ -267,6 +292,20 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 <a href="sales-2.0-index.html" style="position:fixed;left:78px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
   <h1>План валовой прибыли по месяцам</h1>
   <div class="sub">Какие машины и товары в каком месяце · плановая валовая прибыль и загрузка · BYN · маржа = продажа − landed cost (из закупок)</div>
+
+  <!-- годовая цель по валовой прибыли: декомпозиция на месяцы + сколько добрать -->
+  <div class="goal" id="goalBox">
+    <div class="goal-head">
+      <div class="goal-ttl">🎯 Годовая цель · валовая прибыль <span class="yr">2026 · декомпозиция по месяцам</span></div>
+      <div class="goal-target" id="goalTarget">—</div>
+    </div>
+    <div class="goal-bar"><span class="seg fact" id="gFactBar"></span><span class="seg plan" id="gPlanBar"></span></div>
+    <div class="goal-legend">
+      <span><i class="dot fact"></i> Факт (янв–май): <b id="gFact">—</b> <em id="gFactP"></em></span>
+      <span><i class="dot plan"></i> План вперёд (июнь+): <b id="gPlan">—</b> <em id="gPlanP"></em></span>
+      <span><i class="dot gap"></i> Осталось до годовой цели: <b id="gGap">—</b> <em id="gGapP"></em></span>
+    </div>
+  </div>
 
   <!-- фильтр по менеджерам: каждый видит свои цифры -->
   <div class="mgr-bar">
@@ -467,9 +506,33 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   // плановая вместимость месяца (для %% загрузки) ≈ исходная выручка при 100/88/54/30
   const CAP = [186000/0.88, 198000/1.0, 130000/0.54, 92000/0.30];
 
+  // ── Годовая цель по валовой прибыли (демо, BYN), декомпозиция сверху-вниз на месяцы ──
+  // ANNUAL_GOAL = FACT_PRIOR (закрытые янв–май) + Σ MONTH_TARGET (форвард июнь+). Зазор «добрать» = таргет − план.
+  const ANNUAL_GOAL = 760000;
+  const FACT_PRIOR  = 280000;
+  const MONTH_TARGET = [70000, 70000, 70000, 270000]; // июнь, июль, август, сентябрь+ (4 мес)
+
   function shipFin(ship){
     const v = ship.querySelectorAll('.fin .v');
     return { rev:num(v[0]?.textContent), cost:num(v[1]?.textContent), gp:num(v[2]?.textContent) };
+  }
+
+  // Плановая прибыль месяца (все менеджеры) — для годовой шапки (planAhead).
+  // Доля каждой машины считается в apply() от ВИДИМОГО плана месяца (согласовано с шапкой при фильтре).
+  const monthGpFull = cols.map(col=>[...col.querySelectorAll('.ship')].reduce((s,sh)=>s+shipFin(sh).gp,0));
+
+  // Годовая шапка: цель = факт (закрыто) + план вперёд + «добрать». Уровень отдела (фильтр не меняет).
+  function renderGoal(){
+    const planAhead = monthGpFull.reduce((a,b)=>a+b,0);
+    const gap = Math.max(0, ANNUAL_GOAL - FACT_PRIOR - planAhead);
+    const pc = n => Math.round(n/ANNUAL_GOAL*100);
+    const set = (id,t)=>{ const e=document.getElementById(id); if(e) e.textContent=t; };
+    set('goalTarget', `${fmt(ANNUAL_GOAL)} Br`);
+    set('gFact', `${fmt(FACT_PRIOR)} Br`);   set('gFactP', pc(FACT_PRIOR)+'%');
+    set('gPlan', `${fmt(planAhead)} Br`);    set('gPlanP', pc(planAhead)+'%');
+    set('gGap',  `${fmt(gap)} Br`);          set('gGapP',  pc(gap)+'%');
+    const fb=document.getElementById('gFactBar'); if(fb) fb.style.width=pc(FACT_PRIOR)+'%';
+    const pb=document.getElementById('gPlanBar'); if(pb) pb.style.width=pc(planAhead)+'%';
   }
   function apply(mgr){
     document.querySelectorAll('#mgrSeg button').forEach(b=>b.classList.toggle('on', b.dataset.mgr===mgr));
@@ -483,6 +546,14 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
         if(vis){ const f=shipFin(s); rev+=f.rev; cost+=f.cost; gp+=f.gp; shown++; }
       });
       col.classList.toggle('mgr-empty', shown===0);
+      // доля каждой ВИДИМОЙ машины в прибыли месяца — от пересчитанного видимого плана (согласовано с шапкой)
+      ships.forEach(s=>{
+        if(s.classList.contains('mgr-hidden')) return;
+        const pct = gp ? Math.round(shipFin(s).gp/gp*100) : 0;
+        let el = s.querySelector('.share');
+        if(!el){ el=document.createElement('div'); el.className='share'; s.appendChild(el); }
+        el.innerHTML = `<span>доля в прибыли месяца</span><span class="sbar"><span style="width:${pct}%"></span></span><b>${pct}%</b>`;
+      });
       const mrg = rev ? Math.round(gp/rev*100) : 0;
       const load = Math.min(100, Math.round(rev/CAP[i]*100));
       // обновить шапку колонки
@@ -499,14 +570,31 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
       card.querySelector('.loadl').textContent = mgr==='all'
         ? (load>=100?'загрузка 100% · нужна ещё машина':load>=80?`загрузка ~${load}% · ещё есть место`:`загрузка ~${load}% · добирать сделками`)
         : (shown? `доля менеджера · ${load}% месяца` : 'нет рейсов этого менеджера');
+      // строка «цель месяца / добрать» (всё) либо «вклад менеджера в цель» (фильтр)
+      let tgt = card.querySelector('.tgt');
+      if(!tgt){ tgt=document.createElement('div'); tgt.className='tgt'; card.appendChild(tgt); }
+      const T = MONTH_TARGET[i] || 0;
+      const yr = `<span class="yr">${Math.round(T/ANNUAL_GOAL*100)}% год. цели</span>`;
+      if(mgr==='all'){
+        const diff = gp - T;
+        const need = diff>=0
+          ? `<span class="need ok">цель достигнута · +${fmt(diff)} Br</span>`
+          : `<span class="need gap">добрать ${fmt(-diff)} Br</span>`;
+        tgt.innerHTML = `<span>цель ${fmt(T)} Br · ${need}</span>${yr}`;
+      } else {
+        const contrib = T ? Math.round(gp/T*100) : 0;
+        tgt.innerHTML = `<span>вклад в цель: <b>${fmt(gp)} Br</b> (${contrib}%)</span>${yr}`;
+      }
     });
   }
   document.getElementById('mgrSeg').addEventListener('click', e=>{
     const b=e.target.closest('button[data-mgr]'); if(b) apply(b.dataset.mgr);
   });
+  renderGoal();
   apply('all');
 })();
 </script>
 
+<script src="sales-cur.js"></script>
 </body>
 </html>
