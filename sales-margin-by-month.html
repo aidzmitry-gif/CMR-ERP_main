@@ -80,6 +80,33 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .note b{color:var(--ink)}
 
 
+/* ═══ ЛЕВОЕ МЕНЮ (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ */
+body{padding-left:84px}                       /* место под свёрнутое меню */
+.lnav{position:fixed;top:0;left:0;height:100vh;width:64px;z-index:60}
+.lnav-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);border-right:1px solid var(--line);
+     padding:16px 12px;overflow:hidden;white-space:nowrap;transition:width .22s cubic-bezier(.4,0,.2,1)}
+.lnav:hover .lnav-inner{width:230px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+.lnav .logo{font-weight:800;font-size:16px;color:var(--ink);padding:6px 8px 18px;display:flex;gap:10px;align-items:center}
+.lnav .logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.lnav .logo .lbl{opacity:0;transition:opacity .18s}.lnav:hover .logo .lbl{opacity:1}
+.lnav .nav-group{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:14px 8px 6px;opacity:0;transition:opacity .18s}
+.lnav:hover .nav-group{opacity:1}
+.lnav .nav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;color:var(--muted);font-size:13.5px;cursor:pointer}
+.lnav .nav-item:hover{background:var(--sunken)}
+.lnav .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+.lnav .nav-item .ic{width:24px;text-align:center;flex-shrink:0;opacity:.85}
+.lnav .nav-item .lbl{opacity:0;transition:opacity .18s}.lnav:hover .nav-item .lbl{opacity:1}
+.lnav-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:var(--faint);opacity:0;transition:opacity .18s}
+.lnav:hover .lnav-hint{opacity:1}
+
+/* ═══ ФИЛЬТР ПО МЕНЕДЖЕРАМ ═══ */
+.mgr-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.mgr-bar .mgr-lbl{font-size:12.5px;font-weight:600;color:var(--muted)}
+.mgr-seg{display:inline-flex;gap:4px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.mgr-seg button{border:none;background:none;border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer}
+.mgr-seg button.on{background:var(--brand-100);color:var(--brand-700)}
+.ship.mgr-hidden,.col.mgr-empty{display:none}
+
 /* ═══ ПРАВАЯ РЕЙКА ЧАТОВ (плавающая, сворачиваемая — как в Сделках) ═══ */
 body{padding-right:88px}                     /* место под свёрнутую рейку */
 .chats{position:fixed;top:0;right:0;height:100vh;width:72px;z-index:60}
@@ -197,6 +224,23 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 </head>
 <body>
 
+<!-- ═══ Левое меню (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ -->
+<aside class="lnav">
+  <div class="lnav-inner">
+    <div class="logo"><span class="mark">A</span><span class="lbl">AI-First OS</span></div>
+    <div class="nav-group">CRM</div>
+    <div class="nav-item"><span class="ic">▦</span><span class="lbl">Сделки</span></div>
+    <div class="nav-item"><span class="ic">◔</span><span class="lbl">Лиды</span></div>
+    <div class="nav-item active"><span class="ic">📊</span><span class="lbl">План прибыли</span></div>
+    <div class="nav-item"><span class="ic">◑</span><span class="lbl">РОП</span></div>
+    <div class="nav-group">ERP</div>
+    <div class="nav-item"><span class="ic">▣</span><span class="lbl">Производство</span></div>
+    <div class="nav-item"><span class="ic">⛓</span><span class="lbl">Закупки</span></div>
+    <div class="nav-item"><span class="ic">⚖</span><span class="lbl">Финансы</span></div>
+    <div class="lnav-hint">наведи — раскрыть</div>
+  </div>
+</aside>
+
 <!-- ═══ Правая рейка чатов (плавающая, как в Сделках) ═══ -->
 <aside class="chats" id="chatRailMarker">
   <div class="chats-inner">
@@ -220,9 +264,20 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 </div>
 
 <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
-<a href="sales-2.0-index.html" style="position:fixed;left:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+<a href="sales-2.0-index.html" style="position:fixed;left:78px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
   <h1>План валовой прибыли по месяцам</h1>
   <div class="sub">Какие машины и товары в каком месяце · плановая валовая прибыль и загрузка · BYN · маржа = продажа − landed cost (из закупок)</div>
+
+  <!-- фильтр по менеджерам: каждый видит свои цифры -->
+  <div class="mgr-bar">
+    <span class="mgr-lbl">👤 Менеджер:</span>
+    <div class="mgr-seg" id="mgrSeg">
+      <button class="on" data-mgr="all" onclick="">Все (отдел)</button>
+      <button data-mgr="orlov" onclick="">Орлов И.</button>
+      <button data-mgr="petrova" onclick="">Петрова А.</button>
+      <button data-mgr="sidorov" onclick="">Сидоров К.</button>
+    </div>
+  </div>
 
   <!-- сводка по месяцам -->
   <div class="sum">
@@ -274,17 +329,17 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
           <div class="cm">выручка 186 000 · с/с 122 800</div>
           <div class="cgp">▲ вал. прибыль 63 200 Br (34%)</div></div></div>
 
-      <div class="ship">
+      <div class="ship" data-mgr="sidorov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0418 · AB 7421-7<small>прибытие 18.06</small></div><span class="st transit">в пути</span></div>
         <div class="goods"><div class="g"><span>АКБ 6СТ-190 · Белтранс</span><span>38 шт</span></div><div class="g"><span>АКБ 6СТ-225 · Минскэлектро</span><span>14 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">61 200</div></div><div class="b"><div class="l">С/с</div><div class="v">38 400</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">22 800</div></div></div>
       </div>
-      <div class="ship">
+      <div class="ship" data-mgr="petrova">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0421 · AB 9012-3<small>прибытие 24.06</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ промышл. · Нафтан</span><span>24 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">68 200</div></div><div class="b"><div class="l">С/с</div><div class="v">45 800</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">22 400</div></div></div>
       </div>
-      <div class="ship">
+      <div class="ship" data-mgr="sidorov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0409 · AB 5567-1<small>доставлено 06.06</small></div><span class="st done">доставлено</span></div>
         <div class="goods"><div class="g"><span>АКБ + ЗУ · Белводхоз</span><span>30 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">56 600</div></div><div class="b"><div class="l">С/с</div><div class="v">38 600</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">18 000</div></div></div>
@@ -298,17 +353,17 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
           <div class="cm">выручка 198 000 · с/с 126 500</div>
           <div class="cgp">▲ вал. прибыль 71 500 Br (36%)</div></div></div>
 
-      <div class="ship">
+      <div class="ship" data-mgr="sidorov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0430 · план<small>перезаказ Белтранс ~05.07</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ 6СТ-190 + 2 ЗУ</span><span>42 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">52 000</div></div><div class="b"><div class="l">С/с</div><div class="v">32 800</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">19 200</div></div></div>
       </div>
-      <div class="ship">
+      <div class="ship" data-mgr="orlov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0433 · план<small>Автопарк №7 ~12.07</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ годовой объём</span><span>45 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">54 000</div></div><div class="b"><div class="l">С/с</div><div class="v">34 500</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">19 500</div></div></div>
       </div>
-      <div class="ship">
+      <div class="ship" data-mgr="orlov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0436 · план<small>тендер МЧС ~20.07</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ для МЧС</span><span>60 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">92 000</div></div><div class="b"><div class="l">С/с</div><div class="v">59 200</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">32 800</div></div></div>
@@ -322,12 +377,12 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
           <div class="cm">выручка 130 000 · с/с 87 200</div>
           <div class="cgp">▲ вал. прибыль 42 800 Br (33%)</div></div></div>
 
-      <div class="ship">
+      <div class="ship" data-mgr="sidorov">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0450 · прогноз<small>перезаказ Белводхоз ~27.07→08</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ + ЗУ</span><span>30 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">52 400</div></div><div class="b"><div class="l">С/с</div><div class="v">35 000</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">17 400</div></div></div>
       </div>
-      <div class="ship">
+      <div class="ship" data-mgr="petrova">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">TR-0455 · прогноз<small>Минскэлектро ~02.08</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ промышл.</span><span>14 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">38 900</div></div><div class="b"><div class="l">С/с</div><div class="v">26 400</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">12 500</div></div></div>
@@ -340,7 +395,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
         <div class="ch"><div class="ct">Сентябрь+ <span class="n">2 машины</span></div>
           <div class="cm">выручка 92 000 · с/с 63 600</div>
           <div class="cgp">▲ вал. прибыль 28 400 Br (31%)</div></div></div>
-      <div class="ship">
+      <div class="ship" data-mgr="all">
         <div class="s-top"><div class="truck">🚚</div><div class="s-id">прогноз по циклу<small>формируется из перезаказов</small></div><span class="st plan">план</span></div>
         <div class="goods"><div class="g"><span>АКБ (по периодичности клиентов)</span><span>~50 шт</span></div></div>
         <div class="fin"><div class="b"><div class="l">Выручка</div><div class="v">92 000</div></div><div class="b"><div class="l">С/с</div><div class="v">63 600</div></div><div class="b"><div class="l">Вал. приб.</div><div class="v gp">28 400</div></div></div>
@@ -397,6 +452,59 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   }
   document.getElementById('cw-send').addEventListener('click', sendMsg);
   document.getElementById('cw-input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+})();
+</script>
+
+<script>
+(function(){
+  // ════ Фильтр по менеджерам: каждый видит свои рейсы и пересчитанные итоги ════
+  const cols  = [...document.querySelectorAll('.board > .col')];
+  const cards = [...document.querySelectorAll('.sum > .mcard')]; // мес-карточки в том же порядке
+  const num = s => parseInt(String(s).replace(/\D/g,'')) || 0;
+  const fmt = n => n.toLocaleString('ru-RU').replace(/,/g,' ');
+  const mch = n => n+' '+(n%10===1&&n%100!==11?'машина':n%10>=2&&n%10<=4&&(n%100<10||n%100>=20)?'машины':'машин');
+  const shortCap = ['Июнь','Июль','Август','Сентябрь+'];               // подписи шапок колонок
+  // плановая вместимость месяца (для %% загрузки) ≈ исходная выручка при 100/88/54/30
+  const CAP = [186000/0.88, 198000/1.0, 130000/0.54, 92000/0.30];
+
+  function shipFin(ship){
+    const v = ship.querySelectorAll('.fin .v');
+    return { rev:num(v[0]?.textContent), cost:num(v[1]?.textContent), gp:num(v[2]?.textContent) };
+  }
+  function apply(mgr){
+    document.querySelectorAll('#mgrSeg button').forEach(b=>b.classList.toggle('on', b.dataset.mgr===mgr));
+    cols.forEach((col,i)=>{
+      const ships = [...col.querySelectorAll('.ship')];
+      let rev=0,cost=0,gp=0,shown=0;
+      ships.forEach(s=>{
+        // «Все» — показываем всё; иначе только рейсы менеджера (общий прогноз data-mgr="all" скрываем)
+        const vis = mgr==='all' || s.dataset.mgr===mgr;
+        s.classList.toggle('mgr-hidden', !vis);
+        if(vis){ const f=shipFin(s); rev+=f.rev; cost+=f.cost; gp+=f.gp; shown++; }
+      });
+      col.classList.toggle('mgr-empty', shown===0);
+      const mrg = rev ? Math.round(gp/rev*100) : 0;
+      const load = Math.min(100, Math.round(rev/CAP[i]*100));
+      // обновить шапку колонки
+      const ch=col.querySelector('.col-head');
+      ch.querySelector('.ct').innerHTML = `${shortCap[i]} <span class="n">${mch(shown)}</span>`;
+      ch.querySelector('.cm').textContent = `выручка ${fmt(rev)} · с/с ${fmt(cost)}`;
+      ch.querySelector('.cgp').textContent = `▲ вал. прибыль ${fmt(gp)} Br (${mrg}%)`;
+      // обновить мес-карточку
+      const card=cards[i]; if(!card) return;
+      card.querySelector('.gp').textContent = `${fmt(gp)} Br`;
+      card.querySelector('.mrg').textContent = `маржа ${mrg}% · выручка ${fmt(rev)}`;
+      card.querySelector('.small').innerHTML = `<span>Себестоимость ${fmt(cost)}</span><span>${mch(shown)}</span>`;
+      const bar=card.querySelector('.load span'); if(bar) bar.style.width = load+'%';
+      card.querySelector('.loadl').textContent = mgr==='all'
+        ? (load>=100?'загрузка 100% · нужна ещё машина':load>=80?`загрузка ~${load}% · ещё есть место`:`загрузка ~${load}% · добирать сделками`)
+        : (shown? `доля менеджера · ${load}% месяца` : 'нет рейсов этого менеджера');
+    });
+  }
+  document.getElementById('mgrSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button[data-mgr]'); if(b) apply(b.dataset.mgr);
+  });
+  apply('all');
 })();
 </script>
 
