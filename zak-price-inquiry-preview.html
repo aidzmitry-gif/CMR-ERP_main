@@ -79,7 +79,7 @@
     </div>
 
     <!-- AI-сводка над списком (видна при раскрытии) -->
-    <div class="lbl px-3.5 py-2 text-[11px] text-violet-600 bg-violet-50/60 border-b border-violet-100">
+    <div class="lbl px-3.5 py-2 text-[11px] text-violet-600 dark:text-violet-300 bg-violet-50/60 dark:bg-violet-500/15 border-b border-violet-100 dark:border-violet-500/40">
       ✦ ИИ ведёт 7 диалогов · 3 черновика ответа ждут отправки
     </div>
 
@@ -89,7 +89,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">Shenzhen Hangxin 深圳航芯</span>
-          <span class="ch-flag bg-emerald-50 text-emerald-600">WeChat</span>
+          <span class="ch-flag bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">WeChat</span>
         </span>
         <span class="block truncate text-[12px] text-muted">价格已更新到 ¥3.85/шт · обновил цену по чипам</span>
       </span>
@@ -101,7 +101,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">Yuxin Electronics</span>
-          <span class="ch-flag bg-blue-50 text-blue-600">email</span>
+          <span class="ch-flag bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300">email</span>
         </span>
         <span class="block truncate text-[12px] text-muted">PI attached, lead time 25 days</span>
       </span>
@@ -113,7 +113,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">Иванов П. · продавец</span>
-          <span class="ch-flag bg-amber-50 text-amber-700">внутр.</span>
+          <span class="ch-flag bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">внутр.</span>
         </span>
         <span class="block truncate text-[12px] text-muted">Клиент ждёт срок по партии конденсаторов</span>
       </span>
@@ -125,7 +125,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">阿里巴巴 商家 (1688)</span>
-          <span class="ch-flag bg-orange-50 text-orange-600">1688</span>
+          <span class="ch-flag bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300">1688</span>
         </span>
         <span class="block truncate text-[12px] text-muted">新报价: 50000шт @ ¥0.42</span>
       </span>
@@ -137,7 +137,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">Taobao 店铺 · разъёмы</span>
-          <span class="ch-flag bg-rose-50 text-rose-600">Taobao</span>
+          <span class="ch-flag bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300">Taobao</span>
         </span>
         <span class="block truncate text-[12px] text-muted">现货充足 · в наличии, готов к отгрузке</span>
       </span>
@@ -149,7 +149,7 @@
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
           <span class="truncate text-[13px] font-semibold text-ink">Suzhou Precision</span>
-          <span class="ch-flag bg-blue-50 text-blue-600">email</span>
+          <span class="ch-flag bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300">email</span>
         </span>
         <span class="block truncate text-[12px] text-muted">QC report ready, photos sent</span>
       </span>
@@ -189,14 +189,14 @@
       <div class="w-72 shrink-0 space-y-2">
         <div class="flex items-center justify-between pb-0.5">
           <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">8 запросов</span>
-          <span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">3 без ответа &gt;24ч</span>
+          <span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">3 без ответа &gt;24ч</span>
         </div>
 
         <!-- Запрос 1 — активный (выделен) -->
-        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-brand p-3 cursor-pointer bg-blue-50/30">
+        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-brand p-3 cursor-pointer bg-blue-50/30 dark:bg-blue-500/15">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Конденсатор 470мкФ 25В</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">26ч</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">26ч</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Иванов П. · «РадиоДеталь» · 5 000 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-041 · 12 июн 10:15</div>
@@ -206,7 +206,7 @@
         <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-transparent p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Реле SRD-05VDC 10A</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">→ ответить</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">→ ответить</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Петрова А. · «ЭлектроМир» · 1 200 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-042 · 12 июн 14:30</div>
@@ -216,7 +216,7 @@
         <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-transparent p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Разъём USB-C 24pin SMD</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">уточняем</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">уточняем</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Сидоров К. · «ТехноПром» · 20 000 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-043 · 12 июн 16:05</div>
@@ -226,7 +226,7 @@
         <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-transparent p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">STM32F103C8T6</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">новый</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">новый</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Иванов П. · «ИнтелТех» · 500 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-044 · 13 июн 09:10</div>
@@ -236,27 +236,27 @@
         <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-transparent p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Резистор 10кОм 1% 0.25W</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">новый</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">новый</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Ковалёв А. · «СхемаПлюс» · 100 000 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-045 · 13 июн 11:22</div>
         </div>
 
         <!-- Запрос 6 -->
-        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-red-300 p-3 cursor-pointer hover:bg-sunken">
+        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-red-300 dark:border-red-500/40 p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Дроссель 470мкГн SMD</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">31ч</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">31ч</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Бондарев С. · «МегаТрон» · 8 000 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-040 · 12 июн 03:40</div>
         </div>
 
         <!-- Запрос 7 -->
-        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-red-300 p-3 cursor-pointer hover:bg-sunken">
+        <div class="rounded-xl bg-surface shadow-card border-l-[3px] border-red-300 dark:border-red-500/40 p-3 cursor-pointer hover:bg-sunken">
           <div class="flex items-start justify-between gap-2">
             <span class="text-[13px] font-semibold text-ink leading-tight">Транзистор IRF540N</span>
-            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">48ч</span>
+            <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">48ч</span>
           </div>
           <div class="mt-1 text-[11px] text-muted">Климов Д. · «Эрго» · 2 000 шт</div>
           <div class="mt-0.5 text-[11px] text-faint">ZPR-2026-039 · 11 июн 14:00</div>
@@ -282,8 +282,8 @@
             <div>
               <div class="flex flex-wrap items-center gap-2">
                 <span class="text-[11px] font-semibold text-faint">ZPR-2026-041</span>
-                <span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">26ч без ответа</span>
-                <span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">нет на складе</span>
+                <span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">26ч без ответа</span>
+                <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">нет на складе</span>
               </div>
               <h2 class="mt-1.5 text-lg font-bold text-ink">Конденсатор 470мкФ 25В</h2>
               <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted">
@@ -328,17 +328,17 @@
             </thead>
             <tbody>
               <!-- Строка 1 — рекомендован ИИ -->
-              <tr class="border-b border-line bg-emerald-50/40">
+              <tr class="border-b border-line bg-emerald-50/40 dark:bg-emerald-500/15">
                 <td class="py-2.5 pr-3">
                   <span class="font-semibold text-ink">Shenzhen Hangxin 深圳航芯</span>
                   <span class="block text-[11px] text-muted">WeChat · проверен ✓ · 8 лет</span>
                 </td>
                 <td class="py-2.5 pr-3 font-bold text-ink">¥0.42</td>
-                <td class="py-2.5 pr-3 font-semibold text-emerald-700">0.52 р</td>
+                <td class="py-2.5 pr-3 font-semibold text-emerald-700 dark:text-emerald-300">0.52 р</td>
                 <td class="py-2.5 pr-3 text-ink">22 дня</td>
                 <td class="py-2.5">
-                  <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Ответил ✓</span>
-                  <span class="ml-1 text-[10px] text-violet-600 font-semibold">✦ рекомендован</span>
+                  <span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Ответил ✓</span>
+                  <span class="ml-1 text-[10px] text-violet-600 dark:text-violet-300 font-semibold">✦ рекомендован</span>
                 </td>
               </tr>
               <!-- Строка 2 -->
@@ -351,20 +351,20 @@
                 <td class="py-2.5 pr-3 text-ink">0.54 р</td>
                 <td class="py-2.5 pr-3 text-ink">30 дней</td>
                 <td class="py-2.5">
-                  <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Ответил ✓</span>
+                  <span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Ответил ✓</span>
                 </td>
               </tr>
               <!-- Строка 3 — ждём срок -->
               <tr>
                 <td class="py-2.5 pr-3">
                   <span class="font-semibold text-ink">Yuxin Electronics</span>
-                  <span class="block text-[11px] text-amber-600">email · молодой поставщик (2 года)</span>
+                  <span class="block text-[11px] text-amber-600 dark:text-amber-300">email · молодой поставщик (2 года)</span>
                 </td>
                 <td class="py-2.5 pr-3 font-bold text-ink">¥0.39</td>
                 <td class="py-2.5 pr-3 text-ink">0.48 р</td>
                 <td class="py-2.5 pr-3 text-faint italic">ждём ответа</td>
                 <td class="py-2.5">
-                  <span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Ждём срок</span>
+                  <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Ждём срок</span>
                 </td>
               </tr>
             </tbody>
@@ -375,7 +375,7 @@
         <div class="rounded-2xl bg-surface p-5 shadow-card">
           <div class="flex items-center justify-between mb-3">
             <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Ответ продавцу — черновик</div>
-            <span class="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">✦ составлен ИИ</span>
+            <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">✦ составлен ИИ</span>
           </div>
           <div class="grid grid-cols-2 gap-3 text-[12px] mb-4">
             <div class="rounded-xl bg-sunken px-3 py-2.5">
@@ -412,32 +412,32 @@
         </div>
 
         <!-- ИИ-инсайт -->
-        <div class="rounded-2xl border border-dashed border-violet-300 bg-violet-50 p-5">
+        <div class="rounded-2xl border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 p-5">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
             <span class="flex items-center gap-2">
-              <span class="text-violet-500">✦</span>
-              <span class="text-[11px] font-semibold uppercase tracking-wide text-violet-600">ИИ-рекомендация · ZPR-2026-041</span>
+              <span class="text-violet-500 dark:text-violet-300">✦</span>
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">ИИ-рекомендация · ZPR-2026-041</span>
             </span>
-            <span class="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">Итерация 1 · ИИ (позже)</span>
+            <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">Итерация 1 · ИИ (позже)</span>
           </div>
           <div class="space-y-2">
             <div class="flex items-start justify-between gap-3">
-              <span class="text-sm text-violet-700">
+              <span class="text-sm text-violet-700 dark:text-violet-300">
                 <span class="font-semibold">1 · Поставщик:</span> рекомендую Hangxin (¥0.42), несмотря на то что Yuxin предлагает ¥0.39. Yuxin — 2 года, срок неизвестен — риск для сделки СД-2287. При 5 000 шт разница в стоимости: ~180 р.
               </span>
-              <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">Hangxin ✓</span>
+              <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">Hangxin ✓</span>
             </div>
             <div class="flex items-start justify-between gap-3">
-              <span class="text-sm text-violet-700">
+              <span class="text-sm text-violet-700 dark:text-violet-300">
                 <span class="font-semibold">2 · Срочность:</span> запрос просрочен на 26ч — нужно ответить сегодня. Клиент «РадиоДеталь» — постоянный (5 сделок за квартал). Промедление снижает вероятность сделки.
               </span>
-              <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">срочно</span>
+              <span class="shrink-0 inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[11px] font-semibold text-red-600 dark:text-red-300">срочно</span>
             </div>
             <div class="flex items-start justify-between gap-3">
-              <span class="text-sm text-violet-700">
+              <span class="text-sm text-violet-700 dark:text-violet-300">
                 <span class="font-semibold">3 · Следующий шаг:</span> подтвердить черновик выше → создать заявку ZAK под MO-016 → Hangxin автоматически получит PO через ИИ-переписку.
               </span>
-              <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-600">PO → Hangxin</span>
+              <span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">PO → Hangxin</span>
             </div>
           </div>
         </div>
