@@ -68,8 +68,40 @@
   .f{background:var(--accent-soft);border-radius:3px;padding:0 2px;box-decoration-break:clone}
   body.plain .f{background:transparent;padding:0}
 
+  /* ── операционная панель: резерв в 1С и отгрузка (не печатается) ── */
+  .opbar{max-width:820px;margin:14px auto 0}
+  .opwrap{background:var(--paper);border:1px solid #d8dee9;border-radius:12px;
+    box-shadow:0 2px 12px rgba(16,24,40,.06);padding:14px 18px}
+  .ophead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:12px}
+  .optitle{font-weight:800;font-size:14px}
+  .opbadge{font-weight:800;font-size:10px;background:var(--ink);color:#fff;border-radius:5px;padding:2px 6px;letter-spacing:.04em}
+  .opnote{font-size:11.5px;color:var(--soft);line-height:1.4;flex:1;min-width:220px}
+  .track{list-style:none;display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;padding:0}
+  .track li{flex:1;min-width:130px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--soft);
+    background:#f3f5f8;border:1px solid #e2e7ef;border-radius:8px;padding:8px 10px}
+  .track li .dot{width:20px;height:20px;border-radius:50%;background:#cbd5e1;color:#fff;font-size:11px;font-weight:800;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .track li.done{color:var(--ink);background:var(--accent-soft);border-color:#c5d8ff}
+  .track li.done .dot,.track li.cur .dot{background:var(--accent)}
+  .track li.cur{color:var(--ink);border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .track li.blocked{color:#9f1239;background:#fff1f3;border-color:#fecdd3}
+  .track li.blocked .dot{background:#e11d48}
+  .opstatus{font-size:12.5px;line-height:1.55;margin-bottom:10px}
+  .opstatus .ok{color:#047857;font-weight:700}
+  .opstatus .warn{color:#b91c1c;font-weight:700}
+  .opstatus .ref{font-weight:700}
+  .opstatus .sub{color:var(--soft);font-size:11.5px}
+  .opact{display:flex;gap:8px;flex-wrap:wrap}
+  .opact button{font:700 12.5px var(--font);border:1px solid var(--accent);background:var(--accent);color:#fff;
+    border-radius:8px;padding:9px 14px;cursor:pointer}
+  .opact button.ghost{background:#fff;color:var(--ink);border-color:#d8dee9}
+  .opact button:disabled{opacity:.45;cursor:not-allowed}
+  .opact button:hover:not(:disabled){filter:brightness(.97)}
+  .opscn{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);margin-top:11px;cursor:pointer}
+
   @media print{
     .toolbar{display:none}
+    .opbar{display:none}
     body{background:#fff;font-size:12px}
     .sheet{box-shadow:none;margin:0;max-width:none;width:auto;padding:0;min-height:0}
     .f{background:transparent!important;padding:0!important}
@@ -88,6 +120,24 @@
   <div class="sp"></div>
   <label><input type="checkbox" id="hl" checked onchange="document.body.classList.toggle('plain', !this.checked)"> подсветка авто-полей</label>
   <button class="print" onclick="window.print()">🖨 Печать / PDF</button>
+</div>
+
+<!-- ── Резерв в 1С и отгрузка (операционная панель, не печатается) ── -->
+<div class="opbar">
+  <div class="opwrap">
+    <div class="ophead">
+      <div class="optitle">Резерв и отгрузка <span class="opbadge">1С</span></div>
+      <div class="opnote">Демо процесса: счёт → проверка наличия в 1С → заказ с резервированием → накладная → сигнал «отгружено» в ERP.</div>
+    </div>
+    <ol class="track" id="track">
+      <li data-st="invoice"><span class="dot">1</span>Счёт выставлен</li>
+      <li data-st="reserved"><span class="dot">2</span>Резерв в 1С</li>
+      <li data-st="shipped"><span class="dot">3</span>Отгружено</li>
+    </ol>
+    <div class="opstatus" id="opstatus"></div>
+    <div class="opact" id="opact"></div>
+    <label class="opscn"><input type="checkbox" id="scnStock" checked onchange="window.Inv1C.setStock(this.checked)"> товар есть в 1С (снять галку — ветка «нет в 1С»)</label>
+  </div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -271,8 +321,48 @@
     set("totalWords", moneyWords(grand));
   }
 
+  // ── операционный слой: резерв в 1С и отгрузка (демо процесса из ТЗ) ──
+  var op = { state:"draft", stock:true, procSent:false, orderNo1c:"", invDup:"", waybill:"" };
+  function refs1c(){
+    op.orderNo1c = "Заказ покупателя № " + DATA.docNo + " (с резервированием)";
+    op.invDup    = "Счёт на оплату № " + DATA.docNo;
+    op.waybill   = "Реализация (накладная) № " + DATA.docNo;
+  }
+  var TRACK = { draft:["cur","",""], blocked:["","blocked",""], reserved:["done","done","cur"], shipped:["done","done","done"] };
+  function opStatusHtml(){
+    if (op.state==="draft") return op.stock
+      ? 'Наличие в 1С: <span class="ok">✅ есть на складе</span> — можно выставить счёт и зарезервировать.'
+      : 'Наличие в 1С: <span class="warn">⛔ нет</span> — резерв невозможен. <span class="sub">«Нет в 1С» = нет карточки номенклатуры либо нет свободного остатка → дефицит уходит в закупку (подтверждение закупщика).</span>';
+    if (op.state==="blocked") return '<span class="warn">⛔ Резерв невозможен: товара нет в 1С.</span> Счёт не выставлен.'
+      + (op.procSent ? ' <span class="ok">✅ Дефицит передан в закупку.</span>' : ' <span class="sub">Передать в закупку как дефицит или завести номенклатуру в 1С.</span>');
+    if (op.state==="reserved") return '<span class="ok">✅ Зарезервировано в 1С.</span> Создано: <span class="ref">'+op.orderNo1c+'</span> · дубль счёта <span class="ref">'+op.invDup+'</span> · в 1С передан факт «создан счёт». <span class="sub">Резерв действует 5 банковских дней.</span>';
+    if (op.state==="shipped") return '<span class="ok">📦 Отгружено.</span> Офис-менеджер оформил <span class="ref">'+op.waybill+'</span> в 1С → сигнал «отгружено» получен в ERP. <span class="sub">Резерв закрыт реализацией.</span>';
+    return "";
+  }
+  function opActHtml(){
+    if (op.state==="draft") return '<button onclick="window.Inv1C.issue()"'+(op.stock?"":" disabled")+'>Выставить счёт и зарезервировать</button>'
+      + (op.stock ? "" : '<button class="ghost" onclick="window.Inv1C.toProc()">→ В закупку (дефицит)</button>');
+    if (op.state==="blocked") return '<button class="ghost" onclick="window.Inv1C.reset()">← Назад</button>'
+      + (op.procSent ? "" : '<button class="ghost" onclick="window.Inv1C.toProc()">→ В закупку (дефицит)</button>');
+    if (op.state==="reserved") return '<button onclick="window.Inv1C.ship()">Отметить отгрузку (накладная 1С)</button><button class="ghost" onclick="window.Inv1C.reset()">Отменить резерв</button>';
+    if (op.state==="shipped") return '<button class="ghost" onclick="window.Inv1C.reset()">↺ Сбросить демо</button>';
+    return "";
+  }
+  function renderOp(){
+    var cls = TRACK[op.state] || TRACK.draft, lis = document.querySelectorAll("#track li");
+    for (var i=0;i<lis.length;i++) lis[i].className = cls[i] || "";
+    set("opstatus", opStatusHtml()); set("opact", opActHtml());
+  }
+  window.Inv1C = {
+    setStock:function(v){ op.stock=v; op.state="draft"; op.procSent=false; renderOp(); },
+    issue:function(){ if(op.stock){ refs1c(); op.state="reserved"; } else op.state="blocked"; renderOp(); },
+    ship:function(){ if(op.state==="reserved"){ op.state="shipped"; renderOp(); } },
+    toProc:function(){ op.procSent=true; renderOp(); },
+    reset:function(){ op.state="draft"; op.procSent=false; renderOp(); }
+  };
+
   window.InvoiceTemplate = { DATA: DATA, render: render, moneyWords: moneyWords };
-  render();
+  render(); renderOp();
 })();
 </script>
 </body>
