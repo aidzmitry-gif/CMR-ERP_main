@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     smtp_tls: bool = True
     telegram_bot_token: str = ""
 
+    # Телефония (облачная АТС zruchna): входящий webhook + исходящий click-to-call.
+    # Webhook аутентифицируется общим секретом ``?token=`` — если задан, входящие
+    # без совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
+    # ``originate_url`` — URL инициации звонка (client_call_gen.php), свой на инсталляцию;
+    # пусто → исходящий звонок недоступен (503).
+    telephony_webhook_token: str = ""
+    telephony_originate_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
