@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -24,6 +25,9 @@ async def _collect_params(request: Request) -> dict:
     """Слить параметры webhook из query + (POST) form/JSON в один dict.
 
     zruchna может слать и GET с query, и POST с form-полями, и JSON — принимаем всё.
+    Form (``application/x-www-form-urlencoded``) парсим stdlib-ом ``parse_qsl``, а не
+    ``request.form()``, чтобы не тянуть зависимость ``python-multipart`` (её нет в
+    requirements; иначе form-POST провайдера падал бы 500 и звонок терялся).
     """
     data: dict = dict(request.query_params)
     if request.method == "POST":
@@ -36,8 +40,8 @@ async def _collect_params(request: Request) -> dict:
             if isinstance(body, dict):
                 data.update(body)
         else:
-            form = await request.form()
-            data.update(dict(form))
+            raw = (await request.body()).decode("utf-8", "replace")
+            data.update(dict(parse_qsl(raw, keep_blank_values=True)))
     return data
 
 
@@ -53,10 +57,13 @@ async def telephony_webhook(
     публичен, поэтому при незаданном токене предупреждаем в лог (SECURITY: задать
     ``AIOS_TELEPHONY_WEBHOOK_TOKEN``). Дальше склейку/журнал ведёт sales-подписчик.
     """
+    import hmac
+
     params = await _collect_params(request)
     expected = core.config.telephony_webhook_token
     if expected:
-        if str(params.get("token", "")) != expected:
+        # constant-time сравнение секрета — не сливать длину/префикс по таймингу
+        if not hmac.compare_digest(str(params.get("token", "")), expected):
             raise HTTPException(status_code=403, detail="Неверный токен телефонии")
     else:
         logger.warning("telephony: webhook без AIOS_TELEPHONY_WEBHOOK_TOKEN — приём открыт")
