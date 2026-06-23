@@ -1,6 +1,7 @@
 """HTTP-API модуля Integrations. Монтируется под префиксом ``/integrations``."""
 from __future__ import annotations
 
+import hmac
 import logging
 from urllib.parse import parse_qsl
 
@@ -57,13 +58,11 @@ async def telephony_webhook(
     публичен, поэтому при незаданном токене предупреждаем в лог (SECURITY: задать
     ``AIOS_TELEPHONY_WEBHOOK_TOKEN``). Дальше склейку/журнал ведёт sales-подписчик.
     """
-    import hmac
-
     params = await _collect_params(request)
     expected = core.config.telephony_webhook_token
     if expected:
-        # constant-time сравнение секрета — не сливать длину/префикс по таймингу
-        if not hmac.compare_digest(str(params.get("token", "")), expected):
+        # constant-time сравнение секрета (в байтах — не падать TypeError на non-ASCII токене)
+        if not hmac.compare_digest(str(params.get("token", "")).encode(), expected.encode()):
             raise HTTPException(status_code=403, detail="Неверный токен телефонии")
     else:
         logger.warning("telephony: webhook без AIOS_TELEPHONY_WEBHOOK_TOKEN — приём открыт")
