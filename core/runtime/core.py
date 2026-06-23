@@ -66,6 +66,7 @@ class Core:
         self.references: list[RegisteredReference] = []
         self.startup_hooks: list[Callable[[], Awaitable | None]] = []
         self.shutdown_hooks: list[Callable[[], Awaitable | None]] = []
+        self.tick_hooks: list[Callable] = []
         self.loaded_modules: list[str] = []
 
         # имя регистрирующегося сейчас модуля — выставляется загрузчиком,
@@ -141,3 +142,11 @@ class Core:
     def on_shutdown(self, hook: Callable) -> None:
         """Хук, вызываемый при остановке приложения."""
         self.shutdown_hooks.append(hook)
+
+    def on_tick(self, hook: Callable) -> None:
+        """Периодический фоновый шаг (вызывается из фонового цикла каждую итерацию).
+
+        Сигнатура хука: ``async def hook(session, services)``. Транзакцией владеет
+        цикл — он открывает сессию и коммитит после хука. В проде тяжёлые задачи —
+        Temporal/таймеры; здесь — лёгкий поллер (как relay/escalate)."""
+        self.tick_hooks.append(hook)

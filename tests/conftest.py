@@ -8,6 +8,11 @@ async-драйвер sqlite не ругался на «другой loop».
 from __future__ import annotations
 
 import importlib
+import os
+
+# Тесты — не прод: dev-режим, чтобы прод-guard (SECURITY.md P0-5) не падал на
+# dev-кредах БД из .env. Выставить ДО импорта core.runtime.app (тянет настройки).
+os.environ.setdefault("AIOS_ENVIRONMENT", "dev")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -40,6 +45,13 @@ async def session():
     await engine.dispose()
 
 
+# Дефолт-роль функциональных API-фикстур. После fail-closed (SECURITY.md P0-1) запрос без
+# роли — бесправный «Гость» (403). Исторически фикстура `api` означала «авторизованный
+# клиент» (неявный дефолт-Админ), поэтому ставим супер-роль явно. Тесты доступа, шлющие свой
+# `X-User-Roles`, переопределяют этот дефолт на уровне запроса (per-request > client default).
+AUTHED_HEADERS = {"X-User-Roles": "director"}
+
+
 @pytest_asyncio.fixture
 async def api(session):
     app = create_app()
@@ -49,7 +61,9 @@ async def api(session):
 
     app.dependency_overrides[get_session] = _override
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=AUTHED_HEADERS
+    ) as client:
         yield client
 
 
@@ -64,7 +78,9 @@ async def ai_api(session):
     app.dependency_overrides[get_session] = _override
     app.state.core.services.llm.enabled = True  # включить feature-flag AI для теста
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=AUTHED_HEADERS
+    ) as client:
         yield client
 
 
@@ -82,8 +98,18 @@ async def api_no_gateways(session):
     core.services.stock = None
     core.services.registry = None
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=AUTHED_HEADERS
+    ) as client:
         yield client
+
+
+@pytest_asyncio.fixture
+async def services(session):
+    """Сервисы загруженного приложения (event_bus, stock, …) — для прямого вызова
+    фоновых шагов (``core.on_tick``) в тестах. Операции идут над тест-сессией ``session``."""
+    app = create_app()
+    return app.state.core.services
 
 
 def pytest_collection_modifyitems(items) -> None:

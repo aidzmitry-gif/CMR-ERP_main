@@ -34,10 +34,12 @@ async def _run_hooks(hooks) -> None:
             await result
 
 
-async def _background_loop(services) -> None:
-    """Фоновый цикл: доставка событий из outbox + эскалация согласований.
+async def _background_loop(services, tick_hooks=()) -> None:
+    """Фоновый цикл: доставка событий из outbox + эскалация согласований + tick-хуки.
 
     В проде доставка — консьюмер Redis Streams, эскалация — таймеры Temporal.
+    ``tick_hooks`` — периодические шаги модулей (``core.on_tick``), напр. жизненный
+    цикл резерва под счёт (SALES-51); транзакцией каждого шага владеет цикл.
     """
     while True:
         await asyncio.sleep(2)
@@ -47,6 +49,10 @@ async def _background_loop(services) -> None:
                 await services.event_bus.relay_once(session, EventContext(session, services))
             async with services.db.session_factory() as session:
                 await services.approvals.escalate_once(session)
+            for hook in tick_hooks:
+                async with services.db.session_factory() as session:
+                    await hook(session, services)
+                    await session.commit()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -66,7 +72,7 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
-        background_task = asyncio.create_task(_background_loop(services))
+        background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
         logger.info("Приложение запущено")
         yield
         background_task.cancel()

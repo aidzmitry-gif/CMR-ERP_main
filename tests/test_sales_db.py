@@ -476,6 +476,167 @@ async def test_order_reserves_stock(session, api):
     assert "sales.document.posted" in types
 
 
+async def test_invoice_reserves_stock(session, api):
+    """SALES-51: счёт (invoice), как и заказ, резервирует остатки и держит срок 5 дней."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent, Sku
+    from modules.integrations.models import StockItem
+    from modules.sales.models import DealItem
+    from modules.sales.routes import _utcnow
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "INV-RSV-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="RSV-INV", title="Резерв под счёт", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
+    session.add(StockItem(sku_code="RSV-INV", warehouse="Главный", qty_available=50, qty_reserved=1))
+    await session.commit()
+
+    # счёт проводится в 1С и (SALES-51) резервирует остатки по позициям сделки
+    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["kind"] == "invoice"
+    assert body["status"] == "posted"
+    assert body["reserve_status"] == "reserved"
+    # срок действия счёта = 5 дней со дня выставления (счёт-протокол)
+    assert body["valid_until"] == (_utcnow().date() + timedelta(days=5)).isoformat()
+
+    item = (
+        await session.execute(select(StockItem).where(StockItem.sku_code == "RSV-INV"))
+    ).scalars().first()
+    assert float(item.qty_reserved) == 5  # было 1 + 4 по счёту
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.stock.reserved" in types
+    assert "sales.document.posted" in types
+
+
+async def test_tick_reminds_before_invoice_expiry(session, api, services):
+    """SALES-51: за день до конца срока tick шлёт sales.invoice.expiring (однократно)."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent, Sku
+    from modules.integrations.models import StockItem
+    from modules.sales.models import DealDocument, DealItem
+    from modules.sales.reserve import tick_invoice_reserve
+    from modules.sales.routes import _utcnow
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "EXP-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="EXP-SKU", title="t", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))
+    session.add(StockItem(sku_code="EXP-SKU", warehouse="Главный", qty_available=10, qty_reserved=0))
+    await session.commit()
+    await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+
+    doc = (await session.execute(select(DealDocument))).scalars().first()
+    doc.valid_until = _utcnow().date() + timedelta(days=1)  # окно напоминания (−1 день)
+    await session.commit()
+
+    await tick_invoice_reserve(session, services)
+    await session.commit()
+    await session.refresh(doc)
+    assert doc.reminded_at is not None
+    assert doc.reserve_status == "reserved"  # ещё не аннулирован
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert types.count("sales.invoice.expiring") == 1
+
+    # повторный tick не дублирует напоминание (идемпотентность по reminded_at)
+    await tick_invoice_reserve(session, services)
+    await session.commit()
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert types.count("sales.invoice.expiring") == 1
+
+
+async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, services):
+    """SALES-51: после срока счёт аннулируется, резерв снимается (stock.release)."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent, Sku
+    from modules.integrations.models import StockItem
+    from modules.sales.models import DealDocument, DealItem
+    from modules.sales.reserve import tick_invoice_reserve
+    from modules.sales.routes import _utcnow
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "CANCEL-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="CNL-SKU", title="t", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3))
+    session.add(StockItem(sku_code="CNL-SKU", warehouse="Главный", qty_available=20, qty_reserved=0))
+    await session.commit()
+    await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+
+    item = (
+        await session.execute(select(StockItem).where(StockItem.sku_code == "CNL-SKU"))
+    ).scalars().first()
+    assert float(item.qty_reserved) == 3  # счёт зарезервировал
+
+    doc = (await session.execute(select(DealDocument))).scalars().first()
+    doc.valid_until = _utcnow().date() - timedelta(days=1)  # просрочен
+    await session.commit()
+
+    await tick_invoice_reserve(session, services)
+    await session.commit()
+    await session.refresh(doc)
+    await session.refresh(item)
+    assert doc.status == "cancelled"
+    assert doc.reserve_status == "released"
+    assert doc.cancelled_at is not None
+    assert float(item.qty_reserved) == 0  # резерв снят
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.invoice.cancelled" in types
+    assert "sales.stock.released" in types
+
+
+async def test_payment_consumes_invoice_reserve(session, api):
+    """SALES-51: оплата счёта → reserve_status=consumed (finance.payment.paid → sales)."""
+    from core.domain.models import Sku
+    from core.services.eventbus import EventContext
+    from modules.integrations.models import StockItem
+    from modules.sales.events import on_payment_paid
+    from modules.sales.models import DealDocument, DealItem
+
+    deal = (
+        await api.post("/sales/deals", json={"number": "PAID-1", "title": "t", "counterparty": "c"})
+    ).json()
+    sku = Sku(code="PAID-SKU", title="t", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1))
+    session.add(StockItem(sku_code="PAID-SKU", warehouse="Главный", qty_available=5, qty_reserved=0))
+    await session.commit()
+    doc_body = (
+        await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    ).json()
+    assert doc_body["reserve_status"] == "reserved"
+
+    # имитируем приход события оплаты из finance (привязка по номеру счёта)
+    await on_payment_paid({"ref": doc_body["number"]}, EventContext(session, None))
+    await session.commit()
+
+    doc = await session.get(DealDocument, doc_body["id"])
+    assert doc.status == "paid"
+    assert doc.reserve_status == "consumed"
+
+
 async def test_chats(api):
     deal = (
         await api.post("/sales/deals", json={"number": "CH-1", "title": "t", "counterparty": "ООО Чат"})
@@ -798,14 +959,17 @@ async def test_rbac_approve_enforced(session, api):
         await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
     ).json()
 
-    # роль без права (латиницей — HTTP-заголовки только ASCII) → 403
+    # бесправная роль (явный заголовок, латиницей — HTTP только ASCII) → 403
     denied = await api.post(
         f"/approvals/{appr['id']}/approve", json={"by": "x"}, headers={"X-User-Roles": "guest"}
     )
     assert denied.status_code == 403
 
-    # без заголовка пользователь по умолчанию — Админ → 200
-    ok = await api.post(f"/approvals/{appr['id']}/approve", json={"by": "Админ"})
+    # fail-closed (P0-1): без заголовка роли запрос был бы «Гостем» и тоже получил бы 403.
+    # Дефолт фикстуры `api` — супер-роль `director` (has_permission даёт ей все права),
+    # поэтому approve проходит. Кириллические роли (РОП/Админ) в HTTP-заголовок не лезут —
+    # сетевой успешный путь по таким ролям появится с проверенным токеном в P1 (Keycloak).
+    ok = await api.post(f"/approvals/{appr['id']}/approve", json={"by": "x"})
     assert ok.status_code == 200
 
 
