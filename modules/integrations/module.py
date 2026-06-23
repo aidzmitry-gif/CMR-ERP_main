@@ -7,6 +7,7 @@ from modules.integrations import routes
 from modules.integrations.client import OneCClient
 from modules.integrations.registry import RegistryClient
 from modules.integrations.stock import StockService
+from modules.integrations.telephony import ZruchnaClient
 
 
 class IntegrationsModule(ModuleContract):
@@ -16,13 +17,19 @@ class IntegrationsModule(ModuleContract):
 
     def register(self, core: Core) -> None:
         core.include_router(routes.router, prefix=self.api_prefix)
-        core.declare_permissions([Permission("integrations.sync", "Синхронизация с 1С")])
+        core.declare_permissions([
+            Permission("integrations.sync", "Синхронизация с 1С"),
+            Permission("integrations.telephony", "Инициация звонков (click-to-call)"),
+        ])
         # опубликовать 1С-коннектор и складской шлюз в фасаде ядра — другие модули
         # пишут/читают в 1С и резервируют остатки через core.services, не импортируя
         # этот модуль (§2.4).
         core.services.onec = OneCClient(core.config.onec_base_url)
         core.services.stock = StockService()
         core.services.registry = RegistryClient()
+        # телефонный шлюз: исходящий звонок через облачную АТС zruchna. Входящие
+        # события идут не через шлюз, а webhook'ом → шина (см. routes/telephony).
+        core.services.telephony = ZruchnaClient(core.config.telephony_originate_url)
 
 
 def get_module() -> ModuleContract:

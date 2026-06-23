@@ -22,3 +22,10 @@ class RegistryOut(BaseModel):
     name: str
     address: str
     status: str
+
+
+class OriginateIn(BaseModel):
+    """Запрос инициации исходящего звонка: внутренний номер сотрудника + клиент."""
+
+    vnut: str
+    number: str
