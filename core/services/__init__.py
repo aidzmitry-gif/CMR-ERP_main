@@ -17,6 +17,7 @@ from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
 from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
+from core.services.telephony import TelephonyGateway
 from core.services.temporal import TemporalService
 
 __all__ = ["Services", "build_services"]
@@ -38,6 +39,7 @@ class Services:
     onec: OneCGateway | None = None
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None
+    telephony: TelephonyGateway | None = None
 
 
 def build_services() -> Services:
