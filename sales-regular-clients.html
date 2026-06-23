@@ -71,7 +71,7 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .seg button .cnt{font-size:11px;opacity:.7;margin-left:4px}
 
   /* таблица аккаунтов */
-  .tbl{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-card);overflow:hidden}
+  .tbl{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-card);overflow-x:auto}
   table{width:100%;border-collapse:collapse;font-size:13px}
   thead th{text-align:left;padding:11px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;border-bottom:1px solid var(--line);background:var(--sunken)}
   thead th.r{text-align:right}
@@ -88,7 +88,7 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .next-d{font-weight:600}.next-d.soon{color:var(--amber-ink)}.next-d.over{color:var(--red-ink)}
   .trend{font-size:11px;font-weight:700}
   .money{font-weight:700;text-align:right}
-  .act{display:flex;gap:6px;justify-content:flex-end}
+  .act{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .abtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);white-space:nowrap}
   .abtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
   .abtn:hover{filter:brightness(.98)}
@@ -106,6 +106,47 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   .fnode .fb{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
   .fnode .tag{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;background:var(--sunken);color:var(--muted)}
   .farrow{align-self:center;color:#cbd5e1;font-size:20px}
+
+  /* ═══ ПОДТВЕРЖДЁННЫЙ ОБЪЁМ (инструмент продавца) ═══ */
+  .caret{display:inline-block;width:12px;color:var(--faint);transition:transform .15s;font-size:11px}
+  tr.open .caret{transform:rotate(90deg)}
+  .cbadge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;border-radius:99px;padding:3px 9px;white-space:nowrap}
+  .cbadge.ok{background:var(--green-soft);color:var(--green-ink)}
+  .cbadge.due{background:var(--amber-soft);color:var(--amber-ink)}
+  .cbadge.risk{background:var(--red-soft);color:var(--red-ink)}
+  .drow.hide{display:none}
+  .drow > td{background:var(--sunken)!important;padding:0 14px 14px 14px!important}
+  .conf{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:2px;box-shadow:var(--shadow-card)}
+  .conf-h{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .conf-t{font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .conf-meta{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .conf-meta b{color:var(--ink)}
+  .cbar{height:6px;border-radius:99px;background:var(--sunken);overflow:hidden;width:110px;display:inline-block;vertical-align:middle}
+  .cbar span{display:block;height:100%;border-radius:99px}
+  .pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  @media(max-width:960px){.pillars{grid-template-columns:1fr}}
+  .pil{background:var(--sunken);border-radius:10px;padding:10px 12px}
+  .pil .pl{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}
+  .pil .pv{font-size:12px;color:var(--ink);line-height:1.45}
+  .conf-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:10px}
+  .conf-tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .conf-tbl th.r,.conf-tbl td.r{text-align:right}
+  .conf-tbl td{padding:7px 8px;border-bottom:1px solid var(--line)}
+  .conf-tbl tr:last-child td{border-bottom:none}
+  .conf-leg{font-size:11px;color:var(--faint);line-height:1.5;margin-bottom:10px}
+  .conf-leg b{color:var(--muted)}
+  .sst{font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .sst.up{background:var(--green-soft);color:var(--green-ink)}
+  .sst.same{background:var(--sunken);color:var(--muted)}
+  .sst.drop{background:var(--red-soft);color:var(--red-ink)}
+  .conf-roll{font-size:12.5px;background:var(--blue-soft);color:var(--blue-ink);border-radius:9px;padding:9px 12px;margin-bottom:10px}
+  .conf-roll b{font-weight:800}
+  .conf-roll .need{color:var(--amber-ink)}
+  .conf-roll .enough{color:var(--green-ink)}
+  .conf-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .conf-hint{font-size:11px;color:var(--faint)}
+  .vol-inp{width:66px;padding:3px 6px;border:1px solid var(--brand);border-radius:6px;font:700 12.5px var(--font);text-align:right;background:var(--surface);color:var(--ink)}
+  .abtn.confirmed{background:var(--green-soft);color:var(--green-ink);border-color:var(--green-ink);cursor:default;opacity:1}
 
 
 /* ═══ ПРАВАЯ РЕЙКА ЧАТОВ (плавающая, сворачиваемая — как в Сделках) ═══ */
@@ -289,7 +330,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
         <thead>
           <tr>
             <th>Клиент</th><th>Статус</th><th>Последний заказ</th><th>Следующий ожидается</th>
-            <th class="r">Средний чек</th><th>Тренд</th><th>Допродажа</th><th class="r">Действие</th>
+            <th class="r">Средний чек</th><th>Тренд</th><th>Подтв. объём</th><th>Допродажа</th><th class="r">Действие</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -330,44 +371,129 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
 
 <script>
   const C=[
-    {av:'СБ',c:'#EF4444',nm:'ООО «СтройБаза»',sub:'Гомель · 11 заказов',st:'red',stt:'Просрочен 12 дн',last:'02.03.2026',int:'~90 дн',next:'просрочен (01.06)',nd:'over',avg:'18 400',trend:'↘ -14%',td:'down',up:'Не берёт ЗУ — повод вернуть'},
-    {av:'НФ',c:'#EF4444',nm:'ОАО «Нафтан»',sub:'Новополоцк · 8 заказов',st:'red',stt:'Просрочен 8 дн',last:'15.03.2026',int:'~120 дн',next:'просрочен (05.06)',nd:'over',avg:'62 800',trend:'↘ -9%',td:'down',up:'Промышленные АКБ + сервис'},
-    {av:'АМ',c:'#EF4444',nm:'ЧТУП «АвтоМир»',sub:'Минск · 6 заказов',st:'red',stt:'Просрочен 5 дн',last:'20.03.2026',int:'~75 дн',next:'просрочен (03.06)',nd:'over',avg:'9 200',trend:'→ стаб.',td:'',up:'Тестеры АКБ'},
-    {av:'БТ',c:'#F59E0B',nm:'ОАО «Белтранс»',sub:'Минск · 7 заказов',st:'amber',stt:'Пора связаться',last:'12.03.2026',int:'~90 дн',next:'через 3 дн (15.06)',nd:'soon',avg:'43 200',trend:'↗ +8%',td:'up',up:'Парк вырос 38→40 → +2 АКБ + 2 ЗУ'},
-    {av:'А7',c:'#F59E0B',nm:'Автопарк №7',sub:'Брест · 5 заказов',st:'amber',stt:'Пора связаться',last:'15.02.2026',int:'~120 дн',next:'через 2 дн (15.06)',nd:'soon',avg:'49 500',trend:'→ стаб.',td:'',up:'Рамочный договор на год'},
-    {av:'ЭМ',c:'#F59E0B',nm:'ТЧУП «Энергомир»',sub:'Витебск · 4 заказа',st:'amber',stt:'Пора связаться',last:'01.03.2026',int:'~100 дн',next:'через 6 дн (18.06)',nd:'soon',avg:'31 600',trend:'↗ +5%',td:'up',up:'Зарядные + стеллаж'},
-    {av:'БВ',c:'#22C55E',nm:'РУП «Белводхоз»',sub:'Минск · 9 заказов',st:'green',stt:'В цикле',last:'28.05.2026',int:'~60 дн',next:'через 34 дн (27.07)',nd:'',avg:'52 400',trend:'↗ +11%',td:'up',up:'—'},
-    {av:'ГС',c:'#22C55E',nm:'СТО «Гранд-Сервис»',sub:'Гомель · 12 заказов',st:'green',stt:'В цикле',last:'30.05.2026',int:'~45 дн',next:'через 19 дн (19.07)',nd:'',avg:'14 800',trend:'→ стаб.',td:'',up:'—'},
-    {av:'МЭ',c:'#22C55E',nm:'УП «Минскэлектро»',sub:'Минск · 6 заказов',st:'green',stt:'В цикле',last:'25.05.2026',int:'~70 дн',next:'через 38 дн (02.08)',nd:'',avg:'38 900',trend:'↗ +6%',td:'up',up:'—'},
-    {av:'ВД',c:'#22C55E',nm:'ОДО «ВодоканалСервис»',sub:'Могилёв · 5 заказов',st:'green',stt:'В цикле',last:'02.06.2026',int:'~90 дн',next:'через 56 дн (31.08)',nd:'',avg:'27 300',trend:'→ стаб.',td:'',up:'—'},
+    {av:'СБ',c:'#EF4444',nm:'ООО «СтройБаза»',sub:'Гомель · 11 заказов',st:'red',stt:'Просрочен 12 дн',last:'02.03.2026',int:'~90 дн',next:'просрочен (01.06)',nd:'over',avg:'18 400',trend:'↘ -14%',td:'down',up:'Не берёт ЗУ — повод вернуть',
+      cbs:'risk',conf:35,upd:'02.03 — устарело',
+      pil:{h:'6СТ-132 ~14 шт/мес, тренд ↘ -14%',a:'нет контакта 12 дн — объём НЕ подтверждён',d:'стройтехника простаивает — спрос под вопросом'},
+      sk:[{nm:'АКБ 6СТ-132',hist:'14',plan:'?',agr:'—',conf:'0',stt:'drop'}],
+      roll:{c:0,s:20,i:0}},
+    {av:'НФ',c:'#EF4444',nm:'ОАО «Нафтан»',sub:'Новополоцк · 8 заказов',st:'red',stt:'Просрочен 8 дн',last:'15.03.2026',int:'~120 дн',next:'просрочен (05.06)',nd:'over',avg:'62 800',trend:'↘ -9%',td:'down',up:'Промышленные АКБ + сервис',
+      cbs:'risk',conf:42,upd:'15.03 — устарело',
+      pil:{h:'промышл. АКБ ~6 шт/мес, ↘ -9%',a:'на паузе, ждут финансирование',d:'ремонт цеха перенесён — потребность под вопросом'},
+      sk:[{nm:'АКБ промышл.',hist:'6',plan:'?',agr:'—',conf:'0',stt:'drop'}],
+      roll:{c:0,s:8,i:0}},
+    {av:'АМ',c:'#EF4444',nm:'ЧТУП «АвтоМир»',sub:'Минск · 6 заказов',st:'red',stt:'Просрочен 5 дн',last:'20.03.2026',int:'~75 дн',next:'просрочен (03.06)',nd:'over',avg:'9 200',trend:'→ стаб.',td:'',up:'Тестеры АКБ',
+      cbs:'risk',conf:48,upd:'20.03 — устарело',
+      pil:{h:'тестеры ~3 шт/мес, стабильно',a:'обещал заявку, не прислал',d:'СТО, сезонный спрос'},
+      sk:[{nm:'Тестеры АКБ',hist:'3',plan:'4',agr:'устно',conf:'0',stt:'drop'}],
+      roll:{c:0,s:2,i:0}},
+    {av:'БТ',c:'#F59E0B',nm:'ОАО «Белтранс»',sub:'Минск · 7 заказов',st:'amber',stt:'Пора связаться',last:'12.03.2026',int:'~90 дн',next:'через 3 дн (15.06)',nd:'soon',avg:'43 200',trend:'↗ +8%',td:'up',up:'Парк вырос 38→40 → +2 АКБ + 2 ЗУ',
+      cbs:'ok',conf:92,upd:'12.06',
+      pil:{h:'6СТ-190 ~32 шт/мес, 7 заказов, ↗ +8%',a:'созвон 12.06 — подтвердил ~36 шт/мес, рамочный на год',d:'парк вырос 38→40 машин, плановое ТО Q3'},
+      sk:[{nm:'АКБ 6СТ-190',hist:'32',plan:'36',agr:'рамочный',conf:'36',stt:'up'},{nm:'ЗУ зарядное',hist:'4',plan:'6',agr:'обсужд.',conf:'4',stt:'same'}],
+      roll:{c:40,s:12,i:18}},
+    {av:'А7',c:'#F59E0B',nm:'Автопарк №7',sub:'Брест · 5 заказов',st:'amber',stt:'Пора связаться',last:'15.02.2026',int:'~120 дн',next:'через 2 дн (15.06)',nd:'soon',avg:'49 500',trend:'→ стаб.',td:'',up:'Рамочный договор на год',
+      cbs:'ok',conf:88,upd:'10.06',
+      pil:{h:'6СТ-190 ~18 шт/мес',a:'годовой рамочный договор подписан',d:'5 машин/мес плановое ТО парка'},
+      sk:[{nm:'АКБ 6СТ-190',hist:'18',plan:'20',agr:'рамочный',conf:'20',stt:'up'}],
+      roll:{c:20,s:8,i:6}},
+    {av:'ЭМ',c:'#F59E0B',nm:'ТЧУП «Энергомир»',sub:'Витебск · 4 заказа',st:'amber',stt:'Пора связаться',last:'01.03.2026',int:'~100 дн',next:'через 6 дн (18.06)',nd:'soon',avg:'31 600',trend:'↗ +5%',td:'up',up:'Зарядные + стеллаж',
+      cbs:'due',conf:68,upd:'01.06 — уточнить',
+      pil:{h:'зарядные ~5 шт/мес, ↗ +5%',a:'интерес к стеллажу, объём не финализирован',d:'расширяют склад — возможен рост'},
+      sk:[{nm:'Зарядные',hist:'5',plan:'8',agr:'предв.',conf:'6',stt:'up'},{nm:'Стеллаж',hist:'0',plan:'1',agr:'обсужд.',conf:'0',stt:'same'}],
+      roll:{c:6,s:4,i:0}},
+    {av:'БВ',c:'#22C55E',nm:'РУП «Белводхоз»',sub:'Минск · 9 заказов',st:'green',stt:'В цикле',last:'28.05.2026',int:'~60 дн',next:'через 34 дн (27.07)',nd:'',avg:'52 400',trend:'↗ +11%',td:'up',up:'—',
+      cbs:'ok',conf:90,upd:'28.05',
+      pil:{h:'АКБ+ЗУ ~28 шт/мес, ↗ +11%',a:'цикл 60 дн стабилен, подтвердил',d:'насосные станции, плановая замена'},
+      sk:[{nm:'АКБ 6СТ-190',hist:'24',plan:'24',agr:'регулярно',conf:'24',stt:'same'},{nm:'ЗУ',hist:'4',plan:'4',agr:'регулярно',conf:'4',stt:'same'}],
+      roll:{c:28,s:10,i:20}},
+    {av:'ГС',c:'#22C55E',nm:'СТО «Гранд-Сервис»',sub:'Гомель · 12 заказов',st:'green',stt:'В цикле',last:'30.05.2026',int:'~45 дн',next:'через 19 дн (19.07)',nd:'',avg:'14 800',trend:'→ стаб.',td:'',up:'—',
+      cbs:'ok',conf:84,upd:'30.05',
+      pil:{h:'АКБ легк. ~16 шт/мес, стабильно',a:'регулярный, подтверждает по телефону',d:'СТО, ровный поток'},
+      sk:[{nm:'АКБ легк.',hist:'16',plan:'16',agr:'устно',conf:'16',stt:'same'}],
+      roll:{c:16,s:18,i:0}},
+    {av:'МЭ',c:'#22C55E',nm:'УП «Минскэлектро»',sub:'Минск · 6 заказов',st:'green',stt:'В цикле',last:'25.05.2026',int:'~70 дн',next:'через 38 дн (02.08)',nd:'',avg:'38 900',trend:'↗ +6%',td:'up',up:'—',
+      cbs:'ok',conf:86,upd:'25.05',
+      pil:{h:'промышл. ~14 шт/мес, ↗ +6%',a:'счёт оплачен, цикл 70 дн',d:'электромонтаж, плановые объекты'},
+      sk:[{nm:'АКБ промышл.',hist:'14',plan:'14',agr:'регулярно',conf:'14',stt:'same'}],
+      roll:{c:14,s:6,i:10}},
+    {av:'ВД',c:'#22C55E',nm:'ОДО «ВодоканалСервис»',sub:'Могилёв · 5 заказов',st:'green',stt:'В цикле',last:'02.06.2026',int:'~90 дн',next:'через 56 дн (31.08)',nd:'',avg:'27 300',trend:'→ стаб.',td:'',up:'—',
+      cbs:'ok',conf:80,upd:'02.06',
+      pil:{h:'АКБ ~10 шт/мес, стабильно',a:'цикл 90 дн, подтверждает',d:'водоканал, плановое обслуживание'},
+      sk:[{nm:'АКБ 6СТ-190',hist:'10',plan:'10',agr:'регулярно',conf:'10',stt:'same'}],
+      roll:{c:10,s:12,i:0}},
   ];
   function trendCls(t){ return t.startsWith('↗')?'up':t.startsWith('↘')?'down':''; }
+  function cbadge(c){
+    if(c.cbs==='ok') return `<span class="cbadge ok">✅ ${c.roll.c} шт/мес</span>`;
+    if(c.cbs==='due') return `<span class="cbadge due">🟡 уточнить</span>`;
+    return `<span class="cbadge risk">⚠ не подтв.</span>`;
+  }
+  function sstLbl(s){ return s==='up'?'↑ рост':s==='drop'?'снято клиентом':'без изм.'; }
   function render(filter){
     const tb=document.getElementById('rows'); tb.innerHTML='';
-    C.filter(c=>filter==='all'||c.st===filter).forEach(c=>{
-      const tr=document.createElement('tr');
+    C.forEach((c,idx)=>{
+      if(!(filter==='all'||c.st===filter)) return;
       const action = c.st==='red'
         ? `<button class="abtn primary">📞 Связаться</button><button class="abtn">Передать РОПу</button>`
         : c.st==='amber'
         ? `<button class="abtn primary">🔁 Перезаказ</button><button class="abtn">📞</button>`
         : `<button class="abtn">🔁 Перезаказ</button>`;
+      const tr=document.createElement('tr'); tr.className='mainrow'; tr.dataset.i=idx;
       tr.innerHTML=`
-        <td><div class="cell-cli"><div class="av" style="background:${c.c}">${c.av}</div>
+        <td><div class="cell-cli"><span class="caret">▸</span><div class="av" style="background:${c.c}">${c.av}</div>
           <div><div class="cli-nm">${c.nm}</div><div class="cli-sub">${c.sub}</div></div></div></td>
         <td><span class="stt ${c.st}"><span class="dot"></span>${c.stt}</span></td>
         <td>${c.last}<div class="gap">интервал ${c.int}</div></td>
         <td><span class="next-d ${c.nd}">${c.next}</span></td>
         <td class="money">${c.avg} Br</td>
         <td><span class="trend ${trendCls(c.trend)}">${c.trend}</span></td>
+        <td class="col-conf">${cbadge(c)}</td>
         <td>${c.up==='—'?'<span class="gap">—</span>':`<span style="font-size:12px;color:var(--green-ink)">💡 ${c.up}</span>`}</td>
         <td><div class="act">${action}</div></td>`;
       tb.appendChild(tr);
+
+      const order = Math.max(0, c.roll.c - c.roll.s - c.roll.i);
+      const rollHtml = order>0
+        ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="need">дозаказать ${order} шт</b>`
+        : (c.roll.c>0
+            ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="enough">достаточно — не заказывать</b>`
+            : `объём НЕ подтверждён · склад ${c.roll.s} · <b class="enough">в машину не ставим (иначе ляжет на склад)</b>`);
+      const cc = c.conf>=80?'var(--ok)':c.conf>=60?'var(--warn)':'var(--bad)';
+      const skRows = c.sk.map((s,j)=>`<tr data-j="${j}"><td>${s.nm}</td><td class="r">${s.hist}</td><td class="r">${s.plan}</td><td>${s.agr}</td><td class="r sku-conf"><b>${s.conf}</b> шт</td><td><span class="sst ${s.stt}">${sstLbl(s.stt)}</span></td></tr>`).join('');
+      const dr=document.createElement('tr'); dr.className='drow hide';
+      dr.innerHTML=`<td colspan="9">
+        <div class="conf">
+          <div class="conf-h">
+            <div class="conf-t">🎯 Подтверждённый объём под закупку ${cbadge(c)}</div>
+            <div class="conf-meta">обновлено продавцом <b>${c.upd}</b> · уверенность <b>${c.conf}%</b> <span class="cbar"><span style="width:${c.conf}%;background:${cc}"></span></span></div>
+          </div>
+          <div class="pillars">
+            <div class="pil"><div class="pl">📈 История / опыт</div><div class="pv">${c.pil.h}</div></div>
+            <div class="pil"><div class="pl">🤝 Договорённость с клиентом</div><div class="pv">${c.pil.a}</div></div>
+            <div class="pil"><div class="pl">🏭 План клиента (его продукт / производство)</div><div class="pv">${c.pil.d}</div></div>
+          </div>
+          <table class="conf-tbl">
+            <thead><tr><th>Позиция</th><th class="r">Факт, шт/мес</th><th class="r">План клиента, шт/мес</th><th>Договорённость</th><th class="r">Подтв. объём, шт/мес</th><th>Статус</th></tr></thead>
+            <tbody>${skRows}</tbody>
+          </table>
+          <div class="conf-leg">Факт — средняя продажа (прошлое) · План клиента — сколько он сам планирует брать (его производство/продажи) · Договорённость — насколько твёрдо (рамочный / устно / обсужд.) · <b>Подтв. объём</b> — итог для закупки (решение продавца). Всё в шт/мес.</div>
+          <div class="conf-roll">→ в план закупки следующей машины: ${rollHtml}</div>
+          <div class="conf-act"><button class="abtn primary" onclick="confirmVol(event,this)">✅ Подтвердить объём на месяц</button><button class="abtn" onclick="editVol(event,this)">✏️ Скорректировать</button><span class="conf-hint">подтверждение уйдёт закупщику в план следующей машины</span></div>
+        </div></td>`;
+      tb.appendChild(dr);
     });
   }
   document.getElementById('seg').addEventListener('click', e=>{
     const b=e.target.closest('button'); if(!b) return;
     document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     render(b.dataset.f);
+  });
+  // разворот строки клиента → блок «подтверждённый объём» (игнор клика по кнопкам)
+  document.getElementById('rows').addEventListener('click', e=>{
+    if(e.target.closest('.abtn')) return;
+    const tr=e.target.closest('tr.mainrow'); if(!tr) return;
+    const dr=tr.nextElementSibling;
+    if(dr && dr.classList.contains('drow')){ dr.classList.toggle('hide'); tr.classList.toggle('open'); }
   });
   function toast(msg){
     let t=document.getElementById('toast');
@@ -379,6 +505,56 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
   }
   // действия по клиенту (делегировано — работает и после ре-рендера)
   document.addEventListener('click', e=>{ const b=e.target.closest('.abtn'); if(b) toast('Действие: '+b.textContent.trim().replace(/\s+/g,' ')); });
+  // ── рабочие кнопки блока «Подтверждённый объём» ──
+  function rollHtmlFor(c){
+    const order = Math.max(0, c.roll.c - c.roll.s - c.roll.i);
+    return order>0
+      ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="need">дозаказать ${order} шт</b>`
+      : (c.roll.c>0
+          ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="enough">достаточно — не заказывать</b>`
+          : `объём НЕ подтверждён · склад ${c.roll.s} · <b class="enough">в машину не ставим (иначе ляжет на склад)</b>`);
+  }
+  function ctx(btn){ const dr=btn.closest('tr'); const main=dr.previousElementSibling; return {dr:dr, main:main, c:C[+main.dataset.i]}; }
+  window.editVol=function(e,btn){
+    e.stopPropagation();
+    const x=ctx(btn);
+    if(btn.dataset.edit!=='1'){
+      x.dr.querySelectorAll('.conf-tbl tbody tr').forEach(row=>{
+        const j=+row.dataset.j;
+        row.querySelector('.sku-conf').innerHTML=`<input class="vol-inp" type="number" min="0" value="${x.c.sk[j].conf}">`;
+      });
+      const recalc=()=>{
+        let sum=0;
+        x.dr.querySelectorAll('.conf-tbl tbody tr').forEach(row=>{
+          const j=+row.dataset.j; const v=parseInt(row.querySelector('.vol-inp').value,10)||0;
+          x.c.sk[j].conf=String(v); sum+=v;
+        });
+        x.c.roll.c=sum;
+        x.dr.querySelector('.conf-roll').innerHTML='→ в план закупки следующей машины: '+rollHtmlFor(x.c);
+        x.dr.querySelector('.conf-t .cbadge').outerHTML=cbadge(x.c);
+        x.main.querySelector('.col-conf').innerHTML=cbadge(x.c);
+        const mb=x.dr.querySelector('.conf-meta b'); if(mb) mb.textContent='сейчас';
+      };
+      x.dr.querySelectorAll('.vol-inp').forEach(inp=>inp.addEventListener('input',recalc));
+      x.dr.querySelector('.vol-inp')?.focus();
+      btn.textContent='✓ Готово'; btn.dataset.edit='1'; btn.classList.add('primary');
+    } else {
+      x.dr.querySelectorAll('.conf-tbl tbody tr').forEach(row=>{
+        const j=+row.dataset.j; row.querySelector('.sku-conf').innerHTML=`<b>${x.c.sk[j].conf}</b> шт`;
+      });
+      btn.textContent='✏️ Скорректировать'; btn.dataset.edit=''; btn.classList.remove('primary');
+      toast('Объём обновлён: '+x.c.roll.c+' шт → пойдёт закупщику в план машины');
+    }
+  };
+  window.confirmVol=function(e,btn){
+    e.stopPropagation();
+    const x=ctx(btn);
+    if(x.c.roll.c<=0){ toast('Объём 0 — сначала «Скорректировать» и укажите количество'); return; }
+    x.c.upd='сегодня';
+    const mb=x.dr.querySelector('.conf-meta b'); if(mb) mb.textContent='сегодня';
+    btn.textContent='✓ Подтверждено на месяц'; btn.classList.add('confirmed'); btn.disabled=true;
+    toast('✅ Подтверждено: '+x.c.roll.c+' шт → закупщику в план следующей машины');
+  };
   render('all');
 </script>
 

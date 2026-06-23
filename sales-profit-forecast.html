@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
+/* демо-отклик: кнопки без своего действия показывают тост (чтобы не было «ничего не произошло») */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,.btn,[class*="btn"],.abtn,.chip,.seg button,.tab,a[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(getComputedStyle(el).cursor!=='pointer'&&el.tagName!=='BUTTON')return;
+    var label=(el.textContent||'').trim().slice(0,32)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+
+</script>
+<title>Прогноз роста валовой прибыли — за счёт каких товаров · демо движка планирования спроса</title>
+<style>
+  :root{
+    --brand:#1E5EFF; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1545CC;
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
+  h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
+
+  /* сводка по месяцам сверху */
+  .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  @media(max-width:1000px){.sum{grid-template-columns:repeat(2,1fr)}}
+  .mcard{background:var(--surface);border-radius:13px;box-shadow:var(--shadow-card);padding:15px 16px;border-top:3px solid var(--c,var(--brand))}
+  .mcard .mn{font-weight:800;font-size:15px}
+  .mcard .ml{font-size:11px;color:var(--muted);margin-top:8px}
+  .mcard .gp{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-top:2px}
+  .mcard .mrg{font-size:11.5px;font-weight:700;color:var(--green-ink);margin-top:2px}
+  .mcard .small{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:7px}
+  .mcard .load{height:6px;border-radius:99px;background:var(--sunken);overflow:hidden;margin-top:9px}
+  .mcard .load span{display:block;height:100%;border-radius:99px}
+  .mcard .loadl{font-size:10.5px;color:var(--faint);margin-top:4px}
+
+  /* колонки месяцев */
+  .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px}
+  .col{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:12px}
+  .col-head{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
+  .col-head .stripe{height:4px}
+  .ch{padding:11px 14px}
+  .ch .ct{font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .ch .ct .n{font-size:11px;color:var(--faint);font-weight:600;background:var(--sunken);border-radius:6px;padding:1px 8px}
+  .ch .cm{font-size:12px;color:var(--muted);margin-top:3px}
+  .ch .cgp{font-size:12px;font-weight:700;color:var(--green-ink);margin-top:2px}
+
+  .ship{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);padding:12px}
+  .ship .s-top{display:flex;align-items:center;gap:8px}
+  .ship .truck{width:30px;height:30px;border-radius:8px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+  .ship .s-id{font-weight:700;font-size:12.5px}
+  .ship .s-id small{display:block;color:var(--faint);font-weight:400;font-size:11px}
+  .st{margin-left:auto;font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .st.transit{background:var(--amber-soft);color:var(--amber-ink)}.st.plan{background:var(--blue-soft);color:var(--brand)}.st.done{background:var(--green-soft);color:var(--green-ink)}
+  .ship .goods{margin-top:9px;font-size:12px}
+  .ship .goods .g{display:flex;justify-content:space-between;color:var(--muted);padding:3px 0}
+  .ship .fin{display:flex;justify-content:space-between;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:12px}
+  .ship .fin .b{text-align:center;flex:1}
+  .ship .fin .b .l{font-size:9.5px;color:var(--faint)}
+  .ship .fin .b .v{font-weight:700;font-size:12.5px;margin-top:1px}
+  .ship .fin .b .v.gp{color:var(--green-ink)}
+  .note{margin-top:16px;font-size:12px;color:var(--faint);display:flex;gap:8px}
+  .note b{color:var(--ink)}
+
+  /* ═══ ГОДОВАЯ ЦЕЛЬ (валовая прибыль) — декомпозиция и «добрать» ═══ */
+  .goal{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:16px}
+  .goal-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .goal-ttl{font-weight:800;font-size:14px}
+  .goal-ttl .yr{color:var(--faint);font-weight:600;font-size:12px}
+  .goal-target{font-size:20px;font-weight:800;letter-spacing:-.01em}
+  .goal-bar{display:flex;height:10px;border-radius:99px;background:var(--sunken);overflow:hidden;margin:11px 0 9px}
+  .goal-bar .seg{height:100%}
+  .goal-bar .seg.fact{background:var(--ok)}.goal-bar .seg.plan{background:var(--brand)}
+  .goal-legend{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .goal-legend b{color:var(--ink);font-weight:700}
+  .goal-legend em{font-style:normal;color:var(--faint)}
+  .goal-legend .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  .goal-legend .dot.fact{background:var(--ok)}.goal-legend .dot.plan{background:var(--brand)}.goal-legend .dot.gap{background:var(--line-strong)}
+  /* строка «цель месяца / добрать» в карточке месяца */
+  .mcard .tgt{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+  .mcard .tgt .need{font-weight:700}
+  .mcard .tgt .need.ok{color:var(--green-ink)}.mcard .tgt .need.gap{color:var(--amber-ink,#B45309)}
+  .mcard .tgt .yr{color:var(--faint);white-space:nowrap}
+  /* доля машины в прибыли месяца */
+  .ship .share{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:10.5px;color:var(--muted)}
+  .ship .share .sbar{flex:1;height:4px;border-radius:99px;background:var(--sunken);overflow:hidden}
+  .ship .share .sbar span{display:block;height:100%;background:var(--brand);border-radius:99px}
+  .ship .share b{color:var(--brand-700);font-weight:700;white-space:nowrap}
+
+
+/* ═══ ЛЕВОЕ МЕНЮ (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ */
+body{padding-left:84px}                       /* место под свёрнутое меню */
+.lnav{position:fixed;top:0;left:0;height:100vh;width:64px;z-index:60}
+.lnav-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);border-right:1px solid var(--line);
+     padding:16px 12px;overflow:hidden;white-space:nowrap;transition:width .22s cubic-bezier(.4,0,.2,1)}
+.lnav:hover .lnav-inner{width:230px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+.lnav .logo{font-weight:800;font-size:16px;color:var(--ink);padding:6px 8px 18px;display:flex;gap:10px;align-items:center}
+.lnav .logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.lnav .logo .lbl{opacity:0;transition:opacity .18s}.lnav:hover .logo .lbl{opacity:1}
+.lnav .nav-group{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:14px 8px 6px;opacity:0;transition:opacity .18s}
+.lnav:hover .nav-group{opacity:1}
+.lnav .nav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;color:var(--muted);font-size:13.5px;cursor:pointer}
+.lnav .nav-item:hover{background:var(--sunken)}
+.lnav .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+.lnav .nav-item .ic{width:24px;text-align:center;flex-shrink:0;opacity:.85}
+.lnav .nav-item .lbl{opacity:0;transition:opacity .18s}.lnav:hover .nav-item .lbl{opacity:1}
+.lnav-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:var(--faint);opacity:0;transition:opacity .18s}
+.lnav:hover .lnav-hint{opacity:1}
+
+/* ═══ ФИЛЬТР ПО МЕНЕДЖЕРАМ ═══ */
+.mgr-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.mgr-bar .mgr-lbl{font-size:12.5px;font-weight:600;color:var(--muted)}
+.mgr-seg{display:inline-flex;gap:4px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.mgr-seg button{border:none;background:none;border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer}
+.mgr-seg button.on{background:var(--brand-100);color:var(--brand-700)}
+.ship.mgr-hidden,.col.mgr-empty{display:none}
+
+/* ═══ ПРАВАЯ РЕЙКА ЧАТОВ (плавающая, сворачиваемая — как в Сделках) ═══ */
+body{padding-right:88px}                     /* место под свёрнутую рейку */
+.chats{position:fixed;top:0;right:0;height:100vh;width:72px;z-index:60}
+.chats-inner{position:absolute;top:0;right:0;height:100%;width:72px;background:var(--surface);
+     transition:width .22s cubic-bezier(.4,0,.2,1);overflow-y:auto;overflow-x:hidden;box-shadow:none;border-left:1px solid var(--line)}
+.chats:hover .chats-inner{width:308px;box-shadow:-12px 0 28px rgba(16,24,40,.10)}
+.chats-head{display:flex;align-items:center;gap:8px;padding:16px 14px 10px;white-space:nowrap}
+.chats-head .ttl{font-weight:700;font-size:14px;opacity:0;transition:opacity .18s}
+.chats:hover .chats-head .ttl{opacity:1}
+.chats-head .ico{width:40px;display:flex;justify-content:center;flex-shrink:0;font-size:17px;color:var(--muted)}
+.chats-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);
+     padding:8px 16px 4px;opacity:0;transition:opacity .18s;white-space:nowrap}
+.chats:hover .chats-group{opacity:1}
+.chat-row{display:flex;align-items:center;gap:11px;padding:8px 16px;cursor:pointer;white-space:nowrap;position:relative}
+.chat-row:hover{background:var(--sunken)}
+.chats .avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+     font-weight:700;font-size:14px;color:#fff;position:relative}
+.chats .avatar .unread{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:99px;background:var(--bad);
+     color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--surface)}
+.chat-meta{min-width:0;opacity:0;transition:opacity .18s}
+.chats:hover .chat-meta{opacity:1}
+.chat-meta .nm{font-weight:600;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+.chat-meta .last{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.chats-hint{position:sticky;bottom:0;text-align:center;font-size:10px;color:var(--faint);opacity:0;transition:opacity .18s;padding:10px 0;background:var(--surface)}
+.chats:hover .chats-hint{opacity:1}
+/* окно чата */
+.chatwin{position:fixed;bottom:0;right:84px;width:340px;height:480px;max-height:80vh;background:var(--surface);
+     border-radius:14px 14px 0 0;box-shadow:0 -8px 40px rgba(15,23,42,.22);display:none;flex-direction:column;z-index:65;overflow:hidden}
+.chatwin.show{display:flex}
+.cw-head{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--line);background:var(--surface)}
+.cw-av{width:36px;height:36px;border-radius:50%;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cw-id{min-width:0;flex:1}
+.cw-id .nm{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cw-id .st{font-size:11px;color:var(--ok,#16a34a)}
+.cw-x{width:28px;height:28px;border:none;background:var(--sunken);border-radius:7px;cursor:pointer;color:var(--muted);font-size:13px}
+.cw-body{flex:1;overflow-y:auto;padding:14px 13px;background:var(--sunken);display:flex;flex-direction:column;gap:8px}
+.cw-bub{font-size:12.5px;padding:8px 11px;border-radius:12px;max-width:82%;line-height:1.4;position:relative}
+.cw-bub.in{background:var(--surface);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:4px;color:var(--ink)}
+.cw-bub.out{background:var(--brand);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.cw-bub .bm{font-size:9.5px;margin-top:4px;opacity:.6}
+.cw-day{align-self:center;font-size:10px;color:var(--faint);background:var(--sunken);border:1px solid var(--line);border-radius:99px;padding:2px 10px;margin:2px 0}
+.cw-chan{display:flex;gap:5px;padding:8px 11px 0}
+.cw-chan button{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;color:var(--muted)}
+.cw-chan button.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:600}
+.cw-compose{display:flex;gap:8px;align-items:flex-end;padding:9px 11px 11px;border-top:1px solid var(--line);background:var(--surface)}
+.cw-compose textarea{flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;resize:none;height:38px;max-height:90px;outline:none;font-family:inherit;background:var(--surface);color:var(--ink)}
+.cw-compose textarea:focus{border-color:var(--brand)}
+.cw-send{width:38px;height:38px;border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:16px;cursor:pointer;flex-shrink:0}
+.cw-send:hover{filter:brightness(1.08)}
+
+/* ═══ ДИЗАЙН-СИСТЕМА: 2 темы (C/D). Аппенд-слой перекрывает значения переменных файла. ═══ */
+:root{
+  --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --canvas:#EEF1F5; --surface:#fff; --sunken:#F4F6F9;
+  --ink:#0F172A; --muted:#5B6B82; --faint:#93A1B5;
+  --line:#E2E8F0; --line-strong:#CBD5E1;
+  --brand:#1E5EFF; --brand-50:#E3ECFF; --brand50:#E3ECFF; --brand-100:#E3ECFF; --brand100:#E3ECFF;
+  --brand-700:#1545CC; --brand700:#1545CC;
+  --accent:#1E5EFF; --accent-ink:#1545CC; --accent-soft:#E3ECFF;
+  --money:#0E7C4A; --money-soft:#E2F3EA;
+  --ok:#0E7C4A; --warn:#B45309; --bad:#DC2626;
+  --ai:#7C3AED; --ai-50:#F2EBFE;
+  /* статус-софт фоны (светлые в C, тёмные в D) — для бейджей/полос/шапок */
+  --green-soft:#ECFDF5; --green-ink:#047857;
+  --amber-soft:#FFFBEB; --amber-ink:#B45309;
+  --red-soft:#FEF2F2; --red-ink:#B91C1C;
+  --blue-soft:#EFF5FF; --blue-ink:#1D4ED8;
+  --violet-soft:#EDE9FE; --violet-ink:#6D28D9;
+  --shadow-card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --pop:0 1px 2px rgba(20,20,40,.06),0 12px 28px rgba(20,20,40,.12);
+}
+html.dark{
+  --canvas:#0E1116; --surface:#171B22; --sunken:#1F242C;
+  --ink:#E8EAED; --muted:#9BA3AE; --faint:#6B7280;
+  --line:#2A3038; --line-strong:#3A424C;
+  --brand:#6E8BFF; --brand-50:#232A3D; --brand50:#232A3D; --brand-100:#232A3D; --brand100:#232A3D;
+  --brand-700:#8AA0FF; --brand700:#8AA0FF;
+  --accent:#6E8BFF; --accent-ink:#8AA0FF; --accent-soft:#232A3D;
+  --money:#34D399; --money-soft:#16271F;
+  --ok:#34D399; --warn:#FBBF24; --bad:#F87171;
+  --ai:#A78BFA; --ai-50:#241B3A;
+  --green-soft:#16271F; --green-ink:#34D399;
+  --amber-soft:#2A2114; --amber-ink:#FBBF24;
+  --red-soft:#3A1D1D; --red-ink:#F87171;
+  --blue-soft:#1B2740; --blue-ink:#7FA8FF;
+  --violet-soft:#241B3A; --violet-ink:#C4B5FD;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --pop:0 2px 4px rgba(0,0,0,.5),0 18px 40px rgba(0,0,0,.55);
+}
+html,body{background:var(--canvas);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;font-feature-settings:"cv05","ss01";transition:background .2s,color .2s}
+/* поля ввода — на токены (иначе белый фон + чёрный текст в тёмной) */
+input,select,textarea{background:var(--surface);color:var(--ink)}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+option{background:var(--surface);color:var(--ink)}
+/* нестилизованные ссылки (дефолт-синие) → accent, читаемо в обеих темах */
+a:not([class]){color:var(--accent)}
+/* приглушить светлые статус-фоны в тёмной (бейджи/полосы), смысл-цвет сохраняем */
+html.dark .st.posted,html.dark .ds.done,html.dark .c-main,html.dark .sent.pos,html.dark .ctag.sig{background:#16271F!important;color:#34D399!important}
+html.dark .st.pending,html.dark .cd-badge{background:#2A2114!important;color:#FBBF24!important}
+html.dark .st.paid{background:#1B2740!important;color:#7FA8FF!important}
+html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!important}
+/* бренд-цвета каналов (channels.tsx / DESIGN.md §4.1) */
+.cbtn.call{background:#22C55E!important;border-color:#22C55E!important;color:#fff!important}
+.cbtn.wa{background:#25D366!important;border-color:#25D366!important;color:#fff!important}
+.cbtn.tg{background:#229ED9!important;border-color:#229ED9!important;color:#fff!important}
+.chi{font-style:normal;font-size:11px;line-height:1}
+/* переключатель темы (иконка + текст) — фикс. в правом нижнем углу */
+.theme-tgl{position:fixed;right:14px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 13px;height:auto;cursor:pointer;transition:.14s;white-space:nowrap;box-shadow:0 4px 14px rgba(16,24,40,.12)}
+.theme-tgl:hover{background:var(--sunken)}
+.theme-tgl #themeIco{font-size:15px;line-height:0}
+
+  /* ═══ ПРОГНОЗ ПРИБЫЛИ (этот экран) ═══ */
+  .xlink{display:inline-block;font-size:12px;font-weight:600;color:var(--brand-700);text-decoration:none;margin-bottom:6px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:16px}
+  .card-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .card-t{font-weight:800;font-size:14.5px}
+  .card-t .card-sub{font-weight:500;font-size:12px;color:var(--faint);margin-left:6px}
+  .card-note{margin-top:11px;font-size:11.5px;color:var(--faint);line-height:1.5}
+  .card-note b{color:var(--muted)}
+  .recon{font-size:11.5px;font-weight:700;color:var(--green-ink);background:var(--green-soft);border-radius:7px;padding:4px 10px;white-space:nowrap}
+  .demo-banner{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--amber-soft);color:var(--amber-ink);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:11px;padding:10px 14px;font-size:12px;line-height:1.45;margin-bottom:16px}
+  .demo-banner a{color:var(--brand-700);font-weight:700;text-decoration:none;margin-left:auto;white-space:nowrap}
+
+  /* мост (waterfall) */
+  .wf-wrap{overflow-x:auto}
+  .wf{position:relative;display:flex;align-items:flex-end;gap:10px;height:210px;margin:26px 0 30px;min-width:560px}
+  .wf-col{position:relative;flex:1;height:100%;min-width:56px}
+  .wf-bar{position:absolute;left:12%;right:12%;border-radius:5px 5px 0 0}
+  .wf-bar.start{background:var(--faint)}
+  .wf-bar.end{background:var(--brand)}
+  .wf-bar.pos{background:var(--ok)}
+  .wf-bar.neg{background:var(--bad)}
+  .wf-bar.scn{background:repeating-linear-gradient(45deg,var(--brand),var(--brand) 5px,transparent 5px,transparent 10px);border:1px dashed var(--brand)}
+  .wf-val{position:absolute;left:-6px;right:-6px;text-align:center;font-size:10.5px;font-weight:700;color:var(--ink)}
+  .wf-name{position:absolute;left:-4px;right:-4px;bottom:-24px;text-align:center;font-size:10.5px;color:var(--muted);line-height:1.15}
+  .wf-goal{position:absolute;left:0;right:0;border-top:2px dashed var(--ink);opacity:.45;z-index:2}
+  .wf-goal span{position:absolute;right:0;top:-15px;font-size:10px;font-weight:700;color:var(--muted);background:var(--surface);padding:0 4px}
+  .wf-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px}
+  .wf-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+  .wf-status{font-size:12.5px;font-weight:700}
+  .lg{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:middle}
+  .lg.pos{background:var(--ok)}.lg.neg{background:var(--bad)}
+  .lg.scn{background:repeating-linear-gradient(45deg,var(--brand),var(--brand) 3px,transparent 3px,transparent 6px);border:1px solid var(--brand)}
+  .lg.goal{border-top:2px dashed var(--ink);height:0;width:14px;border-radius:0}
+  .lg.lL{background:var(--brand)}.lg.lD{background:var(--ok)}
+
+  /* драйверы */
+  .drivers{display:flex;flex-direction:column;gap:8px}
+  .drow{display:flex;align-items:center;gap:12px;font-size:12.5px}
+  .drow .dn{width:200px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drow .db{flex:1;height:12px;background:var(--sunken);border-radius:99px;position:relative;min-width:120px}
+  .drow .db .mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line-strong)}
+  .drow .db span{position:absolute;top:0;height:100%;border-radius:99px}
+  .drow .db span.pos{left:50%;background:var(--ok)}
+  .drow .db span.neg{right:50%;background:var(--bad)}
+  .drow .dv{width:96px;text-align:right;flex-shrink:0;font-weight:700}
+  .drow .dv.pos{color:var(--green-ink)}.drow .dv.neg{color:var(--bad)}
+
+  /* таблица SKU */
+  .sku-wrap{overflow-x:auto}
+  .sku{width:100%;border-collapse:collapse;font-size:12.5px;min-width:680px}
+  .sku th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:600;padding:6px 9px;border-bottom:1px solid var(--line)}
+  .sku th.num{text-align:right}
+  .sku td{padding:9px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .sku td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .sku tr.sku-row{cursor:pointer}
+  .sku tr.sku-row:hover td{background:var(--sunken)}
+  .sku tr.sku-row.sel td{background:var(--brand-50)}
+  .sku .sname{font-weight:600}
+  .pill{display:inline-block;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .pill.method{background:var(--sunken);color:var(--muted)}
+  .pill.cls-smooth{background:var(--green-soft);color:var(--green-ink)}
+  .pill.cls-erratic{background:var(--amber-soft);color:var(--amber-ink)}
+  .pill.cls-intermittent{background:var(--blue-soft);color:var(--blue-ink)}
+  .pill.cls-lumpy{background:var(--violet-soft);color:var(--violet-ink)}
+  .pill.cls-obsolete{background:var(--red-soft);color:var(--red-ink)}
+  .clshint{font-size:10px;color:var(--faint);margin-top:2px}
+  .delta.pos{color:var(--green-ink);font-weight:700}
+  .delta.neg{color:var(--bad);font-weight:700}
+
+  /* буфер σ + новые клиенты */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.two{grid-template-columns:1fr}}
+  .hl{color:var(--brand-700)}
+  .sg-formula{font-size:13px;color:var(--muted);background:var(--sunken);border-radius:8px;padding:8px 11px;margin:4px 0 12px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .sg-bar{display:flex;height:18px;border-radius:9px;overflow:hidden;margin:6px 0 10px;background:var(--sunken)}
+  .sg-bar .sg-l{background:var(--brand)}
+  .sg-bar .sg-d{background:var(--ok)}
+  .sg-legend{display:flex;gap:18px;font-size:12px;color:var(--muted);margin-bottom:10px;flex-wrap:wrap}
+  .sg-legend b{color:var(--ink)}
+  .sg-note{font-size:12px;line-height:1.5;background:var(--blue-soft);border-radius:9px;padding:9px 12px;color:var(--blue-ink)}
+  .sg-meta{font-size:11px;color:var(--faint);margin-top:8px}
+  .scn-seg{display:inline-flex;gap:4px;background:var(--sunken);border:1px solid var(--line);border-radius:10px;padding:3px;margin:2px 0 12px;flex-wrap:wrap}
+  .scn-seg button{border:none;background:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer}
+  .scn-seg button.on{background:var(--brand-100);color:var(--brand-700)}
+  .scn-val{font-size:24px;font-weight:800;letter-spacing:-.01em;color:var(--brand-700)}
+  .scn-calc{font-size:12px;color:var(--muted);margin:2px 0 10px}
+  .scn-note{font-size:11.5px;line-height:1.5;color:var(--faint)}
+  .scn-note b{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<!-- ═══ Левое меню (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ -->
+<aside class="lnav">
+  <div class="lnav-inner">
+    <div class="logo"><span class="mark">A</span><span class="lbl">AI-First OS</span></div>
+    <div class="nav-group">CRM</div>
+    <div class="nav-item"><span class="ic">▦</span><span class="lbl">Сделки</span></div>
+    <div class="nav-item"><span class="ic">◔</span><span class="lbl">Лиды</span></div>
+    <div class="nav-item"><span class="ic">📊</span><span class="lbl">План прибыли</span></div>
+    <div class="nav-item active"><span class="ic">📈</span><span class="lbl">Прогноз прибыли</span></div>
+    <div class="nav-item"><span class="ic">◑</span><span class="lbl">РОП</span></div>
+    <div class="nav-group">ERP</div>
+    <div class="nav-item"><span class="ic">▣</span><span class="lbl">Производство</span></div>
+    <div class="nav-item"><span class="ic">⛓</span><span class="lbl">Закупки</span></div>
+    <div class="nav-item"><span class="ic">⚖</span><span class="lbl">Финансы</span></div>
+    <div class="lnav-hint">наведи — раскрыть</div>
+  </div>
+</aside>
+
+<!-- ═══ Правая рейка чатов (плавающая, как в Сделках) ═══ -->
+<aside class="chats" id="chatRailMarker">
+  <div class="chats-inner">
+    <div class="chats-head"><span class="ico">💬</span><span class="ttl">Чаты и дела</span></div>
+    <div class="chats-group">Клиенты</div>
+    <div class="chat-row" data-chat="beltrans"><div class="avatar" style="background:var(--brand)">БТ<span class="unread">3</span></div><div class="chat-meta"><div class="nm">ОАО «Белтранс»</div><div class="last">Когда подъедете на осмотр парка?</div></div></div>
+    <div class="chat-row" data-chat="park7"><div class="avatar" style="background:#F59E0B">А7<span class="unread">1</span></div><div class="chat-meta"><div class="nm">Автопарк №7</div><div class="last">Жду предложение по году</div></div></div>
+    <div class="chat-row" data-chat="minskelektro"><div class="avatar" style="background:#14B8A6">МЭ</div><div class="chat-meta"><div class="nm">УП «Минскэлектро»</div><div class="last">Счёт передали на оплату</div></div></div>
+    <div class="chat-row" data-chat="voltavto"><div class="avatar" style="background:#8B5CF6">ВА<span class="unread">2</span></div><div class="chat-meta"><div class="nm">ТД «ВольтАвто»</div><div class="last">Интересуют АКБ на 12 машин</div></div></div>
+    <div class="chats-group">Коллеги</div>
+    <div class="chat-row" data-chat="rop"><div class="avatar" style="background:#0EA5E9">СК</div><div class="chat-meta"><div class="nm">Сидоров К. · РОП</div><div class="last">Согласовал план на июнь</div></div></div>
+    <div class="chat-row" data-chat="petrova"><div class="avatar" style="background:#64748B">ПА</div><div class="chat-meta"><div class="nm">Петрова А.</div><div class="last">Передай контакт по Гомелю</div></div></div>
+    <div class="chats-hint">наведи — раскрыть</div>
+  </div>
+</aside>
+<div class="chatwin" id="chatwin">
+  <div class="cw-head"><div class="cw-av" id="cw-av">БТ</div><div class="cw-id"><div class="nm" id="cw-nm">—</div><div class="st" id="cw-st">● онлайн · WhatsApp</div></div><button class="cw-x" onclick="closeChat()">✕</button></div>
+  <div class="cw-body" id="cw-body"></div>
+  <div class="cw-chan" id="cw-chan"><button class="on" data-ch="WhatsApp">WhatsApp</button><button data-ch="Telegram">Telegram</button><button data-ch="Email">Email</button><button data-ch="Звонок">☎ Звонок</button></div>
+  <div class="cw-compose"><textarea id="cw-input" placeholder="Написать сообщение…"></textarea><button class="cw-send" id="cw-send" title="Отправить">➤</button></div>
+</div>
+
+<button class="theme-tgl" id="themeTgl" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+<a href="sales-2.0-index.html" style="position:fixed;left:78px;bottom:14px;z-index:9999;display:inline-flex;align-items:center;gap:6px;font:600 12.5px -apple-system,'Segoe UI',sans-serif;color:var(--brand-700);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 12px;box-shadow:0 4px 14px rgba(16,24,40,.12)">← К списку макетов</a>
+  <a href="sales-margin-by-month.html" class="xlink">← План по машинам</a>
+  <h1>Прогноз роста валовой прибыли — за счёт каких товаров</h1>
+  <div class="sub">Факт прошлого года → план этого · мост прибыли (объём · микс · цена · новые клиенты · затраты/FX) · класс спроса по SKU и буфер запаса · BYN · <b>числа иллюстративные (демо)</b></div>
+
+  <div class="demo-banner">
+    <span>⚠️ Демо «правильной формы» движка планирования спроса. Прогнозные числа иллюстративные — реальные придут из: история продаж 1С → классификация ABC-XYZ / ADI-CV² → Nixtla (SBA · ETS · TSB) → буфер newsvendor.</span>
+    <a href="sales-margin-by-month.html">→ План по машинам</a>
+  </div>
+
+  <!-- мост валовой прибыли (PVM waterfall) -->
+  <div class="card">
+    <div class="card-h">
+      <div class="card-t">💰 Мост валовой прибыли · прошлый год → план</div>
+      <div class="recon" id="recon">—</div>
+    </div>
+    <div class="wf-wrap"><div class="wf" id="wf"></div></div>
+    <div class="wf-foot">
+      <div class="wf-legend">
+        <span><i class="lg pos"></i> рост</span>
+        <span><i class="lg neg"></i> снижение</span>
+        <span><i class="lg scn"></i> сценарий (новые клиенты)</span>
+        <span><i class="lg goal"></i> годовая цель</span>
+      </div>
+      <div class="wf-status" id="wfStatus">—</div>
+    </div>
+    <div class="card-note">Порядок раскладки фиксирован (PVM): Объём → Микс → Цена → Новые клиенты → Затраты/FX. Бакеты обязаны сходиться к Δ валовой прибыли — иначе мост врёт. Считается на <b>валовой марже</b>, не на обороте.</div>
+  </div>
+
+  <!-- за счёт каких товаров -->
+  <div class="card">
+    <div class="card-t">📦 За счёт каких товаров растёт прибыль <span class="card-sub">Δ валовой прибыли к прошлому году · ключевые SKU</span></div>
+    <div class="drivers" id="drivers"></div>
+  </div>
+
+  <!-- маршрутизация SKU -->
+  <div class="card">
+    <div class="card-t">🧭 Маршрутизация SKU: класс спроса → метод → спрос за срок → буфер <span class="card-sub">не одна модель на каталог — каждый SKU к своему методу</span></div>
+    <div class="sku-wrap">
+      <table class="sku">
+        <thead><tr>
+          <th>Товар</th><th>Класс спроса</th><th>ABC · XYZ</th><th>Метод</th>
+          <th class="num">Спрос за срок · P50 / P90</th><th class="num">Буфер</th>
+          <th class="num">План ВП</th><th class="num">Δ к пр. году</th>
+        </tr></thead>
+        <tbody id="skuBody"></tbody>
+      </table>
+    </div>
+    <div class="card-note">P50 / P90 — квантили спроса за срок поставки; запас считается из <b>P90</b>, а не из среднего (контейнер не дозакажешь). Клик по строке — раскладка буфера на σ спроса и σ срока ↓. Показаны ключевые позиции, не весь каталог.</div>
+  </div>
+
+  <!-- буфер (σ) + новые клиенты -->
+  <div class="two">
+    <div class="card sigma">
+      <div class="card-t">🛡 Буфер запаса: чем он движется — <span id="sgSku" class="hl">—</span></div>
+      <div class="sg-formula">SS = z · √( L·σ²d + d̄²·σ²L )</div>
+      <div class="sg-bar"><span class="sg-l" id="sgL"></span><span class="sg-d" id="sgD"></span></div>
+      <div class="sg-legend">
+        <span><i class="lg lL"></i> срок поставки σ_L · <b id="sgLp">—</b></span>
+        <span><i class="lg lD"></i> спрос σ_d · <b id="sgDp">—</b></span>
+      </div>
+      <div class="sg-note" id="sgNote">—</div>
+      <div class="sg-meta" id="sgMeta">—</div>
+    </div>
+
+    <div class="card scn">
+      <div class="card-t">🚀 Новые клиенты — отдельный сегмент <span class="card-sub">вне твёрдого плана и закупки</span></div>
+      <div class="scn-seg">
+        <button onclick="setScn('cons')" data-s="cons">Консервативный</button>
+        <button onclick="setScn('base')" data-s="base" class="on">База</button>
+        <button onclick="setScn('agr')" data-s="agr">Агрессивный</button>
+      </div>
+      <div class="scn-val" id="scnVal">—</div>
+      <div class="scn-calc" id="scnCalc">—</div>
+      <div class="scn-note">Probability-haircut из вероятностей стадий воронки CRM. <b>Не входит</b> в твёрдое закупочное число и committed-маржу · пере-прогноз помесячно по первым заказам. Меняет только верхний бакет моста (пунктир).</div>
+    </div>
+  </div>
+
+  <div class="note"><span>🧪</span><span><b>Методики (state-of-the-art):</b> класс спроса ADI/CV² (Syntetos-Boylan) + ABC-XYZ → SBA (медленный хвост), TSB (устаревающие), AutoETS / Theta (сезонные АКБ); движок — <b>Nixtla statsforecast</b> (не свой); запас — <b>newsvendor</b> (критический квантиль P90), буфер DDMRP; мост — <b>PVM</b> (Volume→Mix→Price→New→Cost/FX); метрика — деньги + FVA, не MAPE. Все числа демонстрационные.</span></div>
+
+<script>
+(function(){
+  const CHATS={
+    beltrans:{av:'БТ',c:'var(--brand)',nm:'ОАО «Белтранс»',chan:'WhatsApp',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Здравствуйте! Получили ваше КП по парку.',m:'WhatsApp · 09:40'},{d:'in',t:'Когда сможете подъехать на осмотр парка?',m:'WhatsApp · 09:41'},{d:'out',t:'Добрый день! Готовы 13.06 в 11:00, подойдёт?',m:'WhatsApp · 10:05 ✓✓'}]},
+    park7:{av:'А7',c:'#F59E0B',nm:'Автопарк №7',chan:'Email',msgs:[{d:'day',t:'Вчера'},{d:'out',t:'Подготовили предложение по годовой поставке, во вложении.',m:'Email · 16:00'},{d:'in',t:'Спасибо, изучаем. Жду предложение по году.',m:'Email · 17:20'}]},
+    minskelektro:{av:'МЭ',c:'#14B8A6',nm:'УП «Минскэлектро»',chan:'Email',msgs:[{d:'day',t:'Сегодня'},{d:'out',t:'Счёт СЧ-0421 выставлен, направил на почту.',m:'Email · 11:10'},{d:'in',t:'Счёт получили, передали на оплату.',m:'Email · 12:00'}]},
+    voltavto:{av:'ВА',c:'#8B5CF6',nm:'ТД «ВольтАвто»',chan:'WhatsApp',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Интересуют АКБ на 12 машин, что есть в наличии?',m:'Сайт · 10:02'},{d:'in',t:'И цену опт, пожалуйста.',m:'WhatsApp · 10:03'}]},
+    rop:{av:'СК',c:'#0EA5E9',nm:'Сидоров К. · РОП',chan:'Telegram',msgs:[{d:'day',t:'Сегодня'},{d:'in',t:'Согласовал твой план на июнь. Держим темп по Белтрансу.',m:'Telegram · 08:30'}]},
+    petrova:{av:'ПА',c:'#64748B',nm:'Петрова А.',chan:'Telegram',msgs:[{d:'day',t:'Вчера'},{d:'in',t:'Передай контакт по Гомелю, у меня там встреча.',m:'Telegram · 15:12'}]},
+  };
+  let curChat=null;
+  function renderThread(key){
+    const c=CHATS[key]; const body=document.getElementById('cw-body'); body.innerHTML='';
+    c.msgs.forEach(m=>{
+      if(m.d==='day'){ const d=document.createElement('div'); d.className='cw-day'; d.textContent=m.t; body.appendChild(d); return; }
+      const b=document.createElement('div'); b.className='cw-bub '+m.d; b.innerHTML=m.t+'<div class="bm">'+m.m+'</div>'; body.appendChild(b);
+    });
+    body.scrollTop=body.scrollHeight;
+  }
+  function openChat(key){
+    const c=CHATS[key]; if(!c) return; curChat=key;
+    document.getElementById('cw-av').textContent=c.av;
+    document.getElementById('cw-av').style.background=c.c;
+    document.getElementById('cw-nm').textContent=c.nm;
+    document.getElementById('cw-st').textContent='● онлайн · '+c.chan;
+    document.querySelectorAll('#cw-chan button').forEach(b=>b.classList.toggle('on', b.dataset.ch===c.chan));
+    renderThread(key);
+    document.getElementById('chatwin').classList.add('show');
+    document.getElementById('cw-input').focus();
+  }
+  window.closeChat=function(){ document.getElementById('chatwin').classList.remove('show'); };
+  document.querySelectorAll('.chat-row').forEach(row=>row.addEventListener('click', ()=>openChat(row.dataset.chat)));
+  document.getElementById('cw-chan').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    document.querySelectorAll('#cw-chan button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    document.getElementById('cw-st').textContent='● онлайн · '+b.dataset.ch;
+  });
+  function sendMsg(){
+    const inp=document.getElementById('cw-input'); const txt=inp.value.trim(); if(!txt||!curChat) return;
+    const chan=document.querySelector('#cw-chan button.on')?.dataset.ch||'WhatsApp';
+    CHATS[curChat].msgs.push({d:'out',t:txt,m:chan+' · сейчас ✓'});
+    renderThread(curChat); inp.value='';
+    setTimeout(()=>{ if(curChat){ CHATS[curChat].msgs.push({d:'in',t:'Принял, спасибо!',m:chan+' · сейчас'}); if(document.getElementById('chatwin').classList.contains('show')) renderThread(curChat); } }, 1400);
+  }
+  document.getElementById('cw-send').addEventListener('click', sendMsg);
+  document.getElementById('cw-input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+})();
+</script>
+
+<script>
+(function(){
+  "use strict";
+  const PREV=620000, GOAL=760000, POT=98000;
+  const NEW_BY={cons:22000, base:44000, agr:70000};
+  const HC_BY ={cons:0.22, base:0.45, agr:0.71};
+  let scn='base';
+  const fmt=n=>Math.round(n).toLocaleString('ru-RU');
+
+  // Единый источник: ключевые SKU (демо). P50/P90/буфер/σ-раскладка считаются из {L,sigL,dd,sigD}.
+  const SKUS=[
+    {sku:'АКБ 6СТ-190 (Зубр)',     cls:'smooth',       abc:'A · X', method:'AutoETS',     gp:96000, d:18000, L:45,sigL:4, dd:7,   sigD:3},
+    {sku:'АКБ 6СТ-225',            cls:'smooth',       abc:'A · Y', method:'AutoETS',     gp:58000, d:9000,  L:48,sigL:5, dd:4,   sigD:1.8},
+    {sku:'АКБ 6СТ-132 (легк.)',    cls:'erratic',      abc:'B · Y', method:'Croston/SBA', gp:31000, d:5000,  L:45,sigL:4, dd:3,   sigD:2.4},
+    {sku:'Зарядные + тестеры',     cls:'intermittent', abc:'B · Z', method:'SBA',         gp:14000, d:3000,  L:52,sigL:6, dd:0.5, sigD:0.4},
+    {sku:'АКБ промышл. (тяга)',    cls:'lumpy',        abc:'C · Z', method:'SBA',         gp:12000, d:6000,  L:60,sigL:7, dd:0.2, sigD:0.5},
+    {sku:'АКБ 6СТ-60 (старый ряд)',cls:'obsolete',     abc:'C · Z', method:'TSB',         gp:4000,  d:-7000, L:46,sigL:5, dd:0.4, sigD:0.3}
+  ];
+  const CLS={
+    smooth:{ru:'гладкий', hint:'часто · ровно'},
+    erratic:{ru:'скачущий объём', hint:'часто · скачет'},
+    intermittent:{ru:'редкий ровный', hint:'редко · ровно'},
+    lumpy:{ru:'редкий скачущий', hint:'редко · скачет'},
+    obsolete:{ru:'устаревает', hint:'хвост нулей · TSB гасит'}
+  };
+  const Z=1.28; // квантиль P90
+  function calc(s){
+    const termD=s.L*s.sigD*s.sigD, termL=s.dd*s.dd*s.sigL*s.sigL;
+    const ss=Z*Math.sqrt(termD+termL);
+    const p50=s.dd*s.L, p90=p50+ss;
+    const lp=Math.round(termL/(termD+termL)*100);
+    return {ss:Math.round(ss), p50:Math.round(p50), p90:Math.round(p90), lp:lp, dp:100-lp};
+  }
+
+  // ── мост ВП (PVM waterfall) ──
+  function buckets(){
+    return [
+      {k:'Объём', v:58000, t:'pos'},
+      {k:'Микс', v:42000, t:'pos'},
+      {k:'Цена', v:20000, t:'pos'},
+      {k:'Новые<br>клиенты', v:NEW_BY[scn], t:'scn'},
+      {k:'Затраты<br>/ FX', v:-24000, t:'neg'}
+    ];
+  }
+  function renderWF(){
+    const bks=buckets();
+    const fc=PREV+bks.reduce((a,b)=>a+b.v,0);
+    let lvl=PREV, mx=Math.max(PREV,GOAL,fc);
+    bks.forEach(b=>{ lvl+=b.v; if(lvl>mx) mx=lvl; });
+    const H=210, sc=(H-22)/(mx*1.06);
+    const wf=document.getElementById('wf'); wf.innerHTML='';
+    const gl=document.createElement('div'); gl.className='wf-goal'; gl.style.bottom=(GOAL*sc)+'px';
+    gl.innerHTML='<span>годовая цель '+fmt(GOAL)+' Br</span>'; wf.appendChild(gl);
+    function col(name,cls,bottom,h,label){
+      const c=document.createElement('div'); c.className='wf-col';
+      c.innerHTML='<div class="wf-val" style="bottom:'+(bottom+h+4)+'px">'+label+'</div>'+
+                  '<div class="wf-bar '+cls+'" style="bottom:'+bottom+'px;height:'+Math.max(2,h)+'px"></div>'+
+                  '<div class="wf-name">'+name+'</div>';
+      wf.appendChild(c);
+    }
+    col('Пр. год','start',0,PREV*sc,fmt(PREV)+' Br');
+    let run=PREV;
+    bks.forEach(b=>{
+      const before=run, after=run+b.v;
+      col(b.k, b.t, Math.min(before,after)*sc, Math.abs(b.v)*sc, (b.v>=0?'+':'−')+fmt(Math.abs(b.v))+' Br');
+      run=after;
+    });
+    col('Прогноз','end',0,fc*sc,fmt(fc)+' Br');
+    document.getElementById('recon').textContent='сверка: бакеты = Δ ВП ✓  +'+fmt(fc-PREV)+' Br';
+    const diff=fc-GOAL, st=document.getElementById('wfStatus');
+    if(diff>0){ st.textContent='✓ выше годовой цели · +'+fmt(diff)+' Br'; st.style.color='var(--green-ink)'; }
+    else if(diff===0){ st.textContent='✓ ровно в годовую цель'; st.style.color='var(--green-ink)'; }
+    else { st.textContent='ниже цели · добрать '+fmt(-diff)+' Br'; st.style.color='var(--amber-ink)'; }
+  }
+
+  // ── драйверы: за счёт каких товаров ──
+  function renderDrivers(){
+    const box=document.getElementById('drivers'); box.innerHTML='';
+    const rows=SKUS.slice().sort((a,b)=>b.d-a.d);
+    const mx=Math.max.apply(null, rows.map(r=>Math.abs(r.d)));
+    rows.forEach(r=>{
+      const pos=r.d>=0, w=Math.round(Math.abs(r.d)/mx*50);
+      const el=document.createElement('div'); el.className='drow';
+      el.innerHTML='<div class="dn">'+r.sku+'</div>'+
+        '<div class="db"><span class="mid"></span><span class="'+(pos?'pos':'neg')+'" style="width:'+w+'%"></span></div>'+
+        '<div class="dv '+(pos?'pos':'neg')+'">'+(pos?'+':'−')+fmt(Math.abs(r.d))+' Br</div>';
+      box.appendChild(el);
+    });
+  }
+
+  // ── таблица маршрутизации SKU ──
+  function renderTable(){
+    const tb=document.getElementById('skuBody'); tb.innerHTML='';
+    SKUS.forEach((s,i)=>{
+      const c=calc(s), cl=CLS[s.cls];
+      const tr=document.createElement('tr'); tr.className='sku-row'+(i===0?' sel':'');
+      tr.innerHTML=
+        '<td><div class="sname">'+s.sku+'</div></td>'+
+        '<td><span class="pill cls-'+s.cls+'">'+cl.ru+'</span><div class="clshint">'+cl.hint+'</div></td>'+
+        '<td>'+s.abc+'</td>'+
+        '<td><span class="pill method">'+s.method+'</span></td>'+
+        '<td class="num">'+c.p50+' / '+c.p90+' шт</td>'+
+        '<td class="num">'+c.ss+' шт</td>'+
+        '<td class="num">'+fmt(s.gp)+' Br</td>'+
+        '<td class="num delta '+(s.d>=0?'pos':'neg')+'">'+(s.d>=0?'+':'−')+fmt(Math.abs(s.d))+' Br</td>';
+      tr.addEventListener('click', function(){ selectSku(i); });
+      tb.appendChild(tr);
+    });
+  }
+
+  // ── буфер: раскладка на σ спроса и σ срока поставки ──
+  function selectSku(i){
+    const rows=document.querySelectorAll('#skuBody tr');
+    rows.forEach((r,j)=>r.classList.toggle('sel', j===i));
+    const s=SKUS[i], c=calc(s), cl=CLS[s.cls];
+    document.getElementById('sgSku').textContent=s.sku;
+    document.getElementById('sgL').style.width=c.lp+'%';
+    document.getElementById('sgD').style.width=c.dp+'%';
+    document.getElementById('sgLp').textContent=c.lp+'%';
+    document.getElementById('sgDp').textContent=c.dp+'%';
+    const note=document.getElementById('sgNote');
+    if(c.lp>=55) note.textContent='Главный риск запаса — нестабильность СРОКА поставки из Китая (σ_L). Измерять/стабилизировать lead-time экспедитора экономит больше замороженного капитала, чем шлифовка прогноза спроса.';
+    else if(c.lp<=45) note.textContent='Главный риск — колебания самого СПРОСА (класс «'+cl.ru+'»). Здесь важнее качество прогноза, чем срок поставки.';
+    else note.textContent='Срок поставки и спрос вносят сопоставимый вклад в буфер.';
+    document.getElementById('sgMeta').textContent='срок L='+s.L+'±'+s.sigL+' дн · спрос d̄='+s.dd+'±'+s.sigD+' шт/день · z(P90)='+Z+' · буфер '+c.ss+' шт';
+  }
+
+  // ── сценарий новых клиентов ──
+  window.setScn=function(x){
+    scn=x;
+    document.querySelectorAll('.scn-seg button').forEach(b=>b.classList.toggle('on', b.dataset.s===x));
+    document.getElementById('scnVal').textContent='+'+fmt(NEW_BY[x])+' Br';
+    document.getElementById('scnCalc').textContent='потенциал воронки '+fmt(POT)+' Br × haircut '+HC_BY[x].toFixed(2);
+    renderWF();
+  };
+
+  renderWF(); renderDrivers(); renderTable(); selectSku(0); setScn('base');
+})();
+</script>
+
+<script src="sales-cur.js"></script>
+</body>
+</html>
