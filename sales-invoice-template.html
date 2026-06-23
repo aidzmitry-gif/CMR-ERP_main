@@ -30,7 +30,7 @@
     box-shadow:0 4px 24px rgba(16,24,40,.12);min-height:1000px}
   .logo{display:flex;align-items:center;gap:12px;margin-bottom:14px}
   .logo .mk{width:46px;height:46px;border-radius:8px;background:var(--ink);color:#fff;display:flex;align-items:center;
-    justify-content:center;font-size:24px}
+    justify-content:center;font-size:18px;font-weight:800;letter-spacing:.02em}
   .logo .lt{font-weight:800;font-size:13px;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}
   .logo .lt small{display:block;font-weight:600;font-size:10px;color:var(--soft);letter-spacing:.06em}
   h1{text-align:center;font-size:16px;font-weight:800;margin:6px 0 16px}
@@ -92,7 +92,7 @@
 
 <div class="sheet" id="sheet">
   <div class="logo">
-    <div class="mk">🔋</div>
+    <div class="mk" id="mk">АР</div>
     <div class="lt"><span id="lgName">—</span><small>счёт-протокол на оплату</small></div>
   </div>
 
@@ -233,9 +233,17 @@
            ', р/с '+p.acc+' в банке '+p.bank+' БИК '+p.bik;
   }
   function set(id,html){ var e=document.getElementById(id); if(e) e.innerHTML=html; }
+  // монограмма-логотип из инициалов поставщика (без орг-формы и кавычек)
+  function monogram(name){
+    var ws=(name||"").replace(/["«»„“]/g,"").split(/\s+/).filter(Boolean)
+      .filter(function(w){ return !/^(ООО|ОАО|ЗАО|ОДО|АО|ПАО|УП|ЧУП|ЧТУП|ИП|СП|ТОО)$/i.test(w); });
+    var ini=ws.slice(0,2).map(function(w){ return w.charAt(0); }).join("");
+    return (ini || (name||"?").slice(0,2)).toUpperCase();
+  }
 
   function render(){
     set("lgName", DATA.supplier.name);
+    set("mk", monogram(DATA.supplier.name));
     set("docNo", DATA.docNo); set("docDate", DATA.date);
     set("docNo2", DATA.docNo); set("docDate2", DATA.date);
     set("orderNo", DATA.orderNo); set("sig1", DATA.signatory);
