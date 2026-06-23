@@ -55,6 +55,14 @@ const MODULES: ModuleItem[] = [
       { label: "Клиенты" },
       { label: "Контакты" },
       { label: "Сделки", href: "/crm/deals" },
+      { label: "Звонки", href: "/crm/calls" },
+      { label: "Каталог · подбор", href: "/crm/catalog" },
+      { label: "Реестр документов", href: "/crm/docs" },
+      { label: "Архив документов", href: "/crm/docs-archive" },
+      { label: "Постоянные клиенты", href: "/crm/regular" },
+      { label: "Статус отгрузки", href: "/crm/shipments" },
+      { label: "Валовая прибыль", href: "/crm/margin" },
+      { label: "Конструктор плана", href: "/crm/plan" },
       { label: "РОП · Обзор", href: "/crm/rop" },
       { label: "РОП · Планирование", href: "/crm/rop/planning" },
       { label: "РОП · Темп", href: "/crm/rop/pace" },
@@ -207,6 +215,13 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   const crmActive =
     pathname.startsWith("/crm/deals") ||
     pathname.startsWith("/crm/leads") ||
+    pathname.startsWith("/crm/calls") ||
+    pathname.startsWith("/crm/catalog") ||
+    pathname.startsWith("/crm/docs") ||
+    pathname.startsWith("/crm/regular") ||
+    pathname.startsWith("/crm/shipments") ||
+    pathname.startsWith("/crm/margin") ||
+    pathname.startsWith("/crm/plan") ||
     pathname.startsWith("/crm/rop");
 
   // dev-выход: чистим cookie сессии и уводим на экран входа

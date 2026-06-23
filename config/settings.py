@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,8 +15,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AIOS_", extra="ignore")
 
     app_name: str = "AI-First Business OS"
-    environment: str = "dev"
-    debug: bool = True
+    # Безопасные дефолты: прод не должен случайно унаследовать dev-режим.
+    # Для локальной разработки выставить AIOS_ENVIRONMENT=dev и AIOS_DEBUG=true.
+    environment: str = "prod"
+    debug: bool = False
 
     # инфраструктура (наполняется в части 1+)
     database_url: str = "postgresql+psycopg://aios:aios@localhost:5432/aios"
@@ -46,6 +49,28 @@ class Settings(BaseSettings):
     # пусто → исходящий звонок недоступен (503).
     telephony_webhook_token: str = ""
     telephony_originate_url: str = ""
+
+    # Приём лидов с сайта (контакт-форма) и почты (вебхук форвардера): публичные коннекторы
+    # integrations, аутентификация общим секретом ?token= — если задан, входящие без
+    # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
+    intake_webhook_token: str = ""
+
+    @model_validator(mode="after")
+    def _no_dev_defaults_in_prod(self) -> "Settings":
+        """В прод-окружении запретить dev-дефолтные креды (SECURITY.md P0-5).
+
+        Локальная разработка проходит при ``AIOS_ENVIRONMENT=dev``; прод-режим
+        (значение по умолчанию) падает на старте, если БД/Telegram несут засвеченные
+        dev-значения — это страховка от деплоя с ``aios:aios`` и т.п.
+        """
+        if self.environment.lower().startswith("dev"):
+            return self
+        if "aios:aios@" in self.database_url:
+            raise ValueError(
+                "Прод-режим с dev-дефолтом БД (aios:aios). Задайте AIOS_DATABASE_URL "
+                "с реальными кредами или AIOS_ENVIRONMENT=dev для локальной разработки."
+            )
+        return self
 
 
 @lru_cache

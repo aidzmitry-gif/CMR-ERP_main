@@ -2,15 +2,18 @@
 "use client";
 
 import clsx from "clsx";
-import { Plus, X } from "lucide-react";
+import { Globe, Mail, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
   convertLead,
   createLead,
+  fetchLeadsClient,
   type LeadInput,
   qualifyLead,
   routeLead,
+  submitEmailLead,
+  submitWebLead,
 } from "@/lib/api";
 import type { Lead, LeadStatus } from "@/lib/types";
 
@@ -444,6 +447,49 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
   const selected = leads.find((l) => l.id === selectedId) ?? null;
 
+  const [note, setNote] = useState("");
+  const [demoBusy, setDemoBusy] = useState(false);
+
+  async function refresh() {
+    setLeads(await fetchLeadsClient());
+  }
+
+  // Демо: внешний канал (сайт/почта) шлёт заявку в публичный коннектор → лид приходит
+  // событием через relay (~2с), затем подтягиваем приём.
+  async function demoSite() {
+    setDemoBusy(true);
+    await submitWebLead({
+      name: "Андрей Гудков",
+      company: "ООО СтройКуб",
+      phone: "+375297778899",
+      email: "a.gudkov@stroykub.by",
+      region: "Брест",
+      product: "лист 5 мм",
+      message: "Заявка с сайта: нужен лист 5 мм, 10 т, срочно",
+    });
+    setNote("Заявка с сайта принята — лид появится в «Новых» через пару секунд…");
+    window.setTimeout(() => {
+      void refresh();
+      setNote("");
+    }, 2600);
+    setDemoBusy(false);
+  }
+
+  async function demoEmail() {
+    setDemoBusy(true);
+    await submitEmailLead({
+      from: "Ольга Минина <o.minina@zavod.by>",
+      subject: "Запрос цены на арматуру",
+      text: "Здравствуйте, пришлите цену на арматуру 12, объём 8 т.",
+    });
+    setNote("Письмо принято — лид появится в «Новых» через пару секунд…");
+    window.setTimeout(() => {
+      void refresh();
+      setNote("");
+    }, 2600);
+    setDemoBusy(false);
+  }
+
   function patch(id: number, fields: Partial<Lead>) {
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...fields } : l)));
   }
@@ -516,13 +562,32 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
             <p className="mt-0.5 text-sm text-muted">
               Воронка: приём → квалификация → распределение → сделка · Новых: {pending} из {leads.length}.
             </p>
+            {note && <p className="mt-1 text-xs font-medium text-accent-ink">{note}</p>}
           </div>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
-          >
-            <Plus size={16} /> Принять лид
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={demoSite}
+              disabled={demoBusy}
+              title="Симуляция: контакт-форма сайта → приём лида"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
+            >
+              <Globe size={15} /> Заявка с сайта
+            </button>
+            <button
+              onClick={demoEmail}
+              disabled={demoBusy}
+              title="Симуляция: входящее письмо → приём лида"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
+            >
+              <Mail size={15} /> Письмо
+            </button>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
+            >
+              <Plus size={16} /> Принять лид
+            </button>
+          </div>
         </div>
 
         {leads.length > 0 && (

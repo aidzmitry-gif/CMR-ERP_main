@@ -348,8 +348,15 @@ export function DealsWorkspace({
 
         {/* План / Факт по периодам */}
         <section className="mt-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-semibold text-ink">План / Факт</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-ink">План / Факт</h2>
+              <span className="hidden items-center gap-1.5 text-[11px] text-muted sm:flex">
+                <span className="text-emerald-500">●</span>≥100%
+                <span className="text-amber-500">●</span>70–99%
+                <span className="text-red-500">●</span>&lt;70%
+              </span>
+            </div>
             <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
               {PERIODS.map((p) => (
                 <button

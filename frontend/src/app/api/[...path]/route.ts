@@ -25,10 +25,18 @@ async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   }
 
   const res = await fetch(target, init);
-  const body = await res.arrayBuffer();
   const out = new Headers();
   const contentType = res.headers.get("content-type");
   if (contentType) out.set("content-type", contentType);
+  // SSE/поток: пробрасываем тело стримом, НЕ буферизуем. Иначе text/event-stream
+  // (окно входящего звонка, /sales/calls/stream) «висит» до закрытия апстрима и
+  // карточки звонка не доходят до клиента.
+  if (contentType?.includes("text/event-stream")) {
+    out.set("cache-control", "no-cache, no-transform");
+    out.set("connection", "keep-alive");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+  }
+  const body = await res.arrayBuffer();
   return new Response(body, { status: res.status, statusText: res.statusText, headers: out });
 }
 

@@ -25,7 +25,7 @@ describe("DealDocuments", () => {
 
   it("договор на согласовании → проведение в 1С", async () => {
     mock(api.fetchDocuments).mockResolvedValue([
-      { id: 3, kind: "contract", number: "ДГ-1", status: "pending_approval", onec_ref: null, amount: 1000 },
+      { id: 3, kind: "contract", number: "ДГ-1", status: "pending_approval", onec_ref: null, amount: 1000, reserve_status: "none", valid_until: null },
     ]);
     mock(api.decideDocument).mockResolvedValue(true);
     render(<DealDocuments dealId="1" />);
@@ -36,7 +36,7 @@ describe("DealDocuments", () => {
 
   it("смена типа документа и отклонение", async () => {
     mock(api.fetchDocuments).mockResolvedValue([
-      { id: 4, kind: "contract", number: "ДГ-2", status: "pending_approval", onec_ref: null, amount: 1 },
+      { id: 4, kind: "contract", number: "ДГ-2", status: "pending_approval", onec_ref: null, amount: 1, reserve_status: "none", valid_until: null },
     ]);
     mock(api.createDocument).mockResolvedValue(true);
     mock(api.decideDocument).mockResolvedValue(true);
@@ -47,5 +47,23 @@ describe("DealDocuments", () => {
     await waitFor(() => expect(api.createDocument).toHaveBeenCalledWith("1", "order"));
     fireEvent.click(screen.getByTitle("Отклонить"));
     await waitFor(() => expect(api.decideDocument).toHaveBeenCalledWith(4, false, "Юрист"));
+  });
+
+  it("счёт в резерве → бейдж срока действия", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([
+      {
+        id: 7,
+        kind: "invoice",
+        number: "СЧ-1",
+        status: "posted",
+        onec_ref: "1С-СЧ-1",
+        amount: 5000,
+        reserve_status: "reserved",
+        valid_until: "2099-01-05",
+      },
+    ]);
+    render(<DealDocuments dealId="1" />);
+    expect(await screen.findByText(/В резерве/)).toBeInTheDocument();
+    expect(screen.getByText(/05\.01\.2099/)).toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { ActiveCallProvider } from "@/components/calls/active-call-provider";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { fetchAccess } from "@/lib/access";
@@ -24,12 +25,16 @@ export async function AppShell({
   const roleTitle = access?.roles.find((r) => r.slug === role)?.title ?? role;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar crumbs={crumbs} />
-        <div className="flex flex-1 overflow-hidden">{children}</div>
+    // Подписка на входящие звонки (SSE) + всплывающее окно — на любом экране оболочки.
+    // owner = ФИО продавца (cookie aios_user), по нему backend пушит карточки (SALES-50).
+    <ActiveCallProvider owner={userName ?? undefined}>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Topbar crumbs={crumbs} />
+          <div className="flex flex-1 overflow-hidden">{children}</div>
+        </div>
       </div>
-    </div>
+    </ActiveCallProvider>
   );
 }

@@ -6,7 +6,10 @@ vi.mock("@/components/topbar", () => ({
   Topbar: ({ crumbs }: { crumbs: string[] }) => <div data-testid="topbar">{crumbs.join("/")}</div>,
 }));
 // серверные зависимости AppShell: dev-сессия (логин/роль), редирект-гейт и матрица доступа
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
 vi.mock("@/lib/role-server", () => ({
   currentUserName: async () => "Харькович Д.С.",
   currentRole: async () => "director",

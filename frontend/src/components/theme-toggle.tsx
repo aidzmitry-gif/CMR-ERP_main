@@ -1,7 +1,7 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * Переключатель тем C (светлая) ⇄ D (тёмная).
@@ -9,10 +9,13 @@ import { useState } from "react";
  * Начальное состояние ставит THEME_INIT_SCRIPT в <head> (без мигания) — здесь только синхронизируемся.
  */
 export function ThemeToggle() {
-  // читаем фактический класс, выставленный анти-мигающим скриптом; lazy init безопасен на клиенте
-  const [dark, setDark] = useState(() =>
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
-  );
+  // initial=false совпадает с SSR (там нет document) — иначе гидрация падает
+  // (сервер рисует Moon, клиент с .dark — Sun). Фактическую тему читаем после маунта.
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    // queueMicrotask — чтобы не вызывать setState синхронно в теле эффекта (идиома проекта)
+    queueMicrotask(() => setDark(document.documentElement.classList.contains("dark")));
+  }, []);
 
   function toggle() {
     const next = !dark;
@@ -39,7 +42,8 @@ export function ThemeToggle() {
 
 /**
  * Инлайн-скрипт, исполняемый ДО первого рендера (в <head> через next/script strategy=beforeInteractive
- * или dangerouslySetInnerHTML). Ставит .dark по сохранённому выбору или системной теме — чтобы не было
- * вспышки светлого при загрузке тёмной.
+ * или dangerouslySetInnerHTML). Ставит .dark ТОЛЬКО если в localStorage сохранён выбор «dark» —
+ * по умолчанию приложение светлое (курс DESIGN.md, Stripe/Notion), тёмная включается тумблером.
+ * Без вспышки светлого при загрузке сохранённой тёмной.
  */
-export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
+export const THEME_INIT_SCRIPT = `(function(){try{document.documentElement.classList.toggle('dark',localStorage.getItem('theme')==='dark');}catch(e){}})();`;

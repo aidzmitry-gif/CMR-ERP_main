@@ -20,8 +20,38 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   draft: { label: "Черновик", cls: "bg-sunken text-muted" },
   pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
   posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
+  paid: { label: "Оплачен", cls: "bg-emerald-50 text-emerald-600" },
   rejected: { label: "Отклонён", cls: "bg-red-50 text-red-600" },
+  cancelled: { label: "Аннулирован", cls: "bg-red-50 text-red-600" },
 };
+
+// SALES-51: срок действия счёта и бейдж резерва (горящий = ≤1 дня до аннулирования).
+function fmtDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function daysUntil(iso: string): number {
+  const target = new Date(`${iso}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
+
+function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
+  if (d.reserve_status === "reserved" && d.valid_until) {
+    const days = daysUntil(d.valid_until);
+    const left =
+      days < 0 ? "просрочен" : days === 0 ? "сегодня" : days === 1 ? "завтра" : `${days} дн.`;
+    const cls = days <= 1 ? "bg-red-50 text-red-600" : "bg-sky-50 text-sky-600";
+    return { label: `В резерве · до ${fmtDate(d.valid_until)} · ${left}`, cls };
+  }
+  if (d.reserve_status === "consumed")
+    return { label: "Резерв → оплачен", cls: "bg-emerald-50 text-emerald-600" };
+  if (d.reserve_status === "released")
+    return { label: "Резерв снят", cls: "bg-sunken text-muted" };
+  return null;
+}
 
 export function DealDocuments({ dealId }: { dealId: string }) {
   const [items, setItems] = useState<DealDoc[]>([]);
@@ -81,6 +111,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
         {items.map((d) => {
           const s = STATUS[d.status] ?? STATUS.draft;
+          const rb = reserveBadge(d);
           return (
             <li
               key={d.id}
@@ -90,10 +121,19 @@ export function DealDocuments({ dealId }: { dealId: string }) {
                 <div className="truncate text-sm text-ink">
                   {KIND_LABEL[d.kind] ?? d.kind} · {d.number}
                 </div>
-                <span className={`mt-0.5 inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
-                  {s.label}
-                  {d.onec_ref ? ` · ${d.onec_ref}` : ""}
-                </span>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                  <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
+                    {s.label}
+                    {d.onec_ref ? ` · ${d.onec_ref}` : ""}
+                  </span>
+                  {rb && (
+                    <span
+                      className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${rb.cls}`}
+                    >
+                      {rb.label}
+                    </span>
+                  )}
+                </div>
               </div>
               {d.status === "pending_approval" && (
                 <div className="flex shrink-0 gap-1.5">

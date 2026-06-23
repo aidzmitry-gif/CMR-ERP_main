@@ -20,9 +20,17 @@ const TONES: Record<KpiTone, { chip: string; bar: string }> = {
   slate: { chip: "bg-sunken text-muted", bar: "bg-line-strong" },
 };
 
+/** Светофор выполнения (Сделки 2.0): ≥100% — зелёный, ≥70% — янтарь, иначе красный. */
+function perfTone(pct: number): { bar: string; text: string } {
+  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600" };
+  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600" };
+  return { bar: "bg-red-500", text: "text-red-600" };
+}
+
 export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
   const Icon = ICONS[kpi.icon];
   const tone = TONES[kpi.tone];
+  const perf = perfTone(kpi.percent);
   const value = kpi.money ? formatMoney(kpi.value) : kpi.value;
   const target = kpi.money ? formatMoney(kpi.target) : kpi.target;
 
@@ -49,9 +57,12 @@ export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
         {value} <span className="text-sm font-normal text-muted">/ {target}</span>
       </div>
       <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
-        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${kpi.percent}%` }} />
+        <div className={`h-full rounded-full ${perf.bar}`} style={{ width: `${Math.min(kpi.percent, 100)}%` }} />
       </div>
-      <div className="mt-1.5 text-xs text-muted">{kpi.percent}% выполнено</div>
+      <div className={`mt-1.5 flex items-center gap-1 text-xs ${perf.text}`}>
+        <span className="text-[9px] leading-none">●</span>
+        {kpi.percent}% выполнено
+      </div>
     </div>
   );
 }

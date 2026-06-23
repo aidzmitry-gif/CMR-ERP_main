@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -69,6 +70,88 @@ async def telephony_webhook(
     result = telephony.ingest(session, core.event_bus, params)
     await session.commit()
     return result
+
+
+# ──────────────── Приём лидов с сайта и почты (публично, токен) ────────────────
+
+
+def _check_intake_token(core: Core, params: dict) -> None:
+    """Проверить общий секрет приёма (?token=), если он задан в настройках."""
+    expected = core.config.intake_webhook_token
+    if expected:
+        if not hmac.compare_digest(str(params.get("token", "")).encode(), expected.encode()):
+            raise HTTPException(status_code=403, detail="Неверный токен приёма")
+    else:
+        logger.warning("intake: приём без AIOS_INTAKE_WEBHOOK_TOKEN — открыт")
+
+
+def _parse_sender(s: str) -> tuple[str, str]:
+    """«Имя <addr@dom>» → (имя, адрес); просто адрес → ('', адрес)."""
+    m = re.match(r"^\s*(.*?)\s*<([^>]+)>\s*$", s)
+    if m:
+        return m.group(1).strip().strip('"'), m.group(2).strip()
+    return ("", s.strip())
+
+
+@router.api_route("/web/lead", methods=["POST"])
+async def web_lead_intake(
+    request: Request,
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Заявка с сайта (контакт-форма) → лид в приём CRM. Публично, токен ?token= (если задан).
+
+    Принимает JSON или form-поля (name/company/phone/email/region/product/message). Сам лид
+    создаёт sales-подписчик события ``intake.lead.received`` (границы §2.4).
+    """
+    params = await _collect_params(request)
+    _check_intake_token(core, params)
+    core.event_bus.emit(
+        session,
+        "intake.lead.received",
+        {
+            "source": "site",
+            "name": str(params.get("name", "") or "").strip(),
+            "company": str(params.get("company", "") or "").strip(),
+            "phone": str(params.get("phone", "") or "").strip(),
+            "email": str(params.get("email", "") or "").strip(),
+            "region": str(params.get("region", "") or "").strip(),
+            "product": str(params.get("product", "") or "").strip(),
+            "message": str(params.get("message", "") or "").strip(),
+        },
+    )
+    await session.commit()
+    return {"ok": True, "source": "site"}
+
+
+@router.api_route("/email/inbound", methods=["POST"])
+async def email_lead_intake(
+    request: Request,
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Входящее письмо (от почтового форвардера/вебхука) → лид. Публично, токен ?token=.
+
+    Поля: ``from`` («Имя <addr>»), ``subject``, ``text``/``body``. Тема + текст → сообщение лида.
+    """
+    params = await _collect_params(request)
+    _check_intake_token(core, params)
+    name, email = _parse_sender(str(params.get("from", "") or "").strip())
+    subject = str(params.get("subject", "") or "").strip()
+    body = str(params.get("text") or params.get("body") or "").strip()
+    core.event_bus.emit(
+        session,
+        "intake.lead.received",
+        {
+            "source": "email",
+            "name": name,
+            "email": email,
+            "product": subject,
+            "message": (f"{subject}\n{body}").strip() or subject,
+        },
+    )
+    await session.commit()
+    return {"ok": True, "source": "email"}
 
 
 @router.post("/telephony/originate")

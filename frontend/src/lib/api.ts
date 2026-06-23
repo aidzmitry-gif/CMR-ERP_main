@@ -562,6 +562,8 @@ export interface DealDoc {
   status: string;
   onec_ref: string | null;
   amount: number;
+  valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
+  reserve_status: string; // none | reserved | consumed | released
 }
 
 /** Документы сделки (счета/договоры/заказы) — клиент, через /api. */
@@ -663,6 +665,114 @@ export async function aiAssist(dealId: string, kind: string): Promise<string | n
   }
 }
 
+// ──────────────────────── Телефония (SALES-50) ────────────────────────
+
+/** Карточка звонка из SSE-потока `/sales/calls/stream` (плоский dict backend `_card`). */
+export interface CallCard {
+  id: number;
+  call_id: string;
+  direction: string; // in | out
+  phone: string | null;
+  did?: string | null;
+  agent_ext?: string | null;
+  owner: string;
+  counterparty_id?: number | null;
+  contact_id?: number | null;
+  deal_id?: number | null;
+  status: string; // ringing | answered | missed | busy | ended | failed
+  duration_sec?: number | null;
+  recording_url?: string | null;
+}
+
+/** Запись журнала звонков (CallOut). */
+export interface CallRow {
+  id: number;
+  call_id: string;
+  direction: string;
+  phone_e164: string | null;
+  owner: string;
+  status: string;
+  result?: string | null;
+  comment?: string | null;
+  deal_id?: number | null;
+  duration_sec?: number | null;
+  started_at: string;
+}
+
+/**
+ * Подписка на поток карточек звонков продавца (всплывающее окно входящего).
+ * EventSource ходит на /api-прокси (он добавляет роль из cookie + стримит SSE).
+ * Возвращает функцию отписки.
+ */
+export function subscribeCalls(owner: string | undefined, onCard: (card: CallCard) => void): () => void {
+  // SSR / тестовая среда (jsdom) без EventSource — подписка не нужна, возвращаем no-op.
+  if (typeof EventSource === "undefined") return () => {};
+  const url = owner
+    ? `/api/sales/calls/stream?owner=${encodeURIComponent(owner)}`
+    : "/api/sales/calls/stream";
+  const es = new EventSource(url);
+  es.onmessage = (e) => {
+    try {
+      onCard(JSON.parse(e.data) as CallCard);
+    } catch {
+      /* heartbeat/комментарий потока — игнор */
+    }
+  };
+  return () => es.close();
+}
+
+async function postCall(url: string, body: unknown): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Журнал звонков с фильтрами (клиент, через /api). */
+export async function fetchCalls(
+  params: { status?: string; owner?: string; date?: string } = {},
+): Promise<CallRow[]> {
+  try {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => Boolean(v)) as [string, string][],
+    ).toString();
+    const res = await fetch(`/api/sales/calls${q ? `?${q}` : ""}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as CallRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Заметка по звонку. */
+export async function callComment(id: number, comment: string): Promise<boolean> {
+  return postCall(`/api/sales/calls/${id}/comment`, { comment });
+}
+
+/** Итог/классификация звонка. */
+export async function callResult(id: number, result: string): Promise<boolean> {
+  return postCall(`/api/sales/calls/${id}/result`, { result });
+}
+
+/** Привязать звонок к сделке (deal_id) или создать новую (create=true). */
+export async function callLinkDeal(
+  id: number,
+  body: { deal_id?: number; create?: boolean },
+): Promise<boolean> {
+  return postCall(`/api/sales/calls/${id}/link-deal`, body);
+}
+
+/** Симуляция входящего звонка (dev): прямой приём события телефонии, минуя АТС. */
+export async function triggerIncomingCall(payload: Record<string, unknown>): Promise<boolean> {
+  return postCall("/api/sales/telephony/incoming", payload);
+}
+
 interface ApiLead {
   id: number;
   source: string;
@@ -712,6 +822,27 @@ export async function fetchLeads(roles?: string): Promise<Lead[]> {
   } catch {
     return [];
   }
+}
+
+/** Лиды из API (клиент, через /api) — для обновления приёма после входящих заявок. */
+export async function fetchLeadsClient(): Promise<Lead[]> {
+  try {
+    const res = await fetch("/api/sales/leads", { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as ApiLead[]).map(mapLead);
+  } catch {
+    return [];
+  }
+}
+
+/** Заявка с сайта (контакт-форма) → публичный коннектор приёма лидов. */
+export async function submitWebLead(payload: Record<string, string>): Promise<boolean> {
+  return postCall("/api/integrations/web/lead", payload);
+}
+
+/** Входящее письмо (вебхук форвардера) → публичный коннектор приёма лидов. */
+export async function submitEmailLead(payload: Record<string, string>): Promise<boolean> {
+  return postCall("/api/integrations/email/inbound", payload);
 }
 
 export interface LeadInput {
