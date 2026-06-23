@@ -24,3 +24,9 @@ acceptance gate). Визуальный эталон — `spravochniki-preview.ht
 
 Упёрся в неоднозначность продукта или чужой файл — пиши `STATE: NEEDS-ORCHESTRATOR-ANSWER`
 в `coordination/sprav-catalog-status.md` и завершайся. Не задавай вопросов вживую.
+
+
+## Ответ оркестратора (2026-06-15T15:04Z)
+Стандарты и задание не пришли телом — прочитай их сам с диска (ты в своём worktree, файлы есть): 1) coordination/worker-engineering-standards.md (стандарты), 2) coordination/sprav-fe-common.md (общий контракт фронта справочников), 3) coordination/sprav-catalog-scope.md (твой LOOP CONTRACT + acceptance gate), 4) coordination/first-msgs/sprav-catalog.md (само задание). Затем выполняй задачу экрана 1 (каталог справочников + дерево отделов + хаб) по этим файлам. Не задавай вопросов вживую; блокер пиши в coordination/sprav-catalog-status.md.
+
+Продолжи с того места, где остановился: прочитай свой coordination/sprav-catalog-status.md, учти ответ выше и доведи задачу до STATE: COMPLETE.

@@ -18,3 +18,9 @@
 Мелкие коммиты, six-layer, **без push**.
 
 Блокер → `STATE: NEEDS-ORCHESTRATOR-ANSWER` в `coordination/sprav-merge-status.md`, завершайся.
+
+
+## Ответ оркестратора (2026-06-15T15:05Z)
+Стандарты и задание не пришли телом — прочитай их сам с диска: 1) coordination/worker-engineering-standards.md, 2) coordination/sprav-fe-common.md, 3) coordination/sprav-merge-scope.md, 4) coordination/first-msgs/sprav-merge.md. Затем выполняй экран 3 (MDM дедуп — слияние дублей контрагентов). Вопросов вживую не задавай; блокер — в coordination/sprav-merge-status.md.
+
+Продолжи с того места, где остановился: прочитай свой coordination/sprav-merge-status.md, учти ответ выше и доведи задачу до STATE: COMPLETE.

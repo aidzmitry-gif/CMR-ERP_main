@@ -19,3 +19,9 @@
 Мелкие коммиты, six-layer, **без push**.
 
 Блокер/неоднозначность → `STATE: NEEDS-ORCHESTRATOR-ANSWER` в `coordination/sprav-rates-status.md`, завершайся.
+
+
+## Ответ оркестратора (2026-06-15T15:05Z)
+Стандарты и задание не пришли телом — прочитай их сам с диска (ты в своём worktree): 1) coordination/worker-engineering-standards.md, 2) coordination/sprav-fe-common.md, 3) coordination/sprav-rates-scope.md (твой LOOP CONTRACT), 4) coordination/first-msgs/sprav-rates.md (задание). Затем выполняй экран 2 (версионные справочники SCD2 — курсы валют + НДС). Вопросов вживую не задавай; блокер — в coordination/sprav-rates-status.md.
+
+Продолжи с того места, где остановился: прочитай свой coordination/sprav-rates-status.md, учти ответ выше и доведи задачу до STATE: COMPLETE.

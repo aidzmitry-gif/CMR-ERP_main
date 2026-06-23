@@ -51,3 +51,10 @@ coordination/.worker-launchers/
 coordination/.worker-pids/
 coordination/.worker-logs/
 coordination/.empty-mcp.json
+
+# Telegram-мост (tg_bridge.py) — runtime
+coordination/.tg-bridge-state.json
+coordination/.tg-events.jsonl
+coordination/.tg-guard-denied.jsonl
+coordination/.guard-settings.json
+coordination/.guard-test-settings.json

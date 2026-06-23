@@ -20,3 +20,9 @@
 Мелкие коммиты, six-layer, **без push**.
 
 Блокер → `STATE: NEEDS-ORCHESTRATOR-ANSWER` в `coordination/sprav-import-status.md`, завершайся.
+
+
+## Ответ оркестратора (2026-06-15T19:36Z)
+Твой процесс оборвался в середине /code-review (last: CLAUDE none). Прочитай свой coordination/sprav-import-status.md (если есть) и git log --oneline main..HEAD в своём worktree — пойми, что уже закоммичено. Доведи задачу экрана 6 (импорт 1С: маппинг/предпросмотр/конфликты, демо до backend-фазы) до конца: заверши /code-review → /simplify по своим файлам, гейт (cd frontend && npx tsc --noEmit чисто; vitest если есть логика), мелкие коммиты без push, и поставь STATE: COMPLETE в coordination/sprav-import-status.md. Не задавай вопросов вживую.
+
+Продолжи с того места, где остановился: прочитай свой coordination/sprav-import-status.md, учти ответ выше и доведи задачу до STATE: COMPLETE.
