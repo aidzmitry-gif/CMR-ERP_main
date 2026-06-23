@@ -2,7 +2,7 @@
 
 import { Link2, Package, Target, TrendingUp, Truck, User } from "lucide-react";
 import { useMemo, useState } from "react";
-import { formatByn } from "@/lib/format";
+import { formatByn, plural } from "@/lib/format";
 
 // demo-данные (бэкенда по экрану пока нет). Валюта — BYN.
 // Месяц поставки = ETA рейса (логистика). Себестоимость (landed cost) — из закупок,
@@ -184,14 +184,6 @@ const STATUS: Record<ShipStatus, { label: string; cls: string }> = {
   done: { label: "доставлено", cls: "bg-emerald-50 text-emerald-600" },
 };
 
-function plural(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} машина`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} машины`;
-  return `${n} машин`;
-}
-
 type MonthStat = {
   col: MonthCol;
   ships: Ship[];
@@ -345,7 +337,7 @@ export function MarginByMonth() {
                   </div>
                   <div className="mt-1.5 flex justify-between text-[11.5px] text-muted">
                     <span>Себестоимость {formatByn(stat.cost)}</span>
-                    <span>{plural(stat.count)}</span>
+                    <span>{stat.count} {plural(stat.count, ["машина", "машины", "машин"])}</span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
                     <div className={`h-full rounded-full ${loadBar}`} style={{ width: `${stat.load}%` }} />
@@ -394,7 +386,7 @@ export function MarginByMonth() {
                   <div className="flex items-center justify-between text-sm font-semibold text-ink">
                     {stat.col.title}
                     <span className="rounded-md bg-sunken px-2 py-0.5 text-[11px] font-semibold text-faint">
-                      {plural(stat.count)}
+                      {stat.count} {plural(stat.count, ["машина", "машины", "машин"])}
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted">

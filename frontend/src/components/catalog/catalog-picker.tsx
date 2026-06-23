@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { formatByn } from "@/lib/format";
+import { formatByn, plural } from "@/lib/format";
 
 // ──────────────────────────────────────────────────────────────────────────
 // demo-данные (бэкенда по экрану пока нет). Каталог: остатки по складам,
@@ -172,9 +172,6 @@ function whInc(p: Product): number {
 }
 function isService(p: Product): boolean {
   return p.wh.length === 0;
-}
-function plural(n: number): string {
-  return n === 1 ? "позиция" : n < 5 ? "позиции" : "позиций";
 }
 
 // совпадение по наименованию: имя/артикул/теги (АКБ 6СТ → все 6СТ; ЗУ → зарядные)
@@ -621,7 +618,7 @@ export function CatalogPicker() {
               <div className="flex items-center justify-between border-b border-line px-4 py-3">
                 <span className="text-[15px] font-bold text-ink">В счёт</span>
                 <span className={`${STATUS_BADGE} bg-sunken text-muted`}>
-                  {cartItems.length} {plural(cartItems.length)}
+                  {cartItems.length} {plural(cartItems.length, ["позиция", "позиции", "позиций"])}
                 </span>
               </div>
 
