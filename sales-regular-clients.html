@@ -452,12 +452,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
         <td><div class="act">${action}</div></td>`;
       tb.appendChild(tr);
 
-      const order = Math.max(0, c.roll.c - c.roll.s - c.roll.i);
-      const rollHtml = order>0
-        ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="need">дозаказать ${order} шт</b>`
-        : (c.roll.c>0
-            ? `подтверждено <b>${c.roll.c} шт</b> · склад ${c.roll.s} · в пути ${c.roll.i} → <b class="enough">достаточно — не заказывать</b>`
-            : `объём НЕ подтверждён · склад ${c.roll.s} · <b class="enough">в машину не ставим (иначе ляжет на склад)</b>`);
+      const rollHtml = rollHtmlFor(c);
       const cc = c.conf>=80?'var(--ok)':c.conf>=60?'var(--warn)':'var(--bad)';
       const skRows = c.sk.map((s,j)=>`<tr data-j="${j}"><td>${s.nm}</td><td class="r">${s.hist}</td><td class="r">${s.plan}</td><td>${s.agr}</td><td class="r sku-conf"><b>${s.conf}</b> шт</td><td><span class="sst ${s.stt}">${sstLbl(s.stt)}</span></td></tr>`).join('');
       const dr=document.createElement('tr'); dr.className='drow hide';
@@ -530,6 +525,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
           x.c.sk[j].conf=String(v); sum+=v;
         });
         x.c.roll.c=sum;
+        x.c.cbs = sum>0 ? 'ok' : 'risk';   // объём подтверждён → статус согласован с числом
         x.dr.querySelector('.conf-roll').innerHTML='→ в план закупки следующей машины: '+rollHtmlFor(x.c);
         x.dr.querySelector('.conf-t .cbadge').outerHTML=cbadge(x.c);
         x.main.querySelector('.col-conf').innerHTML=cbadge(x.c);
@@ -550,8 +546,10 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
     e.stopPropagation();
     const x=ctx(btn);
     if(x.c.roll.c<=0){ toast('Объём 0 — сначала «Скорректировать» и укажите количество'); return; }
-    x.c.upd='сегодня';
+    x.c.upd='сегодня'; x.c.cbs='ok';
     const mb=x.dr.querySelector('.conf-meta b'); if(mb) mb.textContent='сегодня';
+    x.dr.querySelector('.conf-t .cbadge').outerHTML=cbadge(x.c);
+    x.main.querySelector('.col-conf').innerHTML=cbadge(x.c);
     btn.textContent='✓ Подтверждено на месяц'; btn.classList.add('confirmed'); btn.disabled=true;
     toast('✅ Подтверждено: '+x.c.roll.c+' шт → закупщику в план следующей машины');
   };

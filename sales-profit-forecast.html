@@ -38,71 +38,11 @@ try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
   body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;padding:22px}
   h1{font-size:20px;font-weight:800}.sub{color:var(--muted);font-size:13px;margin:3px 0 18px}
 
-  /* сводка по месяцам сверху */
-  .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
-  @media(max-width:1000px){.sum{grid-template-columns:repeat(2,1fr)}}
-  .mcard{background:var(--surface);border-radius:13px;box-shadow:var(--shadow-card);padding:15px 16px;border-top:3px solid var(--c,var(--brand))}
-  .mcard .mn{font-weight:800;font-size:15px}
-  .mcard .ml{font-size:11px;color:var(--muted);margin-top:8px}
-  .mcard .gp{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-top:2px}
-  .mcard .mrg{font-size:11.5px;font-weight:700;color:var(--green-ink);margin-top:2px}
-  .mcard .small{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:7px}
-  .mcard .load{height:6px;border-radius:99px;background:var(--sunken);overflow:hidden;margin-top:9px}
-  .mcard .load span{display:block;height:100%;border-radius:99px}
-  .mcard .loadl{font-size:10.5px;color:var(--faint);margin-top:4px}
-
-  /* колонки месяцев */
-  .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px}
-  .col{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:12px}
-  .col-head{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden}
-  .col-head .stripe{height:4px}
-  .ch{padding:11px 14px}
-  .ch .ct{font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center}
-  .ch .ct .n{font-size:11px;color:var(--faint);font-weight:600;background:var(--sunken);border-radius:6px;padding:1px 8px}
-  .ch .cm{font-size:12px;color:var(--muted);margin-top:3px}
-  .ch .cgp{font-size:12px;font-weight:700;color:var(--green-ink);margin-top:2px}
-
-  .ship{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);padding:12px}
-  .ship .s-top{display:flex;align-items:center;gap:8px}
-  .ship .truck{width:30px;height:30px;border-radius:8px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
-  .ship .s-id{font-weight:700;font-size:12.5px}
-  .ship .s-id small{display:block;color:var(--faint);font-weight:400;font-size:11px}
-  .st{margin-left:auto;font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap}
-  .st.transit{background:var(--amber-soft);color:var(--amber-ink)}.st.plan{background:var(--blue-soft);color:var(--brand)}.st.done{background:var(--green-soft);color:var(--green-ink)}
-  .ship .goods{margin-top:9px;font-size:12px}
-  .ship .goods .g{display:flex;justify-content:space-between;color:var(--muted);padding:3px 0}
-  .ship .fin{display:flex;justify-content:space-between;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:12px}
-  .ship .fin .b{text-align:center;flex:1}
-  .ship .fin .b .l{font-size:9.5px;color:var(--faint)}
-  .ship .fin .b .v{font-weight:700;font-size:12.5px;margin-top:1px}
-  .ship .fin .b .v.gp{color:var(--green-ink)}
+  /* board/mcard/ship CSS из шаблона-источника убраны — на этом экране не используются */
   .note{margin-top:16px;font-size:12px;color:var(--faint);display:flex;gap:8px}
   .note b{color:var(--ink)}
 
-  /* ═══ ГОДОВАЯ ЦЕЛЬ (валовая прибыль) — декомпозиция и «добрать» ═══ */
-  .goal{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:16px}
-  .goal-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-  .goal-ttl{font-weight:800;font-size:14px}
-  .goal-ttl .yr{color:var(--faint);font-weight:600;font-size:12px}
-  .goal-target{font-size:20px;font-weight:800;letter-spacing:-.01em}
-  .goal-bar{display:flex;height:10px;border-radius:99px;background:var(--sunken);overflow:hidden;margin:11px 0 9px}
-  .goal-bar .seg{height:100%}
-  .goal-bar .seg.fact{background:var(--ok)}.goal-bar .seg.plan{background:var(--brand)}
-  .goal-legend{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
-  .goal-legend b{color:var(--ink);font-weight:700}
-  .goal-legend em{font-style:normal;color:var(--faint)}
-  .goal-legend .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
-  .goal-legend .dot.fact{background:var(--ok)}.goal-legend .dot.plan{background:var(--brand)}.goal-legend .dot.gap{background:var(--line-strong)}
-  /* строка «цель месяца / добрать» в карточке месяца */
-  .mcard .tgt{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
-  .mcard .tgt .need{font-weight:700}
-  .mcard .tgt .need.ok{color:var(--green-ink)}.mcard .tgt .need.gap{color:var(--amber-ink,#B45309)}
-  .mcard .tgt .yr{color:var(--faint);white-space:nowrap}
-  /* доля машины в прибыли месяца */
-  .ship .share{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:10.5px;color:var(--muted)}
-  .ship .share .sbar{flex:1;height:4px;border-radius:99px;background:var(--sunken);overflow:hidden}
-  .ship .share .sbar span{display:block;height:100%;background:var(--brand);border-radius:99px}
-  .ship .share b{color:var(--brand-700);font-weight:700;white-space:nowrap}
+  /* goal/share CSS из шаблона-источника убраны — на этом экране не используются */
 
 
 /* ═══ ЛЕВОЕ МЕНЮ (плавающее, сворачиваемое — только иконки, раскрытие по наведению) ═══ */
@@ -124,13 +64,7 @@ body{padding-left:84px}                       /* место под свёрну�
 .lnav-hint{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:var(--faint);opacity:0;transition:opacity .18s}
 .lnav:hover .lnav-hint{opacity:1}
 
-/* ═══ ФИЛЬТР ПО МЕНЕДЖЕРАМ ═══ */
-.mgr-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
-.mgr-bar .mgr-lbl{font-size:12.5px;font-weight:600;color:var(--muted)}
-.mgr-seg{display:inline-flex;gap:4px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
-.mgr-seg button{border:none;background:none;border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer}
-.mgr-seg button.on{background:var(--brand-100);color:var(--brand-700)}
-.ship.mgr-hidden,.col.mgr-empty{display:none}
+/* (фильтр по менеджерам из шаблона-источника убран — на этом экране его нет) */
 
 /* ═══ ПРАВАЯ РЕЙКА ЧАТОВ (плавающая, сворачиваемая — как в Сделках) ═══ */
 body{padding-right:88px}                     /* место под свёрнутую рейку */
@@ -643,7 +577,7 @@ html.dark .st.draft{background:var(--sunken)!important;color:var(--muted)!import
     renderWF();
   };
 
-  renderWF(); renderDrivers(); renderTable(); selectSku(0); setScn('base');
+  renderDrivers(); renderTable(); selectSku(0); setScn('base'); // setScn вызывает renderWF
 })();
 </script>
 

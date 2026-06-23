@@ -209,18 +209,22 @@
   }
   function intWords(n){
     if(n===0) return "ноль";
-    var p=[], mil=Math.floor(n/1e6); n%=1e6;
+    var p=[], bil=Math.floor(n/1e9); n%=1e9;
+    var mil=Math.floor(n/1e6); n%=1e6;
     var th=Math.floor(n/1000); n%=1000;
+    if(bil){ p.push(triplet(bil,false)); p.push(plural(bil,["миллиард","миллиарда","миллиардов"])); }
     if(mil){ p.push(triplet(mil,false)); p.push(plural(mil,["миллион","миллиона","миллионов"])); }
     if(th){ p.push(triplet(th,true)); p.push(plural(th,["тысяча","тысячи","тысяч"])); }
     if(n){ p.push(triplet(n,false)); }
     return p.join(" ");
   }
   function moneyWords(amount){
-    var rubInt=Math.floor(amount+1e-6), kop=Math.round((amount-rubInt)*100);
+    // одно округление до копеек, перенос в рубли (иначе возможно «...100 копеек»)
+    var neg=amount<0, cents=Math.round(Math.abs(amount)*100);
+    var rubInt=Math.floor(cents/100), kop=cents%100;
     var w=intWords(rubInt); w=w.charAt(0).toUpperCase()+w.slice(1);
     var kk=(kop<10?"0":"")+kop;
-    return w+" "+plural(rubInt, DATA.currency.rub)+" "+kk+" "+plural(kop, DATA.currency.kop);
+    return (neg?"минус ":"")+w+" "+plural(rubInt, DATA.currency.rub)+" "+kk+" "+plural(kop, DATA.currency.kop);
   }
   function money(n){ return n.toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
@@ -241,9 +245,10 @@
 
     var rows1="", rows2="", grand=0, vatSum=0;
     DATA.items.forEach(function(it,i){
-      var net = it.qty*it.price;            // стоимость без НДС
-      var vat = net*DATA.vatRate/100;       // сумма НДС
-      var tot = net+vat;                    // всего с НДС
+      // округляем построчно до копеек, чтобы «Итого» сходилось с суммой видимых строк
+      var net = Math.round(it.qty*it.price*100)/100;   // стоимость без НДС
+      var vat = Math.round(net*DATA.vatRate)/100;      // сумма НДС
+      var tot = Math.round((net+vat)*100)/100;         // всего с НДС
       grand+=tot; vatSum+=vat;
       rows1+='<tr><td class="c">'+(i+1)+'</td><td>'+it.name+'</td><td class="c">'+it.qty+'</td>'+
         '<td class="c">'+it.unit+'</td><td class="r">'+money(it.price)+'</td><td class="r">'+money(net)+'</td>'+
