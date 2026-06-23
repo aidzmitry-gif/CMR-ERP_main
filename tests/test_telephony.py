@@ -77,6 +77,13 @@ def test_parse_ignored():
     assert parse_event({"type": "in", "uniqueid": ""}) is None  # без uniqueid не склеить
 
 
+def test_parse_duration_garbage_no_crash():
+    # мусор в длительности не должен уронить вебхук: inf → OverflowError, "-5" → отрицательное
+    out = parse_event({"type": "hangup", "direct": "in", "uniqueid": "U6", "duration": "inf", "hold": "-5"})
+    assert out["payload"]["duration_sec"] is None
+    assert out["payload"]["hold_sec"] is None
+
+
 def test_originate_params():
     assert originate_params("101", "375291234567") == {"vnut": "101", "number": "+375291234567"}
     assert originate_params("1234", "291234567")["vnut"] == "123"  # внутренний — не больше 3 цифр
@@ -278,6 +285,12 @@ async def test_webhook_token_enforced(session):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             bad = await client.get("/integrations/telephony/zruchna", params={"type": "in", "uniqueid": "T1", "phone": "375291234567"})
             assert bad.status_code == 403
+            # non-ASCII токен не должен ронять вебхук в 500 (compare_digest на байтах)
+            nonascii = await client.get(
+                "/integrations/telephony/zruchna",
+                params={"token": "Ключ", "type": "in", "uniqueid": "T1", "phone": "375291234567"},
+            )
+            assert nonascii.status_code == 403
             ok = await client.get(
                 "/integrations/telephony/zruchna",
                 params={"token": "s3cret", "type": "in", "uniqueid": "T1", "phone": "375291234567"},

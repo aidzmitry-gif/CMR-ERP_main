@@ -93,9 +93,10 @@ def _to_seconds(value: object) -> int | None:
             seconds = seconds * 60 + part
         return seconds
     try:
-        return int(float(s))
-    except ValueError:
+        result = int(float(s))  # OverflowError тоже: float("inf") иначе уронил бы вебхук в 500
+    except (ValueError, OverflowError):
         return None
+    return result if result >= 0 else None
 
 
 def parse_event(params: dict) -> dict | None:
