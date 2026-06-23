@@ -23,11 +23,15 @@ OPEN_PREFIXES: tuple[str, ...] = (
 
 
 def roles_from_request(request: Request) -> list[str]:
-    """Роли текущего пользователя из заголовка ``X-User-Roles`` (dev). По умолчанию — Админ."""
+    """Роли текущего пользователя из заголовка ``X-User-Roles`` (dev).
+
+    Fail-closed (SECURITY.md P0-1): без заголовка — бесправный «Гость», не «Админ».
+    «Гость» нет в матрице → middleware отдаст 403 на любом защищённом модуле.
+    """
     header = request.headers.get("X-User-Roles")
     if not header:
-        return ["Админ"]
-    return [r.strip() for r in header.split(",") if r.strip()] or ["Админ"]
+        return ["Гость"]
+    return [r.strip() for r in header.split(",") if r.strip()] or ["Гость"]
 
 
 def build_prefix_map(core) -> list[tuple[str, str]]:

@@ -191,8 +191,9 @@ def test_has_permission_roles():
 def test_get_current_user_headers():
     from core.services.auth import get_current_user
 
+    # fail-closed (P0-1): без заголовков — бесправный «Гость», не дефолт-Админ
     default = get_current_user(SimpleNamespace(headers={}))
-    assert default.roles == ["Админ"] and default.username == "dev"
+    assert default.roles == ["Гость"] and default.username == "anonymous"
 
     custom = get_current_user(
         SimpleNamespace(headers={"X-User": "ivan", "X-User-Roles": "Менеджер, РОП"})

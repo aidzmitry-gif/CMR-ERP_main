@@ -1,0 +1,74 @@
+# .dockerignore — что НЕ попадает в build-контекст образа бэкенда.
+# Критично: Dockerfile делает `COPY . .` — без этого файла в слои образа
+# запекались бы секреты (.env), dev-БД и история git. См. SECURITY.md (P0-3).
+
+# --- Секреты и локальные окружения (НИКОГДА в образ) ---
+.env
+.env.*
+!.env.example
+*service-account*.json
+*-credentials.json
+**/secrets.*
+
+# --- Git и история ---
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# --- Локальная dev-БД и данные ---
+dev.db
+*.sqlite3
+/data/
+connectors/data/
+
+# --- Python-артефакты ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- Тесты и покрытие (не нужны в рантайме) ---
+tests/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Фронтенд (собирается отдельно, не часть backend-образа) ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# --- Claude Code / оркестратор / Telegram-мост — runtime и конфиги агентов ---
+.claude/
+.cursor/
+coordination/.workers-state.json
+coordination/.worker-prompts/
+coordination/.worker-launchers/
+coordination/.worker-pids/
+coordination/.worker-logs/
+coordination/.tg-bridge-state.json
+coordination/.tg-events.jsonl
+coordination/.tg-guard-denied.jsonl
+coordination/.guard-settings.json
+coordination/.guard-test-settings.json
+
+# --- IDE / ОС / прочее ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.refs_voronki/
+
+# --- Документация и сам этот файл (не нужны в рантайме) ---
+.dockerignore
+*.md
+!README.md

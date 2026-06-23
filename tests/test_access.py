@@ -42,13 +42,15 @@ def test_helpers_map_slug_to_package():
 
 
 # --- backend-ограничение ---
-def test_default_role_is_superuser():
-    # без заголовка роли — dev-Админ, полный доступ
-    assert client.get("/sales/ping").status_code == 200
+def test_default_role_is_guest_denied():
+    # fail-closed (P0-1): без заголовка роли — бесправный «Гость», 403 на защищённый модуль
+    assert client.get("/sales/ping").status_code == 403
+    # но системные роуты остаются доступны и без роли
+    assert client.get("/health").status_code == 200
 
 
 def test_super_roles_have_full_access():
-    # роли передаются по сети ASCII-слагами; «Админ» — дефолт без заголовка (см. выше)
+    # роли передаются по сети ASCII-слагами; супер-роли (director/commercial) — полный доступ
     for role in ("director", "commercial"):
         r = client.get("/sales/ping", headers={"X-User-Roles": role})
         assert r.status_code == 200, role
@@ -71,6 +73,20 @@ def test_system_routes_always_open():
     # системные роуты открыты даже для ограниченной роли
     assert client.get("/health", headers={"X-User-Roles": "sales"}).status_code == 200
     assert client.get("/system/access", headers={"X-User-Roles": "sales"}).status_code == 200
+
+
+def test_system_read_open_but_mutations_require_super(tmp_path):
+    # P0-2: GET-мета под /system открыт без роли (фронт его читает)
+    assert client.get("/system/modules").status_code == 200
+    # но мутации (MDM merge, правка справочников) требуют системного права →
+    # Гость/обычная роль получают 403, супер-роль (director) проходит проверку прав
+    merge = "/system/mdm/merge"
+    assert client.post(merge, json={}).status_code == 403  # без роли — Гость
+    assert client.post(merge, json={}, headers={"X-User-Roles": "sales"}).status_code == 403
+    # супер-роль проходит require_permission (дальше 422 на пустом теле — это уже не 403)
+    assert client.post(merge, json={}, headers={"X-User-Roles": "director"}).status_code != 403
+    # CRUD справочников под /system/refs/* — та же защита
+    assert client.post("/system/refs/currencies", json={}).status_code == 403
 
 
 # --- dev-логин: сотрудники → роль ---

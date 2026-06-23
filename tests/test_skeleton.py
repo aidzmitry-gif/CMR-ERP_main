@@ -3,7 +3,9 @@ from fastapi.testclient import TestClient
 
 from core.runtime.app import create_app
 
-client = TestClient(create_app())
+# Дефолт-роль: после fail-closed (P0-1) запрос без роли — «Гость» (403 на модули).
+# Дымовые тесты проверяют, что модуль смонтирован, поэтому ходим супер-ролью.
+client = TestClient(create_app(), headers={"X-User-Roles": "director"})
 
 
 def test_health():

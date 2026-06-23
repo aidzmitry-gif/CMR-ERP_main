@@ -1,8 +1,8 @@
 """Лёгкий RBAC (dev) — без Keycloak. Реальный OIDC/MFA подключается позже (часть 5).
 
 Текущий пользователь определяется заголовками ``X-User`` / ``X-User-Roles``
-(dev-режим); по умолчанию — суперпользователь «Админ», чтобы фронт работал без
-авторизации. Права берутся из ролей, объявленных модулями (``Core.roles``).
+(dev-режим). Fail-closed (SECURITY.md P0-1): без заголовка ролей — бесправный
+«Гость», НЕ «Админ». Права берутся из ролей, объявленных модулями (``Core.roles``).
 """
 from __future__ import annotations
 
@@ -24,16 +24,30 @@ class AuthService:
 
 
 def get_current_user(request: Request) -> CurrentUser:
-    """Определить пользователя из заголовков (dev). По умолчанию — Админ."""
+    """Определить пользователя из заголовков (dev). По умолчанию — бесправный «Гость».
+
+    Fail-closed (SECURITY.md P0-1): без заголовка роли больше НЕ выдаём «Админ».
+    «Гость» не входит в матрицу доступа и в супер-роли → видит только публичные/
+    системные роуты, на защищённые модули получает 403. Настоящая аутентификация
+    (Keycloak OIDC) заменит этот заголовок проверенным токеном в P1 (часть 5).
+    """
     roles_header = request.headers.get("X-User-Roles")
-    username = request.headers.get("X-User", "dev")
-    roles = [r.strip() for r in roles_header.split(",") if r.strip()] if roles_header else ["Админ"]
-    return CurrentUser(username=username, roles=roles)
+    username = request.headers.get("X-User", "anonymous")
+    roles = [r.strip() for r in roles_header.split(",") if r.strip()] if roles_header else ["Гость"]
+    return CurrentUser(username=username, roles=roles or ["Гость"])
 
 
 def has_permission(core, user: CurrentUser, permission: str) -> bool:
-    """Есть ли у пользователя право (Админ — суперпользователь)."""
-    if "Админ" in user.roles:
+    """Есть ли у пользователя право.
+
+    Супер-роли (``config.access.SUPER_ROLES``: Админ/Директор/Коммерческий) имеют все
+    права — единый источник истины с матрицей доступа к модулям, чтобы две системы
+    (модульный доступ и право на действие) не расходились. Прочие роли получают права
+    из ролей, объявленных модулями (``core.roles``).
+    """
+    from config.access import is_super
+
+    if is_super(user.roles):
         return True
     granted: set[str] = set()
     for role in core.roles:

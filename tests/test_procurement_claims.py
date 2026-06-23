@@ -27,7 +27,10 @@ async def claims_app(session):
 
     app.dependency_overrides[get_session] = _override
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    # Дефолт-роль: после fail-closed (P0-1) запрос без роли — «Гость» (403 на модули).
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Roles": "director"}
+    ) as client:
         yield client, app.state.core
 
 

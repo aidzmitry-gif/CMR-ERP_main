@@ -28,6 +28,11 @@ from core.domain.reference import (
 )
 from core.runtime.deps import get_session
 from core.services import scd2
+from core.services.auth import require_permission
+
+# Мутации справочников живут под открытым /system/refs/* — защищаем пообъектно на роуте.
+# Право `system.write` есть только у супер-ролей (см. has_permission). SECURITY.md P0-2.
+SYSTEM_WRITE = "system.write"
 
 
 def _row(obj, fields: tuple[str, ...]) -> dict:
@@ -66,7 +71,9 @@ def build_simple_ref_router(
 
     @router.post("")
     async def create_item(
-        payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+        payload: dict = Body(...),
+        session: AsyncSession = Depends(get_session),
+        _: object = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         missing = [k for k in required if k not in payload]
         if missing:
@@ -79,7 +86,10 @@ def build_simple_ref_router(
 
     @router.patch("/{code}")
     async def update_item(
-        code: str, payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+        code: str,
+        payload: dict = Body(...),
+        session: AsyncSession = Depends(get_session),
+        _: object = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
         for field in editable:
@@ -90,7 +100,9 @@ def build_simple_ref_router(
 
     @router.delete("/{code}")
     async def archive_item(
-        code: str, session: AsyncSession = Depends(get_session)
+        code: str,
+        session: AsyncSession = Depends(get_session),
+        _: object = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
         obj.is_active = False
@@ -138,7 +150,9 @@ def build_versioned_ref_router(
 
     @router.post("/versions")
     async def add_version(
-        payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+        payload: dict = Body(...),
+        session: AsyncSession = Depends(get_session),
+        _: object = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         key = payload.get(key_field)
         start = payload.get("start_date")
