@@ -62,6 +62,8 @@ def normalize_e164(phone: object, default_cc: str = "375") -> str | None:
         return None
     if plus or digits.startswith("375"):
         return "+" + digits
+    if digits.startswith("00") and len(digits) > 2:  # международный префикс 00 → +
+        return "+" + digits[2:]
     if digits.startswith("80") and len(digits) >= 11:  # РБ-домашний набор 8 0XX …
         return "+375" + digits[2:]
     if digits.startswith("8") and len(digits) == 11:  # 8 + 10 цифр → межгород (+7)
@@ -77,9 +79,14 @@ def _to_seconds(value: object) -> int | None:
     if not s:
         return None
     if ":" in s:
+        segments = s.split(":")
+        if len(segments) > 3:  # длиннее H:M:S — мусор провайдера, не угадываем
+            return None
         try:
-            parts = [int(p) for p in s.split(":")]
+            parts = [int(p) for p in segments]
         except ValueError:
+            return None
+        if any(p < 0 for p in parts):
             return None
         seconds = 0
         for part in parts:

@@ -19,6 +19,7 @@ from modules.integrations.telephony import (
         ("+375291234567", "+375291234567"),
         ("80291234567", "+375291234567"),  # домашний набор 8 0XX …
         ("8 (029) 123-45-67", "+375291234567"),
+        ("00375291234567", "+375291234567"),  # международный префикс 00 → +
         ("291234567", "+375291234567"),  # 9 цифр без кода страны
         ("", None),
         (None, None),
@@ -197,6 +198,7 @@ async def test_ended_updates_call(session):
 async def test_missed_call_status(session):
     from sqlalchemy import select
 
+    from core.domain.models import OutboxEvent
     from modules.sales import calls as calls_mod
     from modules.sales.models import CallLog
 
@@ -208,6 +210,29 @@ async def test_missed_call_status(session):
     await session.commit()
     call = (await session.execute(select(CallLog).where(CallLog.call_id == "C-MISS"))).scalars().first()
     assert call.status == "missed"
+
+    # пропущенный без предшествующего incoming должен всё равно залогироваться (audit/KPI)
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "sales.call.logged" in types
+
+
+async def test_late_answer_keeps_terminal_status(session):
+    """Внепорядковый answer после hangup не понижает терминальный статус обратно."""
+    from sqlalchemy import select
+
+    from modules.sales import calls as calls_mod
+    from modules.sales.models import CallLog
+
+    ctx, _ = _ctx(session)
+    await calls_mod.on_call_ended(
+        {"call_id": "C-OOO", "direction": "in", "phone_e164": "+375291110003", "event": "hangup", "status": "answered"},
+        ctx,
+    )
+    await calls_mod.on_call_answered({"call_id": "C-OOO", "direction": "in"}, ctx)
+    await session.commit()
+    call = (await session.execute(select(CallLog).where(CallLog.call_id == "C-OOO"))).scalars().first()
+    assert call.status == "ended"  # остался терминальным, не вернулся в "answered"
+    assert call.answered_at is not None
 
 
 # --- HTTP: webhook коннектора + токен ----------------------------------------------
