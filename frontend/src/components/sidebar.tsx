@@ -206,8 +206,12 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-const ORDER_KEY = "aios-sidebar-order";
-const COLLAPSED_KEY = "aios-sidebar-collapsed";
+// localStorage-ключи пользовательских настроек сайдбара.
+// TODO(Step B): collapsed → cookie (как THEME_INIT_SCRIPT), уберёт width-флэш при первой отрисовке.
+const ORDER_KEY = "aios-sidebar-order"; // порядок модулей (массив slugs)
+const COLLAPSED_KEY = "aios-sidebar-collapsed"; // "1" — свёрнут rail
+const LOGO_KEY = "aios-sidebar-logo"; // текст логотипа (по умолч. "ERP")
+const SUBORDER_KEY = "aios-sidebar-sub-order"; // порядок sub-items: { [moduleSlug]: string[] }
 
 function readOrder(): string[] | null {
   try {
@@ -228,12 +232,56 @@ function writeOrder(order: string[]) {
   }
 }
 
+function readLogo(): string {
+  try {
+    return localStorage.getItem(LOGO_KEY) || "ERP";
+  } catch {
+    return "ERP";
+  }
+}
+
+function writeLogo(text: string) {
+  try {
+    localStorage.setItem(LOGO_KEY, text);
+  } catch {
+    /* */
+  }
+}
+
+function readSubOrder(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(SUBORDER_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSubOrder(order: Record<string, string[]>) {
+  try {
+    localStorage.setItem(SUBORDER_KEY, JSON.stringify(order));
+  } catch {
+    /* */
+  }
+}
+
 function applyOrder(modules: ModuleItem[], order: string[] | null): ModuleItem[] {
   if (!order || order.length === 0) return modules;
   const bySlug = new Map(modules.map((m) => [m.slug, m]));
   const placed = order.map((s) => bySlug.get(s)).filter((m): m is ModuleItem => Boolean(m));
   const placedSet = new Set(placed.map((m) => m.slug));
   const tail = modules.filter((m) => !placedSet.has(m.slug)); // новые модули — в конец
+  return [...placed, ...tail];
+}
+
+function applySubOrder(items: SubItem[], order: string[] | undefined): SubItem[] {
+  if (!order || order.length === 0) return items;
+  const byLabel = new Map(items.map((s) => [s.label, s]));
+  const placed = order.map((l) => byLabel.get(l)).filter((s): s is SubItem => Boolean(s));
+  const placedSet = new Set(placed.map((s) => s.label));
+  const tail = items.filter((s) => !placedSet.has(s.label));
   return [...placed, ...tail];
 }
 
@@ -249,22 +297,27 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   const pathname = usePathname() || "";
   const router = useRouter();
 
-  // collapsed (rail) — пользовательский тоггл, хранится в localStorage.
+  // collapsed (rail) — пользовательский тоггл, в localStorage.
   // hoverExpanded — временное раскрытие при наведении (overlay, не толкает контент).
-  // editing — режим перестановки разделов (drag-handles появляются, ссылки временно
-  //   некликабельны, чтобы случайно не перейти при перетаскивании).
+  // editing — режим перестановки разделов: drag-handles появляются у модулей И sub-items,
+  //   ссылки временно отключены, чтобы случайно не перейти при перетаскивании.
   // order — пользовательский порядок модулей; null → дефолт (как в MODULES).
+  // subOrder — порядок sub-items по slug модуля; {} → дефолт (как в MODULES[i].sub).
+  // logoText — кастомный текст логотипа («ERP» по умолчанию); пользователь
+  //   редактирует кликом по логотипу. TODO(Step B): загрузка изображения.
   const [collapsed, setCollapsed] = useState(false);
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [order, setOrder] = useState<string[] | null>(null);
+  const [subOrder, setSubOrder] = useState<Record<string, string[]>>({});
   const [draggingSlug, setDraggingSlug] = useState<string | null>(null);
+  const [draggingSub, setDraggingSub] = useState<{ module: string; label: string } | null>(null);
+  const [logoText, setLogoText] = useState("ERP");
+  const [logoEditing, setLogoEditing] = useState(false);
+  const [logoDraft, setLogoDraft] = useState("ERP");
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Состояние читаем после маунта — иначе SSR vs клиент-гидрация рассогласуется.
-  // TODO(Step B): переехать на cookie для collapsed (как THEME_INIT_SCRIPT) —
-  //   избавит от width-флэша при первой отрисовке. Order может остаться в LS:
-  //   его «правильный» порядок виден только после ручного reorder, без флэша.
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -272,6 +325,10 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       /* */
     }
     setOrder(readOrder());
+    setSubOrder(readSubOrder());
+    const lg = readLogo();
+    setLogoText(lg);
+    setLogoDraft(lg);
     // Cleanup hoverTimer на unmount — иначе 120мс таймер может выстрелить
     // в уже размонтированный компонент и вызвать React-warning.
     return () => {
@@ -336,15 +393,27 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     setHoverExpanded(false);
   }
 
-  // Полная ширина = либо явно раскрыта, либо collapsed+наведение (overlay).
   const showFull = !collapsed || hoverExpanded;
-  const layoutWidth = collapsed ? "w-14" : "w-60"; // место в layout, всегда фиксировано
-  const contentWidth = showFull ? "w-60" : "w-14"; // visible ширина; при hover «выезжает»
+  const layoutWidth = collapsed ? "w-14" : "w-60"; // layout-placeholder
+  const contentWidth = showFull ? "w-60" : "w-14"; // visible-ширина
 
-  // ─── Drag & drop (native HTML5) ─────────────────────────────────────────────
-  // Стратегия: каждое module-row draggable. При onDragOver запоминаем slug-цель,
-  // при onDrop переставляем массив видимых модулей через arrayMove, скрытые
-  // модули складываем в конец, сохраняем полный порядок в localStorage.
+  // ─── Logo editing ───────────────────────────────────────────────────────────
+  function commitLogo() {
+    const next = logoDraft.trim() || "ERP";
+    setLogoText(next);
+    setLogoDraft(next);
+    writeLogo(next);
+    setLogoEditing(false);
+  }
+  function cancelLogo() {
+    setLogoDraft(logoText);
+    setLogoEditing(false);
+  }
+
+  // ─── DnD: модули ────────────────────────────────────────────────────────────
+  // Стратегия: каждый module-row draggable. При onDragOver разрешаем drop,
+  // при onDrop переставляем массив видимых модулей, скрытые-по-роли складываем
+  // в конец полного порядка (чтобы не терялись при смене роли), сохраняем в LS.
   function handleDragStart(slug: string) {
     return (e: React.DragEvent) => {
       if (!editing) {
@@ -353,7 +422,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       }
       setDraggingSlug(slug);
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", slug);
+      e.dataTransfer.setData("text/plain", "module:" + slug);
     };
   }
 
@@ -376,7 +445,6 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       const next = [...ids];
       next.splice(from, 1);
       next.splice(to, 0, draggingSlug);
-      // Скрытые роли-модули складываем в хвост, чтобы при смене роли порядок не терялся.
       const nextSet = new Set(next);
       const hidden = MODULES.filter((m) => !nextSet.has(m.slug)).map((m) => m.slug);
       const fullOrder = [...next, ...hidden];
@@ -390,10 +458,73 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     setDraggingSlug(null);
   }
 
+  // ─── DnD: sub-items (в рамках активного модуля) ─────────────────────────────
+  function handleSubDragStart(moduleSlug: string, label: string) {
+    return (e: React.DragEvent) => {
+      if (!editing) {
+        e.preventDefault();
+        return;
+      }
+      e.stopPropagation(); // не пускаем dragstart на parent-модуль
+      setDraggingSub({ module: moduleSlug, label });
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", "sub:" + moduleSlug + ":" + label);
+    };
+  }
+
+  function handleSubDragOver(moduleSlug: string, label: string) {
+    return (e: React.DragEvent) => {
+      if (
+        !editing ||
+        !draggingSub ||
+        draggingSub.module !== moduleSlug ||
+        draggingSub.label === label
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+    };
+  }
+
+  function handleSubDrop(moduleSlug: string, label: string) {
+    return (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (
+        !editing ||
+        !draggingSub ||
+        draggingSub.module !== moduleSlug ||
+        draggingSub.label === label
+      )
+        return;
+      const mod = MODULES.find((m) => m.slug === moduleSlug);
+      if (!mod || !mod.sub) return;
+      const ordered = applySubOrder(mod.sub, subOrder[moduleSlug]);
+      const labels = ordered.map((s) => s.label);
+      const from = labels.indexOf(draggingSub.label);
+      const to = labels.indexOf(label);
+      if (from < 0 || to < 0) return;
+      const next = [...labels];
+      next.splice(from, 1);
+      next.splice(to, 0, draggingSub.label);
+      const newSubOrder = { ...subOrder, [moduleSlug]: next };
+      setSubOrder(newSubOrder);
+      writeSubOrder(newSubOrder);
+      setDraggingSub(null);
+    };
+  }
+
+  function handleSubDragEnd() {
+    setDraggingSub(null);
+  }
+
   function resetOrder() {
     setOrder(null);
+    setSubOrder({});
     try {
       localStorage.removeItem(ORDER_KEY);
+      localStorage.removeItem(SUBORDER_KEY);
     } catch {
       /* */
     }
@@ -401,7 +532,6 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
 
   return (
     <aside className={clsx(layoutWidth, "relative shrink-0 transition-[width] duration-150")}>
-      {/* Реальный визуал sidebar (может расширяться поверх контента при hover-expand). */}
       <div
         className={clsx(
           "absolute inset-y-0 left-0 z-30 flex flex-col border-r border-line bg-surface transition-[width] duration-150",
@@ -411,12 +541,41 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
       >
-        {/* лого + collapse-тоггл */}
+        {/* лого (редактируемое) + collapse-тоггл */}
         <div className={clsx("flex items-center gap-2 px-3 py-4", showFull && "px-5")}>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white"
+            title={!showFull ? logoText : undefined}
+          >
             <Box size={20} />
           </span>
-          {showFull && <span className="flex-1 text-lg font-bold text-ink">ERP</span>}
+          {showFull && !logoEditing && (
+            <button
+              type="button"
+              onClick={() => {
+                setLogoDraft(logoText);
+                setLogoEditing(true);
+              }}
+              title="Клик — переименовать"
+              className="min-w-0 flex-1 truncate rounded px-1 text-left text-lg font-bold text-ink hover:bg-sunken"
+            >
+              {logoText}
+            </button>
+          )}
+          {showFull && logoEditing && (
+            <input
+              autoFocus
+              value={logoDraft}
+              onChange={(e) => setLogoDraft(e.target.value)}
+              onBlur={commitLogo}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitLogo();
+                if (e.key === "Escape") cancelLogo();
+              }}
+              maxLength={24}
+              className="min-w-0 flex-1 rounded border border-accent bg-surface px-1 text-lg font-bold text-ink outline-none"
+            />
+          )}
           {showFull && (
             <button
               type="button"
@@ -431,18 +590,17 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
         </div>
 
         <nav className="thin-scroll flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4">
-          {/* заголовок «модули» + кнопка редактирования (только в раскрытом виде) */}
           {showFull && (
             <div className="flex items-center justify-between px-3 pb-2 pt-3">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 Модули
               </span>
               <div className="flex items-center gap-1">
-                {editing && order && (
+                {editing && (order || Object.keys(subOrder).length > 0) && (
                   <button
                     type="button"
                     onClick={resetOrder}
-                    title="Вернуть исходный порядок"
+                    title="Вернуть исходный порядок (модули + подразделы)"
                     className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-faint hover:bg-sunken hover:text-ink"
                   >
                     сброс
@@ -452,10 +610,16 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                   type="button"
                   onClick={() => setEditing((v) => !v)}
                   aria-label={editing ? "Готово" : "Редактировать меню"}
-                  title={editing ? "Готово — выйти из режима правки" : "Редактировать меню (перетаскивание)"}
+                  title={
+                    editing
+                      ? "Готово — выйти из режима правки"
+                      : "Редактировать меню (перетаскивание модулей и подразделов)"
+                  }
                   className={clsx(
                     "flex h-6 w-6 items-center justify-center rounded-md",
-                    editing ? "bg-accent-soft text-accent-ink" : "text-faint hover:bg-sunken hover:text-ink",
+                    editing
+                      ? "bg-accent-soft text-accent-ink"
+                      : "text-faint hover:bg-sunken hover:text-ink",
                   )}
                 >
                   <Pencil size={12} />
@@ -474,8 +638,6 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
               editing && showFull && "cursor-grab active:cursor-grabbing",
               isDragSrc && "opacity-40",
             );
-            // Тело строки — общее для Link и div-варианта; вынесено, чтобы не дублировать
-            // GripVertical/Icon/label при правке (например, добавление бейджа).
             const rowBody = (
               <>
                 {editing && showFull && (
@@ -501,31 +663,73 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                 ) : (
                   <div
                     className={clsx(rowCls, !editing && "cursor-default")}
-                    title={!showFull ? m.label : editing ? "Перетащите для смены порядка" : "Модуль"}
+                    title={
+                      !showFull
+                        ? m.label
+                        : editing
+                          ? "Перетащите для смены порядка"
+                          : "Модуль"
+                    }
                   >
                     {rowBody}
                   </div>
                 )}
-                {/* Подменю активного модуля — только в раскрытом виде и вне режима редактирования */}
-                {showFull && !editing && m.sub && active && (
+                {/* Подменю активного модуля — в раскрытом виде. В edit-mode подразделы
+                    тоже становятся draggable (см. handleSubDrag*). */}
+                {showFull && m.sub && active && (
                   <div className="mb-1 mt-1 flex flex-col">
-                    {m.sub.map((s) => {
+                    {applySubOrder(m.sub, subOrder[m.slug]).map((s) => {
                       const sactive = !!s.href && pathname === s.href;
+                      const isSubDragSrc =
+                        draggingSub?.module === m.slug && draggingSub?.label === s.label;
                       const scls = clsx(
-                        "rounded-lg py-1.5 pl-11 pr-3 text-sm",
-                        sactive ? "font-medium text-accent-ink" : "text-muted hover:bg-sunken",
+                        "flex items-center gap-2 rounded-lg py-1.5 pr-3 text-sm",
+                        editing ? "pl-4" : "pl-11",
+                        sactive
+                          ? "font-medium text-accent-ink"
+                          : "text-muted hover:bg-sunken",
+                        editing && "cursor-grab active:cursor-grabbing",
+                        isSubDragSrc && "opacity-40",
                       );
-                      return s.href ? (
-                        <Link key={s.label} href={s.href} className={scls}>
-                          {s.label}
-                        </Link>
-                      ) : (
+                      const subBody = (
+                        <>
+                          {editing && (
+                            <GripVertical
+                              size={12}
+                              className="shrink-0 text-faint"
+                              aria-hidden
+                            />
+                          )}
+                          <span className="truncate">{s.label}</span>
+                        </>
+                      );
+                      return (
                         <div
                           key={s.label}
-                          className={`${scls} cursor-default`}
-                          title="Раздел в разработке"
+                          draggable={editing}
+                          onDragStart={handleSubDragStart(m.slug, s.label)}
+                          onDragOver={handleSubDragOver(m.slug, s.label)}
+                          onDrop={handleSubDrop(m.slug, s.label)}
+                          onDragEnd={handleSubDragEnd}
                         >
-                          {s.label}
+                          {s.href && !editing ? (
+                            <Link href={s.href} className={scls}>
+                              {subBody}
+                            </Link>
+                          ) : (
+                            <div
+                              className={clsx(scls, !editing && "cursor-default")}
+                              title={
+                                editing
+                                  ? "Перетащите для смены порядка"
+                                  : s.href
+                                    ? undefined
+                                    : "Раздел в разработке"
+                              }
+                            >
+                              {subBody}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

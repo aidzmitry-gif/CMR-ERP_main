@@ -14,11 +14,13 @@ import {
 import clsx from "clsx";
 import { Clock, LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
+import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import { KpiCard } from "@/components/kpi-card";
 import {
@@ -71,10 +73,52 @@ function pluralDeals(n: number): string {
   return "сделок";
 }
 
-function DraggableDeal({ deal, extras }: { deal: Deal; extras: CardExtras }) {
+function DraggableDeal({
+  deal,
+  extras,
+  onPreview,
+  onOpen,
+}: {
+  deal: Deal;
+  extras: CardExtras;
+  onPreview: (d: Deal) => void;
+  onOpen: (d: Deal) => void;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: deal.id });
+  // Click vs double-click: первый клик → setTimeout(230ms) → onPreview;
+  // второй клик в окне таймера → clear + onOpen. Глушим встроенный <Link>
+  // у DealCard через preventDefault — навигация идёт через router.push в onOpen.
+  // Не мешаем клику по интерактивным дочерним (кнопка «Отказ», ChannelRow).
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+  }, []);
+
+  function handleClickCapture(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest("button")) return; // отказ-кнопка, иконки каналов — не глушим
+    e.preventDefault();
+    e.stopPropagation();
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onOpen(deal);
+      return;
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      onPreview(deal);
+    }, 230);
+  }
+
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? "opacity-40" : ""}>
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClickCapture={handleClickCapture}
+      className={isDragging ? "opacity-40" : ""}
+    >
       <DealCard deal={deal} {...extras} />
     </div>
   );
@@ -134,10 +178,14 @@ export function DealsWorkspace({
   initialStages: Stage[];
   initialKpis: Kpi[];
 }) {
+  const router = useRouter();
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [period, setPeriod] = useState("day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
+  // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
+  // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
+  const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
   const [query, setQuery] = useState("");
@@ -414,7 +462,13 @@ export function DealsWorkspace({
               {filteredStages.map((stage) => (
                 <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
                   {stage.deals.map((deal) => (
-                    <DraggableDeal key={deal.id} deal={deal} extras={cardExtras(deal, stage.id)} />
+                    <DraggableDeal
+                      key={deal.id}
+                      deal={deal}
+                      extras={cardExtras(deal, stage.id)}
+                      onPreview={setPreviewDeal}
+                      onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                    />
                   ))}
                 </Column>
               ))}
@@ -490,6 +544,9 @@ export function DealsWorkspace({
           onConfirm={confirmLose}
         />
       )}
+
+      {/* Drawer-preview сделки: открывается single-click по карточке на доске. */}
+      <DealDrawerPreview deal={previewDeal} onClose={() => setPreviewDeal(null)} />
     </>
   );
 }
