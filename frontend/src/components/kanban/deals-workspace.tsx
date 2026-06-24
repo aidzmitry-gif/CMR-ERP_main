@@ -25,10 +25,12 @@ import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import { KpiCard } from "@/components/kpi-card";
 import {
   createDeal,
+  createDealTask,
   fetchLossReasons,
   getKpis,
   logActivity,
   loseDeal,
+  updateDeal,
   updateDealStage,
   type DealInput,
 } from "@/lib/api";
@@ -545,8 +547,59 @@ export function DealsWorkspace({
         />
       )}
 
-      {/* Drawer-preview сделки: открывается single-click по карточке на доске. */}
-      <DealDrawerPreview deal={previewDeal} onClose={() => setPreviewDeal(null)} />
+      {/* Drawer-preview сделки: открывается single-click по карточке на доске.
+          Цель — работа из канбана без проваливания в полную карточку: stage-mover,
+          inline next-step, быстрая задача, ChannelButtons, Win/Lose. */}
+      <DealDrawerPreview
+        deal={previewDeal}
+        stages={stages}
+        onClose={() => setPreviewDeal(null)}
+        onMoveStage={(dealId, stageId) => {
+          if (stageId === "lost") {
+            // Drawer-Lose открывает модалку причины (как drag в колонку «отказ»).
+            openLose(dealId);
+            return;
+          }
+          setStages((prev) => moveDealToStage(prev, dealId, stageId));
+          // Поддерживаем превью консистентным: если перенесли активный deal, обновляем ссылку
+          setPreviewDeal((p) =>
+            p && p.id === dealId
+              ? (stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? p)
+              : p,
+          );
+          void updateDealStage(dealId, stageId);
+        }}
+        onUpdateFields={(dealId, fields) => {
+          // Оптимистично патчим во всех колонках; UI-маппинг snake→camel для starred/next_step.
+          const camel: Partial<Deal> = {};
+          if ("next_step" in fields) camel.nextStep = String(fields.next_step ?? "");
+          if ("starred" in fields) camel.starred = Boolean(fields.starred);
+          if ("priority" in fields)
+            camel.priority = fields.priority as Deal["priority"];
+          setStages((prev) =>
+            prev.map((s) => ({
+              ...s,
+              deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...camel } : d)),
+            })),
+          );
+          setPreviewDeal((p) => (p && p.id === dealId ? { ...p, ...camel } : p));
+          void updateDeal(dealId, fields);
+        }}
+        onAddTask={(dealId, title) => {
+          // Создаём fire-and-forget; в drawer'е список задач не показываем (он в полной карточке).
+          void createDealTask(dealId, { title });
+        }}
+        onWin={(dealId) => {
+          setStages((prev) => moveDealToStage(prev, dealId, "won"));
+          void updateDealStage(dealId, "won");
+          setPreviewDeal(null);
+        }}
+        onLose={(dealId) => {
+          // Просим причину через ту же модалку, что и при drag-в-отказ.
+          openLose(dealId);
+          setPreviewDeal(null);
+        }}
+      />
     </>
   );
 }

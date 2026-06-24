@@ -1,20 +1,50 @@
 "use client";
 
-import { ArrowRight, Calendar, Flag, User, X } from "lucide-react";
+import {
+  ArrowRight,
+  Calendar,
+  Check,
+  ChevronRight,
+  Flag,
+  Plus,
+  Star,
+  User,
+  X,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
-import { useEffect } from "react";
-import { ChannelRow } from "@/components/channels";
+import { useEffect, useState } from "react";
+import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Button } from "@/components/ui/button";
 import { formatByn } from "@/lib/format";
-import type { Deal } from "@/lib/types";
+import type { Deal, Stage } from "@/lib/types";
 
 /**
  * Drawer-preview сделки на доске (sales-card-expanded.html прототип).
- * Выезжает справа по single-click на карточку. Double-click открывает полную
- * страницу /crm/deals/[id]. Backdrop кликабельный для закрытия, Esc — тоже.
+ * Цель — рабочая поверхность ИЗ канбана: продавец двигает стадию, редактирует
+ * «следующий шаг», добавляет задачу, ставит ★/Win/Lose БЕЗ перехода в полную карточку.
+ * 1-клик по карточке открывает drawer, 2-клика — переход на /crm/deals/[id].
  */
-export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClose: () => void }) {
+export function DealDrawerPreview({
+  deal,
+  stages,
+  onClose,
+  onMoveStage,
+  onUpdateFields,
+  onAddTask,
+  onWin,
+  onLose,
+}: {
+  deal: Deal | null;
+  stages: Stage[];
+  onClose: () => void;
+  onMoveStage: (dealId: string, stageId: string) => void;
+  onUpdateFields: (dealId: string, fields: Record<string, unknown>) => void;
+  onAddTask: (dealId: string, title: string) => void;
+  onWin: (dealId: string) => void;
+  onLose: (dealId: string) => void;
+}) {
   // Esc-закрытие
   useEffect(() => {
     if (!deal) return;
@@ -25,12 +55,52 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
     return () => document.removeEventListener("keydown", onKey);
   }, [deal, onClose]);
 
-  // Backdrop виден всегда, чтобы анимация выезда работала; pointer-events выкл, когда закрыто.
+  // Локальные draft-стейты для inline-редакторов (next-step + новая задача).
+  // Сбрасываем, когда меняется открытая сделка, чтобы не утечь чужой текст.
+  const [stepDraft, setStepDraft] = useState("");
+  const [stepEditing, setStepEditing] = useState(false);
+  const [taskDraft, setTaskDraft] = useState("");
+  useEffect(() => {
+    setStepDraft(deal?.nextStep ?? "");
+    setStepEditing(false);
+    setTaskDraft("");
+  }, [deal?.id]);
+
   const open = deal != null;
+
+  // Найти текущую стадию + следующую (для кнопки «→ Следующая стадия»).
+  const currentStageIdx = deal
+    ? stages.findIndex((s) => s.deals.some((d) => d.id === deal.id))
+    : -1;
+  const nextStage =
+    currentStageIdx >= 0 && currentStageIdx < stages.length - 1
+      ? stages[currentStageIdx + 1]
+      : null;
+
+  function commitStep() {
+    if (!deal) return;
+    const next = stepDraft.trim();
+    if (next === deal.nextStep) {
+      setStepEditing(false);
+      return;
+    }
+    onUpdateFields(deal.id, { next_step: next });
+    setStepEditing(false);
+  }
+
+  function addTask() {
+    if (!deal || !taskDraft.trim()) return;
+    onAddTask(deal.id, taskDraft.trim());
+    setTaskDraft("");
+  }
+
+  function toggleStar() {
+    if (!deal) return;
+    onUpdateFields(deal.id, { starred: !deal.starred });
+  }
 
   return (
     <>
-      {/* Backdrop — приглушает доску, закрывает по клику. z-40 ниже модалок (z-50). */}
       <div
         aria-hidden
         onClick={onClose}
@@ -38,17 +108,17 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       />
-      {/* Drawer — фиксирован справа, 460px (max-w-[94vw] для узких экранов). */}
       <aside
         role="dialog"
         aria-label={deal ? `Превью сделки ${deal.number}` : "Превью сделки"}
         aria-hidden={!open}
-        className={`fixed inset-y-0 right-0 z-50 flex w-[460px] max-w-[94vw] flex-col border-l border-line bg-surface shadow-pop transition-transform duration-200 ${
+        className={`fixed inset-y-0 right-0 z-50 flex w-[480px] max-w-[94vw] flex-col border-l border-line bg-surface shadow-pop transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
         {deal && (
           <>
+            {/* Шапка: номер, контрагент, описание, action-иконки (★ закрепить, ✕ закрыть) */}
             <header className="flex items-start gap-3 border-b border-line px-[18px] py-3">
               <div className="min-w-0 flex-1">
                 <div className="text-[12.5px] text-muted">№ {deal.number}</div>
@@ -61,6 +131,18 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
               </div>
               <button
                 type="button"
+                onClick={toggleStar}
+                aria-label={deal.starred ? "Снять закрепление" : "Закрепить"}
+                title={deal.starred ? "Снять закрепление" : "Закрепить"}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken"
+              >
+                <Star
+                  size={16}
+                  className={deal.starred ? "fill-amber-400 text-amber-400" : "text-faint"}
+                />
+              </button>
+              <button
+                type="button"
                 onClick={onClose}
                 aria-label="Закрыть превью"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-ink"
@@ -69,6 +151,7 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
               </button>
             </header>
 
+            {/* Скроллируемое тело */}
             <div className="flex-1 overflow-y-auto px-[18px] py-[14px]">
               <div className="flex flex-wrap items-center gap-2">
                 <PriorityBadge priority={deal.priority} withIcon />
@@ -77,24 +160,139 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
                 </span>
               </div>
 
-              {/* Сумма крупно */}
+              {/* Сумма крупно + вероятность */}
               <div className="mt-3 text-[22px] font-extrabold tabular-nums text-ink">
                 {formatByn(deal.amount)}
               </div>
               {deal.probability != null && deal.probability > 0 && (
                 <div className="mt-1 text-[12px] text-muted">
-                  <span className="font-semibold text-accent-ink">{deal.probability}%</span>{" "}
-                  · взвешенно ≈ {formatByn(Math.round(deal.amount * (deal.probability / 100)))}
+                  <span className="font-semibold text-accent-ink">{deal.probability}%</span> ·
+                  взвешенно ≈{" "}
+                  {formatByn(Math.round(deal.amount * (deal.probability / 100)))}
                 </div>
               )}
 
-              {/* KV-список с быстрой инфой (как в прототипе) */}
+              {/* === STAGE-MOVER === */}
+              <section className="mt-4">
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  Стадия
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={
+                      currentStageIdx >= 0 ? stages[currentStageIdx].id : ""
+                    }
+                    onChange={(e) => onMoveStage(deal.id, e.target.value)}
+                    aria-label="Стадия сделки"
+                    className="flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
+                  >
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title}
+                      </option>
+                    ))}
+                  </select>
+                  {nextStage && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onMoveStage(deal.id, nextStage.id)}
+                      icon={<ChevronRight size={14} />}
+                      title={`Переместить в «${nextStage.title}»`}
+                    >
+                      {nextStage.title}
+                    </Button>
+                  )}
+                </div>
+              </section>
+
+              {/* === NEXT STEP — inline edit === */}
+              <section className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    <Flag size={11} className="text-accent-ink" />
+                    Следующий шаг
+                  </span>
+                  {!stepEditing && (
+                    <button
+                      type="button"
+                      onClick={() => setStepEditing(true)}
+                      className="text-[11px] font-semibold text-accent-ink hover:text-accent"
+                    >
+                      Изменить
+                    </button>
+                  )}
+                </div>
+                {stepEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      autoFocus
+                      value={stepDraft}
+                      onChange={(e) => setStepDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commitStep();
+                        if (e.key === "Escape") {
+                          setStepDraft(deal.nextStep ?? "");
+                          setStepEditing(false);
+                        }
+                      }}
+                      rows={2}
+                      placeholder="Что сделать дальше? Ctrl+Enter — сохранить"
+                      className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none"
+                    />
+                    <div className="flex gap-2">
+                      <Button variant="primary" size="sm" onClick={commitStep} icon={<Check size={13} />}>
+                        Сохранить
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setStepDraft(deal.nextStep ?? "");
+                          setStepEditing(false);
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-ink">{deal.nextStep || "—"}</div>
+                )}
+              </section>
+
+              {/* === QUICK TASK === */}
+              <section className="mt-4">
+                <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <Plus size={11} className="text-accent-ink" />
+                  Быстрая задача
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={taskDraft}
+                    onChange={(e) => setTaskDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addTask();
+                    }}
+                    placeholder="Позвонить, отправить КП, …"
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={addTask}
+                    disabled={!taskDraft.trim()}
+                    icon={<Plus size={13} />}
+                  >
+                    Добавить
+                  </Button>
+                </div>
+              </section>
+
+              {/* === META-список === */}
               <dl className="mt-4 divide-y divide-line border-y border-line">
                 <Row label="Ответственный" icon={<User size={13} className="text-muted" />}>
                   {deal.owner || "—"}
-                </Row>
-                <Row label="Следующий шаг" icon={<Flag size={13} className="text-accent-ink" />}>
-                  {deal.nextStep || "—"}
                 </Row>
                 {(deal.date || deal.closedDate || deal.expectedCloseDate) && (
                   <Row
@@ -106,24 +304,44 @@ export function DealDrawerPreview({ deal, onClose }: { deal: Deal | null; onClos
                 )}
               </dl>
 
-              {/* Каналы связи */}
+              {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
               <div className="mt-4 rounded-xl border border-line p-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
                   Связь с клиентом
                 </div>
-                <ChannelRow />
+                <ChannelButtons dealId={deal.id} />
               </div>
 
-              {/* Подсказка про UX взаимодействия */}
-              <div className="mt-4 rounded-lg bg-sunken px-3 py-2 text-[11px] text-faint">
-                💡 <b className="text-muted">Двойной клик</b> по карточке на доске — открывает
-                полную страницу сделки.
+              {/* === WIN / LOSE === */}
+              <section className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  variant="money"
+                  size="sm"
+                  onClick={() => onWin(deal.id)}
+                  icon={<Check size={14} />}
+                  className="flex-1"
+                >
+                  Выиграна
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => onLose(deal.id)}
+                  icon={<XCircle size={14} />}
+                  className="flex-1"
+                >
+                  Отказ
+                </Button>
+              </section>
+
+              <div className="mt-4 text-center text-[11px] text-faint">
+                💡 Двойной клик по карточке открывает полную страницу
               </div>
             </div>
 
             <footer className="border-t border-line px-[18px] py-3">
               <Link href={`/crm/deals/${deal.id}`} className="block">
-                <Button variant="primary" block icon={<ArrowRight size={15} />}>
+                <Button variant="secondary" block icon={<ArrowRight size={15} />}>
                   Открыть полную карточку
                 </Button>
               </Link>
