@@ -43,6 +43,17 @@ interface ApiStage {
   deals: ApiDeal[];
 }
 
+/**
+ * Защитный маппер: backend может прислать «high»/«medium»/«low», null или мусор.
+ * Приводим к ru-ключам {@link Priority}, дефолт — «Средний» (минимально шумит в UI).
+ */
+function toPriority(raw: unknown): Priority {
+  if (raw === "Высокий" || raw === "Средний" || raw === "Низкий") return raw;
+  if (raw === "high") return "Высокий";
+  if (raw === "low") return "Низкий";
+  return "Средний";
+}
+
 function mapDeal(d: ApiDeal): Deal {
   return {
     id: String(d.id),
@@ -50,7 +61,7 @@ function mapDeal(d: ApiDeal): Deal {
     company: d.counterparty,
     description: d.title,
     amount: d.amount,
-    priority: d.priority as Priority,
+    priority: toPriority(d.priority),
     owner: d.owner,
     date: d.deal_date ?? undefined,
     closedDate: d.closed_date ?? undefined,
@@ -99,8 +110,9 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       number: d.number,
       company: d.counterparty,
       description: d.title,
-      amount: d.amount,
-      priority: d.priority as Priority,
+      // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
+      amount: Number(d.amount ?? 0),
+      priority: toPriority(d.priority),
       nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
       contact: d.owner || DEAL_DETAIL.contact,
       datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,

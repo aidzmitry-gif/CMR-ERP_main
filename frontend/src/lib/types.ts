@@ -103,6 +103,99 @@ export interface DealDetail {
   focus: boolean;
   starred: boolean;
   dealDate: string;
+
+  // ── MDM / 1С расширение ────────────────────────────────────────────────────
+  // Все поля опциональны: backend заполняет по мере готовности интеграций,
+  // UI уже умеет различать «нет данных» vs «есть данные». Контекст —
+  // memory: mdm-1c-data-provenance-ui, spravochniki-mdm-decision,
+  //         invoice-1c-reserve-shipment, onec-odata-setup.
+
+  /** Контрагент в MDM-витрине (источник истины — 1С, alias по УНП). */
+  counterparty?: {
+    id: number;
+    unp?: string;
+    sourceSystem?: "erp" | "1c" | "bitrix";
+    externalRef?: string;
+    isGolden?: boolean;
+    mergedIntoId?: number;
+  };
+
+  /** Активная стадия + сколько в ней висим (для маркера «протух»). */
+  stage?: {
+    idx: number;
+    id: string;
+    title: string;
+    daysInStage?: number;
+    isStale?: boolean;
+  };
+
+  /** Себестоимость / прибыль / маржа / вероятность для metrics-полосы. */
+  pricing?: {
+    cost?: number;
+    costSource?: "landed_zak" | "avg_1c" | "manual";
+    profit?: number;
+    margin?: number;
+    probability?: number;
+    weighted?: number;
+  };
+
+  /** Оплата: invoiced — счёт ERP; paid — факт из 1С (банк/касса). */
+  pay?: {
+    invoiced: number;
+    paid: number;
+    vat?: number;
+    dueDate?: string;
+    lastPaymentAt?: string;
+    source1cDocId?: string;
+  };
+
+  /** Отгрузка: рейс/ETA из logistics, резерв/статус склада из 1С, сквозной груз из ZAK. */
+  ship?: {
+    tripId?: string;
+    eta?: string;
+    route?: string;
+    reserve1cDocId?: string;
+    warehouseStatus?: "none" | "reserved" | "picked" | "shipped";
+    cargoTripDealIds?: number[];
+  };
+
+  /** Доставка: метод/адрес/дата — CRM; склад — WMS-справочник 1С. */
+  delivery?: {
+    method?: "pickup" | "address" | "our_truck";
+    address?: string;
+    date?: string;
+    warehouseId?: number;
+    warehouse1cRef?: string;
+  };
+
+  /** Постоянный клиент: счётчики — CRM; LTV/средний чек — 1С. */
+  regular?: {
+    isRegular: boolean;
+    orderCount?: number;
+    lastOrderAt?: string;
+    nextExpectedAt?: string;
+    avgCheck?: number;
+    ltv?: number;
+    intervalDays?: number;
+    trendPct?: number;
+  };
+
+  /** Другие сделки этого counterparty (по counterparty.id). */
+  linkedDealIds?: number[];
+
+  /** Документы: source отделяет ERP-сторону от 1С (накладные/реализации). */
+  docs?: Array<{
+    id: number;
+    kind: "contract" | "invoice" | "waybill" | "act" | "other";
+    source: "erp" | "1c";
+    onecRef?: string;
+    title: string;
+    status: string;
+  }>;
+
+  /** Температура и тип воронки — для группировок. */
+  temperature?: "hot" | "warm" | "cold";
+  funnel?: "new" | "regular" | "tender" | "project";
 }
 
 export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";

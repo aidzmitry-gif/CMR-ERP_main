@@ -11,6 +11,7 @@ import {
   type SkuOption,
   updateDealItem,
 } from "@/lib/api";
+import { formatByn } from "@/lib/format";
 
 export function DealItems({ dealId }: { dealId: string }) {
   const [items, setItems] = useState<DealItemFull[]>([]);
@@ -69,9 +70,9 @@ export function DealItems({ dealId }: { dealId: string }) {
               <div className="truncate text-sm text-muted">{item.title}</div>
               {item.last_price != null && (
                 <span className="text-xs text-faint">
-                  {item.last_price.toLocaleString("ru-RU")} ₽
+                  {formatByn(item.last_price)}
                   {item.min_price != null && item.min_price < item.last_price
-                    ? ` · мин ${item.min_price.toLocaleString("ru-RU")}`
+                    ? ` · мин ${formatByn(item.min_price)}`
                     : ""}
                 </span>
               )}
@@ -100,6 +101,7 @@ export function DealItems({ dealId }: { dealId: string }) {
         <select
           value={skuId ?? ""}
           onChange={(e) => setSkuId(Number(e.target.value))}
+          aria-label="Номенклатура (справочник из 1С через MDM)"
           className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {skus.map((s) => (
@@ -122,6 +124,10 @@ export function DealItems({ dealId }: { dealId: string }) {
         >
           <Plus size={16} /> Добавить
         </button>
+      </div>
+      {/* Провенанс справочника — пользователь должен видеть, что SKU = MDM-витрина из 1С. */}
+      <div className="mt-1.5 text-[10px] text-faint">
+        номенклатура · справочник из 1С (через MDM); цены last/min — из истории сделок CRM / Price Engine
       </div>
     </div>
   );
