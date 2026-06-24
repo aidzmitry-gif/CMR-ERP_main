@@ -10,8 +10,9 @@ describe("PriorityBadge", () => {
   });
 
   it("применяет цветовой класс по приоритету", () => {
+    // «Низкий» приоритет в DESIGN.md §1 = нейтраль (sunken+muted), не slate-500 (legacy).
     render(<PriorityBadge priority="Низкий" />);
-    expect(screen.getByText("Низкий").className).toContain("text-slate-500");
+    expect(screen.getByText("Низкий").className).toContain("text-muted");
   });
 
   it("показывает иконку при withIcon", () => {
