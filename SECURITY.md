@@ -100,10 +100,12 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
       `environment="prod"` по умолчанию; `model_validator` падает на старте, если прод-режим
       несёт dev-креды `aios:aios`. ⚠️ Локальная разработка/тесты теперь требуют явного
       `AIOS_ENVIRONMENT=dev` (выставлено в `tests/conftest.py`).
-- [ ] **P0-6. Telegram webhook secret-token.** Передать `secret_token` (1–256 симв.) в
-      `setWebhook`; Telegram добавляет заголовок `X-Telegram-Bot-Api-Secret-Token` в **каждый**
-      запрос. Сервер: constant-compare заголовка с ожидаемым → 401 при несовпадении. Иначе
-      любой может подделать `/approve <id>`. _(подтверждено офиц. Telegram Bot API)_
+- [x] **P0-6. Telegram webhook secret-token.** ✅ 2026-06-24. `core/runtime/telegram_routes.py`:
+      `_check_telegram_secret` constant-compare заголовка `X-Telegram-Bot-Api-Secret-Token` с
+      `config.telegram_webhook_secret` (env `AIOS_TELEGRAM_WEBHOOK_SECRET`) → 401 при несовпадении;
+      секрет не задан → **fail-closed в проде** (401, DoD P0: аноним → 401), в dev открыт с warning.
+      Тесты в `test_core_extras.py`. **Ops-хвост:** при деплое выставить env + вызвать `setWebhook` с
+      тем же `secret_token`. _(подтверждено офиц. Telegram Bot API)_
 - [ ] **P0-7. Bind на localhost.** uvicorn `--host 127.0.0.1`, наружу — только через
       TLS-прокси; ограничить host-порты (5432/6379/8000/8080) на localhost/Tailscale.
 

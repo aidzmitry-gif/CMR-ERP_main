@@ -8,9 +8,11 @@
 """
 from __future__ import annotations
 
+import hmac
 import inspect
+import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +20,29 @@ from core.domain.models import Approval
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["telegram"])
+
+
+def _check_telegram_secret(core: Core, request: Request) -> None:
+    """Проверить Telegram secret-token (SECURITY.md P0-6).
+
+    Telegram передаёт значение из ``setWebhook`` в заголовке
+    ``X-Telegram-Bot-Api-Secret-Token``. Если секрет задан — несовпадение даёт 401
+    (constant-time, в байтах — не падать на non-ASCII). Секрет не задан → **fail-closed
+    в проде** (DoD P0: аноним → 401), т.к. ``/telegram`` в OPEN_PREFIXES и публичный прод
+    иначе принимал бы поддельные ``/approve``; в dev — открыт для локальной отладки.
+    """
+    expected = core.config.telegram_webhook_secret
+    if not expected:
+        if not core.config.environment.lower().startswith("dev"):
+            raise HTTPException(status_code=401, detail="Telegram secret-token не настроен")
+        logger.warning("telegram: webhook без AIOS_TELEGRAM_WEBHOOK_SECRET — приём открыт (dev)")
+        return
+    got = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not hmac.compare_digest(got.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Неверный Telegram secret-token")
 
 
 async def handle_command(core, session: AsyncSession, text: str) -> str:
@@ -75,10 +99,16 @@ async def handle_command(core, session: AsyncSession, text: str) -> str:
 @router.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict,
+    request: Request,
     core: Core = Depends(get_core),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Приём Telegram-update и ответ в формате Bot API (sendMessage)."""
+    """Приём Telegram-update и ответ в формате Bot API (sendMessage).
+
+    Аутентификация (SECURITY.md P0-6): secret-token из ``setWebhook`` — иначе кто угодно
+    подделает ``/approve <id>`` (согласования гейтят действия с деньгами).
+    """
+    _check_telegram_secret(core, request)
     message = update.get("message") or {}
     text = (message.get("text") or "").strip()
     chat_id = (message.get("chat") or {}).get("id")

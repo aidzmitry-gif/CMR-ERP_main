@@ -73,6 +73,41 @@ async def test_telegram_module_command_and_already_decided(api):
     assert "уже обработано" in again.json()["text"]
 
 
+async def test_telegram_webhook_secret_token(api, monkeypatch):
+    """P0-6: при заданном secret-token вебхук требует совпадающий заголовок Telegram."""
+    from config.settings import get_settings
+
+    # Секрет живёт в кэш-синглтоне настроек (get_settings) — monkeypatch авто-восстановит
+    # его после теста, иначе утечёт в другие тесты (порядок прогона).
+    monkeypatch.setattr(get_settings(), "telegram_webhook_secret", "s3cret-XYZ")
+    body = {"message": {"text": "/approvals", "chat": {"id": 1}}}
+    # без заголовка — 401
+    assert (await api.post("/telegram/webhook", json=body)).status_code == 401
+    # неверный секрет — 401
+    bad = await api.post(
+        "/telegram/webhook", json=body, headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"}
+    )
+    assert bad.status_code == 401
+    # верный секрет — проходит до обработчика команды
+    ok = await api.post(
+        "/telegram/webhook", json=body, headers={"X-Telegram-Bot-Api-Secret-Token": "s3cret-XYZ"}
+    )
+    assert ok.status_code == 200 and "Нет согласований" in ok.json()["text"]
+
+
+async def test_telegram_webhook_failclosed_in_prod_without_secret(api, monkeypatch):
+    """P0-6: без секрета вебхук открыт в dev, но fail-closed (401) в проде."""
+    from config.settings import get_settings
+
+    cfg = get_settings()
+    monkeypatch.setattr(cfg, "telegram_webhook_secret", "")
+    body = {"message": {"text": "/approvals", "chat": {"id": 1}}}
+    monkeypatch.setattr(cfg, "environment", "dev")
+    assert (await api.post("/telegram/webhook", json=body)).status_code == 200
+    monkeypatch.setattr(cfg, "environment", "prod")
+    assert (await api.post("/telegram/webhook", json=body)).status_code == 401
+
+
 # --- Согласования: 404 и эндпоинт reject ---
 
 

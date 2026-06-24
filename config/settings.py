@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     smtp_from: str = "no-reply@aios.local"
     smtp_tls: bool = True
     telegram_bot_token: str = ""
+    # Telegram-webhook secret-token (SECURITY.md P0-6): задаётся в setWebhook, Telegram
+    # шлёт его в заголовке ``X-Telegram-Bot-Api-Secret-Token`` в КАЖДОМ запросе. Если задан —
+    # входящие без совпадающего заголовка отбиваются 401 (иначе любой подделает /approve).
+    # Прод публичен (/telegram открыт в middleware) → задавать обязательно.
+    telegram_webhook_secret: str = ""
 
     # Телефония (облачная АТС zruchna): входящий webhook + исходящий click-to-call.
     # Webhook аутентифицируется общим секретом ``?token=`` — если задан, входящие
