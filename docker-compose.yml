@@ -10,8 +10,11 @@ services:
       POSTGRES_USER: aios
       POSTGRES_PASSWORD: aios
       POSTGRES_DB: aios
+    # SECURITY.md P0-7: published-порт только на loopback — Postgres (aios/aios) не торчит
+    # в LAN/Tailscale/интернет. Контейнеры ходят по имени сервиса `postgres:5432` (docker-сеть),
+    # локальный seed/psql — через localhost. Наружу БД не нужна никому.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -23,8 +26,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    # SECURITY.md P0-7: published-порт только на loopback (Redis без пароля). Контейнеры
+    # ходят по `redis:6379` через docker-сеть — наружу порт не нужен.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,6 +46,9 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: aios
       KC_DB_PASSWORD: aios
+    # SECURITY.md P0-7: в проде забиндить на loopback ("127.0.0.1:8080:8080") и пускать
+    # только через TLS-прокси/туннель. Не делаю по умолчанию: зависит от топологии прокси
+    # (на хосте через loopback vs прямой Tailscale-доступ). admin/admin — только dev.
     ports:
       - "8080:8080"
     depends_on:
@@ -53,6 +61,9 @@ services:
       AIOS_ENVIRONMENT: dev
       AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@postgres:5432/aios
       AIOS_REDIS_URL: redis://redis:6379/0
+    # SECURITY.md P0-7: в проде забиндить на loopback ("127.0.0.1:8000:8000") и пускать
+    # только через TLS-прокси. Не делаю по умолчанию: если прокси/Tailscale ходит к app не
+    # через хостовой loopback — bind на 127.0.0.1 оборвёт доступ. См. ops-вопрос в STATUS.
     ports:
       - "8000:8000"
     depends_on:

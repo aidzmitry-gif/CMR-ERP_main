@@ -106,8 +106,12 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
       секрет не задан → **fail-closed в проде** (401, DoD P0: аноним → 401), в dev открыт с warning.
       Тесты в `test_core_extras.py`. **Ops-хвост:** при деплое выставить env + вызвать `setWebhook` с
       тем же `secret_token`. _(подтверждено офиц. Telegram Bot API)_
-- [ ] **P0-7. Bind на localhost.** uvicorn `--host 127.0.0.1`, наружу — только через
-      TLS-прокси; ограничить host-порты (5432/6379/8000/8080) на localhost/Tailscale.
+- [~] **P0-7. Bind на localhost.** ⏳ 2026-06-24 частично. `docker-compose.yml`: published-порты
+      Postgres/Redis (5432/6379) забиндены на `127.0.0.1` — датасторы (`aios/aios`, Redis без пароля)
+      не торчат в LAN/Tailscale/интернет; контейнеры ходят по именам сервисов через docker-сеть, не
+      ломается. **Остаток (ops):** app/keycloak (8000/8080) на loopback — зависит от топологии прокси
+      (на хосте через loopback vs прямой Tailscale-доступ к app); для не-docker uvicorn — `--host
+      127.0.0.1` за TLS-прокси.
 
 **Definition of done P0:** анонимный запрос к любому не-публичному роуту получает 401;
 `/system` мутации требуют авторизации; образ не содержит `.env`; прод на уникальных
