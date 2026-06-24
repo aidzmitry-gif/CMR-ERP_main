@@ -36,10 +36,18 @@ cd /opt/cmr-erp
 echo "=== [4/7] rebuild image + alembic + seed ==="
 # КРИТИЧНО: пересобрать образ ДО seed, иначе scripts/seed.py в контейнере остаётся
 # старой версией (git pull обновил файл на хосте, не в образе).
-# --build гарантирует, что свежие COPY . . включит обновлённый scripts/seed.py.
 docker compose up -d --build
-sleep 6
-# entrypoint.sh уже сделал alembic upgrade head на старте. Теперь seed (идемпотентно).
+sleep 8
+# Если контейнер упал (alembic/uvicorn/импорт модуля) — показать логи и выйти,
+# иначе следующие шаги получат "container is not running" без причины.
+if ! docker exec aios-app-1 true 2>/dev/null; then
+  echo "FAIL: aios-app-1 не работает. Логи:" >&2
+  docker logs --tail 80 aios-app-1 2>&1 | tail -80 >&2
+  echo "" >&2
+  echo "Возможные причины: alembic-миграция, ошибка импорта модуля (leads/sales)," >&2
+  echo "или валидация settings. Скопируйте логи выше и пришлите." >&2
+  exit 1
+fi
 docker exec -e PYTHONPATH=/app aios-app-1 python scripts/seed.py
 echo "SEED OK"
 
@@ -69,8 +77,15 @@ fi
 echo "=== [6/7] docker compose up -d (app пересоздастся с host-env) ==="
 # Образ уже пересобран в [4/7]; здесь только перезапуск с обновлёнными env.
 docker compose up -d
-sleep 4
-# Проверка проброса telephony-токена в контейнер (fail-fast — иначе webhook бессмысленен).
+sleep 6
+# Если app упал после рестарта (например, новый ENV сломал валидатор settings) —
+# показать логи и выйти.
+if ! docker exec aios-app-1 true 2>/dev/null; then
+  echo "FAIL: aios-app-1 не работает после рестарта с host-env. Логи:" >&2
+  docker logs --tail 60 aios-app-1 2>&1 | tail -60 >&2
+  exit 1
+fi
+# Проверка проброса telephony-токена в контейнер.
 TOKEN_LEN=$(docker exec aios-app-1 sh -c 'printf "%s" "$AIOS_TELEPHONY_WEBHOOK_TOKEN" | wc -c' || echo 0)
 echo "  токен в контейнере: $TOKEN_LEN символов (ожидаемо 64)"
 if [ "$TOKEN_LEN" != "64" ]; then
