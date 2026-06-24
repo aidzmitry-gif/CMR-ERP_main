@@ -33,8 +33,13 @@ npm run build
 systemctl restart cmr-frontend
 cd /opt/cmr-erp
 
-echo "=== [4/7] alembic + seed ==="
-# alembic применяется entrypoint'ом app — здесь только seed
+echo "=== [4/7] rebuild image + alembic + seed ==="
+# КРИТИЧНО: пересобрать образ ДО seed, иначе scripts/seed.py в контейнере остаётся
+# старой версией (git pull обновил файл на хосте, не в образе).
+# --build гарантирует, что свежие COPY . . включит обновлённый scripts/seed.py.
+docker compose up -d --build
+sleep 6
+# entrypoint.sh уже сделал alembic upgrade head на старте. Теперь seed (идемпотентно).
 docker exec -e PYTHONPATH=/app aios-app-1 python scripts/seed.py
 echo "SEED OK"
 
@@ -57,6 +62,7 @@ if ! grep -qE '^AIOS_TELEPHONY_ORIGINATE_URL=' "$HOST_CFG"; then
 fi
 
 echo "=== [6/7] docker compose up -d (app пересоздастся с host-env) ==="
+# Образ уже пересобран в [4/7]; здесь только перезапуск с обновлёнными env.
 docker compose up -d
 sleep 4
 # Проверки контейнерных переменных (если что-то не пробросилось — падаем громко, не молча).
