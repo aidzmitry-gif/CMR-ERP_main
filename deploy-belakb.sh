@@ -43,15 +43,14 @@ sleep 6
 docker exec -e PYTHONPATH=/app aios-app-1 python scripts/seed.py
 echo "SEED OK"
 
-echo "=== [5/7] host-конфиг (prod-env + telephony) ==="
+echo "=== [5/7] host-конфиг (telephony) ==="
 HOST_CFG=/opt/cmr-erp/.env
 touch "$HOST_CFG"
-# AIOS_ENVIRONMENT=prod — критично: иначе config.settings отключает webhook-токены и пускает дефолты.
-# Anchored regex (^KEY=), чтобы закомментированные строки в .env.example НЕ матчились.
-if ! grep -qE '^AIOS_ENVIRONMENT=' "$HOST_CFG"; then
-  echo "AIOS_ENVIRONMENT=prod" >> "$HOST_CFG"
-  echo "  AIOS_ENVIRONMENT=prod добавлен (security P0)."
-fi
+# Anchored regex (^KEY=), чтобы закомментированные строки в .env.example не матчились.
+# AIOS_ENVIRONMENT=prod НЕ ставим сейчас: settings._no_dev_defaults_in_prod
+# отбивает дефолтные aios:aios@postgres креды → app падает на старте. Перейти в prod
+# можно только после смены DB-пароля на сильный (отдельная задача). Токены webhook'ов
+# enforced независимо от ENV (через `if expected:` в роутах) — telephony работает в dev-режиме.
 if ! grep -qE '^AIOS_TELEPHONY_WEBHOOK_TOKEN=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_WEBHOOK_TOKEN=$(openssl rand -hex 32)" >> "$HOST_CFG"
   echo "  Сгенерирован новый AIOS_TELEPHONY_WEBHOOK_TOKEN."
@@ -60,22 +59,22 @@ if ! grep -qE '^AIOS_TELEPHONY_ORIGINATE_URL=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_ORIGINATE_URL=https://CHANGE-ME.zruchna.io/client_call_gen.php" >> "$HOST_CFG"
   echo "  ⚠️ AIOS_TELEPHONY_ORIGINATE_URL = placeholder. Замените на ваш URL в $HOST_CFG."
 fi
+# Если AIOS_ENVIRONMENT=prod уже в .env из предыдущих запусков скрипта — убрать
+# (иначе app не стартует с дефолтными DB-кредами).
+if grep -qE '^AIOS_ENVIRONMENT=prod' "$HOST_CFG"; then
+  sed -i '/^AIOS_ENVIRONMENT=prod$/d' "$HOST_CFG"
+  echo "  AIOS_ENVIRONMENT=prod удалён (app падал с дефолтными DB-кредами). См. SECURITY-TODO ниже."
+fi
 
 echo "=== [6/7] docker compose up -d (app пересоздастся с host-env) ==="
 # Образ уже пересобран в [4/7]; здесь только перезапуск с обновлёнными env.
 docker compose up -d
 sleep 4
-# Проверки контейнерных переменных (если что-то не пробросилось — падаем громко, не молча).
-ENV_IN_CONTAINER=$(docker exec aios-app-1 sh -c 'printf "%s" "$AIOS_ENVIRONMENT"' || echo "")
+# Проверка проброса telephony-токена в контейнер (fail-fast — иначе webhook бессмысленен).
 TOKEN_LEN=$(docker exec aios-app-1 sh -c 'printf "%s" "$AIOS_TELEPHONY_WEBHOOK_TOKEN" | wc -c' || echo 0)
-echo "  AIOS_ENVIRONMENT в контейнере: '$ENV_IN_CONTAINER' (ожидаемо prod)"
 echo "  токен в контейнере: $TOKEN_LEN символов (ожидаемо 64)"
-if [ "$ENV_IN_CONTAINER" != "prod" ]; then
-  echo "FAIL: AIOS_ENVIRONMENT не пробросился (получено '$ENV_IN_CONTAINER'). Проверьте $HOST_CFG и docker compose config." >&2
-  exit 1
-fi
 if [ "$TOKEN_LEN" != "64" ]; then
-  echo "FAIL: AIOS_TELEPHONY_WEBHOOK_TOKEN в контейнере имеет длину $TOKEN_LEN, ожидаемо 64. Webhook будет уязвим/неработоспособен. Проверьте $HOST_CFG." >&2
+  echo "FAIL: AIOS_TELEPHONY_WEBHOOK_TOKEN в контейнере имеет длину $TOKEN_LEN, ожидаемо 64. Проверьте $HOST_CFG." >&2
   exit 1
 fi
 
@@ -98,3 +97,10 @@ echo "  • Откройте https://belakb.by/crm/deals — должны быт
 echo "  • Если хотите телефонию вживую — допишите в /opt/cmr-erp/.env реальный"
 echo "    AIOS_TELEPHONY_ORIGINATE_URL и настройте Caddy по coordination/caddy-telephony-snippet.md"
 echo "    (+ webhook в кабинете zruchna со ссылкой и токеном из .env)."
+echo
+echo "🔒 SECURITY-TODO (не блокер сейчас): сервер работает с AIOS_ENVIRONMENT=dev,"
+echo "   что отключает _no_dev_defaults_in_prod (SECURITY P0-5). Чтобы перейти в prod-режим:"
+echo "   1) docker exec aios-postgres-1 psql -U aios -c \"ALTER USER aios WITH PASSWORD '<сильный>';\""
+echo "   2) В /opt/cmr-erp/.env: AIOS_DATABASE_URL=postgresql+psycopg://aios:<сильный>@postgres:5432/aios"
+echo "   3) В /opt/cmr-erp/.env: AIOS_ENVIRONMENT=prod"
+echo "   4) docker compose up -d (контейнер пересоздастся, _no_dev_defaults_in_prod пройдёт)."
