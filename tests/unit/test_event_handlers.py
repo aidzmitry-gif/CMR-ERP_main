@@ -4,14 +4,15 @@ from types import SimpleNamespace
 
 async def test_sales_handlers_ctx_none_are_noop():
     from modules.sales.events import (
-        on_campaign_launched,
         on_incoming_message_ai,
+        on_lead_converted,
         on_payment_paid,
         on_shipment_delivered,
     )
 
     # ctx=None → ранний выход, без обращения к БД и без исключений
-    await on_campaign_launched({"leads": 3, "name": "К"}, None)
+    # (on_campaign_launched ушёл в модуль leads при выносе лидов; здесь — текущие sales-хендлеры)
+    await on_lead_converted({"lead_id": 1, "title": "t"}, None)
     await on_payment_paid({"ref": "x"}, None)
     await on_shipment_delivered({"deal_id": 1}, None)
     await on_incoming_message_ai({"direction": "in", "deal_id": 1}, None)

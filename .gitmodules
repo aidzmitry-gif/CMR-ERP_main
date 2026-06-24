@@ -25,3 +25,6 @@
 [submodule "modules/hr"]
 	path = modules/hr
 	url = https://github.com/aidzmitry-gif/HR-10.git
+[submodule "modules/leads"]
+	path = modules/leads
+	url = https://github.com/aidzmitry-gif/CRM-LID1.1.git

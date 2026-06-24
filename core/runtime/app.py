@@ -34,11 +34,13 @@ async def _run_hooks(hooks) -> None:
             await result
 
 
-async def _background_loop(services) -> None:
-    """Фоновый цикл: доставка событий из outbox + эскалация согласований.
+async def _background_loop(services, tick_handlers=()) -> None:
+    """Фоновый цикл: доставка событий из outbox + эскалация согласований +
+    периодические шаги модулей (``on_tick``) на огрублённой каденции (~1/мин).
 
-    В проде доставка — консьюмер Redis Streams, эскалация — таймеры Temporal.
+    В проде доставка — консьюмер Redis Streams, эскалация/тики — таймеры Temporal.
     """
+    ticks = 0
     while True:
         await asyncio.sleep(2)
         try:
@@ -47,6 +49,12 @@ async def _background_loop(services) -> None:
                 await services.event_bus.relay_once(session, EventContext(session, services))
             async with services.db.session_factory() as session:
                 await services.approvals.escalate_once(session)
+            ticks += 1
+            if tick_handlers and ticks % 30 == 0:  # ~раз в минуту (цикл = 2с)
+                async with services.db.session_factory() as session:
+                    for handler in tick_handlers:
+                        await handler(session, services)
+                    await session.commit()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -66,7 +74,7 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
-        background_task = asyncio.create_task(_background_loop(services))
+        background_task = asyncio.create_task(_background_loop(services, core.tick_handlers))
         logger.info("Приложение запущено")
         yield
         background_task.cancel()

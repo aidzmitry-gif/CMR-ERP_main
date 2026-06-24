@@ -66,6 +66,7 @@ class Core:
         self.references: list[RegisteredReference] = []
         self.startup_hooks: list[Callable[[], Awaitable | None]] = []
         self.shutdown_hooks: list[Callable[[], Awaitable | None]] = []
+        self.tick_handlers: list[Callable] = []
         self.loaded_modules: list[str] = []
 
         # имя регистрирующегося сейчас модуля — выставляется загрузчиком,
@@ -137,6 +138,12 @@ class Core:
     def on_startup(self, hook: Callable) -> None:
         """Хук, вызываемый при старте приложения."""
         self.startup_hooks.append(hook)
+
+    def on_tick(self, hook: Callable) -> None:
+        """Периодический шаг модуля (обслуживание): фоновый цикл ядра вызывает его
+        на огрублённой каденции (~раз в минуту) с ``(session, services)``. Транзакцией
+        владеет цикл (коммитит после прохода) — как и для доставки событий."""
+        self.tick_handlers.append(hook)
 
     def on_shutdown(self, hook: Callable) -> None:
         """Хук, вызываемый при остановке приложения."""

@@ -1,4 +1,8 @@
-"""Тесты вертикали лидов: приём → квалификация → распределение → сделка (ФАЗА 1)."""
+"""Тесты вертикали лидов (модуль leads): приём → квалификация → распределение → конвертация.
+
+После выноса лидов в отдельный модуль конвертация НЕ создаёт сделку напрямую —
+публикует ``leads.lead.converted``, сделку создаёт модуль sales (проверяется на его стороне).
+"""
 from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
@@ -7,8 +11,8 @@ from core.domain.models import OutboxEvent
 
 
 def test_score_lead_target_vs_non_target():
-    from modules.sales.leads import QUALIFY_THRESHOLD, score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import QUALIFY_THRESHOLD, score_lead
+    from modules.leads.models import Lead
 
     rich = Lead(
         source="site", company="ООО ТеплоСеть", phone="+375290000000",
@@ -27,8 +31,8 @@ def test_score_lead_target_vs_non_target():
 
 
 def test_route_lead_by_region_and_product():
-    from modules.sales.leads import route_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
 
     # Минск + прокат → специалист Иванов независимо от нагрузки
     minsk = Lead(source="site", region="Минск", product="лист горячекатаный")
@@ -43,8 +47,8 @@ def test_route_lead_by_region_and_product():
 
 
 def test_route_lead_load_balancing():
-    from modules.sales.leads import route_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
 
     # без гео/продукта кандидаты — все; наименее загруженный побеждает
     generic = Lead(source="site")
@@ -53,8 +57,8 @@ def test_route_lead_load_balancing():
 
 
 def test_choose_funnel():
-    from modules.sales.leads import choose_funnel
-    from modules.sales.models import Lead
+    from modules.leads.leads import choose_funnel
+    from modules.leads.models import Lead
 
     assert choose_funnel(Lead(source="tender"), False) == "tender"
     assert choose_funnel(Lead(source="site", message="проектная поставка"), False) == "project"
@@ -62,12 +66,16 @@ def test_choose_funnel():
     assert choose_funnel(Lead(source="site"), known_customer=False) == "new"
 
 
-# --- API: приём и жизненный цикл лида ---
+# --- API: приём и жизненный цикл лида (модуль смонтирован под /leads) ---
+
+
+async def test_leads_module_mounted(api):
+    assert (await api.get("/leads/ping")).json()["module"] == "leads"
 
 
 async def test_lead_intake_emits_event(session, api):
     r = await api.post(
-        "/sales/leads",
+        "/leads",
         json={"source": "site", "company": "ООО Тест", "phone": "+375290000000", "product": "лист"},
     )
     assert r.status_code == 201
@@ -76,21 +84,21 @@ async def test_lead_intake_emits_event(session, api):
     assert body["company"] == "ООО Тест"
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.lead.received" in types
+    assert "leads.lead.received" in types
 
     # список и фильтр по статусу
-    leads = (await api.get("/sales/leads")).json()
+    leads = (await api.get("/leads")).json()
     assert any(le["id"] == body["id"] for le in leads)
-    new_only = (await api.get("/sales/leads?status=new")).json()
+    new_only = (await api.get("/leads?status=new")).json()
     assert all(le["status"] == "new" for le in new_only)
 
-    assert (await api.get("/sales/leads/999999")).status_code == 404
+    assert (await api.get("/leads/999999")).status_code == 404
 
 
 async def test_lead_qualify_scores_and_emits(session, api):
     lead = (
         await api.post(
-            "/sales/leads",
+            "/leads",
             json={
                 "source": "site", "company": "ООО Качество", "phone": "+375291112233",
                 "email": "z@q.by", "product": "арматура",
@@ -99,7 +107,7 @@ async def test_lead_qualify_scores_and_emits(session, api):
         )
     ).json()
 
-    r = await api.post(f"/sales/leads/{lead['id']}/qualify")
+    r = await api.post(f"/leads/{lead['id']}/qualify")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "qualified"
@@ -109,21 +117,21 @@ async def test_lead_qualify_scores_and_emits(session, api):
     assert body["ai_rationale"] is None
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.lead.qualified" in types
+    assert "leads.lead.qualified" in types
 
-    assert (await api.post("/sales/leads/999999/qualify")).status_code == 404
+    assert (await api.post("/leads/999999/qualify")).status_code == 404
 
 
 async def test_lead_route_assigns_manager(session, api):
     lead = (
         await api.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО Минский", "region": "Минск", "product": "лист"},
         )
     ).json()
-    await api.post(f"/sales/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/qualify")
 
-    r = await api.post(f"/sales/leads/{lead['id']}/route")
+    r = await api.post(f"/leads/{lead['id']}/route")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "routed"
@@ -131,42 +139,35 @@ async def test_lead_route_assigns_manager(session, api):
     assert body["funnel"] in {"new", "regular", "project", "tender"}
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.lead.routed" in types
+    assert "leads.lead.routed" in types
 
 
-async def test_lead_convert_creates_deal(session, api):
+async def test_lead_convert_emits_converted_event(session, api):
     lead = (
         await api.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО Конверт", "region": "Минск", "product": "лист"},
         )
     ).json()
 
     # без распределения конвертация запрещена
-    assert (await api.post(f"/sales/leads/{lead['id']}/convert")).status_code == 409
+    assert (await api.post(f"/leads/{lead['id']}/convert")).status_code == 409
 
-    await api.post(f"/sales/leads/{lead['id']}/qualify")
-    routed = (await api.post(f"/sales/leads/{lead['id']}/route")).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
 
-    r = await api.post(f"/sales/leads/{lead['id']}/convert")
+    r = await api.post(f"/leads/{lead['id']}/convert")
     assert r.status_code == 201
     body = r.json()
     assert body["status"] == "converted"
-    assert body["number"] == f"CRM-LEAD-{lead['id']}"
+    assert body["lead_id"] == lead["id"]
 
-    # сделка появилась в воронке, ответственный = назначенный менеджер
-    deals = (await api.get("/sales/deals")).json()
-    deal = next(d for d in deals if d["number"] == body["number"])
-    assert deal["owner"] == routed["assigned_to"]
-    assert deal["stage"] == "new"
-
-    # лид ссылается на сделку; повторная конвертация запрещена
-    got = (await api.get(f"/sales/leads/{lead['id']}")).json()
-    assert got["deal_id"] == body["deal_id"]
-    assert (await api.post(f"/sales/leads/{lead['id']}/convert")).status_code == 409
-
+    # сделку создаёт sales по событию (асинхронно через шину) — здесь проверяем публикацию
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.deal.created" in types
+    assert "leads.lead.converted" in types
+
+    # повторная конвертация запрещена
+    assert (await api.post(f"/leads/{lead['id']}/convert")).status_code == 409
 
 
 async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
@@ -177,14 +178,14 @@ async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
 
     lead = (
         await api.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО Постоянный", "product": "лист", "region": "Минск"},
         )
     ).json()
-    q = (await api.post(f"/sales/leads/{lead['id']}/qualify")).json()
+    q = (await api.post(f"/leads/{lead['id']}/qualify")).json()
     assert "действующий контрагент" in q["reason"]
 
-    routed = (await api.post(f"/sales/leads/{lead['id']}/route")).json()
+    routed = (await api.post(f"/leads/{lead['id']}/route")).json()
     assert routed["funnel"] == "regular"  # действующий клиент → воронка постоянных
 
 
@@ -193,8 +194,8 @@ async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
 
 async def test_ai_qualify_lead_unit():
     from core.services.litellm import LLMGateway
-    from modules.sales.ai import qualify_lead
-    from modules.sales.models import Lead
+    from modules.leads.ai import qualify_lead
+    from modules.leads.models import Lead
 
     class _Settings:
         ai_enabled = True
@@ -205,3 +206,73 @@ async def test_ai_qualify_lead_unit():
     lead = Lead(source="site", company="ООО Клиент", region="Минск", product="лист", message="Запрос")
     text = await qualify_lead(gateway, lead, 80, "target")
     assert isinstance(text, str) and len(text) > 0
+
+
+# --- Телефония → лид: входящий звонок с неизвестного номера заводит лид ---
+
+
+def _call_ctx(session):
+    from types import SimpleNamespace
+
+    from core.services.eventbus import EventContext, OutboxEventBus
+
+    return EventContext(session=session, services=SimpleNamespace(event_bus=OutboxEventBus()))
+
+
+async def test_unknown_call_creates_lead(session):
+    from modules.leads.events import on_call_logged
+    from modules.leads.models import Lead
+
+    await on_call_logged(
+        {"direction": "in", "phone": "+375290000001", "agent_ext": "101"}, _call_ctx(session)
+    )
+    await session.commit()
+
+    leads = (await session.execute(select(Lead))).scalars().all()
+    assert len(leads) == 1
+    assert leads[0].source == "phone"
+    assert leads[0].phone == "+375290000001"
+    assert leads[0].status == "new"
+    assert "101" in leads[0].message
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.received" in types
+
+
+async def test_known_caller_does_not_create_lead(session):
+    from core.domain.models import Contact, Counterparty
+    from modules.leads.events import on_call_logged
+    from modules.leads.models import Lead
+
+    cp = Counterparty(name="ООО Известный")
+    session.add(cp)
+    await session.flush()
+    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291110000", is_primary=True))
+    await session.commit()
+
+    await on_call_logged({"direction": "in", "phone": "+375291110000"}, _call_ctx(session))
+    await session.commit()
+
+    assert (await session.execute(select(Lead))).scalars().first() is None
+
+
+async def test_repeat_call_does_not_duplicate_lead(session):
+    from modules.leads.events import on_call_logged
+    from modules.leads.models import Lead
+
+    payload = {"direction": "in", "phone": "+375290000002", "agent_ext": "102"}
+    await on_call_logged(payload, _call_ctx(session))
+    await session.commit()
+    await on_call_logged(payload, _call_ctx(session))
+    await session.commit()
+
+    assert len((await session.execute(select(Lead))).scalars().all()) == 1
+
+
+async def test_outgoing_call_ignored(session):
+    from modules.leads.events import on_call_logged
+    from modules.leads.models import Lead
+
+    await on_call_logged({"direction": "out", "phone": "+375290000003"}, _call_ctx(session))
+    await session.commit()
+    assert (await session.execute(select(Lead))).scalars().first() is None
