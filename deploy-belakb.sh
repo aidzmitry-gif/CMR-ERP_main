@@ -96,8 +96,8 @@ fi
 echo "=== [7/7] самопроверка эндпоинтов (роль director) ==="
 echo -n "/sales/board       : "
 curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/sales/board || echo "(connect failed)"
-echo -n "/leads/board       : "
-curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/leads/board 2>/dev/null || echo "(нет /leads/board, ок если эндпоинт другой)"
+echo -n "/leads (list)      : "
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/leads || echo "(connect failed)"
 for m in procurement wms production hr logistics legal knowledge office; do
   printf "/%s/board " "$m"
   printf "%*s" $((20-${#m})) ""
