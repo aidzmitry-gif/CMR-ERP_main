@@ -753,6 +753,7 @@ export function FunnelBoard({
   boardTabs,
 }: FunnelBoardProps) {
   const [stages, setStages] = useState<FunnelStage[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
@@ -767,7 +768,11 @@ export function FunnelBoard({
   }
 
   useEffect(() => {
-    void fetchFunnelBoard(boardPath).then(setStages);
+    setLoaded(false);
+    void fetchFunnelBoard(boardPath).then((s) => {
+      setStages(s);
+      setLoaded(true);
+    });
   }, [boardPath]);
 
   function handleDragStart(e: DragStartEvent) {
@@ -965,7 +970,11 @@ export function FunnelBoard({
                 ))}
               </Column>
             ))}
-            {filtered.length === 0 && <p className="p-6 text-sm text-muted">Загрузка доски…</p>}
+            {filtered.length === 0 && (
+              <p className="p-6 text-sm text-muted">
+                {loaded ? "Доска пуста или модуль недоступен" : "Загрузка доски…"}
+              </p>
+            )}
           </div>
           <DragOverlay>
             {active ? (
