@@ -753,7 +753,8 @@ export function FunnelBoard({
   boardTabs,
 }: FunnelBoardProps) {
   const [stages, setStages] = useState<FunnelStage[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loadedPath, setLoadedPath] = useState<string | null>(null);
+  const loaded = loadedPath === boardPath;
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
@@ -768,10 +769,9 @@ export function FunnelBoard({
   }
 
   useEffect(() => {
-    setLoaded(false);
     void fetchFunnelBoard(boardPath).then((s) => {
       setStages(s);
-      setLoaded(true);
+      setLoadedPath(boardPath);
     });
   }, [boardPath]);
 
