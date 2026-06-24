@@ -34,6 +34,15 @@ systemctl restart cmr-frontend
 cd /opt/cmr-erp
 
 echo "=== [4/7] rebuild image + alembic + seed ==="
+# КРИТИЧНО (ДО rebuild): убрать AIOS_ENVIRONMENT=prod из host-config, если остался
+# от предыдущих запусков. Иначе settings._no_dev_defaults_in_prod роняет app на
+# валидации (input_value={'environment': 'prod', ...}). [5/7] делает это позже,
+# но до него скрипт не доходит из-за падения [4/7]. Поэтому здесь, ДО compose up.
+HOST_CFG=/opt/cmr-erp/.env
+if [ -f "$HOST_CFG" ] && grep -qE '^AIOS_ENVIRONMENT=prod' "$HOST_CFG"; then
+  sed -i '/^AIOS_ENVIRONMENT=prod$/d' "$HOST_CFG"
+  echo "  AIOS_ENVIRONMENT=prod удалён (валил app, см. SECURITY-TODO в конце)."
+fi
 # КРИТИЧНО: пересобрать образ ДО seed, иначе scripts/seed.py в контейнере остаётся
 # старой версией (git pull обновил файл на хосте, не в образе).
 docker compose up -d --build
@@ -52,13 +61,10 @@ docker exec -e PYTHONPATH=/app aios-app-1 python scripts/seed.py
 echo "SEED OK"
 
 echo "=== [5/7] host-конфиг (telephony) ==="
-HOST_CFG=/opt/cmr-erp/.env
+# HOST_CFG уже задан в [4/7].
 touch "$HOST_CFG"
 # Anchored regex (^KEY=), чтобы закомментированные строки в .env.example не матчились.
-# AIOS_ENVIRONMENT=prod НЕ ставим сейчас: settings._no_dev_defaults_in_prod
-# отбивает дефолтные aios:aios@postgres креды → app падает на старте. Перейти в prod
-# можно только после смены DB-пароля на сильный (отдельная задача). Токены webhook'ов
-# enforced независимо от ENV (через `if expected:` в роутах) — telephony работает в dev-режиме.
+# Токены webhook'ов enforced независимо от ENV (через `if expected:` в роутах).
 if ! grep -qE '^AIOS_TELEPHONY_WEBHOOK_TOKEN=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_WEBHOOK_TOKEN=$(openssl rand -hex 32)" >> "$HOST_CFG"
   echo "  Сгенерирован новый AIOS_TELEPHONY_WEBHOOK_TOKEN."
@@ -66,12 +72,6 @@ fi
 if ! grep -qE '^AIOS_TELEPHONY_ORIGINATE_URL=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_ORIGINATE_URL=https://CHANGE-ME.zruchna.io/client_call_gen.php" >> "$HOST_CFG"
   echo "  ⚠️ AIOS_TELEPHONY_ORIGINATE_URL = placeholder. Замените на ваш URL в $HOST_CFG."
-fi
-# Если AIOS_ENVIRONMENT=prod уже в .env из предыдущих запусков скрипта — убрать
-# (иначе app не стартует с дефолтными DB-кредами).
-if grep -qE '^AIOS_ENVIRONMENT=prod' "$HOST_CFG"; then
-  sed -i '/^AIOS_ENVIRONMENT=prod$/d' "$HOST_CFG"
-  echo "  AIOS_ENVIRONMENT=prod удалён (app падал с дефолтными DB-кредами). См. SECURITY-TODO ниже."
 fi
 
 echo "=== [6/7] docker compose up -d (app пересоздастся с host-env) ==="
