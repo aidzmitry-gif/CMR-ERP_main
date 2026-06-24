@@ -58,7 +58,9 @@ services:
   app:
     build: .
     environment:
-      AIOS_ENVIRONMENT: dev
+      # SECURITY: prod-задавать через host-env (/opt/cmr-erp/.env) → AIOS_ENVIRONMENT=prod,
+      # иначе config.settings._no_dev_defaults_in_prod не сработает и webhook-токены НЕ enforced.
+      AIOS_ENVIRONMENT: ${AIOS_ENVIRONMENT:-dev}
       AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@postgres:5432/aios
       AIOS_REDIS_URL: redis://redis:6379/0
       # Телефония zruchna — задаётся на хосте через /opt/cmr-erp/.env (compose автозагрузка).

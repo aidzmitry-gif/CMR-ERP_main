@@ -38,34 +38,51 @@ echo "=== [4/7] alembic + seed ==="
 docker exec -e PYTHONPATH=/app aios-app-1 python scripts/seed.py
 echo "SEED OK"
 
-echo "=== [5/7] telephony host-конфиг ==="
+echo "=== [5/7] host-конфиг (prod-env + telephony) ==="
 HOST_CFG=/opt/cmr-erp/.env
 touch "$HOST_CFG"
-if ! grep -q AIOS_TELEPHONY_WEBHOOK_TOKEN "$HOST_CFG"; then
+# AIOS_ENVIRONMENT=prod — критично: иначе config.settings отключает webhook-токены и пускает дефолты.
+# Anchored regex (^KEY=), чтобы закомментированные строки в .env.example НЕ матчились.
+if ! grep -qE '^AIOS_ENVIRONMENT=' "$HOST_CFG"; then
+  echo "AIOS_ENVIRONMENT=prod" >> "$HOST_CFG"
+  echo "  AIOS_ENVIRONMENT=prod добавлен (security P0)."
+fi
+if ! grep -qE '^AIOS_TELEPHONY_WEBHOOK_TOKEN=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_WEBHOOK_TOKEN=$(openssl rand -hex 32)" >> "$HOST_CFG"
   echo "  Сгенерирован новый AIOS_TELEPHONY_WEBHOOK_TOKEN."
 fi
-if ! grep -q AIOS_TELEPHONY_ORIGINATE_URL "$HOST_CFG"; then
+if ! grep -qE '^AIOS_TELEPHONY_ORIGINATE_URL=' "$HOST_CFG"; then
   echo "AIOS_TELEPHONY_ORIGINATE_URL=https://CHANGE-ME.zruchna.io/client_call_gen.php" >> "$HOST_CFG"
   echo "  ⚠️ AIOS_TELEPHONY_ORIGINATE_URL = placeholder. Замените на ваш URL в $HOST_CFG."
 fi
 
-echo "=== [6/7] docker compose up -d (app пересоздастся с telephony-env) ==="
+echo "=== [6/7] docker compose up -d (app пересоздастся с host-env) ==="
 docker compose up -d
 sleep 4
+# Проверки контейнерных переменных (если что-то не пробросилось — падаем громко, не молча).
+ENV_IN_CONTAINER=$(docker exec aios-app-1 sh -c 'printf "%s" "$AIOS_ENVIRONMENT"' || echo "")
 TOKEN_LEN=$(docker exec aios-app-1 sh -c 'printf "%s" "$AIOS_TELEPHONY_WEBHOOK_TOKEN" | wc -c' || echo 0)
+echo "  AIOS_ENVIRONMENT в контейнере: '$ENV_IN_CONTAINER' (ожидаемо prod)"
 echo "  токен в контейнере: $TOKEN_LEN символов (ожидаемо 64)"
+if [ "$ENV_IN_CONTAINER" != "prod" ]; then
+  echo "FAIL: AIOS_ENVIRONMENT не пробросился (получено '$ENV_IN_CONTAINER'). Проверьте $HOST_CFG и docker compose config." >&2
+  exit 1
+fi
+if [ "$TOKEN_LEN" != "64" ]; then
+  echo "FAIL: AIOS_TELEPHONY_WEBHOOK_TOKEN в контейнере имеет длину $TOKEN_LEN, ожидаемо 64. Webhook будет уязвим/неработоспособен. Проверьте $HOST_CFG." >&2
+  exit 1
+fi
 
 echo "=== [7/7] самопроверка эндпоинтов (роль director) ==="
 echo -n "/sales/board       : "
-curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/sales/board
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/sales/board || echo "(connect failed)"
 echo -n "/leads/board       : "
 curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/leads/board 2>/dev/null || echo "(нет /leads/board, ок если эндпоинт другой)"
 for m in procurement wms production hr logistics legal knowledge office; do
   printf "/%s/board " "$m"
   printf "%*s" $((20-${#m})) ""
   echo -n ": "
-  curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/$m/board
+  curl -s -o /dev/null -w '%{http_code}\n' -H 'X-User-Roles: director' http://127.0.0.1:8000/$m/board || echo "(connect failed)"
 done
 
 echo
