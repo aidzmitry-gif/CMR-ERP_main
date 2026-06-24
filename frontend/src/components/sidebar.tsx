@@ -260,9 +260,11 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   const [order, setOrder] = useState<string[] | null>(null);
   const [draggingSlug, setDraggingSlug] = useState<string | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragOverSlug = useRef<string | null>(null);
 
   // Состояние читаем после маунта — иначе SSR vs клиент-гидрация рассогласуется.
+  // TODO(Step B): переехать на cookie для collapsed (как THEME_INIT_SCRIPT) —
+  //   избавит от width-флэша при первой отрисовке. Order может остаться в LS:
+  //   его «правильный» порядок виден только после ручного reorder, без флэша.
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -270,6 +272,11 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       /* */
     }
     setOrder(readOrder());
+    // Cleanup hoverTimer на unmount — иначе 120мс таймер может выстрелить
+    // в уже размонтированный компонент и вызвать React-warning.
+    return () => {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    };
   }, []);
 
   // Применяем пользовательский порядок + фильтр по правам.
@@ -355,7 +362,6 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       if (!editing || !draggingSlug || slug === draggingSlug) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      dragOverSlug.current = slug;
     };
   }
 
@@ -371,18 +377,17 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       next.splice(from, 1);
       next.splice(to, 0, draggingSlug);
       // Скрытые роли-модули складываем в хвост, чтобы при смене роли порядок не терялся.
-      const hidden = MODULES.map((m) => m.slug).filter((s) => !next.includes(s));
+      const nextSet = new Set(next);
+      const hidden = MODULES.filter((m) => !nextSet.has(m.slug)).map((m) => m.slug);
       const fullOrder = [...next, ...hidden];
       setOrder(fullOrder);
       writeOrder(fullOrder);
       setDraggingSlug(null);
-      dragOverSlug.current = null;
     };
   }
 
   function handleDragEnd() {
     setDraggingSlug(null);
-    dragOverSlug.current = null;
   }
 
   function resetOrder() {
@@ -469,6 +474,17 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
               editing && showFull && "cursor-grab active:cursor-grabbing",
               isDragSrc && "opacity-40",
             );
+            // Тело строки — общее для Link и div-варианта; вынесено, чтобы не дублировать
+            // GripVertical/Icon/label при правке (например, добавление бейджа).
+            const rowBody = (
+              <>
+                {editing && showFull && (
+                  <GripVertical size={14} className="-ml-1 shrink-0 text-faint" aria-hidden />
+                )}
+                <m.Icon size={18} />
+                {showFull && <span className="truncate">{m.label}</span>}
+              </>
+            );
             return (
               <div
                 key={m.slug}
@@ -480,22 +496,14 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
               >
                 {m.href && !editing ? (
                   <Link href={m.href} className={rowCls} title={!showFull ? m.label : undefined}>
-                    {editing && showFull && (
-                      <GripVertical size={14} className="-ml-1 shrink-0 text-faint" aria-hidden />
-                    )}
-                    <m.Icon size={18} />
-                    {showFull && <span className="truncate">{m.label}</span>}
+                    {rowBody}
                   </Link>
                 ) : (
                   <div
                     className={clsx(rowCls, !editing && "cursor-default")}
                     title={!showFull ? m.label : editing ? "Перетащите для смены порядка" : "Модуль"}
                   >
-                    {editing && showFull && (
-                      <GripVertical size={14} className="-ml-1 shrink-0 text-faint" aria-hidden />
-                    )}
-                    <m.Icon size={18} />
-                    {showFull && <span className="truncate">{m.label}</span>}
+                    {rowBody}
                   </div>
                 )}
                 {/* Подменю активного модуля — только в раскрытом виде и вне режима редактирования */}
