@@ -45,7 +45,10 @@ describe("DealApprovals", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "payment.large" } });
     fireEvent.click(screen.getByText("На согласование"));
     await waitFor(() => expect(api.requestApproval).toHaveBeenCalledWith("1", "payment.large"));
-    fireEvent.click(screen.getByTitle("Отклонить"));
+    // Дожидаемся, что pending-кнопка «Отклонить» доступна после возможного re-render
+    // (флак на CI: клик улетал до того, как состояние стабилизировалось).
+    const rejectBtn = await screen.findByTitle("Отклонить");
+    fireEvent.click(rejectBtn);
     await waitFor(() => expect(api.decideApproval).toHaveBeenCalledWith(2, false, "Согласующий"));
   });
 });
