@@ -31,6 +31,7 @@ from modules.procurement.models import PurchaseRequest
 from modules.production.models import ProductionOrder
 from modules.sales.models import (
     Activity,
+    ContractTemplate,
     Deal,
     DealItem,
     KpiTarget,
@@ -340,6 +341,22 @@ async def main() -> None:
         if (await s.execute(select(Deal))).scalars().first() is None:
             s.add_all(_demo_deals())
             await s.flush()
+
+        # Шаблон договора по умолчанию (SALES-53) — «Поставка товара» с плейсхолдерами {{...}}.
+        if (await s.execute(select(ContractTemplate))).scalars().first() is None:
+            s.add(ContractTemplate(
+                code="supply",
+                name="Договор поставки товара",
+                body=(
+                    "ДОГОВОР ПОСТАВКИ {{number}}\n\n"
+                    "Продавец: {{seller.name}}, УНП {{seller.unp}}, {{seller.address}}.\n"
+                    "Покупатель: {{buyer.name}}, УНП {{buyer.unp}}, {{buyer.address}}.\n\n"
+                    "Предмет: {{items}}. Сумма: {{total}}.\n"
+                    "Условия оплаты: {{payment_terms}}.\n"
+                    "Условия поставки: {{delivery_terms}}.\n"
+                    "Счёт действителен до: {{valid_until}}.\n"
+                ),
+            ))
 
         # Позиции номенклатуры для сделки «АльфаМеталл»
         if (await s.execute(select(DealItem))).scalars().first() is None:

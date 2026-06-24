@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
     intake_webhook_token: str = ""
 
+    # Реквизиты своей организации (продавец) для договоров SALES-53 — конфиг, не shared-схема
+    # (ТЗ C.5). Переопределяются env AIOS_SELLER_*. Реквизиты покупателя берутся по УНП из ЕГР.
+    seller_name: str = "ООО «Аккумуляторные решения»"
+    seller_unp: str = ""
+    seller_address: str = ""
+    seller_director: str = ""
+    seller_phone: str = ""
+    seller_email: str = ""
+
     @model_validator(mode="after")
     def _no_dev_defaults_in_prod(self) -> "Settings":
         """В прод-окружении запретить dev-дефолтные креды (SECURITY.md P0-5).
