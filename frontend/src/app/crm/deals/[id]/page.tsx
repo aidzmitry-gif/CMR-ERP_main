@@ -11,13 +11,16 @@ import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchDealDetail } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
 
 // 9-стадийная воронка продаж (эталон — sales-card-full.html).
-// TODO(SALES): stage/stageIdx → из бэкенда (d.stage.idx), пока хардкод-stub.
+// TODO(SALES-43): забрать из единого frontend/src/lib/sales-stages.ts, когда
+//   реальный регламент из Excel заказчика будет порчен в bytestream — пока
+//   список встречается в нескольких местах (mock-data/rop-data/leads-workspace).
 const STAGES = [
   "Контакт",
   "Квалификация",
@@ -58,7 +61,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 {d.description || "Описание не задано"}
               </div>
               {/* Контрагент — из MDM-витрины (источник истины — 1С).
-                  TODO: реальный УНП/counterparty.id из API; пока плэйсхолдер. */}
+                  TODO(Step B): вынести в <SourceTag source="mdm/1c" /> и переиспользовать
+                  на других экранах (drawer-preview, board hover-card, leads-workspace). */}
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-faint">
                 <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
                   контрагент · из MDM / 1С
@@ -86,6 +90,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         </Card>
 
         {/* ── ОСНОВНАЯ СЕТКА: 1.5fr / 1fr; порядок блоков как в render() прототипа. ── */}
+        {/* TODO(Step B): вынести stub-карточки в frontend/src/components/deal/ —
+            drawer-preview и hover-card на доске собираются из тех же блоков. */}
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.5fr_1fr]">
           {/* LEFT — «мозг» сверху (AI), затем операционка по порядку прототипа */}
           <div className="min-w-0 space-y-4">
@@ -122,7 +128,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 // ── вспомогательные подкомпоненты страницы (server, без хуков) ───────────────────
 
 function Metrics({ amount, closeDate }: { amount: number; closeDate: string }) {
-  // TODO(SALES): cost/profit/margin/probability — из d.pricing.* (см. types.ts расширение).
+  // TODO(SALES): cost/profit/margin — из d.pricing.* (probability/expectedCloseDate
+  //   уже на Deal — читаем оттуда, чтобы не плодить дубли в DealDetail).
   const cells: { label: string; value: string; tone?: "money" }[] = [
     { label: "Сумма", value: formatByn(amount) },
     { label: "Себестоимость", value: "—" },
@@ -132,13 +139,11 @@ function Metrics({ amount, closeDate }: { amount: number; closeDate: string }) {
     { label: "Закрытие", value: closeDate || "—" },
   ];
   return (
-    <div className="mt-2.5 flex flex-wrap overflow-hidden rounded-[10px] border border-line">
-      {cells.map((c, i) => (
+    <div className="mt-2.5 flex flex-wrap divide-x divide-line overflow-hidden rounded-[10px] border border-line">
+      {cells.map((c) => (
         <div
           key={c.label}
-          className={`flex min-w-[150px] flex-1 flex-wrap items-baseline gap-1.5 px-3.5 py-[7px] ${
-            i < cells.length - 1 ? "border-r border-line" : ""
-          }`}
+          className="flex min-w-[150px] flex-1 flex-wrap items-baseline gap-1.5 px-3.5 py-[7px]"
         >
           <div className="text-[11px] uppercase tracking-wide text-muted">{c.label}</div>
           <div
@@ -194,12 +199,16 @@ function Stages({ currentIdx }: { currentIdx: number }) {
   );
 }
 
+/**
+ * Тонкая обёртка над CardHeader из ui/card.tsx — даёт удобный (icon + title) API
+ * для stub-карточек, при этом стиль шапки приходит из дизайн-системы (одна точка правки).
+ */
 function PanelHeader({ icon, title }: { icon: string; title: string }) {
   return (
-    <div className="flex items-center gap-1.5 border-b border-line px-[18px] py-3 text-[13.5px] font-bold text-ink">
+    <CardHeader>
       <span aria-hidden>{icon}</span>
       <span>{title}</span>
-    </div>
+    </CardHeader>
   );
 }
 
@@ -225,7 +234,7 @@ function NextStepStub({
   return (
     <Card>
       <PanelHeader icon="⏭" title="Следующий шаг" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <div className="text-[13.5px] font-semibold text-ink">{nextStep || "—"}</div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted">
           <span>
@@ -235,7 +244,7 @@ function NextStepStub({
             <span aria-hidden>👤</span> {contact || "ответственный не назначен"}
           </span>
         </div>
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -247,7 +256,7 @@ function ShipStub() {
   return (
     <Card>
       <PanelHeader icon="🚚" title="Сквозная машина / отгрузка" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <ul className="space-y-1 text-[12px] text-muted">
           <li>
             <span aria-hidden>🚚</span>{" "}
@@ -269,7 +278,7 @@ function ShipStub() {
           <code>ship.{`{tripId, eta, route, reserve1cDocId, warehouseStatus, cargoTripDealIds}`}</code>{" "}
           в DealDetail.
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -281,7 +290,7 @@ function CallsStub() {
   return (
     <Card>
       <PanelHeader icon="📞" title="Звонки и транскрибация" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <div className="text-[12px] text-muted">
           плеер · авто-теги (сигналы, возражения) · sentiment · извлечённые договорённости ·
           построчная транскрипция.
@@ -290,18 +299,18 @@ function CallsStub() {
           импорт из Bitrix24 (исторические звонки), транскрипция локально faster-whisper large-v3 →{" "}
           <code>comm_call</code>; подключим отдельным фидом по сделке (не через DealDetail).
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }
 
 function PayStub({ amount }: { amount: number }) {
   // STUB: «к оплате» — из счёта ERP; «оплачено» — факт из 1С (банк/касса).
-  // Прогресс-бар: при amount === 0 рисуем 0% (защита от деления на ноль при оживлении).
+  // Прогресс-бар вернём, когда придёт pay.paid: бессмысленно держать пустой 0%-bar в DOM.
   return (
     <Card>
       <PanelHeader icon="💵" title="Оплата и деньги" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <div className="grid grid-cols-2 gap-2.5">
           <div className="rounded-[10px] bg-sunken px-3 py-2.5">
             <div className="text-[11px] text-muted">К оплате</div>
@@ -316,14 +325,11 @@ function PayStub({ amount }: { amount: number }) {
             <div className="mt-0.5 text-[10px] text-faint">из 1С (банк/касса)</div>
           </div>
         </div>
-        <div className="h-[9px] overflow-hidden rounded-full bg-sunken" aria-hidden>
-          <div className="h-full bg-money" style={{ width: "0%" }} />
-        </div>
         <StubNote>
           подключим, когда payments появятся в API (<code>pay.invoiced</code> из ERP,{" "}
           <code>pay.paid</code> из 1С-фида).
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -333,17 +339,12 @@ function DeliveryStub() {
   return (
     <Card>
       <PanelHeader icon="📦" title="Доставка" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <div className="flex gap-2">
           {["Самовывоз", "Доставка по адресу", "Наша машина"].map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              disabled
-              className="flex-1 rounded-[9px] border border-line bg-surface px-2 py-2 text-[12.5px] font-semibold text-muted disabled:cursor-not-allowed disabled:opacity-80"
-            >
+            <Button key={opt} variant="secondary" size="sm" disabled className="flex-1">
               {opt}
-            </button>
+            </Button>
           ))}
         </div>
         <StubNote>
@@ -351,7 +352,7 @@ function DeliveryStub() {
           (синхронизирован с 1С, резерв создаётся в 1С); рейс / машина — модуль{" "}
           <code>logistics</code>.
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -362,7 +363,7 @@ function RegStub() {
   return (
     <Card>
       <PanelHeader icon="★" title="Постоянный клиент" />
-      <div className="space-y-2 px-[18px] py-[14px]">
+      <CardBody className="space-y-2">
         <div className="text-[11px] text-faint">
           плашка будет показываться только для постоянных клиентов —{" "}
           <code>d.regular?.isRegular === true</code>
@@ -371,7 +372,7 @@ function RegStub() {
           счётчик заказов — из CRM (<code>sales.deal</code>); LTV / средний чек — из 1С (реализации).
           Подключим, когда LTV-витрина начнёт отдавать regular-флаг.
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -380,12 +381,12 @@ function LinkedStub() {
   return (
     <Card>
       <PanelHeader icon="🔗" title="Сделки клиента" />
-      <div className="px-[18px] py-[14px]">
+      <CardBody>
         <StubNote>
           другие сделки контрагента — запросим по <code>counterparty.id</code> (тот же ключ, что в
           MDM / 1С); при <code>merged_into_id != null</code> покажем плашку «контрагент слит».
         </StubNote>
-      </div>
+      </CardBody>
     </Card>
   );
 }

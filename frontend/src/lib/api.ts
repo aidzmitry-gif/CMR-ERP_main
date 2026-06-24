@@ -1,6 +1,7 @@
 import { ensureLostStage } from "@/lib/board";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
+import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -43,24 +44,14 @@ interface ApiStage {
   deals: ApiDeal[];
 }
 
-/**
- * Защитный маппер: backend может прислать «high»/«medium»/«low», null или мусор.
- * Приводим к ru-ключам {@link Priority}, дефолт — «Средний» (минимально шумит в UI).
- */
-function toPriority(raw: unknown): Priority {
-  if (raw === "Высокий" || raw === "Средний" || raw === "Низкий") return raw;
-  if (raw === "high") return "Высокий";
-  if (raw === "low") return "Низкий";
-  return "Средний";
-}
-
 function mapDeal(d: ApiDeal): Deal {
   return {
     id: String(d.id),
     number: d.number,
     company: d.counterparty,
     description: d.title,
-    amount: d.amount,
+    // Number(d.amount ?? 0) — симметрично fetchDealDetail; страховка от null/NaN в борде.
+    amount: Number(d.amount ?? 0),
     priority: toPriority(d.priority),
     owner: d.owner,
     date: d.deal_date ?? undefined,

@@ -1,5 +1,17 @@
 export type Priority = "Высокий" | "Средний" | "Низкий";
 
+/**
+ * Защитный маппер для {@link Priority}: backend может прислать «high»/«medium»/«low»,
+ * null или мусор — приводим к ru-ключам, дефолт «Средний» (минимально шумит в UI).
+ * Живёт рядом с типом, чтобы при добавлении нового значения правка была в одном файле.
+ */
+export function toPriority(raw: unknown): Priority {
+  if (raw === "Высокий" || raw === "Средний" || raw === "Низкий") return raw;
+  if (raw === "high") return "Высокий";
+  if (raw === "low") return "Низкий";
+  return "Средний";
+}
+
 export type ChannelKey = "phone" | "whatsapp" | "viber" | "telegram" | "email";
 
 export interface Deal {
@@ -129,14 +141,16 @@ export interface DealDetail {
     isStale?: boolean;
   };
 
-  /** Себестоимость / прибыль / маржа / вероятность для metrics-полосы. */
+  /**
+   * Себестоимость / прибыль / маржа для metrics-полосы.
+   * NB: probability и weighted-сумма уже живут на Deal (probability + expectedCloseDate
+   * для SALES-43/44) — здесь не дублируем, читаем из {@link Deal}.
+   */
   pricing?: {
     cost?: number;
     costSource?: "landed_zak" | "avg_1c" | "manual";
     profit?: number;
     margin?: number;
-    probability?: number;
-    weighted?: number;
   };
 
   /** Оплата: invoiced — счёт ERP; paid — факт из 1С (банк/касса). */
