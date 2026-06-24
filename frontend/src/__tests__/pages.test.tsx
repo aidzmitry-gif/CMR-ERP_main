@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Страницы App Router — тонкие обёртки: дочерние компоненты и API мокаем,
 // проверяем, что страница собирает данные и монтирует нужный компонент.
+// next/font/google → возвращает заглушку Inter(): без неё RootLayout падает
+//   на TypeError("Inter is not a function") при импорте под vitest.
+vi.mock("next/font/google", () => ({
+  Inter: () => ({ variable: "--font-inter", className: "font-inter" }),
+}));
 vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => <a>{children}</a> }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/components/app-shell", () => ({
