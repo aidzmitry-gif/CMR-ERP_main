@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
 import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
@@ -40,8 +41,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const stageIdx = 0;
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto max-w-[1280px] px-[22px] pb-10 pt-[18px]">
+    <AppShell crumbs={["CRM", "Сделки", d.number || "сделка"]}>
+      <div className="flex-1 overflow-y-auto bg-canvas text-ink">
+        <div className="mx-auto max-w-[1280px] px-[22px] pb-10 pt-[18px]">
         <Link
           href="/crm/deals"
           className="mb-3 inline-flex items-center gap-1 text-[12.5px] font-semibold text-muted hover:text-ink"
@@ -120,8 +122,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </Card>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
 
