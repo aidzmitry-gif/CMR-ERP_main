@@ -20,6 +20,7 @@ from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
 from core.services.temporal import TemporalService
+from core.services.touch_history import TouchHistoryGateway
 
 __all__ = ["Services", "build_services"]
 
@@ -43,6 +44,10 @@ class Services:
     telephony: TelephonyGateway | None = None
     # себестоимость партии (landed cost) — наполняет модуль procurement; None — не подключён
     landed_cost: LandedCostGateway | None = None
+    # история касаний (звонки/письма/сделки) для 360° — наполняет sales; None — не подключён.
+    # Несёт PII/коммерческую переписку → роут-потребитель защищён правом, реализация в sales
+    # тоже проводит свою проверку прав (защита на обоих уровнях).
+    touch_history: TouchHistoryGateway | None = None
 
 
 def build_services() -> Services:

@@ -175,6 +175,15 @@ M3 = его реализация. Не пересматривать, испол�
 
 ## M5. Карточка контрагента → точка входа в 360° (чтобы выкинуть Битрикс)
 
+> ✅ **РЕАЛИЗОВАНО — каркас в ядре (2026-06-25).** Фасад `core/services/touch_history.py`
+> (`TouchHistoryGateway`: `touches`/`summary` по `counterparty_id`); карточка
+> `/system/mdm/counterparty/{id}` отдаёт `touches`/`touch_summary` через фасад (graceful — sales
+> не подключён → `[]`, не 500). Макет `spravochniki-client-360.html` (лента касаний, фильтр, сводка).
+> Ядро не лезет в схему sales (изоляция §2.4). Хвост: sales реализует `SalesTouchHistory`
+> (читает CallLog/Message/Deal); **sales-долг — `Deal.counterparty` строка, не id** (хрупкая связь
+> при merge/переименовании, чинится в submodule sales); импорт из Битрикс как source-adapter
+> (`source="bitrix"` в alias уже поддержан).
+
 Битрикс держат ради **общения/сделок/задач**. У вас есть `Contact`, MDM, провенанс — но история
 касаний (звонки/письма/сделки) не сходится на карточке. Это смыкается с коннекторами
 [client-360-bitrix-1c](#) и `bitrix-connector-call-kb` (память).

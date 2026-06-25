@@ -219,12 +219,32 @@ async def mdm_unmerge(
 
 @router.get("/system/mdm/counterparty/{counterparty_id}")
 async def mdm_counterparty_card(
-    counterparty_id: int, session: AsyncSession = Depends(get_session)
+    counterparty_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("sales.deal.read")),
 ) -> dict:
-    """Карточка эталона контрагента: реквизиты + источники (1С/Bitrix), слитые дубли, контакты, аудит."""
+    """Карточка эталона контрагента: реквизиты + источники (1С/Bitrix), дубли, контакты, аудит, 360°.
+
+    История касаний (звонки/письма/сделки, M5) читается через ``core.services.touch_history`` —
+    если модуль sales не подключён/не реализовал фасад, ``touches=[]`` (graceful, карточка без 360°).
+    ⚠ Под правом ``sales.deal.read``: карточка несёт контакты (PII) и историю общения (тексты
+    переписки/транскрипты — коммерческая тайна), а ``/system`` пропускается middleware → защищаем
+    пообъектно (как карточка SKU/landed cost в M4). Реализация фасада в sales — своя проверка прав.
+    """
     card = await mdm.counterparty_card(session, counterparty_id)
     if card is None:
         raise HTTPException(status_code=404, detail="контрагент не найден")
+
+    gateway = request.app.state.core.services.touch_history
+    card["touches"] = []
+    card["touch_summary"] = None
+    if gateway is not None:
+        try:
+            card["touches"] = await gateway.touches(session, counterparty_id)
+            card["touch_summary"] = await gateway.summary(session, counterparty_id)
+        except Exception:  # noqa: BLE001 — sales недоступен → карточка без истории, не 500
+            pass
     return card
 
 
