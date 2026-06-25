@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>План счетов РБ — справочник (превью)</title>
+  <!-- ════════════════════════════════════════════════════════════════════
+       Справочник «План счетов» — Типовой план счетов бухучёта РБ
+       (постановление Минфина РБ № 50 от 29.06.2011). 8 разделов +
+       забалансовые. Тип счёта: А / П / А-П / контрарный. Бел. специфика
+       (сч. 18 НДС, 44 расходы на реализацию, 90 текущая деят., 65 ОНО).
+       Создано Claude. 2 темы, демо.
+       ════════════════════════════════════════════════════════════════════ -->
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode:'class', theme:{ extend:{
+      colors:{ canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+      boxShadow:{ card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+    } } };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .bg-ink{background:#0E1729 !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .text-slate-300{color:#475569 !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-violet-50{background:#1E1B33 !important} html.dark .text-violet-700{color:#A78BFA !important}
+    html.dark .bg-rose-50{background:#2A1717 !important} html.dark .text-rose-700{color:#F87171 !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .theme-tgl{position:fixed;top:14px;right:16px;z-index:50;display:inline-flex;align-items:center;gap:7px;
+      background:#fff;border:1px solid #e2e8f0;color:#64748b;border-radius:10px;padding:7px 12px;font:600 12.5px ui-sans-serif,system-ui;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+    html.dark .theme-tgl{background:#111A2E;border-color:#1E293B;color:#94A3B8}
+    .acc{font-variant-numeric:tabular-nums}
+    /* заголовок раздела плана счетов — контрастный в обеих темах */
+    .sec-hd td{background:#EDF1F7 !important;color:#334155 !important;font-weight:700}
+    html.dark .sec-hd td{background:#16233F !important;color:#9DBEFF !important}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1180px] space-y-4 p-6">
+
+    <a href="spravochniki-preview.html" class="text-[12px] text-muted hover:text-brand-600">← Все справочники (реестр)</a>
+    <div>
+      <h1 class="text-xl font-bold text-ink">План счетов — Республика Беларусь</h1>
+      <p class="mt-1 text-sm text-muted">Типовой план счетов бухгалтерского учёта · постановление Минфина РБ № 50 от 29.06.2011. 8 разделов + забалансовые. Иерархия: раздел → счёт → субсчёт.</p>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-base font-bold text-ink">План счетов 🌳</h2>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">схема: public</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">/refs/accounts</span>
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">иерархия · разделы</span>
+          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🇧🇾 РБ № 50</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="rounded-xl bg-slate-50 px-3 py-2 w-56"><input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Поиск по номеру/названию…" /></div>
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">+ Добавить субсчёт</button>
+        </div>
+      </div>
+      <!-- легенда типов -->
+      <div class="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-[11px]">
+        <span class="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">А — активный</span>
+        <span class="rounded-full bg-rose-50 px-2 py-0.5 text-rose-700">П — пассивный</span>
+        <span class="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700">А-П — активно-пассивный</span>
+        <span class="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">контр. — регулирующий (контрактивный/контрпассивный)</span>
+      </div>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+            <th class="px-4 py-2 font-semibold w-16">Счёт</th>
+            <th class="px-3 py-2 font-semibold">Наименование</th>
+            <th class="px-3 py-2 font-semibold w-44">Тип</th>
+            <th class="px-3 py-2 font-semibold">Примечание</th>
+          </tr>
+        </thead>
+        <tbody id="tbody" class="divide-y divide-slate-50"></tbody>
+      </table>
+    </div>
+
+    <!-- БД-блок -->
+    <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Бел. специфика (отличия от РФ)</div>
+      <ul class="mt-3 space-y-1.5 text-sm text-slate-300">
+        <li><span class="font-mono text-slate-200">18</span> — «НДС по приобретённым товарам, работам, услугам» <span class="text-slate-500">(в РФ — счёт 19)</span></li>
+        <li><span class="font-mono text-slate-200">44</span> — «Расходы на реализацию» <span class="text-slate-500">(в РФ — «Расходы на продажу»)</span></li>
+        <li><span class="font-mono text-slate-200">90</span> — «Доходы и расходы по текущей деятельности» <span class="text-slate-500">(в РФ — «Продажи»)</span></li>
+        <li><span class="font-mono text-slate-200">65</span> — «Отложенные налоговые обязательства» <span class="text-slate-500">(в РФ — счёт 77)</span></li>
+        <li><span class="font-mono text-slate-200">25/26</span> — «затраты», а не «расходы»; <span class="font-mono text-slate-200">08</span> — «вложения в долгосрочные активы»</li>
+      </ul>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Справочник «План счетов» (РБ № 50) · синтетические счета · демо · 2 темы · создано Claude. Субсчета разворачиваются под счётом.</p>
+  </div>
+
+<script>
+/* Разделы и счета Типового плана РБ № 50. type: А|П|А-П|контр.  */
+var SECTIONS=[
+  {n:"Раздел I. Долгосрочные активы",rows:[
+    ["01","Основные средства","А",""],
+    ["02","Амортизация основных средств","контр.","контрактивный к 01"],
+    ["03","Доходные вложения в материальные ценности","А",""],
+    ["04","Нематериальные активы","А",""],
+    ["05","Амортизация нематериальных активов","контр.","контрактивный к 04"],
+    ["07","Оборудование к установке и строительные материалы","А",""],
+    ["08","Вложения в долгосрочные активы","А","РФ: во внеоборотные активы"],
+    ["09","Отложенные налоговые активы","А",""],
+  ]},
+  {n:"Раздел II. Производственные запасы",rows:[
+    ["10","Материалы","А",""],
+    ["14","Резервы под снижение стоимости запасов","контр.",""],
+    ["15","Заготовление и приобретение материалов","А",""],
+    ["16","Отклонение в стоимости материалов","А-П",""],
+    ["18","НДС по приобретённым товарам, работам, услугам","А","🇧🇾 в РФ — счёт 19"],
+  ]},
+  {n:"Раздел III. Затраты на производство",rows:[
+    ["20","Основное производство","А",""],
+    ["21","Полуфабрикаты собственного производства","А",""],
+    ["23","Вспомогательные производства","А",""],
+    ["25","Общепроизводственные затраты","А","собирательно-распред."],
+    ["26","Общехозяйственные затраты","А","собирательно-распред."],
+    ["28","Брак в производстве","А",""],
+    ["29","Обслуживающие производства и хозяйства","А",""],
+  ]},
+  {n:"Раздел IV. Готовая продукция и товары",rows:[
+    ["40","Выпуск продукции, работ, услуг","А-П",""],
+    ["41","Товары","А","субсчета: 41-1 на складах, 41-2 в рознице"],
+    ["42","Торговая наценка","контр.","контрпассивный"],
+    ["43","Готовая продукция","А",""],
+    ["44","Расходы на реализацию","А","🇧🇾 в РФ — «Расходы на продажу»"],
+    ["45","Товары отгруженные","А",""],
+  ]},
+  {n:"Раздел V. Денежные средства и краткосрочные фин. вложения",rows:[
+    ["50","Касса","А",""],
+    ["51","Расчётные счета","А",""],
+    ["52","Валютные счета","А",""],
+    ["55","Специальные счета в банках","А",""],
+    ["57","Денежные средства в пути","А",""],
+    ["58","Краткосрочные финансовые вложения","А",""],
+  ]},
+  {n:"Раздел VI. Расчёты",rows:[
+    ["60","Расчёты с поставщиками и подрядчиками","А-П","К — долг перед поставщиком, Д — авансы выданные"],
+    ["62","Расчёты с покупателями и заказчиками","А-П","Д — долг покупателя, К — авансы полученные"],
+    ["63","Резервы по сомнительным долгам","контр.",""],
+    ["65","Отложенные налоговые обязательства","П","🇧🇾 в РФ — счёт 77"],
+    ["66","Расчёты по краткосрочным кредитам и займам","П",""],
+    ["67","Расчёты по долгосрочным кредитам и займам","П",""],
+    ["68","Расчёты по налогам и сборам","А-П","обычно пассивное сальдо"],
+    ["69","Расчёты по социальному страхованию и обеспечению","А-П",""],
+    ["70","Расчёты с персоналом по оплате труда","А-П",""],
+    ["71","Расчёты с подотчётными лицами","А-П",""],
+    ["73","Расчёты с персоналом по прочим операциям","А-П",""],
+    ["75","Расчёты с учредителями","А-П",""],
+    ["76","Расчёты с разными дебиторами и кредиторами","А-П",""],
+  ]},
+  {n:"Раздел VII. Собственный капитал",rows:[
+    ["80","Уставный капитал","П",""],
+    ["81","Собственные акции (доли в уставном капитале)","контр.","контрпассивный к 80"],
+    ["82","Резервный капитал","П",""],
+    ["83","Добавочный капитал","П",""],
+    ["84","Нераспределённая прибыль (непокрытый убыток)","А-П",""],
+    ["86","Целевое финансирование","П",""],
+  ]},
+  {n:"Раздел VIII. Финансовые результаты",rows:[
+    ["90","Доходы и расходы по текущей деятельности","А-П","🇧🇾 в РФ — «Продажи»"],
+    ["91","Прочие доходы и расходы","А-П",""],
+    ["94","Недостачи и потери от порчи имущества","А",""],
+    ["96","Резервы предстоящих платежей","П",""],
+    ["97","Расходы будущих периодов","А",""],
+    ["98","Доходы будущих периодов","П",""],
+    ["99","Прибыли и убытки","А-П",""],
+  ]},
+  {n:"Забалансовые счета",rows:[
+    ["001","Арендованные основные средства","заб.",""],
+    ["002","ТМЦ, принятые на ответственное хранение","заб.",""],
+    ["003","Материалы, принятые в переработку","заб.",""],
+    ["004","Товары, принятые на комиссию","заб.",""],
+    ["006","Бланки строгой отчётности","заб.",""],
+    ["009","Обеспечения обязательств и платежей выданные","заб.",""],
+  ]},
+];
+
+function typeBadge(t){
+  var m={"А":"bg-blue-50 text-blue-700","П":"bg-rose-50 text-rose-700","А-П":"bg-violet-50 text-violet-700","контр.":"bg-amber-50 text-amber-700","заб.":"bg-slate-100 text-slate-500"};
+  return '<span class="rounded-full px-2 py-0.5 text-[11px] font-semibold '+(m[t]||'bg-slate-100 text-slate-600')+'">'+t+'</span>';
+}
+(function(){
+  var html='';
+  SECTIONS.forEach(function(sec){
+    html+='<tr class="sec-hd"><td colspan="4" class="px-4 py-2 text-[11px] uppercase tracking-wide">'+sec.n+'</td></tr>';
+    sec.rows.forEach(function(r){
+      html+='<tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Счёт '+r[0]+' — субсчета и проводки">'+
+        '<td class="px-4 py-2 font-mono text-[13px] font-semibold text-ink acc">'+r[0]+'</td>'+
+        '<td class="px-3 py-2 text-slate-700">'+r[1]+'</td>'+
+        '<td class="px-3 py-2">'+typeBadge(r[2])+'</td>'+
+        '<td class="px-3 py-2 text-[12px] text-slate-500">'+(r[3]||'')+'</td>'+
+      '</tr>';
+    });
+  });
+  document.getElementById('tbody').innerHTML=html;
+})();
+
+/* демо-тост */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-demo],button,a[href="#"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

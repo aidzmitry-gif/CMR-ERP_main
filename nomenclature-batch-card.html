@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карточка партии закупки — превью</title>
+<!-- ════════════════════════════════════════════════════════════════════════
+     Карточка ПАРТИИ закупки (lot/batch) — транзакционная сущность.
+     Замыкает: срок годности по партии · технология тестирования + результаты ·
+     landed cost (разбор) · фото приёмки со склада Китая · машина (контейнер).
+     Создано Claude (Opus 4.8) автономно по /goal. Демо-данные BYN, 2 темы.
+     Связано: nomenclature-card-preview.html, logistics-shipment-card.html,
+     coordination/nomenclature-card-design.md, procurement-costing-handoff.md
+     ════════════════════════════════════════════════════════════════════════ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}</script>
+<style>
+  :root{
+    --font:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+    --brand:#1E5EFF; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1545CC;
+    --canvas:#F4F5F7; --surface:#FFFFFF; --sunken:#F4F6F9;
+    --ink:#1F2937; --muted:#6B7280; --faint:#93A1B5; --line:#E2E8F0;
+    --money:#0F9D58; --ok:#16A34A; --warn:#B45309; --bad:#DC2626; --violet:#6D28D9;
+    --ok-bg:#ECFDF3; --warn-bg:#FFF7ED; --bad-bg:#FEF2F2; --info-bg:#EFF5FF; --violet-bg:#F5F3FF; --inh-bg:#F1F5F9;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-pop:0 8px 24px rgba(16,24,40,.10);
+  }
+  html.dark{
+    --canvas:#0B1220; --surface:#111A2E; --sunken:#0E1729;
+    --ink:#E5EAF3; --muted:#94A3B8; --faint:#64748B; --line:#1E293B;
+    --brand:#3B82F6; --brand-50:#16233F; --brand-100:#16233F; --brand-700:#9DBEFF;
+    --money:#34D399; --ok:#34D399; --warn:#FBBF24; --bad:#F87171; --violet:#A78BFA;
+    --ok-bg:#16271F; --warn-bg:#2A2114; --bad-bg:#2A1717; --info-bg:#16233F; --violet-bg:#1E1B33; --inh-bg:#16202F;
+    --shadow-card:0 1px 2px rgba(0,0,0,.30), 0 1px 3px rgba(0,0,0,.40);
+    --shadow-pop:0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 80px}
+  a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+  .mono,.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .crumb{font-size:12px;color:var(--muted)}
+  .theme-tgl{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer;box-shadow:var(--shadow-card)}
+  .theme-tgl:hover{color:var(--ink)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-card)}
+  .pad{padding:18px}
+  .eyebrow{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+  .grid2{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) 320px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .fgrid{display:grid;gap:14px 18px;grid-template-columns:1fr 1fr}
+  @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
+  .col2{grid-column:1/-1}
+  .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap}
+  .b-ok{background:var(--ok-bg);color:var(--ok)} .b-warn{background:var(--warn-bg);color:var(--warn)}
+  .b-bad{background:var(--bad-bg);color:var(--bad)} .b-info{background:var(--info-bg);color:var(--brand-700)}
+  .b-violet{background:var(--violet-bg);color:var(--violet)} .b-mut{background:var(--sunken);color:var(--muted)}
+  .field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .field .val{font-size:14px;color:var(--ink);font-weight:500}
+  .field .val.unset{color:var(--faint);font-weight:400;font-style:italic}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0} .row .k{color:var(--muted);font-size:13px} .row .v{font-weight:600;font-size:13.5px;text-align:right}
+  .hdr{display:flex;gap:18px;align-items:flex-start}
+  .h-title{font-size:19px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
+  .h-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px;align-items:center}
+  .h-sub{color:var(--muted);font-size:12.5px;margin-top:7px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px}
+  @media(max-width:680px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--surface);padding:12px 14px}
+  .kpi .lab{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px}
+  .kpi .big{font-size:18px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .sub{font-size:11px;color:var(--faint);margin-top:1px}
+  .kpi.money .big{color:var(--money)}
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:600;padding:8px 10px;background:var(--sunken)}
+  table.rl td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:middle}
+  table.rl tr:hover td{background:var(--sunken)}
+  .photo{border-radius:12px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .photo .cnt{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.55);color:#fff;border-radius:7px;padding:1px 6px;font-size:10px;font-weight:600}
+  .sect-lead{font-size:12px;color:var(--muted);margin:2px 0 12px}
+  .pill-src{font-size:11px;color:var(--faint)}
+  .grp-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+  .grp-title{font-size:13.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:7px}
+  .lock-note{display:flex;align-items:center;gap:8px;border-radius:10px;padding:9px 12px;font-size:12.5px;font-weight:500;margin-bottom:14px}
+  .timeline{display:flex;gap:0;margin-top:4px;flex-wrap:wrap}
+  .tl{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+  .tl .dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex-shrink:0}
+  .tl.done .dot{background:var(--money)} .tl.cur .dot{background:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+  .tl .arr{color:var(--faint);margin:0 7px;font-size:11px}
+  .btn{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer}
+  .btn:hover{color:var(--ink)} .btn-pri{background:var(--brand);color:#fff;border-color:var(--brand)} html.dark .btn-pri{color:#06101F}
+  .qc-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .qc-row:last-child{border-bottom:0}
+  .meter{height:8px;border-radius:99px;background:var(--sunken);overflow:hidden;flex:1}
+  .meter>span{display:block;height:100%;border-radius:99px;background:var(--money)}
+</style>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="crumb"><a href="spravochniki-preview-index.html">← Все экраны</a> · <a href="nomenclature-card-preview.html">Карточка номенклатуры</a> › <span style="color:var(--ink);font-weight:600">Партия ЗАК-2026-0355</span></div>
+    <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  </div>
+
+  <!-- ШАПКА -->
+  <div class="card pad">
+    <div class="hdr">
+      <div class="photo" style="width:104px;height:104px;background:linear-gradient(135deg,#F59E0B22,#DC262622);font-size:40px;flex-shrink:0">🏭<span class="cnt">📷 6</span></div>
+      <div style="flex:1;min-width:0">
+        <div class="h-title">Партия ЗАК-2026-0355 · Аккумулятор LiFePO4 EVE LF304</div>
+        <div class="h-meta">
+          <span class="badge b-mono b-mut">ЗАК-2026-0355</span>
+          <span class="badge b-ok">Принята на склад</span>
+          <span class="badge b-violet">🚚 машина MO-2026-005</span>
+          <span class="badge b-warn" title="Срок годности истекает менее чем через год">⏳ годна до 02.02.2027 · 8 мес</span>
+          <span class="badge b-info">🌐 ГТД 06181/140626/0012345</span>
+        </div>
+        <div class="h-sub">
+          Поставщик: <a href="spravochniki-card-preview.html">Shenzhen EVE Trading Co.</a> ·
+          Номенклатура: <a href="nomenclature-card-preview.html">EVE LF304 (KA-00006181)</a> ·
+          Дата производства ячеек: 02.02.2024
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn btn-pri" data-demo="К отгрузке (FEFO)">К приоритетной отгрузке</button>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lab">📦 Кол-во в партии</div><div class="big num">48 шт</div><div class="sub">остаток партии: 32 шт</div></div>
+      <div class="kpi"><div class="lab">⏳ Срок годности</div><div class="big" style="font-size:16px;color:var(--warn)">⚠ 8 мес</div><div class="sub">до 02.02.2027 · FEFO</div></div>
+      <div class="kpi money"><div class="lab">💰 Landed cost / ед.</div><div class="big num">208,40 ₽</div><div class="sub">предварит. · факт по ГТД</div></div>
+      <div class="kpi"><div class="lab">✅ ОТК / тестирование</div><div class="big" style="font-size:15px;color:var(--money)">Пройдено</div><div class="sub">48/48 · брак 0</div></div>
+    </div>
+  </div>
+
+  <div class="lock-note" style="background:var(--warn-bg);color:var(--warn);margin-top:16px">⏳ Срок годности партии меньше года (осталось ~8 мес). Партия помечена для отгрузки по FEFO (first-expired-first-out) — отгружать раньше партии ЗАК-2026-0418 (годна до 15.03.2028).</div>
+
+  <div class="grid2">
+    <!-- ЛЕВО -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <!-- Технология тестирования + результаты -->
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">🔬 Технология тестирования</span><span class="pill-src">📥 из справочника технологий тестирования</span></div>
+        <div class="fgrid" style="margin-bottom:8px">
+          <div class="field"><label>Протокол</label><div class="val">ТТ-LFP-ёмкость · v2.1</div></div>
+          <div class="field"><label>Тестировщик</label><div class="val">ОТК · Романов И.</div></div>
+        </div>
+        <table class="rl">
+          <thead><tr><th>Параметр</th><th>Норма</th><th>Факт (средн.)</th><th>Вердикт</th></tr></thead>
+          <tbody>
+            <tr><td>Ёмкость, Ач</td><td class="num">≥ 304</td><td class="num">306,2</td><td><span class="badge b-ok">✓</span></td></tr>
+            <tr><td>Внутр. сопротивление, мОм</td><td class="num">≤ 0,25</td><td class="num">0,21</td><td><span class="badge b-ok">✓</span></td></tr>
+            <tr><td>Напряжение покоя, В</td><td class="num">3,28–3,32</td><td class="num">3,30</td><td><span class="badge b-ok">✓</span></td></tr>
+            <tr><td>Саморазряд за 30 дн, %</td><td class="num">≤ 3</td><td class="num">1,8</td><td><span class="badge b-ok">✓</span></td></tr>
+          </tbody>
+        </table>
+        <div class="qc-row" style="margin-top:10px">
+          <span class="k" style="color:var(--muted);font-size:13px">Годность по тесту</span>
+          <div class="meter"><span style="width:100%"></span></div>
+          <span class="v" style="font-weight:700;color:var(--money)">48/48 · 100%</span>
+        </div>
+      </div>
+
+      <!-- Разбор landed cost -->
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">💰 Разбор landed cost партии</span><a href="#" class="pill-src">экран расчёта (Китай) →</a></div>
+        <table class="rl">
+          <thead><tr><th>Статья</th><th>Сумма, ¥</th><th>Сумма, ₽</th><th>Доля</th></tr></thead>
+          <tbody>
+            <tr><td>Инвойс поставщика (48×¥390)</td><td class="num">18 720</td><td class="num">7 675</td><td class="num">76%</td></tr>
+            <tr><td>Международный фрахт</td><td class="num">—</td><td class="num">980</td><td class="num">10%</td></tr>
+            <tr><td>Пошлина (ТН ВЭД, 0%)</td><td class="num">—</td><td class="num">0</td><td class="num">0%</td></tr>
+            <tr><td>Брокер + сертификация</td><td class="num">—</td><td class="num">540</td><td class="num">5%</td></tr>
+            <tr><td>Страховка + банк</td><td class="num">—</td><td class="num">208</td><td class="num">2%</td></tr>
+            <tr><td>Внутр. логистика</td><td class="num">—</td><td class="num">600</td><td class="num">6%</td></tr>
+            <tr style="font-weight:700"><td>Итого landed cost</td><td class="num">—</td><td class="num">10 003</td><td class="num">100%</td></tr>
+            <tr style="font-weight:700"><td>Себестоимость единицы</td><td class="num">—</td><td class="num" style="color:var(--money)">208,40 ₽</td><td><span class="badge b-warn">+34% к инвойсу</span></td></tr>
+          </tbody>
+        </table>
+        <p class="sect-lead" style="margin-top:8px">НДС при ввозе учтён отдельно (возмещаемый, не в себестоимости). Курс ¥1=0,41 ₽ · НБ РБ 02.06.2026.</p>
+      </div>
+
+      <!-- Машина -->
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">🚚 Машина MO-2026-005 — как ехала партия</span><a href="logistics-shipment-card.html" class="pill-src">открыть машину →</a></div>
+        <div class="fgrid" style="margin-bottom:10px">
+          <div class="field"><label>Контейнер</label><div class="val mono">TCLU-552310-8</div></div>
+          <div class="field"><label>Маршрут · режим</label><div class="val">Шэньчжэнь → Минск · море+авто · FOB</div></div>
+        </div>
+        <div class="timeline">
+          <span class="tl done"><span class="dot"></span>Выкуп</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Производство</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Склад Китай</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Проверка</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Отправка</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Таможня Минск</span><span class="arr">›</span>
+          <span class="tl done"><span class="dot"></span>Склад Минск</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ПРАВО -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card pad">
+        <span class="eyebrow">Фото приёмки со склада Китая</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+          <div class="photo" style="height:84px;font-size:28px;background:linear-gradient(135deg,#F59E0B22,#DC262622)" data-demo="Фото приёмки 1">🏭<span class="cnt">упаковка</span></div>
+          <div class="photo" style="height:84px;font-size:28px;background:linear-gradient(135deg,#16A34A22,#1E5EFF22)" data-demo="Фото приёмки 2">📦<span class="cnt">палета</span></div>
+          <div class="photo" style="height:84px;font-size:28px;background:var(--sunken)" data-demo="Фото приёмки 3">🔋<span class="cnt">ячейки</span></div>
+          <div class="photo" style="height:84px;font-size:28px;background:var(--sunken)" data-demo="Фото приёмки 4">🏷<span class="cnt">маркировка</span></div>
+        </div>
+        <p class="sect-lead" style="margin-top:10px">Фото со склада Китая и приёмки в Минске. Привязаны к этой партии.</p>
+      </div>
+
+      <div class="card pad">
+        <span class="eyebrow">Срок годности</span>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+          <div class="row"><span class="k">Дата производства</span><span class="v num">02.02.2024</span></div>
+          <div class="row"><span class="k">Срок хранения</span><span class="v num">36 мес</span></div>
+          <div class="row"><span class="k">Годна до</span><span class="v num" style="color:var(--warn)">02.02.2027</span></div>
+          <div class="row"><span class="k">Осталось</span><span class="badge b-warn">~8 мес ⚠</span></div>
+          <div class="row"><span class="k">Правило отгрузки</span><span class="v">FEFO</span></div>
+        </div>
+      </div>
+
+      <div class="card pad">
+        <span class="eyebrow">Размещение на складе</span>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+          <div class="row"><span class="k">Склад</span><span class="v">Главный (Минск)</span></div>
+          <div class="row"><span class="k">Стеллаж / ячейка</span><span class="v mono">A-12-03</span></div>
+          <div class="row"><span class="k">Остаток партии</span><span class="v num">32 шт</span></div>
+        </div>
+        <a href="nomenclature-movements-report.html" class="btn" style="display:block;text-align:center;margin-top:10px">Движение партии →</a>
+      </div>
+    </div>
+  </div>
+
+  <p style="text-align:center;color:var(--faint);font-size:11.5px;margin-top:24px">
+    Карточка партии закупки (lot/batch) · транзакционная сущность · демо-данные (BYN) · 2 темы.
+    <br>Создано Claude автономно по /goal — черновик-каркас для доработки.
+  </p>
+</div>
+
+<script>
+  /* демо-отклик для кнопок без своего действия */
+  (function(){
+    function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-pop);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+    document.addEventListener('click',function(e){
+      var el=e.target.closest('button,.btn,a[href="#"],[data-demo]');
+      if(!el)return;
+      if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+      if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+      if(el.tagName==='A')e.preventDefault();
+      var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+      dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+    },true);
+  })();
+</script>
+</body>
+</html>

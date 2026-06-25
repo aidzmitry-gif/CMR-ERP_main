@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Сотрудники — справочник (превью)</title>
+  <!-- ════════════════════════════════════════════════════════════════════
+       Справочник «Сотрудники» (мастер-данные, модель app_user).
+       Список + карточка: ФИО, должность, отдел, роль доступа, контакты,
+       план/факт для продавцов. Создано Claude. 2 темы, демо BYN.
+       Связано: config/access.py (роли), оргструктура, должности.
+       ════════════════════════════════════════════════════════════════════ -->
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode:'class', theme:{ extend:{
+      colors:{ canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+      boxShadow:{ card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+    } } };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .bg-ink{background:#0E1729 !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .text-slate-300{color:#475569 !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-violet-50{background:#1E1B33 !important} html.dark .text-violet-700{color:#A78BFA !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .theme-tgl{position:fixed;top:14px;right:16px;z-index:50;display:inline-flex;align-items:center;gap:7px;
+      background:#fff;border:1px solid #e2e8f0;color:#64748b;border-radius:10px;padding:7px 12px;font:600 12.5px ui-sans-serif,system-ui;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+    html.dark .theme-tgl{background:#111A2E;border-color:#1E293B;color:#94A3B8}
+    .ava{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <a href="spravochniki-preview.html" class="text-[12px] text-muted hover:text-brand-600">← Все справочники (реестр)</a>
+    <div>
+      <h1 class="text-xl font-bold text-ink">Сотрудники — справочник</h1>
+      <p class="mt-1 text-sm text-muted">Мастер-данные (модель <span class="font-mono text-[12px]">app_user</span>). ФИО, должность, отдел, роль доступа, контакты. Доступ к модулям — из ролей.</p>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-base font-bold text-ink">Сотрудники ★</h2>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">схема: public</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">/refs/employees</span>
+          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🤖 в каталоге AI</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">12 активных</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="rounded-xl bg-slate-50 px-3 py-2 w-56"><input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Поиск по ФИО/должности…" /></div>
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">+ Добавить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+
+      <!-- ЛЕВО: список сотрудников -->
+      <div class="rounded-2xl bg-white p-0 shadow-card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th class="px-5 py-2 font-semibold">Сотрудник</th>
+                <th class="px-3 py-2 font-semibold">Должность</th>
+                <th class="px-3 py-2 font-semibold">Отдел</th>
+                <th class="px-3 py-2 font-semibold">Роль доступа</th>
+                <th class="px-3 py-2 font-semibold">Статус</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+              <tr class="bg-brand-100/40 cursor-pointer" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#2563eb">АП</span><div><div class="font-medium text-ink">Петров Алексей</div><div class="text-[11px] text-slate-400 font-mono">apetrov</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">РОП</td><td class="px-3 py-2.5 text-slate-600">Продажи</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">sales_head</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span></td>
+              </tr>
+              <tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#0F9D58">ИК</span><div><div class="font-medium text-ink">Ковалёва Ирина</div><div class="text-[11px] text-slate-400 font-mono">ikovaleva</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">Менеджер по продажам</td><td class="px-3 py-2.5 text-slate-600">Продажи</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">sales</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span></td>
+              </tr>
+              <tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#B45309">ЕИ</span><div><div class="font-medium text-ink">Иванова Елена</div><div class="text-[11px] text-slate-400 font-mono">eivanova</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">Закупщик</td><td class="px-3 py-2.5 text-slate-600">Закупки</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">procurement</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span></td>
+              </tr>
+              <tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#6D28D9">СД</span><div><div class="font-medium text-ink">Сидоров Дмитрий</div><div class="text-[11px] text-slate-400 font-mono">dsidorov</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">Кладовщик</td><td class="px-3 py-2.5 text-slate-600">Склад</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">warehouse</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span></td>
+              </tr>
+              <tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#0f172a">ДХ</span><div><div class="font-medium text-ink">Харькович Д.С.</div><div class="text-[11px] text-slate-400 font-mono">director</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">Директор</td><td class="px-3 py-2.5 text-slate-600">Руководство</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">director</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span></td>
+              </tr>
+              <tr class="hover:bg-slate-50/60 cursor-pointer opacity-60" data-demo="Открыть сотрудника">
+                <td class="px-5 py-2.5"><div class="flex items-center gap-2.5"><span class="ava" style="background:#94a3b8">ТМ</span><div><div class="font-medium text-ink">Тарасов Максим</div><div class="text-[11px] text-slate-400 font-mono">mtarasov</div></div></div></td>
+                <td class="px-3 py-2.5 text-slate-600">Менеджер</td><td class="px-3 py-2.5 text-slate-600">Продажи</td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">—</span></td>
+                <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">🗃 Уволен</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="border-t border-slate-100 px-5 py-3 text-[12px] text-muted">5 активных + 1 в архиве · клик по строке — карточка сотрудника · правки в аудит.</div>
+      </div>
+
+      <!-- ПРАВО: карточка выбранного (Петров) -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="flex items-center gap-3">
+          <span class="ava" style="background:#2563eb;width:44px;height:44px;font-size:15px">АП</span>
+          <div><h3 class="text-base font-bold text-ink">Петров Алексей Иванович</h3><div class="text-[12px] text-slate-400 font-mono">apetrov · ID U-0007</div></div>
+        </div>
+        <dl class="mt-4 space-y-3 border-t border-slate-100 pt-4 text-sm">
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Должность</dt><dd class="text-ink">РОП (рук. отдела продаж)</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Отдел</dt><dd class="text-ink">Отдел продаж</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Руководитель</dt><dd class="text-ink">Харькович Д.С.</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Телефон</dt><dd class="font-mono text-[13px] text-slate-600">+375 29 100-20-30</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">E-mail</dt><dd class="text-slate-600">apetrov@erp.by</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Принят</dt><dd class="text-ink">14.03.2024</dd></div>
+        </dl>
+        <div class="mt-4 border-t border-slate-100 pt-4">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Роль и доступ</div>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <span class="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">sales_head</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Сделки</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">РОП-кокпит</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Справочники</span>
+          </div>
+          <a href="spravochniki-ai-preview.html" class="mt-2 inline-block text-[12px] text-brand-600">управление доступом →</a>
+        </div>
+        <div class="mt-4 border-t border-slate-100 pt-4">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">План / факт (этот месяц)</div>
+          <div class="mt-2 flex items-center justify-between text-sm"><span class="text-slate-500">Валовая прибыль</span><span class="font-semibold text-ink">38,4 / 45,0 тыс Br</span></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-emerald-500" style="width:85%"></div></div>
+          <div class="mt-1 text-[11px] text-slate-400">85% плана · 6 дней до конца месяца</div>
+        </div>
+        <div class="mt-5 flex gap-2 border-t border-slate-100 pt-4">
+          <button class="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Сбросить пароль</button>
+          <button class="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">🗃 В архив</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Справочник «Сотрудники» (app_user) · роли из config/access.py · демо-данные · 2 темы · создано Claude.</p>
+  </div>
+
+<script>
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-demo],button,a[href="#"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

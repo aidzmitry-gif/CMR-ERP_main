@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карточка номенклатуры — превью (витрина золотой записи)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}</script>
+<style>
+  :root{
+    --font:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+    --brand:#1E5EFF; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1545CC;
+    --canvas:#F4F5F7; --surface:#FFFFFF; --sunken:#F4F6F9;
+    --ink:#1F2937; --muted:#6B7280; --faint:#93A1B5; --line:#E2E8F0;
+    --money:#0F9D58; --ok:#16A34A; --warn:#B45309; --bad:#DC2626; --violet:#6D28D9;
+    --ok-bg:#ECFDF3; --warn-bg:#FFF7ED; --bad-bg:#FEF2F2; --info-bg:#EFF5FF; --violet-bg:#F5F3FF; --inh-bg:#F1F5F9;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-pop:0 8px 24px rgba(16,24,40,.10);
+  }
+  html.dark{
+    --canvas:#0B1220; --surface:#111A2E; --sunken:#0E1729;
+    --ink:#E5EAF3; --muted:#94A3B8; --faint:#64748B; --line:#1E293B;
+    --brand:#3B82F6; --brand-50:#16233F; --brand-100:#16233F; --brand-700:#9DBEFF;
+    --money:#34D399; --ok:#34D399; --warn:#FBBF24; --bad:#F87171; --violet:#A78BFA;
+    --ok-bg:#16271F; --warn-bg:#2A2114; --bad-bg:#2A1717; --info-bg:#16233F; --violet-bg:#1E1B33; --inh-bg:#16202F;
+    --shadow-card:0 1px 2px rgba(0,0,0,.30), 0 1px 3px rgba(0,0,0,.40);
+    --shadow-pop:0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 80px}
+  a{color:var(--brand);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* topbar */
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .crumb{font-size:12px;color:var(--muted)}
+  .theme-tgl{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);color:var(--muted);
+       border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer;box-shadow:var(--shadow-card)}
+  .theme-tgl:hover{color:var(--ink)}
+
+  /* card primitives */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-card)}
+  .pad{padding:18px}
+  .eyebrow{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+  .grid2{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) 320px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .fgrid{display:grid;gap:14px 18px;grid-template-columns:1fr 1fr}
+  @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
+  .col2{grid-column:1/-1}
+
+  /* badges */
+  .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap}
+  .b-ok{background:var(--ok-bg);color:var(--ok)} .b-warn{background:var(--warn-bg);color:var(--warn)}
+  .b-bad{background:var(--bad-bg);color:var(--bad)} .b-info{background:var(--info-bg);color:var(--brand-700)}
+  .b-violet{background:var(--violet-bg);color:var(--violet)} .b-mut{background:var(--sunken);color:var(--muted)}
+  .b-mono{background:var(--sunken);color:var(--muted);font-variant-numeric:tabular-nums}
+  /* inheritance marker */
+  .inh{display:inline-flex;align-items:center;gap:4px;background:var(--inh-bg);color:var(--violet);border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:help}
+  .local{display:inline-flex;align-items:center;gap:4px;background:var(--sunken);color:var(--faint);border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:600}
+
+  /* field rows */
+  .field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .field .val{font-size:14px;color:var(--ink);font-weight:500}
+  .field .val.unset{color:var(--faint);font-weight:400;font-style:italic}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .k{color:var(--muted);font-size:13px} .row .v{font-weight:600;font-size:13.5px;text-align:right}
+
+  /* header */
+  .hdr{display:flex;gap:18px;align-items:flex-start}
+  .photo{width:104px;height:104px;border-radius:14px;background:linear-gradient(135deg,#1E5EFF22,#6D28D922);border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;font-size:40px;flex-shrink:0;position:relative;overflow:hidden}
+  .photo .cnt{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.55);color:#fff;border-radius:7px;padding:1px 6px;font-size:10px;font-weight:600}
+  .h-title{font-size:19px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
+  .h-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px;align-items:center}
+  .h-sub{color:var(--muted);font-size:12.5px;margin-top:7px}
+
+  /* KPI strip */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px}
+  .kpis.k4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:980px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:680px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--surface);padding:12px 14px}
+  .kpi .lab{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px}
+  .kpi .big{font-size:18px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .sub{font-size:11px;color:var(--faint);margin-top:1px}
+  .kpi.money .big{color:var(--money)}
+
+  /* tabs */
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+  .tab{border:0;background:transparent;color:var(--muted);font:600 13px var(--font);padding:6px 13px;border-radius:999px;cursor:pointer}
+  .tab:hover{background:var(--sunken)}
+  .tab.active{background:var(--brand);color:#fff}
+  html.dark .tab.active{color:#06101F}
+  .panel{display:none;margin-top:16px}
+  .panel.active{display:block}
+  .lock-note{display:flex;align-items:center;gap:8px;background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-size:12.5px;font-weight:500;margin-bottom:14px}
+
+  /* details (rare groups) */
+  details.coll{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--sunken)}
+  details.coll>summary{cursor:pointer;list-style:none;padding:11px 14px;font-weight:600;font-size:13.5px;color:var(--ink);display:flex;align-items:center;gap:8px;user-select:none}
+  details.coll>summary::-webkit-details-marker{display:none}
+  details.coll>summary::before{content:'▸';color:var(--faint);font-size:12px;transition:.15s}
+  details.coll[open]>summary::before{transform:rotate(90deg)}
+  details.coll .body{padding:2px 14px 14px}
+  .grp-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+  .grp-title{font-size:13.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:7px}
+  .expand-all{font-size:12px;color:var(--brand);background:transparent;border:0;cursor:pointer;font-weight:600}
+
+  /* related list table */
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:600;padding:8px 10px;background:var(--sunken)}
+  table.rl td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:middle}
+  table.rl tr:hover td{background:var(--sunken)}
+  .timeline{display:flex;gap:0;margin-top:4px;flex-wrap:wrap}
+  .tl{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+  .tl .dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex-shrink:0}
+  .tl.done .dot{background:var(--money)} .tl.cur .dot{background:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+  .tl .arr{color:var(--faint);margin:0 7px;font-size:11px}
+  .attr-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+  .attr-tbl td{padding:7px 0;border-bottom:1px solid var(--line)}
+  .attr-tbl td:first-child{color:var(--muted);width:50%}
+  .attr-tbl td:last-child{font-weight:600;text-align:right}
+  .sect-lead{font-size:12px;color:var(--muted);margin:2px 0 12px}
+  .pill-src{font-size:11px;color:var(--faint)}
+  .btn{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer}
+  .btn:hover{color:var(--ink)}
+  .btn-pri{background:var(--brand);color:#fff;border-color:var(--brand)}
+  html.dark .btn-pri{color:#06101F}
+</style>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="crumb"><a href="spravochniki-preview-index.html">← Все экраны</a> · <a href="spravochniki-preview.html">Справочники</a> › <a href="spravochniki-hierarchy-preview.html">Номенклатура</a> › <span style="color:var(--ink);font-weight:600">Аккумуляторная батарея LiFePO4 EVE LF304</span></div>
+    <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  </div>
+
+  <!-- ════════ ШАПКА-СВОДКА (всегда открыта, primary) ════════ -->
+  <div class="card pad">
+    <div class="hdr">
+      <div class="photo">🔋<span class="cnt">📷 4</span></div>
+      <div style="flex:1;min-width:0">
+        <div class="h-title">Аккумуляторная батарея LiFePO4 EVE LF304 3.2V 304Ah /Китай/</div>
+        <div class="h-meta">
+          <span class="badge b-info" title="Мастер-данные (golden record)">★ эталон</span>
+          <span class="badge b-ok">Активна</span>
+          <span class="badge b-mono">KA-00006181</span>
+          <span class="badge b-mut">арт. EVE-LF304</span>
+          <span class="badge b-violet">↧ синк из 1С · 09:14</span>
+          <span class="badge b-mut">🤖 в каталоге AI</span>
+          <span class="badge b-info">ABC/XYZ: AX</span>
+          <span class="badge b-warn" title="Ближайшая истекающая партия: ЗАК-2026-0355, годен до 02.02.2027">⏳ срок 8 мес</span>
+        </div>
+        <div class="h-sub">
+          Группа: <a href="spravochniki-hierarchy-preview.html">Электрооборудование › Аккумуляторы › LiFePO4 ячейки</a> ·
+          Ед.: шт · Вид: 11.4 Литий-ферумные LiFePO4 · Качество: Новый
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <span class="badge b-mut" title="Витрина: данные у владельца, правка — фаза 2">🔒 read-витрина</span>
+      </div>
+    </div>
+
+    <!-- KPI-плитки: остаток · где лежит · landed cost · пошлина -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="lab">📦 Остаток</div>
+        <div class="big num">128 <span style="font-size:12px;font-weight:600;color:var(--muted)">шт</span></div>
+        <div class="sub">истина остатка — 1С</div>
+      </div>
+      <div class="kpi">
+        <div class="lab">🗄 Где лежит</div>
+        <div class="big" style="font-size:16px">Стеллаж A-12-03</div>
+        <div class="sub">по инвентаризации 20.06</div>
+      </div>
+      <div class="kpi">
+        <div class="lab">⏳ Срок годности</div>
+        <div class="big" style="font-size:16px;color:var(--warn)">⚠ 8 мес</div>
+        <div class="sub">до 02.02.2027 · партия 0355</div>
+      </div>
+      <div class="kpi money">
+        <div class="lab">💰 Landed cost</div>
+        <div class="big num">214,80 ₽</div>
+        <div class="sub">факт по ГТД · курс 02.06</div>
+      </div>
+      <div class="kpi">
+        <div class="lab">🌐 ТН ВЭД / пошлина</div>
+        <div class="big num" style="font-size:15px">8507 60 000 0</div>
+        <div class="sub">пошлина 0% · литий-ионные</div>
+      </div>
+    </div>
+
+    <!-- ВКЛАДКИ -->
+    <div class="tabs">
+      <button class="tab active" data-tab="overview">Обзор</button>
+      <button class="tab" data-tab="specs">Характеристики</button>
+      <button class="tab" data-tab="procure">Закупка и партии</button>
+      <button class="tab" data-tab="wh">Склад</button>
+      <button class="tab" data-tab="price">Цены и маржа 🔒</button>
+      <button class="tab" data-tab="analytics">Аналитика</button>
+      <button class="tab" data-tab="history">История</button>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: ОБЗОР ════════ -->
+  <div class="panel active" id="overview">
+    <div class="grid2">
+      <div class="card pad">
+        <div class="grp-h"><span class="eyebrow">Идентификация и наименования</span></div>
+        <div class="fgrid">
+          <div class="field col2"><label>Рабочее наименование</label><div class="val">Аккумуляторная батарея LiFePO4 EVE LF304 3.2V 304Ah /Китай/</div></div>
+          <div class="field col2"><label>Наименование для печати</label><div class="val">Аккумуляторная батарея LiFePO4 EVE LF304 3.2V 304Ah /Китай/</div></div>
+          <div class="field"><label>Код</label><div class="val mono">KA-00006181</div></div>
+          <div class="field"><label>Артикул</label><div class="val mono">EVE-LF304</div></div>
+          <div class="field"><label>Ед. измерения <span class="inh" title="Унаследовано от группы «LiFePO4 ячейки»">⬆ из группы</span></label><div class="val">шт</div></div>
+          <div class="field"><label>Вид номенклатуры <span class="inh" title="Унаследовано от группы «LiFePO4 ячейки»">⬆ из группы</span></label><div class="val">11.4 Литий-ферумные LiFePO4</div></div>
+          <div class="field"><label>Тип</label><div class="val">Товар</div></div>
+          <div class="field"><label>Качество</label><div class="val">Новый</div></div>
+        </div>
+
+        <details class="coll">
+          <summary>Сведения о производителе</summary>
+          <div class="body">
+            <div class="fgrid">
+              <div class="field"><label>Производитель (бренд)</label><div class="val">EVE Energy Co., Ltd</div></div>
+              <div class="field"><label>Марка</label><div class="val">EVE</div></div>
+              <div class="field col2"><label>Импортёр (контрагент) <span class="pill-src">📥 из справочника контрагентов</span></label><div class="val">ООО «Аккумуляторные решения»</div></div>
+              <div class="field"><label>Страна происхождения <span class="inh" title="Унаследовано от группы">⬆ из группы</span></label><div class="val">🇨🇳 Китай</div></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="coll">
+          <summary>Описание и файлы</summary>
+          <div class="body">
+            <div class="field col2"><label>Текстовое описание</label><div class="val unset">не заполнено</div></div>
+            <div class="field col2" style="margin-top:12px"><label>Файлы</label><div class="val">Паспорт ячейки EVE LF304.pdf · Datasheet.pdf</div></div>
+          </div>
+        </details>
+
+        <details class="coll">
+          <summary>Товары другого качества <span class="badge b-mut" style="margin-left:4px">2</span></summary>
+          <div class="body">
+            <p class="sect-lead">Связанные позиции того же товара иного качества (брак / уценка / восстановленные).</p>
+            <table class="rl">
+              <thead><tr><th>Позиция</th><th>Качество</th><th>Код</th><th>Остаток</th></tr></thead>
+              <tbody>
+                <tr><td>АКБ LiFePO4 EVE LF304 (уценка)</td><td><span class="badge b-warn">Grade B</span></td><td class="mono">KA-00006182</td><td class="num">6 шт</td></tr>
+                <tr><td>АКБ LiFePO4 EVE LF304 (восстан.)</td><td><span class="badge b-mut">Refurb</span></td><td class="mono">KA-00006183</td><td class="num">3 шт</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+
+      <!-- sidebar -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card pad">
+          <span class="eyebrow">Фото</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+            <div class="photo" style="width:100%;height:84px;font-size:30px">🔋<span class="cnt">товар</span></div>
+            <div class="photo" style="width:100%;height:84px;font-size:30px;background:linear-gradient(135deg,#F59E0B22,#DC262622)">🏭<span class="cnt">склад Китая</span></div>
+            <div class="photo" style="width:100%;height:84px;font-size:30px;background:linear-gradient(135deg,#16A34A22,#1E5EFF22)">📦<span class="cnt">приёмка</span></div>
+            <div class="photo" style="width:100%;height:84px;font-size:30px;background:var(--sunken)">＋<span class="cnt">ещё</span></div>
+          </div>
+          <p class="sect-lead" style="margin-top:10px">Фото приёмки привязаны к партии (см. «Закупка и партии»), на карточку выводится последнее.</p>
+        </div>
+
+        <div class="card pad">
+          <span class="eyebrow">Золотая запись</span>
+          <p style="margin-top:8px;font-size:13.5px;font-weight:600">★ Эталон в ERP</p>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:7px">
+            <div class="row"><span class="k">ERP-native</span><span class="badge b-ok">эталон</span></div>
+            <div class="row"><span class="k mono">↧ 1С · KA-00006181</span><span class="badge b-mut">синк ←</span></div>
+            <div class="row"><span class="k">Источник истины склада</span><span class="badge b-violet">1С</span></div>
+          </div>
+          <p class="sect-lead" style="margin-top:10px">Мастер-данные ведутся в ERP, склад/остатки — из 1С.</p>
+        </div>
+
+        <div class="card pad">
+          <span class="eyebrow">Заполненность</span>
+          <div class="row" style="border:0;padding-top:8px"><span class="k">Полнота карточки</span><span class="v num" style="color:var(--money)">84%</span></div>
+          <div style="height:8px;border-radius:99px;background:var(--sunken);overflow:hidden;margin-top:4px"><div style="height:100%;width:84%;background:var(--money);border-radius:99px"></div></div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+            <span class="badge b-ok">ТН ВЭД ✓</span><span class="badge b-ok">Вес ✓</span><span class="badge b-warn">Фото товара ⚠</span>
+          </div>
+          <p class="sect-lead" style="margin-top:10px">Обязательность полей — <span class="inh">⬆ из группы</span> (наследуется жёстко).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: ХАРАКТЕРИСТИКИ ════════ -->
+  <div class="panel" id="specs">
+    <div class="grid2">
+      <div class="card pad">
+        <div class="grp-h">
+          <span class="grp-title">Физические · упаковка</span>
+          <button class="expand-all" onclick="toggleAll(this)">Развернуть всё</button>
+        </div>
+        <div class="fgrid">
+          <div class="field"><label>Вес нетто</label><div class="val num">5,42 кг</div></div>
+          <div class="field"><label>Вес брутто</label><div class="val num">5,90 кг</div></div>
+          <div class="field"><label>Габариты (Д×Ш×В)</label><div class="val num">175 × 72 × 207 мм</div></div>
+          <div class="field"><label>Объём</label><div class="val num">2,61 л</div></div>
+          <div class="field"><label>Кол-во в коробке</label><div class="val num">4 шт</div></div>
+          <div class="field"><label>Кол-во на палете</label><div class="val num">96 шт</div></div>
+        </div>
+
+        <div class="grp-h" style="margin-top:18px">
+          <span class="grp-title">Учёт и налоги</span>
+        </div>
+        <div class="fgrid">
+          <div class="field"><label>Код ТН ВЭД <span class="local">задано здесь</span></label><div class="val mono">8507 60 000 0</div></div>
+          <div class="field"><label>Ставка пошлины <span class="pill-src">📥 по коду ТН ВЭД</span></label><div class="val num">0% · литий-ионные</div></div>
+          <div class="field"><label>Ставка НДС <span class="inh" title="Унаследовано от группы">⬆ из группы</span></label><div class="val num">20%</div></div>
+          <div class="field"><label>Утильсбор</label><div class="val num">— не применяется</div></div>
+          <div class="field"><label>Срок хранения <span class="inh" title="Унаследовано от группы «LiFePO4 ячейки»">⬆ из группы</span></label><div class="val num">36 мес</div></div>
+          <div class="field"><label>Контроль срока годности</label><div class="val">По партиям · алерт при &lt; 12 мес</div></div>
+        </div>
+        <div class="lock-note" style="background:var(--warn-bg);color:var(--warn);margin-top:14px">⏳ Ближайшая истекающая партия <b>ЗАК-2026-0355</b> — годна до <b>02.02.2027</b> (осталось ~8 мес). Срок меньше года — позиция помечена для приоритетной отгрузки/распродажи.</div>
+
+        <details class="coll">
+          <summary>Классификаторы (ОКЭД · ОКП · ГТД)</summary>
+          <div class="body">
+            <div class="fgrid">
+              <div class="field"><label>ОКЭД</label><div class="val unset">не указан</div></div>
+              <div class="field"><label>ОКП</label><div class="val unset">не указан</div></div>
+              <div class="field"><label>Учёт по номерам ГТД</label><div class="val">Да</div></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="coll">
+          <summary>Печать ценников и этикеток</summary>
+          <div class="body">
+            <div class="fgrid">
+              <div class="field"><label>Шаблон этикетки</label><div class="val unset">общий для вида · не указан</div></div>
+              <div class="field"><label>Штрихкоды</label><div class="val">2 шт · EAN-13</div></div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="card pad">
+        <div class="grp-h">
+          <span class="grp-title">⚙️ Технические характеристики</span>
+          <span class="pill-src">JSONB · набор <span class="inh">⬆ из группы</span></span>
+        </div>
+        <p class="sect-lead">«Горячие» параметры подняты в поля выше; остальное — таблица «параметр · значение». Набор полей задаёт группа.</p>
+        <table class="attr-tbl">
+          <tr><td>Химия</td><td>LiFePO4 (LFP)</td></tr>
+          <tr><td>Номинальное напряжение</td><td class="num">3,2 В</td></tr>
+          <tr><td>Ёмкость</td><td class="num">304 Ач</td></tr>
+          <tr><td>Энергия</td><td class="num">972,8 Вт·ч</td></tr>
+          <tr><td>Ток заряда (макс.)</td><td class="num">152 А (0,5C)</td></tr>
+          <tr><td>Ресурс (циклов)</td><td class="num">≥ 6000 @ 80% DoD</td></tr>
+          <tr><td>Рабочая температура</td><td class="num">−20…+60 °C</td></tr>
+          <tr><td>Клемма</td><td>M6, шпилька</td></tr>
+          <tr><td>Сертификаты</td><td>UN38.3 · IEC 62619</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: ЗАКУПКА И ПАРТИИ (related lists) ════════ -->
+  <div class="panel" id="procure">
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="grp-h">
+        <span class="grp-title">💰 Landed cost — последний</span>
+        <a href="nomenclature-batch-card.html" class="pill-src">разбор расчёта (инвойс + фрахт + пошлина) →</a>
+      </div>
+      <div class="kpis" style="margin-top:6px">
+        <div class="kpi money"><div class="lab">Себестоимость ед.</div><div class="big num">214,80 ₽</div><div class="sub">BYN, факт по ГТД</div></div>
+        <div class="kpi"><div class="lab">Стадия</div><div class="big" style="font-size:15px">Факт</div><div class="sub">предварит. была 208,40</div></div>
+        <div class="kpi"><div class="lab">Курс</div><div class="big num" style="font-size:15px">¥1 = 0,41</div><div class="sub">НБ РБ · 02.06.2026</div></div>
+        <div class="kpi"><div class="lab">Надбавка к инвойсу</div><div class="big num">+31%</div><div class="sub">фрахт+пошлина+брокер</div></div>
+      </div>
+    </div>
+
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="grp-h"><span class="grp-title">🚚 Партии закупки из Китая</span><span class="pill-src">транзакции · мягкая связь по коду</span></div>
+      <table class="rl">
+        <thead><tr><th>Партия</th><th>Поставщик</th><th>Кол-во</th><th>Машина</th><th>Технология тестирования</th><th>Дата приёмки</th><th>Годен до</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0418</a></td><td>Shenzhen EVE Trading</td><td class="num">96 шт</td>
+            <td><a href="logistics-shipment-card.html" class="mono">MO-2026-007</a></td>
+            <td><span class="badge b-violet">📋 ТТ-LFP-внутр.сопрот.</span></td>
+            <td class="num">14.06.2026</td><td class="num"><span class="badge b-ok">15.03.2028</span></td><td><span class="badge b-ok">Принята</span></td>
+          </tr>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0355</a></td><td>Shenzhen EVE Trading</td><td class="num">48 шт</td>
+            <td><a href="logistics-shipment-card.html" class="mono">MO-2026-005</a></td>
+            <td><span class="badge b-violet">📋 ТТ-LFP-ёмкость</span></td>
+            <td class="num">02.05.2026</td><td class="num"><span class="badge b-warn">02.02.2027 · 8 мес ⚠</span></td><td><span class="badge b-ok">Принята</span></td>
+          </tr>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0502</a></td><td>Ganfeng Lithium</td><td class="num">120 шт</td>
+            <td><a href="logistics-shipment-card.html" class="mono">MO-2026-009</a></td>
+            <td><span class="badge b-mut">— не задана</span></td>
+            <td class="num">в пути</td><td class="num"><span class="badge b-ok">10.01.2029</span></td><td><span class="badge b-warn">Таможня Минск</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card pad">
+      <div class="grp-h"><span class="grp-title">📦 Машина MO-2026-007 — где ехала последняя партия</span><a href="logistics-shipment-card.html" class="pill-src">открыть машину →</a></div>
+      <div class="fgrid" style="margin-bottom:10px">
+        <div class="field"><label>Контейнер</label><div class="val mono">MSKU-784512-3</div></div>
+        <div class="field"><label>Маршрут · режим</label><div class="val">Шэньчжэнь → Минск · море+авто · FOB</div></div>
+      </div>
+      <div class="timeline">
+        <span class="tl done"><span class="dot"></span>Выкуп</span><span class="arr">›</span>
+        <span class="tl done"><span class="dot"></span>Производство</span><span class="arr">›</span>
+        <span class="tl done"><span class="dot"></span>Склад Китай</span><span class="arr">›</span>
+        <span class="tl done"><span class="dot"></span>Проверка</span><span class="arr">›</span>
+        <span class="tl done"><span class="dot"></span>Отправка</span><span class="arr">›</span>
+        <span class="tl done"><span class="dot"></span>Таможня Минск</span><span class="arr">›</span>
+        <span class="tl cur"><span class="dot"></span>Склад Минск</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: СКЛАД ════════ -->
+  <div class="panel" id="wh">
+    <div class="grid2">
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">🗄 Размещение и остатки</span><span class="pill-src">истина остатка — 1С</span></div>
+        <table class="rl">
+          <thead><tr><th>Склад</th><th>Зона</th><th>Стеллаж / ячейка</th><th>Остаток</th><th>Инвентаризация</th></tr></thead>
+          <tbody>
+            <tr><td>Главный (Минск)</td><td>Хранение A</td><td class="mono">A-12-03</td><td class="num">96 шт</td><td class="num">20.06.2026</td></tr>
+            <tr><td>Главный (Минск)</td><td>Подбор B</td><td class="mono">B-04-11</td><td class="num">32 шт</td><td class="num">20.06.2026</td></tr>
+            <tr><td>Транзит</td><td>Таможня</td><td class="mono">—</td><td class="num">120 шт</td><td class="num">в пути</td></tr>
+          </tbody>
+        </table>
+        <p class="sect-lead" style="margin-top:12px">Итого по складам: <b>128 шт</b> в наличии + 120 шт в пути.</p>
+      </div>
+      <div class="card pad">
+        <span class="eyebrow">Идентификация на складе</span>
+        <div class="fgrid" style="margin-top:10px">
+          <div class="field"><label>Штрихкод (EAN-13)</label><div class="val mono">4810000061812</div></div>
+          <div class="field"><label>QR-этикетка</label><div class="val">▣ печать</div></div>
+          <div class="field col2"><label>Учёт серий</label><div class="val">Не используются (учёт по партиям/ГТД)</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card pad" style="margin-top:16px">
+      <div class="grp-h">
+        <span class="grp-title">🔄 Движение номенклатуры</span>
+        <span class="pill-src">приход / расход / перемещение · период 30 дн · источник 1С + WMS</span>
+      </div>
+      <table class="rl">
+        <thead><tr><th>Дата</th><th>Документ</th><th>Операция</th><th>Откуда → Куда</th><th>Кол-во</th><th>Остаток после</th></tr></thead>
+        <tbody>
+          <tr><td class="num">24.06.2026</td><td class="mono">Реализация 00КА-001906</td><td><span class="badge b-bad">Расход</span></td><td>A-12-03 → Клиент</td><td class="num">−12 шт</td><td class="num">128 шт</td></tr>
+          <tr><td class="num">20.06.2026</td><td class="mono">Перемещение 00ПМ-0331</td><td><span class="badge b-info">Перемещ.</span></td><td>B-04-11 → A-12-03</td><td class="num">64 шт</td><td class="num">140 шт</td></tr>
+          <tr><td class="num">14.06.2026</td><td class="mono">Поступление ЗАК-2026-0418</td><td><span class="badge b-ok">Приход</span></td><td>Таможня → A-12-03</td><td class="num">+96 шт</td><td class="num">140 шт</td></tr>
+          <tr><td class="num">08.06.2026</td><td class="mono">Реализация 00КА-001854</td><td><span class="badge b-bad">Расход</span></td><td>B-04-11 → Клиент</td><td class="num">−40 шт</td><td class="num">44 шт</td></tr>
+        </tbody>
+      </table>
+      <p class="sect-lead" style="margin-top:10px">Полный отчёт (по складам · по ячейкам · по сериям) → <a href="nomenclature-movements-report.html">открыть «Движения товара»</a>. Истина остатка — 1С.</p>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: ЦЕНЫ И МАРЖА (доступ по ролям) ════════ -->
+  <div class="panel" id="price">
+    <div class="lock-note">🔒 Видно отделу продаж, директору и заму. Закупщик видит landed cost и цену со скидкой (контроль маржи), но не видит клиента.</div>
+    <div class="grid2">
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">💵 Цена и маржа</span></div>
+        <table class="rl">
+          <thead><tr><th>Показатель</th><th>Значение</th><th>Маржа от landed cost</th></tr></thead>
+          <tbody>
+            <tr><td>Landed cost (себест.)</td><td class="num">214,80 ₽</td><td>—</td></tr>
+            <tr><td>Прайс (база)</td><td class="num">329,00 ₽</td><td><span class="badge b-ok">+53%</span></td></tr>
+            <tr><td>Цена со скидкой 8%</td><td class="num">302,68 ₽</td><td><span class="badge b-ok">+41%</span></td></tr>
+            <tr><td>Минимальная цена</td><td class="num">258,00 ₽</td><td><span class="badge b-warn">+20%</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card pad">
+        <span class="eyebrow">История цен 🕘</span>
+        <p class="sect-lead" style="margin-top:8px">Версионно (SCD2), как курсы валют и НДС.</p>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
+          <div class="row"><span class="k">329,00 ₽ · с 01.06.2026</span><span class="badge b-ok">текущая</span></div>
+          <div class="row"><span class="k">315,00 ₽ · 01.04–31.05</span><span class="badge b-mut">архив</span></div>
+          <div class="row"><span class="k">298,00 ₽ · 01.01–31.03</span><span class="badge b-mut">архив</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: АНАЛИТИКА ════════ -->
+  <div class="panel" id="analytics">
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="grp-h"><span class="grp-title">📊 Классификация ABC / XYZ</span><span class="pill-src">за 12 мес · по выручке × стабильности спроса</span></div>
+      <div class="kpis k4" style="margin-top:6px">
+        <div class="kpi"><div class="lab">ABC (выручка)</div><div class="big" style="color:var(--money)">A</div><div class="sub">топ-12% по обороту</div></div>
+        <div class="kpi"><div class="lab">XYZ (спрос)</div><div class="big" style="color:var(--brand)">X</div><div class="sub">стабильный, прогнозируемый</div></div>
+        <div class="kpi"><div class="lab">Итоговый класс</div><div class="big">AX</div><div class="sub">ключевой ходовой товар</div></div>
+        <div class="kpi"><div class="lab">Рекомендация</div><div class="big" style="font-size:14px">Не допускать дефицит</div><div class="sub">высокий приоритет закупки</div></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">💹 Продажи номенклатуры</span><span class="pill-src">🔒 топ-клиенты — по ролям</span></div>
+        <div style="display:flex;gap:20px;align-items:flex-end;margin:10px 0 14px">
+          <div><div class="big num" style="font-size:24px;font-weight:800">1 248 <span style="font-size:13px;color:var(--muted)">шт/год</span></div><div class="sub" style="color:var(--money)">▲ +18% к прошлому году</div></div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:flex-end;height:64px;margin-bottom:10px">
+          <div style="flex:1;background:var(--brand);opacity:.35;height:40%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);opacity:.45;height:55%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);opacity:.5;height:48%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);opacity:.6;height:70%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);opacity:.7;height:82%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);opacity:.85;height:75%;border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;background:var(--brand);height:95%;border-radius:3px 3px 0 0"></div>
+        </div>
+        <table class="rl">
+          <thead><tr><th>Топ-клиенты</th><th>Продано</th><th>Сумма</th></tr></thead>
+          <tbody>
+            <tr><td>🔒 ОАО «БелАвтоТех»</td><td class="num">320 шт</td><td class="num">105 280 ₽</td></tr>
+            <tr><td>🔒 ООО «ЭнергоСбыт»</td><td class="num">186 шт</td><td class="num">61 194 ₽</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card pad">
+        <div class="grp-h"><span class="grp-title">🔁 Оборачиваемость и дефицит</span></div>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:8px">
+          <div class="row"><span class="k">Дней запаса (текущий темп)</span><span class="v num">37 дн</span></div>
+          <div class="row"><span class="k">Скорость расхода</span><span class="v num">~3,5 шт/день</span></div>
+          <div class="row"><span class="k">Оборачиваемость</span><span class="v num">9,8×/год</span></div>
+          <div class="row"><span class="k">Прогноз «когда кончится»</span><span class="v" style="color:var(--warn)">01.08.2026</span></div>
+          <div class="row"><span class="k">В пути (придёт)</span><span class="v num">120 шт · ~10 дн</span></div>
+        </div>
+        <div class="lock-note" style="background:var(--info-bg);color:var(--brand-700);margin-top:14px">📥 Сигнал в закупку: при темпе 3,5 шт/день и поставке через машину MO-2026-009 дефицита не будет. Связь с S&OP.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ ВКЛАДКА: ИСТОРИЯ ════════ -->
+  <div class="panel" id="history">
+    <div class="card pad">
+      <div class="grp-h"><span class="grp-title">🕘 Аудит изменений</span></div>
+      <table class="rl">
+        <thead><tr><th>Поле</th><th>Было</th><th>Стало</th><th>Кто</th><th>Когда</th><th>Источник</th></tr></thead>
+        <tbody>
+          <tr><td>Landed cost</td><td class="num">208,40 ₽</td><td class="num">214,80 ₽</td><td>система</td><td class="num">14.06 09:14</td><td><span class="badge b-violet">↧ 1С / ГТД</span></td></tr>
+          <tr><td>Стеллаж</td><td class="mono">B-04-11</td><td class="mono">A-12-03</td><td>Кладовщик · Сидоров</td><td class="num">20.06 11:02</td><td><span class="badge b-info">ERP / инвент.</span></td></tr>
+          <tr><td>Прайс</td><td class="num">315,00 ₽</td><td class="num">329,00 ₽</td><td>РОП · Петров</td><td class="num">01.06 16:40</td><td><span class="badge b-info">ERP</span></td></tr>
+          <tr><td>ТН ВЭД</td><td class="unset">—</td><td class="mono">8507 60 000 0</td><td>Закупки · Иванова</td><td class="num">28.05 10:15</td><td><span class="badge b-info">ERP</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p style="text-align:center;color:var(--faint);font-size:11.5px;margin-top:24px">
+    Превью карточки номенклатуры · витрина золотой записи · демо-данные (BYN) · 2 темы.
+    Структура по <span class="mono">coordination/nomenclature-card-design.md</span>
+  </p>
+</div>
+
+<script>
+  // вкладки
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.addEventListener('click',function(){
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById(t.dataset.tab).classList.add('active');
+    });
+  });
+  // развернуть/свернуть все <details> в ближайшей карточке
+  function toggleAll(btn){
+    var card=btn.closest('.card');
+    var dets=card.querySelectorAll('details.coll');
+    var anyClosed=Array.from(dets).some(d=>!d.open);
+    dets.forEach(d=>d.open=anyClosed);
+    btn.textContent=anyClosed?'Свернуть всё':'Развернуть всё';
+  }
+  /* демо-отклик: любой кликабельный элемент без своего действия показывает тост (нет «ничего не произошло») */
+  (function(){
+    function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-pop);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+    document.addEventListener('click',function(e){
+      var el=e.target.closest('button,.tab,.btn,.expand-all,a[href="#"],[data-demo]');
+      if(!el)return;
+      if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+      if(el.classList.contains('tab')||el.classList.contains('expand-all'))return; // у них своё действие
+      if(el.tagName==='SUMMARY'||el.closest('summary'))return;
+      if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+      if(el.tagName==='A')e.preventDefault();
+      var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+      dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+    },true);
+  })();
+</script>
+</body>
+</html>
