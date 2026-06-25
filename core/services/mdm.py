@@ -65,7 +65,13 @@ async def match_candidates(
 
 
 def _apply_survivorship(survivor: Counterparty, duplicate: Counterparty) -> None:
-    """Непустое значение выигрывает; эталон в приоритете при конфликте (заполняем пустое)."""
+    """Непустое значение выигрывает; эталон в приоритете при конфликте (заполняем пустое).
+
+    Дефолт при merge (стратегия ``non_empty_wins``). Правила-как-данные применяются на пути
+    импорта (``reference_import`` + ``survivorship``); при ручном merge дублей эталон в
+    приоритете — расширить до загрузки правил можно, когда появятся не-``non_empty_wins``
+    поля, конфликтующие именно при слиянии (YAGNI).
+    """
     for field in _SURVIVORSHIP_FIELDS:
         if not getattr(survivor, field) and getattr(duplicate, field):
             setattr(survivor, field, getattr(duplicate, field))

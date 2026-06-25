@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Правила слияния (survivorship) — справочники</title>
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .ring-slate-100{--tw-ring-color:#172033 !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-red-50{background:#2A1717 !important} html.dark .text-red-700{color:#F87171 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-violet-50{background:#211A33 !important} html.dark .text-violet-700{color:#C4B5FD !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .src-egr{background:#ecfdf5;color:#047857}    html.dark .src-egr{background:#16271F;color:#34D399}
+    .src-erp{background:#eef2ff;color:#4338ca}    html.dark .src-erp{background:#211A33;color:#C4B5FD}
+    .src-1c{background:#eff6ff;color:#1d4ed8}      html.dark .src-1c{background:#16233F;color:#7FA8FF}
+    .src-bitrix{background:#fff7ed;color:#c2410c} html.dark .src-bitrix{background:#2A2114;color:#FBBF24}
+    .src-manual{background:#f1f5f9;color:#475569} html.dark .src-manual{background:#16202F;color:#AEB9C9}
+    .chip{display:inline-flex;align-items:center;gap:3px;border-radius:999px;padding:1px 8px;font:600 11.5px ui-sans-serif,system-ui;white-space:nowrap}
+    select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:26px}
+    .theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+      background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+      border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+      box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+    .theme-tgl:hover{background:#1545CC !important}
+    html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+      box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <a href="spravochniki-card-provenance.html" class="text-[12px] text-muted hover:text-brand-600">← Карточка контрагента (происхождение)</a>
+
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-bold text-ink">Правила слияния (survivorship)</h1>
+        <p class="mt-1 max-w-3xl text-sm text-muted">Кто «побеждает» при конфликте источников — задаётся <span class="font-medium text-ink">как данные, а не в коде</span>. Для каждого поля: стратегия + приоритет источников. Так синк из 1С <span class="font-medium text-ink">не затирает</span> то, что закреплено за ЕГР, ERP или ручным вводом. Хранится в таблице <span class="font-mono">survivorship_rule</span>; применяется при импорте и merge.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Сбросить к дефолту</button>
+        <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Сохранить правила</button>
+      </div>
+    </div>
+
+    <!-- Сущность + приоритет источников -->
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+
+      <!-- Левая: глобальный приоритет источников -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Глобальный приоритет источников</p>
+        <p class="mt-1 text-[12px] text-muted">Порядок доверия по умолчанию. Стратегия <span class="font-mono">source_priority</span> берёт первый доступный источник слева направо. Перетаскивание — в проде; здесь демонстрация порядка.</p>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <span class="chip src-egr">1 · 🏛 ЕГР</span><span class="text-slate-300">›</span>
+          <span class="chip src-erp">2 · ✦ ERP</span><span class="text-slate-300">›</span>
+          <span class="chip src-manual">3 · ✍ Вручную</span><span class="text-slate-300">›</span>
+          <span class="chip src-1c">4 · 📥 1С</span><span class="text-slate-300">›</span>
+          <span class="chip src-bitrix">5 · 🔵 Битрикс</span>
+        </div>
+        <p class="mt-3 text-[11px] text-slate-400">Конституция данных: реквизиты — из госреестра (ЕГР); внутренние решения — за ERP; ручная правка важнее автосинка; 1С точен в УНП/деньгах; Битрикс — контакты, но не реквизиты.</p>
+      </div>
+
+      <!-- Правая: выбор сущности -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Сущность</p>
+        <div class="mt-3 space-y-2">
+          <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl bg-brand-100 px-3 py-2 text-sm font-semibold text-brand-600">Контрагент <span class="chip src-erp">8 правил</span></label>
+          <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Номенклатура (SKU) <span class="chip src-manual">6 правил</span></label>
+          <label class="flex cursor-pointer items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Контакт <span class="chip src-manual">4 правила</span></label>
+        </div>
+        <p class="mt-3 text-[11px] text-slate-400">Правила задаются на сущность. Поля без своего правила берут стратегию по умолчанию (<span class="font-mono">non_empty_wins</span>).</p>
+      </div>
+    </div>
+
+    <!-- Таблица правил по полям -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Правила по полям — Контрагент</p>
+        <button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-brand-600 shadow-card ring-1 ring-slate-200">+ добавить поле</button>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th class="px-3 py-2 font-semibold">Поле</th>
+              <th class="px-3 py-2 font-semibold">Стратегия</th>
+              <th class="px-3 py-2 font-semibold">Приоритет / параметр</th>
+              <th class="px-3 py-2 font-semibold">Эффект при синке из 1С</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">УНП</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option selected>source_priority</option><option>manual_only</option><option>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5"><span class="chip src-egr">🏛 только ЕГР</span></td>
+              <td class="px-3 py-2.5 text-emerald-700">🛡 не трогает</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Полное наименование</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option selected>source_priority</option><option>manual_only</option><option>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5"><span class="chip src-egr">🏛 ЕГР</span> <span class="text-slate-300">›</span> <span class="chip src-1c">📥 1С</span></td>
+              <td class="px-3 py-2.5 text-emerald-700">🛡 не трогает (есть ЕГР)</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Краткое наименование</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option>source_priority</option><option selected>manual_only</option><option>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5"><span class="chip src-manual">✍ только вручную</span></td>
+              <td class="px-3 py-2.5 text-emerald-700">🛡 не трогает</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Юридический адрес</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option selected>source_priority</option><option>manual_only</option><option>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5"><span class="chip src-egr">🏛 ЕГР</span></td>
+              <td class="px-3 py-2.5 text-emerald-700">🛡 не трогает</td>
+            </tr>
+            <tr class="bg-amber-50/40 hover:bg-amber-50/70">
+              <td class="px-3 py-2.5 font-medium">Телефон</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option>source_priority</option><option>manual_only</option><option selected>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5 text-slate-500">самое свежее по дате</td>
+              <td class="px-3 py-2.5 text-amber-700">⚠ обновит, если 1С новее</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">e-mail</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option>source_priority</option><option>manual_only</option><option>most_recent</option><option selected>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5 text-slate-500">непустое выигрывает</td>
+              <td class="px-3 py-2.5 text-slate-400">— обновит, если в ERP пусто</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Отрасль</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option>source_priority</option><option>manual_only</option><option>most_recent</option><option selected>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5 text-slate-500">непустое выигрывает</td>
+              <td class="px-3 py-2.5 text-slate-400">— синк обновит</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Тип (клиент/поставщик)</td>
+              <td class="px-3 py-2.5">
+                <select class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[13px] text-ink ring-1 ring-slate-200 outline-none">
+                  <option selected>source_priority</option><option>manual_only</option><option>most_recent</option><option>non_empty_wins</option>
+                </select>
+              </td>
+              <td class="px-3 py-2.5"><span class="chip src-erp">✦ ERP</span></td>
+              <td class="px-3 py-2.5 text-emerald-700">🛡 не трогает</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Стратегии — справка -->
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="font-mono text-[12px] font-semibold text-brand-600">source_priority</p>
+        <p class="mt-1.5 text-[12px] text-muted">Берёт значение из самого приоритетного доступного источника. Для реквизитов: ЕГР → ERP → 1С.</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="font-mono text-[12px] font-semibold text-brand-600">manual_only</p>
+        <p class="mt-1.5 text-[12px] text-muted">Меняется только человеком в ERP. Никакой синк не перезаписывает. Для выверенных вручную полей.</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="font-mono text-[12px] font-semibold text-brand-600">most_recent</p>
+        <p class="mt-1.5 text-[12px] text-muted">Выигрывает самое свежее по дате изменения, независимо от источника. Для телефонов/контактов.</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="font-mono text-[12px] font-semibold text-brand-600">non_empty_wins</p>
+        <p class="mt-1.5 text-[12px] text-muted">Дефолт: непустое значение замещает пустое; при конфликте двух непустых эталон сохраняется. Как сейчас в коде.</p>
+      </div>
+    </div>
+
+    <!-- Предпросмотр следующего синка -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Предпросмотр — что сделает следующий синк из 1С</p>
+        <span class="chip src-1c">📥 пакет из 1С · 142 записи</span>
+      </div>
+      <div class="mt-3 grid gap-3 sm:grid-cols-3">
+        <div class="rounded-xl bg-emerald-50 p-3">
+          <p class="text-2xl font-bold text-emerald-700">118</p>
+          <p class="text-[12px] text-emerald-700">полей защищено правилом — <b>не изменятся</b></p>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-3">
+          <p class="text-2xl font-bold text-ink">47</p>
+          <p class="text-[12px] text-muted">пустых полей будут <b>заполнены</b> из 1С</p>
+        </div>
+        <div class="rounded-xl bg-amber-50 p-3">
+          <p class="text-2xl font-bold text-amber-700">3</p>
+          <p class="text-[12px] text-amber-700">конфликта на ручную проверку (approval)</p>
+        </div>
+      </div>
+      <p class="mt-3 text-[12px] text-muted">Без правил все 168 непустых полей были бы <span class="text-red-700 font-medium">перезаписаны</span> из 1С (как сейчас в коде). С правилами 1С обновит только то, что ему отдано. Спорные merge/конфликты идут человеку в контур (approval) — не авто.</p>
+      <div class="mt-3 flex items-center gap-2">
+        <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Применить синк по правилам</button>
+        <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Показать 3 конфликта</button>
+      </div>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные. Дорожная карта: coordination/reference-independence-roadmap.md (M2.2). Бэкенд: переносит хардкод <span class="font-mono">_SURVIVORSHIP_FIELDS</span> из core/services/mdm.py в таблицу <span class="font-mono">survivorship_rule</span>; человек-в-контуре на спорных merge — концепция §7.2.</p>
+
+  </div>
+<script>
+/* демо-отклик */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,a[href="#"],[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

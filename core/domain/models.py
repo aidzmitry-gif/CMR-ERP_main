@@ -29,6 +29,10 @@ class Counterparty(Base):
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
     # ссылка дубля на эталон, в который он слит (NULL — самостоятельная запись)
     merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"))
+    # происхождение по полям (field-level provenance): {поле: {"source": ..., "at": ...}}.
+    # Источник КАЖДОГО поля, а не записи целиком → survivorship-движок знает, что синк
+    # вправе перезаписать, а что закреплено за ЕГР/ERP/ручным вводом (M2 дорожной карты).
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class CounterpartyAlias(Base):
@@ -45,6 +49,26 @@ class CounterpartyAlias(Base):
     source: Mapped[str] = mapped_column(String(32))  # "1c" | "bitrix" | "merge" | "erp"
     external_ref: Mapped[str] = mapped_column(String(128))  # id/код записи в источнике
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class SurvivorshipRule(Base):
+    """Правило слияния по полю — «кто побеждает» при конфликте источников (M2).
+
+    Survivorship как **данные, а не код**: для пары (сущность, поле) задаётся стратегия и,
+    для ``source_priority``, упорядоченный список источников. Применяется при импорте из
+    внешних систем и при merge дублей. Поля без своего правила берут дефолт ``non_empty_wins``.
+    Так синк из 1С не затирает то, что закреплено за ЕГР/ERP/ручным вводом.
+    """
+
+    __tablename__ = "survivorship_rule"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(32))  # "counterparty" | "sku" | ...
+    field: Mapped[str] = mapped_column(String(64))
+    # стратегия: source_priority | manual_only | most_recent | non_empty_wins
+    strategy: Mapped[str] = mapped_column(String(32))
+    # для source_priority — упорядоченный список источников ["egr","erp","manual","1c","bitrix"]
+    source_priority: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
 
 
 class Contact(Base):
