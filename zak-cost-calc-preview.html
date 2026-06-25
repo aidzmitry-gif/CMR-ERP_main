@@ -66,7 +66,7 @@
           <span class="text-faint">/</span>
           <span class="text-sm font-semibold">Калькулятор себестоимости</span>
         </div>
-        <h1 class="mt-1 text-2xl font-bold">Себестоимость закупки (Китай) → цена → прибыль</h1>
+        <h1 class="mt-1 text-2xl font-bold">Предварительная себестоимость (Китай) → цена реализации</h1>
         <p class="mt-1 text-[13px] text-muted max-w-[760px]">
           Сквозной расчёт: цена поставщика + комиссия + страховка + доставка + пошлина → <b>landed cost</b> за штуку →
           наценка и НДС → цена продажи → прибыль и рентабельность. Все ставки и курсы редактируемые (поля настроек ниже),
@@ -77,6 +77,12 @@
         <button id="addRow" class="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card hover:opacity-90">+ Позиция</button>
         <button id="resetBtn" class="rounded-xl bg-surface px-3 py-2 text-sm font-semibold text-ink border border-line hover:border-accent">Сбросить</button>
       </div>
+    </div>
+
+    <!-- Назначение + куда идёт цена + источник фактической себестоимости -->
+    <div class="mt-4 rounded-2xl bg-accent-soft/50 border border-accent/20 px-4 py-3 text-[13px] text-ink space-y-1">
+      <div><b>Назначение:</b> предварительная (плановая, не точная) себестоимость → <b>цена реализации</b>. Эта цена <b>согласуется с клиентом</b> и идёт в <b>прайс</b> и в <b>цену продажи клиентам</b>.</div>
+      <div class="text-muted"><b class="text-ink">Фактическая себестоимость</b> сюда не вводится: сейчас она <b class="text-ink">из 1С</b>, после ухода с 1С — <b class="text-ink">через план счетов ERP</b>; служит для маржи факта и согласованную цену не меняет.</div>
     </div>
 
     <!-- НАСТРОЙКИ: курсы + ставки -->
@@ -110,9 +116,9 @@
     <!-- ИТОГИ -->
     <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="rounded-2xl bg-surface p-4 shadow-card">
-        <div class="text-[11px] text-muted">Себестоимость партии</div>
+        <div class="text-[11px] text-muted">Себестоимость партии <span class="text-faint">· план</span></div>
         <div id="tCost" class="mt-1 text-xl font-bold num">—</div>
-        <div class="text-[11px] text-faint">landed cost, BYN</div>
+        <div class="text-[11px] text-faint">предварит. landed cost, BYN · факт — из 1С</div>
       </div>
       <div class="rounded-2xl bg-surface p-4 shadow-card">
         <div class="text-[11px] text-muted">Выручка с НДС</div>
@@ -162,7 +168,7 @@
               <th class="px-2 py-2 font-semibold text-right">Наценка ×</th>
               <th class="px-2 py-2 font-semibold text-right bg-accent-soft/60">Себес/шт, BYN</th>
               <th class="px-2 py-2 font-semibold text-right">Цена без НДС</th>
-              <th class="px-2 py-2 font-semibold text-right">Цена с НДС</th>
+              <th class="px-2 py-2 font-semibold text-right">Цена с НДС <span class="block text-[9px] font-medium text-accent">→ прайс / клиенту</span></th>
               <th class="px-2 py-2 font-semibold text-right text-money">Прибыль/шт</th>
               <th class="px-2 py-2 font-semibold text-right">Рентаб.</th>
               <th class="px-2 py-2 font-semibold">Статус / машина</th>
@@ -352,6 +358,7 @@ function renderBreakdown(S){
       <div class="mt-2 text-[12px] font-semibold text-ink mb-1">3 · Цена продажи</div>
       ${row('× наценка', f2(c.priceEx)+' BYN', `× ${r.markup}`)}
       ${row('+ НДС', f2(c.priceVat)+' BYN', `${(S.vat*100).toFixed(0)}%`)}
+      <div class="mt-2 rounded-lg bg-accent-soft/60 px-2.5 py-1.5 text-[11px] text-accent">→ согласуется с клиентом → в прайс и цену продажи</div>
     </div>`;
   const colProfit = `
     <div class="rounded-xl bg-sunken p-3">
