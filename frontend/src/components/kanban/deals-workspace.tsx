@@ -20,6 +20,7 @@ import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
+import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import { KpiCard } from "@/components/kpi-card";
@@ -188,6 +189,8 @@ export function DealsWorkspace({
   // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
   // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
   const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
+  // callDeal = открыто окно звонка по этой сделке (тот же кокпит, что и у лида).
+  const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
   const [query, setQuery] = useState("");
@@ -599,6 +602,23 @@ export function DealsWorkspace({
           openLose(dealId);
           setPreviewDeal(null);
         }}
+        onCall={(d) => setCallDeal(d)}
+      />
+
+      {/* Окно звонка по сделке — единый кокпит (скрипт сделки + подбор товара →
+          позиции сделки реальным addDealItem). Тот же компонент, что и в лидах. */}
+      <CallWindow
+        context={
+          callDeal
+            ? {
+                kind: "deal",
+                dealId: callDeal.id,
+                number: callDeal.number,
+                company: callDeal.company,
+              }
+            : null
+        }
+        onClose={() => setCallDeal(null)}
       />
     </>
   );

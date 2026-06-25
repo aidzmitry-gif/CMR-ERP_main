@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Flag,
+  Phone,
   Plus,
   Star,
   User,
@@ -35,6 +36,7 @@ export function DealDrawerPreview({
   onAddTask,
   onWin,
   onLose,
+  onCall,
 }: {
   deal: Deal | null;
   stages: Stage[];
@@ -44,6 +46,8 @@ export function DealDrawerPreview({
   onAddTask: (dealId: string, title: string) => void;
   onWin: (dealId: string) => void;
   onLose: (dealId: string) => void;
+  /** Открыть окно звонка по сделке (тот же кокпит, что и у лида). */
+  onCall?: (deal: Deal) => void;
 }) {
   // Esc-закрытие
   useEffect(() => {
@@ -303,6 +307,19 @@ export function DealDrawerPreview({
                   </Row>
                 )}
               </dl>
+
+              {/* === ЗВОНОК → окно-кокпит (скрипт + подбор товара + позиции в сделку) === */}
+              {onCall && (
+                <Button
+                  variant="call"
+                  block
+                  className="mt-4"
+                  onClick={() => onCall(deal)}
+                  icon={<Phone size={15} />}
+                >
+                  Позвонить — окно звонка
+                </Button>
+              )}
 
               {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
               <div className="mt-4 rounded-xl border border-line p-3">

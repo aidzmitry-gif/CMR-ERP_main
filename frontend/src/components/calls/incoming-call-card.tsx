@@ -34,6 +34,7 @@ export function IncomingCallCard({
   onLinkDeal,
   onCreateDeal,
   onCreateLead,
+  onAccept,
 }: {
   card: CallCard;
   onClose: () => void;
@@ -42,6 +43,8 @@ export function IncomingCallCard({
   onLinkDeal: () => void;
   onCreateDeal: () => void;
   onCreateLead: () => void;
+  /** Принять звонок → открыть рабочий кокпит разговора (CallWindow). */
+  onAccept?: () => void;
 }) {
   const [note, setNote] = useState("");
   const [savedNote, setSavedNote] = useState(false);
@@ -124,6 +127,10 @@ export function IncomingCallCard({
               <span className="font-semibold text-ink">Сделка #{card.deal_id}</span>
               <span className="text-xs font-medium text-accent-ink">Провалиться →</span>
             </button>
+          ) : known ? (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              Активных сделок нет — пора перезаказ? Оформите прямо в разговоре.
+            </div>
           ) : null}
 
           {/* итог звонка (после завершения) */}
@@ -171,20 +178,38 @@ export function IncomingCallCard({
             </button>
           </div>
 
-          {/* действия */}
-          <div className="mt-4 flex gap-2">
+          {/* приём звонка → рабочий кокпит разговора (скрипт + подбор товара + счёт) */}
+          {!ended && onAccept && (
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={onAccept}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-money px-3 py-2.5 text-sm font-semibold text-white hover:brightness-105"
+              >
+                <Phone size={15} /> Принять
+              </button>
+              <button
+                onClick={() => onResult("Нет ответа")}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-muted hover:bg-sunken"
+              >
+                <PhoneOff size={15} /> Отклонить
+              </button>
+            </div>
+          )}
+
+          {/* создать запись из звонка (вторично — или когда приём недоступен) */}
+          <div className="mt-2 flex gap-2">
             <button
               onClick={onCreateDeal}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-accent-ink"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-2 text-[13px] font-semibold text-muted hover:bg-sunken"
             >
-              <Phone size={15} /> Создать сделку
+              <Phone size={14} /> Создать сделку
             </button>
             {!known && (
               <button
                 onClick={onCreateLead}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-2.5 text-sm font-semibold text-muted hover:bg-sunken"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-2 text-[13px] font-semibold text-muted hover:bg-sunken"
               >
-                <UserPlus size={15} /> Создать лид
+                <UserPlus size={14} /> Создать лид
               </button>
             )}
           </div>

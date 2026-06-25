@@ -6,7 +6,7 @@ import { Globe, Mail, Phone, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { LeadCallPopup } from "@/components/leads/lead-call-popup";
+import { CallWindow } from "@/components/calls/call-window";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import {
   convertLead,
@@ -748,11 +748,22 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         onCall={(l) => setCallPopupLead(l)}
       />
 
-      {/* Screen-pop звонка по лиду (открывается с кнопки «📞» на карточке или в drawer). */}
-      <LeadCallPopup
-        lead={callPopupLead}
+      {/* Единое окно звонка (call-window): тот же кокпит, что и в сделках, со скриптом лида,
+          подбором товара и сбором позиций в сделку. Открывается с «📞» на карточке/в drawer. */}
+      <CallWindow
+        context={
+          callPopupLead
+            ? {
+                kind: "lead",
+                leadId: callPopupLead.id,
+                company: callPopupLead.company,
+                person: callPopupLead.name,
+                phone: callPopupLead.phone,
+                product: callPopupLead.product,
+              }
+            : null
+        }
         onClose={() => setCallPopupLead(null)}
-        onPatch={patch}
       />
 
       {/* Подсказка «Выберите лид» когда нет лидов вовсе — для пустого инбокса. */}

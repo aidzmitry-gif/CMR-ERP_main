@@ -164,6 +164,49 @@ export async function fetchSkus(): Promise<SkuOption[]> {
   }
 }
 
+/** Строка остатка/цены по складу (demo-зеркало 1С, владелец — integrations). */
+export interface StockRow {
+  sku_code: string;
+  warehouse: string;
+  qty_available: number;
+  qty_reserved: number;
+  qty_forecast: number; // «в пути» / прогноз прихода
+  price: number;
+}
+
+/** Остатки и цены по складам (для подбора товара со склада в окне звонка). */
+export async function fetchStock(): Promise<StockRow[]> {
+  try {
+    const res = await fetch("/api/integrations/1c/stock", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as StockRow[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Зафиксировать котировку цены SKU клиенту (Price Engine, POST /prices).
+ * Нужна, чтобы позиция сделки знала цену: deal-items берёт last/min из PriceQuote
+ * по (sku_code, counterparty). Пишем цену со склада на контрагента сделки.
+ */
+export async function createPriceQuote(
+  skuCode: string,
+  counterparty: string,
+  price: number,
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku_code: skuCode, counterparty, price }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Позиции номенклатуры сделки (с ценами клиенту). */
 export async function fetchDealItems(dealId: string): Promise<DealItemFull[]> {
   try {
