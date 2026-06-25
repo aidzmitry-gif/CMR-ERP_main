@@ -2,9 +2,12 @@
 "use client";
 
 import clsx from "clsx";
-import { Globe, Mail, Plus, X } from "lucide-react";
+import { Globe, Mail, Phone, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { LeadCallPopup } from "@/components/leads/lead-call-popup";
+import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import {
   convertLead,
   createLead,
@@ -185,15 +188,45 @@ function Pin() {
 function LeadCard({
   lead,
   selected,
-  onSelect,
+  onPreview,
+  onOpen,
+  onCall,
 }: {
   lead: Lead;
   selected: boolean;
-  onSelect: () => void;
+  onPreview: () => void;
+  onOpen: () => void;
+  onCall: () => void;
 }) {
+  // Click vs double-click split: 1 клик → drawer-preview справа,
+  // 2 клика → полная страница /crm/leads/[id]. Кнопка «📞» — отдельная,
+  // не должна триггерить выбор/навигацию.
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+    },
+    [],
+  );
+
+  function handleClick(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-card-action]")) return;
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onOpen();
+      return;
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      onPreview();
+    }, 230);
+  }
+
   return (
     <div
-      onClick={onSelect}
+      onClick={handleClick}
       className={clsx(
         "cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop",
         selected ? "border-accent ring-1 ring-accent" : "border-line",
@@ -216,7 +249,24 @@ function LeadCard({
           <Pin />
           {lead.region || "—"}
         </span>
-        {lead.qualification && <ScoreBadge lead={lead} />}
+        <div className="flex items-center gap-1.5">
+          {lead.qualification && <ScoreBadge lead={lead} />}
+          {lead.phone && (
+            <button
+              type="button"
+              data-card-action
+              onClick={(e) => {
+                e.stopPropagation();
+                onCall();
+              }}
+              aria-label="Позвонить"
+              title={`Позвонить ${lead.phone}`}
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-money text-white hover:brightness-105"
+            >
+              <Phone size={13} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -440,10 +490,16 @@ function Row({ k, v }: { k: string; v: string }) {
 }
 
 export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
+  const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
+  // selectedId = открыт drawer-preview по этому лиду (1-клик); первый лид
+  //   открыт по умолчанию, чтобы был визуальный фокус сразу при заходе.
   const [selectedId, setSelectedId] = useState<number | null>(initialLeads[0]?.id ?? null);
   const [modalOpen, setModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // callPopupLead = открыт screen-pop звонка по этому лиду
+  //   (см. memory sales-call-window-reserve: real telephony — SALES-50-out, тут MVP UI).
+  const [callPopupLead, setCallPopupLead] = useState<Lead | null>(null);
 
   const selected = leads.find((l) => l.id === selectedId) ?? null;
 
@@ -651,7 +707,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         key={l.id}
                         lead={l}
                         selected={l.id === selectedId}
-                        onSelect={() => setSelectedId(l.id)}
+                        onPreview={() => setSelectedId(l.id)}
+                        onOpen={() => router.push(`/crm/leads/${l.id}`)}
+                        onCall={() => setCallPopupLead(l)}
                       />
                     ))}
                     {items.length === 0 && (
@@ -677,19 +735,34 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         )}
       </main>
 
-      <aside className="w-[340px] shrink-0 overflow-auto border-l border-line bg-surface">
-        {selected ? (
-          <DetailPanel
-            lead={selected}
-            busy={busyId === selected.id}
-            onQualify={() => onQualify(selected.id)}
-            onRoute={() => onRoute(selected.id)}
-            onConvert={() => onConvert(selected.id)}
-          />
-        ) : (
-          <div className="p-6 text-sm text-muted">Выберите лид, чтобы квалифицировать и распределить.</div>
-        )}
-      </aside>
+      {/* Drawer-preview вместо постоянной правой колонки: 1 клик по лиду открывает,
+          2 клика уводят на /crm/leads/[id]. Первый лид открыт по умолчанию (см.
+          useState(initialLeads[0]?.id)). */}
+      <LeadDrawerPreview
+        lead={selected}
+        busy={busyId === selected?.id}
+        onClose={() => setSelectedId(null)}
+        onQualify={onQualify}
+        onRoute={onRoute}
+        onConvert={onConvert}
+        onCall={(l) => setCallPopupLead(l)}
+      />
+
+      {/* Screen-pop звонка по лиду (открывается с кнопки «📞» на карточке или в drawer). */}
+      <LeadCallPopup
+        lead={callPopupLead}
+        onClose={() => setCallPopupLead(null)}
+        onPatch={patch}
+      />
+
+      {/* Подсказка «Выберите лид» когда нет лидов вовсе — для пустого инбокса. */}
+      {leads.length === 0 && (
+        <aside className="w-[280px] shrink-0 overflow-auto border-l border-line bg-surface">
+          <div className="p-6 text-sm text-muted">
+            Выберите лид, чтобы квалифицировать и распределить.
+          </div>
+        </aside>
+      )}
 
       {modalOpen && <IntakeModal onClose={() => setModalOpen(false)} onCreate={onCreate} />}
     </>
