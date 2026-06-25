@@ -67,6 +67,11 @@
 
 ## M2. Field-level provenance + survivorship как данные — ⭐ наивысшая отдача/стоимость
 
+> ✅ **РЕАЛИЗОВАНО (2026-06-25).** `Counterparty.provenance` (JSON, миграция 0044), модель
+> `SurvivorshipRule`, движок `core/services/survivorship.py` (4 стратегии), встроен в
+> `reference_import`. Макеты `spravochniki-card-provenance.html` + `spravochniki-merge-rules.html`.
+> Хвост: provenance/правила для `Sku` (вместе с M4), fuzzy-матч `pg_trgm` (M1), ЕГР-lookup (M1).
+
 **Зачем первым.** Самая дешёвая по коду веха с самым сильным эффектом: после неё **обратный
 синк 1С перестаёт быть страшным**, и ERP психологически становится истиной. Без неё первый же
 синк из 1С затрёт ваши правки — и вы остаётесь в положении «1С главный».
@@ -102,6 +107,15 @@
 ---
 
 ## M3. Двунаправленный синк + журнал выгрузки — переворачивает поток
+
+> ✅ **РЕАЛИЗОВАНО — каркас (2026-06-25).** Таблица `sync_link` (опция B, миграция 0045),
+> сервис `core/services/sync_outbound.py` (`enqueue`/`flush_pending`/`journal`), фоновый
+> `core.on_tick(tick_sync_out)`, роуты `/integrations/1c/sync-out · sync-journal · enqueue`,
+> макет `spravochniki-sync-journal.html`. Выгрузка идёт через mock `post_document` за
+> gateway-протоколом — реальный OData-POST подключается заменой в `OneCClient` (чтение OData
+> уже работает в `connectors/`). Решения владельца: оба пути рождения (карточка+сделка),
+> контрагенты+номенклатура. Хвост: врезка `enqueue` в sales-роут создания контрагента; реальный
+> OData-write.
 
 **Это и есть граница зависимости от 1С.** Пока поток только `1С → ERP`, 1С — владелец де-факто.
 **Проектирование уже сделано** в [onec-bidirectional-sync-plan.md](onec-bidirectional-sync-plan.md) —

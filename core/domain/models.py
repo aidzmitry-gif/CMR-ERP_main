@@ -71,6 +71,31 @@ class SurvivorshipRule(Base):
     source_priority: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
 
 
+class SyncLink(Base):
+    """Связь записи ERP с внешней системой + статус выгрузки (M3, опция B плана).
+
+    Одна таблица на любую сущность (``entity_type``) и любую внешнюю систему (``system``):
+    хранит внешний id (``external_ref``, NULL пока не выгружено), происхождение (``origin``),
+    направление и состояние очереди. ``CounterpartyAlias`` остаётся для MDM-провенанса/дедупа,
+    а роль «ссылка в 1С + статус выгрузки» — здесь. ERP — система-истина: запись, рождённая
+    в ERP (``origin="erp"``), ставится в очередь на выгрузку и доезжает в 1С с подтверждением.
+    """
+
+    __tablename__ = "sync_link"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(32))  # "counterparty" | "sku"
+    entity_id: Mapped[int] = mapped_column()
+    system: Mapped[str] = mapped_column(String(32), default="1c", server_default="1c")
+    external_ref: Mapped[str | None] = mapped_column(String(128))  # Ref_Key в 1С, NULL до выгрузки
+    origin: Mapped[str] = mapped_column(String(16))  # "erp" | "1c" | "bitrix"
+    direction: Mapped[str] = mapped_column(String(8), default="out", server_default="out")  # in|out
+    # local — только в ERP; pending — в очереди; synced — выгружено; error — ошибка
+    state: Mapped[str] = mapped_column(String(16), default="local", server_default="local")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    error_text: Mapped[str | None] = mapped_column(String(255))
+
+
 class Contact(Base):
     """Контактное лицо контрагента."""
 

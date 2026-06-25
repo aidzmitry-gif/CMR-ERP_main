@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
+from core.services import sync_outbound
 from core.services.auth import require_permission
 from modules.integrations import telephony
 from modules.integrations.models import StockItem
@@ -176,6 +177,50 @@ async def sync(core: Core = Depends(get_core), session: AsyncSession = Depends(g
     summary = await sync_1c(session, core.event_bus, core.services.onec)
     await session.commit()
     return {"ok": True, **summary}
+
+
+@router.post("/1c/sync-out")
+async def sync_out(
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Выгрузить очередь pending-записей ERP → 1С (исходящий синк, M3).
+
+    Каркас на шлюзе ``core.services.onec.post_document``: успех → external_ref + synced,
+    ошибка → error с текстом (виден в журнале, ручной повтор). Реальный OData-POST подключается
+    в OneCClient без правки этого роута.
+    """
+    summary = await sync_outbound.flush_pending(session, core.services.onec)
+    await session.commit()
+    return {"ok": True, **summary}
+
+
+@router.get("/1c/sync-journal")
+async def sync_journal(
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Журнал выгрузки: что/куда/статус/когда/ошибка (зеркало журнала импорта)."""
+    return {"entries": await sync_outbound.journal(session)}
+
+
+@router.post("/1c/enqueue/{entity_type}/{entity_id}")
+async def enqueue_out(
+    entity_type: str,
+    entity_id: int,
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Поставить запись ERP в очередь на выгрузку в 1С («Создать здесь» / ручная переотправка)."""
+    if entity_type not in ("counterparty", "sku"):
+        raise HTTPException(status_code=400, detail="entity_type: counterparty|sku")
+    link = await sync_outbound.enqueue(
+        session, entity_type=entity_type, entity_id=entity_id, origin="erp"
+    )
+    await session.commit()
+    return {"ok": True, "state": link.state, "entity_type": entity_type, "entity_id": entity_id}
 
 
 @router.get("/1c/stock", response_model=list[StockOut])
