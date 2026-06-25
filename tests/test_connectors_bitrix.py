@@ -22,8 +22,10 @@ import os
 import pytest
 import requests
 
-from connectors.bitrix import BitrixConnector, BitrixTransientError
-from connectors.state import StateStore
+pytest.importorskip("connectors.bitrix")  # опц. зависимость tenacity может отсутствовать — пропускаем
+
+from connectors.bitrix import BitrixConnector, BitrixTransientError  # noqa: E402
+from connectors.state import StateStore  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
