@@ -228,6 +228,49 @@ async def mdm_counterparty_card(
     return card
 
 
+@router.get("/system/sku/{code}")
+async def sku_card(
+    code: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("sales.deal.read")),
+) -> dict:
+    """Карточка номенклатуры (мастер-данные): горячие поля + категория + себестоимость (фасад, M4).
+
+    Себестоимость (landed cost) читается через ``core.services.landed_cost`` — если модуль
+    procurement не подключён или расчёта нет, поле ``None`` (не 0 — отсутствие не маскируем).
+    ⚠ Под правом ``sales.deal.read``: ``landed_cost`` — коммерческая тайна (себес/маржа),
+    а ``/system`` пропускается middleware → защищаем пообъектно (как MDM-мутации).
+    """
+    sku = (
+        await session.execute(select(Sku).where(Sku.code == code))
+    ).scalars().first()
+    if sku is None:
+        raise HTTPException(status_code=404, detail="номенклатура не найдена")
+
+    landed = None
+    gateway = request.app.state.core.services.landed_cost
+    if gateway is not None:
+        try:
+            landed = await gateway.last_landed_cost(session, code)
+        except Exception:  # noqa: BLE001 — БД/сеть procurement недоступна → карточка без себеса, не 500
+            landed = None
+
+    return {
+        "code": sku.code,
+        "title": sku.title,
+        "unit": sku.unit,
+        "category_id": sku.category_id,
+        "weight_kg": sku.weight_kg,
+        "tnved_code": sku.tnved_code,
+        "shelf_life_days": sku.shelf_life_days,
+        "is_active": sku.is_active,
+        "attributes": sku.attributes,
+        "provenance": sku.provenance,
+        "landed_cost": landed,  # None — нет расчёта/модуль не подключён (не 0)
+    }
+
+
 @router.get("/system/events")
 async def system_events(session: AsyncSession = Depends(get_session)) -> list[dict]:
     """Последние доменные события — журнал outbox (единый event log, часть 3)."""

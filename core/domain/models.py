@@ -110,7 +110,13 @@ class Contact(Base):
 
 
 class Sku(Base):
-    """Единица номенклатуры (товарная позиция)."""
+    """Единица номенклатуры (товарная позиция) — мастер-данные (golden record).
+
+    ERP — система-источник номенклатуры; код — natural key (не зависит от 1С). «Горячие»
+    поля, нужные продавцу/расчёту в момент сделки (вес, ТН ВЭД, срок годности) — типизированные
+    колонки; длинный хвост характеристик — в ``attributes`` JSONB (концепция §4.3). Транзакционные
+    данные (партии, landed cost, остатки) НЕ здесь — читаются через фасады ядра (CQRS, §6).
+    """
 
     __tablename__ = "sku"
 
@@ -120,10 +126,17 @@ class Sku(Base):
     unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
     # группа (категория) номенклатуры — ссылка на иерархический справочник (public)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
-    # переменные характеристики (цвет/размер/тех.параметры) — JSONB, не EAV.
-    # На масштабе каталога: «горячие» атрибуты выносятся в типизированные колонки,
-    # хвост остаётся здесь; фасетный поиск млн+ SKU — через внешний search-движок.
+    # «горячие» поля (M4): вес для распределения фрахта, ТН ВЭД для пошлины (→ landed cost),
+    # срок годности в днях для FEFO-алерта (<1 года). Nullable — заполняются по мере данных.
+    weight_kg: Mapped[float | None] = mapped_column()
+    tnved_code: Mapped[str | None] = mapped_column(String(16))  # код ТН ВЭД (пошлина из справочника)
+    shelf_life_days: Mapped[int | None] = mapped_column()  # срок годности; None — бессрочно
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")  # архив, не удаление
+    # переменные характеристики (цвет/размер упаковки/палета/тех.параметры) — JSONB, не EAV;
+    # фасетный поиск млн+ SKU — через внешний search-движок.
     attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # происхождение по полям (field-level provenance, M2) — единый слой с Counterparty.
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class User(Base):

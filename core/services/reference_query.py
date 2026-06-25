@@ -133,7 +133,8 @@ async def _query_counterparties(
 
 
 async def _query_skus(session: AsyncSession, key: str | None, limit: int) -> dict:
-    stmt = select(Sku)
+    # только активные: архивный SKU (M4) не должен подставляться AI в спецификацию/сделку
+    stmt = select(Sku).where(Sku.is_active.is_(True))
     if key:
         stmt = stmt.where(Sku.code == key)
     rows = (await session.execute(stmt.limit(limit))).scalars().all()

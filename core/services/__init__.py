@@ -13,6 +13,7 @@ from core.services.auth import AuthService
 from core.services.config import Settings, get_settings
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
+from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
 from core.services.registry import RegistryGateway
@@ -40,6 +41,8 @@ class Services:
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None
     telephony: TelephonyGateway | None = None
+    # себестоимость партии (landed cost) — наполняет модуль procurement; None — не подключён
+    landed_cost: LandedCostGateway | None = None
 
 
 def build_services() -> Services:
