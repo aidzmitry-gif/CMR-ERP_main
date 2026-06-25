@@ -1,6 +1,9 @@
 # Скрипты для Linux-контейнеров всегда с LF (иначе entrypoint ломается на Windows).
 *.sh text eol=lf
 
+# Git-хуки без расширения — тоже LF (Windows-bash спотыкается о CRLF в #!/bin/sh).
+.githooks/* text eol=lf
+
 # Бинарные файлы не трогаем.
 *.png binary
 *.pdf binary
