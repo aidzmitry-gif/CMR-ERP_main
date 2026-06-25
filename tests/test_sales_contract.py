@@ -1,10 +1,10 @@
 """SALES-53: договор по шаблону + реквизиты по УНП + пакет «счёт + договор»."""
 from decimal import Decimal
 
-from modules.sales.models import DealItem
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, Sku
+from modules.sales.models import DealItem
 
 TEMPLATE_BODY = (
     "ДОГОВОР {{number}}\n"

@@ -91,10 +91,9 @@ def test_originate_params():
 
 # --- Резолв продавца по номеру (A.2) ----------------------------------------------
 async def test_resolve_owner_by_active_deal(session):
+    from core.domain.models import Contact, Counterparty
     from modules.sales.calls import resolve_owner
     from modules.sales.models import Deal
-
-    from core.domain.models import Contact, Counterparty
 
     cp = Counterparty(name="ООО Резолв", unp="190000777")
     session.add(cp)
@@ -137,11 +136,11 @@ def _ctx(session):
 
 
 async def test_incoming_logs_resolves_and_pushes(session):
-    from modules.sales.models import CallLog, Deal
     from sqlalchemy import select
 
     from core.domain.models import Contact, Counterparty, OutboxEvent
     from modules.sales import calls as calls_mod
+    from modules.sales.models import CallLog, Deal
 
     cp = Counterparty(name="ООО Пуш", unp="190000888")
     session.add(cp)
@@ -179,11 +178,11 @@ async def test_incoming_logs_resolves_and_pushes(session):
 
 
 async def test_ended_updates_call(session):
-    from modules.sales.models import CallLog
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
     from modules.sales import calls as calls_mod
+    from modules.sales.models import CallLog
 
     ctx, _ = _ctx(session)
     await calls_mod.on_incoming_call({"call_id": "C-END", "direction": "in", "phone_e164": "+375291110001"}, ctx)
@@ -204,11 +203,11 @@ async def test_ended_updates_call(session):
 
 
 async def test_missed_call_status(session):
-    from modules.sales.models import CallLog
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
     from modules.sales import calls as calls_mod
+    from modules.sales.models import CallLog
 
     ctx, _ = _ctx(session)
     await calls_mod.on_call_ended(
@@ -226,10 +225,10 @@ async def test_missed_call_status(session):
 
 async def test_late_answer_keeps_terminal_status(session):
     """Внепорядковый answer после hangup не понижает терминальный статус обратно."""
-    from modules.sales.models import CallLog
     from sqlalchemy import select
 
     from modules.sales import calls as calls_mod
+    from modules.sales.models import CallLog
 
     ctx, _ = _ctx(session)
     await calls_mod.on_call_ended(

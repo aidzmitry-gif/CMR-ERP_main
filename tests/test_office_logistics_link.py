@@ -7,10 +7,10 @@
 """
 from types import SimpleNamespace
 
-from modules.logistics.models import CarrierRfq, Shipment
 from sqlalchemy import select
 
 from core.runtime.app import create_app
+from modules.logistics.models import CarrierRfq, Shipment
 from modules.office import events as office_events
 from modules.office.models import OfficeDoc
 
