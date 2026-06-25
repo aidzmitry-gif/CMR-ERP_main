@@ -27,6 +27,8 @@ jobs:
     env:
       # реальный Postgres для integration-слоя (тесты сами берут этот URL)
       AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@localhost:5432/aios
+      # CI — не прод: разрешаем dev-дефолтные креды (Settings P0-5 иначе отклоняет aios:aios)
+      AIOS_ENVIRONMENT: dev
 
     steps:
       - uses: actions/checkout@v5
