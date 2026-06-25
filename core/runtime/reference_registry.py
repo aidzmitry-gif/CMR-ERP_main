@@ -194,6 +194,49 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         ai_exposed=True,
         description="Сотрудники/пользователи (мастер-данные); кадровая карточка — в модуле hr.",
     ),
+    # --- классификаторы (§3.1) ---
+    Reference(
+        key="core.accounts",
+        title="План счетов",
+        department="Финансы",
+        owner_schema="public",
+        endpoint="/system/refs/accounts",
+        columns=(
+            _CODE,
+            _TITLE,
+            ReferenceColumn("kind", "Тип", "string", semantic="актив/пассив/активно-пассивный"),
+            ReferenceColumn(
+                "parent_id", "Синтетический счёт", "number",
+                semantic="родительский счёт (синтетика); пусто = корень",
+            ),
+            _ACTIVE,
+        ),
+        permissions=("refs.view", "refs.edit"),
+        ai_exposed=True,
+        description="План счетов бухучёта РБ (постановление Минфина №50): синтетика + субсчета "
+        "(иерархия parent_id). Используется финансовым модулем для проводок.",
+    ),
+    Reference(
+        key="core.regions",
+        title="Регионы и города",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/regions",
+        columns=(
+            _CODE,
+            _TITLE,
+            ReferenceColumn("kind", "Уровень", "string", semantic="область/район/город"),
+            ReferenceColumn(
+                "parent_id", "Входит в", "number",
+                semantic="родительский регион (область→район→город); пусто = корень",
+            ),
+            _ACTIVE,
+        ),
+        permissions=("refs.view", "refs.edit"),
+        ai_exposed=True,
+        description="Гео-справочник РБ (область→район→город, иерархия parent_id): адреса "
+        "контрагентов и территориальная аналитика продаж (territory).",
+    ),
 )
 
 

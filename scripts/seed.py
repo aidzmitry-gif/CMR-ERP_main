@@ -14,11 +14,13 @@ from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, User
 from core.domain.reference import (
+    Account,
     Bank,
     Country,
     Currency,
     CurrencyRate,
     NomenclatureCategory,
+    Region,
     Unit,
     VatRate,
 )
@@ -82,6 +84,45 @@ CATEGORY_DEFS = [
     ("CAT-0200", "Металлопрокат", None),
     ("CAT-0201", "Листовой прокат", "CAT-0200"),
     ("CAT-0202", "Арматура", "CAT-0200"),
+]
+
+# План счетов РБ (постановление Минфина №50) — выборка ходовых счетов: синтетика + субсчета.
+# code, title, kind, parent_code
+ACCOUNT_DEFS = [
+    ("10", "Материалы", "актив", None),
+    ("10.1", "Сырьё и материалы", "актив", "10"),
+    ("41", "Товары", "актив", None),
+    ("41.1", "Товары на складах", "актив", "41"),
+    ("43", "Готовая продукция", "актив", None),
+    ("50", "Касса", "актив", None),
+    ("51", "Расчётные счета", "актив", None),
+    ("52", "Валютные счета", "актив", None),
+    ("60", "Расчёты с поставщиками и подрядчиками", "пассив", None),
+    ("60.1", "Расчёты с поставщиками (BYN)", "пассив", "60"),
+    ("60.2", "Расчёты с поставщиками (валюта)", "пассив", "60"),
+    ("62", "Расчёты с покупателями и заказчиками", "активно-пассивный", None),
+    ("62.1", "Расчёты с покупателями (BYN)", "активно-пассивный", "62"),
+    ("68", "Расчёты по налогам и сборам", "пассив", None),
+    ("68.2", "НДС", "пассив", "68"),
+    ("90", "Доходы и расходы по текущей деятельности", "активно-пассивный", None),
+    ("90.1", "Выручка от реализации", "пассив", "90"),
+]
+
+# Регионы РБ — области + областные центры (область→город, иерархия по коду).
+# code, title, kind, parent_code
+REGION_DEFS = [
+    ("BY-BR", "Брестская область", "область", None),
+    ("BY-BR-BREST", "Брест", "город", "BY-BR"),
+    ("BY-VI", "Витебская область", "область", None),
+    ("BY-VI-VITEBSK", "Витебск", "город", "BY-VI"),
+    ("BY-HO", "Гомельская область", "область", None),
+    ("BY-HO-GOMEL", "Гомель", "город", "BY-HO"),
+    ("BY-HR", "Гродненская область", "область", None),
+    ("BY-HR-GRODNO", "Гродно", "город", "BY-HR"),
+    ("BY-MI", "Минская область", "область", None),
+    ("BY-MI-MINSK", "Минск", "город", "BY-MI"),
+    ("BY-MA", "Могилёвская область", "область", None),
+    ("BY-MA-MOGILEV", "Могилёв", "город", "BY-MA"),
 ]
 
 # Остатки/цены по складам (StockItem — demo-зеркало 1С; владелец остатков — integrations).
@@ -351,6 +392,27 @@ async def main() -> None:
                 VatRate(code="НДС0", title="Без НДС (0%)", rate=Decimal("0.00"),
                         start_date=date(2024, 1, 1), end_date=None),
             ])
+
+        # План счетов РБ (постановление Минфина №50) — синтетика + субсчета (иерархия по коду).
+        if (await s.execute(select(Account))).scalars().first() is None:
+            s.add_all([Account(code=c, title=t, kind=k) for c, t, k, _p in ACCOUNT_DEFS])
+            await s.flush()
+        acc_by_code = {a.code: a for a in (await s.execute(select(Account))).scalars().all()}
+        for code, _t, _k, parent_code in ACCOUNT_DEFS:
+            acc, parent = acc_by_code.get(code), acc_by_code.get(parent_code)
+            if acc and parent and acc.parent_id is None:
+                acc.parent_id = parent.id
+
+        # Регионы РБ (область→город, иерархия по коду).
+        if (await s.execute(select(Region))).scalars().first() is None:
+            s.add_all([Region(code=c, title=t, kind=k) for c, t, k, _p in REGION_DEFS])
+            await s.flush()
+        reg_by_code = {r.code: r for r in (await s.execute(select(Region))).scalars().all()}
+        for code, _t, _k, parent_code in REGION_DEFS:
+            reg, parent = reg_by_code.get(code), reg_by_code.get(parent_code)
+            if reg and parent and reg.parent_id is None:
+                reg.parent_id = parent.id
+
         await s.flush()
 
         # Общее ядро: контрагент, пользователь, контакт

@@ -15,14 +15,17 @@ from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.reference import (
+    Account,
     Bank,
     Country,
     Currency,
     CurrencyRate,
     NomenclatureCategory,
+    Region,
     Unit,
     VatRate,
 )
@@ -94,7 +97,14 @@ def build_simple_ref_router(
             raise HTTPException(status_code=422, detail=f"не хватает полей: {', '.join(missing)}")
         obj = model(**{k: payload[k] for k in editable if k in payload})
         session.add(obj)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            # дубль уникального ключа (code уже есть) → 409, а не голый 500
+            await session.rollback()
+            raise HTTPException(
+                status_code=409, detail=f"запись с таким {key_field} уже существует"
+            ) from exc
         _emit_change(request, session, model, "create", getattr(obj, key_field), user.username)
         await session.commit()
         await session.refresh(obj)
@@ -233,5 +243,24 @@ def build_reference_router() -> APIRouter:
             required=("code", "name"),
         ),
         prefix="/nomenclature-groups",
+    )
+    # План счетов (РБ) и гео-регионы — иерархические справочники (parent_id), как группы.
+    router.include_router(
+        build_simple_ref_router(
+            Account,
+            fields=("id", "code", "title", "kind", "parent_id", "is_active"),
+            editable=("code", "title", "kind", "parent_id"),
+            required=("code", "title"),
+        ),
+        prefix="/accounts",
+    )
+    router.include_router(
+        build_simple_ref_router(
+            Region,
+            fields=("id", "code", "title", "kind", "parent_id", "is_active"),
+            editable=("code", "title", "kind", "parent_id"),
+            required=("code", "title"),
+        ),
+        prefix="/regions",
     )
     return router
