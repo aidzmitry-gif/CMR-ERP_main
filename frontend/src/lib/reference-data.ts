@@ -422,17 +422,47 @@ export interface CounterpartyAudit {
   detail: Record<string, unknown>;
 }
 
-/** Карточка эталона контрагента (golden record): реквизиты + источники + дубли + контакты + аудит. */
+/** Происхождение одного поля (M2): откуда значение и когда записано. */
+export interface FieldProvenance {
+  source: string; // egr | erp | manual | 1c | bitrix
+  at: string | null; // ISO-дата записи значения
+}
+
+/** Карта происхождения по полям записи: `{field: {source, at}}` (M2). */
+export type Provenance = Record<string, FieldProvenance>;
+
+/** Одно касание клиента в 360°-истории (звонок/письмо/сделка), M5. */
+export interface Touch {
+  kind: string; // call | deal | message | ...
+  ts: string;
+  channel: string | null;
+  direction: string | null; // in | out | null
+  title: string;
+  ref: string; // напр. "call:5" / "deal:12"
+}
+
+/** Сводка касаний: счётчики по типам + последний контакт (M5). */
+export interface TouchSummary {
+  calls: number;
+  deals: number;
+  messages: number;
+  last_contact: string | null;
+}
+
+/** Карточка эталона контрагента (golden record): реквизиты + источники + дубли + контакты + аудит + 360°. */
 export interface CounterpartyCard {
   id: number;
   name: string;
   unp: string | null;
   is_active: boolean;
   merged_into_id: number | null;
+  provenance: Provenance; // M2: происхождение по полям
   aliases: CounterpartyAlias[];
   merged_duplicates: DuplicateMember[];
   contacts: { id: number; full_name: string; phone: string | null; email: string | null; is_primary: boolean }[];
   audit: CounterpartyAudit[];
+  touches: Touch[]; // M5: 360°-история (пусто, если sales-фасад не подключён)
+  touch_summary: TouchSummary | null;
 }
 
 /** Карточка одного эталона контрагента (SSR) — экран карточки/MDM. `null` — нет записи. */
@@ -447,6 +477,67 @@ export async function fetchCounterpartyCard(
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as CounterpartyCard;
+  } catch {
+    return null;
+  }
+}
+
+// ── Журнал исходящего синка ERP → 1С (M3) ────────────────────────────────────
+
+/** Запись журнала выгрузки: что/куда/статус/когда/ошибка (sync_link). */
+export interface SyncJournalEntry {
+  id: number;
+  entity_type: string; // counterparty | sku
+  entity_id: number;
+  system: string; // 1c
+  origin: string; // erp | 1c | bitrix
+  direction: string; // out | in
+  state: string; // pending | synced | error
+  external_ref: string | null;
+  last_synced_at: string | null;
+  error_text: string | null;
+}
+
+/** Журнал исходящей выгрузки ERP → 1С (SSR). Под правом integrations.sync. */
+export async function fetchSyncJournal(roles?: string): Promise<SyncJournalEntry[]> {
+  try {
+    const res = await fetch(`${BASE}/integrations/1c/sync-journal`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as { entries: SyncJournalEntry[] }).entries;
+  } catch {
+    return [];
+  }
+}
+
+// ── Карточка номенклатуры (master-data витрина SKU, M4) ──────────────────────
+
+/** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
+export interface SkuCard {
+  code: string;
+  title: string;
+  unit: string | null;
+  category_id: number | null;
+  weight_kg: number | null;
+  tnved_code: string | null;
+  shelf_life_days: number | null;
+  is_active: boolean;
+  attributes: Record<string, unknown>; // переменные характеристики (JSONB-хвост)
+  provenance: Provenance; // происхождение по полям (M2)
+  landed_cost: number | null; // себес партии; null — нет расчёта/модуль не подключён (не 0)
+}
+
+/** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */
+export async function fetchSkuCard(code: string, roles?: string): Promise<SkuCard | null> {
+  try {
+    const res = await fetch(`${BASE}/system/sku/${encodeURIComponent(code)}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as SkuCard;
   } catch {
     return null;
   }

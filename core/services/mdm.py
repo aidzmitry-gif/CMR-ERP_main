@@ -284,6 +284,8 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
         "unp": cp.unp,
         "is_active": cp.is_active,
         "merged_into_id": cp.merged_into_id,
+        # M2: происхождение по полям {field: {source, at}} — карточка рисует бейдж источника
+        "provenance": cp.provenance or {},
         "aliases": [
             {"source": a.source, "external_ref": a.external_ref, "created_at": str(a.created_at)}
             for a in alias_rows
