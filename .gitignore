@@ -52,6 +52,9 @@ coordination/.worker-pids/
 coordination/.worker-logs/
 coordination/.empty-mcp.json
 
+# Журнал активности флота (git-хуки .githooks) — локальный обмен между сессиями
+coordination/.activity.local.md
+
 # Telegram-мост (tg_bridge.py) — runtime
 coordination/.tg-bridge-state.json
 coordination/.tg-events.jsonl
