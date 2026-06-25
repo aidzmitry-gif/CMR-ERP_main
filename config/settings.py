@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     # базовый URL 1С (OData/REST); пусто — используется mock-источник
     onec_base_url: str = ""
+    # базовый URL сервиса ЕГР РБ (lookup реквизитов по УНП); пусто — mock-справочник
+    egr_base_url: str = ""
 
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False

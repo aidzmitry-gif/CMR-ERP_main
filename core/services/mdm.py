@@ -10,10 +10,31 @@
 """
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import AuditLog, Contact, Counterparty, CounterpartyAlias
+
+#: порог похожести имён по умолчанию для fuzzy-кандидатов (0..1); ниже — не предлагаем.
+FUZZY_THRESHOLD = 0.6
+
+#: орг-формы и шум, мешающие сравнению имён (убираем перед похожестью).
+_NAME_NOISE = re.compile(
+    r"\b(ооо|оао|зао|чуп|ип|уп|одо|общество|акционерное|открытое|закрытое|частное|"
+    r"unitarnoe|ltd|llc|inc|gmbh)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_name(name: str) -> str:
+    """Привести имя к виду для сравнения: lower, без орг-форм, кавычек и лишних пробелов."""
+    s = (name or "").lower().replace("«", " ").replace("»", " ").replace('"', " ")
+    s = _NAME_NOISE.sub(" ", s)
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", s).strip()
 
 #: поля контрагента, участвующие в survivorship при слиянии
 _SURVIVORSHIP_FIELDS = ("name", "unp")
@@ -62,6 +83,58 @@ async def match_candidates(
     if exclude_id is not None:
         query = query.where(Counterparty.id != exclude_id)
     return list((await session.execute(query)).scalars().all())
+
+
+async def fuzzy_candidates(
+    session: AsyncSession,
+    *,
+    name: str,
+    exclude_id: int | None = None,
+    threshold: float = FUZZY_THRESHOLD,
+    limit: int = 10,
+) -> list[dict]:
+    """Похожие по имени активные контрагенты — кандидаты на дедуп (опечатки/регистр/орг-форма).
+
+    Ловит дубли БЕЗ совпадения УНП (пустой/кривой УНП), которые ``match_candidates`` пропускает.
+    Это **кандидаты на approval, не авто-merge** — человек-в-контуре решает (концепция §7.2).
+    На Postgres — ``pg_trgm`` (``similarity``, расширение в миграции 0046); на SQLite (dev/тесты)
+    — Python-фолбэк (``difflib`` над нормализованными именами). ``[{id, name, score}]`` по убыванию.
+
+    # ponytail: (1) ``threshold`` — общий для двух разных шкал (pg_trgm similarity vs
+    # SequenceMatcher.ratio), recall на SQLite и Postgres слегка расходится; калибровать порог
+    # отдельно по движку, если важна точность. (2) SQLite-фолбэк сканирует все активные имена
+    # в Python (O(n)) — ок на dev-объёмах; на проде работает Postgres-ветка с SQL-фильтром.
+    """
+    norm = _normalize_name(name)
+    if not norm:
+        return []
+    dialect = session.bind.dialect.name if session.bind is not None else "sqlite"
+
+    if dialect == "postgresql":
+        sim = func.similarity(func.lower(Counterparty.name), name.lower())
+        query = (
+            select(Counterparty.id, Counterparty.name, sim.label("score"))
+            .where(Counterparty.is_active.is_(True), sim >= threshold)
+            .order_by(sim.desc())
+            .limit(limit)
+        )
+        if exclude_id is not None:
+            query = query.where(Counterparty.id != exclude_id)
+        rows = (await session.execute(query)).all()
+        return [{"id": r.id, "name": r.name, "score": float(r.score)} for r in rows]
+
+    # SQLite-фолбэк: тянем активные имена и считаем похожесть в Python (dev-объёмы малы).
+    q = select(Counterparty.id, Counterparty.name).where(Counterparty.is_active.is_(True))
+    if exclude_id is not None:
+        q = q.where(Counterparty.id != exclude_id)
+    scored = [
+        {"id": cid, "name": cname,
+         "score": SequenceMatcher(None, norm, _normalize_name(cname)).ratio()}
+        for cid, cname in (await session.execute(q)).all()
+    ]
+    scored = [s for s in scored if s["score"] >= threshold]
+    scored.sort(key=lambda s: s["score"], reverse=True)
+    return scored[:limit]
 
 
 def _apply_survivorship(survivor: Counterparty, duplicate: Counterparty) -> None:

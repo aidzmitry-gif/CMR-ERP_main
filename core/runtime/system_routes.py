@@ -167,6 +167,17 @@ async def mdm_duplicates(session: AsyncSession = Depends(get_session)) -> dict:
     return {"clusters": await mdm.duplicate_clusters(session)}
 
 
+@router.get("/system/mdm/fuzzy")
+async def mdm_fuzzy(
+    name: str, exclude_id: int | None = None, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Похожие по имени контрагенты — fuzzy-кандидаты на дедуп (опечатки/орг-форма, без УНП).
+
+    Кандидаты на ручную проверку (approval), не авто-merge. Дополняет точный матч по УНП.
+    """
+    return {"candidates": await mdm.fuzzy_candidates(session, name=name, exclude_id=exclude_id)}
+
+
 @router.post("/system/mdm/merge")
 async def mdm_merge(
     request: Request,

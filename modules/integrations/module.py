@@ -27,7 +27,7 @@ class IntegrationsModule(ModuleContract):
         # этот модуль (§2.4).
         core.services.onec = OneCClient(core.config.onec_base_url)
         core.services.stock = StockService()
-        core.services.registry = RegistryClient()
+        core.services.registry = RegistryClient(core.config.egr_base_url)
         # телефонный шлюз: исходящий звонок через облачную АТС zruchna. Входящие
         # события идут не через шлюз, а webhook'ом → шина (см. routes/telephony).
         core.services.telephony = ZruchnaClient(core.config.telephony_originate_url)

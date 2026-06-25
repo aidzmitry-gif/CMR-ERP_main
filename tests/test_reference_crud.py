@@ -37,6 +37,26 @@ async def test_simple_ref_crud_and_archive(api):
     assert (await api.patch("/system/refs/units/нет", json={"title": "x"})).status_code == 404
 
 
+async def test_ref_mutations_emit_audit_events(api, session):
+    """M1: create/patch/archive справочника пишут событие в outbox (concept §8 — аудит правок)."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    await api.post("/system/refs/units", json={"code": "кг", "title": "Килограмм"})
+    await api.patch("/system/refs/units/кг", json={"title": "Килограмм (масса)"})
+    await api.delete("/system/refs/units/кг")
+
+    rows = (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "reference.ref_unit.changed")
+        )
+    ).scalars().all()
+    actions = {r.payload["action"] for r in rows}
+    assert {"create", "update", "archive"} <= actions
+    assert all(r.payload["entity_ref"] == "ref_unit:кг" for r in rows)
+
+
 async def test_versioned_ref_scd2(api):
     base = "/system/refs/currency-rates"
 

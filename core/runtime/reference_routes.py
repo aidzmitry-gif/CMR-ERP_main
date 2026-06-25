@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,7 @@ from core.domain.reference import (
 )
 from core.runtime.deps import get_session
 from core.services import scd2
-from core.services.auth import require_permission
+from core.services.auth import CurrentUser, require_permission
 
 # Мутации справочников живут под открытым /system/refs/* — защищаем пообъектно на роуте.
 # Право `system.write` есть только у супер-ролей (см. has_permission). SECURITY.md P0-2.
@@ -46,6 +46,19 @@ async def _by_key(session: AsyncSession, model: type, key_field: str, value):
     if obj is None:
         raise HTTPException(status_code=404, detail="запись не найдена")
     return obj
+
+
+def _emit_change(request: Request, session, model, action: str, key, actor: str) -> None:
+    """Записать правку справочника в аудит (concept §8): outbox-событие → проекция в audit_log.
+
+    Эмитится в той же транзакции, что и мутация (до commit) — at-least-once. ``entity_ref``
+    указывает на конкретную запись справочника, ``actor`` — кто правил (личность из X-User).
+    """
+    request.app.state.core.event_bus.emit(
+        session,
+        f"reference.{model.__tablename__}.changed",
+        {"action": action, "entity_ref": f"{model.__tablename__}:{key}", "actor": actor},
+    )
 
 
 def build_simple_ref_router(
@@ -71,15 +84,18 @@ def build_simple_ref_router(
 
     @router.post("")
     async def create_item(
+        request: Request,
         payload: dict = Body(...),
         session: AsyncSession = Depends(get_session),
-        _: object = Depends(require_permission(SYSTEM_WRITE)),
+        user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         missing = [k for k in required if k not in payload]
         if missing:
             raise HTTPException(status_code=422, detail=f"не хватает полей: {', '.join(missing)}")
         obj = model(**{k: payload[k] for k in editable if k in payload})
         session.add(obj)
+        await session.flush()
+        _emit_change(request, session, model, "create", getattr(obj, key_field), user.username)
         await session.commit()
         await session.refresh(obj)
         return _row(obj, fields)
@@ -87,25 +103,29 @@ def build_simple_ref_router(
     @router.patch("/{code}")
     async def update_item(
         code: str,
+        request: Request,
         payload: dict = Body(...),
         session: AsyncSession = Depends(get_session),
-        _: object = Depends(require_permission(SYSTEM_WRITE)),
+        user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
         for field in editable:
             if field in payload:
                 setattr(obj, field, payload[field])
+        _emit_change(request, session, model, "update", code, user.username)
         await session.commit()
         return _row(obj, fields)
 
     @router.delete("/{code}")
     async def archive_item(
         code: str,
+        request: Request,
         session: AsyncSession = Depends(get_session),
-        _: object = Depends(require_permission(SYSTEM_WRITE)),
+        user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
         obj.is_active = False
+        _emit_change(request, session, model, "archive", code, user.username)
         await session.commit()
         return {"archived": code}
 
