@@ -150,8 +150,9 @@ async def test_kpis_period_scaling(session, api):
 
 
 async def test_deal_items(session, api):
-    from core.domain.models import Sku
     from modules.sales.models import DealItem
+
+    from core.domain.models import Sku
 
     deal = (
         await api.post("/sales/deals", json={"number": "IT-1", "title": "t", "counterparty": "c"})
@@ -442,11 +443,11 @@ async def test_decide_document_rbac_enforced(session, api):
 
 
 async def test_order_reserves_stock(session, api):
+    from modules.sales.models import DealItem
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku
     from modules.integrations.models import StockItem
-    from modules.sales.models import DealItem
 
     deal = (
         await api.post("/sales/deals", json={"number": "OR-1", "title": "t", "counterparty": "c"})
@@ -480,12 +481,12 @@ async def test_invoice_reserves_stock(session, api):
     """SALES-51: счёт (invoice), как и заказ, резервирует остатки и держит срок 5 дней."""
     from datetime import timedelta
 
+    from modules.sales.models import DealItem
+    from modules.sales.routes import _utcnow
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku
     from modules.integrations.models import StockItem
-    from modules.sales.models import DealItem
-    from modules.sales.routes import _utcnow
 
     deal = (
         await api.post("/sales/deals", json={"number": "INV-RSV-1", "title": "t", "counterparty": "c"})
@@ -521,13 +522,13 @@ async def test_tick_reminds_before_invoice_expiry(session, api, services):
     """SALES-51: за день до конца срока tick шлёт sales.invoice.expiring (однократно)."""
     from datetime import timedelta
 
+    from modules.sales.models import DealDocument, DealItem
+    from modules.sales.reserve import tick_invoice_reserve
+    from modules.sales.routes import _utcnow
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku
     from modules.integrations.models import StockItem
-    from modules.sales.models import DealDocument, DealItem
-    from modules.sales.reserve import tick_invoice_reserve
-    from modules.sales.routes import _utcnow
 
     deal = (
         await api.post("/sales/deals", json={"number": "EXP-1", "title": "t", "counterparty": "c"})
@@ -564,13 +565,13 @@ async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, ser
     """SALES-51: после срока счёт аннулируется, резерв снимается (stock.release)."""
     from datetime import timedelta
 
+    from modules.sales.models import DealDocument, DealItem
+    from modules.sales.reserve import tick_invoice_reserve
+    from modules.sales.routes import _utcnow
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku
     from modules.integrations.models import StockItem
-    from modules.sales.models import DealDocument, DealItem
-    from modules.sales.reserve import tick_invoice_reserve
-    from modules.sales.routes import _utcnow
 
     deal = (
         await api.post("/sales/deals", json={"number": "CANCEL-1", "title": "t", "counterparty": "c"})
@@ -608,11 +609,12 @@ async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, ser
 
 async def test_payment_consumes_invoice_reserve(session, api):
     """SALES-51: оплата счёта → reserve_status=consumed (finance.payment.paid → sales)."""
+    from modules.sales.events import on_payment_paid
+    from modules.sales.models import DealDocument, DealItem
+
     from core.domain.models import Sku
     from core.services.eventbus import EventContext
     from modules.integrations.models import StockItem
-    from modules.sales.events import on_payment_paid
-    from modules.sales.models import DealDocument, DealItem
 
     deal = (
         await api.post("/sales/deals", json={"number": "PAID-1", "title": "t", "counterparty": "c"})
@@ -689,8 +691,9 @@ async def test_messages_omnichannel(session, api):
 
 
 async def test_price_engine(session, api):
-    from core.domain.models import Sku
     from modules.sales.models import DealItem
+
+    from core.domain.models import Sku
 
     # история котировок по SKU + клиенту
     for p in (1500, 1450, 1470):
@@ -724,9 +727,10 @@ async def test_price_engine(session, api):
 
 
 async def test_ai_draft_reply_unit():
-    from core.services.litellm import LLMGateway
     from modules.sales.ai import draft_reply
     from modules.sales.models import Deal, Message
+
+    from core.services.litellm import LLMGateway
 
     class _Settings:
         ai_enabled = True
@@ -743,9 +747,10 @@ async def test_ai_draft_reply_unit():
 
 
 async def test_ai_assist_unit():
-    from core.services.litellm import LLMGateway
     from modules.sales.ai import next_step, summarize
     from modules.sales.models import Deal
+
+    from core.services.litellm import LLMGateway
 
     class _Settings:
         ai_enabled = True
@@ -764,12 +769,12 @@ async def test_ai_assist_unit():
 async def test_ai_event_handler(session):
     from types import SimpleNamespace
 
+    from modules.sales.events import on_incoming_message_ai
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
     from core.services.eventbus import EventContext, OutboxEventBus
     from core.services.litellm import LLMGateway
-    from modules.sales.events import on_incoming_message_ai
 
     class _Settings:
         ai_enabled = True

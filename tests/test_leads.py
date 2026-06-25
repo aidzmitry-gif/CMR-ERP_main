@@ -192,9 +192,10 @@ async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
 
 
 async def test_ai_qualify_lead_unit():
-    from core.services.litellm import LLMGateway
     from modules.sales.ai import qualify_lead
     from modules.sales.models import Lead
+
+    from core.services.litellm import LLMGateway
 
     class _Settings:
         ai_enabled = True

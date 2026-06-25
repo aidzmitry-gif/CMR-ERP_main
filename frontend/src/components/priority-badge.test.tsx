@@ -11,7 +11,7 @@ describe("PriorityBadge", () => {
 
   it("применяет цветовой класс по приоритету", () => {
     render(<PriorityBadge priority="Низкий" />);
-    expect(screen.getByText("Низкий").className).toContain("text-slate-500");
+    expect(screen.getByText("Низкий").className).toContain("text-muted");
   });
 
   it("показывает иконку при withIcon", () => {

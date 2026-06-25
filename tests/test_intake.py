@@ -3,10 +3,10 @@
 
 async def test_web_and_email_intake_create_leads(session, api, services):
     """Сайт (контакт-форма) и почта (вебхук) → событие → relay → лид со статусом new."""
+    from modules.sales.models import Lead
     from sqlalchemy import select
 
     from core.services.eventbus import EventContext
-    from modules.sales.models import Lead
 
     # 1) заявка с сайта
     r = await api.post(
