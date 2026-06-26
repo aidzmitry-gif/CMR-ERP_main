@@ -17,7 +17,8 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchDealDetail } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
-import { PROGRESSION_STAGES } from "@/lib/sales-stages";
+import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
+import type { DealDetail } from "@/lib/types";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -58,7 +59,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <PriorityBadge priority={d.priority} withIcon />
-                {/* TODO(SALES): stage / regular / temperature / ship-бейджи из бэкенда */}
+                {d.stage && <StageBadge stage={d.stage} />}
+                {/* TODO(SALES): regular / temperature / ship-бейджи — ждут полей бэкенда */}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -187,6 +189,28 @@ function Stages({ currentIdx }: { currentIdx: number }) {
         );
       })}
     </ol>
+  );
+}
+
+/** Бейдж активной стадии в шапке: канон-цвет + дней в стадии + «протухает» (SALES-43). */
+function StageBadge({ stage }: { stage: NonNullable<DealDetail["stage"]> }) {
+  const color = STAGE_BY_ID[stage.id]?.color ?? "#64748B";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-semibold"
+      style={{ background: `${color}1A`, color }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} aria-hidden />
+      {stage.title}
+      {stage.daysInStage != null && (
+        <span className="font-normal opacity-80">· {stage.daysInStage} дн</span>
+      )}
+      {stage.isStale && (
+        <span className="rounded bg-amber-500/20 px-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+          протухает
+        </span>
+      )}
+    </span>
   );
 }
 

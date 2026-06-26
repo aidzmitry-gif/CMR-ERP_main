@@ -1,4 +1,4 @@
-import { STAGE_BY_ID } from "@/lib/sales-stages";
+import { progressionIndex, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { Chat, DealDetail, FunnelTotal, Kpi, Stage } from "@/lib/types";
 
 // Демо-данные прототипа (как на макете). Подставляются вместо реального API.
@@ -84,7 +84,8 @@ export const CHATS: Chat[] = [
 
 /** Подобрать детальную карточку по id сделки (для страницы /crm/deals/[id]). */
 export function getDealDetail(id: string): DealDetail {
-  const deal = STAGES.flatMap((s) => s.deals).find((d) => d.id === id);
+  const stage = STAGES.find((s) => s.deals.some((d) => d.id === id));
+  const deal = stage?.deals.find((d) => d.id === id);
   if (!deal) return DEAL_DETAIL;
   return {
     number: deal.number,
@@ -101,6 +102,9 @@ export function getDealDetail(id: string): DealDetail {
     focus: false,
     starred: deal.starred ?? false,
     dealDate: deal.date ?? "",
+    stage: stage
+      ? { idx: progressionIndex(stage.id), id: stage.id, title: stage.title }
+      : undefined,
   };
 }
 
