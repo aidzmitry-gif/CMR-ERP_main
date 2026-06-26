@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from core.domain.models import Contact, Counterparty, Sku, User
+from core.domain.models import Contact, Counterparty, Sku, SurvivorshipRule, User
 from core.domain.reference import (
     Account,
     Bank,
@@ -106,6 +106,18 @@ ACCOUNT_DEFS = [
     ("68.2", "НДС", "пассив", "68"),
     ("90", "Доходы и расходы по текущей деятельности", "активно-пассивный", None),
     ("90.1", "Выручка от реализации", "пассив", "90"),
+]
+
+# Правила слияния (survivorship, M2) — чем синк из 1С НЕ имеет права затереть.
+# entity_type, field, strategy, source_priority
+SURVIVORSHIP_DEFS = [
+    ("counterparty", "name", "source_priority", ["egr", "erp", "manual", "1c", "bitrix"]),
+    ("counterparty", "unp", "source_priority", ["egr", "erp", "1c"]),
+    ("counterparty", "phone", "most_recent", []),
+    ("counterparty", "email", "non_empty_wins", []),
+    ("sku", "title", "source_priority", ["erp", "manual", "1c"]),
+    ("sku", "weight_kg", "manual_only", []),
+    ("sku", "tnved_code", "manual_only", []),
 ]
 
 # Регионы РБ — области + областные центры (область→город, иерархия по коду).
@@ -412,6 +424,13 @@ async def main() -> None:
             reg, parent = reg_by_code.get(code), reg_by_code.get(parent_code)
             if reg and parent and reg.parent_id is None:
                 reg.parent_id = parent.id
+
+        # Правила слияния (survivorship, M2) — по полю «кто побеждает» при конфликте источников.
+        if (await s.execute(select(SurvivorshipRule))).scalars().first() is None:
+            s.add_all([
+                SurvivorshipRule(entity_type=e, field=f, strategy=st, source_priority=sp)
+                for e, f, st, sp in SURVIVORSHIP_DEFS
+            ])
 
         await s.flush()
 

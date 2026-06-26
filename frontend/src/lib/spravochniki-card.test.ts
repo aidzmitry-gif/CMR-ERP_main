@@ -4,7 +4,9 @@ import {
   formatAuditDate,
   formatTouchTs,
   provenanceCounts,
+  ruleProtectsFromSync,
   sourceMeta,
+  strategyMeta,
   syncEntityLabel,
   syncStateMeta,
   touchKindMeta,
@@ -119,5 +121,40 @@ describe("syncEntityLabel", () => {
 
   it("неизвестный тип возвращается как есть", () => {
     expect(syncEntityLabel("invoice")).toBe("invoice");
+  });
+});
+
+describe("strategyMeta", () => {
+  it("известные стратегии — подпись + пояснение", () => {
+    expect(strategyMeta("manual_only").label).toBe("Только вручную");
+    expect(strategyMeta("source_priority").label).toBe("Приоритет источника");
+    expect(strategyMeta("most_recent").hint).toContain("поздней датой");
+    expect(strategyMeta("non_empty_wins").label).toBe("Непустое замещает");
+  });
+
+  it("неизвестная стратегия → как есть, без пояснения", () => {
+    expect(strategyMeta("xz")).toEqual({ label: "xz", hint: "" });
+  });
+});
+
+describe("ruleProtectsFromSync", () => {
+  it("manual_only — всегда защищено", () => {
+    expect(ruleProtectsFromSync({ strategy: "manual_only", source_priority: [] })).toBe(true);
+  });
+
+  it("source_priority защищает, только если 1С не первый", () => {
+    expect(
+      ruleProtectsFromSync({ strategy: "source_priority", source_priority: ["egr", "1c"] }),
+    ).toBe(true);
+    expect(
+      ruleProtectsFromSync({ strategy: "source_priority", source_priority: ["1c", "egr"] }),
+    ).toBe(false);
+    // пустой приоритет — не закреплено
+    expect(ruleProtectsFromSync({ strategy: "source_priority", source_priority: [] })).toBe(false);
+  });
+
+  it("most_recent / non_empty_wins — синк может обновить", () => {
+    expect(ruleProtectsFromSync({ strategy: "most_recent", source_priority: [] })).toBe(false);
+    expect(ruleProtectsFromSync({ strategy: "non_empty_wins", source_priority: [] })).toBe(false);
   });
 });
