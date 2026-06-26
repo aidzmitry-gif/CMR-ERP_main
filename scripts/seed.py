@@ -75,6 +75,31 @@ SKU_DEFS = [
     ("REBAR-20", "Двигатель тяговый (демо)", "шт", "36"),
 ]
 
+# Демо-наполнение горячих полей + характеристик (JSONB) — чтобы карточка номенклатуры
+# показывала живые блоки «Производитель», «Тех. характеристики», вес/срок, а не сплошь «нет данных».
+# Это ДЕМО (товары помечены «(демо)»), не золотая запись из 1С. code → {вес, срок, attributes}.
+SKU_DETAILS = {
+    "AKB-60": {"weight_kg": 0.024, "shelf_life_days": 3650, "tnved_code": "8506108000", "attributes": {
+        "Производитель": "GP Batteries", "Марка": "GP Ultra", "Страна происхождения": "Китай",
+        "Типоразмер": "AAA / LR03", "Напряжение": "1,5 В", "Химия": "Щелочная (alkaline)",
+        "Упаковка": "блистер 4 шт", "Штрихкод (EAN-13)": "4891199000041"}},
+    "AKB-100": {"weight_kg": 0.023, "shelf_life_days": 3650, "tnved_code": "8506108000", "attributes": {
+        "Производитель": "GP Batteries", "Марка": "GP Ultra", "Страна происхождения": "Китай",
+        "Типоразмер": "AA / LR6", "Напряжение": "1,5 В", "Химия": "Щелочная (alkaline)"}},
+    "TESTER-D": {"weight_kg": 0.32, "attributes": {
+        "Производитель": "ООО Аккумуляторные решения", "Тип": "Цифровой тестер АКБ",
+        "Диапазон напряжения": "0–30 В", "Питание": "9 В крона", "Дисплей": "ЖК"}},
+    "LFP-12-100": {"weight_kg": 0.019, "shelf_life_days": 3650, "tnved_code": "8506108000", "attributes": {
+        "Производитель": "Космос", "Типоразмер": "AAA / R03", "Напряжение": "1,5 В",
+        "Химия": "Солевая (zinc-carbon)"}},
+    "REBAR-10": {"weight_kg": 0.21, "attributes": {
+        "Производитель": "Hoco", "Ёмкость": "10000 мА·ч", "Выход": "USB-A ×2, USB-C",
+        "Быстрая зарядка": "PD 20 Вт", "Корпус": "алюминий"}},
+    "REBAR-16": {"weight_kg": 0.003, "shelf_life_days": 3650, "tnved_code": "8506500000", "attributes": {
+        "Производитель": "Panasonic", "Типоразмер": "CR2032", "Напряжение": "3 В",
+        "Химия": "Литиевая (Li/MnO2)", "Ёмкость": "220 мА·ч"}},
+}
+
 # Демо-дерево групп номенклатуры (adjacency list: parent_code → код предка).
 # Виды номенклатуры из боевой 1С заказчика (Аккумуляторные) — то, что видно на скринах.
 # code = номер из 1С (natural key), name = наименование без номера; иерархия 2 уровня (parent_code).
@@ -150,6 +175,8 @@ TNVED_DEFS = [
     ("8507100000", "Аккумуляторы свинцовые для запуска поршневых двигателей", "5.0", "НДС20", None, "шт"),
     ("8507200000", "Аккумуляторы свинцовые прочие", "5.0", "НДС20", None, "шт"),
     ("8507600000", "Аккумуляторы литий-ионные", "0.0", "НДС20", None, "шт"),
+    ("8506108000", "Элементы первичные марганцево-диоксидные (щелочные/солевые)", "0.0", "НДС20", None, "шт"),
+    ("8506500000", "Элементы первичные литиевые (CR2032 и т.п.)", "0.0", "НДС20", None, "шт"),
     ("8504401900", "Зарядные устройства (выпрямители) прочие", "5.0", "НДС20", None, "шт"),
     ("8504408200", "Зарядные устройства аккумуляторов", "0.0", "НДС20", None, "шт"),
     ("9030339000", "Приборы для измерения напряжения/тока (тестеры)", "0.0", "НДС20", None, "шт"),
@@ -523,23 +550,34 @@ async def main() -> None:
             if cat and cat.tnved_code is None:
                 cat.tnved_code = tnved
 
-        # Номенклатура (по коду, идемпотентно) — с привязкой к группе.
+        # Номенклатура (по коду, идемпотентно) — с привязкой к группе + демо-характеристики.
         existing_codes = set((await s.execute(select(Sku.code))).scalars().all())
         for code, title, unit, cat_code in SKU_DEFS:
             if code not in existing_codes:
                 cat = cat_by_code.get(cat_code)
-                s.add(Sku(code=code, title=title, unit=unit,
-                          category_id=cat.id if cat else None))
+                d = SKU_DETAILS.get(code, {})
+                s.add(Sku(
+                    code=code, title=title, unit=unit,
+                    category_id=cat.id if cat else None,
+                    weight_kg=d.get("weight_kg"),
+                    shelf_life_days=d.get("shelf_life_days"),
+                    tnved_code=d.get("tnved_code"),  # свой код → переопределяет групповой
+                    attributes=d.get("attributes", {}),
+                ))
         await s.flush()
 
         # Остатки/цены по складам (StockItem — demo-зеркало 1С) для подбора товара в окне звонка.
         if (await s.execute(select(StockItem))).scalars().first() is None:
             for code, (price, whs) in STOCK_DEFS.items():
+                # Себестоимость из 1С (demo): варьируемая доля цены, детерминированно по коду
+                # (маржа «в наличии» = (цена − себес)/цена; см. pricing-calculation-todo).
+                ratio = 0.72 + (sum(ord(c) for c in code) % 11) / 100
+                cost = Decimal(str(round(price * ratio, 2)))
                 for wh, av, res, fc in whs:
                     s.add(StockItem(
                         sku_code=code, warehouse=wh,
                         qty_available=Decimal(av), qty_reserved=Decimal(res),
-                        qty_forecast=Decimal(fc), price=Decimal(price),
+                        qty_forecast=Decimal(fc), price=Decimal(price), cost=cost,
                     ))
             await s.flush()
 
