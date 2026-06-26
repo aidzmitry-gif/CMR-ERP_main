@@ -64,11 +64,14 @@ export function DealDrawerPreview({
   const [stepDraft, setStepDraft] = useState("");
   const [stepEditing, setStepEditing] = useState(false);
   const [taskDraft, setTaskDraft] = useState("");
+  // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setStepDraft(deal?.nextStep ?? "");
     setStepEditing(false);
     setTaskDraft("");
   }, [deal?.id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const open = deal != null;
 

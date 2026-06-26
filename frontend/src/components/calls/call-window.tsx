@@ -154,6 +154,9 @@ export function CallWindow({
   const script = useMemo(() => scriptFor(kind), [kind]);
 
   // Сброс + дозвон при новом звонке; предотметить «done»-пункты скрипта.
+  // Намеренный сброс всего стейта при смене открытого звонка (context) — легитимный
+  // «reset on key change», а не каскад от рендера.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!context) return;
     setPhase("dialing");
@@ -171,6 +174,7 @@ export function CallWindow({
     const t = setTimeout(() => setPhase("live"), 1200);
     return () => clearTimeout(t);
   }, [context, script]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Таймер разговора.
   useEffect(() => {
@@ -284,6 +288,8 @@ export function CallWindow({
     // прямую сделку (createDeal) + addDealItem; полноценную привязку к лиду (статус
     // converted) добавим эндпоинтом «быстрая сделка» отдельным шагом (SALES).
     const counterparty = ctx.company || ctx.phone || "Новый клиент";
+    // Date.now() в обработчике клика (не в рендере) — уникальный номер счёта в момент действия.
+    // eslint-disable-next-line react-hooks/purity
     const number = `CRM-CALL-${Date.now().toString(36).toUpperCase()}`;
     const deal = await createDeal({
       number,
