@@ -27,6 +27,7 @@ import {
   createPriceQuote,
   fetchSkus,
   fetchStock,
+  lookupCounterparty,
   type SkuOption,
   type StockRow,
 } from "@/lib/api";
@@ -43,10 +44,11 @@ import { scriptFor } from "./call-scripts";
  *
  * Фазы: dialing (короткий дозвон) → live (3 колонки) → done (итог).
  *
- * РЕАЛЬНО работает: скрипт-чеклист, подбор номенклатуры из справочника (fetchSkus),
- * добавление позиций в сделку (addDealItem), задача из звонка (createDealTask).
+ * РЕАЛЬНО работает: скрипт-чеклист, реквизиты по УНП из ЕГР (lookupCounterparty),
+ * подбор номенклатуры из справочника (fetchSkus), добавление позиций в сделку
+ * (addDealItem), задача из звонка (createDealTask).
  * ЗАГЛУШКИ (помечены TODO): originate к АТС, отправка счёта/договора (1С),
- * резерв под счёт (SALES-51), микрофон/удержание/перевод, УНП→ЕГР, повтор заказа.
+ * резерв под счёт (SALES-51), микрофон/удержание/перевод, повтор заказа.
  */
 
 export type CallContext =
@@ -146,7 +148,7 @@ export function CallWindow({
     unp: string;
     org: string;
     address: string;
-    account: string;
+    status: string;
   } | null>(null);
   const [term, setTerm] = useState(TERMS[0]);
   const [customTerm, setCustomTerm] = useState(""); // свой вариант условий оплаты
@@ -267,18 +269,18 @@ export function CallWindow({
     setRows((r) => r.filter((x) => x.skuId !== skuId));
   }
 
-  // Подтянуть реквизиты по УНП. ponytail: demo-резолв (фикс. организация); реальный
-  // ЕГР/MDM-резолв — SALES (УНП→ЕГР помечен заглушкой в докстринге окна).
-  function pullReq() {
+  // Подтянуть реквизиты по УНП через существующий резолвер ЕГР (РБ): lookupCounterparty
+  // → /integrations/egr. Бэкенд сам отдаёт demo-данные, если ЕГР не сконфигурирован
+  // (base_url пуст) — контракт RegistryInfo один и тот же, спец-обработки demo тут нет.
+  async function pullReq() {
     const clean = unp.replace(/\D/g, "");
     if (clean.length !== 9) return flash("УНП — 9 цифр");
-    setReq({
-      unp: clean,
-      org: "ООО «Стартлайн»",
-      address: "г. Минск, ул. Кальварийская, 17",
-      account: "BY12 ALFA 3012 0000 …",
-    });
-    flash("✅ Реквизиты подтянуты (demo · ЕГР/MDM — SALES)");
+    setBusy(true);
+    const info = await lookupCounterparty(clean);
+    setBusy(false);
+    if (!info) return flash("⚠️ По УНП ничего не найдено");
+    setReq({ unp: info.unp || clean, org: info.name, address: info.address, status: info.status });
+    flash("✅ Реквизиты подтянуты из ЕГР");
   }
 
   const pickedRows = rows.filter((r) => r.picked);
@@ -505,7 +507,7 @@ export function CallWindow({
                       value={unp}
                       onChange={(e) => setUnp(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") pullReq();
+                        if (e.key === "Enter") void pullReq();
                       }}
                       inputMode="numeric"
                       placeholder="УНП (9 цифр)"
@@ -519,15 +521,16 @@ export function CallWindow({
                   {req && (
                     <div className="mt-1.5 space-y-1 rounded-lg border border-money/40 bg-money-soft px-2.5 py-2 text-[11.5px]">
                       <div className="font-semibold text-money">
-                        ✅ Реквизиты по УНП {req.unp} — ЕГР (demo)
+                        ✅ Реквизиты по УНП {req.unp} — ЕГР
                       </div>
                       <ReqRow k="Организация" v={req.org} />
                       <ReqRow k="Адрес" v={req.address} />
-                      <ReqRow k="Расчётный счёт" v={req.account} />
+                      {req.status && <ReqRow k="Статус" v={req.status} />}
                     </div>
                   )}
                   <div className="mt-1 text-[11px] text-faint">
-                    ЕГР/MDM-резолв по УНП — заглушка (SALES); сейчас demo-реквизиты.
+                    Реквизиты из ЕГР (egr.gov.by) через интеграцию; demo-данные, если ЕГР не
+                    сконфигурирован.
                   </div>
                 </div>
               )}
