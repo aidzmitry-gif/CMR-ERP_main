@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Button } from "@/components/ui/button";
+import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
 import { formatByn } from "@/lib/format";
 import type { Deal, Stage } from "@/lib/types";
 
@@ -37,6 +38,8 @@ export function DealDrawerPreview({
   onWin,
   onLose,
   onCall,
+  now,
+  reasonByCode,
 }: {
   deal: Deal | null;
   stages: Stage[];
@@ -48,6 +51,10 @@ export function DealDrawerPreview({
   onLose: (dealId: string) => void;
   /** Открыть окно звонка по сделке (тот же кокпит, что и у лида). */
   onCall?: (deal: Deal) => void;
+  /** Текущее время (из DealsWorkspace) — для «дней в стадии»/висяка без hydration-mismatch. */
+  now: number | null;
+  /** code→title причины отказа (тот же резолв, что на карточке доски — SALES-40). */
+  reasonByCode?: Map<string, string>;
 }) {
   // Esc-закрытие
   useEffect(() => {
@@ -83,6 +90,17 @@ export function DealDrawerPreview({
     currentStageIdx >= 0 && currentStageIdx < stages.length - 1
       ? stages[currentStageIdx + 1]
       : null;
+
+  // Сделки 2.0 через канон board.ts (те же значения/правила, что карточка доски и список):
+  // вероятность/взвешенно — probabilityFor/weightedAmount; дни/висяк — daysInStage/isStuck.
+  const stageId = currentStageIdx >= 0 ? stages[currentStageIdx].id : "";
+  const prob = deal ? probabilityFor(deal, stageId) : 0;
+  const days = deal && now != null ? daysInStage(deal.stageChangedAt, now) : null;
+  const stuck = deal != null && now != null && isStuck(deal, stageId, now);
+  const lostTitle = deal?.lostReasonCode
+    ? (reasonByCode?.get(deal.lostReasonCode) ?? deal.lostReasonCode)
+    : undefined;
+  const isTerminalLost = stageId === "lost" || stageId === "cond_lost";
 
   function commitStep() {
     if (!deal) return;
@@ -165,17 +183,37 @@ export function DealDrawerPreview({
                 <span className="rounded-md bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">
                   контрагент · из MDM / 1С
                 </span>
+                {days != null && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      stuck ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted"
+                    }`}
+                  >
+                    🕒 {days} дн.{stuck ? " · висяк" : ""}
+                  </span>
+                )}
               </div>
 
-              {/* Сумма крупно + вероятность */}
+              {/* Причина отказа (SALES-40) — тот же резолв, что на карточке доски */}
+              {lostTitle && (
+                <div className="mt-2">
+                  <span className="inline-block rounded-md bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                    Причина отказа: {lostTitle}
+                  </span>
+                  {deal.lostComment && (
+                    <div className="mt-1 text-[12px] text-muted">{deal.lostComment}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Сумма крупно + вероятность (канон board.ts: дефолт по стадии, как карточка/список) */}
               <div className="mt-3 text-[22px] font-extrabold tabular-nums text-ink">
                 {formatByn(deal.amount)}
               </div>
-              {deal.probability != null && deal.probability > 0 && (
+              {prob > 0 && (
                 <div className="mt-1 text-[12px] text-muted">
-                  <span className="font-semibold text-accent-ink">{deal.probability}%</span> ·
-                  взвешенно ≈{" "}
-                  {formatByn(Math.round(deal.amount * (deal.probability / 100)))}
+                  <span className="font-semibold text-accent-ink">{prob}%</span> · взвешенно ≈{" "}
+                  {formatByn(weightedAmount(deal, stageId))}
                 </div>
               )}
 
@@ -332,27 +370,29 @@ export function DealDrawerPreview({
                 <ChannelButtons dealId={deal.id} />
               </div>
 
-              {/* === WIN / LOSE === */}
-              <section className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  variant="money"
-                  size="sm"
-                  onClick={() => onWin(deal.id)}
-                  icon={<Check size={14} />}
-                  className="flex-1"
-                >
-                  Выиграна
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => onLose(deal.id)}
-                  icon={<XCircle size={14} />}
-                  className="flex-1"
-                >
-                  Отказ
-                </Button>
-              </section>
+              {/* === WIN / LOSE === скрываем для уже отказных (lost/cond_lost): причина показана выше */}
+              {!isTerminalLost && (
+                <section className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    variant="money"
+                    size="sm"
+                    onClick={() => onWin(deal.id)}
+                    icon={<Check size={14} />}
+                    className="flex-1"
+                  >
+                    Выиграна
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => onLose(deal.id)}
+                    icon={<XCircle size={14} />}
+                    className="flex-1"
+                  >
+                    Отказ
+                  </Button>
+                </section>
+              )}
 
               <div className="mt-4 text-center text-[11px] text-faint">
                 💡 Двойной клик по карточке открывает полную страницу

@@ -140,6 +140,9 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       // Вероятность/прогноз (SALES-44): явный override; нет — UI возьмёт дефолт по стадии.
       probability: d.probability ?? undefined,
       expectedCloseDate: d.expected_close_date ?? undefined,
+      // Причина отказа (SALES-40) — бэк отдаёт в DealRead, detail её раньше ронял.
+      lostReasonCode: d.lost_reason_code ?? undefined,
+      lostComment: d.lost_comment ?? undefined,
     };
   } catch {
     return getDealDetail(id);

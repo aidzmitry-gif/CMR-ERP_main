@@ -15,6 +15,7 @@ import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
@@ -61,8 +62,18 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <PriorityBadge priority={d.priority} withIcon />
                 {d.stage && <StageBadge stage={d.stage} />}
+                {/* Причина отказа (SALES-40) — как на карточке доски/в списке/drawer */}
+                {d.lostReasonCode &&
+                  (d.stage?.id === "lost" || d.stage?.id === "cond_lost") && (
+                    <span className="inline-flex items-center rounded-md bg-red-100 px-2 py-0.5 text-[11.5px] font-semibold text-red-700">
+                      Причина: {LOSS_REASONS.find((r) => r.code === d.lostReasonCode)?.title ?? d.lostReasonCode}
+                    </span>
+                  )}
                 {/* TODO(SALES): regular / temperature / ship-бейджи — ждут полей бэкенда */}
               </div>
+              {d.lostComment && (d.stage?.id === "lost" || d.stage?.id === "cond_lost") && (
+                <div className="mt-1 text-[12.5px] text-muted">Комментарий: {d.lostComment}</div>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <DealEditButton

@@ -46,6 +46,7 @@ import {
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
+import { STAGE_BY_ID } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
@@ -657,6 +658,12 @@ export function DealsWorkspace({
                   // (isOpenStage — критерий для АГРЕГАТОВ: итог строки и колонки, не для per-deal.)
                   const prob = probabilityFor(deal, stageId);
                   const weighted = weightedAmount(deal, stageId);
+                  // SALES-43/40: дни-в-стадии/висяк + причина отказа — те же значения, что cardExtras.
+                  const days = now != null ? daysInStage(deal.stageChangedAt, now) : null;
+                  const stuck = now != null && isStuck(deal, stageId, now);
+                  const lostTitle = deal.lostReasonCode
+                    ? (reasonByCode.get(deal.lostReasonCode) ?? deal.lostReasonCode)
+                    : undefined;
                   return (
                   <tr key={deal.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-4 py-2.5">
@@ -666,7 +673,24 @@ export function DealsWorkspace({
                     </td>
                     <td className="px-4 py-2.5 text-ink">{deal.company}</td>
                     <td className="px-4 py-2.5 text-muted">{deal.description}</td>
-                    <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-1.5 text-muted">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: STAGE_BY_ID[stageId]?.color ?? "#64748B" }}
+                          aria-hidden
+                        />
+                        {stageTitle}
+                        {days != null && (
+                          <span className={stuck ? "font-semibold text-amber-600" : "text-faint"}>
+                            · {days} дн{stuck ? " · висяк" : ""}
+                          </span>
+                        )}
+                      </span>
+                      {lostTitle && (
+                        <div className="mt-0.5 text-[11px] text-red-700">Причина: {lostTitle}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-muted">{prob}%</td>
                     <td className="px-4 py-2.5 text-right font-medium text-ink">
                       {fmt(deal.amount)}
@@ -758,6 +782,8 @@ export function DealsWorkspace({
           setPreviewDeal(null);
         }}
         onCall={(d) => setCallDeal(d)}
+        now={now}
+        reasonByCode={reasonByCode}
       />
 
       {/* Окно звонка по сделке — единый кокпит (скрипт сделки + подбор товара →

@@ -145,6 +145,9 @@ export interface DealDetail {
   probability?: number;
   /** Ожидаемая дата закрытия (SALES-44). */
   expectedCloseDate?: string;
+  /** Причина отказа (SALES-40) — код из справочника LOSS_REASONS + комментарий менеджера. */
+  lostReasonCode?: string;
+  lostComment?: string;
 
   /** Себестоимость / прибыль / маржа для metrics-полосы (считается на клиенте по позициям). */
   pricing?: {
