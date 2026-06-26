@@ -15,8 +15,8 @@ import { formatByn } from "@/lib/format";
  * Себес/прибыль/маржа считаются на клиенте по правилу «в наличии → себес из 1С»
  * ([[pricing-calculation-todo]]): позиции сделки (fetchDealItems) джойнятся с остатками
  * 1С по коду (fetchStock.cost). Под-заказ (себес из 1С нет) в расчёт не идёт — он
- * появится с предварительным расчётом. Цена позиции — последняя котировка клиенту
- * (Price Engine), иначе цена со склада. Пока грузится — «…», нет себес — «—».
+ * появится с предварительным расчётом. Цена позиции — из 1С (правило «в наличии →
+ * цена из 1С», как и себестоимость). Пока грузится — «…», нет себес — «—».
  */
 export function DealMetrics({
   dealId,
@@ -47,7 +47,7 @@ export function DealMetrics({
     const st = stock[it.code];
     if (st?.cost != null) {
       anyCost = true;
-      costedRevenue += (it.last_price ?? st.price ?? 0) * it.qty;
+      costedRevenue += (st.price ?? 0) * it.qty; // цена из 1С (правило «в наличии → цена из 1С»)
       cost += st.cost * it.qty;
     } else {
       hasUnderOrder = true;
