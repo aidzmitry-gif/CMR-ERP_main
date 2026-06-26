@@ -8,6 +8,7 @@ import { DealApprovals } from "@/components/deal-approvals";
 import { DealContacts } from "@/components/deal-contacts";
 import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
+import { DealMetrics } from "@/components/deal-metrics";
 import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
@@ -74,7 +75,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
 
-          <Metrics amount={d.amount} closeDate={d.dealDate} />
+          <DealMetrics dealId={id} amount={d.amount} closeDate={d.dealDate} />
           <Stages currentIdx={stageIdx} />
         </Card>
 
@@ -116,38 +117,6 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 }
 
 // ── вспомогательные подкомпоненты страницы (server, без хуков) ───────────────────
-
-function Metrics({ amount, closeDate }: { amount: number; closeDate: string }) {
-  // TODO(SALES): cost/profit/margin — из d.pricing.* (probability/expectedCloseDate
-  //   уже на Deal — читаем оттуда, чтобы не плодить дубли в DealDetail).
-  const cells: { label: string; value: string; tone?: "money" }[] = [
-    { label: "Сумма", value: formatByn(amount) },
-    { label: "Себестоимость", value: "—" },
-    { label: "Прибыль", value: "—", tone: "money" },
-    { label: "Маржа", value: "—" },
-    { label: "Вероятность", value: "—" },
-    { label: "Закрытие", value: closeDate || "—" },
-  ];
-  return (
-    <div className="mt-2.5 flex flex-wrap divide-x divide-line overflow-hidden rounded-[10px] border border-line">
-      {cells.map((c) => (
-        <div
-          key={c.label}
-          className="flex min-w-[150px] flex-1 flex-wrap items-baseline gap-1.5 px-3.5 py-[7px]"
-        >
-          <div className="text-[11px] uppercase tracking-wide text-muted">{c.label}</div>
-          <div
-            className={`text-[15px] font-extrabold tabular-nums ${
-              c.tone === "money" ? "text-money" : "text-ink"
-            }`}
-          >
-            {c.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function Stages({ currentIdx }: { currentIdx: number }) {
   // <ol>/<li> вместо role="list" — настоящая семантика упорядоченного списка.
