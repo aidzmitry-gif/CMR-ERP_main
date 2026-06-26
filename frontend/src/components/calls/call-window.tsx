@@ -141,6 +141,13 @@ export function CallWindow({
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [query, setQuery] = useState("");
   const [reserve, setReserve] = useState(true);
+  const [unp, setUnp] = useState(""); // УНП контрагента — резолв реквизитов (ЕГР/MDM) пока заглушка
+  const [req, setReq] = useState<{
+    unp: string;
+    org: string;
+    address: string;
+    account: string;
+  } | null>(null);
   const [term, setTerm] = useState(TERMS[0]);
   const [customTerm, setCustomTerm] = useState(""); // свой вариант условий оплаты
   const [note, setNote] = useState("");
@@ -164,6 +171,8 @@ export function CallWindow({
     setRows([]);
     setQuery("");
     setReserve(true);
+    setUnp("");
+    setReq(null);
     setTerm(TERMS[0]);
     setCustomTerm("");
     setNote("");
@@ -258,6 +267,20 @@ export function CallWindow({
     setRows((r) => r.filter((x) => x.skuId !== skuId));
   }
 
+  // Подтянуть реквизиты по УНП. ponytail: demo-резолв (фикс. организация); реальный
+  // ЕГР/MDM-резолв — SALES (УНП→ЕГР помечен заглушкой в докстринге окна).
+  function pullReq() {
+    const clean = unp.replace(/\D/g, "");
+    if (clean.length !== 9) return flash("УНП — 9 цифр");
+    setReq({
+      unp: clean,
+      org: "ООО «Стартлайн»",
+      address: "г. Минск, ул. Кальварийская, 17",
+      account: "BY12 ALFA 3012 0000 …",
+    });
+    flash("✅ Реквизиты подтянуты (demo · ЕГР/MDM — SALES)");
+  }
+
   const pickedRows = rows.filter((r) => r.picked);
   // Итог заказа по ценам со склада (для счёта); НДС 20%.
   const orderTotal = pickedRows.reduce((sum, r) => sum + (stock[r.code]?.price ?? 0) * r.qty, 0);
@@ -287,7 +310,9 @@ export function CallWindow({
     // подобранные позиции. convertLead требует routed-статус, поэтому для звонка делаем
     // прямую сделку (createDeal) + addDealItem; полноценную привязку к лиду (статус
     // converted) добавим эндпоинтом «быстрая сделка» отдельным шагом (SALES).
-    const counterparty = ctx.company || ctx.phone || "Новый клиент";
+    // Реквизиты по УНП (если подтянули) дают официальное наименование, когда у лида/
+    // нового клиента нет компании — иначе сохраняем известную компанию лида.
+    const counterparty = ctx.company || req?.org || ctx.phone || "Новый клиент";
     // Date.now() в обработчике клика (не в рендере) — уникальный номер счёта в момент действия.
     // eslint-disable-next-line react-hooks/purity
     const number = `CRM-CALL-${Date.now().toString(36).toUpperCase()}`;
@@ -466,9 +491,51 @@ export function CallWindow({
             <section className="min-w-0 space-y-3 bg-surface p-4">
               <ColHeader icon={<ShoppingCart size={14} />}>Заказ / счёт</ColHeader>
 
+              {/* Реквизиты по УНП (лид/новый клиент): подтянуть из ЕГР перед подбором.
+                  Резолв — заглушка (demo); реальный ЕГР/MDM — SALES. У сделки контрагент
+                  уже известен, поэтому блок только для lead/new. */}
+              {ctx.kind !== "deal" && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
+                    <StepNum n={1} />
+                    Реквизиты по УНП
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={unp}
+                      onChange={(e) => setUnp(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") pullReq();
+                      }}
+                      inputMode="numeric"
+                      placeholder="УНП (9 цифр)"
+                      aria-label="УНП контрагента"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent"
+                    />
+                    <Button variant="primary" size="sm" onClick={pullReq} disabled={busy}>
+                      Подтянуть
+                    </Button>
+                  </div>
+                  {req && (
+                    <div className="mt-1.5 space-y-1 rounded-lg border border-money/40 bg-money-soft px-2.5 py-2 text-[11.5px]">
+                      <div className="font-semibold text-money">
+                        ✅ Реквизиты по УНП {req.unp} — ЕГР (demo)
+                      </div>
+                      <ReqRow k="Организация" v={req.org} />
+                      <ReqRow k="Адрес" v={req.address} />
+                      <ReqRow k="Расчётный счёт" v={req.account} />
+                    </div>
+                  )}
+                  <div className="mt-1 text-[11px] text-faint">
+                    ЕГР/MDM-резолв по УНП — заглушка (SALES); сейчас demo-реквизиты.
+                  </div>
+                </div>
+              )}
+
               {/* Товар со склада — реальная номенклатура */}
               <div>
-                <div className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
+                  {ctx.kind !== "deal" && <StepNum n={2} />}
                   Товар со склада
                 </div>
                 {rows.length > 0 && (
@@ -779,6 +846,25 @@ function ColHeader({ icon, children }: { icon: React.ReactNode; children: React.
     <div className="flex items-center gap-1.5 border-b border-line pb-2 text-[12.5px] font-bold text-ink">
       <span className="text-accent-ink">{icon}</span>
       {children}
+    </div>
+  );
+}
+
+/** Номер шага оформления (① Реквизиты по УНП → ② Товар со склада). */
+function StepNum({ n }: { n: number }) {
+  return (
+    <span className="flex h-[18px] w-[18px] items-center justify-center rounded-md bg-accent/15 text-[11px] font-bold text-accent-ink">
+      {n}
+    </span>
+  );
+}
+
+/** Строка подтянутых реквизитов (ключ → значение). */
+function ReqRow({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex justify-between gap-3 text-faint">
+      <span>{k}</span>
+      <span className="text-right font-medium text-ink">{v}</span>
     </div>
   );
 }
