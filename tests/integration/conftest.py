@@ -63,7 +63,9 @@ async def pg_app(postgres_url, monkeypatch):
     await app.state.core.services.db.connect()  # реальное подключение к Postgres
     transport = ASGITransport(app=app)
     try:
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=transport, base_url="http://test", headers={"X-User-Roles": "director"}
+        ) as client:  # fail-closed (P0-1): без супер-роли все /sales/* отдают 403
             yield client
     finally:
         await app.state.core.services.db.disconnect()
