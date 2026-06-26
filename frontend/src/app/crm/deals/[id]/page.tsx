@@ -17,28 +17,13 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchDealDetail } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
-
-// 9-стадийная воронка продаж (эталон — sales-card-full.html).
-// TODO(SALES-43): забрать из единого frontend/src/lib/sales-stages.ts, когда
-//   реальный регламент из Excel заказчика будет порчен в bytestream — пока
-//   список встречается в нескольких местах (mock-data/rop-data/leads-workspace).
-const STAGES = [
-  "Контакт",
-  "Квалификация",
-  "Презентация",
-  "Встреча",
-  "Есть цена",
-  "Счёт защищён",
-  "Договор / предоплата",
-  "Отгрузка",
-  "Закрыта",
-];
+import { PROGRESSION_STAGES } from "@/lib/sales-stages";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const d = await fetchDealDetail(id, await currentRole());
-  // Server-only хардкод; страница остаётся server component, гидрация консистентна.
-  const stageIdx = 0;
+  // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 для mock/без стадии.
+  const stageIdx = d.stage?.idx ?? 0;
 
   return (
     <AppShell crumbs={["CRM", "Сделки", d.number || "сделка"]}>
@@ -167,7 +152,7 @@ function Stages({ currentIdx }: { currentIdx: number }) {
   // Цвет текущего узла — токен stage.prop (из tailwind config), не raw amber.
   return (
     <ol aria-label="Стадии воронки продаж" className="relative mt-3 flex list-none items-start">
-      {STAGES.map((label, i) => {
+      {PROGRESSION_STAGES.map((stage, i) => {
         const done = i < currentIdx;
         const cur = i === currentIdx;
         const nodeBg = done
@@ -179,11 +164,11 @@ function Stages({ currentIdx }: { currentIdx: number }) {
         const txt = done || cur ? "text-ink font-semibold" : "text-faint";
         return (
           <li
-            key={label}
+            key={stage.id}
             aria-current={cur ? "step" : undefined}
             className="relative min-w-0 flex-1 text-center"
           >
-            {i < STAGES.length - 1 && (
+            {i < PROGRESSION_STAGES.length - 1 && (
               <div className={`absolute left-1/2 top-2 h-0.5 w-full ${lineBg}`} aria-hidden />
             )}
             <div
@@ -192,8 +177,11 @@ function Stages({ currentIdx }: { currentIdx: number }) {
             >
               {done ? "✓" : i + 1}
             </div>
-            <div className={`mt-1 truncate px-0.5 text-[10px] leading-tight ${txt}`} title={label}>
-              {label}
+            <div
+              className={`mt-1 truncate px-0.5 text-[10px] leading-tight ${txt}`}
+              title={stage.title}
+            >
+              {stage.title}
             </div>
           </li>
         );
