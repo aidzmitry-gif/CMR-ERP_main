@@ -91,8 +91,8 @@ async def test_production_completed_emits(session, api):
 
 
 async def test_campaign_creates_leads(session):
-    from modules.leads.events import on_campaign_launched
-    from modules.leads.models import Lead
+    from modules.sales.events import on_campaign_launched
+    from modules.sales.models import Lead
 
     # кампания питает приём лидов (front-of-funnel), а не создаёт сделки напрямую
     await on_campaign_launched({"name": "Весна", "leads": 3, "channel": "email"}, _ctx(session))
@@ -159,3 +159,33 @@ async def test_logistics_delivered_emits(session, api):
     assert r.status_code == 200
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "logistics.shipment.delivered" in types
+
+
+async def test_freight_cost_creates_finance_expense(session):
+    from modules.finance.events import on_freight_cost
+    from modules.finance.models import Payment
+
+    await on_freight_cost(
+        {"deal_id": 7, "ref": "ОТГ-1", "carrier": "DPD", "amount": 320.50}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()
+    assert len(rows) == 1
+    assert float(rows[0].amount) == 320.50 and rows[0].ref == "freight:ОТГ-1"
+
+    # нулевой тариф не создаёт расход
+    await on_freight_cost({"ref": "ОТГ-2", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()) == 1
+
+
+async def test_delivered_shipment_emits_freight_cost(session, api):
+    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+    # назначаем перевозчика с тарифом → amount > 0
+    await api.post(
+        f"/logistics/shipments/{ship['id']}/carrier-order",
+        json={"carrier": "DPD", "shipping_cost": 150},
+    )
+    await api.patch(f"/logistics/shipments/{ship['id']}", json={"status": "delivered"})
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.freight.cost" in types
