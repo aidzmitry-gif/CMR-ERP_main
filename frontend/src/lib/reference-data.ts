@@ -543,6 +543,35 @@ export async function fetchSkuCard(code: string, roles?: string): Promise<SkuCar
   }
 }
 
+// ── Правила слияния (survivorship, M2) ───────────────────────────────────────
+
+/** Правило слияния для одного поля: стратегия + (для source_priority) порядок источников. */
+export interface SurvivorshipRule {
+  id: number;
+  entity_type: string; // counterparty | sku
+  field: string;
+  strategy: string; // source_priority | manual_only | most_recent | non_empty_wins
+  source_priority: string[];
+}
+
+/** Правила слияния (SSR), `entityType` — фильтр (counterparty/sku); пусто — все. */
+export async function fetchSurvivorshipRules(
+  entityType?: string,
+  roles?: string,
+): Promise<SurvivorshipRule[]> {
+  try {
+    const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : "";
+    const res = await fetch(`${BASE}/system/mdm/rules${q}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as { rules: SurvivorshipRule[] }).rules;
+  } catch {
+    return [];
+  }
+}
+
 // ── Группы (категории) номенклатуры — иерархия (parent_id) ───────────────────
 
 /** Группа номенклатуры (узел дерева; parent_id=null → корень). */

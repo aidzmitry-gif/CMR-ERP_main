@@ -90,7 +90,7 @@ export function syncStateMeta(state: string): { label: string; tone: "ok" | "wai
   }
 }
 
-/** Человеческая подпись типа сущности в журнале синка. */
+/** Человеческая подпись типа сущности в журнале синка / правилах слияния. */
 export function syncEntityLabel(entityType: string): string {
   switch (entityType) {
     case "counterparty":
@@ -100,4 +100,48 @@ export function syncEntityLabel(entityType: string): string {
     default:
       return entityType;
   }
+}
+
+// ── M2: правила слияния (survivorship) ───────────────────────────────────────
+
+/** Подпись и пояснение стратегии слияния для экрана правил. */
+export function strategyMeta(strategy: string): { label: string; hint: string } {
+  switch (strategy) {
+    case "source_priority":
+      return {
+        label: "Приоритет источника",
+        hint: "Берётся значение из самого доверенного доступного источника (по порядку).",
+      };
+    case "manual_only":
+      return {
+        label: "Только вручную",
+        hint: "Меняет только человек в ERP; никакой синк не перезаписывает.",
+      };
+    case "most_recent":
+      return {
+        label: "Самое свежее",
+        hint: "Выигрывает значение с самой поздней датой, независимо от источника.",
+      };
+    case "non_empty_wins":
+      return {
+        label: "Непустое замещает",
+        hint: "Непустое заполняет пустое; при конфликте двух непустых эталон сохраняется.",
+      };
+    default:
+      return { label: strategy, hint: "" };
+  }
+}
+
+/** Защищает ли стратегия поле от затирания синком из 1С (закреплено за источником выше 1С). */
+export function ruleProtectsFromSync(rule: {
+  strategy: string;
+  source_priority: string[];
+}): boolean {
+  if (rule.strategy === "manual_only") return true;
+  if (rule.strategy === "source_priority") {
+    // защищено, если 1С НЕ первый приоритет (выше него есть egr/erp/manual)
+    return rule.source_priority.length > 0 && rule.source_priority[0] !== "1c";
+  }
+  // most_recent / non_empty_wins — синк может обновить (не закреплено за источником)
+  return false;
 }

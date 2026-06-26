@@ -16,7 +16,13 @@ from difflib import SequenceMatcher
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import AuditLog, Contact, Counterparty, CounterpartyAlias
+from core.domain.models import (
+    AuditLog,
+    Contact,
+    Counterparty,
+    CounterpartyAlias,
+    SurvivorshipRule,
+)
 
 #: порог похожести имён по умолчанию для fuzzy-кандидатов (0..1); ниже — не предлагаем.
 FUZZY_THRESHOLD = 0.6
@@ -301,3 +307,29 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
             for a in audit
         ],
     }
+
+
+async def survivorship_rules(session: AsyncSession, entity_type: str | None = None) -> list[dict]:
+    """Правила слияния (survivorship) — какое поле за каким источником закреплено (M2).
+
+    Витрина таблицы ``survivorship_rule``: для каждой пары (сущность, поле) — стратегия и,
+    для ``source_priority``, упорядоченный список источников. Поля без своей записи берут
+    дефолт ``non_empty_wins`` (его на витрине не показываем — правил для него нет в БД).
+    ``entity_type`` фильтрует (counterparty/sku); пусто — все. Только чтение.
+    """
+    query = select(SurvivorshipRule).order_by(
+        SurvivorshipRule.entity_type, SurvivorshipRule.field
+    )
+    if entity_type:
+        query = query.where(SurvivorshipRule.entity_type == entity_type)
+    rows = (await session.execute(query)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "entity_type": r.entity_type,
+            "field": r.field,
+            "strategy": r.strategy,
+            "source_priority": list(r.source_priority or []),
+        }
+        for r in rows
+    ]

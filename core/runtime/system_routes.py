@@ -167,6 +167,19 @@ async def mdm_duplicates(session: AsyncSession = Depends(get_session)) -> dict:
     return {"clusters": await mdm.duplicate_clusters(session)}
 
 
+@router.get("/system/mdm/rules")
+async def mdm_rules(
+    entity_type: str | None = None, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Правила слияния (survivorship, M2): за каким источником закреплено каждое поле.
+
+    Витрина ``survivorship_rule`` — чем синк из 1С не имеет права затереть ручную правку/
+    реквизит ЕГР. ``entity_type`` фильтрует (counterparty/sku). Только чтение (метаданные
+    политики, не PII) — под общим /system без отдельного права.
+    """
+    return {"rules": await mdm.survivorship_rules(session, entity_type)}
+
+
 @router.get("/system/mdm/fuzzy")
 async def mdm_fuzzy(
     name: str, exclude_id: int | None = None, session: AsyncSession = Depends(get_session)
