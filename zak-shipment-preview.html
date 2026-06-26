@@ -180,9 +180,11 @@
       <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
       <a href="zak-board-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Воронка</a>
       <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Машины</span>
+      <a href="zak-claims-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Рекламации</a>
       <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
       <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
       <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
+      <a href="zak-cost-calc-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Калькулятор</a>
     </div>
 
     <!-- Легенда вех -->
@@ -213,9 +215,12 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span class="text-sm font-semibold text-ink">MO-2026-014</span>
-            <span class="ml-2 text-[12px] font-normal text-muted">· 18 заявок · ¥182 400 · ETA Минск 16 июня</span>
+            <span class="ml-2 text-[12px] font-normal text-muted">· 18 заявок · ¥182 400 · landed 43 350 BYN · ETA Минск 16 июня</span>
           </div>
-          <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">⑥ Таможня Минск</span>
+          <div class="flex items-center gap-1.5">
+            <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Частично оплачена</span>
+            <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">⑥ Таможня Минск</span>
+          </div>
         </div>
 
         <!-- горизонтальный таймлайн вех с плановыми датами -->
@@ -264,8 +269,9 @@
                     <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Поставщик</th>
                     <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Кол-во</th>
                     <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Вес / м³</th>
-                    <th class="pb-1.5 text-center text-[11px] font-semibold text-faint">Выкуп</th>
-                    <th class="pb-1.5 text-center text-[11px] font-semibold text-faint">Источник</th>
+                    <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Landed, BYN</th>
+                    <th class="pb-1.5 text-center text-[11px] font-semibold text-faint">Оплата</th>
+                    <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Сделка</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-50">
@@ -274,48 +280,54 @@
                     <td class="py-2 text-muted text-[12px]">Shenzhen Hangxin 深圳航芯</td>
                     <td class="py-2 text-right text-muted">5 000 шт</td>
                     <td class="py-2 text-right text-muted">8 кг / 0.02</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачено</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">пополнение</td>
+                    <td class="py-2 text-right font-semibold text-ink">3 050</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачен</span></td>
+                    <td class="py-2 text-[12px] text-accent">СД-2287</td>
                   </tr>
                   <tr>
                     <td class="py-2 font-medium text-ink">Реле SRD-05VDC 10А</td>
                     <td class="py-2 text-muted text-[12px]">Yuxin Electronics</td>
                     <td class="py-2 text-right text-muted">1 200 шт</td>
                     <td class="py-2 text-right text-muted">6 кг / 0.01</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачено</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">под сделку</td>
+                    <td class="py-2 text-right font-semibold text-ink">1 150</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачен</span></td>
+                    <td class="py-2 text-[12px] text-accent">СД-2290</td>
                   </tr>
                   <tr>
                     <td class="py-2 font-medium text-ink">Разъём USB-C 24pin SMD</td>
                     <td class="py-2 text-muted text-[12px]">阿里巴巴 商家 (1688)</td>
                     <td class="py-2 text-right text-muted">20 000 шт</td>
                     <td class="py-2 text-right text-muted">12 кг / 0.03</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачено</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">под сделку</td>
+                    <td class="py-2 text-right font-semibold text-ink">26 000</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Частично</span></td>
+                    <td class="py-2 text-[12px] text-accent">СД-2291</td>
                   </tr>
                   <tr>
                     <td class="py-2 font-medium text-ink">Чип STM32F103C8T6</td>
                     <td class="py-2 text-muted text-[12px]">Suzhou Precision</td>
                     <td class="py-2 text-right text-muted">3 000 шт</td>
                     <td class="py-2 text-right text-muted">4 кг / 0.01</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачено</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">пополнение</td>
+                    <td class="py-2 text-right font-semibold text-ink">5 950</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Частично</span></td>
+                    <td class="py-2 text-[12px] text-accent">СД-2278</td>
                   </tr>
                   <tr>
                     <td class="py-2 font-medium text-ink">Транзистор 2N3904 SOT-23</td>
                     <td class="py-2 text-muted text-[12px]">Taobao 店铺 · разъёмы</td>
                     <td class="py-2 text-right text-muted">50 000 шт</td>
                     <td class="py-2 text-right text-muted">3 кг / 0.01</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачено</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">пополнение</td>
+                    <td class="py-2 text-right font-semibold text-ink">2 800</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Оплачен</span></td>
+                    <td class="py-2 text-[12px] text-muted">пополнение</td>
                   </tr>
                   <tr>
                     <td class="py-2 font-medium text-ink">Резистор 10кОм 0402</td>
                     <td class="py-2 text-muted text-[12px]">Shenzhen Hangxin 深圳航芯</td>
                     <td class="py-2 text-right text-muted">200 000 шт</td>
                     <td class="py-2 text-right text-muted">5 кг / 0.01</td>
-                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Ждёт оплату</span></td>
-                    <td class="py-2 text-center text-[12px] text-muted">пополнение</td>
+                    <td class="py-2 text-right font-semibold text-ink">4 400</td>
+                    <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">Не оплачен</span></td>
+                    <td class="py-2 text-[12px] text-muted">пополнение</td>
                   </tr>
                 </tbody>
               </table>
@@ -340,6 +352,36 @@
               </div>
               <div class="h-2 w-full overflow-hidden rounded-full bg-sunken">
                 <div class="h-2 rounded-full bg-emerald-500" style="width:64%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- финансы машины: себестоимость (landed) + оплаты -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">Финансы машины</span>
+              <a href="zak-cost-calc-preview.html" class="text-[11px] font-semibold text-accent">калькулятор →</a>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-4">
+              <div class="rounded-xl border border-line bg-sunken p-3">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Себестоимость (landed)</div>
+                <div class="mt-1 text-lg font-bold text-ink">43 350 <span class="text-[12px] font-medium text-muted">BYN</span></div>
+                <div class="text-[10px] text-faint">сумма по позициям · план</div>
+              </div>
+              <div class="rounded-xl border border-line bg-sunken p-3">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Оплачено</div>
+                <div class="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-300">16 585 <span class="text-[12px] font-medium text-muted">BYN</span></div>
+                <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-emerald-500" style="width:38%"></div></div>
+              </div>
+              <div class="rounded-xl border border-line bg-sunken p-3">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">К доплате</div>
+                <div class="mt-1 text-lg font-bold text-amber-600 dark:text-amber-300">26 765 <span class="text-[12px] font-medium text-muted">BYN</span></div>
+                <div class="text-[10px] text-faint">по 2 поставщикам</div>
+              </div>
+              <div class="rounded-xl border border-line bg-sunken p-3">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Статус оплат</div>
+                <div class="mt-1"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[12px] font-semibold text-amber-700 dark:text-amber-300">Частично оплачена</span></div>
+                <div class="mt-1 text-[10px] text-faint">3 оплачено · 2 частично · 1 нет</div>
               </div>
             </div>
           </div>
@@ -407,9 +449,12 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span class="text-sm font-semibold text-ink">MO-2026-015</span>
-            <span class="ml-2 text-[12px] font-normal text-muted">· 22 заявки · ¥210 800 · ETA Минск 24 июня</span>
+            <span class="ml-2 text-[12px] font-normal text-muted">· 22 заявки · ¥210 800 · landed 51 200 BYN · ETA Минск 24 июня</span>
           </div>
-          <span class="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">④ Проверка (склад Китай)</span>
+          <div class="flex items-center gap-1.5">
+            <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Частично оплачена</span>
+            <span class="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">④ Проверка (склад Китай)</span>
+          </div>
         </div>
         <div class="mt-3 flex items-center gap-1">
           <div class="h-2 flex-1 rounded-full bg-emerald-500"></div>
@@ -427,9 +472,12 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span class="text-sm font-semibold text-ink">MO-2026-016</span>
-            <span class="ml-2 text-[12px] font-normal text-muted">· 9 заявок · ¥74 100 · сбор открыт · ETA Минск 3 июля</span>
+            <span class="ml-2 text-[12px] font-normal text-muted">· 9 заявок · ¥74 100 · landed 17 800 BYN · сбор открыт · ETA Минск 3 июля</span>
           </div>
-          <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">② Производство</span>
+          <div class="flex items-center gap-1.5">
+            <span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">Предоплаты</span>
+            <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">② Производство</span>
+          </div>
         </div>
         <div class="mt-3 flex items-center gap-1">
           <div class="h-2 flex-1 rounded-full bg-emerald-500"></div>
@@ -447,9 +495,12 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span class="text-sm font-semibold text-ink">MO-2026-017</span>
-            <span class="ml-2 text-[12px] font-normal text-muted">· 6 заявок · ¥43 200 · сбор открыт · ETA Минск 15 июля</span>
+            <span class="ml-2 text-[12px] font-normal text-muted">· 6 заявок · ¥43 200 · landed 10 400 BYN · сбор открыт · ETA Минск 15 июля</span>
           </div>
-          <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">① Выкуп</span>
+          <div class="flex items-center gap-1.5">
+            <span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">Не оплачена</span>
+            <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">① Выкуп</span>
+          </div>
         </div>
         <div class="mt-3 flex items-center gap-1">
           <div class="h-2 flex-1 rounded-full bg-violet-400"></div>
@@ -463,6 +514,67 @@
       </div>
 
     </div><!-- /СПИСОК МАШИН -->
+
+    <!-- ======== СБОРКА СЛЕДУЮЩЕЙ МАШИНЫ ИЗ ПОДТВЕРЖДЁННЫХ РАСЧЁТОВ ======== -->
+    <div class="rounded-2xl bg-surface p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span class="text-sm font-semibold text-ink">Сборка следующей машины · из подтверждённых расчётов</span>
+          <p class="mt-0.5 text-[12px] text-muted">Расчёты со статусом <b>«выкуп подтверждён»</b> собираются в открытую машину. Без выкупа расчёт остаётся в истории.</p>
+        </div>
+        <div class="flex items-center gap-1.5 text-[11px]">
+          <span class="text-faint">Открыты для сбора:</span>
+          <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-600 dark:text-violet-300">MO-016 · 48% свободно</span>
+          <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-600 dark:text-violet-300">MO-017 · 40% свободно</span>
+        </div>
+      </div>
+
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-line">
+              <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Позиция (расчёт)</th>
+              <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Поставщик</th>
+              <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Кол-во</th>
+              <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Landed, BYN</th>
+              <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Сделка</th>
+              <th class="pb-1.5 text-center text-[11px] font-semibold text-faint">Выкуп</th>
+              <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">В машину</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <tr>
+              <td class="py-2 font-medium text-ink">Модуль ESP8266-12F</td>
+              <td class="py-2 text-muted text-[12px]">Shenzhen Hangxin 深圳航芯</td>
+              <td class="py-2 text-right text-muted">800 шт</td>
+              <td class="py-2 text-right font-semibold text-ink">2 040</td>
+              <td class="py-2 text-[12px] text-accent">СД-2280</td>
+              <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">подтверждён</span></td>
+              <td class="py-2 text-right"><button class="rounded-lg border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">＋ MO-016</button></td>
+            </tr>
+            <tr>
+              <td class="py-2 font-medium text-ink">Конд. алюм. 1000мкФ 35В</td>
+              <td class="py-2 text-muted text-[12px]">Yuxin Electronics</td>
+              <td class="py-2 text-right text-muted">8 000 шт</td>
+              <td class="py-2 text-right font-semibold text-ink">3 920</td>
+              <td class="py-2 text-[12px] text-muted">пополнение</td>
+              <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">подтверждён</span></td>
+              <td class="py-2 text-right"><button class="rounded-lg border border-accent px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft">＋ MO-016</button></td>
+            </tr>
+            <tr>
+              <td class="py-2 font-medium text-ink">Реле 24VDC SPDT 10A</td>
+              <td class="py-2 text-muted text-[12px]">Suzhou Precision</td>
+              <td class="py-2 text-right text-muted">600 шт</td>
+              <td class="py-2 text-right font-semibold text-ink">4 560</td>
+              <td class="py-2 text-[12px] text-accent">СД-2270</td>
+              <td class="py-2 text-center"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">ждёт согл.</span></td>
+              <td class="py-2 text-right"><button class="rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-faint" title="Сначала подтвердить выкуп" disabled>＋ MO-017</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-[11px] text-faint">Себестоимость (landed) тянется из расчёта позиции; <b>не выкупленные</b> расчёты сюда не попадают — остаются в истории по номенклатуре.</div>
+    </div>
 
     <!-- ИИ-блок (ghost) -->
     <div class="rounded-2xl border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 p-5">

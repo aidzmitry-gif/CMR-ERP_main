@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Закупки · Рекламации — превью</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: {
+          canvas: "rgb(var(--canvas) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          sunken: "rgb(var(--sunken) / <alpha-value>)",
+          ink: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--muted) / <alpha-value>)",
+          faint: "rgb(var(--faint) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", soft: "rgb(var(--accent-soft) / <alpha-value>)" },
+          money: { DEFAULT: "rgb(var(--money) / <alpha-value>)", soft: "rgb(var(--money-soft) / <alpha-value>)" },
+        },
+        fontFamily: { sans: ["Inter","system-ui","-apple-system","Segoe UI","Roboto","Arial","sans-serif"] },
+        boxShadow: {
+          card: "0 1px 1px rgba(20,20,40,0.03), 0 2px 4px rgba(20,20,40,0.04), 0 6px 16px rgba(20,20,40,0.04), inset 0 1px 0 rgba(255,255,255,0.6)",
+          pop: "0 1px 2px rgba(20,20,40,0.06), 0 12px 28px rgba(20,20,40,0.12)",
+        },
+        borderRadius: { lg: "10px", xl: "12px", "2xl": "14px" },
+      } },
+    };
+  </script>
+  <style>
+    :root{ --canvas:238 241 245; --surface:255 255 255; --sunken:244 246 249; --ink:15 23 42; --muted:91 107 130; --faint:147 161 181; --line:226 232 240; --accent:30 94 255; --accent-soft:227 236 255; --money:14 124 74; --money-soft:226 243 234; }
+    .dark{ --canvas:14 17 22; --surface:23 27 34; --sunken:31 36 44; --ink:232 234 237; --muted:155 163 174; --faint:107 114 128; --line:42 48 56; --accent:110 139 255; --accent-soft:35 42 61; --money:52 211 153; --money-soft:22 39 31; }
+    body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-feature-settings:"cv05","ss01";-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+    .chatrail{position:fixed;top:0;right:0;height:100vh;width:68px;z-index:30;background:rgb(var(--surface));border-left:1px solid rgb(var(--line));transition:width .22s ease;overflow:hidden;box-shadow:-8px 0 24px rgba(20,20,40,.05)}
+    .chatrail:hover{width:320px;box-shadow:-12px 0 40px rgba(20,20,40,.14)}
+    .chatrail .lbl{opacity:0;transition:opacity .18s ease;white-space:nowrap}
+    .chatrail:hover .lbl{opacity:1}
+    .chatrail .head{display:flex;align-items:center;gap:.5rem;height:56px;padding:0 14px;border-bottom:1px solid rgb(var(--line))}
+    .chatrow{display:flex;align-items:center;gap:.6rem;padding:9px 14px;cursor:pointer}
+    .chatrow:hover{background:rgb(var(--sunken))}
+    .av{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff}
+    .badge{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9999px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid rgb(var(--surface))}
+    .ch-flag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:9999px;line-height:1.4}
+    .ovl{position:fixed;inset:0;background:rgba(8,10,16,.50);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+    .ovl.show{opacity:1;pointer-events:auto}
+    .drw{position:fixed;top:0;right:0;height:100vh;width:600px;max-width:96vw;background:rgb(var(--surface));box-shadow:-12px 0 40px rgba(8,10,16,.30);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);z-index:60;display:flex;flex-direction:column}
+    .drw.show{transform:translateX(0)}
+    .card{cursor:pointer}
+    .card:hover{box-shadow:0 12px 28px rgba(20,20,40,.12)}
+    .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:70;height:40px;padding:0 14px;border-radius:9999px;background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);display:flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;font-weight:600;color:rgb(var(--ink))}
+    .theme-toggle:hover{border-color:rgb(var(--accent))}
+  </style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-toggle" onclick="toggleTheme()" title="Светлая / тёмная тема"><span id="themeIcon">🌙</span><span class="theme-lbl">Тёмная</span></button>
+  <script>
+    function applyTheme(d){ document.documentElement.classList.toggle('dark', d); const i=document.getElementById('themeIcon'), l=document.querySelector('.theme-lbl'); if(i) i.textContent=d?'☀️':'🌙'; if(l) l.textContent=d?'Светлая':'Тёмная'; }
+    function toggleTheme(){ const d=!document.documentElement.classList.contains('dark'); applyTheme(d); try{localStorage.setItem('zak-theme', d?'dark':'light')}catch(e){} }
+    (function(){ const p=new URLSearchParams(location.search).get('theme'); let s; try{s=localStorage.getItem('zak-theme')}catch(e){} applyTheme(p ? p==='dark' : s==='dark'); })();
+  </script>
+
+  <!-- ====== Панель чатов поставщиков ====== -->
+  <aside class="chatrail">
+    <div class="head"><span class="text-lg">💬</span><span class="lbl text-sm font-semibold text-ink">Переписка с поставщиками</span></div>
+    <div class="lbl px-3.5 py-2 text-[11px] text-violet-600 dark:text-violet-300 bg-violet-50/60 dark:bg-violet-500/15 border-b border-violet-100 dark:border-violet-500/40">✦ ИИ ведёт 2 претензии · 1 черновик ждёт отправки</div>
+    <div class="chatrow"><span class="av" style="background:#0ea5e9">深<span class="badge">2</span></span><span class="lbl min-w-0"><span class="flex items-center gap-1.5"><span class="truncate text-[13px] font-semibold text-ink">Shenzhen Hangxin 深圳航芯</span><span class="ch-flag bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">WeChat</span></span><span class="block truncate text-[12px] text-muted">претензия по браку — фото получены</span></span></div>
+    <div class="chatrow"><span class="av" style="background:#6366f1">YX<span class="badge">1</span></span><span class="lbl min-w-0"><span class="flex items-center gap-1.5"><span class="truncate text-[13px] font-semibold text-ink">Yuxin Electronics</span><span class="ch-flag bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300">email</span></span><span class="block truncate text-[12px] text-muted">недопоставка 100 шт — согласны допоставить</span></span></div>
+    <div class="chatrow"><span class="av" style="background:#f59e0b">ИП<span class="badge">3</span></span><span class="lbl min-w-0"><span class="flex items-center gap-1.5"><span class="truncate text-[13px] font-semibold text-ink">Иванов П. · продавец</span><span class="ch-flag bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">внутр.</span></span><span class="block truncate text-[12px] text-muted">клиент вернул пересорт по USB-C</span></span></div>
+    <div class="chatrow"><span class="av" style="background:#ef4444">阿</span><span class="lbl min-w-0"><span class="flex items-center gap-1.5"><span class="truncate text-[13px] font-semibold text-ink">阿里巴巴 商家 (1688)</span><span class="ch-flag bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300">1688</span></span><span class="block truncate text-[12px] text-muted">пересорт 24pin → отвечает медленно</span></span></div>
+    <div class="chatrow"><span class="av" style="background:#8b5cf6">SZ</span><span class="lbl min-w-0"><span class="flex items-center gap-1.5"><span class="truncate text-[13px] font-semibold text-ink">Suzhou Precision</span><span class="ch-flag bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300">email</span></span><span class="block truncate text-[12px] text-muted">задержка QC — предложили скидку 3%</span></span></div>
+    <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-faint">ИИ формирует претензию с фото, переводит и ведёт торг о замене/скидке/допоставке.</div>
+  </aside>
+
+  <!-- ====== Контент ====== -->
+  <div class="mx-auto max-w-[1180px] space-y-4 p-6 pr-[92px]">
+
+    <div>
+      <h1 class="text-xl font-bold text-ink">Рекламации поставщикам · брак / недопоставка / пересорт / срок</h1>
+      <p class="mt-1 text-sm text-muted">
+        Дом всех претензий закупщика. Заводятся из приёмки/QC, склада или с экрана продавца (клиент пожаловался).
+        Внутри претензии — два разговора: <b>внутренний</b> (продавец/склад ↔ закупщик) и <b>внешний</b> (закупщик ↔ поставщик, ведёт ИИ).
+        Клик по претензии — полная карточка.
+      </p>
+    </div>
+
+    <!-- вкладки закупок (Рекламации активна) -->
+    <div class="flex flex-wrap gap-1.5 text-[13px]">
+      <a href="zak-cockpit-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Обзор</a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
+      <a href="zak-board-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Воронка</a>
+      <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Рекламации</span>
+      <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
+      <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
+      <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
+      <a href="zak-cost-calc-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Калькулятор</a>
+    </div>
+
+    <!-- KPI -->
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div class="rounded-2xl bg-surface p-4 shadow-card"><div class="text-[11px] text-muted">Открыто претензий</div><div class="mt-1 text-xl font-bold">4</div><div class="text-[11px] text-faint">из 5 за месяц</div></div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card"><div class="text-[11px] text-muted">У поставщика</div><div class="mt-1 text-xl font-bold">2</div><div class="text-[11px] text-faint">ждут ответа/решения</div></div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card"><div class="text-[11px] text-muted">Просрочка SLA</div><div class="mt-1 text-xl font-bold text-red-600 dark:text-red-400">1</div><div class="text-[11px] text-faint">требует эскалации</div></div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card"><div class="text-[11px] text-muted">К возврату / компенсации</div><div class="mt-1 text-xl font-bold text-money">≈ 7 900</div><div class="text-[11px] text-faint">BYN · удержано/ожидается</div></div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card"><div class="text-[11px] text-muted">Брак-лидер</div><div class="mt-1 text-[15px] font-bold">1688 商家</div><div class="text-[11px] text-faint">2 претензии · «не проверен»</div></div>
+    </div>
+
+    <!-- фильтр по типу -->
+    <div class="flex flex-wrap gap-1.5 text-[12px]">
+      <span class="rounded-full bg-accent px-3 py-1 font-semibold text-white shadow-card">Все · 5</span>
+      <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Брак · 2</span>
+      <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Недопоставка · 1</span>
+      <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Пересорт · 1</span>
+      <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Срок · 1</span>
+    </div>
+
+    <!-- список претензий -->
+    <div id="claimList" class="space-y-2"></div>
+
+    <!-- AI-блок -->
+    <div class="rounded-2xl border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 p-5">
+      <div class="flex items-center gap-2"><span class="text-violet-500 dark:text-violet-300">✦</span><span class="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">ИИ по рекламациям</span></div>
+      <div class="mt-3 space-y-2 text-sm text-violet-700 dark:text-violet-300">
+        <div class="flex items-start justify-between gap-3"><span><b>1 ·</b> CLM-003 (пересорт USB-C, 1688) — SLA просрочен, поставщик «не проверен» отвечает медленно. Эскалировать + не вносить остаток оплаты.</span><span class="shrink-0 inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[11px] font-semibold text-red-600 dark:text-red-300">эскалация</span></div>
+        <div class="flex items-start justify-between gap-3"><span><b>2 ·</b> У 1688 商家 2 претензии за месяц (брак + пересорт) — рейтинг вниз, предложить замену поставщика на постоянных позициях.</span><span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">рейтинг</span></div>
+        <div class="flex items-start justify-between gap-3"><span><b>3 ·</b> CLM-002 (недопоставка 100 шт реле) — допоставка влезает в MO-016 (сбор открыт). Связать, чтобы не гнать отдельную отправку.</span><span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">→ MO-016</span></div>
+      </div>
+    </div>
+
+    <p class="text-xs text-faint">Превью-снимок. Демо-данные (BYN/¥). Претензия — единый объект, видна также блоком в карточке заявки и на машине. Клик по претензии — полная карточка.</p>
+  </div>
+
+  <!-- ====== Оверлей + дровер ====== -->
+  <div class="ovl" id="ovl" onclick="closeClaim()"></div>
+  <aside class="drw" id="drw">
+    <div class="border-b border-line p-5">
+      <div class="flex items-center justify-between">
+        <span class="text-[12px] text-muted" id="cl-num">CLM-001</span>
+        <div class="flex gap-1.5">
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Закрыть" onclick="closeClaim()">✕</button>
+        </div>
+      </div>
+      <h2 class="mt-2 text-lg font-bold text-ink" id="cl-title">—</h2>
+      <div class="mt-0.5 text-[13px] text-muted" id="cl-sub">—</div>
+      <div class="mt-2.5 flex flex-wrap gap-1.5" id="cl-chips"></div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5" id="cl-body"></div>
+    <div class="border-t border-line p-4 flex gap-2">
+      <button class="flex-1 rounded-lg bg-accent py-2.5 text-[13px] font-semibold text-white">→ Следующий шаг</button>
+      <button class="rounded-lg border border-line px-3 py-2.5 text-[13px] font-semibold text-muted">Эскалация</button>
+      <button class="rounded-lg border border-line px-3 py-2.5 text-[13px] font-semibold text-muted">Закрыть претензию</button>
+    </div>
+  </aside>
+
+<script>
+  const CL_STAGES = ["Заявлена","У поставщика","Решение согласовано","Закрыта"];
+  const TYPE = {
+    brak:{lbl:"Брак",cls:"bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300"},
+    short:{lbl:"Недопоставка",cls:"bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300"},
+    mismatch:{lbl:"Пересорт",cls:"bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"},
+    delay:{lbl:"Срок",cls:"bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300"},
+  };
+  const relCls = r => r==="Надёжный"||r==="Стратегич." ? "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                  : r==="Осторожно" ? "bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                  : "bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300";
+
+  const CLAIMS = [
+    { id:"c1", num:"CLM-2026-001", type:"brak", title:"Конденсатор 470мкФ 25В", sku:"8507…", supplier:"Shenzhen Hangxin 深圳航芯", rel:"Стратегич.",
+      machine:"MO-2026-014", deal:"СД-2287", client:"«РадиоДеталь» · Иванов П.", qty:"5 000 шт", affected:"240 шт (4.8%)", found:"Приёмка / QC (AQL 2.5)", date:"12.06.2026", sla:"осталось 2 дня", stage:1,
+      resolution:{type:"Замена брака", sum:"замена 240 шт за счёт поставщика", note:"новая партия в MO-016"},
+      finance:{hold:"удержать 30% остатка оплаты до замены", margin:"landed без изменений (замена бесплатна)"},
+      evidence:["Фото партии (24 шт с дефектом)","QC-протокол AQL 2.5 — брак 4.8% > 2.5%","Видео вскрытия"],
+      internal:[{d:"in",who:"Склад/ОТК",t:"При вскрытии 240 шт вздулись — брак выше нормы, фото приложил"},{d:"out",who:"Закупщик",t:"Принял, открываю претензию Hangxin, держим клиента"}],
+      supplierThread:[{d:"out",t:"质量问题: 240/5000 鼓包, AQL超标, 请安排换货",m:"ИИ · претензия с фото отправлена"},{d:"in",t:"已收到照片, 同意换货, 下批补发",m:"перевод ИИ: фото получили, согласны на замену, допоставим след. партией"}],
+      ai:[{t:"Hangxin признал брак — замена бесплатна. Удержать остаток оплаты до прихода замены.",b:"замена"},{t:"Брак 0.4%→4.8% разово — занести в историю, но рейтинг не ронять (1 случай за 12 мес).",b:"рейтинг"}] },
+
+    { id:"c2", num:"CLM-2026-002", type:"short", title:"Реле SRD-05VDC 10А", sku:"8536…", supplier:"Yuxin Electronics", rel:"Осторожно",
+      machine:"MO-2026-014", deal:"СД-2290", client:"«ЭлектроМир» · Петрова А.", qty:"1 200 шт", affected:"−100 шт (поставлено 1 100)", found:"Склад · пересчёт при приёмке", date:"13.06.2026", sla:"в норме", stage:2,
+      resolution:{type:"Допоставка", sum:"100 шт в MO-016 ИЛИ возврат ¥ за 100 шт", note:"выбрана допоставка"},
+      finance:{hold:"оплата за 100 шт не вносится до допоставки", margin:"−¥ за 100 шт временно, восстановится"},
+      evidence:["Акт пересчёта склада","Фото упаковки (90 коробок вместо 100)"],
+      internal:[{d:"in",who:"Склад",t:"Пришло 1 100 из 1 200, не хватает 100 шт"},{d:"out",who:"Закупщик",t:"Согласовал с Yuxin допоставку 100 шт в след. машину"}],
+      supplierThread:[{d:"out",t:"短装100个, 请在下批MO-016补发",m:"ИИ · недопоставка 100 шт, просим допоставить в MO-016"},{d:"in",t:"确认, 下批补100个, 不另收运费",m:"перевод ИИ: подтверждаем, допоставим 100 шт, без доп. фрахта"}],
+      ai:[{t:"Допоставка влезает в MO-016 (сбор открыт) — связать, не гнать отдельную отправку.",b:"→ MO-016"},{t:"Yuxin: 2-я недопоставка за квартал — на контроль, рейтинг «Осторожно».",b:"рейтинг"}] },
+
+    { id:"c3", num:"CLM-2026-003", type:"mismatch", title:"Разъём USB-C 24pin SMD", sku:"8536…", supplier:"阿里巴巴 商家 (1688)", rel:"Не проверен",
+      machine:"MO-2026-014", deal:"СД-2291", client:"«ТехноПром»", qty:"20 000 шт", affected:"вся партия (прислали 20pin)", found:"Продавец · клиент вернул", date:"14.06.2026", sla:"ПРОСРОЧЕН +1 день", stage:0,
+      resolution:{type:"Возврат + замена", sum:"возврат/замена всей партии 20 000 шт", note:"поставщик отвечает медленно"},
+      finance:{hold:"остаток оплаты НЕ вносить (риск, поставщик не проверен)", margin:"риск полной потери предоплаты"},
+      evidence:["Фото: 20pin вместо 24pin","Скрин спецификации заказа (24pin)","Возврат от клиента"],
+      internal:[{d:"in",who:"Продавец Иванов П.",t:"Клиент вернул — это 20pin, а заказывали 24pin. Срочно, клиент ждёт"},{d:"out",who:"Закупщик",t:"Открыл претензию, давлю на 1688. Поставщик не проверен — без предоплаты остатка"}],
+      supplierThread:[{d:"out",t:"发错货: 20pin 而非 24pin, 请退款或换货",m:"ИИ · пересорт, требуем возврат или замену"},{d:"in",t:"……",m:"ответа нет 2-й день — ИИ поднял как риск"}],
+      ai:[{t:"SLA просрочен, поставщик «не проверен» молчит. Эскалировать руководителю + площадке 1688 (спор).",b:"эскалация"},{t:"Не вносить остаток оплаты. Подобрать проверенного поставщика на USB-C.",b:"риск денег"}] },
+
+    { id:"c4", num:"CLM-2026-004", type:"delay", title:"Трансформатор ТП-20", sku:"8504…", supplier:"Suzhou Precision", rel:"Надёжный",
+      machine:"MO-2026-014", deal:"СД-2272", client:"внутр. сборка", qty:"100 шт", affected:"задержка отгрузки (QC не назначен)", found:"ИИ-планировщик машин", date:"11.06.2026", sla:"в норме", stage:1,
+      resolution:{type:"Ускорить + скидка", sum:"скидка 3% за задержку ИЛИ ускоренный QC", note:"поставщик предложил −3%"},
+      finance:{hold:"—", margin:"скидка 3% улучшает landed на этой позиции"},
+      evidence:["Лог ИИ: партия готова, QC не назначен","Срок машины MO-014 — таможня через 2 дня"],
+      internal:[{d:"in",who:"ИИ-планировщик",t:"Риск срыва MO-014: ТП-20 готов, QC не назначен"},{d:"out",who:"Закупщик",t:"Запросил у Suzhou ускорение, обсуждаем компенсацию за задержку"}],
+      supplierThread:[{d:"out",t:"QC未安排, 影响MO-014到港, 请加急并补偿",m:"ИИ · задержка QC, просим ускорить и компенсацию"},{d:"in",t:"可加急, 给3%折扣补偿",m:"перевод ИИ: можем ускорить, даём скидку 3% как компенсацию"}],
+      ai:[{t:"Suzhou надёжный, предложил −3% — принять скидку, ускорить QC, не срывать MO-014.",b:"−3%"},{t:"Связать с риском машины MO-014 (таможня через 2 дня).",b:"срок"}] },
+
+    { id:"c5", num:"CLM-2026-005", type:"brak", title:"Кабель HDMI 2м", sku:"8544…", supplier:"1688 商家", rel:"Осторожно",
+      machine:"MO-2026-013", deal:"пополнение", client:"—", qty:"200 шт", affected:"2 шт (1.0%) — ниже AQL", found:"Приёмка / QC", date:"08.06.2026", sla:"закрыта", stage:3,
+      resolution:{type:"Скидка", sum:"скидка 2% на партию (брак ниже AQL, замена не требуется)", note:"закрыто"},
+      finance:{hold:"—", margin:"скидка 2% зачтена в landed факт"},
+      evidence:["QC-протокол: брак 1.0% < AQL 2.5%"],
+      internal:[{d:"in",who:"ОТК",t:"Брак 1% — ниже нормы, но зафиксировал"},{d:"out",who:"Закупщик",t:"Закрыл скидкой 2%, замену не требуем"}],
+      supplierThread:[{d:"out",t:"轻微不良1%, 给2%折扣即可",m:"ИИ · мелкий брак 1%, достаточно скидки 2%"},{d:"in",t:"同意2%",m:"перевод ИИ: согласны на 2%"}],
+      ai:[{t:"Закрыто скидкой — занести в историю брака поставщика (тренд по 1688 商家).",b:"история"}] },
+  ];
+
+  const stepper = idx => {
+    let s='<div class="flex gap-1 mt-1">';
+    for(let i=0;i<4;i++){ const c=i<idx?'bg-accent':i===idx?'bg-amber-400':'bg-line'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
+    s+='</div><div class="flex justify-between mt-1 text-[10px] text-faint">'+CL_STAGES.map((n,i)=>`<span class="${i===idx?'font-semibold text-amber-600 dark:text-amber-300':''}">${n}</span>`).join('')+'</div>';
+    return s;
+  };
+  const sec = (t,inner,add) => `<div class="py-4 border-b border-line"><div class="flex items-center justify-between mb-2"><span class="text-[11px] font-semibold uppercase tracking-wide text-faint">${t}</span>${add?`<span class="text-[11px] font-semibold text-accent">${add}</span>`:''}</div>${inner}</div>`;
+  const msgs = arr => arr.map(x=>`<div class="${x.d==='out'?'ml-auto bg-accent text-white':'bg-sunken text-ink'} max-w-[88%] rounded-xl px-3 py-2 text-[12px] mb-1.5">${x.who?`<div class="text-[10px] font-semibold ${x.d==='out'?'text-blue-100':'text-muted'} mb-0.5">${x.who}</div>`:''}${x.t}${x.m?`<div class="text-[10px] mt-0.5 ${x.d==='out'?'text-blue-100':'text-faint'}">${x.m}</div>`:''}</div>`).join('');
+
+  function chips(d){
+    const t=TYPE[d.type], slaBad=/просроч/i.test(d.sla);
+    return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${t.cls}">${t.lbl}</span>
+      <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">● ${CL_STAGES[d.stage]}</span>
+      <span class="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">🚚 ${d.machine}</span>
+      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${slaBad?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':'bg-sunken text-muted'}">SLA: ${d.sla}</span>`;
+  }
+
+  function buildClaim(d){
+    let h='';
+    h+=sec("Статус претензии", stepper(d.stage));
+    // структурные поля
+    const f=(k,v)=>`<div class="flex justify-between gap-3 py-1 border-b border-line/60 text-[12px]"><span class="text-muted shrink-0">${k}</span><span class="text-right font-medium text-ink">${v}</span></div>`;
+    h+=sec("Что и сколько",
+      f("Позиция",d.title)+f("Поставщик",`${d.supplier} <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${relCls(d.rel)}">${d.rel}</span>`)+
+      f("Кол-во в партии",d.qty)+f("Затронуто",`<span class="text-red-600 dark:text-red-400 font-semibold">${d.affected}</span>`)+
+      f("Обнаружено",d.found)+f("Дата",d.date)+f("Машина / сделка",`${d.machine} · ${d.deal}`)+f("Клиент",d.client));
+    // доказательства
+    h+=sec("Доказательства", d.evidence.map(e=>`<div class="flex items-start gap-2 text-[12px] text-ink py-0.5"><span class="text-accent">📎</span><span>${e}</span></div>`).join(''),'＋ фото');
+    // требуемое решение
+    h+=sec("Требуемое решение",
+      `<div class="rounded-lg bg-accent-soft/50 p-3 text-[12px]"><div class="font-semibold text-ink">${d.resolution.type}</div><div class="text-muted mt-0.5">${d.resolution.sum}</div>${d.resolution.note?`<div class="text-faint mt-0.5">${d.resolution.note}</div>`:''}</div>
+       <div class="mt-2 flex flex-wrap gap-1.5">${["Замена","Допоставка","Возврат денег","Скидка","Компенсация"].map(x=>`<span class="rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold ${d.resolution.type.indexOf(x.split(' ')[0])>=0?'bg-accent text-white border-accent':'text-muted'}">${x}</span>`).join('')}</div>`);
+    // финансовый эффект
+    h+=sec("Финансовый эффект",
+      `<div class="space-y-1 text-[12px]"><div class="flex justify-between"><span class="text-muted">Оплата</span><span class="font-medium text-amber-600 dark:text-amber-300 text-right">${d.finance.hold}</span></div>
+       <div class="flex justify-between"><span class="text-muted">Себестоимость / маржа</span><span class="font-medium text-ink text-right">${d.finance.margin}</span></div></div>`,
+      '<a class="text-accent" href="zak-cost-calc-preview.html">калькулятор →</a>');
+    // внутренний разговор
+    h+=sec("Внутренний обмен · продавец / склад ↔ закупщик",`<div class="flex flex-col">${msgs(d.internal)}</div>`);
+    // внешний разговор (AI)
+    h+=sec("Переписка с поставщиком (ведёт ИИ)",`<div class="flex flex-col">${msgs(d.supplierThread)}</div>`,'<a class="text-accent" href="zak-ai-comms-preview.html">все диалоги →</a>');
+    // ИИ-рекомендации
+    h+=`<div class="py-4"><div class="rounded-xl border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 p-3"><div class="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300 mb-2">✦ ИИ по претензии</div>${d.ai.map(x=>`<div class="flex items-start justify-between gap-2 mb-1.5"><span class="text-[12px] text-violet-700 dark:text-violet-300">${x.t}</span><span class="shrink-0 inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300">${x.b}</span></div>`).join('')}</div></div>`;
+    return h;
+  }
+
+  function claimCard(d){
+    const t=TYPE[d.type], slaBad=/просроч/i.test(d.sla), closed=d.stage===3;
+    return `<div class="card rounded-xl bg-surface p-4 shadow-card ${closed?'opacity-70':''} ${slaBad?'ring-1 ring-red-300 dark:ring-red-500/40':''}" data-cl="${d.id}">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[13px] font-semibold text-ink">${d.title}</span>
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${t.cls}">${t.lbl}</span>
+            ${slaBad?'<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">SLA просрочен</span>':''}
+          </div>
+          <div class="mt-1 text-[12px] text-muted">${d.supplier} · затронуто <span class="text-red-600 dark:text-red-400 font-semibold">${d.affected}</span> · ${d.found}</div>
+          <div class="mt-1 text-[11px] text-faint">${d.num} · 🚚 ${d.machine} · ${d.deal} · ${d.client}</div>
+        </div>
+        <div class="text-right shrink-0">
+          <span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">${CL_STAGES[d.stage]}</span>
+          <div class="mt-1 text-[11px] ${slaBad?'text-red-600 dark:text-red-400 font-semibold':'text-faint'}">${d.sla}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('claimList').innerHTML = CLAIMS.map(claimCard).join('');
+
+  function openClaim(id){
+    const d=CLAIMS.find(c=>c.id===id); if(!d) return;
+    document.getElementById('cl-num').textContent=d.num;
+    document.getElementById('cl-title').textContent=d.title+' · '+TYPE[d.type].lbl;
+    document.getElementById('cl-sub').textContent=`${d.supplier} · ${d.machine} · ${d.deal}`;
+    document.getElementById('cl-chips').innerHTML=chips(d);
+    document.getElementById('cl-body').innerHTML=buildClaim(d);
+    document.getElementById('cl-body').scrollTop=0;
+    document.getElementById('ovl').classList.add('show');
+    document.getElementById('drw').classList.add('show');
+  }
+  function closeClaim(){ document.getElementById('ovl').classList.remove('show'); document.getElementById('drw').classList.remove('show'); }
+  document.querySelectorAll('.card[data-cl]').forEach(c=>c.addEventListener('click',()=>openClaim(c.getAttribute('data-cl'))));
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeClaim(); });
+</script>
+</body>
+</html>
