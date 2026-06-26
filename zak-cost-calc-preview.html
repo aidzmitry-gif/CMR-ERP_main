@@ -193,13 +193,22 @@
   </div>
 
 <script>
-// Справочник номенклатуры (MDM, синк с 1С). Вес/тара/коробка + ТН ВЭД → ставка пошлины тянутся отсюда.
+// Справочник ставок пошлины по коду ТН ВЭД (единственный источник ставки — код).
+const TNVED = {
+  "8507 60 000 0": 0,   // литий-ионные аккумуляторы
+  "8504 40 900 0": 0,   // зарядные устройства / источники питания
+  "8427 20 110 0": 5,   // погрузчики самоходные
+  "8427 20 190 0": 5,   // штабелёры/погрузчики прочие
+};
+const dutyByHs = hs => (hs && TNVED[hs] != null) ? TNVED[hs] : null; // ставка % по коду ТН ВЭД, иначе null → запасная
+
+// Справочник номенклатуры (MDM, синк с 1С). Вес/тара/коробка/ТН ВЭД отсюда; пошлина — по коду ТН ВЭД из TNVED.
 const SKU = [
-  { name:"Аккумулятор Li INR18650-35E 3500mah", hs:"8507 60 000 0", duty:0, path:"cny", w:0.05,   tara:"коробка 44×28×6 см", perBox:70, util:0 },
-  { name:"Lifepo4 battery pack 25.6V/200Ah",     hs:"8507 60 000 0", duty:0, path:"cny", w:57.667, tara:"паллета",            perBox:1,  util:0 },
-  { name:"Электроштабелер HILIFT PT16",          hs:"8427 20 190 0", duty:5, path:"usd", w:1500,   tara:"без упаковки",       perBox:1,  util:0 },
-  { name:"Погрузчик CPD15 48V/450ah",            hs:"8427 20 110 0", duty:5, path:"usd", w:2800,   tara:"без упаковки",       perBox:1,  util:6800 },
-  { name:"Электропогрузчик CPD35 15·24kw",       hs:"8427 20 190 0", duty:5, path:"usd", w:3900,   tara:"без упаковки",       perBox:1,  util:28100 },
+  { name:"Аккумулятор Li INR18650-35E 3500mah", hs:"8507 60 000 0", path:"cny", w:0.05,   tara:"коробка 44×28×6 см", perBox:70, util:0 },
+  { name:"Lifepo4 battery pack 25.6V/200Ah",     hs:"8507 60 000 0", path:"cny", w:57.667, tara:"паллета",            perBox:1,  util:0 },
+  { name:"Электроштабелер HILIFT PT16",          hs:"8427 20 190 0", path:"usd", w:1500,   tara:"без упаковки",       perBox:1,  util:0 },
+  { name:"Погрузчик CPD15 48V/450ah",            hs:"8427 20 110 0", path:"usd", w:2800,   tara:"без упаковки",       perBox:1,  util:6800 },
+  { name:"Электропогрузчик CPD35 15·24kw",       hs:"8427 20 190 0", path:"usd", w:3900,   tara:"без упаковки",       perBox:1,  util:28100 },
 ];
 const skuByName = Object.fromEntries(SKU.map(s => [s.name, s]));
 // Коммерческие поля расчёта + связь со сделкой/машиной. status: deal=предварит.для сделки, machine=выкуплен→в машине, history=в истории.
@@ -210,7 +219,7 @@ const DEAL_ROWS = [
   { sku:3, price:6800, qty:3,    markup:1.65, date:"22.06.2026", status:"machine", machine:"M-2407", deal:"S-1185" },
   { sku:4, price:9400, qty:1,    markup:1.2,  date:"25.06.2026", status:"deal",    machine:"",       deal:"S-1190" },
 ];
-const buildRows = () => DEAL_ROWS.map(d => ({ ...JSON.parse(JSON.stringify(SKU[d.sku])), ...d, duty:SKU[d.sku].duty }));
+const buildRows = () => DEAL_ROWS.map(d => ({ ...JSON.parse(JSON.stringify(SKU[d.sku])), ...d, duty:dutyByHs(SKU[d.sku].hs) }));
 let rows = buildRows();
 let sel = 0;
 
@@ -328,7 +337,7 @@ function renderBreakdown(S){
     <div class="md:col-span-3 rounded-xl bg-accent-soft/40 p-3 flex flex-wrap gap-x-6 gap-y-2 items-center text-[12px]">
       <span class="font-semibold text-ink">Из справочника номенклатуры 🔗</span>
       <span class="text-muted">ТН ВЭД: <b class="text-ink num">${r.hs||'—'}</b></span>
-      <span class="text-muted">Пошлина по коду: <b class="text-ink num">${(c.dutyRate*100).toFixed(1)}%</b></span>
+      <span class="text-muted">Пошлина по коду ТН ВЭД: <b class="text-ink num">${(c.dutyRate*100).toFixed(1)}%</b>${(r.hs&&TNVED[r.hs]!=null)?'':' <span class="text-faint">(запасная)</span>'}</span>
       <span class="text-muted">Вес/шт: <b class="text-ink num">${r.w} кг</b></span>
       <span class="text-muted">Тара/коробка: <b class="text-ink">${r.tara||'—'}</b></span>
       <span class="text-muted">В коробке: <b class="text-ink num">${r.perBox||'—'} шт</b></span>
@@ -389,7 +398,7 @@ $('tbody').addEventListener('change', e=>{
   // выбор позиции из справочника → подтянуть вес/тару/коробку, ТН ВЭД и ставку пошлины, путь
   if(f==='name'){
     const s = skuByName[e.target.value];
-    if(s){ Object.assign(rows[i], { name:s.name, hs:s.hs, duty:s.duty, path:s.path, w:s.w, tara:s.tara, perBox:s.perBox, util:s.util }); }
+    if(s){ Object.assign(rows[i], { name:s.name, hs:s.hs, duty:dutyByHs(s.hs), path:s.path, w:s.w, tara:s.tara, perBox:s.perBox, util:s.util }); }
     render();
   }
 });
