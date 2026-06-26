@@ -69,6 +69,12 @@ export function weightedAmount(deal: Deal, stageId: string): number {
   return (deal.amount * probabilityFor(deal, stageId)) / 100;
 }
 
+/** Стадия «в работе» — открытый pipeline (без won/lost/cond_lost). Единый критерий
+ *  охвата для взвешенного прогноза: и итог PipelineRow, и «взвешенно» в шапке колонки
+ *  считают по нему — иначе Σ колонок ≠ итогу (cond_lost даёт 5% в колонке, но не в итоге). */
+export const isOpenStage = (s: Stage): boolean =>
+  s.id !== "won" && s.id !== "lost" && s.id !== "cond_lost";
+
 /** Взвешенная сумма стадии — сумма взвешенных сумм её сделок (для шапки колонки). */
 export function stageWeightedSum(stage: Stage): number {
   return stage.deals.reduce((acc, d) => acc + weightedAmount(d, stage.id), 0);

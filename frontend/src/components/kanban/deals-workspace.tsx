@@ -37,6 +37,7 @@ import {
 } from "@/lib/api";
 import {
   daysInStage,
+  isOpenStage,
   isStuck,
   LOSS_REASONS,
   moveDealToStage,
@@ -106,9 +107,6 @@ function workingDaysLeft(now: number): number {
   }
   return count;
 }
-
-/** Стадия «в работе» — открытый pipeline (без won/lost/cond_lost). */
-const isOpenStage = (s: Stage) => s.id !== "won" && s.id !== "lost" && s.id !== "cond_lost";
 
 // ponytail: demo-ставка валовой маржи для прогноза. Реальная — из landed cost
 // (закупки); методика цены ещё разрабатывается ([[pricing-calculation-todo]]).
@@ -261,8 +259,10 @@ function Column({
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
-  // Взвешенная сумма по колонке (SALES-44) — только для рабочих стадий с карточками.
-  const showWeighted = stage.id !== "won" && stage.id !== "lost" && stage.deals.length > 0;
+  // Взвешенная сумма по колонке (SALES-44) — только для открытого pipeline с карточками.
+  // Охват — тот же isOpenStage, что и в итоге PipelineRow: иначе cond_lost (5%) показал бы
+  // «взвешенно» в колонке, не входя в общий прогноз → Σ колонок ≠ итогу строки.
+  const showWeighted = isOpenStage(stage) && stage.deals.length > 0;
   const weighted = stageWeightedSum(stage);
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
