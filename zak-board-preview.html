@@ -184,9 +184,11 @@
       <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
       <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Воронка</span>
       <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <a href="zak-claims-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Рекламации</a>
       <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
       <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
       <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
+      <a href="zak-cost-calc-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Калькулятор</a>
     </div>
 
     <!-- ════ ПЛАН / ФАКТ — цели отдела закупок (как в продажах) ════ -->
@@ -754,6 +756,13 @@
     Z.esp8266.machine="MO-2026-016 (план)"; Z.esp8266.payment={status:"unpaid",cur:"BYN",total:2040,paid:0,schedule:[
       {d:"после согласования",label:"Предоплата 30%",amt:612,done:false},{d:"против B/L",label:"Остаток 70%",amt:1428,done:false}]};
 
+    // ── Претензии по поставке (брак/недопоставка/пересорт/срок), привязаны к позиции → экран «Рекламации» ──
+    Z.cap470.claims  =[{num:"CLM-2026-001",type:"Брак",         affected:"240 шт (4.8%)", stage:"У поставщика",        sla:"осталось 2 дня", bad:false}];
+    Z.relay_srd.claims=[{num:"CLM-2026-002",type:"Недопоставка", affected:"−100 шт",       stage:"Решение согласовано",sla:"в норме",        bad:false}];
+    Z.usbc.claims    =[{num:"CLM-2026-003",type:"Пересорт",     affected:"вся партия",    stage:"Заявлена",           sla:"ПРОСРОЧЕН",      bad:true}];
+    Z.trafo.claims   =[{num:"CLM-2026-004",type:"Срок",         affected:"задержка QC",   stage:"У поставщика",       sla:"в норме",        bad:false}];
+    Z.hdmi.claims    =[{num:"CLM-2026-005",type:"Брак",         affected:"2 шт (1%)",     stage:"Закрыта",            sla:"—",              bad:false}];
+
     function stepper(idx){
       let s='<div class="flex gap-1 mt-3">';
       for(let i=0;i<9;i++){ const c=i<idx?'bg-accent':i===idx?'bg-amber-400':'bg-line'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
@@ -807,11 +816,22 @@
             <div class="flex justify-between border-t border-line pt-1"><span class="text-muted">Себестоимость ед.</span><span class="font-bold text-ink">${d.landed.unit}</span></div>
             <div class="flex justify-between"><span class="text-muted">Партия</span><span class="font-medium">${d.landed.batch}</span></div>
             <div class="flex justify-between"><span class="text-muted">Рекоменд. цена продажи</span><span class="font-semibold text-emerald-600 dark:text-emerald-300">${d.landed.price}</span></div>
-          </div>`,'<a class="text-accent" href="zak-landed-cost-preview.html">расчёт →</a>');
+          </div>`,'<a class="text-accent" href="zak-cost-calc-preview.html">калькулятор →</a>');
       }
 
       // оплаты поставщику (оплачено / к доплате / история)
       if(d.payment){ h+=paymentSection(d.payment); }
+
+      // претензии по поставке (контекстный блок → экран «Рекламации»)
+      if(d.claims){
+        const cc=d.claims.map(x=>{
+          const tCls = x.type==='Брак'?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':x.type==='Недопоставка'?'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300':x.type==='Пересорт'?'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300':'bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300';
+          return `<div class="flex items-center justify-between gap-2 py-1.5 text-[12px]">
+            <span class="flex items-center gap-2 min-w-0"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${tCls}">${x.type}</span><span class="text-ink truncate">${x.affected}</span><span class="text-faint">${x.num}</span></span>
+            <span class="flex items-center gap-1.5 shrink-0"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">${x.stage}</span>${x.bad?'<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">SLA!</span>':''}</span></div>`;
+        }).join('');
+        h+=sec("Претензии по поставке",cc,'<a class="text-accent" href="zak-claims-preview.html">рекламации →</a>');
+      }
 
       // качество (↑качество)
       if(d.quality){
