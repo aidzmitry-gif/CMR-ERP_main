@@ -522,20 +522,37 @@ export interface EffectiveTnved {
   group_name: string | null;
 }
 
+/** Узел breadcrumb группы номенклатуры (от корня к группе товара). */
+export interface GroupPathNode {
+  code: string;
+  name: string;
+}
+
+/** Связь товара с 1С (M3): происхождение + статус выгрузки. `null` — связи нет. */
+export interface SkuSync {
+  origin: string; // erp | 1c | bitrix — где запись родилась
+  state: string; // local | pending | synced | error
+  external_ref: string | null;
+  last_synced_at: string | null;
+}
+
 /** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
 export interface SkuCard {
   code: string;
   title: string;
   unit: string | null;
   category_id: number | null;
+  group_path: GroupPathNode[]; // breadcrumb группы от корня к листу ([] — нет группы)
   weight_kg: number | null;
   tnved_code: string | null; // собственный код товара (может быть null → наследуется)
   effective_tnved: EffectiveTnved; // свой ∨ унаследованный от группы (+ источник)
+  tnved_rates: TnvedRates | null; // пошлина + НДС по эффективному коду на сегодня; null — нет
   shelf_life_days: number | null;
   is_active: boolean;
   attributes: Record<string, unknown>; // переменные характеристики (JSONB-хвост)
   provenance: Provenance; // происхождение по полям (M2)
   landed_cost: number | null; // себес партии; null — нет расчёта/модуль не подключён (не 0)
+  sync: SkuSync | null; // синк из 1С: происхождение/статус; null — связи нет
 }
 
 /** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */

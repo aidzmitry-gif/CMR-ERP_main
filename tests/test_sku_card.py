@@ -1,5 +1,9 @@
 """M4: карточка номенклатуры (мастер-данные Sku + горячие поля + landed cost через фасад)."""
-from core.domain.models import Sku
+
+from datetime import date
+
+from core.domain.models import Sku, SyncLink
+from core.domain.reference import NomenclatureCategory, TnvedCode, VatRate
 
 
 async def test_sku_card_returns_master_fields(api, session):
@@ -57,3 +61,74 @@ async def test_sku_card_reads_landed_cost_via_gateway(api, session):
         assert card["landed_cost"]["stage"] == "estimated"
     finally:
         core.services.landed_cost = None  # вернуть, чтобы не течь в другие тесты
+
+
+async def test_sku_card_group_breadcrumb(api, session):
+    """group_path — путь по дереву групп от корня к группе товара (для шапки карточки)."""
+    root = NomenclatureCategory(code="G-ROOT", name="Электрооборудование")
+    session.add(root)
+    await session.flush()
+    mid = NomenclatureCategory(code="G-MID", name="Аккумуляторы", parent_id=root.id)
+    session.add(mid)
+    await session.flush()
+    session.add(Sku(code="BC-1", title="Товар", unit="шт", category_id=mid.id))
+    await session.commit()
+
+    card = (await api.get("/system/sku/BC-1")).json()
+    # от корня к листу
+    assert [g["code"] for g in card["group_path"]] == ["G-ROOT", "G-MID"]
+    assert card["group_path"][1]["name"] == "Аккумуляторы"
+
+
+async def test_sku_card_group_breadcrumb_empty_without_category(api, session):
+    """Нет группы → group_path пустой (не падаем)."""
+    session.add(Sku(code="BC-NONE", title="Без группы", unit="шт"))
+    await session.commit()
+    card = (await api.get("/system/sku/BC-NONE")).json()
+    assert card["group_path"] == []
+
+
+async def test_sku_card_tnved_rates_resolved(api, session):
+    """tnved_rates — пошлина + НДС по эффективному коду на сегодня (резолв из справочников)."""
+    session.add(VatRate(code="НДС20", title="НДС 20%", rate=20,
+                        start_date=date(2024, 1, 1), end_date=None))
+    session.add(TnvedCode(code="8507100000", name="Аккумуляторы свинцовые", duty_rate=5,
+                          vat_code="НДС20", excise=None, unit="шт",
+                          start_date=date(2024, 1, 1), end_date=None))
+    session.add(Sku(code="RT-1", title="АКБ", unit="шт", tnved_code="8507100000"))
+    await session.commit()
+
+    card = (await api.get("/system/sku/RT-1")).json()
+    assert card["tnved_rates"]["duty_rate"] == 5.0
+    assert card["tnved_rates"]["vat_rate"] == 20.0
+
+
+async def test_sku_card_tnved_rates_none_without_code(api, session):
+    """Нет эффективного кода ТН ВЭД → tnved_rates None (не выдумываем ставку)."""
+    session.add(Sku(code="RT-NONE", title="Без ТН ВЭД", unit="шт"))
+    await session.commit()
+    card = (await api.get("/system/sku/RT-NONE")).json()
+    assert card["tnved_rates"] is None
+
+
+async def test_sku_card_sync_link(api, session):
+    """sync — происхождение и статус выгрузки в 1С; None, если связи нет."""
+    sku = Sku(code="SY-1", title="Синк-товар", unit="шт")
+    session.add(sku)
+    await session.flush()
+    session.add(SyncLink(entity_type="sku", entity_id=sku.id, system="1c",
+                         external_ref="KA-0001", origin="1c", state="synced"))
+    await session.commit()
+
+    card = (await api.get("/system/sku/SY-1")).json()
+    assert card["sync"]["origin"] == "1c"
+    assert card["sync"]["state"] == "synced"
+    assert card["sync"]["external_ref"] == "KA-0001"
+
+
+async def test_sku_card_sync_none_when_no_link(api, session):
+    """Нет SyncLink → sync None (товар не связан с 1С)."""
+    session.add(Sku(code="SY-NONE", title="Без синка", unit="шт"))
+    await session.commit()
+    card = (await api.get("/system/sku/SY-NONE")).json()
+    assert card["sync"] is None
