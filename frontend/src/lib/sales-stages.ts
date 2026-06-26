@@ -45,3 +45,24 @@ export const STAGE_BY_ID: Record<string, SalesStage> = Object.fromEntries(
 export function progressionIndex(stageId: string): number {
   return PROGRESSION_STAGES.findIndex((s) => s.id === stageId);
 }
+
+/**
+ * Дефолтная вероятность закрытия (%) по стадии (SALES-44) — зеркало backend
+ * PROBABILITY_BY_STAGE. Переопределяется явным `deal.probability` на сделке.
+ */
+export const STAGE_PROBABILITY: Record<string, number> = {
+  new: 10,
+  qual: 25,
+  price_req: 35,
+  has_price: 45,
+  meeting: 55,
+  invoice: 70,
+  protected: 85,
+  contract: 95,
+  won: 100,
+  cond_lost: 5,
+  lost: 0,
+};
+
+/** Терминальная стадия «отказ» (SALES-40) — fallback-колонка доски без бэка. */
+export const LOST_STAGE: SalesStage = STAGE_BY_ID.lost;
