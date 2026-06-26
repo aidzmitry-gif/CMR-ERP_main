@@ -45,7 +45,7 @@ import {
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
-import { formatMoney } from "@/lib/format";
+import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
 
@@ -140,7 +140,15 @@ function PlanBanner({ now }: { now: number | null }) {
 /** Pipeline-строка под скорбордом (порт макета): живые срезы открытого pipeline —
  *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа — DEMO-ставка
  *  22% (реальная — из landed cost закупок; методика цены ещё разрабатывается). */
-function PipelineRow({ stages, now }: { stages: Stage[]; now: number | null }) {
+function PipelineRow({
+  stages,
+  now,
+  fmt,
+}: {
+  stages: Stage[];
+  now: number | null;
+  fmt: (value: number) => string;
+}) {
   const open = stages.filter(isOpenStage);
   const count = open.reduce((n, s) => n + s.deals.length, 0);
   const sum = open.reduce((n, s) => n + s.deals.reduce((a, d) => a + d.amount, 0), 0);
@@ -158,12 +166,12 @@ function PipelineRow({ stages, now }: { stages: Stage[]; now: number | null }) {
       </span>
       <Sep />
       <span className="text-muted">
-        Сумма pipeline: <b className="text-ink">{formatMoney(sum)}</b>
+        Сумма pipeline: <b className="text-ink">{fmt(sum)}</b>
       </span>
       <Sep />
       <span className="text-muted">
         Взвешенный прогноз <span className="text-faint">(выручка)</span>:{" "}
-        <b className="text-accent-ink">≈ {formatMoney(weighted)}</b>
+        <b className="text-accent-ink">≈ {fmt(weighted)}</b>
       </span>
       <Sep />
       <span className="text-muted">
@@ -174,7 +182,7 @@ function PipelineRow({ stages, now }: { stages: Stage[]; now: number | null }) {
         >
           (вал. прибыль · демо 22%)
         </span>
-        : <b className="text-money">≈ {formatMoney(margin)}</b>
+        : <b className="text-money">≈ {fmt(margin)}</b>
       </span>
       <Sep />
       <span className="text-muted">
@@ -187,11 +195,13 @@ function PipelineRow({ stages, now }: { stages: Stage[]; now: number | null }) {
 function DraggableDeal({
   deal,
   extras,
+  fmt,
   onPreview,
   onOpen,
 }: {
   deal: Deal;
   extras: CardExtras;
+  fmt: (value: number) => string;
   onPreview: (d: Deal) => void;
   onOpen: (d: Deal) => void;
 }) {
@@ -230,7 +240,7 @@ function DraggableDeal({
       onClickCapture={handleClickCapture}
       className={isDragging ? "opacity-40" : ""}
     >
-      <DealCard deal={deal} {...extras} />
+      <DealCard deal={deal} fmt={fmt} {...extras} />
     </div>
   );
 }
@@ -238,10 +248,12 @@ function DraggableDeal({
 function Column({
   stage,
   onAdd,
+  fmt,
   children,
 }: {
   stage: Stage;
   onAdd: () => void;
+  fmt: (value: number) => string;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
@@ -254,11 +266,11 @@ function Column({
         <div className="px-4 py-3">
           <div className="font-semibold text-ink">{stage.title}</div>
           <div className="mt-0.5 text-xs text-muted">
-            {stage.count} {pluralDeals(stage.count)} · {formatMoney(stage.sum)}
+            {stage.count} {pluralDeals(stage.count)} · {fmt(stage.sum)}
           </div>
           {showWeighted && (
             <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
-              взвешенно: {formatMoney(stageWeightedSum(stage))}
+              взвешенно: {fmt(stageWeightedSum(stage))}
             </div>
           )}
         </div>
@@ -285,11 +297,14 @@ function Column({
 export function DealsWorkspace({
   initialStages,
   initialKpis,
+  switcher,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
+  switcher?: React.ReactNode;
 }) {
   const router = useRouter();
+  const { fmt } = useCurrency();
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [period, setPeriod] = useState("day");
@@ -448,6 +463,7 @@ export function DealsWorkspace({
       <main className="flex-1 overflow-auto p-6">
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
+          {switcher}
           <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
@@ -539,12 +555,12 @@ export function DealsWorkspace({
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
             {kpis.map((kpi) => (
-              <KpiCard key={kpi.id} kpi={kpi} onLog={() => handleLog(kpi.id)} />
+              <KpiCard key={kpi.id} kpi={kpi} fmt={fmt} onLog={() => handleLog(kpi.id)} />
             ))}
           </div>
         </section>
 
-        <PipelineRow stages={stages} now={now} />
+        <PipelineRow stages={stages} now={now} fmt={fmt} />
 
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
@@ -577,12 +593,13 @@ export function DealsWorkspace({
           <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
               {filteredStages.map((stage) => (
-                <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
+                <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => openModal(stage.id)}>
                   {stage.deals.map((deal) => (
                     <DraggableDeal
                       key={deal.id}
                       deal={deal}
                       extras={cardExtras(deal, stage.id)}
+                      fmt={fmt}
                       onPreview={setPreviewDeal}
                       onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
                     />
@@ -593,7 +610,7 @@ export function DealsWorkspace({
             <DragOverlay>
               {activeDeal ? (
                 <div className="w-[280px] rotate-2">
-                  <DealCard deal={activeDeal} />
+                  <DealCard deal={activeDeal} fmt={fmt} />
                 </div>
               ) : null}
             </DragOverlay>
@@ -630,7 +647,7 @@ export function DealsWorkspace({
                     <td className="px-4 py-2.5 text-muted">{deal.description}</td>
                     <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-ink">
-                      {formatMoney(deal.amount)}
+                      {fmt(deal.amount)}
                     </td>
                   </tr>
                 ))}
@@ -639,7 +656,7 @@ export function DealsWorkspace({
           </div>
         )}
 
-        <FunnelTotals data={computeFunnel(filteredStages)} />
+        <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />
       </main>
 
       <ChatsPanel />

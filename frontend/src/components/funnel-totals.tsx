@@ -1,12 +1,18 @@
 import { formatMoney } from "@/lib/format";
 import type { FunnelData } from "@/lib/funnel";
 
-export function FunnelTotals({ data }: { data: FunnelData }) {
+export function FunnelTotals({
+  data,
+  fmt = formatMoney,
+}: {
+  data: FunnelData;
+  fmt?: (value: number) => string;
+}) {
   const items = [
     { label: "Сделок в работе", value: String(data.activeCount) },
-    { label: "Сумма в работе", value: formatMoney(data.activeSum) },
+    { label: "Сумма в работе", value: fmt(data.activeSum) },
     { label: "Выиграно сделок", value: String(data.wonCount) },
-    { label: "Сумма выигранных", value: formatMoney(data.wonSum) },
+    { label: "Сумма выигранных", value: fmt(data.wonSum) },
     { label: "Проиграно сделок", value: String(data.lostCount) },
     { label: "Конверсия (win rate)", value: `${data.conversion.toFixed(1)}%` },
   ];
