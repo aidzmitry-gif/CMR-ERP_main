@@ -8,11 +8,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_titles
-from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
+from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
+from core.domain.reference import NomenclatureCategory
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
 from core.services import mdm, reference_query, tnved
 from core.services.auth import CurrentUser, require_permission
+
+#: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
+_GROUP_PATH_MAX_DEPTH = 32
 
 router = APIRouter(tags=["system"])
 
@@ -309,19 +313,72 @@ async def sku_card(
     # Эффективный ТН ВЭД: свой код товара или унаследованный от группы (вверх по дереву).
     effective_tnved = await tnved.effective_code_for_sku(session, sku)
 
+    # Ставки по эффективному коду на сегодня (пошлина + НДS) — для блока «Учёт и налоги».
+    # None, если кода нет или нет версии на дату (отсутствие не маскируем — см. tnved.resolve).
+    tnved_rates = None
+    if effective_tnved.get("code"):
+        tnved_rates = await tnved.resolve(session, effective_tnved["code"], date.today())
+
+    group_path = await _group_breadcrumb(session, sku.category_id)
+    sync = await _sku_sync_link(session, sku.id)
+
     return {
         "code": sku.code,
         "title": sku.title,
         "unit": sku.unit,
         "category_id": sku.category_id,
+        "group_path": group_path,  # [{code, name}, …] от корня к группе товара (breadcrumb)
         "weight_kg": sku.weight_kg,
         "tnved_code": sku.tnved_code,  # собственный код (может быть None → наследуется)
         "effective_tnved": effective_tnved,  # {code, source: own|group|None, group_code, group_name}
+        "tnved_rates": tnved_rates,  # {duty_rate, vat_rate, …} на сегодня или None
         "shelf_life_days": sku.shelf_life_days,
         "is_active": sku.is_active,
         "attributes": sku.attributes,
         "provenance": sku.provenance,
         "landed_cost": landed,  # None — нет расчёта/модуль не подключён (не 0)
+        "sync": sync,  # {origin, state, last_synced_at, external_ref} или None — синк из 1С
+    }
+
+
+async def _group_breadcrumb(session: AsyncSession, category_id: int | None) -> list[dict]:
+    """Путь по дереву групп от корня к группе товара: ``[{code, name}, …]``.
+
+    Поднимается по ``parent_id`` (как ``tnved.effective_code_for_sku``), ограничен глубиной —
+    защита от цикла. Пустой список, если у товара нет группы.
+    """
+    if category_id is None:
+        return []
+    chain: list[dict] = []
+    cat_id: int | None = category_id
+    for _ in range(_GROUP_PATH_MAX_DEPTH):
+        cat = await session.get(NomenclatureCategory, cat_id)
+        if cat is None:
+            break
+        chain.append({"code": cat.code, "name": cat.name})
+        if cat.parent_id is None:
+            break
+        cat_id = cat.parent_id
+    chain.reverse()  # от корня к листу
+    return chain
+
+
+async def _sku_sync_link(session: AsyncSession, sku_id: int) -> dict | None:
+    """Связь товара с 1С (M3): происхождение и статус выгрузки. None — связи нет."""
+    link = (
+        await session.execute(
+            select(SyncLink).where(
+                SyncLink.entity_type == "sku", SyncLink.entity_id == sku_id
+            )
+        )
+    ).scalars().first()
+    if link is None:
+        return None
+    return {
+        "origin": link.origin,  # erp | 1c | bitrix — где запись родилась
+        "state": link.state,  # local | pending | synced | error
+        "external_ref": link.external_ref,
+        "last_synced_at": str(link.last_synced_at) if link.last_synced_at else None,
     }
 
 
