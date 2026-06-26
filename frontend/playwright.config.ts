@@ -14,7 +14,17 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // 1) разовый dev-логин → storageState (см. e2e/auth.setup.ts)
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    // 2) сами сценарии — стартуют уже вошедшими (переиспользуют сессию из setup)
+    {
+      name: "chromium",
+      testIgnore: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/state.json" },
+      dependencies: ["setup"],
+    },
+  ],
   webServer: [
     {
       // бэкенд: SQLite dev + AI-слой включён (как в документированном запуске)
