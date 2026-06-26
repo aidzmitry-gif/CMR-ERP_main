@@ -27,12 +27,20 @@ function perfTone(pct: number): { bar: string; text: string } {
   return { bar: "bg-red-500", text: "text-red-600" };
 }
 
-export function KpiCard({ kpi, onLog }: { kpi: Kpi; onLog?: () => void }) {
+export function KpiCard({
+  kpi,
+  onLog,
+  fmt = formatMoney,
+}: {
+  kpi: Kpi;
+  onLog?: () => void;
+  fmt?: (value: number) => string;
+}) {
   const Icon = ICONS[kpi.icon];
   const tone = TONES[kpi.tone];
   const perf = perfTone(kpi.percent);
-  const value = kpi.money ? formatMoney(kpi.value) : kpi.value;
-  const target = kpi.money ? formatMoney(kpi.target) : kpi.target;
+  const value = kpi.money ? fmt(kpi.value) : kpi.value;
+  const target = kpi.money ? fmt(kpi.target) : kpi.target;
 
   return (
     <div className="rounded-xl bg-surface p-4 shadow-card">
