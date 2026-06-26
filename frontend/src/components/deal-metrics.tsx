@@ -8,24 +8,33 @@ import {
   type StockRow,
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
+import { STAGE_PROBABILITY } from "@/lib/sales-stages";
 
 /**
- * Метрики сделки: Сумма/Себестоимость/Прибыль/Маржа/Вероятность/Закрытие.
+ * Метрики сделки: Сумма/Себестоимость/Прибыль/Маржа/Вероятность/Взвеш.прогноз/Закрытие.
  *
  * Себес/прибыль/маржа считаются на клиенте по правилу «в наличии → себес из 1С»
  * ([[pricing-calculation-todo]]): позиции сделки (fetchDealItems) джойнятся с остатками
  * 1С по коду (fetchStock.cost). Под-заказ (себес из 1С нет) в расчёт не идёт — он
  * появится с предварительным расчётом. Цена позиции — из 1С (правило «в наличии →
  * цена из 1С», как и себестоимость). Пока грузится — «…», нет себес — «—».
+ *
+ * Вероятность (SALES-44): явный `probability` сделки, иначе дефолт по стадии
+ * (STAGE_PROBABILITY, канон sales-stages.ts). Взвеш. прогноз = Сумма × вероятность —
+ * ожидаемый вклад сделки в пайплайн.
  */
 export function DealMetrics({
   dealId,
   amount,
   closeDate,
+  stageId,
+  probability,
 }: {
   dealId: string;
   amount: number;
   closeDate: string;
+  stageId?: string;
+  probability?: number;
 }) {
   const [items, setItems] = useState<DealItemFull[] | null>(null);
   const [stock, setStock] = useState<Record<string, StockRow>>({});
@@ -57,12 +66,15 @@ export function DealMetrics({
   const marginPct = costedRevenue > 0 ? Math.round((profit / costedRevenue) * 100) : null;
   const dash = items == null ? "…" : "—"; // грузим vs нет данных
 
+  // Вероятность: явный override сделки, иначе дефолт по стадии (канон).
+  const prob = probability ?? (stageId ? STAGE_PROBABILITY[stageId] : undefined);
   const cells: { label: string; value: string; tone?: "money" }[] = [
     { label: "Сумма", value: formatByn(amount) },
     { label: "Себестоимость", value: anyCost ? formatByn(cost) : dash },
     { label: "Прибыль", value: anyCost ? formatByn(profit) : dash, tone: "money" },
     { label: "Маржа", value: marginPct != null ? `${marginPct}%` : dash },
-    { label: "Вероятность", value: "—" },
+    { label: "Вероятность", value: prob != null ? `${prob}%` : "—" },
+    { label: "Взвеш. прогноз", value: prob != null ? formatByn((amount * prob) / 100) : "—" },
     { label: "Закрытие", value: closeDate || "—" },
   ];
 
