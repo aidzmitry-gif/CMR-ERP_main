@@ -36,6 +36,7 @@ vi.mock("@/components/deal-contacts", () => ({ DealContacts: () => <div>contacts
 vi.mock("@/components/deal-documents", () => ({ DealDocuments: () => <div>documents</div> }));
 vi.mock("@/components/deal-edit-button", () => ({ DealEditButton: () => <div>edit</div> }));
 vi.mock("@/components/deal-items", () => ({ DealItems: () => <div>items</div> }));
+vi.mock("@/components/deal-metrics", () => ({ DealMetrics: () => <div>metrics</div> }));
 vi.mock("@/components/deal-messages", () => ({ DealMessages: () => <div>messages</div> }));
 vi.mock("@/components/priority-badge", () => ({ PriorityBadge: () => <div>priority</div> }));
 vi.mock("@/lib/api", () => ({

@@ -31,7 +31,7 @@ import {
   type SkuOption,
   type StockRow,
 } from "@/lib/api";
-import { formatByn } from "@/lib/format";
+import { useCurrency } from "@/components/kanban/currency-context";
 import { scriptFor } from "./call-scripts";
 
 /**
@@ -144,6 +144,7 @@ export function CallWindow({
   context: CallContext | null;
   onClose: () => void;
 }) {
+  const { fmt } = useCurrency(); // суммы в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
   const [phase, setPhase] = useState<"dialing" | "live" | "done">("dialing");
   const [seconds, setSeconds] = useState(0);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -580,7 +581,7 @@ export function CallWindow({
                               {r.title}
                             </div>
                             <div className="truncate text-[11px] text-faint">
-                              {st?.price ? `${formatByn(st.price)} · ` : ""}своб {st?.free ?? 0}
+                              {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
                               {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                               <span className={s.cls}>{s.label}</span>
                               {m ? (
@@ -645,7 +646,7 @@ export function CallWindow({
                               <span className="shrink-0 text-[11px] text-faint">{s.code}</span>
                             </span>
                             <span className="mt-0.5 block truncate text-[11px] text-faint">
-                              {st?.price ? `${formatByn(st.price)} · ` : ""}своб {st?.free ?? 0}
+                              {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
                               {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                               <span className={sk.cls}>{sk.label}</span>
                               {m ? (
@@ -723,9 +724,9 @@ export function CallWindow({
                 <div className="flex items-center justify-between rounded-lg bg-sunken px-3 py-2 text-[12.5px]">
                   <span className="text-muted">Итого{reserve ? " · резерв" : ""}</span>
                   <span className="font-bold text-ink">
-                    {formatByn(orderTotal)}
+                    {fmt(orderTotal)}
                     <span className="ml-1 font-normal text-faint">
-                      · с НДС {formatByn(orderTotal * 1.2)}
+                      · с НДС {fmt(orderTotal * 1.2)}
                     </span>
                   </span>
                 </div>
@@ -738,8 +739,8 @@ export function CallWindow({
                     Маржа{hasUnderOrder ? " · в наличии" : ""}
                   </span>
                   <span className="font-bold text-money">
-                    {formatByn(orderMargin)} ({Math.round((orderMargin / costedRevenue) * 100)}%)
-                    <span className="ml-1 font-normal text-faint">· себес {formatByn(orderCost)}</span>
+                    {fmt(orderMargin)} ({Math.round((orderMargin / costedRevenue) * 100)}%)
+                    <span className="ml-1 font-normal text-faint">· себес {fmt(orderCost)}</span>
                   </span>
                 </div>
               )}
