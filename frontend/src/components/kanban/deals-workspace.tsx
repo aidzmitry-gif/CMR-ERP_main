@@ -110,6 +110,10 @@ function workingDaysLeft(now: number): number {
 /** Стадия «в работе» — открытый pipeline (без won/lost/cond_lost). */
 const isOpenStage = (s: Stage) => s.id !== "won" && s.id !== "lost" && s.id !== "cond_lost";
 
+// ponytail: demo-ставка валовой маржи для прогноза. Реальная — из landed cost
+// (закупки); методика цены ещё разрабатывается ([[pricing-calculation-todo]]).
+const DEMO_MARGIN_RATE = 0.22;
+
 /** Баннер планирования: под конец месяца напоминает составить план на следующий и
  *  согласовать с РОПом (порт sales-board-mockup.html). Считается от текущей даты;
  *  `now` приходит после маунта (см. DealsWorkspace) — до него баннера нет. */
@@ -153,7 +157,7 @@ function PipelineRow({
   const count = open.reduce((n, s) => n + s.deals.length, 0);
   const sum = open.reduce((n, s) => n + s.deals.reduce((a, d) => a + d.amount, 0), 0);
   const weighted = open.reduce((n, s) => n + stageWeightedSum(s), 0);
-  const margin = Math.round(weighted * 0.22); // ponytail: demo-ставка маржи, апгрейд — landed cost
+  const margin = Math.round(weighted * DEMO_MARGIN_RATE);
   const stuck =
     now == null
       ? null
@@ -259,6 +263,7 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   // Взвешенная сумма по колонке (SALES-44) — только для рабочих стадий с карточками.
   const showWeighted = stage.id !== "won" && stage.id !== "lost" && stage.deals.length > 0;
+  const weighted = stageWeightedSum(stage);
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
       <div className="overflow-hidden rounded-xl bg-surface shadow-card">
@@ -269,9 +274,17 @@ function Column({
             {stage.count} {pluralDeals(stage.count)} · {fmt(stage.sum)}
           </div>
           {showWeighted && (
-            <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
-              взвешенно: {fmt(stageWeightedSum(stage))}
-            </div>
+            <>
+              <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
+                взвешенно: {fmt(weighted)}
+              </div>
+              <div
+                className="text-[11px] font-semibold text-money"
+                title="Демо-ставка маржи 22%. Реальная — из landed cost (закупки); методика цены ещё разрабатывается."
+              >
+                прогноз маржи: ~{fmt(Math.round(weighted * DEMO_MARGIN_RATE))}
+              </div>
+            </>
           )}
         </div>
       </div>
