@@ -22,3 +22,8 @@ class StockGateway(Protocol):
     # Возврат: ``{rows: [{warehouse, qty_available, qty_reserved, qty_forecast, price, cost}],
     #           total_available, total_reserved, price, cost, updated_at}`` или ``None`` — нет остатков.
     async def stock_by_sku(self, session: AsyncSession, sku_code: str) -> dict | None: ...
+    # Партии закупки по SKU (lot/batch + FEFO) для карточки номенклатуры: строки партий +
+    # сводка. Возврат: ``{rows: [{lot_no, supplier, warehouse, qty, mfg_date, expiry_date,
+    #   unit_landed_cost, external_ref, days_to_expiry, fefo}], total_qty, nearest_expiry}``
+    # или ``None`` — партий нет. ``fefo`` — алерт (``expired``/``warn`` <1 года/``ok``).
+    async def batches_by_sku(self, session: AsyncSession, sku_code: str) -> dict | None: ...

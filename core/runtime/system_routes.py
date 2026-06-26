@@ -325,12 +325,17 @@ async def sku_card(
     # Остатки/цена/себестоимость по складам (зеркало 1С) — через фасад stock (integrations).
     # None, если модуль выключен или по коду остатков нет (отсутствие не маскируем нулём).
     stock = None
+    batches = None
     stock_gw = request.app.state.core.services.stock
     if stock_gw is not None:
         try:
             stock = await stock_gw.stock_by_sku(session, code)
         except Exception:  # noqa: BLE001 — integrations недоступен → карточка без остатка, не 500
             stock = None
+        try:
+            batches = await stock_gw.batches_by_sku(session, code)
+        except Exception:  # noqa: BLE001 — нет фасада/партий → карточка без партий, не 500
+            batches = None
 
     return {
         "code": sku.code,
@@ -349,6 +354,7 @@ async def sku_card(
         "landed_cost": landed,  # None — нет расчёта/модуль не подключён (не 0)
         "sync": sync,  # {origin, state, last_synced_at, external_ref} или None — синк из 1С
         "stock": stock,  # {rows, total_available, price, cost, …} из 1С или None — нет остатков
+        "batches": batches,  # {rows, total_qty, nearest_expiry} партии+FEFO или None — нет партий
     }
 
 

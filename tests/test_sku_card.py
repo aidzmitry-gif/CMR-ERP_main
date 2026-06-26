@@ -94,6 +94,49 @@ async def test_sku_card_stock_none_when_no_stock(api, session):
     assert (await api.get("/system/sku/ST-NONE")).json()["stock"] is None
 
 
+async def test_sku_card_batches_fefo(api, session):
+    """Карточка отдаёт партии (lot/batch) с FEFO-флагом по сроку годности, отсортированные."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from modules.integrations.models import Batch
+
+    today = date.today()
+    session.add(Sku(code="B-1", title="Товар с партиями", unit="шт"))
+    session.add_all([
+        # ok: срок > года; warn: < года; expired: в прошлом; none: без срока
+        Batch(sku_code="B-1", lot_no="L-OK", qty=Decimal("10"),
+              expiry_date=today + timedelta(days=800), unit_landed_cost=Decimal("231.50")),
+        Batch(sku_code="B-1", lot_no="L-WARN", qty=Decimal("5"),
+              expiry_date=today + timedelta(days=100)),
+        Batch(sku_code="B-1", lot_no="L-EXP", qty=Decimal("3"),
+              expiry_date=today - timedelta(days=10)),
+        Batch(sku_code="B-1", lot_no="L-NONE", qty=Decimal("7"), expiry_date=None),
+    ])
+    await session.commit()
+
+    b = (await api.get("/system/sku/B-1")).json()["batches"]
+    assert b["total_qty"] == 25.0  # 10+5+3+7
+    fefo = {r["lot_no"]: r["fefo"] for r in b["rows"]}
+    assert fefo == {"L-OK": "ok", "L-WARN": "warn", "L-EXP": "expired", "L-NONE": "none"}
+    # FEFO-порядок: раньше истекающие первыми, без срока — в конец
+    assert [r["lot_no"] for r in b["rows"]] == ["L-EXP", "L-WARN", "L-OK", "L-NONE"]
+    assert b["rows"][0]["lot_no"] == "L-EXP"
+    # nearest_expiry — соонейший НЕ истёкший срок (не дата просроченной L-EXP, хоть та и первая)
+    assert b["nearest_expiry"] == (today + timedelta(days=100)).isoformat()
+    # landed cost партии прокидывается (вход маржи); где нет — None, не 0
+    ok_row = next(r for r in b["rows"] if r["lot_no"] == "L-OK")
+    assert ok_row["unit_landed_cost"] == 231.5
+    assert next(r for r in b["rows"] if r["lot_no"] == "L-WARN")["unit_landed_cost"] is None
+
+
+async def test_sku_card_batches_none_when_no_batches(api, session):
+    """Нет партий по коду → batches None (отсутствие не маскируем)."""
+    session.add(Sku(code="B-NONE", title="Без партий", unit="шт"))
+    await session.commit()
+    assert (await api.get("/system/sku/B-NONE")).json()["batches"] is None
+
+
 async def test_sku_card_group_breadcrumb(api, session):
     """group_path — путь по дереву групп от корня к группе товара (для шапки карточки)."""
     root = NomenclatureCategory(code="G-ROOT", name="Электрооборудование")
