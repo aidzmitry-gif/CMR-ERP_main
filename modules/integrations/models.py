@@ -23,4 +23,6 @@ class StockItem(Base):
     qty_reserved: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
     qty_forecast: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
     price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
+    # Себестоимость из 1С — для маржи позиции «в наличии» (None: 1С не дал себес).
+    cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

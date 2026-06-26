@@ -91,6 +91,7 @@ interface OrderRow {
 /** Агрегированный остаток SKU по всем складам (подбор товара со склада в окне звонка). */
 interface SkuStock {
   price: number;
+  cost: number | null; // себестоимость из 1С — для маржи «в наличии»
   free: number; // ATP = Σ(available − reserved), не ниже 0
   forecast: number; // «в пути» (приход)
   warehouses: { name: string; free: number; forecast: number }[];
@@ -101,10 +102,11 @@ function aggregateStock(rows: StockRow[]): Record<string, SkuStock> {
   const map: Record<string, SkuStock> = {};
   for (const r of rows) {
     const free = Math.max(0, (r.qty_available || 0) - (r.qty_reserved || 0));
-    const m = (map[r.sku_code] ??= { price: 0, free: 0, forecast: 0, warehouses: [] });
+    const m = (map[r.sku_code] ??= { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] });
     m.free += free;
     m.forecast += r.qty_forecast || 0;
     if (!m.price && r.price) m.price = r.price; // цена едина по складам
+    if (m.cost == null && r.cost != null) m.cost = r.cost; // себес едина по складам
     if (free > 0 || r.qty_forecast > 0)
       m.warehouses.push({ name: r.warehouse, free, forecast: r.qty_forecast || 0 });
   }
@@ -116,6 +118,13 @@ function srokOf(s?: SkuStock): { label: string; cls: string } {
   if (!s || (s.free === 0 && s.forecast === 0)) return { label: "под заказ", cls: "text-faint" };
   if (s.free > 0) return { label: "в наличии", cls: "text-money" };
   return { label: "в пути", cls: "text-amber-600" };
+}
+
+/** Маржа позиции «в наличии» из 1С: (цена − себес)/цена. null — нет себес/цены. */
+function marginOf(s?: SkuStock): { pct: number; gp: number } | null {
+  if (!s || !s.price || s.cost == null) return null;
+  const gp = s.price - s.cost;
+  return { pct: (gp / s.price) * 100, gp };
 }
 
 // Условия оплаты — типовой B2B-набор CRM (предоплата/отсрочка/по факту) + свой вариант.
@@ -286,6 +295,13 @@ export function CallWindow({
   const pickedRows = rows.filter((r) => r.picked);
   // Итог заказа по ценам со склада (для счёта); НДС 20%.
   const orderTotal = pickedRows.reduce((sum, r) => sum + (stock[r.code]?.price ?? 0) * r.qty, 0);
+  // Себес/маржа — ТОЛЬКО по позициям «в наличии» (себес из 1С). Под-заказ (нет себес)
+  // в маржу не идёт — она появится с предрасчётом ([[pricing-calculation-todo]]).
+  const costedRows = pickedRows.filter((r) => stock[r.code]?.cost != null);
+  const costedRevenue = costedRows.reduce((s, r) => s + (stock[r.code]?.price ?? 0) * r.qty, 0);
+  const orderCost = costedRows.reduce((s, r) => s + (stock[r.code]?.cost ?? 0) * r.qty, 0);
+  const orderMargin = costedRevenue - orderCost;
+  const hasUnderOrder = pickedRows.some((r) => stock[r.code]?.cost == null);
 
   // Колонка «Заказ» — главное действие зависит от контекста.
   async function commitOrder() {
@@ -546,6 +562,7 @@ export function CallWindow({
                     {rows.map((r) => {
                       const st = stock[r.code];
                       const s = srokOf(st);
+                      const m = marginOf(st);
                       return (
                         <div
                           key={r.skuId}
@@ -566,6 +583,11 @@ export function CallWindow({
                               {st?.price ? `${formatByn(st.price)} · ` : ""}своб {st?.free ?? 0}
                               {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                               <span className={s.cls}>{s.label}</span>
+                              {m ? (
+                                <span className="text-money"> · маржа {Math.round(m.pct)}%</span>
+                              ) : st?.free === 0 ? (
+                                <span className="text-faint"> · себес из предрасчёта</span>
+                              ) : null}
                             </div>
                           </div>
                           <input
@@ -606,6 +628,7 @@ export function CallWindow({
                     {candidates.map((s) => {
                       const st = stock[s.code];
                       const sk = srokOf(st);
+                      const m = marginOf(st);
                       return (
                         <button
                           key={s.id}
@@ -625,6 +648,11 @@ export function CallWindow({
                               {st?.price ? `${formatByn(st.price)} · ` : ""}своб {st?.free ?? 0}
                               {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                               <span className={sk.cls}>{sk.label}</span>
+                              {m ? (
+                                <span className="text-money"> · маржа {Math.round(m.pct)}%</span>
+                              ) : st?.free === 0 ? (
+                                <span className="text-faint"> · предрасчёт</span>
+                              ) : null}
                             </span>
                           </span>
                         </button>
@@ -701,6 +729,24 @@ export function CallWindow({
                     </span>
                   </span>
                 </div>
+              )}
+
+              {/* Маржа по позициям «в наличии» (себес из 1С); под-заказ — отдельно (предрасчёт) */}
+              {costedRows.length > 0 && costedRevenue > 0 && (
+                <div className="flex items-center justify-between rounded-lg bg-money-soft px-3 py-2 text-[12px]">
+                  <span className="font-semibold text-money">
+                    Маржа{hasUnderOrder ? " · в наличии" : ""}
+                  </span>
+                  <span className="font-bold text-money">
+                    {formatByn(orderMargin)} ({Math.round((orderMargin / costedRevenue) * 100)}%)
+                    <span className="ml-1 font-normal text-faint">· себес {formatByn(orderCost)}</span>
+                  </span>
+                </div>
+              )}
+              {hasUnderOrder && (
+                <p className="text-[11px] text-faint">
+                  Под-заказ позиции — себестоимость из предварительного расчёта (скоро); пока в марже не учтены.
+                </p>
               )}
 
               {/* CTA по контексту */}
