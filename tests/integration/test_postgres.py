@@ -52,16 +52,12 @@ async def test_lead_lifecycle_on_postgres(pg_app):
     assert conv.status_code == 201
     assert conv.json()["status"] == "converted"
 
-    # convert публикует leads.lead.converted; фоновый relay (lifespan) → sales создаёт сделку
-    number = f"CRM-LEAD-{lead['id']}"
-    deal = None
-    for _ in range(20):
-        deals = (await pg_app.get("/sales/deals")).json()
-        deal = next((d for d in deals if d["number"] == number), None)
-        if deal is not None:
-            break
-        await asyncio.sleep(0.3)
-    assert deal is not None and deal["owner"] == routed["assigned_to"]
+    # convert лишь публикует leads.lead.converted; сделку sales создаёт по подписке через
+    # фоновый relay, а pg_app (ASGITransport) lifespan не крутит. Полный поток лид→сделка
+    # проверяет SQLite-тест test_lead_convert_creates_deal (ручной relay). Здесь — что
+    # событие реально записано в outbox реальной БД.
+    events = (await pg_app.get("/system/events")).json()
+    assert any(e["event_type"] == "leads.lead.converted" for e in events)
 
 
 async def test_lifespan_background_relay_on_postgres(postgres_url, monkeypatch):
