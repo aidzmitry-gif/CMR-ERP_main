@@ -19,8 +19,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from connectors import gdrive
-from connectors.state import StateStore
+pytest.importorskip("connectors.gdrive")  # опц. google-клиенты могут отсутствовать — пропускаем
+
+from connectors import gdrive  # noqa: E402
+from connectors.state import StateStore  # noqa: E402
 
 pytestmark = pytest.mark.unit
 

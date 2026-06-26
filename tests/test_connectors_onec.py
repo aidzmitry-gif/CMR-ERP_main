@@ -18,7 +18,9 @@ from __future__ import annotations
 import pytest
 import requests
 
-from connectors.onec import OneCConnector, OneCTransientError
+pytest.importorskip("connectors.onec")  # опц. зависимость tenacity может отсутствовать — пропускаем
+
+from connectors.onec import OneCConnector, OneCTransientError  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
