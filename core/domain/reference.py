@@ -101,6 +101,35 @@ class VatRate(Base):
     )
 
 
+class TnvedCode(Base):
+    """Код ТН ВЭД ЕАЭС с таможенными ставками — историчный (SCD Type 2).
+
+    Единый таможенный тариф ЕАЭС (ЕТТ, общий для РБ/РФ/КЗ): ставка ввозной пошлины +
+    акциз по коду, НДС — мягкой ссылкой ``vat_code`` на ``ref_vat_rate`` (не дублируем
+    ставку НДС). Ставки меняются решениями Совета ЕЭК → версионность как у курсов/НДС:
+    расчёт landed cost берёт ставку, действовавшую на дату оформления.
+
+    ``duty_rate`` — базовая адвалорная ставка ЕТТ в % (преференции/антидемпинг по стране
+    происхождения — отдельным слоем позже, не здесь). ``unit`` — единица для таможни.
+    """
+
+    __tablename__ = "ref_tnved"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(16))  # natural key: 10-значный код ЕТТ "8507100000"
+    name: Mapped[str] = mapped_column(String(512))  # описание позиции
+    duty_rate: Mapped[Decimal] = mapped_column(Numeric(6, 3))  # ввозная пошлина %, базовая ЕТТ
+    vat_code: Mapped[str | None] = mapped_column(String(16))  # → ref_vat_rate.code (мягкая ссылка)
+    excise: Mapped[str | None] = mapped_column(String(128))  # акциз (если применим), текстом
+    unit: Mapped[str | None] = mapped_column(String(32))  # доп. единица измерения для таможни
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)  # NULL = текущая
+
+    __table_args__ = (
+        Index("ix_ref_tnved_lookup", "code", "start_date"),
+    )
+
+
 class Account(Base):
     """Счёт плана счетов (РБ, постановление Минфина №50) — иерархия (синтетика → субсчёт).
 

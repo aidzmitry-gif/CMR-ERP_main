@@ -11,7 +11,7 @@ from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_tit
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm, reference_query
+from core.services import mdm, reference_query, tnved
 from core.services.auth import CurrentUser, require_permission
 
 router = APIRouter(tags=["system"])
@@ -178,6 +178,23 @@ async def mdm_rules(
     политики, не PII) — под общим /system без отдельного права.
     """
     return {"rules": await mdm.survivorship_rules(session, entity_type)}
+
+
+@router.get("/system/tnved/lookup")
+async def tnved_lookup(
+    code: str, on: date, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Таможенные ставки по коду ТН ВЭД на дату ``on`` — вход расчёта landed cost.
+
+    Один lookup отдаёт пошлину (ЕТТ ЕАЭС) и ставку НДС, действовавшие на дату оформления
+    (НДС резолвится из ``ref_vat_rate`` по мягкой ссылке ``vat_code``). 404 — нет версии
+    кода на эту дату. ``on`` обязателен (дата оформления), чтобы ставка была исторически
+    корректной — расчёт не должен молча брать «сегодняшнюю».
+    """
+    result = await tnved.resolve(session, code, on)
+    if result is None:
+        raise HTTPException(status_code=404, detail="код ТН ВЭД не найден на эту дату")
+    return result
 
 
 @router.get("/system/mdm/fuzzy")

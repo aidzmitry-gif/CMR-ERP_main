@@ -543,6 +543,38 @@ export async function fetchSkuCard(code: string, roles?: string): Promise<SkuCar
   }
 }
 
+// ── ТН ВЭД: резолв таможенных ставок на дату (вход landed cost) ──────────────
+
+/** Ставки по коду ТН ВЭД на дату: пошлина (ЕТТ) + НДС (резолвлен из ref_vat_rate). */
+export interface TnvedRates {
+  code: string;
+  name: string;
+  duty_rate: number; // ввозная пошлина %, ЕТТ ЕАЭС
+  vat_code: string | null;
+  vat_rate: number | null; // ставка НДS % на дату; null — не задана
+  excise: string | null;
+  unit: string | null;
+  as_of: string; // дата, на которую резолвлены ставки
+}
+
+/** Ставки ТН ВЭД на дату `on` (YYYY-MM-DD) — вход расчёта себестоимости. `null` — нет версии. */
+export async function fetchTnvedRates(
+  code: string,
+  on: string,
+  roles?: string,
+): Promise<TnvedRates | null> {
+  try {
+    const res = await fetch(
+      `${BASE}/system/tnved/lookup?code=${encodeURIComponent(code)}&on=${encodeURIComponent(on)}`,
+      { cache: "no-store", headers: roleHeaders(roles) },
+    );
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as TnvedRates;
+  } catch {
+    return null;
+  }
+}
+
 // ── Правила слияния (survivorship, M2) ───────────────────────────────────────
 
 /** Правило слияния для одного поля: стратегия + (для source_priority) порядок источников. */

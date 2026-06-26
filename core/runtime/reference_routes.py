@@ -26,6 +26,7 @@ from core.domain.reference import (
     CurrencyRate,
     NomenclatureCategory,
     Region,
+    TnvedCode,
     Unit,
     VatRate,
 )
@@ -262,5 +263,18 @@ def build_reference_router() -> APIRouter:
             required=("code", "title"),
         ),
         prefix="/regions",
+    )
+    # ТН ВЭД ЕАЭС — версионный (SCD2): ставки меняются решениями ЕЭК, расчёт берёт ставку на дату.
+    router.include_router(
+        build_versioned_ref_router(
+            TnvedCode,
+            key_field="code",
+            value_fields=("name", "duty_rate", "vat_code", "excise", "unit"),
+            list_fields=(
+                "id", "code", "name", "duty_rate", "vat_code", "excise", "unit",
+                "start_date", "end_date",
+            ),
+        ),
+        prefix="/tnved",
     )
     return router

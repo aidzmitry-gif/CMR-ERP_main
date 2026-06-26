@@ -16,11 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import Counterparty, Sku
 from core.domain.reference import (
+    Account,
     Bank,
     Country,
     Currency,
     CurrencyRate,
     NomenclatureCategory,
+    Region,
+    TnvedCode,
     Unit,
     VatRate,
 )
@@ -46,6 +49,16 @@ _VERSIONED = {
         ("currency_code", "rate", "start_date", "end_date"),
     ),
     "core.vat_rates": (VatRate, "code", ("code", "title", "rate", "start_date", "end_date")),
+    "core.tnved": (
+        TnvedCode,
+        "code",
+        ("code", "name", "duty_rate", "vat_code", "excise", "unit", "start_date", "end_date"),
+    ),
+}
+# иерархические классификаторы (adjacency list): ref -> (model, поля)
+_HIERARCHICAL = {
+    "core.accounts": (Account, ("id", "code", "title", "kind", "parent_id")),
+    "core.regions": (Region, ("id", "code", "title", "kind", "parent_id")),
 }
 
 
@@ -75,6 +88,8 @@ async def query(
         return await _query_simple(session, ref, key, limit)
     if ref in _VERSIONED:
         return await _query_versioned(session, ref, key, as_of)
+    if ref in _HIERARCHICAL:
+        return await _query_hierarchical(session, ref, key, limit)
     if ref == "core.counterparties":
         return await _query_counterparties(session, key, name, limit)
     if ref == "core.skus":
@@ -111,6 +126,20 @@ async def _query_versioned(
         "as_of": as_of,
         "result": _row(obj, fields) if obj is not None else None,
     }
+
+
+async def _query_hierarchical(
+    session: AsyncSession, ref: str, key: str | None, limit: int
+) -> dict:
+    """Иерархический классификатор (план счетов, регионы): key=code → узел; без key → активные."""
+    model, fields = _HIERARCHICAL[ref]
+    stmt = select(model).where(model.is_active.is_(True))
+    if key is not None:
+        stmt = stmt.where(model.code == key)
+    rows = (await session.execute(stmt.order_by(model.code).limit(limit))).scalars().all()
+    if key is not None:
+        return {"ref": ref, "key": key, "result": _row(rows[0], fields) if rows else None}
+    return {"ref": ref, "result": [_row(r, fields) for r in rows]}
 
 
 async def _query_counterparties(
