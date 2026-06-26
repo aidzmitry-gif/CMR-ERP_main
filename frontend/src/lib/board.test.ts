@@ -6,6 +6,7 @@ import {
   STUCK_DAYS,
   daysInStage,
   ensureLostStage,
+  isOpenStage,
   isStuck,
   moveDealToStage,
   probabilityFor,
@@ -101,6 +102,33 @@ describe("weightedAmount / stageWeightedSum (SALES-44)", () => {
       deal("2", 400_000), // дефолт has_price → 400 000 × prob
     ]);
     expect(stageWeightedSum(s)).toBe(500_000 + (400_000 * STAGE_PROBABILITY.has_price) / 100);
+  });
+});
+
+describe("isOpenStage — единый охват взвешенного прогноза (SALES-44)", () => {
+  it("открытый pipeline: всё, кроме won/lost/cond_lost", () => {
+    expect(isOpenStage(stage("new", []))).toBe(true);
+    expect(isOpenStage(stage("contract", []))).toBe(true);
+    expect(isOpenStage(stage("won", []))).toBe(false);
+    expect(isOpenStage(stage("lost", []))).toBe(false);
+    expect(isOpenStage(stage("cond_lost", []))).toBe(false);
+  });
+
+  it("Σ «взвешенно» по открытым колонкам = итогу строки (cond_lost не рассинхронит)", () => {
+    // Раньше cond_lost с карточками показывался в колонке (5%), но не входил в итог PipelineRow
+    // (open-фильтр) → Σ колонок ≠ итогу. Единый isOpenStage устраняет расхождение.
+    const stages = [
+      stage("new", [deal("1", 1_000_000)]),
+      stage("cond_lost", [deal("2", 500_000)]),
+      stage("won", [deal("3", 800_000)]),
+    ];
+    const rowTotal = stages.filter(isOpenStage).reduce((n, s) => n + stageWeightedSum(s), 0);
+    // Колонки показывают «взвешенно» ровно для тех же стадий (showWeighted = isOpenStage && deals>0).
+    const columnsSum = stages
+      .filter((s) => isOpenStage(s) && s.deals.length > 0)
+      .reduce((n, s) => n + stageWeightedSum(s), 0);
+    expect(columnsSum).toBe(rowTotal);
+    expect(rowTotal).toBe((1_000_000 * STAGE_PROBABILITY.new) / 100); // cond_lost/won вклада не дают
   });
 });
 
