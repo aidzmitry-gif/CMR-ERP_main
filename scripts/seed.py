@@ -40,6 +40,7 @@ from modules.sales.models import (
     DealItem,
     KpiTarget,
     Lead,
+    LossReason,
     Message,
     PriceQuote,
 )
@@ -73,6 +74,12 @@ SKU_DEFS = [
     ("REBAR-12", "Power bank 20000 мА·ч (демо)", "шт", "39"),
     ("REBAR-16", "Литиевая батарейка CR2032 (демо)", "шт", "4.1"),
     ("REBAR-20", "Двигатель тяговый (демо)", "шт", "36"),
+    # — Тестовые позиции по разным группам (пометка «(тест)») — для проверки дерева/карточки —
+    ("TEST-AAA", "Тестовая щелочная AAA (тест)", "шт", "1.1"),
+    ("TEST-AA", "Тестовая солевая AA (тест)", "шт", "2.1"),
+    ("TEST-ZU", "Тестовое зарядное (тест)", "шт", "30"),
+    ("TEST-PB", "Тестовый power bank (тест)", "шт", "39"),
+    ("TEST-CR", "Тестовая литиевая CR (тест)", "шт", "4.1"),
 ]
 
 # Демо-наполнение горячих полей + характеристик (JSONB) — чтобы карточка номенклатуры
@@ -469,12 +476,25 @@ async def main() -> None:
                 Unit(code="кг", title="Килограмм"),
                 Unit(code="м", title="Метр"),
                 Unit(code="т", title="Тонна"),
+                Unit(code="л", title="Литр"),
+                Unit(code="м²", title="Квадратный метр"),
+                Unit(code="м³", title="Кубический метр"),
+                Unit(code="упак", title="Упаковка"),
+                Unit(code="компл", title="Комплект"),
+                Unit(code="пара", title="Пара"),
+                Unit(code="рул", title="Рулон"),
+                Unit(code="час", title="Час"),
             ])
         if (await s.execute(select(Currency))).scalars().first() is None:
             s.add_all([
                 Currency(code="BYN", title="Белорусский рубль"),
                 Currency(code="USD", title="Доллар США"),
                 Currency(code="EUR", title="Евро"),
+                Currency(code="RUB", title="Российский рубль"),
+                Currency(code="CNY", title="Китайский юань"),
+                Currency(code="PLN", title="Польский злотый"),
+                Currency(code="UAH", title="Украинская гривна"),
+                Currency(code="KZT", title="Казахстанский тенге"),
             ])
         if (await s.execute(select(CurrencyRate))).scalars().first() is None:
             s.add_all([
@@ -486,17 +506,34 @@ async def main() -> None:
                              start_date=date(2026, 6, 10), end_date=None),
                 CurrencyRate(currency_code="EUR", rate=Decimal("3.46"),
                              start_date=date(2026, 1, 1), end_date=None),
+                CurrencyRate(currency_code="RUB", rate=Decimal("0.034"),
+                             start_date=date(2026, 1, 1), end_date=None),
+                CurrencyRate(currency_code="CNY", rate=Decimal("0.45"),
+                             start_date=date(2026, 1, 1), end_date=None),
+                CurrencyRate(currency_code="PLN", rate=Decimal("0.80"),
+                             start_date=date(2026, 1, 1), end_date=None),
             ])
         if (await s.execute(select(Country))).scalars().first() is None:
             s.add_all([
                 Country(code="BY", title="Беларусь"),
                 Country(code="RU", title="Россия"),
                 Country(code="CN", title="Китай"),
+                Country(code="PL", title="Польша"),
+                Country(code="UA", title="Украина"),
+                Country(code="KZ", title="Казахстан"),
+                Country(code="DE", title="Германия"),
+                Country(code="LT", title="Литва"),
+                Country(code="TR", title="Турция"),
             ])
         if (await s.execute(select(Bank))).scalars().first() is None:
             s.add_all([
                 Bank(code="153001749", title="ОАО «Приорбанк»", swift="PJCBBY2X"),
                 Bank(code="153001270", title="ОАО «АСБ Беларусбанк»", swift="AKBBBY2X"),
+                Bank(code="153001288", title="ОАО «Белинвестбанк»", swift="BLBBBY2X"),
+                Bank(code="153001601", title="ОАО «БПС-Сбербанк»", swift="BPSBBY2X"),
+                Bank(code="153001895", title="ОАО «Белагропромбанк»", swift="BAPBBY2X"),
+                Bank(code="153001963", title="ЗАО «Альфа-Банк»", swift="ALFABY2X"),
+                Bank(code="153001361", title="ОАО «Банк БелВЭБ»", swift="BELBBY2X"),
             ])
         if (await s.execute(select(VatRate))).scalars().first() is None:
             s.add_all([
@@ -506,6 +543,28 @@ async def main() -> None:
                         start_date=date(2024, 1, 1), end_date=None),
                 VatRate(code="НДС0", title="Без НДС (0%)", rate=Decimal("0.00"),
                         start_date=date(2024, 1, 1), end_date=None),
+                VatRate(code="НДС25", title="НДС 25% (услуги связи)", rate=Decimal("25.00"),
+                        start_date=date(2024, 1, 1), end_date=None),
+                VatRate(code="БезНДС", title="Без НДС (освобождение)", rate=Decimal("0.00"),
+                        start_date=date(2024, 1, 1), end_date=None),
+            ])
+
+        # Причины отказа (классификатор sales, SALES-40) — справочник стадии «Отказ».
+        if (await s.execute(select(LossReason))).scalars().first() is None:
+            s.add_all([
+                LossReason(code=c, title=t, sort_order=i, active=True)
+                for i, (c, t) in enumerate((
+                    ("price", "Дорого / не прошли по цене"),
+                    ("competitor", "Ушёл к конкуренту"),
+                    ("no_need", "Отпала потребность"),
+                    ("no_budget", "Нет бюджета у клиента"),
+                    ("no_stock", "Нет товара в наличии / сроки"),
+                    ("no_response", "Клиент перестал выходить на связь"),
+                    ("specs", "Не подошли характеристики / ассортимент"),
+                    ("terms", "Не устроили условия оплаты/доставки"),
+                    ("duplicate", "Дубль обращения"),
+                    ("test", "Тестовая причина (тест)"),
+                ), start=1)
             ])
 
         # План счетов РБ (постановление Минфина №50) — синтетика + субсчета (иерархия по коду).
@@ -554,6 +613,48 @@ async def main() -> None:
             s.add(User(username="manager", full_name="Иван Менеджеров"))
             await s.flush()
             s.add(Contact(counterparty_id=cp.id, full_name="Пётр Петров", phone="+375291234567"))
+
+            # Тестовые контрагенты + их филиалы (пометка «(тест)»). Филиал в РБ — обособленное
+            # подразделение под УНП головной организации, поэтому делим тот же УНП; связь видна
+            # по имени. Контактные лица с телефонами привязаны к контрагенту/филиалу (Contact).
+            # head: (name, unp, [контакты]); branches: [(имя филиала, контакты)]
+            # Контакты разных отделов компании (отдел — в имени, т.к. в модели Contact его нет).
+            for head_name, head_unp, head_contacts, branches in (
+                ("ООО ТестТорг (тест)", "191000111",
+                 [("Андрей Тестов — директор", "+375291110011"),
+                  ("Марина Пробная — отдел продаж", "+375292220022"),
+                  ("Анна Закупова — отдел закупок", "+375291110012"),
+                  ("Виктор Счётов — бухгалтерия", "+375291110013"),
+                  ("Павел Возилов — логистика", "+375291110014")],
+                 [("ООО ТестТорг — филиал Гомель (тест)",
+                   [("Олег Гомельский — руководитель филиала", "+375293330033"),
+                    ("Нина Складская — склад", "+375293330034")]),
+                  ("ООО ТестТорг — филиал Брест (тест)",
+                   [("Игорь Брестский — руководитель филиала", "+375294440044")])]),
+                ("ЗАО ПробаСнаб (тест)", "192000222",
+                 [("Елена Снабова — отдел снабжения", "+375295550055"),
+                  ("Роман Финансов — финансовый отдел", "+375295550056"),
+                  ("Татьяна Кадрова — отдел кадров", "+375295550057")],
+                 [("ЗАО ПробаСнаб — филиал Витебск (тест)",
+                   [("Дмитрий Витебский — руководитель филиала", "+375296660066")])]),
+                ("ИП Демонов (тест)", "193000333",
+                 [("Сергей Демонов — владелец", "+375297770077"),
+                  ("Ольга Демонова — бухгалтерия", "+375297770078")],
+                 []),
+            ):
+                head = Counterparty(name=head_name, unp=head_unp)
+                s.add(head)
+                await s.flush()
+                for fio, tel in head_contacts:
+                    s.add(Contact(counterparty_id=head.id, full_name=fio, phone=tel,
+                                  is_primary=(fio == head_contacts[0][0])))
+                for br_name, br_contacts in branches:
+                    br = Counterparty(name=br_name, unp=head_unp)  # филиал под УНП головной
+                    s.add(br)
+                    await s.flush()
+                    for fio, tel in br_contacts:
+                        s.add(Contact(counterparty_id=br.id, full_name=fio, phone=tel,
+                                      is_primary=True))
 
         # Группы (категории) номенклатуры — иерархия (parent_id строится по коду предка).
         if (await s.execute(select(NomenclatureCategory))).scalars().first() is None:
