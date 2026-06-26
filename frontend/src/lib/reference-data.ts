@@ -556,6 +556,27 @@ export interface SkuStock {
   updated_at: string | null;
 }
 
+/** Партия закупки (lot/batch) по SKU + FEFO-состояние по сроку годности. */
+export interface SkuBatchRow {
+  lot_no: string;
+  supplier: string | null;
+  warehouse: string | null;
+  qty: number;
+  mfg_date: string | null; // дата производства (ISO) или null
+  expiry_date: string | null; // годен до (ISO) или null
+  unit_landed_cost: number | null; // себес единицы партии (landed cost); null — нет расчёта
+  external_ref: string | null; // ГТД/машина/Ref 1С
+  days_to_expiry: number | null; // дней до «годен до»; null — без срока
+  fefo: "expired" | "warn" | "ok" | "none"; // алерт срока: просрочено / <1 года / ок / без срока
+}
+
+/** Партии закупки по SKU (через фасад stock). `null` — партий нет. */
+export interface SkuBatches {
+  rows: SkuBatchRow[];
+  total_qty: number;
+  nearest_expiry: string | null; // ближайший срок «годен до» среди партий
+}
+
 /** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
 export interface SkuCard {
   code: string;
@@ -574,6 +595,7 @@ export interface SkuCard {
   landed_cost: number | null; // себес партии; null — нет расчёта/модуль не подключён (не 0)
   sync: SkuSync | null; // синк из 1С: происхождение/статус; null — связи нет
   stock: SkuStock | null; // остатки/цена/себес по складам (из 1С); null — нет остатков
+  batches: SkuBatches | null; // партии закупки (lot/batch) + FEFO; null — партий нет
 }
 
 /** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */

@@ -27,7 +27,7 @@ from core.domain.reference import (
 )
 from core.services import build_services
 from modules.hr.models import Candidate
-from modules.integrations.models import StockItem
+from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
 from modules.legal.models import LegalCase
 from modules.office.models import OfficeDoc
@@ -238,6 +238,29 @@ STOCK_DEFS = {
     "REBAR-12": (1920, [("Минск (центр.)", 100, 25, 0), ("Гомель", 40, 0, 60)]),
     "REBAR-16": (1900, [("Минск (центр.)", 70, 10, 0), ("Брест", 30, 0, 0)]),
     "REBAR-20": (1890, [("Минск (центр.)", 0, 0, 50)]),
+}
+
+
+# Партии закупки по SKU (Batch — demo-зеркало 1С/закупок; FEFO по «годен до»).
+# code -> [(lot_no, supplier, warehouse, qty, mfg_date, expiry_date, unit_landed_cost, ext_ref), ...]
+# Даты подобраны под разные состояния FEFO относительно 2026-06: ok (>1 года), warn (<1 года),
+# expired (в прошлом), none (без срока). Батарейки годны ~10 лет — даём близкий срок для алерта.
+BATCH_DEFS = {
+    "AKB-60": [
+        ("LOT-CN-2401", "GP Batteries (CN)", "Минск (центр.)", 30, "2024-02-10", "2027-02-10", 231.50, "ГТД 0042/240315"),
+        ("LOT-CN-2308", "GP Batteries (CN)", "Минск (центр.)", 11, "2023-08-05", "2026-08-05", 228.00, "ГТД 0117/230920"),
+        ("LOT-CN-2212", "GP Batteries (CN)", "Гомель", 18, "2022-12-01", "2026-03-01", 224.40, "ГТД 0231/230110"),
+    ],
+    "AKB-100": [
+        ("LOT-CN-2405", "GP Batteries (CN)", "Минск (центр.)", 26, "2024-05-20", "2027-05-20", 352.00, "ГТД 0061/240610"),
+        ("LOT-CN-2310", "GP Batteries (CN)", "Брест", 9, "2023-10-12", "2026-10-12", 349.10, "ГТД 0150/231101"),
+    ],
+    "REBAR-16": [  # CR2032 — литий, годен 10 лет; партия со средним сроком
+        ("LOT-PA-2403", "Panasonic (JP)", "Минск (центр.)", 70, "2024-03-01", "2034-03-01", None, "ГТД 0055/240401"),
+    ],
+    "TESTER-D": [  # прибор без срока годности
+        ("LOT-AS-01", "ООО Аккумуляторные решения", "Минск (центр.)", 45, None, None, 168.00, None),
+    ],
 }
 
 
@@ -578,6 +601,20 @@ async def main() -> None:
                         sku_code=code, warehouse=wh,
                         qty_available=Decimal(av), qty_reserved=Decimal(res),
                         qty_forecast=Decimal(fc), price=Decimal(price), cost=cost,
+                    ))
+            await s.flush()
+
+        # Партии закупки (Batch — demo-зеркало 1С/закупок) для вкладки «Закупка и партии» + FEFO.
+        if (await s.execute(select(Batch))).scalars().first() is None:
+            for code, lots in BATCH_DEFS.items():
+                for lot_no, supplier, wh, qty, mfg, exp, lc, ext in lots:
+                    s.add(Batch(
+                        sku_code=code, lot_no=lot_no, supplier=supplier, warehouse=wh,
+                        qty=Decimal(qty),
+                        mfg_date=date.fromisoformat(mfg) if mfg else None,
+                        expiry_date=date.fromisoformat(exp) if exp else None,
+                        unit_landed_cost=Decimal(str(lc)) if lc is not None else None,
+                        external_ref=ext,
                     ))
             await s.flush()
 

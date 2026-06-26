@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
-import type { FieldProvenance, SkuCard } from "@/lib/reference-data";
+import type { FieldProvenance, SkuBatchRow, SkuCard } from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
 import { ProvenanceBadge } from "./provenance-badge";
@@ -210,6 +210,27 @@ function skladPlural(n: number): string {
   return "складов";
 }
 
+/** ISO-дата (YYYY-MM-DD) → ДД.ММ.ГГГГ; null/пусто → «—». */
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return d && m && y ? `${d}.${m}.${y}` : iso;
+}
+
+/** FEFO-бейдж по сроку годности партии: просрочено / <1 года / ок / без срока. */
+function FefoBadge({ fefo, days }: { fefo: SkuBatchRow["fefo"]; days: number | null }) {
+  if (fefo === "none") return <Badge tone="mut">без срока</Badge>;
+  if (fefo === "expired")
+    return <Badge tone="bad" title="Срок годности истёк">просрочено</Badge>;
+  if (fefo === "warn")
+    return (
+      <Badge tone="warn" title="Менее года до конца срока — отгружать первой (FEFO)">
+        ⚠ &lt; года{days != null && days >= 0 ? ` · ${days} дн` : ""}
+      </Badge>
+    );
+  return <Badge tone="ok">ок</Badge>;
+}
+
 /** Значение JSON-атрибута → строка (объект/массив — компактный JSON). */
 function attrValue(v: unknown): string {
   if (v == null) return "—";
@@ -244,6 +265,7 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
   const groupPath = card.group_path ?? [];
   const sync = card.sync;
   const stock = card.stock;
+  const batches = card.batches;
   // Маржа от себестоимости (контроль валовой прибыли) — null, если нет цены/себеса
   // или цена 0 (защита от деления на ноль → не показываем -Infinity%).
   const margin =
@@ -650,12 +672,81 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
         )}
 
         {/* ──────── ТАБ: ЗАКУПКА И ПАРТИИ ──────── */}
-        {tab === "procure" && (
-          <EmptyState
-            title="🚚 Партии закупки и landed cost"
-            hint="Партии из Китая (поставщик, машина, технология тестирования, приёмка, годен до) и разбор себестоимости появятся после реализации модели партии в закупках (ZAK). Сейчас транзакционных данных по этому товару нет — числа не выдумываем."
-          />
-        )}
+        {tab === "procure" &&
+          (batches && batches.rows.length > 0 ? (
+            <Card>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[13.5px] font-bold text-ink">🚚 Партии закупки (FEFO)</p>
+                <div className="flex items-center gap-2">
+                  <Badge tone="mut">всего {batches.total_qty} {card.unit ?? "шт"}</Badge>
+                  {batches.nearest_expiry && (
+                    <Badge tone="violet" title="Ближайший срок «годен до» среди партий">
+                      ближайший срок · {fmtDate(batches.nearest_expiry)}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <p className="mt-1 text-[12px] text-muted">
+                Откуда приехало и до какого срока годен. FEFO — раньше истекающие отгружаем
+                первыми. Себестоимость партии (landed cost) — вход маржи.
+              </p>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full border-collapse text-[13px]">
+                  <thead>
+                    <tr className="text-left text-[10.5px] uppercase tracking-wide text-faint">
+                      <th className="py-2 pr-3 font-semibold">Партия</th>
+                      <th className="py-2 pr-3 font-semibold">Поставщик</th>
+                      <th className="py-2 pr-3 font-semibold">Склад</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Кол-во</th>
+                      <th className="py-2 pr-3 font-semibold">Произв.</th>
+                      <th className="py-2 pr-3 font-semibold">Годен до</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Себес/ед</th>
+                      <th className="py-2 font-semibold">FEFO</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {batches.rows.map((b: SkuBatchRow) => (
+                      <tr key={b.lot_no}>
+                        <td className="py-2 pr-3 font-mono text-[12px] text-ink">
+                          {b.lot_no}
+                          {b.external_ref && (
+                            <span className="block text-[10.5px] font-sans text-faint">
+                              {b.external_ref}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-muted">{b.supplier ?? "—"}</td>
+                        <td className="py-2 pr-3 text-muted">{b.warehouse ?? "—"}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-ink">
+                          {b.qty} {card.unit ?? "шт"}
+                        </td>
+                        <td className="py-2 pr-3 tabular-nums text-muted">{fmtDate(b.mfg_date)}</td>
+                        <td className="py-2 pr-3 tabular-nums text-muted">
+                          {fmtDate(b.expiry_date)}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-ink">
+                          {b.unit_landed_cost != null ? formatByn(b.unit_landed_cost) : "—"}
+                        </td>
+                        <td className="py-2">
+                          <FefoBadge fefo={b.fefo} days={b.days_to_expiry} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 border-t border-line pt-3 text-[12px] text-faint">
+                Себестоимость «—» — разбор landed cost (инвойс+фрахт+пошлина+брокер) появится
+                после расчёта по методике цены. Машина/технология тестирования/фото приёмки —
+                после связи партии с воронкой закупок (ZAK).
+              </p>
+            </Card>
+          ) : (
+            <EmptyState
+              title="🚚 Партии закупки и landed cost"
+              hint="Партий по этому товару нет. Поставщик, машина, технология тестирования, приёмка, годен до и разбор себестоимости появятся после прихода партии из закупок (ZAK) или синка из 1С. Числа не выдумываем."
+            />
+          ))}
 
         {/* ──────── ТАБ: СКЛАД ──────── */}
         {tab === "wh" && (
