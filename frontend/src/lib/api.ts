@@ -1,4 +1,5 @@
 import { ensureLostStage } from "@/lib/board";
+import { progressionIndex, STAGE_BY_ID } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
@@ -118,6 +119,11 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       focus: d.focus,
       starred: d.starred,
       dealDate: d.deal_date ?? "",
+      // Активная стадия из бэка (id) → idx в линейной прогрессии + заголовок (канон
+      // sales-stages.ts). Терминалы-отказа дают idx −1 (степпер без активного узла).
+      stage: STAGE_BY_ID[d.stage]
+        ? { idx: progressionIndex(d.stage), id: d.stage, title: STAGE_BY_ID[d.stage].title }
+        : undefined,
     };
   } catch {
     return getDealDetail(id);
@@ -862,7 +868,7 @@ function mapLead(l: ApiLead): Lead {
 /** Лиды на приёме (вход воронки) из API (SSR); fallback — пусто. */
 export async function fetchLeads(roles?: string): Promise<Lead[]> {
   try {
-    const res = await fetch(`${BASE}/sales/leads`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/leads`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiLead[]).map(mapLead);
   } catch {
@@ -873,7 +879,7 @@ export async function fetchLeads(roles?: string): Promise<Lead[]> {
 /** Лиды из API (клиент, через /api) — для обновления приёма после входящих заявок. */
 export async function fetchLeadsClient(): Promise<Lead[]> {
   try {
-    const res = await fetch("/api/sales/leads", { cache: "no-store" });
+    const res = await fetch("/api/leads", { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiLead[]).map(mapLead);
   } catch {
@@ -905,7 +911,7 @@ export interface LeadInput {
 /** Принять лид из канала (клиент, через /api). */
 export async function createLead(input: LeadInput): Promise<Lead | null> {
   try {
-    const res = await fetch("/api/sales/leads", {
+    const res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -930,7 +936,7 @@ export interface LeadQualifyResult {
 /** Квалифицировать лид (Lead Qualifier): балл + вердикт (+ AI-обоснование, если включён). */
 export async function qualifyLead(id: number): Promise<LeadQualifyResult | null> {
   try {
-    const res = await fetch(`/api/sales/leads/${id}/qualify`, { method: "POST" });
+    const res = await fetch(`/api/leads/${id}/qualify`, { method: "POST" });
     if (!res.ok) return null;
     return (await res.json()) as LeadQualifyResult;
   } catch {
@@ -948,7 +954,7 @@ export interface LeadRouteResult {
 /** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка). */
 export async function routeLead(id: number): Promise<LeadRouteResult | null> {
   try {
-    const res = await fetch(`/api/sales/leads/${id}/route`, { method: "POST" });
+    const res = await fetch(`/api/leads/${id}/route`, { method: "POST" });
     if (!res.ok) return null;
     return (await res.json()) as LeadRouteResult;
   } catch {
@@ -958,17 +964,38 @@ export async function routeLead(id: number): Promise<LeadRouteResult | null> {
 
 export interface LeadConvertResult {
   lead_id: number;
-  deal_id: number;
-  number: string;
   status: LeadStatus;
+  /** id созданной сделки. Появляется не сразу: sales создаёт сделку асинхронно по
+   *  событию `leads.lead.converted` (§2.4), здесь мы её дожидаемся поллингом. */
+  deal_id?: number;
 }
 
-/** Конвертировать распределённый лид в сделку. */
+/** Дождаться, пока relay проставит лиду `deal_id` (сделку создаёт sales по событию). */
+async function pollLeadDealId(id: number, tries = 12): Promise<number | undefined> {
+  for (let i = 0; i < tries; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const res = await fetch(`/api/leads/${id}`, { cache: "no-store" });
+      if (res.ok) {
+        const dealId = ((await res.json()) as ApiLead).deal_id;
+        if (dealId) return dealId;
+      }
+    } catch {
+      // сеть моргнула — пробуем следующий тик
+    }
+  }
+  return undefined;
+}
+
+/** Конвертировать распределённый лид. Сам convert лишь помечает лид и публикует
+ *  `leads.lead.converted`; сделку создаёт модуль sales (§2.4) — её id подтягиваем
+ *  поллингом, чтобы вернуть UI готовую ссылку «Открыть сделку». */
 export async function convertLead(id: number): Promise<LeadConvertResult | null> {
   try {
-    const res = await fetch(`/api/sales/leads/${id}/convert`, { method: "POST" });
+    const res = await fetch(`/api/leads/${id}/convert`, { method: "POST" });
     if (!res.ok) return null;
-    return (await res.json()) as LeadConvertResult;
+    const conv = (await res.json()) as { lead_id: number; status: LeadStatus };
+    return { ...conv, deal_id: await pollLeadDealId(id) };
   } catch {
     return null;
   }
