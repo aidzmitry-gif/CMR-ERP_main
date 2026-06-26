@@ -7,8 +7,8 @@ import pytest
 
 
 def test_score_lead_empty_is_non_target():
-    from modules.sales.leads import score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import score_lead
+    from modules.leads.models import Lead
 
     score, verdict, reason = score_lead(Lead(source="phone"), known_customer=False)
     assert verdict == "non-target"
@@ -16,8 +16,8 @@ def test_score_lead_empty_is_non_target():
 
 
 def test_score_lead_caps_at_100():
-    from modules.sales.leads import score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import score_lead
+    from modules.leads.models import Lead
 
     full = Lead(
         source="tender", company="ООО Полный", phone="+375290000000", email="a@b.by",
@@ -29,8 +29,8 @@ def test_score_lead_caps_at_100():
 
 
 def test_score_lead_placeholder_company_not_counted():
-    from modules.sales.leads import score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import score_lead
+    from modules.leads.models import Lead
 
     _, _, reason = score_lead(Lead(source="site", company="Новый лид"), known_customer=False)
     assert "указана компания" not in reason
@@ -38,16 +38,16 @@ def test_score_lead_placeholder_company_not_counted():
 
 @pytest.mark.parametrize("source", ["tender", "site", "email", "whatsapp", "telegram", "phone"])
 def test_score_lead_channel_bonus(source):
-    from modules.sales.leads import score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import score_lead
+    from modules.leads.models import Lead
 
     score, _, _ = score_lead(Lead(source=source), known_customer=False)
     assert score >= 0
 
 
 def test_score_lead_unknown_source_no_bonus():
-    from modules.sales.leads import score_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import score_lead
+    from modules.leads.models import Lead
 
     # источник вне справочника каналов → бонуса канала нет (ветка channel_bonus=0)
     score, _, _ = score_lead(Lead(source="referral", phone="+375290000000"), known_customer=False)
@@ -58,24 +58,24 @@ def test_score_lead_unknown_source_no_bonus():
 
 
 def test_route_by_region_only():
-    from modules.sales.leads import route_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
 
     manager, _ = route_lead(Lead(source="site", region="Минская обл."), loads={}, known_customer=False)
     assert manager == "Иванов И.И."
 
 
 def test_route_by_product_only():
-    from modules.sales.leads import route_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
 
     manager, _ = route_lead(Lead(source="site", product="станок ЧПУ"), loads={}, known_customer=False)
     assert manager == "Петров П.П."
 
 
 def test_route_no_match_uses_least_loaded_universal():
-    from modules.sales.leads import route_lead
-    from modules.sales.models import Lead
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
 
     # ни гео, ни продукта; универсал Сидоров наименее загружен
     manager, _ = route_lead(
@@ -96,15 +96,15 @@ def test_route_no_match_uses_least_loaded_universal():
     ],
 )
 def test_choose_funnel_all_branches(lead_kwargs, known, expected):
-    from modules.sales.leads import choose_funnel
-    from modules.sales.models import Lead
+    from modules.leads.leads import choose_funnel
+    from modules.leads.models import Lead
 
     assert choose_funnel(Lead(**lead_kwargs), known) == expected
 
 
 @pytest.mark.parametrize("score,expected", [(85, "Высокий"), (50, "Средний"), (49, "Низкий"), (0, "Низкий")])
 def test_lead_priority_boundaries(score, expected):
-    from modules.sales.leads import lead_priority
+    from modules.leads.leads import lead_priority
 
     assert lead_priority(score) == expected
 

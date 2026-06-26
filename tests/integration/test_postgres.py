@@ -40,17 +40,28 @@ async def test_deal_crud_on_postgres(pg_app):
 async def test_lead_lifecycle_on_postgres(pg_app):
     lead = (
         await pg_app.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО ПГ-Лид", "region": "Минск", "product": "лист"},
         )
     ).json()
-    await pg_app.post(f"/sales/leads/{lead['id']}/qualify")
-    routed = (await pg_app.post(f"/sales/leads/{lead['id']}/route")).json()
+    await pg_app.post(f"/leads/{lead['id']}/qualify")
+    routed = (await pg_app.post(f"/leads/{lead['id']}/route")).json()
     assert routed["assigned_to"]
 
-    conv = await pg_app.post(f"/sales/leads/{lead['id']}/convert")
+    conv = await pg_app.post(f"/leads/{lead['id']}/convert")
     assert conv.status_code == 201
-    assert conv.json()["number"] == f"CRM-LEAD-{lead['id']}"
+    assert conv.json()["status"] == "converted"
+
+    # convert публикует leads.lead.converted; фоновый relay (lifespan) → sales создаёт сделку
+    number = f"CRM-LEAD-{lead['id']}"
+    deal = None
+    for _ in range(20):
+        deals = (await pg_app.get("/sales/deals")).json()
+        deal = next((d for d in deals if d["number"] == number), None)
+        if deal is not None:
+            break
+        await asyncio.sleep(0.3)
+    assert deal is not None and deal["owner"] == routed["assigned_to"]
 
 
 async def test_lifespan_background_relay_on_postgres(postgres_url, monkeypatch):

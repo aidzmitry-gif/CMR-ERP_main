@@ -41,18 +41,18 @@ async def test_price_info_empty(api):
 
 
 async def test_lead_404_paths(api):
-    assert (await api.post("/sales/leads/999999/qualify")).status_code == 404
-    assert (await api.post("/sales/leads/999999/route")).status_code == 404
-    assert (await api.post("/sales/leads/999999/convert")).status_code == 404
+    assert (await api.post("/leads/999999/qualify")).status_code == 404
+    assert (await api.post("/leads/999999/route")).status_code == 404
+    assert (await api.post("/leads/999999/convert")).status_code == 404
 
 
 async def test_lead_route_after_convert_conflicts(api):
-    lead = (await api.post("/sales/leads", json={"source": "site", "company": "ООО Цикл"})).json()
-    await api.post(f"/sales/leads/{lead['id']}/qualify")
-    await api.post(f"/sales/leads/{lead['id']}/route")
-    await api.post(f"/sales/leads/{lead['id']}/convert")
+    lead = (await api.post("/leads", json={"source": "site", "company": "ООО Цикл"})).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+    await api.post(f"/leads/{lead['id']}/convert")
     # после конвертации повторное распределение запрещено
-    assert (await api.post(f"/sales/leads/{lead['id']}/route")).status_code == 409
+    assert (await api.post(f"/leads/{lead['id']}/route")).status_code == 409
 
 
 # --- ERP-модули: PATCH несуществующих + не-терминальные статусы ---

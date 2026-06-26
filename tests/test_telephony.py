@@ -108,15 +108,17 @@ async def test_resolve_owner_by_active_deal(session):
     assert res["contact_id"] is not None
 
 
-async def test_resolve_owner_lead_fallback(session):
+async def test_resolve_owner_no_lead_fallback(session):
+    from modules.leads.models import Lead
     from modules.sales.calls import resolve_owner
-    from modules.sales.models import Lead
 
     session.add(Lead(source="phone", phone="+375299998877", assigned_to="Петров П.П.", status="routed"))
     await session.commit()
 
-    res = await resolve_owner(session, "375299998877")  # незнакомый контакт → лид
-    assert res["owner"] == "Петров П.П."
+    # Лид НЕ резолвится в sales: резолв лида по звонку вынесен в репозиторий лидов
+    # (подписка на sales.call.logged). Здесь неизвестный номер → owner пуст (дежурный пул).
+    res = await resolve_owner(session, "375299998877")
+    assert res["owner"] == ""
     assert res["counterparty_id"] is None
 
 
