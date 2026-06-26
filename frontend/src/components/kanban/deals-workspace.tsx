@@ -76,6 +76,114 @@ function pluralDeals(n: number): string {
   return "сделок";
 }
 
+function pluralWorkdays(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "рабочий день";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "рабочих дня";
+  return "рабочих дней";
+}
+
+const MONTH_GEN = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+const MONTH_NOM = [
+  "январь", "февраль", "март", "апрель", "май", "июнь",
+  "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
+
+/** Рабочих дней (пн–пт) с текущей даты до конца месяца включительно. */
+function workingDaysLeft(now: number): number {
+  const d = new Date(now);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  let count = 0;
+  for (let day = d.getDate(); day <= lastDay; day++) {
+    const wd = new Date(year, month, day).getDay();
+    if (wd !== 0 && wd !== 6) count++;
+  }
+  return count;
+}
+
+/** Стадия «в работе» — открытый pipeline (без won/lost/cond_lost). */
+const isOpenStage = (s: Stage) => s.id !== "won" && s.id !== "lost" && s.id !== "cond_lost";
+
+/** Баннер планирования: под конец месяца напоминает составить план на следующий и
+ *  согласовать с РОПом (порт sales-board-mockup.html). Считается от текущей даты;
+ *  `now` приходит после маунта (см. DealsWorkspace) — до него баннера нет. */
+function PlanBanner({ now }: { now: number | null }) {
+  if (now == null) return null;
+  const left = workingDaysLeft(now);
+  if (left > 7) return null; // нудж только в последнюю рабочую неделю месяца
+  const d = new Date(now);
+  const cur = MONTH_GEN[d.getMonth()];
+  const next = MONTH_NOM[(d.getMonth() + 1) % 12];
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+      <span aria-hidden>📋</span>
+      <span>
+        До конца {cur} — <b>{left} {pluralWorkdays(left)}</b>. Пора составить личный план на{" "}
+        <b>{next}</b> и согласовать с РОПом.
+      </span>
+      <Link
+        href="/crm/rop/planning"
+        className="ml-auto rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:bg-accent-ink"
+      >
+        Составить план на {next}
+      </Link>
+    </div>
+  );
+}
+
+/** Pipeline-строка под скорбордом (порт макета): живые срезы открытого pipeline —
+ *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа — DEMO-ставка
+ *  22% (реальная — из landed cost закупок; методика цены ещё разрабатывается). */
+function PipelineRow({ stages, now }: { stages: Stage[]; now: number | null }) {
+  const open = stages.filter(isOpenStage);
+  const count = open.reduce((n, s) => n + s.deals.length, 0);
+  const sum = open.reduce((n, s) => n + s.deals.reduce((a, d) => a + d.amount, 0), 0);
+  const weighted = open.reduce((n, s) => n + stageWeightedSum(s), 0);
+  const margin = Math.round(weighted * 0.22); // ponytail: demo-ставка маржи, апгрейд — landed cost
+  const stuck =
+    now == null
+      ? null
+      : stages.reduce((n, s) => n + s.deals.filter((d) => isStuck(d, s.id, now)).length, 0);
+  const Sep = () => <span className="hidden h-4 w-px bg-line sm:block" aria-hidden />;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-surface px-4 py-3 text-[13px] shadow-card">
+      <span className="text-muted">
+        В работе: <b className="text-ink">{count}</b> {pluralDeals(count)}
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Сумма pipeline: <b className="text-ink">{formatMoney(sum)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Взвешенный прогноз <span className="text-faint">(выручка)</span>:{" "}
+        <b className="text-accent-ink">≈ {formatMoney(weighted)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Прогноз маржи{" "}
+        <span
+          className="text-faint"
+          title="Демо-ставка маржи 22%. Реальная маржа — из landed cost (закупки); методика цены ещё разрабатывается."
+        >
+          (вал. прибыль · демо 22%)
+        </span>
+        : <b className="text-money">≈ {formatMoney(margin)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Висяки: <b className="text-amber-600">{stuck ?? "—"}</b>
+      </span>
+    </div>
+  );
+}
+
 function DraggableDeal({
   deal,
   extras,
@@ -399,6 +507,8 @@ export function DealsWorkspace({
           </div>
         )}
 
+        <PlanBanner now={now} />
+
         {/* План / Факт по периодам */}
         <section className="mt-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -433,6 +543,8 @@ export function DealsWorkspace({
             ))}
           </div>
         </section>
+
+        <PipelineRow stages={stages} now={now} />
 
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
