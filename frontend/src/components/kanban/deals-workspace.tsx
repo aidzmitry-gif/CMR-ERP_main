@@ -467,7 +467,7 @@ export function DealsWorkspace({
     };
   }
   const flatDeals = filteredStages.flatMap((s) =>
-    s.deals.map((d) => ({ deal: d, stageTitle: s.title })),
+    s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id, open: isOpenStage(s) })),
   );
   const PRIORITIES = ["Высокий", "Средний", "Низкий"];
 
@@ -638,18 +638,25 @@ export function DealsWorkspace({
                   <th className="px-4 py-2.5 font-medium">Контрагент</th>
                   <th className="px-4 py-2.5 font-medium">Описание</th>
                   <th className="px-4 py-2.5 font-medium">Стадия</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Вероятн.</th>
                   <th className="px-4 py-2.5 text-right font-medium">Сумма</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Взвешенно</th>
                 </tr>
               </thead>
               <tbody>
                 {flatDeals.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                    <td colSpan={7} className="px-4 py-6 text-center text-muted">
                       Сделок не найдено
                     </td>
                   </tr>
                 )}
-                {flatDeals.map(({ deal, stageTitle }) => (
+                {flatDeals.map(({ deal, stageTitle, stageId, open }) => {
+                  // Вероятность/взвешенно — те же probabilityFor/weightedAmount, что на карточках.
+                  // Взвешенно показываем только для открытых стадий (isOpenStage) — как итог/колонки.
+                  const prob = probabilityFor(deal, stageId);
+                  const weighted = weightedAmount(deal, stageId);
+                  return (
                   <tr key={deal.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-4 py-2.5">
                       <Link href={`/crm/deals/${deal.id}`} className="font-medium text-accent-ink">
@@ -659,11 +666,16 @@ export function DealsWorkspace({
                     <td className="px-4 py-2.5 text-ink">{deal.company}</td>
                     <td className="px-4 py-2.5 text-muted">{deal.description}</td>
                     <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted">{prob}%</td>
                     <td className="px-4 py-2.5 text-right font-medium text-ink">
                       {fmt(deal.amount)}
                     </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-accent-ink">
+                      {open ? `≈ ${fmt(weighted)}` : "—"}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
