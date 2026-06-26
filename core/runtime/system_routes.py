@@ -306,13 +306,17 @@ async def sku_card(
         except Exception:  # noqa: BLE001 — БД/сеть procurement недоступна → карточка без себеса, не 500
             landed = None
 
+    # Эффективный ТН ВЭД: свой код товара или унаследованный от группы (вверх по дереву).
+    effective_tnved = await tnved.effective_code_for_sku(session, sku)
+
     return {
         "code": sku.code,
         "title": sku.title,
         "unit": sku.unit,
         "category_id": sku.category_id,
         "weight_kg": sku.weight_kg,
-        "tnved_code": sku.tnved_code,
+        "tnved_code": sku.tnved_code,  # собственный код (может быть None → наследуется)
+        "effective_tnved": effective_tnved,  # {code, source: own|group|None, group_code, group_name}
         "shelf_life_days": sku.shelf_life_days,
         "is_active": sku.is_active,
         "attributes": sku.attributes,

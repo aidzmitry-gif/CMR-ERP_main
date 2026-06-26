@@ -239,8 +239,8 @@ def build_reference_router() -> APIRouter:
     router.include_router(
         build_simple_ref_router(
             NomenclatureCategory,
-            fields=("id", "code", "name", "parent_id", "is_active"),
-            editable=("code", "name", "parent_id"),
+            fields=("id", "code", "name", "parent_id", "tnved_code", "is_active"),
+            editable=("code", "name", "parent_id", "tnved_code"),
             required=("code", "name"),
         ),
         prefix="/nomenclature-groups",

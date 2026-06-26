@@ -5,7 +5,9 @@
 """
 from datetime import date
 
-from core.domain.reference import TnvedCode, VatRate
+from core.domain.models import Sku
+from core.domain.reference import NomenclatureCategory, TnvedCode, VatRate
+from core.services import tnved
 
 
 async def test_tnved_in_catalog(api):
@@ -98,3 +100,62 @@ async def test_tnved_lookup_vat_null_when_no_vat_code(api, session):
     )).json()
     assert body["duty_rate"] == 0.0
     assert body["vat_rate"] is None
+
+
+async def test_effective_tnved_own_wins(session):
+    """Свой код товара — источник own, группу не смотрим."""
+    grp = NomenclatureCategory(code="G1", name="Аккумуляторы", tnved_code="8507100000")
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="AKB-1", title="АКБ", category_id=grp.id, tnved_code="8507600000")
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_code_for_sku(session, sku)
+    assert eff == {"code": "8507600000", "source": "own", "group_code": None, "group_name": None}
+
+
+async def test_effective_tnved_inherited_from_group(session):
+    """Нет своего → наследуем от группы (вверх по parent_id), с указанием группы."""
+    root = NomenclatureCategory(code="G10", name="Аккумуляторы", tnved_code="8507100000")
+    session.add(root)
+    await session.flush()
+    child = NomenclatureCategory(code="G11", name="Грузовые", parent_id=root.id)  # без своего ТН ВЭД
+    session.add(child)
+    await session.flush()
+    sku = Sku(code="AKB-2", title="АКБ", category_id=child.id, tnved_code=None)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_code_for_sku(session, sku)
+    assert eff["code"] == "8507100000"
+    assert eff["source"] == "group"
+    assert eff["group_code"] == "G10"  # унаследовано от КОРНЯ, не от пустого child
+
+
+async def test_effective_tnved_skips_archived_group(session):
+    """Архивная группа не дарит код вниз; подъём продолжается к активному предку."""
+    root = NomenclatureCategory(code="G30", name="Аккумуляторы", tnved_code="8507100000")
+    session.add(root)
+    await session.flush()
+    # промежуточная группа архивна и имеет свой код — НЕ должен примениться
+    mid = NomenclatureCategory(code="G31", name="Старое", parent_id=root.id,
+                               tnved_code="9999999999", is_active=False)
+    session.add(mid)
+    await session.flush()
+    sku = Sku(code="AKB-3", title="АКБ", category_id=mid.id, tnved_code=None)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_code_for_sku(session, sku)
+    assert eff["code"] == "8507100000"  # взят от активного корня, архивный mid пропущен
+    assert eff["group_code"] == "G30"
+
+
+async def test_effective_tnved_none_when_nowhere(session):
+    """Нет ни своего, ни в группах вверх → None (не падаем, не выдумываем)."""
+    grp = NomenclatureCategory(code="G20", name="Прочее")  # без ТН ВЭД
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="X-1", title="X", category_id=grp.id, tnved_code=None)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_code_for_sku(session, sku)
+    assert eff == {"code": None, "source": None, "group_code": None, "group_name": None}

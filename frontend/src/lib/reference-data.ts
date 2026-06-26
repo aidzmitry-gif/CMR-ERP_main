@@ -514,6 +514,14 @@ export async function fetchSyncJournal(roles?: string): Promise<SyncJournalEntry
 
 // ── Карточка номенклатуры (master-data витрина SKU, M4) ──────────────────────
 
+/** Эффективный код ТН ВЭД товара: свой или унаследованный от группы. */
+export interface EffectiveTnved {
+  code: string | null;
+  source: "own" | "group" | null; // own — задан на товаре; group — взят с группы; null — нигде
+  group_code: string | null; // с какой группы взят (source=group)
+  group_name: string | null;
+}
+
 /** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
 export interface SkuCard {
   code: string;
@@ -521,7 +529,8 @@ export interface SkuCard {
   unit: string | null;
   category_id: number | null;
   weight_kg: number | null;
-  tnved_code: string | null;
+  tnved_code: string | null; // собственный код товара (может быть null → наследуется)
+  effective_tnved: EffectiveTnved; // свой ∨ унаследованный от группы (+ источник)
   shelf_life_days: number | null;
   is_active: boolean;
   attributes: Record<string, unknown>; // переменные характеристики (JSONB-хвост)

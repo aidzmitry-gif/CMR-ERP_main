@@ -481,6 +481,11 @@ async def main() -> None:
             cat, parent = cat_by_code.get(code), cat_by_code.get(parent_code)
             if cat and parent and cat.parent_id is None:
                 cat.parent_id = parent.id
+        # ТН ВЭД по умолчанию на корневых группах → товары внутри наследуют (демо M4).
+        for code, tnved in (("CAT-0100", "8507100000"), ("CAT-0200", "7208519800")):
+            cat = cat_by_code.get(code)
+            if cat and cat.tnved_code is None:
+                cat.tnved_code = tnved
 
         # Номенклатура (по коду, идемпотентно) — с привязкой к группе.
         existing_codes = set((await s.execute(select(Sku.code))).scalars().all())
