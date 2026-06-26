@@ -13,6 +13,7 @@ class StockOut(BaseModel):
     qty_reserved: float
     qty_forecast: float
     price: float
+    cost: float | None = None
 
 
 class RegistryOut(BaseModel):

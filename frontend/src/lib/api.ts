@@ -191,6 +191,7 @@ export interface StockRow {
   qty_reserved: number;
   qty_forecast: number; // «в пути» / прогноз прихода
   price: number;
+  cost?: number | null; // себестоимость из 1С (для маржи «в наличии»); null — не дана
 }
 
 /** Остатки и цены по складам (для подбора товара со склада в окне звонка). */
