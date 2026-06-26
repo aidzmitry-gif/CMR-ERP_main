@@ -467,7 +467,7 @@ export function DealsWorkspace({
     };
   }
   const flatDeals = filteredStages.flatMap((s) =>
-    s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id, open: isOpenStage(s) })),
+    s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })),
   );
   const PRIORITIES = ["Высокий", "Средний", "Низкий"];
 
@@ -651,9 +651,10 @@ export function DealsWorkspace({
                     </td>
                   </tr>
                 )}
-                {flatDeals.map(({ deal, stageTitle, stageId, open }) => {
-                  // Вероятность/взвешенно — те же probabilityFor/weightedAmount, что на карточках.
-                  // Взвешенно показываем только для открытых стадий (isOpenStage) — как итог/колонки.
+                {flatDeals.map(({ deal, stageTitle, stageId }) => {
+                  // Вероятность/взвешенно — те же probabilityFor/weightedAmount и то же правило
+                  // показа (prob > 0), что на карточке доски: won → ≈сумма, lost (0%) → «—».
+                  // (isOpenStage — критерий для АГРЕГАТОВ: итог строки и колонки, не для per-deal.)
                   const prob = probabilityFor(deal, stageId);
                   const weighted = weightedAmount(deal, stageId);
                   return (
@@ -671,7 +672,7 @@ export function DealsWorkspace({
                       {fmt(deal.amount)}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-accent-ink">
-                      {open ? `≈ ${fmt(weighted)}` : "—"}
+                      {prob > 0 ? `≈ ${fmt(weighted)}` : "—"}
                     </td>
                   </tr>
                   );
