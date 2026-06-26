@@ -235,6 +235,25 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
   const groupPath = card.group_path ?? [];
   const sync = card.sync;
 
+  // «Производительские» атрибуты для блока «Сведения о производителе» (таб Обзор) —
+  // подмножество JSONB-attributes по известным ключам; пусто → честная заглушка.
+  const makerKeys = ["Производитель", "Марка", "Бренд", "Импортёр", "Страна происхождения", "Страна"];
+  const makerAttrs = makerKeys
+    .map((k) => [k, card.attributes?.[k]] as const)
+    .filter(([, v]) => v != null && v !== "");
+
+  // Заполненность карточки — доля непустых «горячих» полей (демо-метрика полноты golden record).
+  const fillChecks = [
+    card.title,
+    card.unit,
+    card.weight_kg,
+    eff.code,
+    card.shelf_life_days,
+    makerAttrs.length > 0 ? "x" : null,
+  ];
+  const filled = fillChecks.filter((v) => v != null && v !== "").length;
+  const fillPct = Math.round((filled / fillChecks.length) * 100);
+
   return (
     <div className="flex-1 overflow-y-auto bg-canvas p-6">
       <div className="mx-auto max-w-5xl space-y-4">
@@ -390,10 +409,18 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                 </div>
 
                 <Collapsible summary="Сведения о производителе">
-                  <p className="text-[12px] text-faint">
-                    Производитель, марка, импортёр и страна происхождения появятся, когда будут
-                    заполнены на товаре или унаследованы от группы. Сейчас не заданы.
-                  </p>
+                  {makerAttrs.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {makerAttrs.map(([k, v]) => (
+                        <Field key={k} label={k} value={attrValue(v)} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-faint">
+                      Производитель, марка, импортёр и страна происхождения появятся, когда будут
+                      заполнены на товаре или унаследованы от группы. Сейчас не заданы.
+                    </p>
+                  )}
                 </Collapsible>
                 <Collapsible summary="Описание и файлы">
                   <p className="text-[12px] text-faint">
@@ -470,6 +497,25 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   </p>
                 </Card>
               )}
+
+              <Card>
+                <Eyebrow>Заполненность</Eyebrow>
+                <div className="mt-2 flex items-center justify-between text-[13px]">
+                  <span className="text-muted">Полнота карточки</span>
+                  <span className="font-bold tabular-nums text-money">{fillPct}%</span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-sunken">
+                  <div className="h-full rounded-full bg-money" style={{ width: `${fillPct}%` }} />
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  <Badge tone={eff.code ? "ok" : "warn"}>ТН ВЭД {eff.code ? "✓" : "⚠"}</Badge>
+                  <Badge tone={card.weight_kg != null ? "ok" : "warn"}>Вес {card.weight_kg != null ? "✓" : "⚠"}</Badge>
+                  <Badge tone={makerAttrs.length > 0 ? "ok" : "warn"}>Производитель {makerAttrs.length > 0 ? "✓" : "⚠"}</Badge>
+                </div>
+                <p className="mt-2.5 text-[11px] text-faint">
+                  Полнота по «горячим» полям витрины. Обязательность задаёт группа (наследуется).
+                </p>
+              </Card>
             </div>
           </div>
         )}
