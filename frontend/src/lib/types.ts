@@ -141,11 +141,12 @@ export interface DealDetail {
     isStale?: boolean;
   };
 
-  /**
-   * Себестоимость / прибыль / маржа для metrics-полосы.
-   * NB: probability и weighted-сумма уже живут на Deal (probability + expectedCloseDate
-   * для SALES-43/44) — здесь не дублируем, читаем из {@link Deal}.
-   */
+  /** Вероятность закрытия 0..100 (SALES-44). Явный override; нет — UI берёт дефолт по стадии. */
+  probability?: number;
+  /** Ожидаемая дата закрытия (SALES-44). */
+  expectedCloseDate?: string;
+
+  /** Себестоимость / прибыль / маржа для metrics-полосы (считается на клиенте по позициям). */
   pricing?: {
     cost?: number;
     costSource?: "landed_zak" | "avg_1c" | "manual";

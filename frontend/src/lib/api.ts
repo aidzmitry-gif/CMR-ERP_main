@@ -137,6 +137,9 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       // Активная стадия из бэка: idx прогрессии + заголовок (канон sales-stages.ts) +
       // «дней в стадии»/«протухает» (SALES-43) из stage_changed_at.
       stage: dealStage(d.stage, d.stage_changed_at),
+      // Вероятность/прогноз (SALES-44): явный override; нет — UI возьмёт дефолт по стадии.
+      probability: d.probability ?? undefined,
+      expectedCloseDate: d.expected_close_date ?? undefined,
     };
   } catch {
     return getDealDetail(id);

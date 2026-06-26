@@ -75,7 +75,13 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
 
-          <DealMetrics dealId={id} amount={d.amount} closeDate={d.dealDate} />
+          <DealMetrics
+            dealId={id}
+            amount={d.amount}
+            closeDate={d.expectedCloseDate || d.dealDate}
+            stageId={d.stage?.id}
+            probability={d.probability}
+          />
           <Stages currentIdx={stageIdx} />
         </Card>
 
