@@ -13,7 +13,7 @@ import {
   type StockRow,
   updateDealItem,
 } from "@/lib/api";
-import { formatByn } from "@/lib/format";
+import { useCurrency } from "@/components/kanban/currency-context";
 
 /** Маржа позиции «в наличии» из 1С (правило «в наличии → себес и цена из 1С»). */
 function itemMargin(st?: StockRow): { cost: number; pct: number } | null {
@@ -22,6 +22,7 @@ function itemMargin(st?: StockRow): { cost: number; pct: number } | null {
 }
 
 export function DealItems({ dealId }: { dealId: string }) {
+  const { fmt } = useCurrency(); // цены/себес в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
   const [items, setItems] = useState<DealItemFull[]>([]);
   const [skus, setSkus] = useState<SkuOption[]>([]);
   const [stock, setStock] = useState<Record<string, StockRow>>({});
@@ -86,15 +87,15 @@ export function DealItems({ dealId }: { dealId: string }) {
               <div className="truncate text-sm text-muted">{item.title}</div>
               {item.last_price != null && (
                 <span className="text-xs text-faint">
-                  {formatByn(item.last_price)}
+                  {fmt(item.last_price)}
                   {item.min_price != null && item.min_price < item.last_price
-                    ? ` · мин ${formatByn(item.min_price)}`
+                    ? ` · мин ${fmt(item.min_price)}`
                     : ""}
                 </span>
               )}
               {m ? (
                 <div className="text-[11px] font-semibold text-money">
-                  себес {formatByn(m.cost)} · маржа {Math.round(m.pct)}%
+                  себес {fmt(m.cost)} · маржа {Math.round(m.pct)}%
                 </div>
               ) : stock[item.code] ? (
                 <div className="text-[11px] text-faint">под заказ · себес из предрасчёта</div>

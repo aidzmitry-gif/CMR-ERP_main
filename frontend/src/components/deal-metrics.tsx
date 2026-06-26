@@ -7,7 +7,7 @@ import {
   fetchStock,
   type StockRow,
 } from "@/lib/api";
-import { formatByn } from "@/lib/format";
+import { useCurrency } from "@/components/kanban/currency-context";
 import { STAGE_PROBABILITY } from "@/lib/sales-stages";
 
 /**
@@ -36,6 +36,7 @@ export function DealMetrics({
   stageId?: string;
   probability?: number;
 }) {
+  const { fmt } = useCurrency(); // деньги в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
   const [items, setItems] = useState<DealItemFull[] | null>(null);
   const [stock, setStock] = useState<Record<string, StockRow>>({});
 
@@ -69,12 +70,12 @@ export function DealMetrics({
   // Вероятность: явный override сделки, иначе дефолт по стадии (канон).
   const prob = probability ?? (stageId ? STAGE_PROBABILITY[stageId] : undefined);
   const cells: { label: string; value: string; tone?: "money" }[] = [
-    { label: "Сумма", value: formatByn(amount) },
-    { label: "Себестоимость", value: anyCost ? formatByn(cost) : dash },
-    { label: "Прибыль", value: anyCost ? formatByn(profit) : dash, tone: "money" },
+    { label: "Сумма", value: fmt(amount) },
+    { label: "Себестоимость", value: anyCost ? fmt(cost) : dash },
+    { label: "Прибыль", value: anyCost ? fmt(profit) : dash, tone: "money" },
     { label: "Маржа", value: marginPct != null ? `${marginPct}%` : dash },
     { label: "Вероятность", value: prob != null ? `${prob}%` : "—" },
-    { label: "Взвеш. прогноз", value: prob != null ? formatByn((amount * prob) / 100) : "—" },
+    { label: "Взвеш. прогноз", value: prob != null ? fmt((amount * prob) / 100) : "—" },
     { label: "Закрытие", value: closeDate || "—" },
   ];
 

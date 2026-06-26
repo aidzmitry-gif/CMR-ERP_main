@@ -15,9 +15,9 @@ import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Money } from "@/components/money";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
-import { formatByn } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
@@ -316,7 +316,7 @@ function PayStub({ amount }: { amount: number }) {
           <div className="rounded-[10px] bg-sunken px-3 py-2.5">
             <div className="text-[11px] text-muted">К оплате</div>
             <div className="mt-0.5 text-[16px] font-extrabold tabular-nums text-ink">
-              {formatByn(amount)}
+              <Money byn={amount} />
             </div>
             <div className="mt-0.5 text-[10px] text-faint">из счёта ERP</div>
           </div>

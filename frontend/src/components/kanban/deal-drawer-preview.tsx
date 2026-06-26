@@ -19,8 +19,8 @@ import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Button } from "@/components/ui/button";
 import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
-import { formatByn } from "@/lib/format";
 import type { Deal, Stage } from "@/lib/types";
+import { useCurrency } from "./currency-context";
 
 /**
  * Drawer-preview сделки на доске (sales-card-expanded.html прототип).
@@ -93,6 +93,7 @@ export function DealDrawerPreview({
 
   // Сделки 2.0 через канон board.ts (те же значения/правила, что карточка доски и список):
   // вероятность/взвешенно — probabilityFor/weightedAmount; дни/висяк — daysInStage/isStuck.
+  const { fmt } = useCurrency(); // суммы в валюте выбранного ЮЛ (как карточка доски)
   const stageId = currentStageIdx >= 0 ? stages[currentStageIdx].id : "";
   const prob = deal ? probabilityFor(deal, stageId) : 0;
   const days = deal && now != null ? daysInStage(deal.stageChangedAt, now) : null;
@@ -208,12 +209,12 @@ export function DealDrawerPreview({
 
               {/* Сумма крупно + вероятность (канон board.ts: дефолт по стадии, как карточка/список) */}
               <div className="mt-3 text-[22px] font-extrabold tabular-nums text-ink">
-                {formatByn(deal.amount)}
+                {fmt(deal.amount)}
               </div>
               {prob > 0 && (
                 <div className="mt-1 text-[12px] text-muted">
                   <span className="font-semibold text-accent-ink">{prob}%</span> · взвешенно ≈{" "}
-                  {formatByn(weightedAmount(deal, stageId))}
+                  {fmt(weightedAmount(deal, stageId))}
                 </div>
               )}
 
