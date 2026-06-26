@@ -536,6 +536,26 @@ export interface SkuSync {
   last_synced_at: string | null;
 }
 
+/** Строка остатка по складу (зеркало 1С). */
+export interface StockRow {
+  warehouse: string;
+  qty_available: number;
+  qty_reserved: number;
+  qty_forecast: number;
+  price: number | null;
+  cost: number | null; // себестоимость из 1С (вход маржи)
+}
+
+/** Остатки/цена/себестоимость по SKU (из 1С через фасад stock). `null` — нет остатков. */
+export interface SkuStock {
+  rows: StockRow[];
+  total_available: number;
+  total_reserved: number;
+  price: number | null;
+  cost: number | null;
+  updated_at: string | null;
+}
+
 /** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
 export interface SkuCard {
   code: string;
@@ -553,6 +573,7 @@ export interface SkuCard {
   provenance: Provenance; // происхождение по полям (M2)
   landed_cost: number | null; // себес партии; null — нет расчёта/модуль не подключён (не 0)
   sync: SkuSync | null; // синк из 1С: происхождение/статус; null — связи нет
+  stock: SkuStock | null; // остатки/цена/себес по складам (из 1С); null — нет остатков
 }
 
 /** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */

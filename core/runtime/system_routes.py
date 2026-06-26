@@ -322,6 +322,16 @@ async def sku_card(
     group_path = await _group_breadcrumb(session, sku.category_id)
     sync = await _sku_sync_link(session, sku.id)
 
+    # Остатки/цена/себестоимость по складам (зеркало 1С) — через фасад stock (integrations).
+    # None, если модуль выключен или по коду остатков нет (отсутствие не маскируем нулём).
+    stock = None
+    stock_gw = request.app.state.core.services.stock
+    if stock_gw is not None:
+        try:
+            stock = await stock_gw.stock_by_sku(session, code)
+        except Exception:  # noqa: BLE001 — integrations недоступен → карточка без остатка, не 500
+            stock = None
+
     return {
         "code": sku.code,
         "title": sku.title,
@@ -338,6 +348,7 @@ async def sku_card(
         "provenance": sku.provenance,
         "landed_cost": landed,  # None — нет расчёта/модуль не подключён (не 0)
         "sync": sync,  # {origin, state, last_synced_at, external_ref} или None — синк из 1С
+        "stock": stock,  # {rows, total_available, price, cost, …} из 1С или None — нет остатков
     }
 
 
