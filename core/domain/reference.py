@@ -188,6 +188,9 @@ class NomenclatureCategory(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True)  # стабильный код: "CAT-0102"
     name: Mapped[str] = mapped_column(String(255))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
+    # код ТН ВЭД по умолчанию для группы (→ ref_tnved): товар без своего наследует его вверх
+    # по parent_id. Мягкая ссылка (не FK), как Sku.tnved_code — резолв в reference_query.
+    tnved_code: Mapped[str | None] = mapped_column(String(16))
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (

@@ -6,7 +6,7 @@ import { formatByn } from "@/lib/format";
 import type { SkuCard } from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
-import { Field } from "./provenance-badge";
+import { Field, ProvenanceBadge } from "./provenance-badge";
 
 /** Значение JSON-атрибута → строка для таблицы (объект/массив — компактный JSON). */
 function attrValue(v: unknown): string {
@@ -19,6 +19,13 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
   const prov = card.provenance ?? {};
   const counts = provenanceCounts(prov);
   const attrs = Object.entries(card.attributes ?? {});
+  // фолбэк на старую форму карточки (фронт впереди бэка): нет effective_tnved → свой код товара.
+  const eff = card.effective_tnved ?? {
+    code: card.tnved_code ?? null,
+    source: card.tnved_code ? ("own" as const) : null,
+    group_code: null,
+    group_name: null,
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-canvas p-6">
@@ -69,12 +76,29 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   prov={prov.weight_kg}
                   mono
                 />
-                <Field
-                  label="Код ТН ВЭД"
-                  value={card.tnved_code ?? "—"}
-                  prov={prov.tnved_code}
-                  mono
-                />
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] text-muted">Код ТН ВЭД</p>
+                    {eff.source === "group" ? (
+                      <span
+                        className="shrink-0 rounded-full bg-sunken px-2 py-0.5 text-[11px] text-faint"
+                        title={`Унаследовано от группы ${eff.group_name ?? ""}`}
+                      >
+                        ↑ от группы
+                      </span>
+                    ) : (
+                      <ProvenanceBadge prov={prov.tnved_code} />
+                    )}
+                  </div>
+                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 font-mono text-sm text-ink">
+                    {eff.code ?? "—"}
+                  </div>
+                  {eff.source === "group" && eff.group_name && (
+                    <p className="mt-1 text-[11px] text-faint">
+                      унаследовано от группы «{eff.group_name}» — можно переопределить
+                    </p>
+                  )}
+                </div>
                 <Field
                   label="Срок годности, дн."
                   value={card.shelf_life_days != null ? String(card.shelf_life_days) : "—"}

@@ -173,6 +173,10 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
                 "parent_id", "Родитель", "number",
                 semantic="родительская группа (иерархия adjacency list); пусто = корень",
             ),
+            ReferenceColumn(
+                "tnved_code", "ТН ВЭД по умолч.", "string",
+                semantic="код ТН ВЭД группы (core.tnved); товар без своего наследует его",
+            ),
             _ACTIVE,
         ),
         permissions=("refs.view", "refs.edit"),
