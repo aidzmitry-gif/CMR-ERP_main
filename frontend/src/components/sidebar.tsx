@@ -318,6 +318,8 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Состояние читаем после маунта — иначе SSR vs клиент-гидрация рассогласуется.
+  // Гидрация из localStorage (внешнее хранилище) — легитимный setState в эффекте.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -335,6 +337,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
       if (hoverTimer.current) clearTimeout(hoverTimer.current);
     };
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Применяем пользовательский порядок + фильтр по правам.
   const visibleModules = useMemo(() => {
