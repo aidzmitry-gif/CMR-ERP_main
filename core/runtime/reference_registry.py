@@ -196,6 +196,33 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
     ),
     # --- классификаторы (§3.1) ---
     Reference(
+        key="core.tnved",
+        title="Коды ТН ВЭД (тарифы)",
+        department="Финансы",
+        owner_schema="public",
+        endpoint="/system/refs/tnved",
+        columns=(
+            _CODE,
+            ReferenceColumn("name", "Описание", "string"),
+            ReferenceColumn(
+                "duty_rate", "Пошлина, %", "number",
+                semantic="ввозная пошлина ЕТТ ЕАЭС, действует в периоде",
+            ),
+            ReferenceColumn(
+                "vat_code", "НДС", "string", semantic="ссылка на ставку НДС (core.vat_rates)",
+            ),
+            ReferenceColumn("excise", "Акциз", "string"),
+            ReferenceColumn("unit", "Ед. (там.)", "string"),
+            ReferenceColumn("start_date", "Действует с", "date"),
+            ReferenceColumn("end_date", "По", "date", semantic="пусто = текущая"),
+        ),
+        permissions=("refs.view", "refs.edit"),
+        versioned=True,
+        ai_exposed=True,
+        description="Коды ТН ВЭД ЕАЭС (ЕТТ) с ввозной пошлиной + акциз; НДС ссылкой на core.vat_rates. "
+        "Историчны (SCD2): расчёт landed cost берёт ставку на дату оформления.",
+    ),
+    Reference(
         key="core.accounts",
         title="План счетов",
         department="Финансы",

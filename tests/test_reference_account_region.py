@@ -62,6 +62,20 @@ async def test_regions_hierarchy_crud(api):
     assert dup.status_code != 200
 
 
+async def test_account_region_via_reference_query(api):
+    """AI-путь reference.query для иерархических классификаторов (ai_exposed) — не 422."""
+    await api.post("/system/refs/accounts", json={"code": "60", "title": "Поставщики", "kind": "пассив"})
+    await api.post("/system/refs/regions", json={"code": "BY-MI", "title": "Минская обл.", "kind": "область"})
+
+    acc = await api.post("/system/references/query", json={"ref": "core.accounts", "key": "60"})
+    assert acc.status_code == 200
+    assert acc.json()["result"]["title"] == "Поставщики"
+
+    reg = await api.post("/system/references/query", json={"ref": "core.regions"})
+    assert reg.status_code == 200
+    assert any(r["code"] == "BY-MI" for r in reg.json()["result"])
+
+
 async def test_account_region_in_catalog(api):
     departments = (await api.get("/system/references")).json()["departments"]
     by_key = {ref["key"]: ref for refs in departments.values() for ref in refs}
