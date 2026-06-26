@@ -63,6 +63,37 @@ async def test_sku_card_reads_landed_cost_via_gateway(api, session):
         core.services.landed_cost = None  # вернуть, чтобы не течь в другие тесты
 
 
+async def test_sku_card_stock_from_gateway(api, session):
+    """Карточка отдаёт остатки/цену/себес по складам через фасад stock (StockItem из 1С)."""
+    from decimal import Decimal
+
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="ST-1", title="Товар на складе", unit="шт"))
+    session.add_all([
+        StockItem(sku_code="ST-1", warehouse="Минск", qty_available=Decimal("41"),
+                  qty_reserved=Decimal("13"), qty_forecast=Decimal("0"),
+                  price=Decimal("320"), cost=Decimal("233.6")),
+        StockItem(sku_code="ST-1", warehouse="Гомель", qty_available=Decimal("18"),
+                  qty_reserved=Decimal("0"), qty_forecast=Decimal("0"),
+                  price=Decimal("320"), cost=Decimal("233.6")),
+    ])
+    await session.commit()
+
+    st = (await api.get("/system/sku/ST-1")).json()["stock"]
+    assert st["total_available"] == 59.0  # 41 + 18
+    assert st["total_reserved"] == 13.0
+    assert st["price"] == 320.0 and st["cost"] == 233.6  # вход маржи
+    assert {r["warehouse"] for r in st["rows"]} == {"Минск", "Гомель"}
+
+
+async def test_sku_card_stock_none_when_no_stock(api, session):
+    """Нет остатков по коду → stock None (отсутствие не маскируем нулём)."""
+    session.add(Sku(code="ST-NONE", title="Без остатка", unit="шт"))
+    await session.commit()
+    assert (await api.get("/system/sku/ST-NONE")).json()["stock"] is None
+
+
 async def test_sku_card_group_breadcrumb(api, session):
     """group_path — путь по дереву групп от корня к группе товара (для шапки карточки)."""
     root = NomenclatureCategory(code="G-ROOT", name="Электрооборудование")

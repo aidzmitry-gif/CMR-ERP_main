@@ -201,6 +201,15 @@ function TabBtn({
   );
 }
 
+/** Русское склонение «склад» по числу: 1 склад, 2 склада, 5 складов. */
+function skladPlural(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "склад";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "склада";
+  return "складов";
+}
+
 /** Значение JSON-атрибута → строка (объект/массив — компактный JSON). */
 function attrValue(v: unknown): string {
   if (v == null) return "—";
@@ -234,6 +243,13 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
   const rates = card.tnved_rates;
   const groupPath = card.group_path ?? [];
   const sync = card.sync;
+  const stock = card.stock;
+  // Маржа от себестоимости (контроль валовой прибыли) — null, если нет цены/себеса
+  // или цена 0 (защита от деления на ноль → не показываем -Infinity%).
+  const margin =
+    stock?.price != null && stock.price > 0 && stock?.cost != null
+      ? Math.round(((stock.price - stock.cost) / stock.price) * 100)
+      : null;
 
   // «Производительские» атрибуты для блока «Сведения о производителе» (таб Обзор) —
   // подмножество JSONB-attributes по известным ключам; пусто → честная заглушка.
@@ -314,16 +330,31 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
             <Kpi
               icon="📦"
               label="Остаток"
-              big={<span className="italic text-faint">нет данных</span>}
-              bigClass="text-[15px]"
-              sub="истина остатка — 1С"
+              big={
+                stock ? (
+                  <>
+                    {stock.total_available} <span className="text-xs font-semibold text-muted">{card.unit ?? "шт"}</span>
+                  </>
+                ) : (
+                  <span className="italic text-faint">нет данных</span>
+                )
+              }
+              sub={stock ? `резерв ${stock.total_reserved} · истина — 1С` : "истина остатка — 1С"}
             />
             <Kpi
               icon="🗄"
               label="Где лежит"
-              big={<span className="italic text-faint">нет данных</span>}
+              big={
+                stock && stock.rows.length > 0 ? (
+                  stock.rows.length === 1
+                    ? stock.rows[0].warehouse
+                    : `${stock.rows.length} ${skladPlural(stock.rows.length)}`
+                ) : (
+                  <span className="italic text-faint">нет данных</span>
+                )
+              }
               bigClass="text-[15px]"
-              sub="WMS / инвентаризация"
+              sub={stock ? "склады из 1С" : "WMS / инвентаризация"}
             />
             <Kpi
               icon="⏳"
@@ -628,10 +659,46 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
 
         {/* ──────── ТАБ: СКЛАД ──────── */}
         {tab === "wh" && (
-          <EmptyState
-            title="🗄 Размещение, остатки и движение"
-            hint="Размещение по складам/ячейкам, остатки и движение (приход/расход/перемещение) появятся после интеграции WMS и синка остатков из 1С. Истина остатка — 1С; пока данных нет — поле пустое."
-          />
+          stock && stock.rows.length > 0 ? (
+            <Card>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[13.5px] font-bold text-ink">🗄 Размещение и остатки</p>
+                <Badge tone="violet">истина — 1С</Badge>
+              </div>
+              <table className="mt-2 w-full border-collapse text-[13px]">
+                <thead>
+                  <tr className="text-left text-[10.5px] uppercase tracking-wide text-faint">
+                    <th className="py-2 pr-3 font-semibold">Склад</th>
+                    <th className="py-2 pr-3 text-right font-semibold">Доступно</th>
+                    <th className="py-2 pr-3 text-right font-semibold">Резерв</th>
+                    <th className="py-2 text-right font-semibold">Прогноз</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {stock.rows.map((r) => (
+                    <tr key={r.warehouse}>
+                      <td className="py-2 pr-3 text-ink">{r.warehouse}</td>
+                      <td className="py-2 pr-3 text-right font-medium tabular-nums text-ink">
+                        {r.qty_available} {card.unit ?? "шт"}
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-muted">{r.qty_reserved}</td>
+                      <td className="py-2 text-right tabular-nums text-muted">{r.qty_forecast || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-3 border-t border-line pt-3 text-[12px] text-faint">
+                Итого доступно: <b className="text-ink">{stock.total_available} {card.unit ?? "шт"}</b>
+                {stock.total_reserved > 0 && <> · в резерве {stock.total_reserved}</>}. Размещение по
+                ячейкам и движение (приход/расход) — после интеграции WMS. Истина остатка — 1С.
+              </p>
+            </Card>
+          ) : (
+            <EmptyState
+              title="🗄 Размещение, остатки и движение"
+              hint="Остатков по этому товару в 1С нет. Размещение по складам/ячейкам и движение появятся после синка остатков из 1С и интеграции WMS. Истина остатка — 1С."
+            />
+          )
         )}
 
         {/* ──────── ТАБ: ЦЕНЫ И МАРЖА ──────── */}
@@ -641,32 +708,56 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
               🔒 Видно отделу продаж, директору и заму. Закупщик видит landed cost и цену со скидкой
               (контроль маржи), но не видит клиента.
             </div>
-            {card.landed_cost != null ? (
+            {stock?.price != null && stock?.cost != null ? (
               <Card>
                 <p className="text-[13.5px] font-bold text-ink">💵 Цена и маржа</p>
                 <table className="mt-2 w-full border-collapse text-[13px]">
+                  <thead>
+                    <tr className="text-left text-[10.5px] uppercase tracking-wide text-faint">
+                      <th className="py-2 pr-3 font-semibold">Показатель</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Значение</th>
+                      <th className="py-2 text-right font-semibold">Маржа</th>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-line">
                     <tr>
-                      <td className="py-2 text-muted">Landed cost (себест.)</td>
-                      <td className="py-2 text-right font-semibold tabular-nums text-ink">
-                        {formatByn(card.landed_cost)}
+                      <td className="py-2 pr-3 text-muted">Себестоимость (из 1С)</td>
+                      <td className="py-2 pr-3 text-right font-semibold tabular-nums text-ink">
+                        {formatByn(stock.cost)}
                       </td>
+                      <td className="py-2 text-right text-faint">—</td>
                     </tr>
                     <tr>
-                      <td className="py-2 text-muted">Прайс (база)</td>
-                      <td className="py-2 text-right italic text-faint">цена не задана</td>
+                      <td className="py-2 pr-3 text-muted">Цена продажи (из 1С)</td>
+                      <td className="py-2 pr-3 text-right font-semibold tabular-nums text-ink">
+                        {formatByn(stock.price)}
+                      </td>
+                      <td className="py-2 text-right">
+                        {margin != null && (
+                          <Badge tone={margin >= 20 ? "ok" : "warn"}>+{margin}%</Badge>
+                        )}
+                      </td>
                     </tr>
+                    {card.landed_cost != null && (
+                      <tr>
+                        <td className="py-2 pr-3 text-muted">Landed cost (партия)</td>
+                        <td className="py-2 pr-3 text-right font-semibold tabular-nums text-ink">
+                          {formatByn(card.landed_cost)}
+                        </td>
+                        <td className="py-2 text-right text-faint">—</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
                 <p className="mt-3 text-[12px] text-faint">
-                  Прайс, скидки и минимальная цена появятся после реализации прайс-листов в продажах.
-                  Маржа считается от landed cost.
+                  Цена и себестоимость — из 1С (зеркало). Маржа = (цена − себес) / цена. Прайс-листы,
+                  скидки и история цен (SCD2) появятся после реализации прайсинга в продажах.
                 </p>
               </Card>
             ) : (
               <EmptyState
                 title="💵 Цена и маржа"
-                hint="Маржа считается от landed cost, которого пока нет (расчёт партии в закупках не выполнен). Прайс/скидки/история цен (SCD2) появятся после реализации прайс-листов в продажах."
+                hint="Цена и себестоимость по этому товару из 1С не пришли. Маржа считается от себестоимости/landed cost. Прайс-листы, скидки и история цен (SCD2) появятся после реализации прайсинга в продажах."
               />
             )}
           </div>
