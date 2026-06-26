@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({
   fetchDealItems: vi.fn(),
   fetchSkus: vi.fn(),
+  // fetchStock грузит остатки/себес 1С для маржи позиции — мок-дефолт «пусто» (маржа тут не проверяется).
+  fetchStock: vi.fn(() => Promise.resolve([])),
   addDealItem: vi.fn(),
   updateDealItem: vi.fn(),
   deleteDealItem: vi.fn(),
