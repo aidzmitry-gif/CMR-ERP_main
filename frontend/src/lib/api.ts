@@ -1,5 +1,5 @@
-import { ensureLostStage } from "@/lib/board";
-import { progressionIndex, STAGE_BY_ID } from "@/lib/sales-stages";
+import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
+import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
@@ -91,6 +91,21 @@ export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
 }
 
 /** Детальная карточка сделки из API; fallback — mock по id. */
+/** Активная стадия сделки для DealDetail: idx прогрессии + заголовок (канон) +
+ *  «дней в стадии»/«протухает» (SALES-43, из stage_changed_at). undefined — нет канон-стадии. */
+function dealStage(stageId: string, stageChangedAt?: string | null): DealDetail["stage"] {
+  const s = STAGE_BY_ID[stageId];
+  if (!s) return undefined;
+  const days = daysInStage(stageChangedAt ?? undefined, Date.now());
+  return {
+    idx: progressionIndex(stageId),
+    id: stageId,
+    title: s.title,
+    daysInStage: days ?? undefined,
+    isStale: days != null && days >= STUCK_DAYS && !TERMINAL_STAGES.has(stageId),
+  };
+}
+
 export async function fetchDealDetail(id: string, roles?: string): Promise<DealDetail> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
@@ -119,11 +134,9 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       focus: d.focus,
       starred: d.starred,
       dealDate: d.deal_date ?? "",
-      // Активная стадия из бэка (id) → idx в линейной прогрессии + заголовок (канон
-      // sales-stages.ts). Терминалы-отказа дают idx −1 (степпер без активного узла).
-      stage: STAGE_BY_ID[d.stage]
-        ? { idx: progressionIndex(d.stage), id: d.stage, title: STAGE_BY_ID[d.stage].title }
-        : undefined,
+      // Активная стадия из бэка: idx прогрессии + заголовок (канон sales-stages.ts) +
+      // «дней в стадии»/«протухает» (SALES-43) из stage_changed_at.
+      stage: dealStage(d.stage, d.stage_changed_at),
     };
   } catch {
     return getDealDetail(id);
