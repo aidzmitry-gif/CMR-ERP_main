@@ -329,7 +329,16 @@ async def sku_card(
     # Прочие «общие данные группы», наследуемые товаром (ед.изм/страна по умолчанию, ставка НДС
     # по умолчанию группы). Тот же обход вверх по дереву; источник (own|group) — для метки «↑ из группы».
     effective_unit = await tnved.effective_group_field(session, sku, "unit")
+    # Страна: типизированная колонка country (своя ∨ группы). Фоллбэк на свободный JSONB-ключ
+    # «Страна происхождения»/«Страна» — легаси-данные (синк 1С пишет туда), чтобы страна не
+    # пропадала с карточки, когда типизированной колонки ещё нет. Типизированная важнее.
     effective_country = await tnved.effective_group_field(session, sku, "country")
+    if effective_country["value"] is None:
+        for legacy_key in ("Страна происхождения", "Страна"):
+            legacy = await tnved.effective_group_attr(session, sku, legacy_key)
+            if legacy["value"] is not None:
+                effective_country = legacy
+                break
     # НДС по умолчанию группы — отдельно от ТН-ВЭД-резолва: у Sku своего поля нет, берётся от группы.
     group_vat = await tnved.effective_group_field(session, sku, "vat_code")
     if group_vat.get("value"):

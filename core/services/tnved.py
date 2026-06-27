@@ -55,6 +55,11 @@ def _none_result() -> dict:
     return {"value": None, "source": None, "group_code": None, "group_name": None}
 
 
+def _attrs_dict(attrs) -> dict:
+    """``attributes`` как словарь; не-dict (битые данные/None) → ``{}`` (read-path не падает)."""
+    return attrs if isinstance(attrs, dict) else {}
+
+
 async def _walk_up_groups(session: AsyncSession, category_id: int, extract) -> dict:
     """Подъём по дереву групп от ``category_id`` вверх, отдаёт первое непустое ``extract(cat)``.
 
@@ -104,14 +109,14 @@ async def effective_group_attr(session: AsyncSession, sku: Sku, key: str) -> dic
     ``effective_group_field``: ``{value, source: own|group|None, group_code, group_name}``.
     Значения нормализуются в строку для отдачи в JSON (атрибуты свободные, тип не гарантирован).
     """
-    own = (sku.attributes or {}).get(key)
+    own = _attrs_dict(sku.attributes).get(key)
     if own not in (None, ""):
         return {"value": str(own), "source": "own", "group_code": None, "group_name": None}
     if sku.category_id is None:
         return _none_result()
 
     def _from_group(cat: NomenclatureCategory):
-        v = (cat.attributes or {}).get(key)
+        v = _attrs_dict(cat.attributes).get(key)
         return str(v) if v not in (None, "") else None
 
     return await _walk_up_groups(session, sku.category_id, _from_group)

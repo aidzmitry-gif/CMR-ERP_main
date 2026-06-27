@@ -345,3 +345,21 @@ async def test_sku_card_exposes_effective_attrs(api, session):
     assert attrs["Кол-во в коробке"]["source"] == "group"
     assert attrs["Марка"]["value"] == "GP Ultra"
     assert attrs["Марка"]["source"] == "own"
+
+
+async def test_sku_card_country_falls_back_to_legacy_jsonb(api, session):
+    """Страна из легаси JSONB-ключа «Страна происхождения» не пропадает с карточки.
+
+    Типизированной колонки country нет (ни у товара, ни у группы) → effective_country
+    должно подхватить значение из Sku.attributes (как пишет синк 1С), а не отдать None.
+    """
+    grp = NomenclatureCategory(code="GCL1", name="Группа")  # без типизированной country
+    session.add(grp)
+    await session.flush()
+    session.add(Sku(code="CL-SKU", title="АКБ", category_id=grp.id,
+                    attributes={"Страна происхождения": "Китай"}))
+    await session.commit()
+
+    card = (await api.get("/system/sku/CL-SKU")).json()
+    assert card["effective_country"]["value"] == "Китай"
+    assert card["effective_country"]["source"] == "own"
