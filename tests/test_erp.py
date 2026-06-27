@@ -190,6 +190,42 @@ async def test_wms_inventory_adjustment_movements(api, session):
     assert row["kind"] == "out" and row["qty"] == 3.0 and row["doc_ref"] == doc["number"]
 
 
+async def test_wms_receipt_qc(api, session):
+    """Событие прихода → документ приёмки pending_qc БЕЗ движения; QC фиксирует решение."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_goods_received
+
+    await on_goods_received(
+        {"item": "AKB-60", "qty": 20, "warehouse": "Минск", "entity_ref": "purchase:7"},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+
+    rs = (await api.get("/wms/receipts?status=pending_qc")).json()
+    assert rs and rs[0]["source"] == "procurement" and rs[0]["entity_ref"] == "purchase:7"
+    rid = rs[0]["id"]
+    det = (await api.get(f"/wms/receipts/{rid}")).json()
+    line = det["lines"][0]
+    assert line["sku_code"] == "AKB-60" and line["expected_qty"] == 20.0
+    assert line["accepted_qty"] is None
+    # ключевой DoD: движения прихода по приёмке ещё НЕТ (до accept)
+    assert (await api.get("/wms/movements?reason=receipt")).json() == []
+
+    qc = await api.post(
+        f"/wms/receipts/{rid}/qc",
+        json={"decisions": [{"line_id": line["id"], "accepted_qty": 18, "rejected_qty": 2,
+                             "reject_reason": "бой"}], "decided_by": "Кладовщик"},
+    )
+    assert qc.status_code == 200
+    l2 = qc.json()["lines"][0]
+    assert l2["accepted_qty"] == 18.0 and l2["rejected_qty"] == 2.0 and l2["reject_reason"] == "бой"
+
+    # RBAC: ручная приёмка — под wms.count
+    assert (await api.post("/wms/receipts", json={"warehouse": "Минск", "lines": []},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
