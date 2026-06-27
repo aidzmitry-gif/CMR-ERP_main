@@ -5,6 +5,7 @@ import {
   changedFields,
   flattenCatalog,
   isCurrentVersion,
+  qualityTone,
   sortVersionsDesc,
   totalDuplicates,
   type NomenclatureGroup,
@@ -94,6 +95,16 @@ describe("totalDuplicates", () => {
 
   it("нет кластеров → 0", () => {
     expect(totalDuplicates([])).toBe(0);
+  });
+});
+
+describe("qualityTone", () => {
+  it("пороги: ≥0.95 ок · ≥0.8 warn · иначе bad", () => {
+    expect(qualityTone(1)).toBe("ok");
+    expect(qualityTone(0.95)).toBe("ok");
+    expect(qualityTone(0.9)).toBe("warn");
+    expect(qualityTone(0.8)).toBe("warn");
+    expect(qualityTone(0.5)).toBe("bad");
   });
 });
 

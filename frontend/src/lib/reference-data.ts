@@ -147,6 +147,70 @@ export async function runReferenceQuery(
   }
 }
 
+// ── Data-Quality: аудит качества справочников (GET /system/references/quality) ──
+
+/** Счётчики проблем по классам (колонки дашборда). */
+export interface QualityByKind {
+  missing: number;
+  duplicate: number;
+  broken_ref: number;
+  orphan: number;
+}
+
+/** Строка сводки качества по одному справочнику. */
+export interface QualitySummaryRow {
+  ref: string;
+  title: string;
+  total: number;
+  score: number; // 1.0 = чисто
+  issues_count: number;
+  by_kind: QualityByKind;
+}
+
+/** Одна проблема качества: класс, поле, число и примеры ключей. */
+export interface QualityIssue {
+  kind: string; // missing | duplicate | broken_ref | orphan
+  field: string;
+  count: number;
+  sample_keys: string[];
+}
+
+/** Детализация качества справочника (issues + sample_keys). */
+export interface QualityDetail {
+  ref: string;
+  title: string;
+  total: number;
+  score: number;
+  issues: QualityIssue[];
+}
+
+/** Сводка качества по всем справочникам (SSR). Не-200 → пусто. */
+export async function fetchQualitySummary(roles?: string): Promise<QualitySummaryRow[]> {
+  try {
+    const res = await fetch(`${BASE}/system/references/quality`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return ((await res.json()) as { references: QualitySummaryRow[] }).references;
+  } catch {
+    return [];
+  }
+}
+
+/** Детализация качества одного справочника (клиент, через прокси). `null` — ошибка/нет проверок. */
+export async function fetchQualityDetail(refKey: string): Promise<QualityDetail | null> {
+  try {
+    const res = await fetch(`/api/system/references/quality/${encodeURIComponent(refKey)}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as QualityDetail;
+  } catch {
+    return null;
+  }
+}
+
 // ── Строки простого справочника (GET/POST/PATCH/DELETE /system/refs/<table>) ──
 
 /** Строка простого справочника. Общие поля + swift у банков. */
@@ -873,6 +937,13 @@ export function changedFields(newer: SkuVersionRow, older: SkuVersionRow | null)
 /** Сколько всего дублей-кандидатов на слияние (members сверх эталона) во всех кластерах. */
 export function totalDuplicates(clusters: DuplicateCluster[]): number {
   return clusters.reduce((sum, c) => sum + Math.max(0, c.members.length - 1), 0);
+}
+
+/** Тон индикатора качества по score: ≥0.95 ок · ≥0.8 предупреждение · иначе плохо. */
+export function qualityTone(score: number): "ok" | "warn" | "bad" {
+  if (score >= 0.95) return "ok";
+  if (score >= 0.8) return "warn";
+  return "bad";
 }
 
 /** Собрать дерево категорий из плоского списка по `parent_id` (порядок входа сохраняется).

@@ -51,6 +51,12 @@ const HUB_LINKS = [
     badge: "🤖",
     desc: "Semantic layer + MCP-tool: структурный запрос к справочникам",
   },
+  {
+    href: "/erp/spravochniki/quality",
+    label: "Качество данных",
+    badge: "📊",
+    desc: "Аудит справочников: пропуски, дубли, битые ссылки, score",
+  },
 ] as const;
 
 // Fetch rows client-side via Next.js API proxy (/api/* → backend).
