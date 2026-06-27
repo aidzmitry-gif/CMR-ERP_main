@@ -141,6 +141,77 @@ def build_simple_ref_router(
         await session.commit()
         return {"archived": code}
 
+    @router.post("/bulk")
+    async def bulk_upsert(
+        request: Request,
+        payload: dict = Body(...),
+        session: AsyncSession = Depends(get_session),
+        user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+    ) -> dict:
+        """Массовый идемпотентный upsert по ``key_field``: создать отсутствующие, обновить
+        existing editable-поля. ``dry_run=true`` → план (would_create/would_update/conflicts)
+        без записи. Реальный прогон эмитит ``bulk_upsert`` per-row (та же транзакция). Контрагенты
+        НЕ через эту фабрику (их upsert/дедуп — зона Синк)."""
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            raise HTTPException(status_code=422, detail="нужно поле rows: список объектов")
+        dry_run = bool(payload.get("dry_run"))
+        existing = {
+            getattr(o, key_field): o
+            for o in (await session.execute(select(model))).scalars().all()
+        }
+        would_create: list[dict] = []
+        would_update: list[dict] = []
+        conflicts: list[dict] = []
+        seen: set = set()
+        for raw in rows:
+            key = raw.get(key_field) if isinstance(raw, dict) else None
+            if not key:
+                conflicts.append({"key": None, "reason": f"нет поля {key_field}"})
+                continue
+            if key in seen:
+                conflicts.append({"key": key, "reason": "дубль ключа в наборе"})
+                continue
+            seen.add(key)
+            if key in existing:
+                obj = existing[key]
+                changes = {
+                    f: raw[f] for f in editable if f in raw and getattr(obj, f) != raw[f]
+                }
+                if not changes:
+                    continue  # идемпотентность: нет изменений — не трогаем, не эмитим
+                would_update.append({"key": key, "changes": changes})
+                if not dry_run:
+                    for field, value in changes.items():
+                        setattr(obj, field, value)
+                    _emit_change(request, session, model, "bulk_upsert", key, user.username)
+            else:
+                missing = [f for f in required if not raw.get(f)]
+                if missing:
+                    conflicts.append({"key": key, "reason": f"не хватает: {', '.join(missing)}"})
+                    continue
+                would_create.append({"key": key})
+                if not dry_run:
+                    session.add(model(**{f: raw[f] for f in editable if f in raw}))
+                    _emit_change(request, session, model, "bulk_upsert", key, user.username)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_create": would_create,
+                "would_update": would_update,
+                "conflicts": conflicts,
+            }
+        try:
+            await session.commit()
+        except IntegrityError as exc:  # гонка/нарушение уникальности на коммите
+            await session.rollback()
+            raise HTTPException(status_code=409, detail="конфликт уникальности при bulk") from exc
+        return {
+            "created": len(would_create),
+            "updated": len(would_update),
+            "conflicts": conflicts,
+        }
+
     return router
 
 
