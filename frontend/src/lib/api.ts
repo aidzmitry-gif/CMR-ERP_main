@@ -70,9 +70,10 @@ function mapDeal(d: ApiDeal): Deal {
 
 /** Доска сделок из API; при недоступности бэкенда — fallback на mock.
  * В обоих случаях гарантируем колонку «отказ» (SALES-40) через {@link ensureLostStage}. */
-export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
+export async function fetchBoardStages(roles?: string, funnel?: string): Promise<Stage[]> {
   try {
-    const res = await fetch(`${BASE}/sales/board`, { cache: "no-store", headers: roleHeaders(roles) });
+    const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
+    const res = await fetch(`${BASE}/sales/board${qs}`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
     return ensureLostStage(
@@ -99,6 +100,25 @@ export interface StageRow {
   kind: "normal" | "won" | "cond_lost" | "lost";
   color: string;
   is_active: boolean;
+  funnel: string;
+}
+
+/** Воронка sales (мульти-воронки): код + титул + счётчик активных сделок. */
+export interface FunnelRow {
+  code: string;
+  title: string;
+  active_deals: number;
+}
+
+/** Список воронок sales для переключателя на доске. */
+export async function fetchFunnels(): Promise<FunnelRow[]> {
+  try {
+    const res = await fetch("/api/sales/funnels", { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as FunnelRow[];
+  } catch {
+    return [];
+  }
 }
 
 /** Создать стадию (редактор стадий). */

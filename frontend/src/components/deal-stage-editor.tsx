@@ -28,6 +28,7 @@ const EMPTY_NEW: StageRow = {
   kind: "normal",
   color: "#64748B",
   is_active: true,
+  funnel: "new_clients",
 };
 
 export function DealStageEditor() {
