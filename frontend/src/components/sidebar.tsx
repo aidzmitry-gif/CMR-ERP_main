@@ -118,9 +118,10 @@ const MODULES: ModuleItem[] = [
     href: "/erp/wms",
     sub: [
       { label: "Операции", href: "/erp/wms" },
-      { label: "Поступления" },
-      { label: "Размещение" },
-      { label: "Остатки", href: "/erp/wms/stock" },
+      { label: "Движения", href: "/erp/wms/movements" },
+      { label: "Размещение", href: "/erp/wms/locations" },
+      { label: "Остатки 1С", href: "/erp/wms/stock" },
+      { label: "Остаток (движения)", href: "/erp/wms/balances" },
       { label: "Инвентаризация", href: "/erp/wms/inventory" },
     ],
   },
