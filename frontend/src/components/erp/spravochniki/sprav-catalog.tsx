@@ -57,6 +57,12 @@ const HUB_LINKS = [
     badge: "📊",
     desc: "Аудит справочников: пропуски, дубли, битые ссылки, score",
   },
+  {
+    href: "/erp/spravochniki/admin",
+    label: "Модерация",
+    badge: "🛡",
+    desc: "Очередь согласования чувствительных правок (ставки НДС/пошлины)",
+  },
 ] as const;
 
 // Fetch rows client-side via Next.js API proxy (/api/* → backend).

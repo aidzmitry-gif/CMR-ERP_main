@@ -147,6 +147,54 @@ export async function runReferenceQuery(
   }
 }
 
+// ── Модерация: согласования правок справочников (reference-admin) ─────────────
+
+/** Запрос на согласование (Approval) — строка очереди модерации. */
+export interface ApprovalRow {
+  id: number;
+  kind: string; // reference.change для правок справочников
+  entity_ref: string; // напр. "ref_vat_rate:НДС20"
+  subject: string;
+  route: string; // роль-согласующий
+  status: string;
+  requested_by: string;
+  created_at: string | null;
+  due_at: string | null;
+}
+
+/** Ожидающие согласования правки справочников (SSR): pending + kind=reference.change. */
+export async function fetchPendingReferenceApprovals(roles?: string): Promise<ApprovalRow[]> {
+  try {
+    const res = await fetch(`${BASE}/approvals?status=pending`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const all = (await res.json()) as ApprovalRow[];
+    return all.filter((a) => a.kind === "reference.change");
+  } catch {
+    return [];
+  }
+}
+
+/** Одобрить/отклонить согласование (клиент, через прокси). `false` — ошибка/нет права. */
+export async function decideApproval(
+  id: number,
+  approve: boolean,
+  reason?: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/approvals/${id}/${approve ? "approve" : "reject"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? null }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Bulk-upsert простых справочников (POST /system/refs/<table>/bulk) ─────────
 
 /** Конфликт строки bulk: ключ (или null) + причина. */
