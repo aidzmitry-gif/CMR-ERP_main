@@ -25,6 +25,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Windows-консоль = cp1251 → print() кириллицы/эмодзи (⛔/⚠) валит UnicodeEncodeError,
+# который наш top-level except глотает в exit(0) → блок-гард молча не срабатывает (поймано
+# при тесте amend-гарда). Принудительно UTF-8 с заменой, чтобы вывод НИКОГДА не падал.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # py3.7+
+    except Exception:
+        pass
+
 # Файлы-хотспоты из DEPENDENCY-MAP §5 — касание = вероятный конфликт/контракт.
 HOTSPOTS = {
     "config/settings.py",
@@ -39,8 +48,10 @@ HOTSPOTS = {
 }
 SHARED_KERNEL = "core/domain/models.py"
 MIGRATION_RE = re.compile(r"migrations/versions/.+\.py$")
-# Новое межмодульное взаимодействие = добавлена строка с emit/subscribe.
-EVENT_RE = re.compile(r"^\+(?!\+).*\b(event_bus\.emit|\.subscribe)\(", re.MULTILINE)
+# Новое межмодульное взаимодействие = добавлена строка с emit/subscribe ШИНЫ.
+# Привязка к объекту шины (event_bus|core), иначе ловит любой .subscribe( (SSE-очередь/RxJS).
+# ponytail: эвристика по тексту — может задеть закомменченный вызов шины; приемлемо для advisory.
+EVENT_RE = re.compile(r"^\+(?!\+).*\b(?:event_bus|core)\.(?:emit|subscribe)\(", re.MULTILINE)
 # Событие ищем ТОЛЬКО в коде — иначе доки/комменты с примером API дают ложный флаг.
 CODE_EXT = (".py", ".ts", ".tsx", ".js", ".jsx")
 # Сдвиг указателя субмодуля в суперпроекте (git --raw): режим gitlink = 160000.
@@ -52,6 +63,7 @@ LOG_HEADER = (
     "# Пишется git-хуками автоматически. Сюда сессии смотрят «что сделано».\n"
     "# Канон обмена: coordination/INFO-FLOW.md\n\n"
 )
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git «пустое дерево» — база diff для корневого коммита
 
 
 def _git(*args: str) -> str:
@@ -63,10 +75,17 @@ def _git(*args: str) -> str:
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=10,  # зависший git-child (index.lock у флота) не должен морозить commit/push
         )
         return out.stdout.strip() if out.returncode == 0 else ""
-    except Exception:
+    except Exception:  # включая TimeoutExpired — хук остаётся неблокирующим
         return ""
+
+
+def _clean(s: str) -> str:
+    """Убрать control/ANSI-байты из недоверенной строки (subject/ref/путь) перед
+    записью в журнал и печатью — CR/ESC иначе портят строку лога в терминале."""
+    return re.sub(r"[\x00-\x1f\x7f]", " ", s)
 
 
 def _coord_dir() -> Path | None:
@@ -79,17 +98,32 @@ def _coord_dir() -> Path | None:
     return None
 
 
-def _code_added_lines(diff: str) -> str:
-    """Только добавленные строки в КОДОВЫХ файлах (.py/.ts/...) из unified-diff.
+def _is_code_path(p: str) -> bool:
+    """Кодовый файл, по которому ловим событие шины: .py/.ts/..., но НЕ доку и НЕ тесты
+    (тесты не вводят межмодульных контрактов)."""
+    if p == "/dev/null" or not p.endswith(CODE_EXT):
+        return False
+    base = p.rsplit("/", 1)[-1]
+    if "/tests/" in f"/{p}" or base.startswith("test_") or base.endswith(
+        ("_test.py", ".test.ts", ".test.tsx", ".test.js")
+    ):
+        return False
+    return True
 
-    Чтобы пример вызова шины в доке/комменте (.md) не считался «новым событием».
-    Контекст файла берём из заголовков `+++ b/<path>`.
+
+def _code_added_lines(diff: str) -> str:
+    """Добавленные строки только из КОДОВЫХ файлов (без доков/тестов) из unified-diff.
+
+    Чтобы пример вызова шины в доке/комменте/тесте не считался «новым событием».
+    Префикс пути (`b/`, `w/`, … или его отсутствие при diff.noprefix) терпим.
     """
     out, in_code = [], False
     for line in diff.splitlines():
         if line.startswith("+++ "):
             p = line[4:].strip()
-            in_code = p.startswith("b/") and p[2:].endswith(CODE_EXT)
+            if len(p) > 1 and p[1] == "/" and p[0].isalpha():
+                p = p[2:]  # снять одно-буквенный префикс diff (b/, w/, i/, …)
+            in_code = _is_code_path(p)
         elif in_code and line.startswith("+") and not line.startswith("+++"):
             out.append(line)
     return "\n".join(out)
@@ -117,9 +151,10 @@ def _flags(files: list[str], diff: str) -> list[str]:
 def _append(coord: Path, line: str) -> None:
     log = coord / LOG_NAME
     try:
-        if not log.exists():
-            log.write_text(LOG_HEADER, encoding="utf-8")
+        # 'a' создаёт файл без усечения → нет TOCTOU-гонки заголовка между воркерами.
         with log.open("a", encoding="utf-8") as fh:  # ponytail: построчный append — гонки маловероятны при низкой конкуренции
+            if fh.tell() == 0:
+                fh.write(LOG_HEADER)
             fh.write(line + "\n")
     except Exception:
         pass
@@ -154,25 +189,75 @@ def _log_submodule_bumps(coord: Path, raw: str, ts: str) -> list[str]:
     zero = "0" * 40
     extra: list[str] = []
     for status, old, new, path in _submodule_bumps(raw):
+        disp = _clean(path)
         if status == "D" or new == zero:
-            _append(coord, f"- {ts} ·   └ submodule {path}: указатель удалён")
+            _append(coord, f"- {ts} ·   └ submodule {disp}: указатель удалён")
             continue
-        rng = new if old == zero else f"{old}..{new}"
+        if old == zero:  # субмодуль добавлен — это не дельта, всю историю не считаем
+            _append(coord, f"- {ts} ·   └ submodule {disp}: добавлен на {new[:7]}")
+            continue
+        rng = f"{old}..{new}"
         commits = [c for c in _git("-C", path, "log", "--oneline", "--no-color", "-n", "20", rng).splitlines() if c]
-        diff = _git("-C", path, "diff", "--no-color", "-U0", rng) if old != zero else ""
+        diff = _git("-C", path, "diff", "--no-color", "-U0", rng)
         names = [f for f in _git("-C", path, "diff", "--name-only", rng).splitlines() if f]
         sflags = _flags(names, diff)
-        tip = commits[0] if commits else f"{old[:7]}→{new[:7]}"
+        tip = _clean(commits[0]) if commits else f"{old[:7]}→{new[:7]}"
         suffix = (" · ⚠ " + " | ".join(sflags)) if sflags else ""
-        _append(coord, f"- {ts} ·   └ submodule {path}: {len(commits)} нов. коммит(ов) · {tip}{suffix}")
-        extra += [f"{path} → {s}" for s in sflags]
+        _append(coord, f"- {ts} ·   └ submodule {disp}: {len(commits)} нов. коммит(ов) · {tip}{suffix}")
+        extra += [f"{disp} → {s}" for s in sflags]
     return extra
+
+
+# Общие ветки флота: на них несколько сессий коммитят разом → HEAD дрейфует под тобой,
+# поэтому amend/reset/rebase бьют по ЧУЖОМУ коммиту (реальная авария 2026-06-27).
+SHARED_BRANCHES = {"main", "sales-2.0-redesign", "theme/dark-mode-cd"}
+
+
+def pre_commit(coord: Path) -> int:
+    """Гард ПЕРЕД коммитом (advisory): предупредить о рисках общей ветки. Всегда 0 —
+    pre-commit НЕ блокирует (ломать поток флота хуже флага). Блок amend — в prepare_commit_msg.
+    """
+    branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
+    if branch not in SHARED_BRANCHES:
+        return 0
+    norm = {f.replace("\\", "/")
+            for f in _git("diff", "--cached", "--name-only").splitlines() if f}
+    hot = sorted(norm & HOTSPOTS)
+    if hot:
+        print(f"[coordination] ⚠ общая ветка '{branch}': тронуты хотспоты: {', '.join(hot)}. "
+              "Сверься с ACTIVE-SESSIONS «Хотспоты» — не держит ли их другая сессия.")
+    if SHARED_KERNEL in norm:
+        print("[coordination] ⚠ shared-kernel (core/domain/models.py) — ломает все модули "
+              "(DEPENDENCY-MAP §3).")
+    if any(MIGRATION_RE.search(f) for f in norm):
+        print("[coordination] ⚠ миграция — впиши номер в ACTIVE-SESSIONS «Счётчик миграций», "
+              "сверь единственный head (§5).")
+    return 0
+
+
+def prepare_commit_msg(coord: Path, source: str, sha: str) -> int:
+    """Гард ПЕРЕД редактированием сообщения. git зовёт с source='commit' и sha при ``--amend`` —
+    единственный надёжный сигнал amend в хуках. На ОБЩЕЙ ветке amend = блок (затрёт чужой коммит,
+    авария 2026-06-27). Обход (свой коммит, точно знаешь что делаешь): ``AIOS_ALLOW_AMEND=1``.
+    """
+    if source != "commit" or not sha:  # не amend (обычный/merge/squash/template коммит)
+        return 0
+    if os.environ.get("AIOS_ALLOW_AMEND") == "1":
+        return 0
+    branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
+    if branch not in SHARED_BRANCHES:
+        return 0
+    print(f"[coordination] ⛔ amend на ОБЩЕЙ ветке '{branch}' заблокирован: HEAD мог сдвинуть "
+          "другая сессия — заамендишь ЧУЖОЙ коммит (так и случилось 2026-06-27). "
+          "Сделай НОВЫЙ коммит, или работай в своей ветке/worktree. "
+          "Если уверен (HEAD точно твой): AIOS_ALLOW_AMEND=1 git commit --amend …")
+    return 1
 
 
 def on_commit(coord: Path) -> None:
     sha = _git("rev-parse", "--short", "HEAD")
-    subject = _git("log", "-1", "--pretty=%s")
-    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    subject = _clean(_git("log", "-1", "--pretty=%s"))
+    branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
     files = [f for f in _git("show", "--name-only", "--pretty=format:", "HEAD").splitlines() if f]
     diff = _git("show", "HEAD", "-U0", "--no-color")
     flags = _flags(files, diff)
@@ -187,10 +272,10 @@ def on_commit(coord: Path) -> None:
 
 def on_push(coord: Path, remote: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    zero = "0" * 40
     all_files: set[str] = set()
     diffs: list[str] = []
     lines_logged = 0
-    zero = "0" * 40
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4:
@@ -198,16 +283,22 @@ def on_push(coord: Path, remote: str) -> None:
         local_ref, local_sha, remote_ref, remote_sha = parts[:4]
         if local_sha == zero:  # удаление ветки
             continue
-        rng = local_sha if remote_sha == zero else f"{remote_sha}..{local_sha}"
-        commits = [c for c in _git("log", "--pretty=%h %s", rng).splitlines() if c]
-        for f in _git("diff", "--name-only", rng).splitlines():
-            if f:
-                all_files.add(f)
-        diffs.append(_git("diff", rng, "-U0", "--no-color"))
-        n = len(commits)
+        if remote_sha == zero:  # новая ветка: дельта = чего ещё нет ни на одном remote
+            newrevs = [c for c in _git("rev-list", local_sha, "--not", "--remotes").splitlines() if c]
+            n = len(newrevs)
+            rng = f"{_git('rev-parse', newrevs[-1] + '^') or EMPTY_TREE}..{local_sha}" if newrevs else None
+        else:  # обновление ветки: точный диапазон remote→local
+            rng = f"{remote_sha}..{local_sha}"
+            n = len([c for c in _git("log", "--pretty=%h", rng).splitlines() if c])
+        if rng:
+            for f in _git("diff", "--name-only", rng).splitlines():
+                if f:
+                    all_files.add(f)
+            diffs.append(_git("diff", rng, "-U0", "--no-color"))
+        dest = _clean(remote_ref.split("/")[-1])
         warn = " · ⚠ >1 коммита — пушь только свою полосу" if n > 1 else ""
-        _append(coord, f"- {ts} · push → {remote}/{remote_ref.split('/')[-1]} · {n} коммит(ов){warn}")
-        print(f"[coordination] push → {remote}/{remote_ref.split('/')[-1]}: {n} коммит(ов)")
+        _append(coord, f"- {ts} · push → {remote}/{dest} · {n} коммит(ов){warn}")
+        print(f"[coordination] push → {remote}/{dest}: {n} коммит(ов)")
         lines_logged += 1
     if not lines_logged:
         return
@@ -219,6 +310,12 @@ def main() -> int:
     coord = _coord_dir()
     if coord is None:
         return 0
+    if mode == "pre-commit":
+        return pre_commit(coord)
+    if mode == "prepare-commit-msg":
+        # git зовёт: prepare-commit-msg <msg-file> [<source> [<sha>]]
+        return prepare_commit_msg(coord, sys.argv[3] if len(sys.argv) > 3 else "",
+                                  sys.argv[4] if len(sys.argv) > 4 else "")
     if mode == "post-commit":
         on_commit(coord)
     elif mode == "pre-push":
