@@ -5,6 +5,7 @@ import {
   changedFields,
   flattenCatalog,
   isCurrentVersion,
+  parseRefCsv,
   qualityTone,
   sortVersionsDesc,
   totalDuplicates,
@@ -95,6 +96,26 @@ describe("totalDuplicates", () => {
 
   it("нет кластеров → 0", () => {
     expect(totalDuplicates([])).toBe(0);
+  });
+});
+
+describe("parseRefCsv", () => {
+  it("парсит по колонкам, отбрасывает строку-заголовок", () => {
+    const out = parseRefCsv("code,title\nPCS,штука\nKG,килограмм", ["code", "title"]);
+    expect(out).toEqual([
+      { code: "PCS", title: "штука" },
+      { code: "KG", title: "килограмм" },
+    ]);
+  });
+
+  it("пустая ячейка опускается, parent_id приводится к числу", () => {
+    const out = parseRefCsv("C1,Группа,\nC2,Под,1", ["code", "name", "parent_id"]);
+    expect(out[0]).toEqual({ code: "C1", name: "Группа" });
+    expect(out[1]).toEqual({ code: "C2", name: "Под", parent_id: 1 });
+  });
+
+  it("поддерживает таб как разделитель", () => {
+    expect(parseRefCsv("X\tикс", ["code", "title"])).toEqual([{ code: "X", title: "икс" }]);
   });
 });
 

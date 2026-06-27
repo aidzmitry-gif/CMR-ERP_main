@@ -147,6 +147,75 @@ export async function runReferenceQuery(
   }
 }
 
+// ── Bulk-upsert простых справочников (POST /system/refs/<table>/bulk) ─────────
+
+/** Конфликт строки bulk: ключ (или null) + причина. */
+export interface BulkConflict {
+  key: string | null;
+  reason: string;
+}
+
+/** План dry_run bulk-upsert (без записи). */
+export interface BulkPlan {
+  dry_run: true;
+  would_create: { key: string }[];
+  would_update: { key: string; changes: Record<string, unknown> }[];
+  conflicts: BulkConflict[];
+}
+
+/** Результат реального bulk-upsert (после записи). */
+export interface BulkApplied {
+  created: number;
+  updated: number;
+  conflicts: BulkConflict[];
+}
+
+export type BulkResult = BulkPlan | BulkApplied;
+
+/** Bulk-upsert строк справочника `table` (клиент). `dryRun` → план без записи. `null` — ошибка. */
+export async function bulkUpsertRef(
+  table: string,
+  rows: Record<string, unknown>[],
+  dryRun: boolean,
+): Promise<BulkResult | null> {
+  try {
+    const res = await fetch(`/api/system/refs/${table}/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows, dry_run: dryRun }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as BulkResult;
+  } catch {
+    return null;
+  }
+}
+
+/** Разобрать вставленный CSV/таблицу в строки по колонкам `cols` (порядок = колонки).
+ * Разделители: таб/запятая/точка-с-запятой. Пустые ячейки пропускаются (поле опускается).
+ * Строка-заголовок (первая ячейка == cols[0]) отбрасывается. `parent_id` приводится к числу. */
+export function parseRefCsv(text: string, cols: string[]): Record<string, unknown>[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows: Record<string, unknown>[] = [];
+  for (const line of lines) {
+    const cells = line.split(/[\t,;]/).map((c) => c.trim());
+    if (cells[0]?.toLowerCase() === cols[0]?.toLowerCase()) continue; // заголовок
+    const row: Record<string, unknown> = {};
+    cols.forEach((col, i) => {
+      const raw = cells[i] ?? "";
+      if (raw === "") return;
+      if (col === "parent_id") {
+        const n = Number(raw);
+        row[col] = Number.isFinite(n) ? n : raw;
+      } else {
+        row[col] = raw;
+      }
+    });
+    if (Object.keys(row).length > 0) rows.push(row);
+  }
+  return rows;
+}
+
 // ── Data-Quality: аудит качества справочников (GET /system/references/quality) ──
 
 /** Счётчики проблем по классам (колонки дашборда). */
