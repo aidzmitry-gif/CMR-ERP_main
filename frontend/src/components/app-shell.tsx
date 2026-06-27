@@ -37,7 +37,11 @@ export async function AppShell({
           <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
           <div className="flex flex-1 flex-col overflow-hidden">
             <Topbar crumbs={crumbs} />
-            <div className="flex flex-1 overflow-hidden">{children}</div>
+            {/* Вертикальный скролл на уровне оболочки: страницы без своего overflow-контейнера
+                (справочники и т.п.) прокручиваются здесь; страницы со своим <main overflow-auto>
+                (доска сделок) скроллят сами — вложенный скролл корректен. min-h-0 нужен, чтобы
+                flex-потомок реально получил скролл, а не растягивал родителя (типовой flexbox-гоча). */}
+            <div className="flex min-h-0 flex-1 overflow-y-auto">{children}</div>
           </div>
         </div>
       </ActiveCallProvider>
