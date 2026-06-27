@@ -303,6 +303,30 @@ async def test_wms_tasks(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_outbound(api, session):
+    """Резерв из sales создаёт pick-задачи; упаковка (/pack) нейтральна для остатка."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_stock_reserved
+
+    await on_stock_reserved(
+        {"doc_ref": "DEAL-5", "items": [{"sku_code": "ROLL-3", "warehouse": "Минск", "qty": 10}]},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+    picks = (await api.get("/wms/tasks?kind=pick&status=open")).json()
+    assert any(t["sku_code"] == "ROLL-3" and t["qty"] == 10.0 and t["doc_ref"] == "DEAL-5" for t in picks)
+
+    before = sum(r["qty"] for r in (await api.get("/wms/balances?sku=ROLL-3")).json()["rows"])
+    pk = await api.post("/wms/pack", json={"sku_code": "ROLL-3", "qty": 10, "warehouse": "Минск", "doc_ref": "DEAL-5"})
+    assert pk.status_code == 201 and len(pk.json()) == 2
+    after = sum(r["qty"] for r in (await api.get("/wms/balances?sku=ROLL-3")).json()["rows"])
+    assert after == before  # упаковка balance-нейтральна (физический расход — отгрузка)
+
+    assert (await api.post("/wms/pack", json={"sku_code": "X", "qty": 1},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
