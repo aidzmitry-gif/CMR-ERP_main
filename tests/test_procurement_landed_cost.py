@@ -13,6 +13,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from core.domain.models import OutboxEvent
 from modules.procurement.landed_cost import LandedCostService
 from modules.procurement.models import LandedCost
 
@@ -89,6 +90,25 @@ async def test_duplicate_sku_lines_aggregated(api, session):
     rows = [r for r in await _rows(session) if r.sku_code == "DUP"]
     assert len(rows) == 1
     assert rows[0].unit_landed_cost_byn == Decimal("100.00")  # (400+600) / (4+6)
+
+
+async def test_receive_emits_landed_cost_calculated(api, session):
+    """Приёмка эмитит procurement.landed_cost.calculated по каждой номенклатуре (push для sales)."""
+    order = await _order(api, lines=[{"sku_code": "EMIT-1", "qty": 10, "goods_value_byn": 1500}])
+    await _receive(api, order["id"])
+
+    events = (
+        await session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.event_type == "procurement.landed_cost.calculated"
+            )
+        )
+    ).scalars().all()
+    assert len(events) == 1
+    payload = events[0].payload
+    assert payload["sku_code"] == "EMIT-1"
+    assert payload["unit_landed_cost_byn"] == "150.00"  # JSON-safe (Decimal → str)
+    assert payload["purchase_order_id"] == order["id"]
 
 
 async def test_zero_qty_line_skipped(api, session):
