@@ -8,10 +8,12 @@ import {
   buildCategoryTree,
   createNomenclatureGroup,
   fetchRefRowsByEndpoint,
+  fetchSkusByCategory,
   patchNomenclatureGroup,
   type CategoryTreeNode,
   type GroupDefaultFields,
   type NomenclatureGroup,
+  type SkuRow,
 } from "@/lib/reference-data";
 import {
   buildBreadcrumb,
@@ -503,6 +505,9 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
   const [units, setUnits] = useState<RefRow[]>([]);
   const [vats, setVats] = useState<RefRow[]>([]);
   const [countries, setCountries] = useState<RefRow[]>([]);
+  // Товары выбранной группы (членство по category_id) — read-only вид «что в категории».
+  const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [skusLoading, setSkusLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -520,6 +525,26 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
       setCountries(c as RefRow[]);
     })();
   }, []);
+
+  // Подгрузка товаров выбранной группы (членство по category_id). live-флаг гасит гонку.
+  useEffect(() => {
+    if (!selected) {
+      setSkus([]);
+      return;
+    }
+    let live = true;
+    setSkusLoading(true);
+    const id = selected.id;
+    void fetchSkusByCategory(id).then((rows) => {
+      if (live) {
+        setSkus(rows);
+        setSkusLoading(false);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [selected]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -890,6 +915,39 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                     </div>
                   ))}
                 </dl>
+              </div>
+
+              {/* Товары группы (членство по category_id) — read-only; привязка SKU→группа в карточке номенклатуры (CRM) */}
+              <div className="mt-4 border-t border-line pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Товары группы
+                  </p>
+                  {!skusLoading && (
+                    <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
+                      {skus.length}
+                      {skus.length === 50 ? "+" : ""}
+                    </span>
+                  )}
+                </div>
+                {skusLoading ? (
+                  <p className="mt-2 text-[12px] text-faint">Загрузка…</p>
+                ) : skus.length === 0 ? (
+                  <p className="mt-2 text-[12px] text-faint">
+                    Нет товаров в этой группе. Привязка товара к группе — в карточке номенклатуры.
+                  </p>
+                ) : (
+                  <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto pr-1">
+                    {skus.map((s) => (
+                      <li key={s.code} className="flex items-center justify-between gap-2 text-[13px]">
+                        <span className="truncate text-ink" title={s.title}>
+                          {s.title}
+                        </span>
+                        <span className="shrink-0 font-mono text-[11px] text-faint">{s.code}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               <div className="mt-5 flex flex-col gap-2 border-t border-line pt-4">

@@ -160,12 +160,14 @@ async def references_query(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="as_of должен быть YYYY-MM-DD") from exc
     try:
+        category_id = payload.get("category_id")
         return await reference_query.query(
             session,
             ref,
             key=payload.get("key"),
             as_of=as_of,
             name=payload.get("name"),
+            category_id=int(category_id) if category_id is not None else None,
             limit=int(payload.get("limit", 10)),
         )
     except reference_query.ReferenceQueryError as exc:

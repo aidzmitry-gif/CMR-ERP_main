@@ -104,7 +104,22 @@ export interface ReferenceQueryInput {
   key?: string;
   as_of?: string; // YYYY-MM-DD
   name?: string;
+  category_id?: number; // core.skus → товары группы (членство по category_id)
   limit?: number;
+}
+
+/** Товар группы (членство по category_id) — строка списка «товары категории». */
+export interface SkuRow {
+  code: string;
+  title: string;
+  unit: string | null;
+  category_id: number | null;
+}
+
+/** Товары группы по category_id (клиент, через reference.query). Не-200/ошибка → пусто. */
+export async function fetchSkusByCategory(categoryId: number, limit = 50): Promise<SkuRow[]> {
+  const res = await runReferenceQuery({ ref: "core.skus", category_id: categoryId, limit });
+  return rowsFromResult(res) as unknown as SkuRow[];
 }
 
 /** Ответ reference.query: result зависит от ref (запись | список | null) — сужает экран. */

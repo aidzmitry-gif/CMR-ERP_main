@@ -82,6 +82,7 @@ async def query(
     key: str | None = None,
     as_of: date | None = None,
     name: str | None = None,
+    category_id: int | None = None,
     limit: int = 10,
 ) -> dict:
     """Структурный lookup по справочнику ``ref`` — возвращает точное значение(я).
@@ -91,7 +92,7 @@ async def query(
       ``as_of`` → версия, действовавшая на дату (или текущая без ``as_of``), с периодом
       ``start_date/end_date``; для ``core.sku_history`` ``key`` — код товара (sku_code);
     - ``core.counterparties``: ``key``=УНП или ``name`` → эталоны (active, не слитые);
-    - ``core.skus``: ``key``=code → позиция номенклатуры (с ``category_id`` — группой);
+    - ``core.skus``: ``key``=code → позиция; ``category_id`` → товары группы (членство); иначе список;
     - ``core.nomenclature_groups``: ``key``=code → группа; без key → активные группы (дерево).
     """
     if ref in _SIMPLE:
@@ -103,7 +104,7 @@ async def query(
     if ref == "core.counterparties":
         return await _query_counterparties(session, key, name, limit)
     if ref == "core.skus":
-        return await _query_skus(session, key, limit)
+        return await _query_skus(session, key, limit, category_id)
     if ref == "core.nomenclature_groups":
         return await _query_categories(session, key, limit)
     raise ReferenceQueryError(f"неизвестный справочник: {ref}")
@@ -171,12 +172,16 @@ async def _query_counterparties(
     }
 
 
-async def _query_skus(session: AsyncSession, key: str | None, limit: int) -> dict:
+async def _query_skus(
+    session: AsyncSession, key: str | None, limit: int, category_id: int | None = None
+) -> dict:
     # только активные: архивный SKU (M4) не должен подставляться AI в спецификацию/сделку
     stmt = select(Sku).where(Sku.is_active.is_(True))
     if key:
         stmt = stmt.where(Sku.code == key)
-    rows = (await session.execute(stmt.limit(limit))).scalars().all()
+    if category_id is not None:  # товары группы (членство по category_id) — вид «что в категории»
+        stmt = stmt.where(Sku.category_id == category_id)
+    rows = (await session.execute(stmt.order_by(Sku.code).limit(limit))).scalars().all()
     return {
         "ref": "core.skus",
         "result": [
