@@ -131,6 +131,42 @@ async def test_allocation_amount_must_be_positive(session, api):
     assert r.status_code == 400
 
 
+# ───────────────────────── P11: landed-маржа из qty+unit / total_landed_byn ─────────────────────────
+
+
+async def test_landed_uses_total_landed_byn_when_present(session):
+    """Закупки эмитят total_landed_byn (предпочтительный путь, точный для landed-маржи)."""
+    from modules.finance.events import on_landed_cost
+
+    # реальный payload закупок (procurement/routes.py:230): qty+unit+total строками
+    await on_landed_cost(
+        {
+            "sku_code": "S-X",
+            "unit_landed_cost_byn": "15.0000",
+            "qty": "10",
+            "total_landed_byn": "150.00",  # предпочтительнее, если есть
+            "deal_id": 7,
+            "entity_ref": "purchase_order:3",
+        },
+        _ctx(session),
+    )
+    await session.commit()
+    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
+    assert float(p.amount) == 150.0 and p.deal_id == 7
+
+
+async def test_landed_falls_back_to_unit_times_qty(session):
+    """Если total нет — используем unit×qty (закупки могут не прислать total в старых эмитах)."""
+    from modules.finance.events import on_landed_cost
+
+    await on_landed_cost(
+        {"sku_code": "S-Y", "unit_landed_cost_byn": "12", "qty": "5"}, _ctx(session)
+    )
+    await session.commit()
+    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
+    assert float(p.amount) == 60.0
+
+
 # ───────────────────────── P3: AR/AP aging ─────────────────────────
 
 
