@@ -1,4 +1,5 @@
 """Тесты межмодульных взаимосвязей (через событийную шину, §2.5)."""
+from decimal import Decimal
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -201,6 +202,69 @@ async def test_freight_refund_creates_credit(session):
     assert len(
         (await session.execute(select(Payment).where(Payment.kind == "freight_refund"))).scalars().all()
     ) == 1
+
+
+async def test_landed_cost_creates_finance_expense(session):
+    from modules.finance.events import on_landed_cost
+    from modules.finance.models import Payment
+
+    # готовая сумма себестоимости → расход kind=landed
+    await on_landed_cost(
+        {"sku_code": "SKU-1", "amount": 1200.00, "entity_ref": "purchase:5"}, _ctx(session)
+    )
+    # сумма как unit×qty (amount не задан)
+    await on_landed_cost(
+        {"sku_code": "SKU-2", "unit_landed_cost_byn": 10, "qty": 3}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()
+    assert len(rows) == 2
+    by_ref = {r.ref: float(r.amount) for r in rows}
+    assert by_ref["landed:purchase:5"] == 1200.0
+    assert by_ref["landed:SKU-2"] == 30.0
+
+    # нулевая себестоимость не маскирует дыру — записи нет
+    await on_landed_cost({"sku_code": "SKU-3", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()) == 2
+
+
+async def test_finance_summary_margin_and_cash(session):
+    from modules.finance.models import Payment
+    from modules.finance.summary import finance_summary
+
+    # выручка 1000 (оплачено 400), фрахт 100, возврат -30, landed 600
+    session.add_all([
+        Payment(ref="inv:1", amount=Decimal("600"), status="paid", kind="receivable"),
+        Payment(ref="inv:2", amount=Decimal("400"), status="pending", kind="receivable"),
+        Payment(ref="freight:1", amount=Decimal("100"), status="pending", kind="freight"),
+        Payment(ref="freight_refund:1", amount=Decimal("-30"), status="pending", kind="freight_refund"),
+        Payment(ref="landed:1", amount=Decimal("600"), status="pending", kind="landed"),
+    ])
+    await session.commit()
+    s = await finance_summary(session)
+
+    # маржа = 1000 − 600 (landed) − 70 (фрахт 100 − возврат 30) = 330
+    assert s["margin"]["revenue"] == 1000.0
+    assert s["margin"]["landed"] == 600.0
+    assert s["margin"]["freight"] == 70.0
+    assert s["margin"]["gross"] == 330.0
+    assert round(s["margin"]["pct"], 1) == 33.0
+    # касса: приток = оплачено 600 + возврат 30 = 630; отток = 100+600 = 700; нетто = -70
+    assert s["cash"]["received"] == 600.0
+    assert s["cash"]["inflow"] == 630.0
+    assert s["cash"]["outflow"] == 700.0
+    assert s["cash"]["net"] == -70.0
+    assert s["currency"] == "BYN"
+
+
+async def test_finance_summary_empty_is_honest(session):
+    from modules.finance.summary import finance_summary
+
+    s = await finance_summary(session)
+    assert s["margin"]["revenue"] == 0.0 and s["margin"]["gross"] == 0.0
+    assert s["margin"]["pct"] is None  # нет выручки → не делим на ноль
+    assert s["cash"]["net"] == 0.0
 
 
 async def test_delivered_shipment_emits_freight_cost(session, api):
