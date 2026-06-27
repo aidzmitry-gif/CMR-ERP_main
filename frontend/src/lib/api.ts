@@ -90,6 +90,57 @@ export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
   }
 }
 
+/** Стадия воронки из редактора (бэк sales.stage) — полный ряд для CRUD. */
+export interface StageRow {
+  code: string;
+  title: string;
+  sort_order: number;
+  probability: number;
+  kind: "normal" | "won" | "cond_lost" | "lost";
+  color: string;
+  is_active: boolean;
+}
+
+/** Создать стадию (редактор стадий). */
+export async function createStage(input: StageRow): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/stages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Частично обновить стадию (имя/порядок/вероятность/тип/цвет/активность). */
+export async function updateStage(code: string, patch: Partial<StageRow>): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/stages/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Удалить стадию; 409 (с detail), если в стадии есть сделки. */
+export async function deleteStage(code: string): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const res = await fetch(`/api/sales/stages/${encodeURIComponent(code)}`, { method: "DELETE" });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    return { ok: false, detail: body.detail };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Детальная карточка сделки из API; fallback — mock по id. */
 /** Активная стадия сделки для DealDetail: idx прогрессии + заголовок (канон) +
  *  «дней в стадии»/«протухает» (SALES-43, из stage_changed_at). undefined — нет канон-стадии. */
