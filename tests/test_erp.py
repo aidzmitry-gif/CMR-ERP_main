@@ -409,6 +409,23 @@ async def test_wms_cycle_count(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_dashboard(api, session):
+    """Дашборд: живые счётчики (очередь QC, задачи, движения сегодня, gateway)."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_goods_received
+
+    await on_goods_received(
+        {"item": "AKB-60", "qty": 5, "warehouse": "Минск", "entity_ref": "purchase:1"},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+    d = (await api.get("/wms/dashboard")).json()
+    assert d["receipts_pending_qc"] >= 1
+    assert d["gateway"] is True
+    assert isinstance(d["alerts_count"], int) and isinstance(d["movements_today_in"], float)
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
