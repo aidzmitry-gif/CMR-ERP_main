@@ -57,3 +57,32 @@ def test_score_and_grade():
     assert pricing.grade_for(87) == "B"
     assert pricing.grade_for(74) == "C"
     assert pricing.grade_for(90) == "A" and pricing.grade_for(83) == "B"
+
+
+def test_rank_bids_best_value_beats_cheapest():
+    # дешёвая, но ненадёжная ставка не должна выиграть у чуть дороже, но качественной
+    bids = [
+        {"id": 1, "carrier_code": "belpost", "price": 100},     # дешевле всех, балл низкий
+        {"id": 2, "carrier_code": "dpd", "price": 110},         # чуть дороже, балл высокий
+    ]
+    ranked = pricing.rank_bids(bids, {"belpost": 70.0, "dpd": 97.0})
+    assert ranked[0][0]["id"] == 2                              # best-fit — dpd, не дешёвый belpost
+    assert ranked[0][1] > ranked[1][1] and 0 <= ranked[1][1] <= 1
+
+
+def test_rank_bids_equal_quality_picks_cheapest():
+    # при равном качестве best-fit вырождается в «дешевле = лучше»
+    bids = [
+        {"id": 1, "carrier_code": "a", "price": 200},
+        {"id": 2, "carrier_code": "b", "price": 150},
+    ]
+    ranked = pricing.rank_bids(bids, {"a": 90.0, "b": 90.0})
+    assert ranked[0][0]["id"] == 2
+
+
+def test_rank_bids_missing_score_is_neutral():
+    # перевозчик без истории не наказывается (нейтральные 0.5), но цена решает
+    ranked = pricing.rank_bids(
+        [{"id": 1, "carrier_code": "x", "price": 100}], {}
+    )
+    assert ranked[0][1] == round(0.6 * 1.0 + 0.4 * 0.5, 4)

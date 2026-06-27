@@ -104,3 +104,32 @@ async def test_rfq_seed_and_board(api):
     board = (await api.get("/logistics/rfqs/board")).json()
     assert [s["id"] for s in board["stages"]][0] == "draft"
     assert sum(s["count"] for s in board["stages"]) >= 1
+
+
+async def test_bids_ranked_best_value_not_cheapest(api):
+    # надёжный dpd чуть дороже дешёвого belpost → best-fit выбирает dpd, не цену
+    await api.post("/logistics/carriers/scorecard/seed")   # балл dpd ≫ belpost
+    rfq = await _new_rfq(api)
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "belpost", "price": 600})
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "dpd", "price": 610})
+    ranked = (await api.get(f"/logistics/rfqs/{rfq['id']}/bids/ranked")).json()
+    assert ranked[0]["carrier_code"] == "dpd" and ranked[0]["is_best_value"] is True
+    assert 0 <= ranked[1]["value_score"] <= ranked[0]["value_score"] <= 1
+    # для сравнения: по цене лучший — belpost
+    by_price = (await api.get(f"/logistics/rfqs/{rfq['id']}/bids")).json()
+    assert by_price[0]["carrier_code"] == "belpost" and by_price[0]["is_best"] is True
+
+
+async def test_award_best_value_strategy(api):
+    await api.post("/logistics/carriers/scorecard/seed")
+    rfq = await _new_rfq(api)
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "belpost", "price": 600})
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "dpd", "price": 610})
+    # cheapest (по умолчанию) → belpost; best_value → dpd
+    cheapest = await api.post(f"/logistics/rfqs/{rfq['id']}/award", json={})
+    assert cheapest.json()["carrier_code"] == "belpost" and cheapest.json()["price"] == 600
+    rfq2 = await _new_rfq(api)
+    await api.post(f"/logistics/rfqs/{rfq2['id']}/bids", json={"carrier_code": "belpost", "price": 600})
+    await api.post(f"/logistics/rfqs/{rfq2['id']}/bids", json={"carrier_code": "dpd", "price": 610})
+    best = await api.post(f"/logistics/rfqs/{rfq2['id']}/award", json={"strategy": "best_value"})
+    assert best.json()["carrier_code"] == "dpd" and best.json()["price"] == 610

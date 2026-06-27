@@ -67,6 +67,31 @@ async def test_scorecard_seed_sorted_by_score(api):
     assert [c["score"] for c in cards] == sorted((c["score"] for c in cards), reverse=True)
 
 
+async def test_scorecard_score_computed_from_metrics(api):
+    from modules.logistics import pricing
+    await api.post("/logistics/carriers/scorecard/seed")
+    dpd = next(
+        c for c in (await api.get("/logistics/carriers/scorecard")).json()
+        if c["carrier_code"] == "dpd"
+    )
+    # балл — не литерал сида, а свёртка метрик (pricing.score_carrier)
+    expected = pricing.score_carrier(
+        dpd["otd_pct"], dpd["damage_free_pct"], dpd["billing_accuracy_pct"], dpd["claims_ratio_pct"]
+    )
+    assert dpd["score"] == expected and dpd["grade"] == pricing.grade_for(expected)
+
+
+async def test_scorecard_recompute_idempotent(api):
+    await api.post("/logistics/carriers/scorecard/seed")
+    before = (await api.get("/logistics/carriers/scorecard")).json()
+    rc = await api.post("/logistics/carriers/scorecard/recompute")
+    assert rc.status_code == 200
+    after = {c["carrier_code"]: c["score"] for c in rc.json()}
+    # пересчёт из тех же метрик не меняет баллы и сохраняет сортировку по убыванию
+    assert {c["carrier_code"]: c["score"] for c in before} == after
+    assert [c["score"] for c in rc.json()] == sorted((c["score"] for c in rc.json()), reverse=True)
+
+
 async def test_audit_seed_and_report(api):
     await api.post("/logistics/costs/audit/seed")
     assert len((await api.post("/logistics/costs/audit/seed")).json()) == 3  # идемпотентно

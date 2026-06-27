@@ -159,3 +159,79 @@ async def test_logistics_delivered_emits(session, api):
     assert r.status_code == 200
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "logistics.shipment.delivered" in types
+
+
+async def test_freight_cost_creates_finance_expense(session):
+    from modules.finance.events import on_freight_cost
+    from modules.finance.models import Payment
+
+    await on_freight_cost(
+        {"deal_id": 7, "ref": "ОТГ-1", "carrier": "DPD", "amount": 320.50}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()
+    assert len(rows) == 1
+    assert float(rows[0].amount) == 320.50 and rows[0].ref == "freight:ОТГ-1"
+
+    # нулевой тариф не создаёт расход
+    await on_freight_cost({"ref": "ОТГ-2", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()) == 1
+
+
+async def test_freight_refund_creates_credit(session):
+    from modules.finance.events import on_freight_refund
+    from modules.finance.models import Payment
+
+    # переплата перевозчику (variance>0) → кредит против фрахта: kind=freight_refund, сумма < 0
+    await on_freight_refund(
+        {"shipment_code": "ЛОГ-1", "carrier": "dpd", "amount": 50, "entity_ref": "audit:3"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (
+        await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert float(rows[0].amount) == -50.0 and rows[0].ref == "freight_refund:audit:3"
+
+    # нулевая/пустая сумма не создаёт записи
+    await on_freight_refund({"shipment_code": "ЛОГ-2", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len(
+        (await session.execute(select(Payment).where(Payment.kind == "freight_refund"))).scalars().all()
+    ) == 1
+
+
+async def test_delivered_shipment_emits_freight_cost(session, api):
+    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+    # назначаем перевозчика с тарифом → amount > 0
+    await api.post(
+        f"/logistics/shipments/{ship['id']}/carrier-order",
+        json={"carrier": "DPD", "shipping_cost": 150},
+    )
+    await api.patch(f"/logistics/shipments/{ship['id']}", json={"status": "delivered"})
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.freight.cost" in types
+
+
+async def test_freight_audit_overbill_emits_refund(session, api):
+    # счёт перевозчика больше тарифа → переплата → событие «к возврату»
+    r = await api.post(
+        "/logistics/costs/audit",
+        json={"shipment_code": "ЛОГ-1", "carrier_code": "dpd",
+              "invoice_amount": 250, "expected_amount": 200},
+    )
+    assert r.status_code == 201 and float(r.json()["variance"]) == 50
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.freight.audit_refund" in types
+
+    # счёт ≤ тарифа → переплаты нет → события нет
+    await api.post(
+        "/logistics/costs/audit",
+        json={"shipment_code": "ЛОГ-2", "carrier_code": "dpd",
+              "invoice_amount": 180, "expected_amount": 200},
+    )
+    refunds = [e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+               if e.event_type == "logistics.freight.audit_refund"]
+    assert len(refunds) == 1
