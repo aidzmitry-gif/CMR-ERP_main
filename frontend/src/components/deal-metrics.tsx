@@ -1,28 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  type DealItemFull,
-  fetchDealItems,
-  fetchStock,
-  type StockRow,
-} from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
 import { STAGE_PROBABILITY } from "@/lib/sales-stages";
 
 /**
- * Метрики сделки: Сумма/Себестоимость/Прибыль/Маржа/Вероятность/Взвеш.прогноз/Закрытие.
+ * Метрики сделки: Сумма / Себестоимость (landed) / Прибыль / Маржа / Вероятность /
+ * Взвеш.прогноз / Закрытие. Источник себеса — серверный GET /sales/deals/{id}/margin
+ * (landed cost через фасад ядра, [[landed_cost]]). Маржа клиентом БОЛЬШЕ НЕ считается:
  *
- * Себес/прибыль/маржа считаются на клиенте по правилу «в наличии → себес из 1С»
- * ([[pricing-calculation-todo]]): позиции сделки (fetchDealItems) джойнятся с остатками
- * 1С по коду (fetchStock.cost). Под-заказ (себес из 1С нет) в расчёт не идёт — он
- * появится с предварительным расчётом. Цена позиции — из 1С (правило «в наличии →
- * цена из 1С», как и себестоимость). Пока грузится — «…», нет себес — «—».
+ * - Все priced → revenue/cogs_landed/gross/margin_pct из ответа (BYN, через useCurrency).
+ * - Частично priced (priced_count < total_count) → бейдж «оценка по N из M позиций».
+ * - landed-фасад None или ничего не оценено → honest «себестоимость закупок не рассчитана»
+ *   с подсказкой про procurement (методику установки цены НЕ изобретаем).
  *
- * Вероятность (SALES-44): явный `probability` сделки, иначе дефолт по стадии
- * (STAGE_PROBABILITY, канон sales-stages.ts). Взвеш. прогноз = Сумма × вероятность —
- * ожидаемый вклад сделки в пайплайн.
+ * Вероятность/прогноз — как было: явный override сделки → дефолт по стадии (sales-stages).
  */
+type MarginLineStatus = "priced" | "no_price" | "no_cost";
+
+type MarginLine = {
+  sku_code: string;
+  title: string;
+  qty: number;
+  unit_price: number | null;
+  revenue: number | null;
+  unit_landed_cost: number | null;
+  cogs: number | null;
+  margin_pct: number | null;
+  status: MarginLineStatus;
+  cost_shipment_id: number | null;
+  cost_fixed_at: string | null;
+  cost_fx_rate: number | null;
+};
+
+type DealMargin = {
+  deal_id: number;
+  revenue: number;
+  cogs_landed: number | null;
+  gross_profit: number | null;
+  margin_pct: number | null;
+  priced_count: number;
+  total_count: number;
+  reason: string | null;
+  lines: MarginLine[];
+};
+
+type Status = "loading" | "error" | "ready";
+
 export function DealMetrics({
   dealId,
   amount,
@@ -36,48 +60,60 @@ export function DealMetrics({
   stageId?: string;
   probability?: number;
 }) {
-  const { fmt } = useCurrency(); // деньги в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
-  const [items, setItems] = useState<DealItemFull[] | null>(null);
-  const [stock, setStock] = useState<Record<string, StockRow>>({});
+  const { fmt } = useCurrency();
+  const [status, setStatus] = useState<Status>("loading");
+  const [margin, setMargin] = useState<DealMargin | null>(null);
 
   useEffect(() => {
-    void fetchDealItems(dealId).then(setItems);
-    void fetchStock().then((rows) => {
-      const byCode: Record<string, StockRow> = {};
-      for (const r of rows) if (!byCode[r.sku_code]) byCode[r.sku_code] = r;
-      setStock(byCode);
-    });
+    let alive = true;
+    setStatus("loading");
+    void (async () => {
+      try {
+        const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/margin`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as DealMargin;
+        if (!alive) return;
+        setMargin(data);
+        setStatus("ready");
+      } catch {
+        if (alive) setStatus("error");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [dealId]);
 
-  let costedRevenue = 0;
-  let cost = 0;
-  let anyCost = false;
-  let hasUnderOrder = false;
-  for (const it of items ?? []) {
-    const st = stock[it.code];
-    if (st?.cost != null) {
-      anyCost = true;
-      costedRevenue += (st.price ?? 0) * it.qty; // цена из 1С (правило «в наличии → цена из 1С»)
-      cost += st.cost * it.qty;
-    } else {
-      hasUnderOrder = true;
-    }
-  }
-  const profit = costedRevenue - cost;
-  const marginPct = costedRevenue > 0 ? Math.round((profit / costedRevenue) * 100) : null;
-  const dash = items == null ? "…" : "—"; // грузим vs нет данных
-
-  // Вероятность: явный override сделки, иначе дефолт по стадии (канон).
   const prob = probability ?? (stageId ? STAGE_PROBABILITY[stageId] : undefined);
+
+  const dash = status === "loading" ? "…" : "—";
+  const hasCogs = status === "ready" && margin?.cogs_landed != null;
+  const hasGross = status === "ready" && margin?.gross_profit != null;
   const cells: { label: string; value: string; tone?: "money" }[] = [
     { label: "Сумма", value: fmt(amount) },
-    { label: "Себестоимость", value: anyCost ? fmt(cost) : dash },
-    { label: "Прибыль", value: anyCost ? fmt(profit) : dash, tone: "money" },
-    { label: "Маржа", value: marginPct != null ? `${marginPct}%` : dash },
+    { label: "Себестоимость", value: hasCogs ? fmt(margin!.cogs_landed!) : dash },
+    { label: "Прибыль", value: hasGross ? fmt(margin!.gross_profit!) : dash, tone: "money" },
+    { label: "Маржа", value: margin?.margin_pct != null ? `${margin.margin_pct}%` : dash },
     { label: "Вероятность", value: prob != null ? `${prob}%` : "—" },
     { label: "Взвеш. прогноз", value: prob != null ? fmt((amount * prob) / 100) : "—" },
     { label: "Закрытие", value: closeDate || "—" },
   ];
+
+  // Бейдж «оценка по N из M позиций» при частичной оценке.
+  const partial =
+    status === "ready" &&
+    margin != null &&
+    margin.total_count > 0 &&
+    margin.priced_count > 0 &&
+    margin.priced_count < margin.total_count;
+
+  // Провенанс себеса (партия/курс) — из любой priced-позиции (берём первую).
+  const provenance =
+    status === "ready" && margin != null
+      ? margin.lines.find((l) => l.status === "priced" && l.cost_shipment_id != null) ?? null
+      : null;
 
   return (
     <>
@@ -98,14 +134,38 @@ export function DealMetrics({
           </div>
         ))}
       </div>
-      {anyCost && hasUnderOrder && (
-        <div className="mt-1 text-[11px] text-faint">
-          Маржа — по позициям «в наличии» (себес из 1С); под-заказ ждёт предрасчёта.
+
+      {/* Бейджи состояний маржи (под таблицей, как было) */}
+      {status === "error" && (
+        <div className="mt-1 text-[11px] text-red-600">
+          Не удалось рассчитать маржу — повторите позже.
         </div>
       )}
-      {items != null && !anyCost && (
+
+      {partial && (
+        <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint">
+          <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
+            оценка по {margin!.priced_count} из {margin!.total_count} позиций
+          </span>
+          <span>остальные — без landed cost или без цены клиенту.</span>
+        </div>
+      )}
+
+      {provenance && (
+        <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint">
+          <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
+            себес · из procurement
+          </span>
+          <span>
+            партия #{provenance.cost_shipment_id}
+            {provenance.cost_fx_rate != null && ` · курс ${provenance.cost_fx_rate}`}
+          </span>
+        </div>
+      )}
+
+      {status === "ready" && margin?.reason && (
         <div className="mt-1 text-[11px] text-faint">
-          Себестоимость и маржа ждут методику цены (предрасчёт landed cost) — пока honest-empty.
+          {margin.reason}. Расчёт себестоимости — модуль «Закупки» (landed cost: фрахт/пошлина/брокер).
         </div>
       )}
     </>
