@@ -81,6 +81,26 @@ async def test_scorecard_score_computed_from_metrics(api):
     assert dpd["score"] == expected and dpd["grade"] == pricing.grade_for(expected)
 
 
+async def test_tariff_edit_updates_existing(api):
+    """Правка тарифа: PATCH меняет цены, GET отдаёт новые. 404 — на неизвестный код."""
+    await api.post("/logistics/zones/seed")
+    await api.post("/logistics/carrier-tariffs/seed")
+    r = await api.patch(
+        "/logistics/carrier-tariffs/dpd/z2",
+        json={"price_w5": 999.99, "pickup_fee": 5.0},
+    )
+    assert r.status_code == 200
+    assert float(r.json()["price_w5"]) == 999.99 and float(r.json()["pickup_fee"]) == 5.0
+    # GET отдаёт изменённое
+    z2 = (await api.get("/logistics/carrier-tariffs?zone=z2")).json()
+    dpd = next(t for t in z2 if t["carrier_code"] == "dpd")
+    assert float(dpd["price_w5"]) == 999.99
+    # 404 на отсутствующий тариф
+    assert (await api.patch(
+        "/logistics/carrier-tariffs/unknown/z2", json={"price_w5": 1}
+    )).status_code == 404
+
+
 async def test_scorecard_edit_metrics_updates_score(api):
     """Правка KPI пересчитывает балл/грейд: dpd → claims↑ → балл↓, грейд может ухудшиться."""
     from modules.logistics import pricing

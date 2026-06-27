@@ -181,6 +181,23 @@ export const fetchTariffs = (zone: string) =>
 export const seedTariffs = () =>
   postJson<CarrierTariff[]>("/logistics/carrier-tariffs/seed", undefined, []);
 
+export interface TariffPatch {
+  price_w5?: number;
+  price_w10?: number;
+  price_w30?: number;
+  over30_per_kg?: number;
+  pickup_fee?: number;
+  cod_pct?: number;
+  insurance_pct?: number;
+}
+/** Изменить тариф перевозчик×зона (создание — через /seed). */
+export const patchTariff = (carrierCode: string, zoneCode: string, patch: TariffPatch) =>
+  patchJson<CarrierTariff | null>(
+    `/logistics/carrier-tariffs/${encodeURIComponent(carrierCode)}/${encodeURIComponent(zoneCode)}`,
+    patch,
+    null,
+  );
+
 // ─────────────────────────────── Перевозчики / парк ───────────────────────────────
 
 export interface Carrier {
@@ -220,6 +237,17 @@ export interface EligibleCarrier {
 
 export const fetchCarriers = () => getJson<Carrier[]>("/logistics/carriers", []);
 export const seedCarriers = () => postJson<Carrier[]>("/logistics/carriers/seed", undefined, []);
+
+export interface CarrierCreate {
+  name: string;
+  code?: string;
+  kind?: string;
+  mode?: string;
+  contact?: string;
+  integration?: string;
+}
+export const createCarrier = (payload: CarrierCreate) =>
+  postJson<Carrier | null>("/logistics/carriers", payload, null);
 export const seedFleet = () => postJson<unknown>("/logistics/fleet/seed", undefined, null);
 export const fetchVehicles = (code: string) =>
   getJson<Vehicle[]>(`/logistics/carriers/${encodeURIComponent(code)}/vehicles`, []);

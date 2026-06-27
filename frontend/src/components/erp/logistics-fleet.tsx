@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, EmptyState, GhostButton, Loading, Pill } from "@/components/erp/logistics-ui";
 import { vehicleFits } from "@/lib/logistics-domain";
 import {
+  createCarrier,
   fetchCargoCapabilities,
   fetchCarriers,
   fetchEligible,
@@ -31,6 +32,38 @@ export function LogisticsFleet() {
   const [weight, setWeight] = useState(500);
   const [needsTemp, setNeedsTemp] = useState(false);
   const [eligible, setEligible] = useState<EligibleCarrier[] | null>(null);
+
+  // форма добавления перевозчика
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCode, setNewCode] = useState("");
+  const [newKind, setNewKind] = useState("РБ");
+  const [newMode, setNewMode] = useState("авто");
+  const [addError, setAddError] = useState<string | null>(null);
+
+  async function onAddCarrier() {
+    setAddError(null);
+    if (!newName.trim()) {
+      setAddError("Название обязательно.");
+      return;
+    }
+    setBusy(true);
+    const created = await createCarrier({
+      name: newName.trim(),
+      code: newCode.trim(),
+      kind: newKind,
+      mode: newMode,
+    });
+    setBusy(false);
+    if (!created) {
+      setAddError("Не удалось добавить перевозчика.");
+      return;
+    }
+    setNewName("");
+    setNewCode("");
+    setAdding(false);
+    await loadCarriers();
+  }
 
   async function loadCarriers() {
     setCarriers(await fetchCarriers());
@@ -117,8 +150,76 @@ export function LogisticsFleet() {
 
       <Card
         title="Перевозчики"
-        action={<GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <GhostButton onClick={() => setAdding((v) => !v)} busy={busy}>
+              {adding ? "Отмена" : "+ Добавить"}
+            </GhostButton>
+            <GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>
+          </div>
+        }
       >
+        {adding && (
+          <div className="mb-4 rounded-lg border border-line bg-sunken p-3">
+            {addError && (
+              <p className="mb-2 text-xs text-red-600">{addError}</p>
+            )}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="block text-xs text-muted">
+                Название
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="напр. ООО «Перевозкин»"
+                  className="mt-1 w-full rounded border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                />
+              </label>
+              <label className="block text-xs text-muted">
+                Код (slug)
+                <input
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  placeholder="напр. perevozkin"
+                  className="mt-1 w-full rounded border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                />
+              </label>
+              <label className="block text-xs text-muted">
+                Тип
+                <select
+                  value={newKind}
+                  onChange={(e) => setNewKind(e.target.value)}
+                  className="mt-1 w-full rounded border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                >
+                  <option value="РБ">РБ</option>
+                  <option value="РФ">РФ</option>
+                  <option value="импорт">импорт</option>
+                </select>
+              </label>
+              <label className="block text-xs text-muted">
+                Транспорт
+                <select
+                  value={newMode}
+                  onChange={(e) => setNewMode(e.target.value)}
+                  className="mt-1 w-full rounded border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                >
+                  <option value="авто">авто</option>
+                  <option value="море">море</option>
+                  <option value="ж/д">ж/д</option>
+                  <option value="авиа">авиа</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={onAddCarrier}
+                disabled={busy}
+                className="rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
+              >
+                Добавить
+              </button>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b border-line text-left text-xs text-muted">
