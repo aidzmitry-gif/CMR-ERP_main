@@ -12,7 +12,7 @@ from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sk
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm, reference_query, scd2, tnved
+from core.services import mdm, reference_quality, reference_query, scd2, tnved
 from core.services.auth import CurrentUser, require_permission
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
@@ -172,6 +172,52 @@ async def references_query(
         )
     except reference_query.ReferenceQueryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _quality_by_kind(issues: list[dict]) -> dict:
+    """Свернуть проблемы по классам (для колонок дашборда: пропуски/дубли/битые/сироты)."""
+    out = {"missing": 0, "duplicate": 0, "broken_ref": 0, "orphan": 0}
+    for i in issues:
+        out[i["kind"]] = out.get(i["kind"], 0) + i["count"]
+    return out
+
+
+@router.get("/system/references/quality")
+async def references_quality(
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> dict:
+    """Сводка качества по всем справочникам: score + число проблем по классам (под ``refs.view``).
+
+    Пересчёт на запрос (# ponytail: материализованная вьюха/кэш, если станет тяжело).
+    """
+    rows = await reference_quality.audit_all(session)
+    return {
+        "references": [
+            {
+                "ref": r["ref"],
+                "title": r["title"],
+                "total": r["total"],
+                "score": r["score"],
+                "issues_count": sum(i["count"] for i in r["issues"]),
+                "by_kind": _quality_by_kind(r["issues"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/system/references/quality/{ref_key}")
+async def reference_quality_detail(
+    ref_key: str,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> dict:
+    """Детализация качества одного справочника: issues + sample_keys (под ``refs.view``)."""
+    res = await reference_quality.audit_reference(session, ref_key)
+    if res is None:
+        raise HTTPException(status_code=404, detail="справочник без проверок качества")
+    return res
 
 
 @router.get("/system/mdm/duplicates")

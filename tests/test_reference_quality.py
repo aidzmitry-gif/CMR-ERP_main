@@ -80,3 +80,34 @@ async def test_audit_all_returns_scored_list(session):
     keys = {r["ref"] for r in res}
     assert {"core.skus", "core.counterparties", "core.units"} <= keys
     assert all(isinstance(r["score"], float) for r in res)
+
+
+# ── эндпоинты (п.2) ───────────────────────────────────────────────────────────
+
+
+async def test_quality_summary_endpoint(api, session):
+    session.add(Unit(code="PCS", title="штука"))
+    await session.commit()
+    r = await api.get("/system/references/quality")
+    assert r.status_code == 200
+    refs = r.json()["references"]
+    assert any(x["ref"] == "core.skus" for x in refs)
+    assert all({"score", "by_kind", "issues_count"} <= set(x) for x in refs)
+
+
+async def test_quality_detail_endpoint(api):
+    r = await api.get("/system/references/quality/core.skus")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ref"] == "core.skus"
+    assert "issues" in body
+
+
+async def test_quality_detail_unknown_404(api):
+    assert (await api.get("/system/references/quality/core.nope")).status_code == 404
+
+
+async def test_quality_requires_refs_view(api):
+    # роль без refs.view и не супер → отказ по текущему контракту auth
+    r = await api.get("/system/references/quality", headers={"X-User-Roles": "warehouse"})
+    assert r.status_code in (401, 403)
