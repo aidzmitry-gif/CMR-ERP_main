@@ -299,3 +299,37 @@ async def test_freight_audit_overbill_emits_refund(session, api):
     refunds = [e for e in (await session.execute(select(OutboxEvent))).scalars().all()
                if e.event_type == "logistics.freight.audit_refund"]
     assert len(refunds) == 1
+
+
+async def test_procurement_received_creates_import_shipment(session):
+    """ИНФО-связка procurement→logistics: приёмка закупки → отметка в импорт-цепочке.
+
+    Склад при этом НЕ движется логистикой (это wms на тот же эвент) — двойного учёта нет.
+    """
+    from modules.logistics.events import on_procurement_received
+    from modules.logistics.models import ImportShipment
+
+    await on_procurement_received(
+        {"item": "АКБ 280Ач", "qty": 200, "warehouse": "Главный", "entity_ref": "purchase:42"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (await session.execute(select(ImportShipment))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].po_ref == "purchase:42" and rows[0].stage == "warehouse"
+    assert rows[0].cargo == "АКБ 280Ач" and rows[0].qty == 200
+    assert rows[0].customs_status == "Принято закупкой"
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.import.received" in types
+
+    # повторное событие по той же закупке — НЕ создаёт второй ImportShipment (обновляет stage)
+    await on_procurement_received(
+        {"item": "АКБ 280Ач", "qty": 200, "entity_ref": "purchase:42"}, _ctx(session)
+    )
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
+
+    # без entity_ref игнорируется (защита от мусорных payload)
+    await on_procurement_received({"item": "X", "qty": 1}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
