@@ -354,6 +354,36 @@ async def test_wms_reconciliation_no_gateway(api_no_gateways):
     assert rec["gateway"] is False and rec["rows"] == []
 
 
+async def test_wms_alerts(api, session):
+    """Low-stock: свободный остаток 1С ниже порога → дефицит + severity."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add_all([
+        Sku(code="ZU-30A", title="ЗУ 30А", unit="шт"),
+        StockItem(sku_code="ZU-30A", warehouse="Минск", qty_available=Decimal(8),
+                  qty_reserved=Decimal(6), cost=Decimal(760)),
+        Sku(code="AKB-225", title="АКБ 225", unit="шт"),
+        StockItem(sku_code="AKB-225", warehouse="Минск", qty_available=Decimal(0),
+                  qty_reserved=Decimal(0), cost=Decimal(1280)),
+    ])
+    await session.commit()
+    await api.post("/wms/thresholds", json={"sku_code": "ZU-30A", "warehouse": "Минск", "min_qty": 5, "reorder_qty": 20})
+    await api.post("/wms/thresholds", json={"sku_code": "AKB-225", "warehouse": "Минск", "min_qty": 3, "reorder_qty": 10})
+
+    al = (await api.get("/wms/alerts")).json()
+    assert al["gateway"] is True
+    by = {r["sku_code"]: r for r in al["rows"]}
+    assert by["ZU-30A"]["free_qty"] == 2.0 and by["ZU-30A"]["deficit"] == 3.0
+    assert by["ZU-30A"]["severity"] == "below_min"
+    assert by["AKB-225"]["severity"] == "out_of_stock" and by["AKB-225"]["deficit"] == 3.0
+
+    assert (await api.post("/wms/thresholds", json={"sku_code": "X"},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
