@@ -188,9 +188,13 @@ class NomenclatureCategory(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True)  # стабильный код: "CAT-0102"
     name: Mapped[str] = mapped_column(String(255))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
-    # код ТН ВЭД по умолчанию для группы (→ ref_tnved): товар без своего наследует его вверх
-    # по parent_id. Мягкая ссылка (не FK), как Sku.tnved_code — резолв в reference_query.
-    tnved_code: Mapped[str | None] = mapped_column(String(16))
+    # «Общие данные группы» — значения по умолчанию, наследуемые товарами вверх по parent_id
+    # (товар без своего → берёт от группы; см. core/services/tnved.effective_group_field).
+    # Все мягкие ссылки (не FK), как Sku.tnved_code — резолв в reference_query/scd2.
+    tnved_code: Mapped[str | None] = mapped_column(String(16))  # → ref_tnved (пошлина/НДС)
+    vat_code: Mapped[str | None] = mapped_column(String(16))  # → ref_vat_rate (НДС по умолч.)
+    unit: Mapped[str | None] = mapped_column(String(16))  # → ref_unit (ед.изм по умолч.)
+    country: Mapped[str | None] = mapped_column(String(8))  # → ref_country (страна происхожд.)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (

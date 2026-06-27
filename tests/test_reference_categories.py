@@ -35,6 +35,25 @@ async def test_category_required_fields(api):
     assert (await api.post(BASE, json={"name": "без кода"})).status_code == 422
 
 
+async def test_category_default_fields_patch(api):
+    """PATCH группы пишет «общие данные» (tnved/НДС/ед/страна); видны в списке."""
+    await api.post(BASE, json={"code": "CAT-0400", "name": "Батарейки"})
+    r = await api.patch(
+        f"{BASE}/CAT-0400",
+        json={"tnved_code": "8506108000", "vat_code": "НДС20", "unit": "упак", "country": "CN"},
+    )
+    assert r.status_code == 200
+    row = next(g for g in (await api.get(BASE)).json() if g["code"] == "CAT-0400")
+    assert row["tnved_code"] == "8506108000"
+    assert row["vat_code"] == "НДС20"
+    assert row["unit"] == "упак"
+    assert row["country"] == "CN"
+    # очистка поля (наследовать) — null проходит
+    await api.patch(f"{BASE}/CAT-0400", json={"country": None})
+    row = next(g for g in (await api.get(BASE)).json() if g["code"] == "CAT-0400")
+    assert row["country"] is None
+
+
 async def test_query_categories(api):
     await api.post(BASE, json={"code": "CAT-0200", "name": "Кабельная продукция"})
 

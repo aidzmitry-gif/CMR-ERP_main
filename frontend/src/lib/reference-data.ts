@@ -522,6 +522,19 @@ export interface EffectiveTnved {
   group_name: string | null;
 }
 
+/** Наследуемое значение поля группы для товара: своё ∨ от группы (+ источник). */
+export interface GroupInherited {
+  value: string | null;
+  source: "own" | "group" | null; // own — на товаре; group — от группы; null — нигде
+  group_code: string | null;
+  group_name: string | null;
+}
+
+/** НДС по умолчанию группы: код + резолвленная ставка % на сегодня (+ источник). */
+export interface GroupVatInherited extends GroupInherited {
+  rate: number | null; // ставка НДС % по коду на сегодня; null — код не задан/нет версии
+}
+
 /** Узел breadcrumb группы номенклатуры (от корня к группе товара). */
 export interface GroupPathNode {
   code: string;
@@ -588,6 +601,9 @@ export interface SkuCard {
   tnved_code: string | null; // собственный код товара (может быть null → наследуется)
   effective_tnved: EffectiveTnved; // свой ∨ унаследованный от группы (+ источник)
   tnved_rates: TnvedRates | null; // пошлина + НДС по эффективному коду на сегодня; null — нет
+  effective_unit: GroupInherited; // ед.изм: своя ∨ от группы (+ источник)
+  effective_country: GroupInherited; // страна: своя ∨ от группы (+ источник)
+  group_vat: GroupVatInherited; // НДС по умолч. группы (код+ставка+источник); value null — не задан
   shelf_life_days: number | null;
   is_active: boolean;
   attributes: Record<string, unknown>; // переменные характеристики (JSONB-хвост)
@@ -681,6 +697,12 @@ export interface NomenclatureGroup {
   code: string;
   name: string;
   parent_id: number | null;
+  // «Общие данные группы» по умолчанию — наследуются товарами вверх по дереву (null — не задано).
+  // Опциональны: старые SSR-ответы/тест-фикстуры могут их не содержать (отсутствие = не задано).
+  tnved_code?: string | null; // код ТН ВЭД по умолч.
+  vat_code?: string | null; // код ставки НДС по умолч. (→ ref_vat_rate)
+  unit?: string | null; // ед.изм по умолч. (→ ref_unit)
+  country?: string | null; // страна происхождения по умолч. (→ ref_country)
   is_active: boolean;
 }
 
@@ -707,11 +729,19 @@ export async function fetchNomenclatureGroups(
 }
 
 /** Создать группу (клиент); `parent_id` пуст → корневая. */
+/** Поля «общих данных группы» по умолчанию (наследуются товарами); null — очистить. */
+export interface GroupDefaultFields {
+  tnved_code?: string | null;
+  vat_code?: string | null;
+  unit?: string | null;
+  country?: string | null;
+}
+
 export async function createNomenclatureGroup(group: {
   code: string;
   name: string;
   parent_id?: number | null;
-}): Promise<boolean> {
+} & GroupDefaultFields): Promise<boolean> {
   try {
     const res = await fetch("/api/system/refs/nomenclature-groups", {
       method: "POST",
@@ -724,10 +754,10 @@ export async function createNomenclatureGroup(group: {
   }
 }
 
-/** Изменить группу по коду (имя / перенос в другого родителя). */
+/** Изменить группу по коду (имя / перенос / общие данные группы по умолчанию). */
 export async function patchNomenclatureGroup(
   code: string,
-  fields: { name?: string; parent_id?: number | null },
+  fields: { name?: string; parent_id?: number | null } & GroupDefaultFields,
 ): Promise<boolean> {
   try {
     const res = await fetch(`/api/system/refs/nomenclature-groups/${encodeURIComponent(code)}`, {
