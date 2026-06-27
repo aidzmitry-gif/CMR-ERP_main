@@ -103,6 +103,11 @@ export function DealMetrics({
           Маржа — по позициям «в наличии» (себес из 1С); под-заказ ждёт предрасчёта.
         </div>
       )}
+      {items != null && !anyCost && (
+        <div className="mt-1 text-[11px] text-faint">
+          Себестоимость и маржа ждут методику цены (предрасчёт landed cost) — пока honest-empty.
+        </div>
+      )}
     </>
   );
 }

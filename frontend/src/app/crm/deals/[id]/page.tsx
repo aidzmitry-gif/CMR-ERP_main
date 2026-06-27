@@ -5,7 +5,9 @@ import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
+import { DealClient360 } from "@/components/deal-client-360";
 import { DealContacts } from "@/components/deal-contacts";
+import { DealLinkedDeals } from "@/components/deal-linked-deals";
 import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
 import { DealMetrics } from "@/components/deal-metrics";
@@ -25,7 +27,8 @@ import type { DealDetail } from "@/lib/types";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = await fetchDealDetail(id, await currentRole());
+  const roles = await currentRole();
+  const d = await fetchDealDetail(id, roles);
   // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 для mock/без стадии.
   const stageIdx = d.stage?.idx ?? 0;
 
@@ -52,10 +55,20 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 {d.description || "Описание не задано"}
               </div>
               {/* Контрагент — из MDM-витрины (источник истины — 1С). Провенанс вынесен в
-                  переиспользуемый <SourceTag> (канон mdm-1c-data-provenance-ui). УНП появится,
-                  как только DealDetail начнёт нести counterparty.unp с бэка (submodule sales). */}
+                  переиспользуемый <SourceTag> (канон mdm-1c-data-provenance-ui). УНП и источники
+                  резолвятся бэком по имени (DealDetail.counterparty); нет в витрине → honest-empty. */}
               <div className="mt-1">
-                <SourceTag entity="контрагент" source="mdm/1c" />
+                {d.counterparty ? (
+                  <SourceTag
+                    entity="контрагент"
+                    source={d.counterparty.sourceSystem ?? "mdm/1c"}
+                    unp={d.counterparty.unp}
+                  />
+                ) : (
+                  <span className="inline-flex items-center rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-faint">
+                    контрагент · не найден в MDM-витрине
+                  </span>
+                )}
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <PriorityBadge priority={d.priority} withIcon />
@@ -113,10 +126,11 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
           {/* RIGHT — клиент / постоянный / переписка / связанные / действия */}
           <div className="min-w-0 space-y-4">
+            <DealClient360 company={d.company} roles={roles} />
             <DealContacts dealId={id} />
             <RegStub />
             <DealMessages dealId={id} />
-            <LinkedStub />
+            <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
             <DealApprovals dealId={id} />
             <DealActions dealId={id} focus={d.focus} starred={d.starred} priority={d.priority} />
             <Card className="px-[18px] py-[14px]">

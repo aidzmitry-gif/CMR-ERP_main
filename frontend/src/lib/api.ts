@@ -112,10 +112,30 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
       items?: { title: string; last_price: number | null; min_price: number | null }[];
+      counterparty_ref?: {
+        id: number;
+        name: string;
+        unp: string | null;
+        sources: string[];
+        is_active: boolean;
+        merged_into_id: number | null;
+      } | null;
     };
+    const cp = d.counterparty_ref;
     return {
       number: d.number,
       company: d.counterparty,
+      // Контрагент из MDM (резолв по имени на бэке): id/УНП/источники для <SourceTag> и
+      // связанных блоков. None с бэка → undefined → honest-empty (нет в витрине).
+      counterparty: cp
+        ? {
+            id: cp.id,
+            unp: cp.unp ?? undefined,
+            sourceSystem: (["erp", "1c", "bitrix"] as const).find((s) => cp.sources.includes(s)),
+            isGolden: cp.is_active && cp.merged_into_id == null,
+            mergedIntoId: cp.merged_into_id ?? undefined,
+          }
+        : undefined,
       description: d.title,
       // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
       amount: Number(d.amount ?? 0),
