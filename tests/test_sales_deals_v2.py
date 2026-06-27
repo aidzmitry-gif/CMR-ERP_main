@@ -210,3 +210,33 @@ async def test_chats_unread_and_mark_read(api):
     chats2 = (await api.get("/sales/chats")).json()
     chat2 = next(c for c in chats2 if c["deal_id"] == deal["id"])
     assert chat2["unread"] == 0
+
+
+# ── Сделки 2.0: редактор стадий (sales.stage CRUD) ──────────────────────────
+async def test_stage_editor_lazy_seed_and_crud(api):
+    # первый GET лениво материализует канон (11 стадий)
+    stages = (await api.get("/sales/stages")).json()
+    assert len(stages) == 11
+    assert stages[0]["code"] == "new"
+    won = next(s for s in stages if s["code"] == "won")
+    assert won["kind"] == "won" and won["probability"] == 100
+
+    created = await api.post(
+        "/sales/stages", json={"code": "nurture", "title": "Дожим", "probability": 40}
+    )
+    assert created.status_code == 201
+    # дубль кода → 409
+    assert (await api.post("/sales/stages", json={"code": "nurture", "title": "x"})).status_code == 409
+
+    upd = await api.patch("/sales/stages/nurture", json={"title": "Дожим клиента", "probability": 42})
+    assert upd.status_code == 200 and upd.json()["title"] == "Дожим клиента"
+
+    # удалить пустую стадию → 204
+    assert (await api.delete("/sales/stages/nurture")).status_code == 204
+
+
+async def test_stage_delete_blocked_when_deals_exist(api):
+    await api.get("/sales/stages")  # материализовать канон
+    await _new_deal(api, "ST-1", stage="qual")
+    # в стадии есть сделка → удаление запрещено (409, целостность Deal.stage)
+    assert (await api.delete("/sales/stages/qual")).status_code == 409
