@@ -32,7 +32,7 @@ from core.domain.reference import (
     VatRate,
 )
 from core.runtime.deps import get_session
-from core.services import scd2
+from core.services import scd2, sku_history
 from core.services.auth import CurrentUser, require_permission
 
 # Мутации справочников живут под открытым /system/refs/* — защищаем пообъектно на роуте.
@@ -305,7 +305,12 @@ def build_versioned_ref_router(
         if key is None or start is None:
             raise HTTPException(status_code=422, detail=f"нужны поля: {key_field}, start_date")
         if isinstance(start, str):
-            start = date.fromisoformat(start)
+            try:
+                start = date.fromisoformat(start)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422, detail="start_date должен быть YYYY-MM-DD"
+                ) from exc
         # чувствительный ref (ставка НДС/пошлина) → на согласование, не пишем сразу
         moderated = await _moderate_version(request, session, model, key, payload, user.username)
         if moderated is not None:
@@ -315,7 +320,11 @@ def build_versioned_ref_router(
             obj = await scd2.add_version(session, model, key_field, key, start, **values)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError as exc:  # NOT NULL / уникальность на коммите → 409, не 500
+            await session.rollback()
+            raise HTTPException(status_code=409, detail="нарушение ограничений версии") from exc
         await session.refresh(obj)
         return _row(obj, list_fields)
 
@@ -407,14 +416,9 @@ def build_reference_router() -> APIRouter:
         build_versioned_ref_router(
             SkuVersion,
             key_field="sku_code",
-            value_fields=(
-                "title", "unit", "category_id", "weight_kg", "volume_m3",
-                "tnved_code", "vat_code", "shelf_life_days", "attributes",
-            ),
-            list_fields=(
-                "id", "sku_code", "title", "unit", "category_id", "weight_kg", "volume_m3",
-                "tnved_code", "vat_code", "shelf_life_days", "attributes", "start_date", "end_date",
-            ),
+            # единый источник полей — sku_history.SNAPSHOT_FIELDS (+ id/ключ/период), DRY с миграцией
+            value_fields=sku_history.SNAPSHOT_FIELDS,
+            list_fields=("id", "sku_code", *sku_history.SNAPSHOT_FIELDS, "start_date", "end_date"),
         ),
         prefix="/sku-history",
     )

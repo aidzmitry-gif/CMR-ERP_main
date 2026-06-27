@@ -12,7 +12,7 @@ from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sk
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm, reference_quality, reference_query, scd2, tnved
+from core.services import mdm, reference_quality, reference_query, scd2, sku_history, tnved
 from core.services.auth import CurrentUser, require_permission
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
@@ -156,11 +156,21 @@ async def system_references_ai_catalog(request: Request) -> dict:
     }
 
 
+#: верхний предел строк одного structural-query (защита от data-volume через большой limit).
+_QUERY_LIMIT_MAX = 100
+
+
 @router.post("/system/references/query")
 async def references_query(
-    payload: dict = Body(...), session: AsyncSession = Depends(get_session)
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
 ) -> dict:
-    """Структурный lookup AI по справочнику (tool reference.query): точное значение с историчностью."""
+    """Структурный lookup AI по справочнику (tool reference.query): точное значение с историчностью.
+
+    Под правом ``refs.view``: отдаёт коммерческие мастер-данные (контрагенты/номенклатура),
+    ``/system`` пропускается middleware → защищаем пообъектно (как quality/MDM-карточки).
+    """
     ref = payload.get("ref")
     if not ref:
         raise HTTPException(status_code=422, detail="нужно поле ref")
@@ -172,17 +182,22 @@ async def references_query(
             raise HTTPException(status_code=422, detail="as_of должен быть YYYY-MM-DD") from exc
     try:
         category_id = payload.get("category_id")
+        category_id = int(category_id) if category_id is not None else None
+        limit = max(1, min(int(payload.get("limit", 10)), _QUERY_LIMIT_MAX))  # clamp от DoS
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail="category_id/limit должны быть числами") from exc
+    try:
         return await reference_query.query(
             session,
             ref,
             key=payload.get("key"),
             as_of=as_of,
             name=payload.get("name"),
-            category_id=int(category_id) if category_id is not None else None,
+            category_id=category_id,
             aggregate=payload.get("aggregate"),
             group_by=payload.get("group_by"),
             resolve=bool(payload.get("resolve")),
-            limit=int(payload.get("limit", 10)),
+            limit=limit,
         )
     except reference_query.ReferenceQueryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -235,8 +250,15 @@ async def reference_quality_detail(
 
 
 @router.get("/system/mdm/duplicates")
-async def mdm_duplicates(session: AsyncSession = Depends(get_session)) -> dict:
-    """Кластеры дублей контрагентов по УНП — кандидаты на слияние (golden record)."""
+async def mdm_duplicates(
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> dict:
+    """Кластеры дублей контрагентов по УНП — кандидаты на слияние (golden record).
+
+    Под ``refs.view``: УНП/имена контрагентов — коммерческие мастер-данные; ``/system``
+    пропускается middleware → защищаем пообъектно.
+    """
     return {"clusters": await mdm.duplicate_clusters(session)}
 
 
@@ -272,11 +294,15 @@ async def tnved_lookup(
 
 @router.get("/system/mdm/fuzzy")
 async def mdm_fuzzy(
-    name: str, exclude_id: int | None = None, session: AsyncSession = Depends(get_session)
+    name: str,
+    exclude_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
 ) -> dict:
     """Похожие по имени контрагенты — fuzzy-кандидаты на дедуп (опечатки/орг-форма, без УНП).
 
     Кандидаты на ручную проверку (approval), не авто-merge. Дополняет точный матч по УНП.
+    Под ``refs.view``: имена контрагентов — коммерческие мастер-данные (см. mdm_duplicates).
     """
     return {"candidates": await mdm.fuzzy_candidates(session, name=name, exclude_id=exclude_id)}
 
@@ -442,15 +468,8 @@ async def sku_card(
         {
             "start_date": v.start_date,
             "end_date": v.end_date,
-            "title": v.title,
-            "unit": v.unit,
-            "category_id": v.category_id,
-            "weight_kg": v.weight_kg,
-            "volume_m3": v.volume_m3,
-            "tnved_code": v.tnved_code,
-            "vat_code": v.vat_code,
-            "shelf_life_days": v.shelf_life_days,
-            "attributes": v.attributes,
+            # проекция мастер-полей — единый источник sku_history.SNAPSHOT_FIELDS (DRY, без ручного дубля)
+            **{f: getattr(v, f) for f in sku_history.SNAPSHOT_FIELDS},
         }
         for v in (
             await session.execute(

@@ -28,7 +28,7 @@ from core.domain.reference import (
     Unit,
     VatRate,
 )
-from core.services import scd2, tnved
+from core.services import scd2, sku_history, tnved
 
 
 class ReferenceQueryError(ValueError):
@@ -55,13 +55,12 @@ _VERSIONED = {
         "code",
         ("code", "name", "duty_rate", "vat_code", "excise", "unit", "start_date", "end_date"),
     ),
+    # поля = единый источник sku_history.SNAPSHOT_FIELDS (+ натуральный ключ и период), чтобы
+    # новые мастер-поля SKU не пришлось дублировать здесь руками (DRY с миграцией 0070).
     "core.sku_history": (
         SkuVersion,
         "sku_code",
-        (
-            "sku_code", "title", "unit", "category_id", "weight_kg", "volume_m3",
-            "tnved_code", "vat_code", "shelf_life_days", "attributes", "start_date", "end_date",
-        ),
+        ("sku_code", *sku_history.SNAPSHOT_FIELDS, "start_date", "end_date"),
     ),
 }
 # иерархические классификаторы (adjacency list): ref -> (model, поля)
@@ -116,12 +115,12 @@ async def query(
         if ref != "core.skus":
             raise ReferenceQueryError("resolve поддержан только для core.skus")
         return await resolve_sku(session, key)
-    if ref in _SIMPLE:
-        return await _query_simple(session, ref, key, limit)
+    # простые и иерархические — одна плоская выборка (различаются лишь набором полей)
+    flat = _SIMPLE.get(ref) or _HIERARCHICAL.get(ref)
+    if flat is not None:
+        return await _query_flat(session, ref, flat[0], flat[1], key, limit)
     if ref in _VERSIONED:
         return await _query_versioned(session, ref, key, as_of)
-    if ref in _HIERARCHICAL:
-        return await _query_hierarchical(session, ref, key, limit)
     if ref == "core.counterparties":
         return await _query_counterparties(session, key, name, limit)
     if ref == "core.skus":
@@ -131,8 +130,14 @@ async def query(
     raise ReferenceQueryError(f"неизвестный справочник: {ref}")
 
 
-async def _query_simple(session: AsyncSession, ref: str, key: str | None, limit: int) -> dict:
-    model, fields = _SIMPLE[ref]
+async def _query_flat(
+    session: AsyncSession, ref: str, model, fields: tuple[str, ...], key: str | None, limit: int
+) -> dict:
+    """Плоская выборка справочника (простой ∨ иерархический): key=code → запись; без key → активные.
+
+    Иерархия (план счетов/регионы) хранится как adjacency list (``parent_id``) и отдаётся плоским
+    списком — дерево собирает фронт; отдельной логики обхода тут нет, поэтому путь общий.
+    """
     stmt = select(model).where(model.is_active.is_(True))
     if key is not None:
         stmt = stmt.where(model.code == key)
@@ -158,20 +163,6 @@ async def _query_versioned(
         "as_of": as_of,
         "result": _row(obj, fields) if obj is not None else None,
     }
-
-
-async def _query_hierarchical(
-    session: AsyncSession, ref: str, key: str | None, limit: int
-) -> dict:
-    """Иерархический классификатор (план счетов, регионы): key=code → узел; без key → активные."""
-    model, fields = _HIERARCHICAL[ref]
-    stmt = select(model).where(model.is_active.is_(True))
-    if key is not None:
-        stmt = stmt.where(model.code == key)
-    rows = (await session.execute(stmt.order_by(model.code).limit(limit))).scalars().all()
-    if key is not None:
-        return {"ref": ref, "key": key, "result": _row(rows[0], fields) if rows else None}
-    return {"ref": ref, "result": [_row(r, fields) for r in rows]}
 
 
 async def _query_counterparties(
@@ -291,7 +282,12 @@ async def resolve_sku(session: AsyncSession, key: str | None) -> dict:
     """
     if not key:
         raise ReferenceQueryError("core.skus resolve: нужен key (код товара)")
-    sku = (await session.execute(select(Sku).where(Sku.code == key))).scalars().first()
+    # только активные — как _query_skus: архивный SKU не подставляется AI в спецификацию/сделку
+    sku = (
+        await session.execute(
+            select(Sku).where(Sku.code == key, Sku.is_active.is_(True))
+        )
+    ).scalars().first()
     if sku is None:
         return {"ref": "core.skus", "key": key, "resolve": True, "result": None}
     eff_tnved = await tnved.effective_code_for_sku(session, sku)
