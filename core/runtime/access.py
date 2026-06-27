@@ -23,15 +23,15 @@ OPEN_PREFIXES: tuple[str, ...] = (
 
 
 def roles_from_request(request: Request) -> list[str]:
-    """Роли текущего пользователя из заголовка ``X-User-Roles`` (dev).
+    """Роли текущего пользователя — единый источник identity (``core.services.auth``).
 
-    Fail-closed (SECURITY.md P0-1): без заголовка — бесправный «Гость», не «Админ».
-    «Гость» нет в матрице → middleware отдаст 403 на любом защищённом модуле.
+    Делегирует в ``get_current_user`` (dev=заголовок ``X-User-Roles``, oidc=проверенный
+    Keycloak-JWT), чтобы middleware и route-зависимости видели ОДНУ identity, а не две
+    копии разбора. Fail-closed (SECURITY.md P0-1/P1): без заголовка/токена — «Гость».
     """
-    header = request.headers.get("X-User-Roles")
-    if not header:
-        return ["Гость"]
-    return [r.strip() for r in header.split(",") if r.strip()] or ["Гость"]
+    from core.services.auth import get_current_user
+
+    return get_current_user(request).roles
 
 
 def build_prefix_map(core) -> list[tuple[str, str]]:
