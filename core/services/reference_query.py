@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import Counterparty, Sku
@@ -28,7 +28,7 @@ from core.domain.reference import (
     Unit,
     VatRate,
 )
-from core.services import scd2
+from core.services import scd2, tnved
 
 
 class ReferenceQueryError(ValueError):
@@ -89,6 +89,9 @@ async def query(
     as_of: date | None = None,
     name: str | None = None,
     category_id: int | None = None,
+    aggregate: str | None = None,
+    group_by: str | None = None,
+    resolve: bool = False,
     limit: int = 10,
 ) -> dict:
     """Структурный lookup по справочнику ``ref`` — возвращает точное значение(я).
@@ -100,7 +103,19 @@ async def query(
     - ``core.counterparties``: ``key``=УНП или ``name`` → эталоны (active, не слитые);
     - ``core.skus``: ``key``=code → позиция; ``category_id`` → товары группы (членство); иначе список;
     - ``core.nomenclature_groups``: ``key``=code → группа; без key → активные группы (дерево).
+
+    Расширения (только чтение, whitelist — без сырого SQL от AI):
+    - ``aggregate="count"`` → число активных записей; ``aggregate="group_by"`` + ``group_by`` →
+      счётчики по полю (напр. SKU по группам). Допустимые поля — ``_AGG_GROUP_BY``.
+    - ``resolve=True`` (только ``core.skus`` + ``key``) → SKU + эффективные ТН ВЭД/НДС/ед/страна
+      через наследование от группы, одним ответом (с источником own|group).
     """
+    if aggregate is not None:
+        return await run_aggregate(session, ref, aggregate, group_by)
+    if resolve:
+        if ref != "core.skus":
+            raise ReferenceQueryError("resolve поддержан только для core.skus")
+        return await resolve_sku(session, key)
     if ref in _SIMPLE:
         return await _query_simple(session, ref, key, limit)
     if ref in _VERSIONED:
@@ -211,3 +226,86 @@ async def _query_categories(session: AsyncSession, key: str | None, limit: int) 
     if key:
         return {"ref": "core.nomenclature_groups", "key": key, "result": data[0] if data else None}
     return {"ref": "core.nomenclature_groups", "result": data}
+
+
+# ── Агрегаты и джойн-resolve (whitelist; сырой SQL от AI запрещён) ─────────────
+
+#: count по справочнику: ref -> модель (активные; контрагенты — ещё и не слитые).
+_COUNTABLE = {
+    "core.skus": Sku,
+    "core.counterparties": Counterparty,
+    "core.nomenclature_groups": NomenclatureCategory,
+    "core.units": Unit,
+    "core.currencies": Currency,
+    "core.countries": Country,
+    "core.banks": Bank,
+    "core.accounts": Account,
+    "core.regions": Region,
+}
+#: разрешённые поля group_by по справочнику (whitelist — иначе ReferenceQueryError).
+_AGG_GROUP_BY = {
+    "core.skus": {"category_id", "unit"},
+    "core.nomenclature_groups": {"parent_id"},
+}
+
+
+def _active_filter(stmt, model):
+    """Активные записи (+ не слитые для контрагентов) — единый фильтр агрегатов."""
+    if hasattr(model, "is_active"):
+        stmt = stmt.where(model.is_active.is_(True))
+    if model is Counterparty:
+        stmt = stmt.where(Counterparty.merged_into_id.is_(None))
+    return stmt
+
+
+async def run_aggregate(
+    session: AsyncSession, ref: str, op: str, group_by: str | None
+) -> dict:
+    """Агрегация по справочнику: ``count`` (число активных) или ``group_by`` (счётчики по полю)."""
+    if ref not in _COUNTABLE:
+        raise ReferenceQueryError(f"{ref}: агрегация не поддержана")
+    model = _COUNTABLE[ref]
+    if op == "count":
+        stmt = _active_filter(select(func.count()).select_from(model), model)
+        return {"ref": ref, "aggregate": "count", "result": int((await session.execute(stmt)).scalar_one())}
+    if op == "group_by":
+        if group_by not in _AGG_GROUP_BY.get(ref, set()):
+            raise ReferenceQueryError(f"{ref}: group_by по '{group_by}' не разрешён")
+        col = getattr(model, group_by)
+        stmt = _active_filter(select(col, func.count()).group_by(col), model).order_by(col)
+        rows = (await session.execute(stmt)).all()
+        return {
+            "ref": ref,
+            "aggregate": "group_by",
+            "group_by": group_by,
+            "result": [{"value": v, "count": int(c)} for v, c in rows],
+        }
+    raise ReferenceQueryError(f"неизвестная агрегация: {op}")
+
+
+async def resolve_sku(session: AsyncSession, key: str | None) -> dict:
+    """SKU + эффективные мягкие ссылки (ТН ВЭД/НДС/ед/страна) через наследование от группы.
+
+    Один ответ вместо нескольких lookup'ов: переиспользует ``core.services.tnved`` (own ∨ group,
+    с указанием источника). Ставки ТН ВЭД резолвятся на сегодня. ``result`` None, если кода нет.
+    """
+    if not key:
+        raise ReferenceQueryError("core.skus resolve: нужен key (код товара)")
+    sku = (await session.execute(select(Sku).where(Sku.code == key))).scalars().first()
+    if sku is None:
+        return {"ref": "core.skus", "key": key, "resolve": True, "result": None}
+    eff_tnved = await tnved.effective_code_for_sku(session, sku)
+    rates = await tnved.resolve(session, eff_tnved["code"], date.today()) if eff_tnved.get("code") else None
+    return {
+        "ref": "core.skus",
+        "key": key,
+        "resolve": True,
+        "result": {
+            "code": sku.code,
+            "title": sku.title,
+            "effective_tnved": {**eff_tnved, "rates": rates},
+            "effective_vat": await tnved.effective_group_field(session, sku, "vat_code"),
+            "effective_unit": await tnved.effective_group_field(session, sku, "unit"),
+            "effective_country": await tnved.effective_group_field(session, sku, "country"),
+        },
+    }

@@ -123,8 +123,19 @@ async def system_references_ai_catalog(request: Request) -> dict:
         "tool": {
             "name": "reference.query",
             "endpoint": "/system/references/query",
-            "params": ["ref", "key", "as_of", "name", "limit"],
+            "params": ["ref", "key", "as_of", "name", "category_id",
+                       "aggregate", "group_by", "resolve", "limit"],
             "note": "точные значения структурно, с историчностью as_of; pgvector — вторично",
+            "capabilities": {
+                "aggregate": {
+                    "count": list(reference_query._COUNTABLE.keys()),
+                    "group_by": {k: sorted(v) for k, v in reference_query._AGG_GROUP_BY.items()},
+                    "note": "count/group_by по whitelist — сырой SQL от AI запрещён",
+                },
+                "resolve": {
+                    "core.skus": "SKU + эффективные ТН ВЭД/НДС/ед/страна (own ∨ от группы)",
+                },
+            },
         },
         "references": [
             {
@@ -168,6 +179,9 @@ async def references_query(
             as_of=as_of,
             name=payload.get("name"),
             category_id=int(category_id) if category_id is not None else None,
+            aggregate=payload.get("aggregate"),
+            group_by=payload.get("group_by"),
+            resolve=bool(payload.get("resolve")),
             limit=int(payload.get("limit", 10)),
         )
     except reference_query.ReferenceQueryError as exc:
