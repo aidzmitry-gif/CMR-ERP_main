@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
+import { SourceTag } from "@/components/source-tag";
 import { changedFields } from "@/lib/reference-data";
 import type { FieldProvenance, GroupInherited, SkuBatchRow, SkuCard } from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
@@ -348,14 +349,13 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   <Badge tone="mut">В архиве</Badge>
                 )}
                 <Badge tone="mono">{card.code}</Badge>
-                {sync ? (
-                  <Badge tone="violet" title={`Происхождение: ${sync.origin} · статус: ${sync.state}`}>
-                    ↧ синк из 1С
-                    {sync.last_synced_at ? ` · ${sync.last_synced_at.slice(0, 16).replace("T", " ")}` : ""}
-                  </Badge>
-                ) : (
-                  <Badge tone="mut" title="Связь с 1С ещё не установлена">
-                    нет синка с 1С
+                <SourceTag
+                  entity="Номенклатура"
+                  source={sync ? (sync.origin === "1c" ? "mdm/1c" : sync.origin) : "erp"}
+                />
+                {sync?.last_synced_at && (
+                  <Badge tone="violet" title={`Статус синка: ${sync.state}`}>
+                    ↧ {sync.last_synced_at.slice(0, 16).replace("T", " ")}
                   </Badge>
                 )}
                 <Badge tone="mut">🤖 в каталоге AI</Badge>
