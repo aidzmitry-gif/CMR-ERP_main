@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_titles
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
-from core.domain.reference import NomenclatureCategory
+from core.domain.reference import NomenclatureCategory, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm, reference_query, tnved
+from core.services import mdm, reference_query, scd2, tnved
 from core.services.auth import CurrentUser, require_permission
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
@@ -319,6 +319,18 @@ async def sku_card(
     if effective_tnved.get("code"):
         tnved_rates = await tnved.resolve(session, effective_tnved["code"], date.today())
 
+    # Прочие «общие данные группы», наследуемые товаром (ед.изм/страна по умолчанию, ставка НДС
+    # по умолчанию группы). Тот же обход вверх по дереву; источник (own|group) — для метки «↑ из группы».
+    effective_unit = await tnved.effective_group_field(session, sku, "unit")
+    effective_country = await tnved.effective_group_field(session, sku, "country")
+    # НДС по умолчанию группы — отдельно от ТН-ВЭД-резолва: у Sku своего поля нет, берётся от группы.
+    group_vat = await tnved.effective_group_field(session, sku, "vat_code")
+    if group_vat.get("value"):
+        vat_ver = await scd2.version_as_of(session, VatRate, "code", group_vat["value"], date.today())
+        group_vat["rate"] = float(vat_ver.rate) if vat_ver is not None else None
+    else:
+        group_vat["rate"] = None
+
     group_path = await _group_breadcrumb(session, sku.category_id)
     sync = await _sku_sync_link(session, sku.id)
 
@@ -347,6 +359,9 @@ async def sku_card(
         "tnved_code": sku.tnved_code,  # собственный код (может быть None → наследуется)
         "effective_tnved": effective_tnved,  # {code, source: own|group|None, group_code, group_name}
         "tnved_rates": tnved_rates,  # {duty_rate, vat_rate, …} на сегодня или None
+        "effective_unit": effective_unit,  # {value, source, group_*} — ед.изм своя ∨ от группы
+        "effective_country": effective_country,  # {value, source, group_*} — страна своя ∨ от группы
+        "group_vat": group_vat,  # {value(код), rate, source, group_*} — НДС по умолч. группы или None
         "shelf_life_days": sku.shelf_life_days,
         "is_active": sku.is_active,
         "attributes": sku.attributes,

@@ -51,30 +51,47 @@ async def resolve(session: AsyncSession, code: str, on: date) -> dict | None:
     }
 
 
-async def effective_code_for_sku(session: AsyncSession, sku: Sku) -> dict:
-    """Эффективный код ТН ВЭД товара: свой, иначе унаследованный от группы (вверх по parent_id).
+async def effective_group_field(session: AsyncSession, sku: Sku, field: str) -> dict:
+    """Эффективное значение «общего поля группы» для товара: своё, иначе унаследованное.
 
-    Возврат: ``{code, source}``. ``source``: ``"own"`` (задан на товаре), ``"group"`` (взят с
-    группы — ``group_code``/``group_name`` указывают, с какой), ``None`` (нигде не задан).
-    Подъём по дереву групп ограничен ``_MAX_DEPTH`` (защита от цикла в parent_id).
+    ``field`` — имя поля и на ``Sku``, и на ``NomenclatureCategory`` (``tnved_code``, ``unit``;
+    для ``vat_code``/``country`` своего поля у Sku нет — берётся только от группы). Возврат:
+    ``{value, source, group_code, group_name}``. ``source``: ``"own"`` (задано на товаре),
+    ``"group"`` (взято с группы — ``group_code``/``group_name`` указывают, с какой), ``None``
+    (нигде не задано). Подъём по дереву групп вверх по ``parent_id``, ограничен ``_MAX_DEPTH``
+    (защита от цикла). Архивная группа не «дарит» значение вниз, но подъём продолжается.
     """
-    if sku.tnved_code:
-        return {"code": sku.tnved_code, "source": "own", "group_code": None, "group_name": None}
+    own = getattr(sku, field, None)
+    if own:
+        return {"value": own, "source": "own", "group_code": None, "group_name": None}
     if sku.category_id is None:
-        return {"code": None, "source": None, "group_code": None, "group_name": None}
+        return {"value": None, "source": None, "group_code": None, "group_name": None}
 
     cat_id = sku.category_id
     for _ in range(_MAX_DEPTH):
         cat = await session.get(NomenclatureCategory, cat_id)
         if cat is None:
             break
-        # архивная группа не «дарит» код вниз (её убрали из выбора), но подъём продолжаем
-        if cat.tnved_code and cat.is_active:
+        val = getattr(cat, field, None)
+        if val and cat.is_active:
             return {
-                "code": cat.tnved_code, "source": "group",
+                "value": val, "source": "group",
                 "group_code": cat.code, "group_name": cat.name,
             }
         if cat.parent_id is None:
             break
         cat_id = cat.parent_id
-    return {"code": None, "source": None, "group_code": None, "group_name": None}
+    return {"value": None, "source": None, "group_code": None, "group_name": None}
+
+
+async def effective_code_for_sku(session: AsyncSession, sku: Sku) -> dict:
+    """Эффективный код ТН ВЭД товара (обёртка над ``effective_group_field`` для совместимости).
+
+    Возврат: ``{code, source, group_code, group_name}`` — ``code`` вместо ``value`` (контракт
+    карточки SKU и тестов не меняется).
+    """
+    eff = await effective_group_field(session, sku, "tnved_code")
+    return {
+        "code": eff["value"], "source": eff["source"],
+        "group_code": eff["group_code"], "group_name": eff["group_name"],
+    }

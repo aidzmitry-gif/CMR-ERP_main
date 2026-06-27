@@ -159,3 +159,100 @@ async def test_effective_tnved_none_when_nowhere(session):
     await session.flush()
     eff = await tnved.effective_code_for_sku(session, sku)
     assert eff == {"code": None, "source": None, "group_code": None, "group_name": None}
+
+
+# ── Общие данные группы (наследуемые поля unit/country/vat_code, M4) ──────────
+
+
+async def test_effective_group_unit_own_wins(session):
+    """Своя ед.изм товара — источник own, группу не смотрим."""
+    grp = NomenclatureCategory(code="GU1", name="Батарейки", unit="упак")
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="U-1", title="Батарейка", category_id=grp.id, unit="шт")
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_field(session, sku, "unit")
+    assert eff["value"] == "шт"
+    assert eff["source"] == "own"
+
+
+async def test_effective_group_country_inherited(session):
+    """Страна (своего поля у Sku нет) наследуется от группы вверх по дереву."""
+    root = NomenclatureCategory(code="GC10", name="Импорт", country="CN")
+    session.add(root)
+    await session.flush()
+    child = NomenclatureCategory(code="GC11", name="Китай-АКБ", parent_id=root.id)
+    session.add(child)
+    await session.flush()
+    sku = Sku(code="C-1", title="АКБ", category_id=child.id)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_field(session, sku, "country")
+    assert eff["value"] == "CN"
+    assert eff["source"] == "group"
+    assert eff["group_code"] == "GC10"  # унаследовано от корня, не от пустого child
+
+
+async def test_effective_group_vat_inherited(session):
+    """Ставка НДС по умолчанию группы наследуется товаром (своего поля у Sku нет)."""
+    grp = NomenclatureCategory(code="GV1", name="Услуги", vat_code="НДС20")
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="V-1", title="Услуга", category_id=grp.id)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_field(session, sku, "vat_code")
+    assert eff["value"] == "НДС20"
+    assert eff["source"] == "group"
+
+
+async def test_effective_group_field_skips_archived(session):
+    """Архивная группа не дарит значение вниз; подъём идёт к активному предку."""
+    root = NomenclatureCategory(code="GA10", name="Импорт", country="CN")
+    session.add(root)
+    await session.flush()
+    mid = NomenclatureCategory(code="GA11", name="Старое", parent_id=root.id,
+                               country="RU", is_active=False)
+    session.add(mid)
+    await session.flush()
+    sku = Sku(code="A-1", title="Товар", category_id=mid.id)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_field(session, sku, "country")
+    assert eff["value"] == "CN"  # архивный mid (RU) пропущен, взят активный корень
+    assert eff["group_code"] == "GA10"
+
+
+async def test_effective_group_field_none_when_nowhere(session):
+    """Нигде не задано → value None (не выдумываем)."""
+    grp = NomenclatureCategory(code="GN1", name="Прочее")
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="N-1", title="X", category_id=grp.id)
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_field(session, sku, "country")
+    assert eff == {"value": None, "source": None, "group_code": None, "group_name": None}
+
+
+async def test_sku_card_exposes_group_defaults(api, session):
+    """Карточка SKU отдаёт effective_unit/country/group_vat от группы."""
+    session.add(VatRate(code="НДС20", title="НДС 20%", rate=20,
+                        start_date=date(2024, 1, 1), end_date=None))
+    grp = NomenclatureCategory(code="GD1", name="Группа", unit="упак",
+                               country="CN", vat_code="НДС20")
+    session.add(grp)
+    await session.flush()
+    session.add(Sku(code="GD-SKU", title="Товар", category_id=grp.id))
+    await session.commit()
+
+    card = (await api.get("/system/sku/GD-SKU")).json()
+    # unit у Sku всегда задан (default «шт») → источник own, группа не перебивает
+    assert card["effective_unit"]["value"] == "шт"
+    assert card["effective_unit"]["source"] == "own"
+    # страна/НДС своего поля у Sku не имеют → наследуются от группы
+    assert card["effective_country"]["value"] == "CN"
+    assert card["effective_country"]["source"] == "group"
+    assert card["group_vat"]["value"] == "НДС20"
+    assert card["group_vat"]["rate"] == 20.0  # резолвлено из ref_vat_rate на сегодня

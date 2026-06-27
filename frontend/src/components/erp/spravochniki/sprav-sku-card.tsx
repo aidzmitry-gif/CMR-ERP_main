@@ -262,6 +262,10 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
     group_name: null,
   };
   const rates = card.tnved_rates;
+  // Наследуемые «общие данные группы»: страна (своё ∨ от группы) + НДС по умолч. группы.
+  // (Ед.изм. не наследуется в карточку: у Sku она задана всегда — см. поле ниже.)
+  const effCountry = card.effective_country;
+  const groupVat = card.group_vat;
   const groupPath = card.group_path ?? [];
   const sync = card.sync;
   const stock = card.stock;
@@ -444,7 +448,30 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field full label="Рабочее наименование" value={card.title} prov={prov.title} />
                   <Field label="Код / артикул" value={card.code} mono prov={prov.code} />
+                  {/* Ед.изм. у товара задана всегда (default «шт») — показываем своё значение;
+                      дефолт группы (effective_unit) применяется только к НОВЫМ товарам, не сюда. */}
                   <Field label="Ед. измерения" value={card.unit ?? "—"} prov={prov.unit} />
+                  <Field
+                    label="Страна происхождения"
+                    value={effCountry?.value ?? "нет данных"}
+                    unset={!effCountry?.value}
+                    mark={
+                      effCountry?.source === "group" ? (
+                        <InheritMark title={`Страна по умолч. группы «${effCountry.group_name ?? ""}»`} />
+                      ) : undefined
+                    }
+                  />
+                  {groupVat?.value && (
+                    <Field
+                      label="НДС по умолч. (группа)"
+                      value={groupVat.rate != null ? `${groupVat.rate}%` : groupVat.value}
+                      mark={
+                        groupVat.source === "group" ? (
+                          <InheritMark title={`Ставка НДС по умолч. группы «${groupVat.group_name ?? ""}»`} />
+                        ) : undefined
+                      }
+                    />
+                  )}
                   <Field
                     label="Вес, кг"
                     value={card.weight_kg != null ? String(card.weight_kg) : "нет данных"}
