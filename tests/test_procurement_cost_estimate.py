@@ -67,6 +67,8 @@ def test_usd_path_full_chain_with_util():
     )
     line = res["lines"][0]
     assert line["goods_byn"] == D("3000.00")
+    assert line["commission_byn"] == D("60.00")
+    assert line["insurance_byn"] == D("30.00")
     assert line["freight_byn"] == D("750.00")
     assert line["duty_byn"] == D("187.50")
     assert line["util_byn"] == D("6800.00")
@@ -106,3 +108,15 @@ async def test_cost_estimate_endpoint(api):
     data = r.json()
     assert data["lines"][0]["unit_landed_cost_byn"] == 4.40
     assert data["total_landed_byn"] == 440.0
+
+
+@pytest.mark.asyncio
+async def test_cost_estimate_usd_only_without_cny_rates(api):
+    """USD-only запрос не обязан слать CNY-курсы (usd_rub/cny_rub/rub_byn) — не 422."""
+    body = {
+        "rates": {"usd_byn": 3.0},  # только базовый курс; CNY-поля опущены
+        "lines": [{"sku_code": "F", "path": "usd", "price": 100, "qty": 1, "weight": 0}],
+    }
+    r = await api.post("/procurement/cost-estimate", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["lines"][0]["unit_landed_cost_byn"] == 330.0  # 100×3.0×1.10
