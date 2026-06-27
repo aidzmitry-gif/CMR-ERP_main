@@ -4,6 +4,7 @@
 // Деньги в ответах — BYN (форматируются в компонентах через `formatByn`).
 
 import type { Bid as DomainBid, ScoreMetrics } from "@/lib/logistics-domain";
+import type { FunnelStage } from "@/lib/types";
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
@@ -79,6 +80,38 @@ export interface Costs {
 export const fetchShipments = () => getJson<Shipment[]>("/logistics/shipments", []);
 export const fetchDashboard = () => getJson<Dashboard | null>("/logistics/dashboard", null);
 export const fetchCosts = () => getJson<Costs | null>("/logistics/costs", null);
+
+// ─────────────────────────────── Импорт из Китая (информационный) ───────────────────────────────
+// Только наблюдение цепочки (события import.*); приёмка на склад/остатки — НЕ здесь
+// (это procurement→wms, двойной учёт запрещён).
+
+export interface ImportShipment {
+  id: number;
+  number: string;
+  supplier: string;
+  flag: string;
+  container_no: string;
+  route: string;
+  incoterms: string;
+  mode: string;
+  cargo: string;
+  qty: number;
+  amount: number;
+  priority: string;
+  owner: string;
+  stage: string;
+  customs_status: string;
+  eta?: string | null;
+  po_ref: string;
+}
+
+// Доска импорта = универсальная воронка ядра (FunnelBoardOut: стадии-колонки с карточками).
+export interface ImportBoard {
+  stages: FunnelStage[];
+}
+
+export const fetchImports = () => getJson<ImportShipment[]>("/logistics/imports", []);
+export const fetchImportBoard = () => getJson<ImportBoard | null>("/logistics/imports/board", null);
 
 // ─────────────────────────────── Тарифы / зоны ───────────────────────────────
 
@@ -256,6 +289,16 @@ export interface Bid extends DomainBid {
   comment?: string;
   round: number;
   is_best: boolean;
+  value_score?: number;     // best-fit: компромисс цена↔качество ∈ [0, 1] (из /bids/ranked)
+  is_best_value?: boolean;   // лучший по соотношению цена/качество (не только по цене)
+}
+
+export interface TenderRecommendation {
+  cheapest: Bid;
+  best_value: Bid;
+  reliability_premium: number;   // доплата best_value к самому дешёвому (цена надёжности)
+  same_carrier: boolean;
+  rationale: string;
 }
 
 export interface AwardResult {
@@ -273,6 +316,10 @@ export const fetchRfq = (id: number) => getJson<Rfq | null>(`/logistics/rfqs/${i
 export const fetchInvites = (id: number) =>
   getJson<Invite[]>(`/logistics/rfqs/${id}/invites`, []);
 export const fetchBids = (id: number) => getJson<Bid[]>(`/logistics/rfqs/${id}/bids`, []);
+export const fetchRankedBids = (id: number) =>
+  getJson<Bid[]>(`/logistics/rfqs/${id}/bids/ranked`, []);
+export const fetchRecommendation = (id: number) =>
+  getJson<TenderRecommendation | null>(`/logistics/rfqs/${id}/recommendation`, null);
 export const seedRfq = () => postJson<Rfq | null>("/logistics/rfqs/seed", undefined, null);
 
 export interface BroadcastResult {
@@ -285,10 +332,12 @@ export interface BroadcastResult {
 
 export const broadcastRfq = (id: number) =>
   postJson<BroadcastResult | null>(`/logistics/rfqs/${id}/broadcast`, undefined, null);
-export const awardRfq = (id: number, carrierCode?: string) =>
+export type AwardStrategy = "cheapest" | "best_value";
+
+export const awardRfq = (id: number, carrierCode?: string, strategy: AwardStrategy = "cheapest") =>
   postJson<AwardResult | null>(
     `/logistics/rfqs/${id}/award`,
-    carrierCode ? { carrier_code: carrierCode } : {},
+    carrierCode ? { carrier_code: carrierCode } : { strategy },
     null,
   );
 

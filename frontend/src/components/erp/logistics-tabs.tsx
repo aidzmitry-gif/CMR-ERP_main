@@ -6,30 +6,41 @@ import { useState } from "react";
 import { LogisticsAudit } from "@/components/erp/logistics-audit";
 import { LogisticsDelivery } from "@/components/erp/logistics-delivery";
 import { LogisticsFleet } from "@/components/erp/logistics-fleet";
+import { LogisticsImport } from "@/components/erp/logistics-import";
 import { LogisticsInsights } from "@/components/erp/logistics-insights";
 import { LogisticsScorecard } from "@/components/erp/logistics-scorecard";
 import { LogisticsTariffs } from "@/components/erp/logistics-tariffs";
 import { LogisticsTender } from "@/components/erp/logistics-tender";
 
-type TabKey = "delivery" | "tariffs" | "fleet" | "tender" | "scorecard" | "audit" | "insights";
+type TabKey =
+  | "delivery"
+  | "tender"
+  | "tariffs"
+  | "fleet"
+  | "import"
+  | "audit"
+  | "scorecard"
+  | "insights";
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "delivery", label: "Доставка" },
+  { key: "delivery", label: "Рейсы" },
+  { key: "tender", label: "Тендеры" },
   { key: "tariffs", label: "Тарифы" },
   { key: "fleet", label: "Парк" },
-  { key: "tender", label: "Тендер" },
+  { key: "import", label: "Импорт" },
+  { key: "audit", label: "Аудит счетов" },
   { key: "scorecard", label: "Scorecard" },
-  { key: "audit", label: "Аудит" },
   { key: "insights", label: "Экономия" },
 ];
 
 const PANELS: Record<TabKey, () => React.ReactNode> = {
   delivery: () => <LogisticsDelivery />,
+  tender: () => <LogisticsTender />,
   tariffs: () => <LogisticsTariffs />,
   fleet: () => <LogisticsFleet />,
-  tender: () => <LogisticsTender />,
-  scorecard: () => <LogisticsScorecard />,
+  import: () => <LogisticsImport />,
   audit: () => <LogisticsAudit />,
+  scorecard: () => <LogisticsScorecard />,
   insights: () => <LogisticsInsights />,
 };
 
