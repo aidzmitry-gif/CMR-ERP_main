@@ -327,8 +327,21 @@ function MoveForm({
 
 type RefRow = { code: string; title?: string };
 
+// Свободные «общие данные группы» (наследуются товаром, JSONB category.attributes; миграция 0055).
+// Ключи совпадают с backend _INHERITABLE_ATTR_KEYS / карточкой SKU (DEDICATED_ATTR_KEYS) — иначе
+// наследование «↑ из группы» не подхватится. Бренд опускаем (синоним Марки), чтобы не плодить дубль.
+const GROUP_ATTR_KEYS: { key: string; placeholder: string }[] = [
+  { key: "Производитель", placeholder: "напр. Omron" },
+  { key: "Марка", placeholder: "напр. G2R" },
+  { key: "Импортёр", placeholder: "кто ввозит" },
+  { key: "Кол-во в коробке", placeholder: "напр. 50" },
+  { key: "Габариты", placeholder: "Д×Ш×В, мм" },
+  { key: "Объём", placeholder: "напр. 0.5 л" },
+];
+
 /** Редактор полей по умолчанию группы: НДС/ед.изм/страна — select из справочников;
- *  ТН ВЭД — ввод кода (кодов много). Пустой выбор = очистить (не наследовать). */
+ *  ТН ВЭД — ввод кода (кодов много); свободные атрибуты (Производитель/коробка/габариты) —
+ *  текст. Пустое значение = очистить (не наследовать). */
 function GroupDefaultsForm({
   node,
   units,
@@ -348,16 +361,31 @@ function GroupDefaultsForm({
   const [vat, setVat] = useState(node.vat_code ?? "");
   const [unit, setUnit] = useState(node.unit ?? "");
   const [country, setCountry] = useState(node.country ?? "");
+  // Свободные атрибуты группы — по известным ключам (значения из node.attributes как строки).
+  const [attrs, setAttrs] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      GROUP_ATTR_KEYS.map(({ key }) => [key, String(node.attributes?.[key] ?? "")]),
+    ),
+  );
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
+    // attributes перезаписывается бэком целиком → стартуем с существующего словаря (сохраняя
+    // неизвестные редактору ключи), known-ключи задаём/удаляем по введённому значению.
+    const merged: Record<string, unknown> = { ...(node.attributes ?? {}) };
+    for (const { key } of GROUP_ATTR_KEYS) {
+      const v = attrs[key].trim();
+      if (v) merged[key] = v;
+      else delete merged[key];
+    }
     await onSave({
       tnved_code: tnved.trim() || null,
       vat_code: vat || null,
       unit: unit || null,
       country: country || null,
+      attributes: merged,
     });
     setBusy(false);
   }
@@ -418,6 +446,30 @@ function GroupDefaultsForm({
           ))}
         </select>
       </div>
+
+      {/* Свободные атрибуты группы (Производитель/коробка/габариты) — наследуются товаром */}
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          Свободные характеристики
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {GROUP_ATTR_KEYS.map(({ key, placeholder }) => (
+            <div key={key}>
+              <label className="mb-1 block text-xs text-muted">{key}</label>
+              <input
+                value={attrs[key]}
+                onChange={(e) => setAttrs((p) => ({ ...p, [key]: e.target.value }))}
+                placeholder={placeholder}
+                className={sel}
+              />
+            </div>
+          ))}
+        </div>
+        <p className="mt-1 text-[10.5px] text-faint">
+          Товар без своего значения наследует от группы (↑ из группы). Пусто — не наследовать.
+        </p>
+      </div>
+
       <div className="flex gap-2">
         <button
           type="submit"
@@ -831,6 +883,12 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                       {selected.country ?? "не задано"}
                     </dd>
                   </div>
+                  {GROUP_ATTR_KEYS.filter(({ key }) => selected.attributes?.[key]).map(({ key }) => (
+                    <div key={key} className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">{key}</dt>
+                      <dd className="text-ink">{String(selected.attributes?.[key])}</dd>
+                    </div>
+                  ))}
                 </dl>
               </div>
 

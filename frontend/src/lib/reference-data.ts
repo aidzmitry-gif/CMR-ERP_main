@@ -720,6 +720,9 @@ export interface NomenclatureGroup {
   vat_code?: string | null; // код ставки НДС по умолч. (→ ref_vat_rate)
   unit?: string | null; // ед.изм по умолч. (→ ref_unit)
   country?: string | null; // страна происхождения по умолч. (→ ref_country)
+  // свободные «общие данные группы» (Производитель/Марка/Импортёр, Кол-во в коробке, Габариты, Объём),
+  // наследуемые товаром вверх по дереву (JSONB, не EAV; миграция 0055). Опционально (старые SSR без него).
+  attributes?: Record<string, unknown>;
   is_active: boolean;
 }
 
@@ -752,6 +755,9 @@ export interface GroupDefaultFields {
   vat_code?: string | null;
   unit?: string | null;
   country?: string | null;
+  // свободные дефолт-атрибуты группы (Производитель/коробка/габариты) — JSONB целиком (backend
+  // перезаписывает attributes); шлём полный словарь намеренных ключей.
+  attributes?: Record<string, unknown>;
 }
 
 export async function createNomenclatureGroup(group: {

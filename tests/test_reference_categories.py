@@ -54,6 +54,18 @@ async def test_category_default_fields_patch(api):
     assert row["country"] is None
 
 
+async def test_category_attributes_patch(api):
+    """PATCH группы пишет свободные «общие данные» (Производитель/коробка) в attributes (JSONB)."""
+    await api.post(BASE, json={"code": "CAT-0500", "name": "Реле"})
+    r = await api.patch(
+        f"{BASE}/CAT-0500",
+        json={"attributes": {"Производитель": "Omron", "Кол-во в коробке": "50"}},
+    )
+    assert r.status_code == 200
+    row = next(g for g in (await api.get(BASE)).json() if g["code"] == "CAT-0500")
+    assert row["attributes"] == {"Производитель": "Omron", "Кол-во в коробке": "50"}
+
+
 async def test_query_categories(api):
     await api.post(BASE, json={"code": "CAT-0200", "name": "Кабельная продукция"})
 
