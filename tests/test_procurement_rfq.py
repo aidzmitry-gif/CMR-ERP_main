@@ -55,5 +55,21 @@ async def test_rfq_closed_rejects_bids(api):
     assert r.status_code == 409
 
 
+async def test_reaward_rejected(api):
+    """Повторный award уже закрытого RFQ → 409 (нельзя переиграть тендер)."""
+    rfq = (await api.post("/procurement/rfq", json={"item": "X"})).json()
+    rid = rfq["id"]
+    bid = (await api.post(f"/procurement/rfq/{rid}/bids", json={"supplier_id": 1, "price_byn": 100})).json()
+    bid_id = bid["bids"][0]["id"]
+    assert (await api.post(f"/procurement/rfq/{rid}/award", json={"bid_id": bid_id})).status_code == 200
+    assert (await api.post(f"/procurement/rfq/{rid}/award", json={"bid_id": bid_id})).status_code == 409
+
+
+async def test_negative_bid_price_rejected(api):
+    rfq = (await api.post("/procurement/rfq", json={"item": "X"})).json()
+    r = await api.post(f"/procurement/rfq/{rfq['id']}/bids", json={"supplier_id": 1, "price_byn": -5})
+    assert r.status_code == 422
+
+
 async def test_rfq_404(api):
     assert (await api.get("/procurement/rfq/9999")).status_code == 404

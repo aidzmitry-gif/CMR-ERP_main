@@ -127,6 +127,43 @@ async def test_update_header_received_409(api):
     assert r.status_code == 409
 
 
+async def test_freight_partial_weight_falls_back_to_value(api):
+    """Если вес задан НЕ у всех позиций — фрахт по стоимости (иначе позиция без веса получит 0)."""
+    o = await _order(
+        api,
+        freight_byn=300,
+        lines=[
+            {"sku_code": "HEAVY", "qty": 1, "goods_value_byn": 100, "weight": 10},
+            {"sku_code": "LIGHT", "qty": 1, "goods_value_byn": 1000, "weight": 0},  # вес не заполнен
+        ],
+    )
+    prev = (await api.get(f"/procurement/orders/{o['id']}/landed-preview")).json()
+    by = {ln["sku_code"]: ln for ln in prev["lines"]}
+    # по стоимости (100/1100, 1000/1100): обе получают фрахт, LIGHT не обнулён
+    assert by["HEAVY"]["allocated_byn"] == 27.27
+    assert by["LIGHT"]["allocated_byn"] == 272.73
+
+
+async def test_negative_freight_rejected(api):
+    r = await api.post(
+        "/procurement/orders",
+        json={"freight_byn": -100, "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]},
+    )
+    assert r.status_code == 422  # отрицательный фрахт → невалидно
+
+
+async def test_cancelled_order_not_editable(api):
+    o = await _order(api, status="ordered", lines=[{"sku_code": "A", "qty": 1, "goods_value_byn": 100}])
+    await api.patch(f"/procurement/orders/{o['id']}", json={"status": "cancelled"})
+    r = await api.post(f"/procurement/orders/{o['id']}/lines", json={"sku_code": "B", "qty": 1})
+    assert r.status_code == 409  # отменённый заказ — терминальный, не редактируется
+
+
+async def test_cannot_create_cancelled(api):
+    r = await api.post("/procurement/orders", json={"status": "cancelled", "lines": []})
+    assert r.status_code == 422
+
+
 async def test_landed_preview_no_fixation(api, session):
     """landed-preview считает распределение БЕЗ фиксации (строк LandedCost не появляется)."""
     o = await _order(

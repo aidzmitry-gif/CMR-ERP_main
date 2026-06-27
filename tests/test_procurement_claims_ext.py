@@ -62,6 +62,13 @@ async def test_resolve_emits_event(api, session):
     assert p["status"] == "resolved"
 
 
+async def test_invalid_claim_status_rejected(api):
+    """Неизвестный статус претензии → 422 (закрытый набор, не свободная строка)."""
+    claim = (await api.post("/procurement/claims", json={"supplier_id": 1, "claim_type": "брак"})).json()
+    r = await api.patch(f"/procurement/claims/{claim['id']}", json={"status": "closed"})
+    assert r.status_code == 422
+
+
 async def test_resolve_event_not_double_emitted(api, session):
     """Повторный PATCH уже закрытой претензии не эмитит событие второй раз."""
     claim = (await api.post("/procurement/claims", json={"supplier_id": 1, "claim_type": "срок"})).json()

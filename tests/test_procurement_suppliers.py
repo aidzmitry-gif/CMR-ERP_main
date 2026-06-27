@@ -71,3 +71,17 @@ async def test_scorecard_with_orders_and_claim(api):
     # quality = 1 − 1/2 = 0.5; своевременность None → балл = 0.5×10 = 5.0
     assert sc["components"]["quality"] == 0.5
     assert sc["score"] == 5.0
+
+
+async def test_scorecard_rejected_claims_not_penalized(api):
+    """Отклонённая претензия (поставщик не виноват) НЕ снижает балл качества."""
+    sup = await _supplier(api)
+    sid = sup["id"]
+    await api.post("/procurement/orders", json={"supplier_id": sid, "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]})
+    claim = (await api.post("/procurement/claims", json={"supplier_id": sid, "claim_type": "брак"})).json()
+    await api.patch(f"/procurement/claims/{claim['id']}", json={"status": "rejected"})
+
+    sc = (await api.get(f"/procurement/suppliers/{sid}/scorecard")).json()
+    assert sc["claims_total"] == 1  # претензия есть в учёте
+    assert sc["components"]["quality"] == 1.0  # но качество не наказано (отклонена)
+    assert sc["score"] == 10.0
