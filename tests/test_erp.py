@@ -259,6 +259,50 @@ async def test_wms_receipt_accept(api, session):
     assert len((await api.get("/wms/movements?reason=receipt")).json()) == len(mv)
 
 
+async def test_wms_tasks(api, session):
+    """accept приёмки → put-away задача; её завершение перемещает остаток; pick → out."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_goods_received
+
+    recv = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "RECV", "code": "RECV-01"})).json()
+    perm = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-10"})).json()
+    await on_goods_received(
+        {"item": "REBAR-10", "qty": 100, "warehouse": "Минск", "entity_ref": "purchase:11"},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+    rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
+    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
+    await api.post(f"/wms/receipts/{rid}/qc",
+                   json={"decisions": [{"line_id": line["id"], "accepted_qty": 100, "location_id": recv["id"]}]})
+    await api.post(f"/wms/receipts/{rid}/accept")
+
+    tasks = (await api.get("/wms/tasks?kind=putaway&status=open")).json()
+    t = next(t for t in tasks if t["sku_code"] == "REBAR-10")
+    assert t["from_location_id"] == recv["id"] and t["qty"] == 100.0
+    done = await api.patch(f"/wms/tasks/{t['id']}", json={"status": "done", "to_location_id": perm["id"]})
+    assert done.status_code == 200 and done.json()["status"] == "done"
+    bal = {r["location_code"]: r["qty"] for r in (await api.get("/wms/balances?sku=REBAR-10")).json()["rows"]}
+    assert bal.get("A-10") == 100.0 and bal.get("RECV-01", 0) == 0.0
+
+    # put-away done без ячейки назначения → 400
+    t2 = (await api.post("/wms/tasks", json={"kind": "putaway", "sku_code": "X", "qty": 1,
+                                             "warehouse": "Минск", "from_location_id": recv["id"]})).json()
+    assert (await api.patch(f"/wms/tasks/{t2['id']}", json={"status": "done"})).status_code == 400
+
+    # pick → расход reason=pick
+    tp = (await api.post("/wms/tasks", json={"kind": "pick", "sku_code": "REBAR-10", "qty": 20,
+                                             "warehouse": "Минск", "from_location_id": perm["id"]})).json()
+    await api.patch(f"/wms/tasks/{tp['id']}", json={"status": "done"})
+    picks = (await api.get("/wms/movements?reason=pick")).json()
+    assert any(m["sku_code"] == "REBAR-10" and m["qty"] == 20.0 for m in picks)
+
+    # RBAC: создание задачи под wms.count
+    assert (await api.post("/wms/tasks", json={"kind": "pick", "sku_code": "X", "qty": 1},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
