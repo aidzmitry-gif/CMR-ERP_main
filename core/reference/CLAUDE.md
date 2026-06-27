@@ -20,9 +20,26 @@
 | `core/domain/reference.py` | ORM в схеме `public`: `ref_unit/currency/currency_rate/country/bank/vat_rate`; `ref_sku_version` (SCD2-история мастер-характеристик SKU, мягкий ключ `sku_code`) |
 | `core/domain/models.py` | `Sku.attributes` (JSONB — переменные характеристики номенклатуры) |
 | `core/services/sku_history.py` | `record_sku_version` — запись датированной версии (снимок мастер-полей `Sku`); единый путь записи истории из точки правки SKU |
-| `core/runtime/system_routes.py` | `GET /system/references` (по отделам), `GET /system/references/ai-catalog` (только `ai_exposed`) |
+| `core/services/reference_quality.py` | data-quality аудит (пропуски/дубли/битые ссылки/сироты + `score`), чистые SELECT |
+| `core/services/reference_query.py` | AI structural-query: lookup + `aggregate` (count/group_by, whitelist) + `resolve` (SKU + эффективные ссылки) |
+| `core/runtime/system_routes.py` | `GET /system/references` + `…/ai-catalog` + `…/quality[/{ref}]` (под `refs.view`), `POST …/query` |
+| `core/runtime/reference_routes.py` | generic-CRUD + `POST /{ref}/bulk` (dry_run-upsert) + модерация чувствительных версий (`SENSITIVE_REFS` → Approval) |
 | `migrations/versions/0037_reference_data.py` | таблицы reference-data + `sku.attributes` (JSONB+GIN на Postgres) |
 | `tests/test_reference_registry.py` | контракт реестра + системные роуты |
+
+## Возможности витрины (2026-06-28)
+
+- **Data-quality** — `GET /system/references/quality[/{ref}]` (право `refs.view`): по каждому
+  справочнику `score` + проблемы (пропуски/дубли/битые ссылки/сироты), дрилдаун с sample-ключами.
+  Фронт — `/erp/spravochniki/quality`. Контрагентов лишь читаем (merge — зона Синк).
+- **Bulk-upsert** — `POST /system/refs/{ref}/bulk` для простых справочников (НЕ контрагенты):
+  `dry_run` → план, идемпотентно, per-row аудит. Фронт — таб «Справочники-классификаторы» в импорте.
+- **Модерация** — правка ставок (`ref_vat_rate`/`ref_tnved`) создаёт Approval вместо записи
+  (human-in-the-loop через `core.services.approvals`). Фронт — `/erp/spravochniki/admin`.
+- **AI-агрегаты/resolve** — `reference.query` с `aggregate=count|group_by` (whitelist) и
+  `resolve=True` (SKU + эффективные ТН ВЭД/НДС/ед/страна одним ответом). Только чтение.
+- **Эффективная датировка** — `Account`/`Region` имеют `effective_from/effective_to` (мягкий
+  период действия в дополнение к `is_active`).
 
 ## Владение данными
 
