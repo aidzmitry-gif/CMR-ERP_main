@@ -66,8 +66,14 @@ _VERSIONED = {
 }
 # иерархические классификаторы (adjacency list): ref -> (model, поля)
 _HIERARCHICAL = {
-    "core.accounts": (Account, ("id", "code", "title", "kind", "parent_id")),
-    "core.regions": (Region, ("id", "code", "title", "kind", "parent_id")),
+    "core.accounts": (
+        Account,
+        ("id", "code", "title", "kind", "parent_id", "effective_from", "effective_to"),
+    ),
+    "core.regions": (
+        Region,
+        ("id", "code", "title", "kind", "parent_id", "effective_from", "effective_to"),
+    ),
 }
 
 

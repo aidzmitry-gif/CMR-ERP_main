@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import Date, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +42,21 @@ SYSTEM_WRITE = "system.write"
 
 def _row(obj, fields: tuple[str, ...]) -> dict:
     return {f: getattr(obj, f) for f in fields}
+
+
+def _coerce(model: type, field: str, value):
+    """ISO-строку → ``date`` для Date-колонок (JSON шлёт строки; простой CRUD их не парсил).
+
+    Прочие типы/значения возвращаем как есть; кривую дату — тоже как есть (валидацию отдаём БД).
+    """
+    if isinstance(value, str):
+        col = model.__table__.columns.get(field)
+        if col is not None and isinstance(col.type, Date):
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                return value
+    return value
 
 
 async def _by_key(session: AsyncSession, model: type, key_field: str, value):
@@ -97,7 +112,7 @@ def build_simple_ref_router(
         missing = [k for k in required if k not in payload]
         if missing:
             raise HTTPException(status_code=422, detail=f"не хватает полей: {', '.join(missing)}")
-        obj = model(**{k: payload[k] for k in editable if k in payload})
+        obj = model(**{k: _coerce(model, k, payload[k]) for k in editable if k in payload})
         session.add(obj)
         try:
             await session.flush()
@@ -123,7 +138,7 @@ def build_simple_ref_router(
         obj = await _by_key(session, model, key_field, code)
         for field in editable:
             if field in payload:
-                setattr(obj, field, payload[field])
+                setattr(obj, field, _coerce(model, field, payload[field]))
         _emit_change(request, session, model, "update", code, user.username)
         await session.commit()
         return _row(obj, fields)
@@ -173,11 +188,11 @@ def build_simple_ref_router(
                 conflicts.append({"key": key, "reason": "дубль ключа в наборе"})
                 continue
             seen.add(key)
+            # коэрция ISO-дат и пр.: сравнение/запись против типов модели, не сырых строк
+            coerced = {f: _coerce(model, f, raw[f]) for f in editable if f in raw}
             if key in existing:
                 obj = existing[key]
-                changes = {
-                    f: raw[f] for f in editable if f in raw and getattr(obj, f) != raw[f]
-                }
+                changes = {f: v for f, v in coerced.items() if getattr(obj, f) != v}
                 if not changes:
                     continue  # идемпотентность: нет изменений — не трогаем, не эмитим
                 would_update.append({"key": key, "changes": changes})
@@ -192,7 +207,7 @@ def build_simple_ref_router(
                     continue
                 would_create.append({"key": key})
                 if not dry_run:
-                    session.add(model(**{f: raw[f] for f in editable if f in raw}))
+                    session.add(model(**coerced))
                     _emit_change(request, session, model, "bulk_upsert", key, user.username)
         if dry_run:
             return {
@@ -323,8 +338,9 @@ def build_reference_router() -> APIRouter:
     router.include_router(
         build_simple_ref_router(
             Account,
-            fields=("id", "code", "title", "kind", "parent_id", "is_active"),
-            editable=("code", "title", "kind", "parent_id"),
+            fields=("id", "code", "title", "kind", "parent_id",
+                    "effective_from", "effective_to", "is_active"),
+            editable=("code", "title", "kind", "parent_id", "effective_from", "effective_to"),
             required=("code", "title"),
         ),
         prefix="/accounts",
@@ -332,8 +348,9 @@ def build_reference_router() -> APIRouter:
     router.include_router(
         build_simple_ref_router(
             Region,
-            fields=("id", "code", "title", "kind", "parent_id", "is_active"),
-            editable=("code", "title", "kind", "parent_id"),
+            fields=("id", "code", "title", "kind", "parent_id",
+                    "effective_from", "effective_to", "is_active"),
+            editable=("code", "title", "kind", "parent_id", "effective_from", "effective_to"),
             required=("code", "title"),
         ),
         prefix="/regions",

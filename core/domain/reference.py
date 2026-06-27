@@ -145,6 +145,11 @@ class Account(Base):
     title: Mapped[str] = mapped_column(String(255))
     kind: Mapped[str | None] = mapped_column(String(16))  # актив | пассив | активно-пассивный
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_account.id"))
+    # Датированный ввод/вывод из оборота (мягкий вывод дополняет is_active): счёт действует
+    # в периоде [effective_from, effective_to); NULL/NULL = бессрочно, end NULL = в силе. Не
+    # полноценный SCD2 (значения счёта не датируются по версиям) — только период действия.
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (
@@ -166,6 +171,10 @@ class Region(Base):
     title: Mapped[str] = mapped_column(String(255))
     kind: Mapped[str | None] = mapped_column(String(16))  # область | район | город
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_region.id"))
+    # Датированный ввод/вывод из оборота (мягкий вывод дополняет is_active): регион действует
+    # в периоде [effective_from, effective_to); end NULL = в силе (переименования/слияния районов).
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (

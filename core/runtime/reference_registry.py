@@ -270,12 +270,20 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
                 "parent_id", "Синтетический счёт", "number",
                 semantic="родительский счёт (синтетика); пусто = корень",
             ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода счёта в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
             _ACTIVE,
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
         description="План счетов бухучёта РБ (постановление Минфина №50): синтетика + субсчета "
-        "(иерархия parent_id). Используется финансовым модулем для проводок.",
+        "(иерархия parent_id), датированный ввод/вывод из оборота. Для проводок финмодуля.",
     ),
     Reference(
         key="core.regions",
@@ -291,12 +299,20 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
                 "parent_id", "Входит в", "number",
                 semantic="родительский регион (область→район→город); пусто = корень",
             ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода региона в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
             _ACTIVE,
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
-        description="Гео-справочник РБ (область→район→город, иерархия parent_id): адреса "
-        "контрагентов и территориальная аналитика продаж (territory).",
+        description="Гео-справочник РБ (область→район→город, иерархия parent_id), датированный "
+        "ввод/вывод из оборота: адреса контрагентов и территориальная аналитика (territory).",
     ),
 )
 
