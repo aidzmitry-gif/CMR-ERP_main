@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { Plus } from "lucide-react";
+import { Plus, Printer } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { createLocation, fetchLocations, locationLabel, type WmsLocation } from "@/lib/wms-ops";
@@ -51,6 +52,7 @@ export function WmsLocations({ initial }: { initial: WmsLocation[] }) {
               <th className="px-4 py-2 font-medium">Ячейка</th>
               <th className="px-4 py-2 font-medium">Описание</th>
               <th className="px-4 py-2 font-medium">Статус</th>
+              <th className="px-4 py-2 text-right font-medium" />
             </tr>
           </thead>
           <tbody>
@@ -76,6 +78,12 @@ export function WmsLocations({ initial }: { initial: WmsLocation[] }) {
                   >
                     {l.is_active ? "Активна" : "Архив"}
                   </span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <Link href={`/erp/wms/locations/${l.id}/label`}
+                    className="inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs text-muted hover:bg-sunken">
+                    <Printer size={13} /> Этикетка
+                  </Link>
                 </td>
               </tr>
             ))}
