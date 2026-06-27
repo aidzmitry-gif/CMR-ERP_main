@@ -49,6 +49,81 @@ async def test_wms(api):
     assert recv["cards"][0]["details"] and recv["cards"][0]["action"] == "Завершить приёмку"
 
 
+async def test_wms_stock_mirror(api, session):
+    """`/wms/stock` — зеркало 1С через шлюз: свободно = наличие − резерв, итоги, RBAC."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="AKB-60", title="Аккумулятор 60 Ач", unit="шт"))
+    session.add_all([
+        StockItem(sku_code="AKB-60", warehouse="Минск", qty_available=Decimal(41),
+                  qty_reserved=Decimal(13), qty_forecast=Decimal(0)),
+        StockItem(sku_code="AKB-60", warehouse="Гомель", qty_available=Decimal(18),
+                  qty_reserved=Decimal(0), qty_forecast=Decimal(5)),
+    ])
+    await session.commit()
+
+    data = (await api.get("/wms/stock")).json()
+    assert data["gateway"] is True and data["sku_count"] == 1
+    minsk = next(r for r in data["rows"] if r["warehouse"] == "Минск")
+    assert minsk["qty_free"] == 28.0  # 41 − 13
+    assert data["total_available"] == 59.0 and data["total_reserved"] == 13.0
+    # фильтр по складу
+    one = (await api.get("/wms/stock?warehouse=Гомель")).json()
+    assert {r["warehouse"] for r in one["rows"]} == {"Гомель"}
+
+    # RBAC: роль склада проходит (право wms.read), чужая роль — 403 на модуле
+    assert (await api.get("/wms/stock", headers={"X-User-Roles": "warehouse"})).status_code == 200
+    assert (await api.get("/wms/stock", headers={"X-User-Roles": "sales"})).status_code == 403
+
+
+async def test_wms_stock_no_gateway(api_no_gateways):
+    """Шлюз остатков отключён → честный пустой ответ (gateway=False), не 500."""
+    data = (await api_no_gateways.get("/wms/stock")).json()
+    assert data["gateway"] is False and data["rows"] == []
+
+
+async def test_wms_inventory(api, session):
+    """Инвентаризация: populate из 1С → факт → расхождение в деньгах → проведение; RBAC."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="AKB-60", title="Аккумулятор 60 Ач", unit="шт"))
+    session.add(StockItem(sku_code="AKB-60", warehouse="Минск",
+                          qty_available=Decimal(41), cost=Decimal(230)))
+    await session.commit()
+
+    # создать документ и наполнить ожидаемым из 1С
+    doc = (await api.post("/wms/inventory", json={"warehouse": "Минск"})).json()
+    assert doc["status"] == "open" and doc["number"].startswith("ИНВ-2026-")
+    det = (await api.post(f"/wms/inventory/{doc['id']}/populate")).json()
+    line = next(line for line in det["lines"] if line["sku_code"] == "AKB-60")
+    assert line["expected_qty"] == 41.0 and line["unit_cost"] == 230.0
+    assert line["counted_qty"] is None and line["variance"] is None
+
+    # внести факт → недостача 3 шт = −690 BYN
+    upd = (await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 38})).json()
+    assert upd["variance"] == -3.0 and upd["variance_value"] == -690.0
+    det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
+    assert det["summary"]["shortages"] == 1 and det["summary"]["shortage_value"] == -690.0
+
+    # провести → done; повторная правка строки запрещена (409)
+    done = (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()
+    assert done["status"] == "done" and done["completed_at"]
+    reedit = await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 40})
+    assert reedit.status_code == 409
+
+    # RBAC: пересчёт (wms.count) только у склада; логистика (только wms.read) — 403
+    assert (await api.post("/wms/inventory", json={"warehouse": "Минск"},
+                           headers={"X-User-Roles": "warehouse"})).status_code == 201
+    assert (await api.post("/wms/inventory", json={"warehouse": "Минск"},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
