@@ -14,11 +14,11 @@ async def test_procurement(api):
     board = (await api.get("/procurement/board")).json()
     assert [s["id"] for s in board["stages"]][0] == "need"
     assert sum(s["count"] for s in board["stages"]) >= 1
-    # стадия переговоров → Supplier Score на карточке
+    # балл поставщика на карточке — реальный (по supplier_id); без привязки поставщика — пусто
     await api.patch(f"/procurement/requests/{r.json()['id']}", json={"stage": "nego"})
     board2 = (await api.get("/procurement/board")).json()
     nego = next(s for s in board2["stages"] if s["id"] == "nego")
-    assert nego["cards"][0]["score"] == "Score 8.7"
+    assert nego["cards"][0]["score"] == ""  # supplier_id не задан → балла нет (не заглушка «8.7»)
 
 
 async def test_production(api):
@@ -47,6 +47,10 @@ async def test_wms(api):
     # на приёмке карточка получает soft-панель пересчёта и кнопку-действие
     recv = next(s for s in board["stages"] if s["id"] == "receiving")
     assert recv["cards"][0]["details"] and recv["cards"][0]["action"] == "Завершить приёмку"
+    # RBAC воронки операций: чтение — wms.read (логистика ок), запись — wms.count (логистика 403)
+    assert (await api.get("/wms/ops", headers={"X-User-Roles": "logistics"})).status_code == 200
+    assert (await api.post("/wms/ops", json={"title": "x"},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
 async def test_wms_stock_mirror(api, session):
@@ -368,10 +372,15 @@ async def test_wms_alerts(api, session):
         Sku(code="AKB-225", title="АКБ 225", unit="шт"),
         StockItem(sku_code="AKB-225", warehouse="Минск", qty_available=Decimal(0),
                   qty_reserved=Decimal(0), cost=Decimal(1280)),
+        # oversell в 1С: reserved > available → свободный клампится в 0, дефицит не раздувается
+        Sku(code="INOX-2", title="Нерж 2", unit="т"),
+        StockItem(sku_code="INOX-2", warehouse="Минск", qty_available=Decimal(3),
+                  qty_reserved=Decimal(5), cost=Decimal(9800)),
     ])
     await session.commit()
     await api.post("/wms/thresholds", json={"sku_code": "ZU-30A", "warehouse": "Минск", "min_qty": 5, "reorder_qty": 20})
     await api.post("/wms/thresholds", json={"sku_code": "AKB-225", "warehouse": "Минск", "min_qty": 3, "reorder_qty": 10})
+    await api.post("/wms/thresholds", json={"sku_code": "INOX-2", "warehouse": "Минск", "min_qty": 2, "reorder_qty": 4})
 
     al = (await api.get("/wms/alerts")).json()
     assert al["gateway"] is True
@@ -379,6 +388,9 @@ async def test_wms_alerts(api, session):
     assert by["ZU-30A"]["free_qty"] == 2.0 and by["ZU-30A"]["deficit"] == 3.0
     assert by["ZU-30A"]["severity"] == "below_min"
     assert by["AKB-225"]["severity"] == "out_of_stock" and by["AKB-225"]["deficit"] == 3.0
+    # oversell: free=max(3−5,0)=0, дефицит=2 (а не 4), severity=out_of_stock
+    assert by["INOX-2"]["free_qty"] == 0.0 and by["INOX-2"]["deficit"] == 2.0
+    assert by["INOX-2"]["severity"] == "out_of_stock"
 
     assert (await api.post("/wms/thresholds", json={"sku_code": "X"},
                            headers={"X-User-Roles": "logistics"})).status_code == 403
