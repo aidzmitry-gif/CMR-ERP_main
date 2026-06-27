@@ -384,6 +384,31 @@ async def test_wms_alerts(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_cycle_count(api, session):
+    """Запуск плана цикл-каунта → заполненный из 1С документ инвентаризации + сдвиг срока."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add_all([
+        Sku(code="ROLL-5", title="Рулон 5", unit="т"),
+        StockItem(sku_code="ROLL-5", warehouse="Гомель", qty_available=Decimal(30), cost=Decimal(2100)),
+    ])
+    await session.commit()
+    plan = (await api.post("/wms/cycle-plans",
+            json={"warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01"})).json()
+    det = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
+    assert det["number"].startswith("ИНВ-") and det["warehouse"] == "Гомель"
+    assert any(line["sku_code"] == "ROLL-5" and line["expected_qty"] == 30.0 for line in det["lines"])
+
+    p = next(p for p in (await api.get("/wms/cycle-plans")).json() if p["id"] == plan["id"])
+    assert p["next_due_date"] > "2020-01-01" and p["last_run_at"]  # срок сдвинут вперёд
+
+    assert (await api.post("/wms/cycle-plans", json={"warehouse": "X"},
+                           headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
