@@ -81,6 +81,45 @@ async def test_scorecard_score_computed_from_metrics(api):
     assert dpd["score"] == expected and dpd["grade"] == pricing.grade_for(expected)
 
 
+async def test_scorecard_edit_metrics_updates_score(api):
+    """Правка KPI пересчитывает балл/грейд: dpd → claims↑ → балл↓, грейд может ухудшиться."""
+    from modules.logistics import pricing
+
+    await api.post("/logistics/carriers/scorecard/seed")
+    before = next(
+        c for c in (await api.get("/logistics/carriers/scorecard?period=2026-06")).json()
+        if c["carrier_code"] == "dpd"
+    )
+    # резко увеличим долю претензий
+    r = await api.patch(
+        "/logistics/carriers/scorecard/dpd?period=2026-06",
+        json={"claims_ratio_pct": 50.0},
+    )
+    assert r.status_code == 200
+    after = r.json()
+    expected = pricing.score_carrier(
+        after["otd_pct"], after["damage_free_pct"],
+        after["billing_accuracy_pct"], after["claims_ratio_pct"],
+    )
+    assert after["score"] == expected and after["score"] < before["score"]
+    assert after["grade"] == pricing.grade_for(expected)
+
+
+async def test_scorecard_edit_404_for_missing(api):
+    await api.post("/logistics/carriers/scorecard/seed")
+    r = await api.patch(
+        "/logistics/carriers/scorecard/unknown?period=2026-06",
+        json={"otd_pct": 99.0},
+    )
+    assert r.status_code == 404
+
+
+async def test_scorecard_edit_requires_period(api):
+    await api.post("/logistics/carriers/scorecard/seed")
+    r = await api.patch("/logistics/carriers/scorecard/dpd", json={"otd_pct": 99.0})
+    assert r.status_code == 422
+
+
 async def test_scorecard_recompute_idempotent(api):
     await api.post("/logistics/carriers/scorecard/seed")
     before = (await api.get("/logistics/carriers/scorecard")).json()

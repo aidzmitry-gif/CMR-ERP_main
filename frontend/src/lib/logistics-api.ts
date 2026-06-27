@@ -259,6 +259,28 @@ export const fetchScorecard = (period: string) =>
   getJson<Scorecard[]>(`/logistics/carriers/scorecard?period=${encodeURIComponent(period)}`, []);
 export const seedScorecard = () =>
   postJson<Scorecard[]>("/logistics/carriers/scorecard/seed", undefined, []);
+export const recomputeScorecard = () =>
+  postJson<Scorecard[]>("/logistics/carriers/scorecard/recompute", undefined, []);
+
+export interface ScorecardMetricsPatch {
+  otd_pct?: number;
+  otif_pct?: number;
+  damage_free_pct?: number;
+  billing_accuracy_pct?: number;
+  claims_ratio_pct?: number;
+  shipments?: number;
+  cost_per_delivery?: number;
+}
+export const patchScorecardMetrics = (
+  carrierCode: string,
+  period: string,
+  patch: ScorecardMetricsPatch,
+) =>
+  patchJson<Scorecard | null>(
+    `/logistics/carriers/scorecard/${encodeURIComponent(carrierCode)}?period=${encodeURIComponent(period)}`,
+    patch,
+    null,
+  );
 
 // ─────────────────────────────── Аудит счетов ───────────────────────────────
 
@@ -285,6 +307,19 @@ export const fetchAudit = (period: string) =>
   getJson<AuditReport | null>(`/logistics/costs/audit?period=${encodeURIComponent(period)}`, null);
 export const seedAudit = () =>
   postJson<AuditEntry[]>("/logistics/costs/audit/seed", undefined, []);
+
+export interface AuditEntryCreate {
+  shipment_code: string;
+  carrier_code: string;
+  invoice_amount: number;
+  expected_amount?: number | null;   // если не задан — считается из тарифа (zone_code+weight_kg)
+  zone_code?: string;
+  weight_kg?: number;
+  reason?: string;
+}
+/** Зарегистрировать счёт перевозчика. На variance>0 бэк эмитит freight.audit_refund → finance. */
+export const createAuditEntry = (payload: AuditEntryCreate) =>
+  postJson<AuditEntry | null>("/logistics/costs/audit", payload, null);
 
 // ─────────────────────────────── Тендер (RFQ) ───────────────────────────────
 

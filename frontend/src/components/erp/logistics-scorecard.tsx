@@ -7,9 +7,12 @@ import { computeScorecardScore, scoreGrade } from "@/lib/logistics-domain";
 import {
   fetchAudit,
   fetchScorecard,
+  patchScorecardMetrics,
+  recomputeScorecard,
   seedScorecard,
   type AuditReport,
   type Scorecard,
+  type ScorecardMetricsPatch,
 } from "@/lib/logistics-api";
 import { formatByn } from "@/lib/format";
 
@@ -37,6 +40,54 @@ export function LogisticsScorecard() {
   async function onSeed() {
     setBusy(true);
     await seedScorecard();
+    await load(period);
+    setBusy(false);
+  }
+
+  const [editing, setEditing] = useState<string | null>(null);     // carrier_code or null
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  function startEdit(r: Scorecard) {
+    setEditing(r.carrier_code);
+    setDraft({
+      otd_pct: String(r.otd_pct),
+      otif_pct: String(r.otif_pct),
+      damage_free_pct: String(r.damage_free_pct),
+      billing_accuracy_pct: String(r.billing_accuracy_pct),
+      claims_ratio_pct: String(r.claims_ratio_pct),
+    });
+    setSaveError(null);
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+    setDraft({});
+    setSaveError(null);
+  }
+
+  async function saveEdit(carrierCode: string) {
+    setSaveError(null);
+    const patch: ScorecardMetricsPatch = {};
+    for (const key of ["otd_pct", "otif_pct", "damage_free_pct", "billing_accuracy_pct", "claims_ratio_pct"] as const) {
+      const v = parseFloat(draft[key]);
+      if (Number.isFinite(v)) patch[key] = v;
+    }
+    setBusy(true);
+    const updated = await patchScorecardMetrics(carrierCode, period, patch);
+    setBusy(false);
+    if (!updated) {
+      setSaveError("Не удалось сохранить KPI.");
+      return;
+    }
+    setEditing(null);
+    setDraft({});
+    await load(period);
+  }
+
+  async function onRecompute() {
+    setBusy(true);
+    await recomputeScorecard();
     await load(period);
     setBusy(false);
   }
@@ -72,6 +123,7 @@ export function LogisticsScorecard() {
             placeholder="ГГГГ-ММ"
             className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
+          <GhostButton onClick={onRecompute} busy={busy}>Пересчитать</GhostButton>
           <GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>
         </div>
       }
@@ -92,19 +144,40 @@ export function LogisticsScorecard() {
               </th>
               <th className="px-3 py-2 text-right font-medium">Балл</th>
               <th className="px-3 py-2 text-center font-medium">Грейд</th>
+              <th className="px-3 py-2 text-right font-medium" aria-label="Действия" />
             </tr>
           </thead>
           <tbody>
             {scored.map((r) => {
               const overpay = overpayByCarrier.get(r.carrier_code) ?? 0;
+              const isEditing = editing === r.carrier_code;
+              const field = (key: keyof ScorecardMetricsPatch & string) => (
+                <input
+                  type="number"
+                  step="0.1"
+                  value={draft[key] ?? ""}
+                  onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                  className="w-20 rounded border border-line bg-surface px-1.5 py-1 text-right text-sm text-ink outline-none focus:border-accent"
+                />
+              );
               return (
                 <tr key={r.carrier_code} className="border-b border-line last:border-0 hover:bg-sunken">
                   <td className="px-3 py-2 font-medium text-ink">{r.carrier_code}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{r.otd_pct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{r.otif_pct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{r.damage_free_pct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{r.billing_accuracy_pct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{r.claims_ratio_pct}%</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">
+                    {isEditing ? field("otd_pct") : `${r.otd_pct}%`}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">
+                    {isEditing ? field("otif_pct") : `${r.otif_pct}%`}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">
+                    {isEditing ? field("damage_free_pct") : `${r.damage_free_pct}%`}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">
+                    {isEditing ? field("billing_accuracy_pct") : `${r.billing_accuracy_pct}%`}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">
+                    {isEditing ? field("claims_ratio_pct") : `${r.claims_ratio_pct}%`}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted">{formatByn(r.cost_per_delivery)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {overpay > 0 ? (
@@ -119,12 +192,42 @@ export function LogisticsScorecard() {
                   <td className="px-3 py-2 text-center">
                     <GradeBadge grade={r.grade} />
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    {isEditing ? (
+                      <span className="inline-flex gap-1">
+                        <button
+                          onClick={() => saveEdit(r.carrier_code)}
+                          disabled={busy}
+                          className="rounded border border-accent bg-accent px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-ink disabled:opacity-60"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={busy}
+                          className="rounded border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:bg-sunken"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => startEdit(r)}
+                        className="text-xs text-accent-ink hover:underline"
+                      >
+                        ✏
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {saveError && (
+        <p className="mt-2 text-xs text-red-600">{saveError}</p>
+      )}
       {audit && audit.to_recover > 0 && (
         <p className="mt-2 text-xs text-muted">
           Всего к возврату за {period}:{" "}
