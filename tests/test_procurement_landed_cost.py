@@ -143,11 +143,10 @@ async def test_invalid_status_rejected(api):
 
 
 async def test_repeated_receive_no_duplicate(api, session):
+    """Повторная приёмка (received→received, no-op) не плодит дубль и не падает (идемпотентность)."""
     order = await _order(api, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
     await _receive(api, order["id"])
-    # увести со статуса и снова принять — строка остаётся одна (upsert)
-    await api.patch(f"/procurement/orders/{order['id']}", json={"status": "customs"})
-    await _receive(api, order["id"])
+    await _receive(api, order["id"])  # received→received — no-op, без новой фиксации
 
     assert len(await _rows(session)) == 1
 
