@@ -104,6 +104,29 @@ async def test_cannot_edit_received_order(api):
     assert r.status_code == 409  # принятый заказ не редактируется
 
 
+async def test_update_header_freight_and_eta(api):
+    o = await _order(
+        api,
+        lines=[
+            {"sku_code": "A", "qty": 10, "goods_value_byn": 100, "weight": 6},
+            {"sku_code": "B", "qty": 30, "goods_value_byn": 300, "weight": 14},
+        ],
+    )
+    r = await api.patch(f"/procurement/orders/{o['id']}/header", json={"freight_byn": 200, "eta_date": "2026-09-01"})
+    assert r.status_code == 200
+    assert r.json()["freight_byn"] == 200.0 and r.json()["eta_date"] == "2026-09-01"
+    # landed-preview учитывает новый фрахт (200 по весу → A unit 16.00)
+    prev = (await api.get(f"/procurement/orders/{o['id']}/landed-preview")).json()
+    by = {ln["sku_code"]: ln for ln in prev["lines"]}
+    assert by["A"]["unit_landed_cost_byn"] == 16.0
+
+
+async def test_update_header_received_409(api):
+    o = await _order(api, status="received", lines=[{"sku_code": "A", "qty": 1, "goods_value_byn": 100}])
+    r = await api.patch(f"/procurement/orders/{o['id']}/header", json={"freight_byn": 50})
+    assert r.status_code == 409
+
+
 async def test_landed_preview_no_fixation(api, session):
     """landed-preview считает распределение БЕЗ фиксации (строк LandedCost не появляется)."""
     o = await _order(
