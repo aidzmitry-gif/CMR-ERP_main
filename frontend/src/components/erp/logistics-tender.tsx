@@ -11,6 +11,7 @@ import {
   fetchRankedBids,
   fetchRecommendation,
   fetchRfqs,
+  negotiateBid,
   seedRfq,
   type AwardStrategy,
   type Bid,
@@ -90,6 +91,26 @@ export function LogisticsTender() {
     if (selected == null) return;
     setBusy(true);
     await awardRfq(selected, undefined, strategy);
+    await openRfq(selected);
+    await loadRfqs();
+    setBusy(false);
+  }
+
+  async function onNegotiate(carrierCode: string, currentPrice: number) {
+    if (selected == null) return;
+    const input = window.prompt(
+      `Контр-ставка для ${carrierCode} (текущая ${currentPrice} BYN): введите новую цену`,
+      String(currentPrice),
+    );
+    if (!input) return;
+    const next = parseFloat(input.replace(",", "."));
+    if (!Number.isFinite(next) || next <= 0) {
+      window.alert("Неверная сумма");
+      return;
+    }
+    const comment = window.prompt("Комментарий (опц.):", "") ?? "";
+    setBusy(true);
+    await negotiateBid(selected, carrierCode, next, comment);
     await openRfq(selected);
     await loadRfqs();
     setBusy(false);
@@ -225,6 +246,7 @@ export function LogisticsTender() {
                         Соотн.
                       </th>
                       <th className="px-3 py-2 text-right font-medium">Раунд</th>
+                      <th className="px-3 py-2 text-right font-medium" aria-label="Действие" />
                     </tr>
                   </thead>
                   <tbody>
@@ -251,6 +273,16 @@ export function LogisticsTender() {
                             {b.value_score != null ? Math.round(b.value_score * 100) : "—"}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted">{b.round}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              onClick={() => onNegotiate(b.carrier_code, b.price)}
+                              disabled={busy}
+                              className="rounded border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:bg-sunken disabled:opacity-60"
+                              title="Контр-ставка (новая цена → следующий раунд)"
+                            >
+                              Торг
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}

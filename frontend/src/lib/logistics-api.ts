@@ -406,6 +406,13 @@ export interface BroadcastResult {
 
 export const broadcastRfq = (id: number) =>
   postJson<BroadcastResult | null>(`/logistics/rfqs/${id}/broadcast`, undefined, null);
+/** Контр-ставка перевозчика: новый (сниженный) прайс → ставка следующего раунда. */
+export const negotiateBid = (id: number, carrierCode: string, newPrice: number, comment = "") =>
+  postJson<Bid | null>(
+    `/logistics/rfqs/${id}/negotiate`,
+    { carrier_code: carrierCode, new_price: newPrice, comment },
+    null,
+  );
 export type AwardStrategy = "cheapest" | "best_value";
 
 export const awardRfq = (id: number, carrierCode?: string, strategy: AwardStrategy = "cheapest") =>
