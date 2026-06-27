@@ -18,6 +18,13 @@ from core.services.auth import CurrentUser, require_permission
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
 _GROUP_PATH_MAX_DEPTH = 32
 
+#: свободные атрибуты карточки SKU, наследуемые от группы (ключи в Sku/Category.attributes).
+#: «производительские» (Производитель/Марка/Импортёр) + упаковка/габариты для калькулятора себеса.
+_INHERITABLE_ATTR_KEYS = (
+    "Производитель", "Марка", "Бренд", "Импортёр",
+    "Кол-во в коробке", "Габариты", "Объём",
+)
+
 router = APIRouter(tags=["system"])
 
 # Системные мутации (MDM/справочники) живут под открытым префиксом /system (его пропускает
@@ -331,6 +338,15 @@ async def sku_card(
     else:
         group_vat["rate"] = None
 
+    # Свободные атрибуты с наследованием от группы (Производитель/Марка/Импортёр, упаковка/габариты):
+    # свой ключ в Sku.attributes ∨ ключ группы вверх по дереву. {key: {value, source, group_*}} —
+    # только непустые (нигде не задан → не кладём). Карточка по ним рисует «↑ из группы» / «задано здесь».
+    effective_attrs: dict[str, dict] = {}
+    for key in _INHERITABLE_ATTR_KEYS:
+        eff = await tnved.effective_group_attr(session, sku, key)
+        if eff["value"] is not None:
+            effective_attrs[key] = eff
+
     group_path = await _group_breadcrumb(session, sku.category_id)
     sync = await _sku_sync_link(session, sku.id)
 
@@ -362,6 +378,7 @@ async def sku_card(
         "effective_unit": effective_unit,  # {value, source, group_*} — ед.изм своя ∨ от группы
         "effective_country": effective_country,  # {value, source, group_*} — страна своя ∨ от группы
         "group_vat": group_vat,  # {value(код), rate, source, group_*} — НДС по умолч. группы или None
+        "effective_attrs": effective_attrs,  # {ключ: {value, source: own|group, group_*}} — своё ∨ от группы
         "shelf_life_days": sku.shelf_life_days,
         "is_active": sku.is_active,
         "attributes": sku.attributes,

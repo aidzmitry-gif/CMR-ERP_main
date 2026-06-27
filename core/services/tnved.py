@@ -51,6 +51,32 @@ async def resolve(session: AsyncSession, code: str, on: date) -> dict | None:
     }
 
 
+def _none_result() -> dict:
+    return {"value": None, "source": None, "group_code": None, "group_name": None}
+
+
+async def _walk_up_groups(session: AsyncSession, category_id: int, extract) -> dict:
+    """Подъём по дереву групп от ``category_id`` вверх, отдаёт первое непустое ``extract(cat)``.
+
+    ``extract`` — функция ``(NomenclatureCategory) -> value | None`` (колонка/JSONB-ключ).
+    Архивная группа (``is_active=False``) не «дарит» значение вниз, но подъём продолжается.
+    Возврат: ``{value, source: "group"|None, group_code, group_name}``. Ограничен ``_MAX_DEPTH``
+    (защита от цикла ``parent_id``).
+    """
+    cat_id: int | None = category_id
+    for _ in range(_MAX_DEPTH):
+        cat = await session.get(NomenclatureCategory, cat_id)
+        if cat is None:
+            break
+        val = extract(cat)
+        if val and cat.is_active:
+            return {"value": val, "source": "group", "group_code": cat.code, "group_name": cat.name}
+        if cat.parent_id is None:
+            break
+        cat_id = cat.parent_id
+    return _none_result()
+
+
 async def effective_group_field(session: AsyncSession, sku: Sku, field: str) -> dict:
     """Эффективное значение «общего поля группы» для товара: своё, иначе унаследованное.
 
@@ -65,23 +91,30 @@ async def effective_group_field(session: AsyncSession, sku: Sku, field: str) -> 
     if own:
         return {"value": own, "source": "own", "group_code": None, "group_name": None}
     if sku.category_id is None:
-        return {"value": None, "source": None, "group_code": None, "group_name": None}
+        return _none_result()
+    return await _walk_up_groups(session, sku.category_id, lambda cat: getattr(cat, field, None))
 
-    cat_id = sku.category_id
-    for _ in range(_MAX_DEPTH):
-        cat = await session.get(NomenclatureCategory, cat_id)
-        if cat is None:
-            break
-        val = getattr(cat, field, None)
-        if val and cat.is_active:
-            return {
-                "value": val, "source": "group",
-                "group_code": cat.code, "group_name": cat.name,
-            }
-        if cat.parent_id is None:
-            break
-        cat_id = cat.parent_id
-    return {"value": None, "source": None, "group_code": None, "group_name": None}
+
+async def effective_group_attr(session: AsyncSession, sku: Sku, key: str) -> dict:
+    """Эффективное значение свободного атрибута товара: свой ключ в ``Sku.attributes``, иначе группы.
+
+    ``key`` — ключ в JSONB-словаре ``attributes`` и товара, и группы (``"Производитель"``,
+    ``"Кол-во в коробке"``, …). Собственное непустое значение товара побеждает; иначе подъём по
+    дереву групп ищет ключ в ``NomenclatureCategory.attributes``. Возврат — как у
+    ``effective_group_field``: ``{value, source: own|group|None, group_code, group_name}``.
+    Значения нормализуются в строку для отдачи в JSON (атрибуты свободные, тип не гарантирован).
+    """
+    own = (sku.attributes or {}).get(key)
+    if own not in (None, ""):
+        return {"value": str(own), "source": "own", "group_code": None, "group_name": None}
+    if sku.category_id is None:
+        return _none_result()
+
+    def _from_group(cat: NomenclatureCategory):
+        v = (cat.attributes or {}).get(key)
+        return str(v) if v not in (None, "") else None
+
+    return await _walk_up_groups(session, sku.category_id, _from_group)
 
 
 async def effective_code_for_sku(session: AsyncSession, sku: Sku) -> dict:

@@ -240,8 +240,9 @@ def build_reference_router() -> APIRouter:
         build_simple_ref_router(
             NomenclatureCategory,
             fields=("id", "code", "name", "parent_id", "tnved_code",
-                    "vat_code", "unit", "country", "is_active"),
-            editable=("code", "name", "parent_id", "tnved_code", "vat_code", "unit", "country"),
+                    "vat_code", "unit", "country", "attributes", "is_active"),
+            editable=("code", "name", "parent_id", "tnved_code", "vat_code",
+                      "unit", "country", "attributes"),
             required=("code", "name"),
         ),
         prefix="/nomenclature-groups",

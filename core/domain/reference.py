@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric, String
+from sqlalchemy import JSON, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -195,6 +195,11 @@ class NomenclatureCategory(Base):
     vat_code: Mapped[str | None] = mapped_column(String(16))  # → ref_vat_rate (НДС по умолч.)
     unit: Mapped[str | None] = mapped_column(String(16))  # → ref_unit (ед.изм по умолч.)
     country: Mapped[str | None] = mapped_column(String(8))  # → ref_country (страна происхожд.)
+    # Свободные «общие данные группы» (Производитель/Марка/Импортёр, Кол-во в коробке, Габариты, …) —
+    # JSONB-хвост по умолчанию, как у Sku.attributes. Товар без своего ключа наследует от группы
+    # вверх по parent_id (см. core/services/tnved.effective_group_attr). Не EAV; типизированные
+    # «горячие» ссылки (НДС/ед/страна/ТН ВЭД) — отдельными колонками выше.
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (

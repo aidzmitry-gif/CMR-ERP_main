@@ -604,6 +604,9 @@ export interface SkuCard {
   effective_unit: GroupInherited; // ед.изм: своя ∨ от группы (+ источник)
   effective_country: GroupInherited; // страна: своя ∨ от группы (+ источник)
   group_vat: GroupVatInherited; // НДС по умолч. группы (код+ставка+источник); value null — не задан
+  // свободные атрибуты (Производитель/Марка/Импортёр, упаковка/габариты): своё ∨ от группы (+источник).
+  // Только непустые ключи; нигде не задан → ключа нет. Карточка рисует «↑ из группы»/«задано здесь».
+  effective_attrs: Record<string, GroupInherited>;
   shelf_life_days: number | null;
   is_active: boolean;
   attributes: Record<string, unknown>; // переменные характеристики (JSONB-хвост)

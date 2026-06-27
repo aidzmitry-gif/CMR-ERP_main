@@ -256,3 +256,92 @@ async def test_sku_card_exposes_group_defaults(api, session):
     assert card["effective_country"]["source"] == "group"
     assert card["group_vat"]["value"] == "НДС20"
     assert card["group_vat"]["rate"] == 20.0  # резолвлено из ref_vat_rate на сегодня
+
+
+# ── Свободные атрибуты группы (Производитель/коробка/габариты) — JSONB-наследование ──
+
+
+async def test_effective_group_attr_own_wins(session):
+    """Свой ключ в Sku.attributes побеждает значение группы."""
+    grp = NomenclatureCategory(code="GAT1", name="Батарейки",
+                               attributes={"Производитель": "GP Batteries"})
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="ATT-1", title="АКБ", category_id=grp.id,
+              attributes={"Производитель": "Panasonic"})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Panasonic"
+    assert eff["source"] == "own"
+
+
+async def test_effective_group_attr_inherited(session):
+    """Нет своего ключа → наследуем от группы вверх по дереву (число → строка)."""
+    root = NomenclatureCategory(code="GAT10", name="Импорт",
+                                attributes={"Производитель": "Космос", "Кол-во в коробке": 10})
+    session.add(root)
+    await session.flush()
+    child = NomenclatureCategory(code="GAT11", name="Подгруппа", parent_id=root.id)  # пусто
+    session.add(child)
+    await session.flush()
+    sku = Sku(code="ATT-2", title="Товар", category_id=child.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Космос"
+    assert eff["source"] == "group"
+    assert eff["group_code"] == "GAT10"  # от корня, не от пустого child
+    # значение нормализуется в строку (атрибуты свободного типа)
+    box = await tnved.effective_group_attr(session, sku, "Кол-во в коробке")
+    assert box["value"] == "10"
+
+
+async def test_effective_group_attr_skips_archived(session):
+    """Архивная группа не дарит атрибут вниз; подъём идёт к активному предку."""
+    root = NomenclatureCategory(code="GAT20", name="Импорт",
+                                attributes={"Производитель": "Космос"})
+    session.add(root)
+    await session.flush()
+    mid = NomenclatureCategory(code="GAT21", name="Старое", parent_id=root.id,
+                               attributes={"Производитель": "Устаревший"}, is_active=False)
+    session.add(mid)
+    await session.flush()
+    sku = Sku(code="ATT-3", title="Товар", category_id=mid.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Космос"  # архивный mid пропущен
+    assert eff["group_code"] == "GAT20"
+
+
+async def test_effective_group_attr_none_when_nowhere(session):
+    """Ключа нет ни у товара, ни в группах → value None (не выдумываем)."""
+    grp = NomenclatureCategory(code="GAT30", name="Прочее", attributes={})
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="ATT-4", title="X", category_id=grp.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff == {"value": None, "source": None, "group_code": None, "group_name": None}
+
+
+async def test_sku_card_exposes_effective_attrs(api, session):
+    """Карточка SKU отдаёт effective_attrs: своё (own) + унаследованное от группы (group)."""
+    grp = NomenclatureCategory(code="GE1", name="Группа",
+                               attributes={"Производитель": "GP Batteries", "Кол-во в коробке": "10 шт"})
+    session.add(grp)
+    await session.flush()
+    session.add(Sku(code="GE-SKU", title="Товар", category_id=grp.id,
+                    attributes={"Марка": "GP Ultra"}))  # своя марка, производитель — от группы
+    await session.commit()
+
+    attrs = (await api.get("/system/sku/GE-SKU")).json()["effective_attrs"]
+    assert attrs["Производитель"] == {
+        "value": "GP Batteries", "source": "group", "group_code": "GE1", "group_name": "Группа",
+    }
+    assert attrs["Кол-во в коробке"]["value"] == "10 шт"
+    assert attrs["Кол-во в коробке"]["source"] == "group"
+    assert attrs["Марка"]["value"] == "GP Ultra"
+    assert attrs["Марка"]["source"] == "own"

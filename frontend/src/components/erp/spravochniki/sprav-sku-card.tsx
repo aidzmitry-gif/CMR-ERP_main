@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
-import type { FieldProvenance, SkuBatchRow, SkuCard } from "@/lib/reference-data";
+import type { FieldProvenance, GroupInherited, SkuBatchRow, SkuCard } from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
 import { ProvenanceBadge } from "./provenance-badge";
@@ -238,6 +238,24 @@ function attrValue(v: unknown): string {
   return String(v);
 }
 
+/** Поле свободного атрибута (своё ∨ от группы). Пусто → честное «нет данных». */
+function AttrField({ label, attr }: { label: string; attr?: GroupInherited }) {
+  if (!attr?.value) return <Field label={label} value="нет данных" unset />;
+  return (
+    <Field
+      label={label}
+      value={attr.value}
+      mark={
+        attr.source === "group" ? (
+          <InheritMark title={`По умолч. группы «${attr.group_name ?? ""}»`} />
+        ) : (
+          <LocalMark />
+        )
+      }
+    />
+  );
+}
+
 const TABS = [
   { id: "overview", label: "Обзор" },
   { id: "specs", label: "Характеристики" },
@@ -249,12 +267,22 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
+// Ключи attributes с отдельным рендером (производитель/упаковка/габариты — свои Field'ы с
+// наследованием; страна — effective_country). Исключаем их из таблицы JSONB-хвоста, чтобы не дублить.
+const DEDICATED_ATTR_KEYS = new Set([
+  "Производитель", "Марка", "Бренд", "Импортёр",
+  "Кол-во в коробке", "Габариты", "Объём",
+  "Страна происхождения", "Страна",
+]);
+
 export function SpravSkuCard({ card }: { card: SkuCard }) {
   const [tab, setTab] = useState<TabId>("overview");
 
   const prov = card.provenance ?? {};
   const counts = provenanceCounts(prov);
-  const attrs = Object.entries(card.attributes ?? {});
+  // JSONB-хвост для таблицы тех.характеристик — БЕЗ ключей, у которых есть отдельное поле
+  // (производитель/упаковка/габариты — отдельные Field'ы с наследованием; страна — effective_country).
+  const attrs = Object.entries(card.attributes ?? {}).filter(([k]) => !DEDICATED_ATTR_KEYS.has(k));
   const eff = card.effective_tnved ?? {
     code: card.tnved_code ?? null,
     source: card.tnved_code ? ("own" as const) : null,
@@ -277,12 +305,14 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
       ? Math.round(((stock.price - stock.cost) / stock.price) * 100)
       : null;
 
-  // «Производительские» атрибуты для блока «Сведения о производителе» (таб Обзор) —
-  // подмножество JSONB-attributes по известным ключам; пусто → честная заглушка.
-  const makerKeys = ["Производитель", "Марка", "Бренд", "Импортёр", "Страна происхождения", "Страна"];
+  // Эффективные атрибуты (своё ∨ от группы) — backend отдаёт только непустые ключи.
+  const effAttrs = card.effective_attrs ?? {};
+  // «Производительские» поля для блока «Сведения о производителе» (таб Обзор) — по известным
+  // ключам; берём эффективное значение (унаследованное от группы помечается «↑ из группы»).
+  const makerKeys = ["Производитель", "Марка", "Бренд", "Импортёр"];
   const makerAttrs = makerKeys
-    .map((k) => [k, card.attributes?.[k]] as const)
-    .filter(([, v]) => v != null && v !== "");
+    .map((k) => [k, effAttrs[k]] as const)
+    .filter(([, v]) => v?.value != null && v.value !== "");
 
   // Заполненность карточки — доля непустых «горячих» полей (демо-метрика полноты golden record).
   const fillChecks = [
@@ -492,13 +522,24 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   {makerAttrs.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {makerAttrs.map(([k, v]) => (
-                        <Field key={k} label={k} value={attrValue(v)} />
+                        <Field
+                          key={k}
+                          label={k}
+                          value={v.value}
+                          mark={
+                            v.source === "group" ? (
+                              <InheritMark title={`По умолч. группы «${v.group_name ?? ""}»`} />
+                            ) : (
+                              <LocalMark />
+                            )
+                          }
+                        />
                       ))}
                     </div>
                   ) : (
                     <p className="text-[12px] text-faint">
-                      Производитель, марка, импортёр и страна происхождения появятся, когда будут
-                      заполнены на товаре или унаследованы от группы. Сейчас не заданы.
+                      Производитель, марка, импортёр появятся, когда будут заполнены на товаре или
+                      унаследованы от группы. Сейчас не заданы.
                     </p>
                   )}
                 </Collapsible>
@@ -614,9 +655,9 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                     mono={card.weight_kg != null}
                     prov={prov.weight_kg}
                   />
-                  <Field label="Габариты (Д×Ш×В)" value="нет данных" unset />
-                  <Field label="Объём" value="нет данных" unset />
-                  <Field label="Кол-во в коробке" value="нет данных" unset />
+                  <AttrField label="Габариты (Д×Ш×В)" attr={effAttrs["Габариты"]} />
+                  <AttrField label="Объём" attr={effAttrs["Объём"]} />
+                  <AttrField label="Кол-во в коробке" attr={effAttrs["Кол-во в коробке"]} />
                 </div>
 
                 <p className="mt-5 text-[13.5px] font-bold text-ink">Учёт и налоги</p>
