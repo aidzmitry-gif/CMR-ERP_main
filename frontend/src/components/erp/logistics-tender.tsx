@@ -3,18 +3,21 @@
 import { useEffect, useState } from "react";
 
 import { Card, EmptyState, GhostButton, Loading, Pill } from "@/components/erp/logistics-ui";
-import { bestBid, bidSavings, rankBids, rfqStatusLabel } from "@/lib/logistics-domain";
+import { bestBid, bidSavings, rfqStatusLabel } from "@/lib/logistics-domain";
 import {
   awardRfq,
   broadcastRfq,
-  fetchBids,
   fetchInvites,
+  fetchRankedBids,
+  fetchRecommendation,
   fetchRfqs,
   seedRfq,
+  type AwardStrategy,
   type Bid,
   type BroadcastResult,
   type Invite,
   type Rfq,
+  type TenderRecommendation,
 } from "@/lib/logistics-api";
 import { formatByn, formatNumber } from "@/lib/format";
 
@@ -34,7 +37,8 @@ export function LogisticsTender() {
 
   const [selected, setSelected] = useState<number | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
-  const [bids, setBids] = useState<Bid[]>([]);
+  const [bids, setBids] = useState<Bid[]>([]);          // best-fit порядок (из /bids/ranked)
+  const [recommendation, setRecommendation] = useState<TenderRecommendation | null>(null);
   const [lastBroadcast, setLastBroadcast] = useState<BroadcastResult | null>(null);
 
   async function loadRfqs() {
@@ -53,9 +57,14 @@ export function LogisticsTender() {
 
   async function openRfq(id: number) {
     setSelected(id);
-    const [inv, bd] = await Promise.all([fetchInvites(id), fetchBids(id)]);
+    const [inv, bd, rec] = await Promise.all([
+      fetchInvites(id),
+      fetchRankedBids(id),
+      fetchRecommendation(id),
+    ]);
     setInvites(inv);
     setBids(bd);
+    setRecommendation(rec);
   }
 
   async function onSeed() {
@@ -77,11 +86,10 @@ export function LogisticsTender() {
     setBusy(false);
   }
 
-  async function onAward() {
+  async function onAward(strategy: AwardStrategy) {
     if (selected == null) return;
     setBusy(true);
-    const best = bestBid(bids);
-    await awardRfq(selected, best?.carrier_code);
+    await awardRfq(selected, undefined, strategy);
     await openRfq(selected);
     await loadRfqs();
     setBusy(false);
@@ -91,9 +99,10 @@ export function LogisticsTender() {
   if (rfqs.length === 0)
     return <EmptyState text="Тендеров (RFQ) пока нет." onSeed={onSeed} seedLabel="Создать демо-тендер" busy={busy} />;
 
-  const ranked = rankBids(bids);
+  // bids уже отсортированы best-fit (цена↔качество) бэкендом; best = самый дешёвый (для экономии).
   const best = bestBid(bids);
   const savings = bidSavings(bids);
+  const hasQuality = bids.some((b) => (b.value_score ?? 0) > 0);
   const current = rfqs.find((r) => r.id === selected) ?? null;
 
   return (
@@ -134,14 +143,23 @@ export function LogisticsTender() {
           title={`Ставки · ${current.number}`}
           hint={`${rfqStatusLabel(current.status)} · приглашено ${invites.length}`}
           action={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <GhostButton onClick={onBroadcast} busy={busy}>Разослать</GhostButton>
               <button
-                onClick={onAward}
+                onClick={() => onAward("cheapest")}
                 disabled={busy || !best}
+                title="Присудить самому дешёвому предложению"
+                className="rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
+              >
+                По цене
+              </button>
+              <button
+                onClick={() => onAward("best_value")}
+                disabled={busy || !best}
+                title="Присудить по соотношению цена↔качество (best-fit по scorecard)"
                 className="rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
               >
-                Присудить лучшему
+                По соотношению
               </button>
             </div>
           }
@@ -152,10 +170,40 @@ export function LogisticsTender() {
             </p>
           ) : (
             <>
+              {recommendation && (
+                <div className="mb-3 rounded-lg border border-accent-soft bg-accent-soft/40 p-3">
+                  <div className="mb-1 flex items-center gap-2">
+                    <Pill text="Рекомендация" tone="violet" />
+                    <span className="text-xs text-muted">почему этот перевозчик</span>
+                  </div>
+                  <p className="text-sm text-ink">{recommendation.rationale}</p>
+                  {!recommendation.same_carrier && (
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-md border border-line bg-surface px-2.5 py-1.5">
+                        <div className="text-muted">Дешевле всех</div>
+                        <div className="font-semibold text-ink">{recommendation.cheapest.carrier}</div>
+                        <div className="tabular-nums text-ink">{formatByn(recommendation.cheapest.price)}</div>
+                      </div>
+                      <div className="rounded-md border border-accent bg-surface px-2.5 py-1.5">
+                        <div className="text-accent-ink">Надёжнее (best-fit)</div>
+                        <div className="font-semibold text-ink">{recommendation.best_value.carrier}</div>
+                        <div className="tabular-nums text-ink">
+                          {formatByn(recommendation.best_value.price)}
+                          {recommendation.reliability_premium > 0 && (
+                            <span className="ml-1 text-faint">
+                              (+{formatByn(recommendation.reliability_premium)} за надёжность)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mb-3 flex flex-wrap gap-4 text-sm">
                 {best && (
                   <span>
-                    Лучшая: <span className="font-semibold text-ink">{best.carrier}</span> ·{" "}
+                    Дешевле всех: <span className="font-semibold text-ink">{best.carrier}</span> ·{" "}
                     <span className="font-semibold text-emerald-600">{formatByn(best.price)}</span>
                   </span>
                 )}
@@ -166,35 +214,42 @@ export function LogisticsTender() {
                 )}
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
+                <table className="w-full min-w-[620px] text-sm">
                   <thead className="border-b border-line text-left text-xs text-muted">
                     <tr>
                       <th className="px-3 py-2 font-medium">Перевозчик</th>
                       <th className="px-3 py-2 text-right font-medium">Цена</th>
                       <th className="px-3 py-2 text-right font-medium">Срок</th>
                       <th className="px-3 py-2 font-medium">ТС</th>
+                      <th className="px-3 py-2 text-right font-medium" title="Соотношение цена↔качество, 0–100">
+                        Соотн.
+                      </th>
                       <th className="px-3 py-2 text-right font-medium">Раунд</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {ranked.map((b) => {
-                      const isBest = best != null && b.carrier_code === best.carrier_code && b.price === best.price;
+                    {bids.map((b) => {
+                      const isCheapest = best != null && b.carrier_code === best.carrier_code && b.price === best.price;
                       return (
                         <tr
                           key={b.id}
                           className={
-                            "border-b border-line last:border-0 " + (isBest ? "bg-emerald-50/50" : "")
+                            "border-b border-line last:border-0 " + (b.is_best_value ? "bg-accent-soft/40" : "")
                           }
                         >
                           <td className="px-3 py-2">
-                            <span className="flex items-center gap-2 font-medium text-ink">
+                            <span className="flex flex-wrap items-center gap-1.5 font-medium text-ink">
                               {b.carrier}
-                              {isBest && <Pill text="лучшая" tone="emerald" />}
+                              {b.is_best_value && <Pill text="по соотношению" tone="violet" />}
+                              {isCheapest && <Pill text="дешевле" tone="emerald" />}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right font-semibold tabular-nums text-ink">{formatByn(b.price)}</td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted">{b.eta_days} дн</td>
                           <td className="px-3 py-2 text-muted">{b.vehicle_class}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted">
+                            {b.value_score != null ? Math.round(b.value_score * 100) : "—"}
+                          </td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted">{b.round}</td>
                         </tr>
                       );
@@ -202,6 +257,11 @@ export function LogisticsTender() {
                   </tbody>
                 </table>
               </div>
+              {!hasQuality && (
+                <p className="mt-2 text-xs text-faint">
+                  Соотношение нейтрально: нет данных scorecard за период — заполните вкладку «Scorecard».
+                </p>
+              )}
             </>
           )}
 
