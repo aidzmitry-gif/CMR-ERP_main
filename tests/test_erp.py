@@ -226,6 +226,39 @@ async def test_wms_receipt_qc(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_receipt_accept(api, session):
+    """Проведение приёмки: приход по факту QC (брак не на балансе), идемпотентно."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_goods_received
+
+    await on_goods_received(
+        {"item": "AKB-100", "qty": 15, "warehouse": "Брест", "entity_ref": "purchase:9"},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+    rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
+    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
+    await api.post(
+        f"/wms/receipts/{rid}/qc",
+        json={"decisions": [{"line_id": line["id"], "accepted_qty": 12, "rejected_qty": 3,
+                             "reject_reason": "скол"}]},
+    )
+    acc = await api.post(f"/wms/receipts/{rid}/accept")
+    assert acc.status_code == 200 and acc.json()["status"] == "accepted"
+
+    # оперативный остаток вырос ровно на принятые 12 (брак 3 на свободный остаток НЕ попал)
+    bal = (await api.get("/wms/balances?sku=AKB-100")).json()
+    assert sum(r["qty"] for r in bal["rows"] if r["sku_code"] == "AKB-100") == 12.0
+    mv = (await api.get("/wms/movements?reason=receipt")).json()
+    assert any(m["doc_ref"].startswith("ПРМ-") and m["qty"] == 12.0 for m in mv)
+
+    # идемпотентность: повторный accept не плодит движения
+    again = await api.post(f"/wms/receipts/{rid}/accept")
+    assert again.status_code == 200
+    assert len((await api.get("/wms/movements?reason=receipt")).json()) == len(mv)
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
