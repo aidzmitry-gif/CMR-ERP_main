@@ -26,6 +26,7 @@ from core.domain.reference import (
     CurrencyRate,
     NomenclatureCategory,
     Region,
+    SkuVersion,
     TnvedCode,
     Unit,
     VatRate,
@@ -278,5 +279,23 @@ def build_reference_router() -> APIRouter:
             ),
         ),
         prefix="/tnved",
+    )
+    # История мастер-характеристик SKU — версионная (SCD2): датированные снимки полей товара.
+    # Запись версий — через core.services.sku_history.record_sku_version (из точки правки SKU);
+    # этот роутер даёт чтение (список/current/as-of) + ручное добавление версии.
+    router.include_router(
+        build_versioned_ref_router(
+            SkuVersion,
+            key_field="sku_code",
+            value_fields=(
+                "title", "unit", "category_id", "weight_kg",
+                "tnved_code", "shelf_life_days", "attributes",
+            ),
+            list_fields=(
+                "id", "sku_code", "title", "unit", "category_id", "weight_kg",
+                "tnved_code", "shelf_life_days", "attributes", "start_date", "end_date",
+            ),
+        ),
+        prefix="/sku-history",
     )
     return router

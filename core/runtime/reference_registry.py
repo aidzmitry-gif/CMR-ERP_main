@@ -161,6 +161,36 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         description="Номенклатура (товарные позиции) + характеристики.",
     ),
     Reference(
+        key="core.sku_history",
+        title="История номенклатуры",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/sku-history",
+        columns=(
+            ReferenceColumn(
+                "sku_code", "Код товара", "string", editable=False,
+                semantic="natural key номенклатуры (core.skus)",
+            ),
+            _TITLE,
+            ReferenceColumn("unit", "Ед.", "string"),
+            ReferenceColumn(
+                "category_id", "Группа", "number",
+                semantic="группа номенклатуры на дату версии (core.nomenclature_groups)",
+            ),
+            ReferenceColumn("weight_kg", "Вес, кг", "number"),
+            ReferenceColumn("tnved_code", "ТН ВЭД", "string", semantic="код ТН ВЭД на дату версии"),
+            ReferenceColumn("shelf_life_days", "Срок годн., дн.", "number"),
+            ReferenceColumn("start_date", "Действует с", "date"),
+            ReferenceColumn("end_date", "По", "date", semantic="пусто = текущая версия"),
+        ),
+        permissions=("refs.view", "refs.edit"),
+        versioned=True,
+        ai_exposed=True,
+        description="Датированные версии мастер-характеристик номенклатуры (SCD2): документ "
+        "«на дату» видит характеристики, действовавшие тогда. Только мастер-данные "
+        "(цена/остаток = операционные, истина 1С — не здесь).",
+    ),
+    Reference(
         key="core.nomenclature_groups",
         title="Группы номенклатуры",
         department="Общие",

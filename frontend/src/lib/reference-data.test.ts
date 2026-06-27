@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCategoryTree,
+  changedFields,
   flattenCatalog,
   isCurrentVersion,
   sortVersionsDesc,
@@ -9,7 +10,23 @@ import {
   type NomenclatureGroup,
   type ReferenceCatalog,
   type ReferenceMeta,
+  type SkuVersionRow,
 } from "./reference-data";
+
+function version(over: Partial<SkuVersionRow> = {}): SkuVersionRow {
+  return {
+    start_date: "2026-01-01",
+    end_date: null,
+    title: "Реле 12В",
+    unit: "шт",
+    category_id: 1,
+    weight_kg: 0.2,
+    tnved_code: "8536490000",
+    shelf_life_days: null,
+    attributes: {},
+    ...over,
+  };
+}
 
 function meta(key: string): ReferenceMeta {
   return {
@@ -105,5 +122,27 @@ describe("buildCategoryTree", () => {
 
   it("пустой список → пустое дерево", () => {
     expect(buildCategoryTree([])).toEqual([]);
+  });
+});
+
+describe("changedFields", () => {
+  it("самая ранняя версия (older=null) → пусто", () => {
+    expect(changedFields(version(), null)).toEqual([]);
+  });
+
+  it("изменения типизированных полей помечаются подписями", () => {
+    const older = version({ title: "Реле 12В", weight_kg: 0.2 });
+    const newer = version({ title: "Реле 12В (2 шт)", weight_kg: 0.25 });
+    expect(changedFields(newer, older)).toEqual(["Наименование", "Вес, кг"]);
+  });
+
+  it("без изменений → пусто", () => {
+    expect(changedFields(version(), version())).toEqual([]);
+  });
+
+  it("изменения в свободных attributes — по ключу", () => {
+    const older = version({ attributes: { Производитель: "Omron" } });
+    const newer = version({ attributes: { Производитель: "TE", Корпус: "DIP" } });
+    expect(changedFields(newer, older).sort()).toEqual(["Корпус", "Производитель"]);
   });
 });

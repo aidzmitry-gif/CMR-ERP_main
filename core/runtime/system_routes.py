@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_titles
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
-from core.domain.reference import NomenclatureCategory, VatRate
+from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
 from core.services import mdm, reference_query, scd2, tnved
@@ -374,6 +374,29 @@ async def sku_card(
         except Exception:  # noqa: BLE001 — нет фасада/партий → карточка без партий, не 500
             batches = None
 
+    # История мастер-характеристик (SCD2): датированные версии, новая — первой. Пусто, пока
+    # версий не записывали (record_sku_version из точки правки SKU). Только мастер-данные.
+    history = [
+        {
+            "start_date": v.start_date,
+            "end_date": v.end_date,
+            "title": v.title,
+            "unit": v.unit,
+            "category_id": v.category_id,
+            "weight_kg": v.weight_kg,
+            "tnved_code": v.tnved_code,
+            "shelf_life_days": v.shelf_life_days,
+            "attributes": v.attributes,
+        }
+        for v in (
+            await session.execute(
+                select(SkuVersion)
+                .where(SkuVersion.sku_code == code)
+                .order_by(SkuVersion.start_date.desc())
+            )
+        ).scalars().all()
+    ]
+
     return {
         "code": sku.code,
         "title": sku.title,
@@ -396,6 +419,7 @@ async def sku_card(
         "sync": sync,  # {origin, state, last_synced_at, external_ref} или None — синк из 1С
         "stock": stock,  # {rows, total_available, price, cost, …} из 1С или None — нет остатков
         "batches": batches,  # {rows, total_qty, nearest_expiry} партии+FEFO или None — нет партий
+        "history": history,  # [{start_date, end_date, …}] версии мастер-характеристик (SCD2), новые сверху
     }
 
 

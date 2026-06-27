@@ -205,3 +205,35 @@ class NomenclatureCategory(Base):
     __table_args__ = (
         Index("ix_ref_nom_category_parent", "parent_id"),
     )
+
+
+class SkuVersion(Base):
+    """История мастер-характеристик номенклатуры — датированная (SCD Type 2).
+
+    Снимок мастер-полей ``Sku`` (наименование, ед., группа, вес, ТН ВЭД, срок годности,
+    свободные характеристики) с полуоткрытым интервалом ``[start_date, end_date)``; текущая —
+    ``end_date IS NULL``. Документ «на дату» видит характеристики, действовавшие тогда (как
+    курс/НДС). Натуральный ключ — **мягкий** ``sku_code`` (без FK к ``sku.id``, как
+    ``vat_code``/``tnved_code``): резолв в reference_query/scd2, не трогает схему ``Sku``.
+
+    Операционные данные (цена/остаток/себестоимость) сюда НЕ кладём — у них другой владелец
+    (1С/склад) и жизненный цикл; история — только мастер-характеристики (шов §1).
+    """
+
+    __tablename__ = "ref_sku_version"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # surrogate key
+    sku_code: Mapped[str] = mapped_column(String(64))  # natural key (мягкая ссылка на sku.code)
+    title: Mapped[str] = mapped_column(String(255))
+    unit: Mapped[str] = mapped_column(String(16))
+    category_id: Mapped[int | None] = mapped_column()  # мягкая ссылка (без FK — снимок, не связь)
+    weight_kg: Mapped[float | None] = mapped_column()
+    tnved_code: Mapped[str | None] = mapped_column(String(16))
+    shelf_life_days: Mapped[int | None] = mapped_column()
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    start_date: Mapped[date] = mapped_column(Date)  # действует с (вкл.)
+    end_date: Mapped[date | None] = mapped_column(Date)  # по (искл.); NULL = текущая
+
+    __table_args__ = (
+        Index("ix_ref_sku_version_lookup", "sku_code", "start_date"),
+    )

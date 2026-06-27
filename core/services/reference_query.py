@@ -23,6 +23,7 @@ from core.domain.reference import (
     CurrencyRate,
     NomenclatureCategory,
     Region,
+    SkuVersion,
     TnvedCode,
     Unit,
     VatRate,
@@ -54,6 +55,14 @@ _VERSIONED = {
         "code",
         ("code", "name", "duty_rate", "vat_code", "excise", "unit", "start_date", "end_date"),
     ),
+    "core.sku_history": (
+        SkuVersion,
+        "sku_code",
+        (
+            "sku_code", "title", "unit", "category_id", "weight_kg",
+            "tnved_code", "shelf_life_days", "attributes", "start_date", "end_date",
+        ),
+    ),
 }
 # иерархические классификаторы (adjacency list): ref -> (model, поля)
 _HIERARCHICAL = {
@@ -78,8 +87,9 @@ async def query(
     """Структурный lookup по справочнику ``ref`` — возвращает точное значение(я).
 
     - простые (``core.units``/...): ``key``=code → запись; без key → список активных;
-    - версионные (``core.currency_rates``/``core.vat_rates``): ``key`` + ``as_of`` → версия,
-      действовавшая на дату (или текущая без ``as_of``), с периодом ``start_date/end_date``;
+    - версионные (``core.currency_rates``/``core.vat_rates``/``core.sku_history``): ``key`` +
+      ``as_of`` → версия, действовавшая на дату (или текущая без ``as_of``), с периодом
+      ``start_date/end_date``; для ``core.sku_history`` ``key`` — код товара (sku_code);
     - ``core.counterparties``: ``key``=УНП или ``name`` → эталоны (active, не слитые);
     - ``core.skus``: ``key``=code → позиция номенклатуры (с ``category_id`` — группой);
     - ``core.nomenclature_groups``: ``key``=code → группа; без key → активные группы (дерево).

@@ -17,8 +17,9 @@
 | `core/runtime/contract.py` | dataclass'ы `Reference`, `ReferenceColumn` — метаданные справочника |
 | `core/runtime/core.py` | `Core.register_reference` (атрибуция текущему модулю), `Core.register_owned_reference(owner, …)` (публичный путь вне loader'а), реестр `core.references`, `RegisteredReference` |
 | `core/runtime/reference_registry.py` | системные справочники ядра (`SYSTEM_REFERENCES`) + `register_system_references(core)`, вызывается в `app.create_app` |
-| `core/domain/reference.py` | ORM в схеме `public`: `ref_unit/currency/currency_rate/country/bank/vat_rate` |
+| `core/domain/reference.py` | ORM в схеме `public`: `ref_unit/currency/currency_rate/country/bank/vat_rate`; `ref_sku_version` (SCD2-история мастер-характеристик SKU, мягкий ключ `sku_code`) |
 | `core/domain/models.py` | `Sku.attributes` (JSONB — переменные характеристики номенклатуры) |
+| `core/services/sku_history.py` | `record_sku_version` — запись датированной версии (снимок мастер-полей `Sku`); единый путь записи истории из точки правки SKU |
 | `core/runtime/system_routes.py` | `GET /system/references` (по отделам), `GET /system/references/ai-catalog` (только `ai_exposed`) |
 | `migrations/versions/0037_reference_data.py` | таблицы reference-data + `sku.attributes` (JSONB+GIN на Postgres) |
 | `tests/test_reference_registry.py` | контракт реестра + системные роуты |

@@ -590,6 +590,19 @@ export interface SkuBatches {
   nearest_expiry: string | null; // ближайший срок «годен до» среди партий
 }
 
+/** Версия истории мастер-характеристик SKU (SCD2): снимок полей за период [start, end). */
+export interface SkuVersionRow {
+  start_date: string;
+  end_date: string | null; // null → текущая версия
+  title: string;
+  unit: string | null;
+  category_id: number | null;
+  weight_kg: number | null;
+  tnved_code: string | null;
+  shelf_life_days: number | null;
+  attributes: Record<string, unknown>;
+}
+
 /** Карточка номенклатуры: горячие типизированные поля + JSON-хвост + себестоимость (фасад). */
 export interface SkuCard {
   code: string;
@@ -615,6 +628,7 @@ export interface SkuCard {
   sync: SkuSync | null; // синк из 1С: происхождение/статус; null — связи нет
   stock: SkuStock | null; // остатки/цена/себес по складам (из 1С); null — нет остатков
   batches: SkuBatches | null; // партии закупки (lot/batch) + FEFO; null — партий нет
+  history: SkuVersionRow[]; // версии мастер-характеристик (SCD2), новые сверху ([] — версий нет)
 }
 
 /** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */
@@ -803,6 +817,36 @@ export function isCurrentVersion(row: { end_date: string | null }): boolean {
 /** Версии по убыванию даты начала (новая — первой), как отдаёт backend-список. */
 export function sortVersionsDesc<T extends { start_date: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => b.start_date.localeCompare(a.start_date));
+}
+
+/** Типизированные мастер-поля версии SKU и их подписи (для таймлайна истории). */
+export const SKU_VERSION_FIELDS: { key: keyof SkuVersionRow; label: string }[] = [
+  { key: "title", label: "Наименование" },
+  { key: "unit", label: "Ед." },
+  { key: "category_id", label: "Группа" },
+  { key: "weight_kg", label: "Вес, кг" },
+  { key: "tnved_code", label: "ТН ВЭД" },
+  { key: "shelf_life_days", label: "Срок годн." },
+];
+
+/** Подписи полей, изменившихся в версии `newer` относительно предыдущей (более старой) `older`.
+ * `older=null` (самая ранняя версия) → пусто. Сравнивает типизированные поля + ключи attributes. */
+export function changedFields(newer: SkuVersionRow, older: SkuVersionRow | null): string[] {
+  if (!older) return [];
+  const changed: string[] = [];
+  for (const { key, label } of SKU_VERSION_FIELDS) {
+    if (newer[key] !== older[key]) changed.push(label);
+  }
+  const keys = new Set([
+    ...Object.keys(newer.attributes ?? {}),
+    ...Object.keys(older.attributes ?? {}),
+  ]);
+  for (const k of keys) {
+    if (JSON.stringify(newer.attributes?.[k]) !== JSON.stringify(older.attributes?.[k])) {
+      changed.push(k);
+    }
+  }
+  return changed;
 }
 
 /** Сколько всего дублей-кандидатов на слияние (members сверх эталона) во всех кластерах. */

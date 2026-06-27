@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
+import { changedFields } from "@/lib/reference-data";
 import type { FieldProvenance, GroupInherited, SkuBatchRow, SkuCard } from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
@@ -931,12 +932,75 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
         )}
 
         {/* ──────── ТАБ: ИСТОРИЯ ──────── */}
-        {tab === "history" && (
-          <EmptyState
-            title="🕘 Аудит изменений"
-            hint="Журнал изменений полей (было → стало, кто, когда, источник 1С/ERP) появится, когда для номенклатуры включат аудит. Происхождение по полям уже видно во вкладке «Обзор» (блок «Происхождение полей»)."
-          />
-        )}
+        {tab === "history" &&
+          (card.history.length > 0 ? (
+            <Card>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[13.5px] font-bold text-ink">🕘 История характеристик</p>
+                <Badge tone="violet">SCD2</Badge>
+              </div>
+              <p className="mt-1 text-[12px] text-muted">
+                Датированные версии мастер-полей: документ «на дату» видит характеристики,
+                действовавшие тогда. Цена/остаток — операционные (истина 1С), здесь не ведутся.
+              </p>
+              <ol className="mt-3 space-y-3">
+                {card.history.map((v, i) => {
+                  const older = card.history[i + 1] ?? null; // история по убыванию: следующая — старее
+                  const changes = changedFields(v, older);
+                  const current = v.end_date === null;
+                  return (
+                    <li key={`${v.start_date}-${i}`} className="rounded-xl bg-sunken p-3.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={current ? "ok" : "mut"}>{current ? "текущая" : "архив"}</Badge>
+                        <span className="text-[12.5px] font-semibold text-ink">
+                          с {fmtDate(v.start_date)}
+                          {v.end_date ? ` по ${fmtDate(v.end_date)}` : ""}
+                        </span>
+                        {older === null ? (
+                          <Badge tone="info">первая версия</Badge>
+                        ) : changes.length > 0 ? (
+                          <span className="text-[11px] text-faint">
+                            изменено: {changes.join(", ")}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                        <Field label="Наименование" value={v.title} />
+                        <Field label="Ед." value={v.unit ?? "—"} />
+                        <Field
+                          label="Вес, кг"
+                          value={v.weight_kg != null ? String(v.weight_kg) : "—"}
+                          mono={v.weight_kg != null}
+                          unset={v.weight_kg == null}
+                        />
+                        <Field
+                          label="Код ТН ВЭД"
+                          value={v.tnved_code ?? "—"}
+                          mono={!!v.tnved_code}
+                          unset={!v.tnved_code}
+                        />
+                        <Field
+                          label="Срок годн., дн."
+                          value={v.shelf_life_days != null ? String(v.shelf_life_days) : "—"}
+                          mono={v.shelf_life_days != null}
+                          unset={v.shelf_life_days == null}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+              <p className="mt-3 border-t border-line pt-3 text-[12px] text-faint">
+                Происхождение по полям (источник 1С/ERP) — во вкладке «Обзор». Журнал «кто/когда»
+                правил — отдельная проекция событий справочника.
+              </p>
+            </Card>
+          ) : (
+            <EmptyState
+              title="🕘 История характеристик (SCD2)"
+              hint="Датированных версий по этому товару пока нет — появятся, когда мастер-поля номенклатуры начнут версионировать при правке. Документ «на дату» будет видеть характеристики, действовавшие тогда. Происхождение по полям уже видно во вкладке «Обзор»."
+            />
+          ))}
       </div>
     </div>
   );
