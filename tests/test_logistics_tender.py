@@ -135,6 +135,21 @@ async def test_award_best_value_strategy(api):
     assert best.json()["carrier_code"] == "dpd" and best.json()["price"] == 610
 
 
+async def test_rfq_recommendation_dumping_flag(api):
+    # 5 ставок: belpost демпинг 60, остальные 95..120 → флаг dumping_risk
+    await api.post("/logistics/carriers/scorecard/seed")
+    rfq = await _new_rfq(api)
+    for code, price in [("belpost", 60), ("evropochta", 95), ("cdek", 100),
+                         ("autolight", 105), ("dpd", 120)]:
+        await api.post(f"/logistics/rfqs/{rfq['id']}/bids",
+                       json={"carrier_code": code, "price": price})
+    rec = (await api.get(f"/logistics/rfqs/{rfq['id']}/recommendation")).json()
+    assert rec["median_price"] == 100
+    assert rec["cheapest_deviation_pct"] == 40.0
+    assert rec["dumping_risk"] is True
+    assert "демпинг" in rec["rationale"] or "медиан" in rec["rationale"]
+
+
 async def test_rfq_recommendation_premium_and_rationale(api):
     await api.post("/logistics/carriers/scorecard/seed")
     rfq = await _new_rfq(api)

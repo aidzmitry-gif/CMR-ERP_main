@@ -86,3 +86,32 @@ def test_rank_bids_missing_score_is_neutral():
         [{"id": 1, "carrier_code": "x", "price": 100}], {}
     )
     assert ranked[0][1] == round(0.6 * 1.0 + 0.4 * 0.5, 4)
+
+
+def test_bid_risk_dumping_flagged_when_below_median():
+    # 5 ставок, медиана 100, дешёвая 70 → 30% ниже → флаг демпинга
+    bids = [{"carrier_code": str(i), "price": p} for i, p in enumerate([70, 95, 100, 105, 120])]
+    risk = pricing.bid_risk(bids[0], bids)
+    assert risk["median"] == 100 and risk["deviation_pct"] == 30.0
+    assert risk["is_suspiciously_cheap"] is True
+
+
+def test_bid_risk_no_dump_when_few_bids():
+    # 2 ставки — мало для надёжного флага демпинга даже при сильном отклонении
+    bids = [{"carrier_code": "a", "price": 50}, {"carrier_code": "b", "price": 100}]
+    risk = pricing.bid_risk(bids[0], bids)
+    assert risk["is_suspiciously_cheap"] is False
+
+
+def test_bid_risk_no_dump_when_close_to_median():
+    # 4 ставки, дешёвая на 10% ниже медианы — норма, не демпинг
+    bids = [{"carrier_code": str(i), "price": p} for i, p in enumerate([90, 95, 105, 110])]
+    risk = pricing.bid_risk(bids[0], bids)
+    assert risk["deviation_pct"] == 10.0 and risk["is_suspiciously_cheap"] is False
+
+
+def test_bid_risk_single_bid_no_signal():
+    # одна ставка → нет медианы для сравнения → нет сигналов
+    bid = {"carrier_code": "x", "price": 100}
+    risk = pricing.bid_risk(bid, [bid])
+    assert risk["is_suspiciously_cheap"] is False

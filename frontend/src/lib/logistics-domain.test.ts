@@ -4,6 +4,7 @@ import {
   auditSummary,
   auditVariance,
   bestBid,
+  bidRisk,
   bidSavings,
   computeScorecardScore,
   nextRfqStatus,
@@ -97,6 +98,33 @@ describe("logistics-domain · ставки тендера", () => {
     expect(bidSavings(bids)).toBe(500); // 1200 − 700
     expect(bidSavings([bid({ price: 500 })])).toBe(0);
     expect(bidSavings([])).toBe(0);
+  });
+
+  it("bidRisk: ≥25% ниже медианы при ≥3 ставках → флаг демпинга", () => {
+    const all: Bid[] = [70, 95, 100, 105, 120].map((p, i) =>
+      bid({ carrier_code: String(i), price: p }),
+    );
+    const r = bidRisk(all[0], all);
+    expect(r.median).toBe(100);
+    expect(r.deviationPct).toBe(30);
+    expect(r.isSuspiciouslyCheap).toBe(true);
+  });
+
+  it("bidRisk: 2 ставки — мало для флага даже при сильном отклонении", () => {
+    const all: Bid[] = [bid({ price: 50 }), bid({ price: 100 })];
+    expect(bidRisk(all[0], all).isSuspiciouslyCheap).toBe(false);
+  });
+
+  it("bidRisk: близко к медиане → не демпинг", () => {
+    const all: Bid[] = [90, 95, 105, 110].map((p) => bid({ price: p }));
+    const r = bidRisk(all[0], all);
+    expect(r.deviationPct).toBe(10);
+    expect(r.isSuspiciouslyCheap).toBe(false);
+  });
+
+  it("bidRisk: одна ставка — нет медианы, нет сигналов", () => {
+    const one = bid({ price: 100 });
+    expect(bidRisk(one, [one]).isSuspiciouslyCheap).toBe(false);
   });
 });
 

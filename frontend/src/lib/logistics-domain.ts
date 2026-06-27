@@ -73,6 +73,39 @@ export function bidSavings(bids: Bid[]): number {
   return round2(Math.max(...prices) - Math.min(...prices));
 }
 
+/** Порог «подозрительно дёшево»: ≥25% ниже медианы при ≥3 ставках = риск демпинга. */
+export const DUMPING_THRESHOLD_PCT = 25;
+export const DUMPING_MIN_BIDS = 3;
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const n = s.length;
+  const mid = Math.floor(n / 2);
+  return n % 2 ? s[mid] : round2((s[mid - 1] + s[mid]) / 2);
+}
+
+export interface BidRisk {
+  median: number;
+  deviationPct: number;
+  isSuspiciouslyCheap: boolean;
+}
+
+/** Риск-признаки ставки: дельта от медианы (% дешевле = +) + флаг демпинга.
+ *  Зеркало backend `pricing.bid_risk` (формула и пороги совпадают). */
+export function bidRisk(bid: Bid, all: Bid[]): BidRisk {
+  const prices = all.map((b) => b.price).filter((p) => p > 0);
+  const m = median(prices);
+  if (m <= 0 || bid.price <= 0) return { median: m, deviationPct: 0, isSuspiciouslyCheap: false };
+  const deviationPct = round2(((m - bid.price) / m) * 100);
+  return {
+    median: m,
+    deviationPct,
+    isSuspiciouslyCheap:
+      prices.length >= DUMPING_MIN_BIDS && deviationPct >= DUMPING_THRESHOLD_PCT,
+  };
+}
+
 // ─────────────────────────────── Scorecard перевозчика ───────────────────────────────
 
 export interface ScoreMetrics {

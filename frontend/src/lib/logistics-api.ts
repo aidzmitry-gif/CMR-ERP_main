@@ -299,6 +299,9 @@ export interface TenderRecommendation {
   reliability_premium: number;   // доплата best_value к самому дешёвому (цена надёжности)
   same_carrier: boolean;
   rationale: string;
+  median_price?: number;             // медиана ставок (опорная цена тендера)
+  cheapest_deviation_pct?: number;    // на сколько % дешевле медианы самая дешёвая (≥ 0)
+  dumping_risk?: boolean;             // флаг: подозрительно дёшево (риск срыва/демпинга)
 }
 
 export interface AwardResult {
