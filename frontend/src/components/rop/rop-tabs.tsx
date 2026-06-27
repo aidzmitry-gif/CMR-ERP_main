@@ -6,6 +6,7 @@ import Link from "next/link";
 const TABS: { key: string; label: string; href?: string }[] = [
   { key: "kanban", label: "Канбан", href: "/crm/deals" },
   { key: "overview", label: "Обзор РОП", href: "/crm/rop" },
+  { key: "scoreboard", label: "Скорборд", href: "/crm/rop/scoreboard" },
   { key: "planning", label: "Планирование", href: "/crm/rop/planning" },
   { key: "pace", label: "Темп", href: "/crm/rop/pace" },
   { key: "cash", label: "Деньги", href: "/crm/rop/cash" },
@@ -17,7 +18,7 @@ const TABS: { key: string; label: string; href?: string }[] = [
 export function RopTabs({
   active,
 }: {
-  active: "overview" | "planning" | "pace" | "cash" | "activity" | "stages" | "loss";
+  active: "overview" | "scoreboard" | "planning" | "pace" | "cash" | "activity" | "stages" | "loss";
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-line">

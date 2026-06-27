@@ -310,22 +310,45 @@ def _demo_leads() -> list[Lead]:
 
 
 def _kpi_targets() -> list[KpiTarget]:
+    # ~15 дневных показателей менеджера/РОП (регламент заказчика, [[sales-deals-real-spec]]).
+    # icon/tone — из ограниченных фронт-юнионов (KpiIcon/KpiTone), чтобы mapKpi и полоса KPI
+    # не падали; деньги (unit="money") форматируются в BYN на скорборде.
     D = Decimal
     return [
         KpiTarget(key="calls_key", title="Звонки ключевым клиентам", target=D("40"), unit="count", icon="phone-key", tone="blue", sort_order=1),
         KpiTarget(key="calls_all", title="Всего звонков", target=D("100"), unit="count", icon="phone", tone="indigo", sort_order=2),
-        KpiTarget(key="ship_plan", title="План по сумме отгрузки", target=D("8000000"), unit="money", icon="ruble", tone="green", sort_order=3),
-        KpiTarget(key="calls_cold", title="Холодные звонки", target=D("60"), unit="count", icon="snow", tone="cyan", sort_order=4),
-        KpiTarget(key="requests", title="Обработка заявок", target=D("30"), unit="count", icon="doc", tone="slate", sort_order=5),
+        KpiTarget(key="calls_cold", title="Холодные звонки", target=D("60"), unit="count", icon="snow", tone="cyan", sort_order=3),
+        KpiTarget(key="requests", title="Обработка заявок", target=D("30"), unit="count", icon="doc", tone="slate", sort_order=4),
+        KpiTarget(key="new_leads", title="Новых лидов принято", target=D("25"), unit="count", icon="phone", tone="cyan", sort_order=5),
+        KpiTarget(key="qualified", title="Квалифицировано лидов", target=D("15"), unit="count", icon="doc", tone="indigo", sort_order=6),
+        KpiTarget(key="quotes", title="Подготовлено цен/КП", target=D("20"), unit="count", icon="doc", tone="blue", sort_order=7),
+        KpiTarget(key="meetings", title="Встреч проведено", target=D("5"), unit="count", icon="doc", tone="slate", sort_order=8),
+        KpiTarget(key="invoices_sent", title="Счетов отправлено", target=D("12"), unit="count", icon="doc", tone="blue", sort_order=9),
+        KpiTarget(key="contracts", title="Договоров заключено", target=D("3"), unit="count", icon="doc", tone="green", sort_order=10),
+        KpiTarget(key="won_count", title="Сделок выиграно", target=D("4"), unit="count", icon="doc", tone="green", sort_order=11),
+        KpiTarget(key="tasks_done", title="Задач закрыто", target=D("18"), unit="count", icon="doc", tone="slate", sort_order=12),
+        KpiTarget(key="ship_plan", title="План по сумме отгрузки", target=D("8000000"), unit="money", icon="ruble", tone="green", sort_order=13),
+        KpiTarget(key="invoices_sum", title="Сумма выставленных счетов", target=D("3000000"), unit="money", icon="ruble", tone="green", sort_order=14),
+        KpiTarget(key="won_sum", title="Сумма выигранных сделок", target=D("2000000"), unit="money", icon="ruble", tone="green", sort_order=15),
     ]
 
 
 def _activities() -> list[Activity]:
     acts: list[Activity] = []
-    for key, n in (("calls_key", 24), ("calls_all", 58), ("calls_cold", 32), ("requests", 18)):
+    counts = (
+        ("calls_key", 24), ("calls_all", 58), ("calls_cold", 32), ("requests", 18),
+        ("new_leads", 16), ("qualified", 9), ("quotes", 13), ("meetings", 3),
+        ("invoices_sent", 7), ("contracts", 2), ("won_count", 3), ("tasks_done", 11),
+    )
+    for key, n in counts:
         acts += [Activity(kpi_key=key, owner="Иван Петров", value=Decimal("1"), date=KPI_DATE) for _ in range(n)]
-    for value in (2_500_000, 1_700_000, 1_000_000):
-        acts.append(Activity(kpi_key="ship_plan", owner="Иван Петров", value=Decimal(value), date=KPI_DATE))
+    money = (
+        ("ship_plan", (2_500_000, 1_700_000, 1_000_000)),
+        ("invoices_sum", (1_200_000, 900_000)),
+        ("won_sum", (1_100_000, 500_000)),
+    )
+    for key, values in money:
+        acts += [Activity(kpi_key=key, owner="Иван Петров", value=Decimal(v), date=KPI_DATE) for v in values]
     return acts
 
 
