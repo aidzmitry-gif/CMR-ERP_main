@@ -133,3 +133,23 @@ async def test_award_best_value_strategy(api):
     await api.post(f"/logistics/rfqs/{rfq2['id']}/bids", json={"carrier_code": "dpd", "price": 610})
     best = await api.post(f"/logistics/rfqs/{rfq2['id']}/award", json={"strategy": "best_value"})
     assert best.json()["carrier_code"] == "dpd" and best.json()["price"] == 610
+
+
+async def test_rfq_recommendation_premium_and_rationale(api):
+    await api.post("/logistics/carriers/scorecard/seed")
+    rfq = await _new_rfq(api)
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "belpost", "price": 600})
+    await api.post(f"/logistics/rfqs/{rfq['id']}/bids", json={"carrier_code": "dpd", "price": 610})
+    rec = (await api.get(f"/logistics/rfqs/{rfq['id']}/recommendation")).json()
+    assert rec["cheapest"]["carrier_code"] == "belpost"
+    assert rec["best_value"]["carrier_code"] == "dpd"
+    assert rec["reliability_premium"] == 10 and rec["same_carrier"] is False
+    assert "BYN" in rec["rationale"]
+    # совпадение дёшево=надёжно → same_carrier, доплата 0
+    rfq2 = await _new_rfq(api)
+    await api.post(f"/logistics/rfqs/{rfq2['id']}/bids", json={"carrier_code": "dpd", "price": 500})
+    rec2 = (await api.get(f"/logistics/rfqs/{rfq2['id']}/recommendation")).json()
+    assert rec2["same_carrier"] is True and rec2["reliability_premium"] == 0
+    # нет ставок → 404
+    rfq3 = await _new_rfq(api)
+    assert (await api.get(f"/logistics/rfqs/{rfq3['id']}/recommendation")).status_code == 404

@@ -109,6 +109,9 @@ async def test_receive_emits_landed_cost_calculated(api, session):
     assert payload["sku_code"] == "EMIT-1"
     assert payload["unit_landed_cost_byn"] == "150.00"  # JSON-safe (Decimal → str)
     assert payload["purchase_order_id"] == order["id"]
+    # qty + total — Финансам для landed-маржи (unit×qty)
+    assert Decimal(payload["qty"]) == Decimal("10")
+    assert Decimal(payload["total_landed_byn"]) == Decimal("1500.00")
 
 
 async def test_zero_qty_line_skipped(api, session):
