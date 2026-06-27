@@ -18,29 +18,30 @@ async def test_tnved_in_catalog(api):
     assert by_key["core.tnved"]["endpoint"] == "/system/refs/tnved"
 
 
-async def test_tnved_versioning_via_router(api):
+async def test_tnved_versioning_router_moderated_and_reads(api, session):
     base = "/system/refs/tnved"
-    # первая версия (открытая)
+    # ТН ВЭД — чувствительный ref (пошлина = деньги/налог): добавление версии через API
+    # не применяется сразу, а уходит на согласование (human-in-the-loop).
     r = await api.post(
         f"{base}/versions",
         json={"code": "8507100000", "start_date": "2024-01-01", "name": "Аккумуляторы",
               "duty_rate": "5.0", "vat_code": "НДС20", "unit": "шт"},
     )
-    assert r.status_code == 200
-    # ставка снижена с 2026 — новая версия закрывает первую
-    r = await api.post(
-        f"{base}/versions",
-        json={"code": "8507100000", "start_date": "2026-01-01", "name": "Аккумуляторы",
-              "duty_rate": "0.0", "vat_code": "НДС20", "unit": "шт"},
-    )
-    assert r.status_code == 200
+    assert r.json()["status"] == "pending_approval"
+    assert (await api.get(f"{base}?key=8507100000")).json() == []  # без согласования не записано
 
-    # текущая версия — ставка 0
+    # SCD2-чтение (current/as-of) на версиях, заведённых напрямую (сидирование / после согласования)
+    session.add_all([
+        TnvedCode(code="8507100000", name="Аккумуляторы", duty_rate=5, vat_code="НДС20",
+                  unit="шт", start_date=date(2024, 1, 1), end_date=date(2026, 1, 1)),
+        TnvedCode(code="8507100000", name="Аккумуляторы", duty_rate=0, vat_code="НДС20",
+                  unit="шт", start_date=date(2026, 1, 1), end_date=None),
+    ])
+    await session.commit()
+
     cur = (await api.get(f"{base}/current", params={"key": "8507100000"})).json()
     assert float(cur["duty_rate"]) == 0.0
     assert cur["end_date"] is None
-
-    # на дату внутри первого периода → старая ставка 5%
     old = (await api.get(f"{base}/as-of", params={"key": "8507100000", "on": "2025-06-01"})).json()
     assert float(old["duty_rate"]) == 5.0
 

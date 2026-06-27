@@ -81,6 +81,33 @@ def _emit_change(request: Request, session, model, action: str, key, actor: str)
     )
 
 
+#: чувствительные справочники — правка ставок/пошлин = деньги/налог (приоритет #1-2), не
+#: применяется сразу, а уходит на согласование (human-in-the-loop). Только версионные ставки.
+#: # ponytail: при необходимости добавить ref_account (структура плана счетов) — но он не
+#: «ставка», а структура; пока модерация только на денежных ставках НДС/пошлины.
+SENSITIVE_REFS = {"ref_vat_rate", "ref_tnved"}
+
+
+async def _moderate_version(request: Request, session, model, key, payload, actor: str) -> dict | None:
+    """Чувствительный ref → создать Approval (pending) вместо записи версии; иначе ``None``.
+
+    Не изобретаем свою таблицу: используем ``core.services.approvals`` (Approval, эскалация по
+    таймеру). Если движок согласований не подключён — не блокируем (``None``, # ponytail: в проде
+    согласование обязательно для денежных ставок). Коммитит запрос (граница транзакции — роут).
+    """
+    if model.__tablename__ not in SENSITIVE_REFS:
+        return None
+    approvals = request.app.state.core.services.approvals
+    if approvals is None:
+        return None
+    subject = f"Новая версия {model.__tablename__} «{key}» с {payload.get('start_date')}"
+    approval = await approvals.request(
+        session, "reference.change", f"{model.__tablename__}:{key}", subject, requested_by=actor
+    )
+    await session.commit()
+    return {"status": "pending_approval", "approval_id": approval.id, "route": approval.route}
+
+
 def build_simple_ref_router(
     model: type,
     *,
@@ -268,9 +295,10 @@ def build_versioned_ref_router(
 
     @router.post("/versions")
     async def add_version(
+        request: Request,
         payload: dict = Body(...),
         session: AsyncSession = Depends(get_session),
-        _: object = Depends(require_permission(SYSTEM_WRITE)),
+        user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         key = payload.get(key_field)
         start = payload.get("start_date")
@@ -278,6 +306,10 @@ def build_versioned_ref_router(
             raise HTTPException(status_code=422, detail=f"нужны поля: {key_field}, start_date")
         if isinstance(start, str):
             start = date.fromisoformat(start)
+        # чувствительный ref (ставка НДС/пошлина) → на согласование, не пишем сразу
+        moderated = await _moderate_version(request, session, model, key, payload, user.username)
+        if moderated is not None:
+            return moderated
         values = {f: payload[f] for f in value_fields if f in payload}
         try:
             obj = await scd2.add_version(session, model, key_field, key, start, **values)
