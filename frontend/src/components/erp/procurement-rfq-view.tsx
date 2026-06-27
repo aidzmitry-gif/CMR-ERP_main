@@ -29,14 +29,16 @@ export function ProcurementRfqView({ initial }: { initial: Rfq[] }) {
   const [bid, setBid] = useState({ supplier_id: "", price_byn: "", lead_time_days: "", incoterms: "" });
 
   useEffect(() => {
-    void fetchRfqs().then(setRfqs);
+    void fetchRfqs().then((d) => {
+      if (d) setRfqs(d); // null = ошибка fetch → не затираем SSR-данные
+    });
   }, []);
 
   const selected = useMemo(() => rfqs.find((r) => r.id === selId) ?? null, [rfqs, selId]);
 
   async function refresh(keep?: number) {
     const fresh = await fetchRfqs();
-    setRfqs(fresh);
+    if (fresh) setRfqs(fresh);
     if (keep) setSelId(keep);
   }
 

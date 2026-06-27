@@ -83,7 +83,18 @@ export function ClaimsPanel({ initial }: { initial: Claim[] }) {
     const supplier = draftFor(c).trim();
     if (supplier === c.supplier) return;
     setBusy(true);
-    await updateClaim(c.id, { supplier });
+    setError("");
+    const ok = await updateClaim(c.id, { supplier });
+    if (!ok) {
+      setError("Не удалось сохранить поставщика");
+    } else {
+      // очистить draft → не затенять обновлённое значение из refresh
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[c.id];
+        return next;
+      });
+    }
     await refresh();
     setBusy(false);
   }

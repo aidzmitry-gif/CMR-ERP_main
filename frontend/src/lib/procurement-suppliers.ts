@@ -77,14 +77,14 @@ export async function fetchSuppliersServer(roles?: string): Promise<Supplier[]> 
   }
 }
 
-/** Поставщики (клиент, через прокси /api). */
-export async function fetchSuppliers(): Promise<Supplier[]> {
+/** Поставщики (клиент, через прокси /api). `null` при ошибке — чтобы не затереть SSR-данные. */
+export async function fetchSuppliers(): Promise<Supplier[] | null> {
   try {
     const res = await fetch("/api/procurement/suppliers", { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.json()) as Supplier[];
   } catch {
-    return [];
+    return null;
   }
 }
 

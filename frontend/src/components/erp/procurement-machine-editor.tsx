@@ -82,7 +82,12 @@ export function ProcurementMachineEditor({ initial }: { initial: MachineOrder })
   }
 
   async function onSaveFreight() {
-    const value = Number(freight) || 0;
+    const value = Number(freight);
+    if (!Number.isFinite(value) || value < 0) {
+      setError("Фрахт должен быть неотрицательным числом");
+      setFreight(String(order.freight_byn)); // вернуть прежнее, не записывать мусор как 0
+      return;
+    }
     if (value === order.freight_byn) return;
     setBusy(true);
     await apply(await updateFreight(order.id, value), "Не удалось сохранить фрахт");

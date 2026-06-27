@@ -57,13 +57,14 @@ export async function fetchRfqsServer(roles?: string): Promise<Rfq[]> {
   }
 }
 
-export async function fetchRfqs(): Promise<Rfq[]> {
+/** `null` при ошибке — чтобы не затереть SSR-данные пустым списком. */
+export async function fetchRfqs(): Promise<Rfq[] | null> {
   try {
     const res = await fetch("/api/procurement/rfq", { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.json()) as Rfq[];
   } catch {
-    return [];
+    return null;
   }
 }
 

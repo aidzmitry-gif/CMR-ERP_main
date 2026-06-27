@@ -66,12 +66,15 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void fetchSuppliers().then(setRows);
+    void fetchSuppliers().then((d) => {
+      if (d) setRows(d); // null = ошибка fetch → не затираем SSR-данные
+    });
   }, []);
 
   async function refresh() {
     setBusy(true);
-    setRows(await fetchSuppliers());
+    const d = await fetchSuppliers();
+    if (d) setRows(d);
     setBusy(false);
   }
 
