@@ -219,6 +219,25 @@
     <p class="text-xs text-faint">Рабочий прототип механики (демо-данные в памяти, без сохранения). Иллюстрирует поведение будущего экрана.</p>
   </div>
 
+  <!-- МОДАЛКА «Разбить позицию» (частичная задержка/отгрузка) -->
+  <div id="splitModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onclick="if(event.target===this) closeSplit()">
+    <div class="w-full max-w-md rounded-2xl bg-surface p-5 shadow-pop">
+      <div class="text-sm font-semibold text-ink">Разбить позицию</div>
+      <div id="splitName" class="mt-0.5 text-[12px] text-muted"></div>
+      <div class="mt-3 text-[12px] text-muted">Сколько единиц <b>задерживается</b> (поедет позже)? Они уйдут в зал ожидания, остаток останется в машине. Вес, объём и себестоимость пересчитаются автоматически.</div>
+      <div class="mt-3 flex items-center gap-2">
+        <input id="splitQty" type="number" min="1" class="w-32 rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none" oninput="splitPreview()">
+        <span id="splitUnit" class="text-[12px] text-muted">шт</span>
+        <span id="splitOf" class="ml-auto text-[11px] text-faint"></span>
+      </div>
+      <div id="splitPreview" class="mt-3 rounded-xl border border-line bg-sunken p-3 text-[12px] text-muted"></div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button onclick="closeSplit()" class="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium text-muted hover:text-ink">Отмена</button>
+        <button id="splitGo" onclick="doSplit()" class="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">Разбить → задержку в зал</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 // ───────────────────────── МОДЕЛЬ (демо, в памяти) ─────────────────────────
 // landed на единицу = себестоимость без фрахта (фрахт считаем отдельно, т.к. он
@@ -227,21 +246,22 @@ const LIMIT_W = 1200, LIMIT_V = 14;        // борт: 1200 кг / 14 м³
 const FREIGHT_USD_KG = 2.0, USD_BYN = 3.0; // фрахт 2 $/кг → BYN
 const FREIGHT_BYN_KG = FREIGHT_USD_KG * USD_BYN; // 6.0 BYN/кг
 
-// ⚠️ ДЕМО-данные в памяти. При порте: landedNoFreight брать из расчёта калькулятора (он тянет
-// пошлину из ref_tnved на дату, вес/тару из ref_nomenclature_category/sku — источник истины MDM,
-// синк с 1С), а не из застывшей константы. Здесь зашито только для самодостаточного прототипа.
-// landedNoFreight — себест. позиции БЕЗ фрахта (товар+пошлина+страховка+комиссия), из калькулятора.
+// ⚠️ ДЕМО-данные в памяти. При порте: wPer/vPer/landedPer тянуть из справочника номенклатуры
+// (ref_nomenclature_category/sku — вес/тара/коробка) и расчёта калькулятора (пошлина из ref_tnved
+// на дату), а не из констант. Источник истины — MDM (синк с 1С); здесь зашито для самодостаточного HTML.
+// ЧИСЛОВАЯ модель: qty — число, unit — единица; wPer/vPer/landedPer — НА ЕДИНИЦУ. Полные вес/объём/
+// себестоимость = qty × *Per (геттеры lineW/lineV/lineGoods) → можно «разбить позицию» и пересчитать.
 // deal — сделка продаж (FK; 'пополнение' = на склад); client — клиент сделки; due — обещанный клиенту срок.
 let inMachine = [
-  {id:'p1', name:'Модуль ESP8266-12F',        sup:'Shenzhen Hangxin', qty:'800 шт',     w:6,  v:0.02, landedNoFreight:1980, deal:'СД-2280', client:'ООО «Спектр»',   due:'10 июля', status:'выкуплен'},
-  {id:'p2', name:'Конд. алюм. 1000мкФ 35В',   sup:'Yuxin Electronics', qty:'8 000 шт',  w:14, v:0.04, landedNoFreight:3850, deal:'пополнение', status:'в производстве'},
-  {id:'p3', name:'Реле 24VDC SPDT 10A',       sup:'Suzhou Precision',  qty:'600 шт',    w:9,  v:0.03, landedNoFreight:4490, deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля',  status:'задержка', warn:'поставщик сдвинул отгрузку на +9 дней'},
-  {id:'p4', name:'Дисплей OLED 0.96" I2C',    sup:'阿里巴巴 (1688)',    qty:'1 500 шт', w:7,  v:0.05, landedNoFreight:5210, deal:'СД-2284', client:'ИП Сидоров',    due:'14 июля', status:'выкуплен'},
+  {id:'p1', name:'Модуль ESP8266-12F',        sup:'Shenzhen Hangxin', qty:800,  unit:'шт', wPer:0.0075, vPer:0.000025, landedPer:2.475, deal:'СД-2280', client:'ООО «Спектр»',   due:'10 июля', status:'выкуплен'},
+  {id:'p2', name:'Конд. алюм. 1000мкФ 35В',   sup:'Yuxin Electronics', qty:8000, unit:'шт', wPer:0.00175,vPer:0.000005, landedPer:0.481, deal:'пополнение', status:'в производстве'},
+  {id:'p3', name:'Реле 24VDC SPDT 10A',       sup:'Suzhou Precision',  qty:600,  unit:'шт', wPer:0.015,  vPer:0.00005,  landedPer:7.483, deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля',  status:'задержка', warn:'поставщик сдвинул отгрузку на +9 дней'},
+  {id:'p4', name:'Дисплей OLED 0.96" I2C',    sup:'阿里巴巴 (1688)',    qty:1500, unit:'шт', wPer:0.00467,vPer:0.0000333,landedPer:3.473, deal:'СД-2284', client:'ИП Сидоров',    due:'14 июля', status:'выкуплен'},
 ];
 let pool = [  // зал ожидания — товар физически на складе Китая, без машины
-  {id:'w1', name:'Транзистор IRFZ44N TO-220', sup:'Taobao · разъёмы',  qty:'4 000 шт',  w:5,  v:0.02, landedNoFreight:2640, deal:'пополнение', status:'на складе Китая', tag:'прибыл 24 июня'},
-  {id:'w2', name:'Разъём XT60 пара',          sup:'Shenzhen Hangxin',  qty:'2 000 шт',  w:8,  v:0.03, landedNoFreight:3120, deal:'СД-2291', client:'ООО «Радиус»', due:'12 июля', status:'на складе Китая', tag:'прибыл 25 июня'},
-  {id:'w3', name:'Реле SRD-05VDC (часть)',    sup:'Yuxin Electronics', qty:'500 шт',    w:3,  v:0.01, landedNoFreight:1150, deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля', status:'на складе Китая', tag:'достали из MO-014'},
+  {id:'w1', name:'Транзистор IRFZ44N TO-220', sup:'Taobao · разъёмы',  qty:4000, unit:'шт', wPer:0.00125,vPer:0.000005, landedPer:0.66,  deal:'пополнение', status:'на складе Китая', tag:'прибыл 24 июня'},
+  {id:'w2', name:'Разъём XT60 пара',          sup:'Shenzhen Hangxin',  qty:2000, unit:'шт', wPer:0.004,  vPer:0.000015, landedPer:1.56,  deal:'СД-2291', client:'ООО «Радиус»', due:'12 июля', status:'на складе Китая', tag:'прибыл 25 июня'},
+  {id:'w3', name:'Реле SRD-05VDC (часть)',    sup:'Yuxin Electronics', qty:500,  unit:'шт', wPer:0.006,  vPer:0.00002,  landedPer:2.30,  deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля', status:'на складе Китая', tag:'достали из MO-014'},
 ];
 const selected = new Set();
 let invVer = 1, plVer = 1;            // версии документов
@@ -251,13 +271,20 @@ let lastFreight = null;              // для дельты фрахта
 const dealSignals = [];              // back-signal продавцу при изъятии позиции со сделкой
 
 // ───────────────────────── РАСЧЁТ ─────────────────────────
+// Геттеры позиции: полные вес/объём/себес = qty × *Per (на единицу из MDM). Числовая модель →
+// можно «разбить позицию» (часть едет, часть задержалась) и пересчитать всё.
+const lineW = r => r.qty * r.wPer;                 // полный вес позиции, кг
+const lineV = r => r.qty * r.vPer;                 // полный объём позиции, м³
+const lineGoods = r => r.qty * r.landedPer;        // себест. товара позиции БЕЗ фрахта, BYN
+const qtyText = r => `${fmt(r.qty)} ${r.unit||'шт'}`;
+
 // Фрахт машины = вес × ставка. Он РАСПРЕДЕЛЯЕТСЯ обратно на позиции по доле веса —
-// поэтому добавил/убрал позицию → доля фрахта (и landed-с-фрахтом) меняется у ВСЕХ остальных.
+// поэтому добавил/убрал/разбил позицию → доля фрахта (и landed-с-фрахтом) меняется у ВСЕХ остальных.
 // freightById[id] — доля фрахта позиции; landedFullById[id] — landed С фрахтом (то, что видит продавец как себес).
 function totals(){
-  const w = inMachine.reduce((s,r)=>s+r.w,0);
-  const v = inMachine.reduce((s,r)=>s+r.v,0);
-  const goods = inMachine.reduce((s,r)=>s+r.landedNoFreight,0);
+  const w = inMachine.reduce((s,r)=>s+lineW(r),0);
+  const v = inMachine.reduce((s,r)=>s+lineV(r),0);
+  const goods = inMachine.reduce((s,r)=>s+lineGoods(r),0);
   const freight = +(w * FREIGHT_BYN_KG).toFixed(0);   // фрахт всей машины
   const landed = goods + freight;
   const sups = new Set(inMachine.map(r=>r.sup)).size;
@@ -265,13 +292,14 @@ function totals(){
   // распределение фрахта по доле веса
   const freightById = {}, landedFullById = {};
   inMachine.forEach(r=>{
-    const share = w>0 ? +(freight * r.w / w).toFixed(0) : 0;
+    const share = w>0 ? +(freight * lineW(r) / w).toFixed(0) : 0;
     freightById[r.id] = share;
-    landedFullById[r.id] = r.landedNoFreight + share;
+    landedFullById[r.id] = +(lineGoods(r) + share).toFixed(0);
   });
   return {w,v,goods,freight,landed,sups,deals,count:inMachine.length,freightById,landedFullById,freightRateByn:FREIGHT_BYN_KG};
 }
-const fmt = n => n.toLocaleString('ru-RU');
+const fmt = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 0});
+const fmtW = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 1});  // вес с десятыми
 
 // ───────────────────────── РЕНДЕР ─────────────────────────
 function statusChip(s){
@@ -291,7 +319,7 @@ function render(){
   document.getElementById('kCount').textContent = t.count;
   document.getElementById('kClients').textContent = t.deals;
   document.getElementById('kSup').textContent = t.sups;
-  document.getElementById('kWeight').textContent = fmt(t.w);
+  document.getElementById('kWeight').textContent = fmtW(t.w);
   document.getElementById('kVol').textContent = t.v.toFixed(2);
   document.getElementById('kLanded').textContent = fmt(t.landed);
   document.getElementById('kFreight').textContent = fmt(t.freight);
@@ -317,7 +345,7 @@ function render(){
     const tr = document.createElement('tr');
     if(r.status==='задержка') tr.className='bg-red-50/40 dark:bg-red-500/5';
     tr.dataset.id = r.id;
-    const fr = t.freightById[r.id]||0, full = t.landedFullById[r.id]||r.landedNoFreight;
+    const fr = t.freightById[r.id]||0, full = t.landedFullById[r.id]||lineGoods(r);
     const dealCell = r.deal==='пополнение'
       ? `<span class="mt-0.5 block text-[11px] text-muted">пополнение</span>`
       : `<a href="#" onclick="return false" title="Открыть сделку ${r.deal}${r.client?' · '+r.client:''}" class="mt-0.5 block text-[11px] font-medium text-accent hover:underline">${r.deal}${r.due?` · до ${r.due}`:''}</a>`;
@@ -325,13 +353,16 @@ function render(){
       <td class="py-2 align-top"><input type="checkbox" onchange="toggleSel('${r.id}')" ${selected.has(r.id)?'checked':''} class="accent-[rgb(var(--accent))]"></td>
       <td class="py-2 align-top font-medium text-ink">${r.name}${r.warn?`<div class="text-[11px] font-normal text-red-600 dark:text-red-300">⚠ ${r.warn}</div>`:''}</td>
       <td class="py-2 align-top text-[12px] text-muted">${r.sup}</td>
-      <td class="py-2 align-top text-right text-muted num">${r.qty}</td>
-      <td class="py-2 align-top text-right text-muted num">${r.w} кг</td>
-      <td class="py-2 align-top text-right text-muted num">${fmt(r.landedNoFreight)}</td>
+      <td class="py-2 align-top text-right text-muted num">${qtyText(r)}</td>
+      <td class="py-2 align-top text-right text-muted num">${fmtW(lineW(r))} кг</td>
+      <td class="py-2 align-top text-right text-muted num">${fmt(lineGoods(r))}</td>
       <td class="py-2 align-top text-right text-[12px] text-faint num">+${fmt(fr)}</td>
       <td class="py-2 align-top text-right font-semibold text-ink num" title="Себестоимость с долей фрахта — её видит продавец">${fmt(full)}</td>
       <td class="py-2 align-top text-center">${statusChip(r.status)}${dealCell}</td>
-      <td class="py-2 align-top text-right"><button title="Достать в зал ожидания" onclick="moveOne('${r.id}','out')" class="rounded-md px-1.5 text-[15px] leading-none text-faint hover:text-red-500">↩</button></td>`;
+      <td class="py-2 align-top text-right whitespace-nowrap">
+        <button title="Разбить позицию: часть едет, часть остаётся (частичная задержка)" onclick="openSplit('${r.id}')" class="rounded-md px-1.5 text-[13px] leading-none text-faint hover:text-accent">✂</button>
+        <button title="Достать в зал ожидания" onclick="moveOne('${r.id}','out')" class="rounded-md px-1.5 text-[15px] leading-none text-faint hover:text-red-500">↩</button>
+      </td>`;
     tb.appendChild(tr);
   });
   document.getElementById('inEmpty').classList.toggle('hidden', inMachine.length>0);
@@ -345,7 +376,7 @@ function render(){
     div.innerHTML = `
       <div class="min-w-0">
         <div class="truncate text-[13px] font-medium text-ink">${r.name}</div>
-        <div class="truncate text-[11px] text-muted">${r.sup} · ${r.qty} · ${r.w} кг · ${fmt(r.landedNoFreight)} BYN</div>
+        <div class="truncate text-[11px] text-muted">${r.sup} · ${qtyText(r)} · ${fmtW(lineW(r))} кг · ${fmt(lineGoods(r))} BYN</div>
         <div class="text-[10px] text-faint">${statusChipText(r)} · ${r.deal}</div>
       </div>
       <button onclick="moveOne('${r.id}','in')" class="shrink-0 rounded-lg border border-accent px-2.5 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">＋ В машину</button>`;
@@ -391,7 +422,7 @@ function renderDocs(t){
 function rebuildDocs(){
   const t = totals();
   invHistory.unshift(`v${invVer} — ${inMachine.length} поз. (заменён при пересборке)`);
-  plHistory.unshift(`v${plVer} — брутто ${fmt(t.w)} кг (заменён при пересборке)`);
+  plHistory.unshift(`v${plVer} — брутто ${fmtW(t.w)} кг (заменён при пересборке)`);
   invVer++; plVer++;
   docsStale = false;
   render();
@@ -400,8 +431,8 @@ function rebuildDocs(){
 // ───────────────────────── ИИ-КОНТРОЛЬ ─────────────────────────
 function renderAI(t){
   const out = [];
-  if(t.w > LIMIT_W) out.push(['red', `Перегруз по весу: ${fmt(t.w)} кг > лимит ${fmt(LIMIT_W)} кг. Убери позицию или раздели на две машины.`]);
-  else if(t.w/LIMIT_W > 0.9) out.push(['amber', `Вес близок к лимиту (${Math.round(t.w/LIMIT_W*100)}%). Запас на упаковку ~${fmt(LIMIT_W-t.w)} кг.`]);
+  if(t.w > LIMIT_W) out.push(['red', `Перегруз по весу: ${fmtW(t.w)} кг > лимит ${fmt(LIMIT_W)} кг. Убери позицию или раздели на две машины.`]);
+  else if(t.w/LIMIT_W > 0.9) out.push(['amber', `Вес близок к лимиту (${Math.round(t.w/LIMIT_W*100)}%). Запас на упаковку ~${fmtW(LIMIT_W-t.w)} кг.`]);
   if(t.v > LIMIT_V) out.push(['red', `Перегруз по объёму: ${t.v.toFixed(2)} м³ > ${LIMIT_V} м³.`]);
   const delayed = inMachine.find(r=>r.status==='задержка');
   if(delayed){
@@ -411,7 +442,7 @@ function renderAI(t){
     out.push(['amber', `«${delayed.name}» задерживается — держит всю машину. Достань в зал ожидания, чтобы не сдвигать ETA остальных ${inMachine.length-1} позиций.${dealNote}`]);
   }
   if(docsStale) out.push(['violet', `Состав изменился — инвойс и упаковочный лист нужно пересобрать перед отправкой (иначе на таможню уйдёт старый пакет).`]);
-  if(pool.length && t.w/LIMIT_W < 0.85) out.push(['violet', `В зале ожидания ${pool.length} поз. — есть запас ${fmt(LIMIT_W-t.w)} кг. Добор снизит фрахт на единицу.`]);
+  if(pool.length && t.w/LIMIT_W < 0.85) out.push(['violet', `В зале ожидания ${pool.length} поз. — есть запас ${fmtW(LIMIT_W-t.w)} кг. Добор снизит фрахт на единицу.`]);
   if(!out.length) out.push(['emerald', `Состав сбалансирован, лимиты в норме, документы актуальны.`]);
   const c = {red:'text-red-600 dark:text-red-300',amber:'text-amber-700 dark:text-amber-300',violet:'text-violet-700 dark:text-violet-300',emerald:'text-emerald-700 dark:text-emerald-300'};
   document.getElementById('aiList').innerHTML = out.map(([k,txt])=>`<div class="${c[k]}">• ${txt}</div>`).join('');
@@ -465,6 +496,50 @@ function flash(id, dir){
   const sel = dir==='out' ? `#poolBody [data-id="${id}"]` : `#inBody [data-id="${id}"]`;
   const el = document.querySelector(sel);
   if(el){ const cls='flash-in'; el.classList.add(cls); setTimeout(()=>el.classList.remove(cls),1100); }
+}
+
+// ── Разбить позицию: часть едет, часть задерживается (→ зал ожидания) ──
+let splitId = null, splitSeq = 0;
+function openSplit(id){
+  const r = inMachine.find(x=>x.id===id); if(!r) return;
+  splitId = id;
+  document.getElementById('splitName').textContent = `${r.name} · ${r.sup} · всего ${qtyText(r)}`;
+  document.getElementById('splitUnit').textContent = r.unit||'шт';
+  document.getElementById('splitOf').textContent = `из ${fmt(r.qty)}`;
+  const inp = document.getElementById('splitQty');
+  inp.max = r.qty - 1; inp.value = '';
+  document.getElementById('splitPreview').textContent = 'Укажите количество, которое задерживается.';
+  document.getElementById('splitModal').classList.remove('hidden');
+  inp.focus();
+}
+function closeSplit(){ document.getElementById('splitModal').classList.add('hidden'); splitId=null; }
+function splitVal(){
+  const r = inMachine.find(x=>x.id===splitId); if(!r) return null;
+  let d = parseInt(document.getElementById('splitQty').value, 10);
+  if(!Number.isFinite(d) || d<1 || d>=r.qty) return null;
+  return {r, d};
+}
+function splitPreview(){
+  const sv = splitVal();
+  const go = document.getElementById('splitGo'), box = document.getElementById('splitPreview');
+  if(!sv){ go.disabled=true; go.classList.add('opacity-40'); box.textContent='Введите 1…(всего−1).'; return; }
+  go.disabled=false; go.classList.remove('opacity-40');
+  const {r,d} = sv, stay = r.qty - d;
+  box.innerHTML = `Останется в машине: <b>${fmt(stay)} ${r.unit}</b> · ${fmtW(stay*r.wPer)} кг · ${fmt(stay*r.landedPer)} BYN<br>`+
+    `Уйдёт в зал ожидания (задержка): <b>${fmt(d)} ${r.unit}</b> · ${fmtW(d*r.wPer)} кг · ${fmt(d*r.landedPer)} BYN`;
+}
+function doSplit(){
+  const sv = splitVal(); if(!sv) return;
+  const {r,d} = sv;
+  const part = {...r, id:`${r.id}-s${++splitSeq}`, qty:d, status:'задержка',
+    warn:'разбита из-за задержки у поставщика', tag:null};
+  r.qty -= d;                       // остаток едет дальше
+  // часть «задержалась» → в зал ожидания (через takeOut: back-signal продавцу + нормализация статуса)
+  takeOut(part);
+  markStale('out');
+  closeSplit();
+  render();
+  flash(part.id, 'out');
 }
 
 // сигналы продавцу при изъятии позиции со сделкой
