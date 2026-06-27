@@ -10,6 +10,7 @@ import { DealContacts } from "@/components/deal-contacts";
 import { DealLinkedDeals } from "@/components/deal-linked-deals";
 import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
+import { DealHandoffBlock } from "@/components/deal-handoff";
 import { DealMetrics } from "@/components/deal-metrics";
 import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
@@ -113,6 +114,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.5fr_1fr]">
           {/* LEFT — «мозг» сверху (AI), затем операционка по порядку прототипа */}
           <div className="min-w-0 space-y-4">
+            <DealHandoffBlock dealId={id} />
             <DealAiAssistant dealId={id} />
             <NextStepStub nextStep={d.nextStep} datetime={d.datetime} contact={d.contact} />
             <ShipStub />

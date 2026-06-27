@@ -110,6 +110,104 @@ export interface FunnelRow {
   active_deals: number;
 }
 
+/** Сводка «передано в исполнение» по выигранной сделке (П10 ТЗ). */
+export interface DealHandoff {
+  deal_id: number;
+  number: string;
+  counterparty: string;
+  amount: number;
+  owner: string;
+  funnel: string;
+  items: { sku_code: string; title: string; qty: number }[];
+  gross_profit: number | null;
+  handed_off_at: string | null;
+}
+
+/** Прочитать handoff-сводку по сделке; null — событие ещё не эмитнуто. */
+export async function fetchDealHandoff(dealId: string): Promise<DealHandoff | null> {
+  try {
+    const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/handoff`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body as DealHandoff | null;
+  } catch {
+    return null;
+  }
+}
+
+export type PlanStatus = "draft" | "pending_approval" | "approved" | "rejected";
+
+/** Личный план показателя продавца (PlanTarget). */
+export interface PlanRow {
+  id: number;
+  owner_id: number;
+  metric: string;
+  period_type: "day" | "week" | "month" | "quarter" | "year";
+  period_key: string;
+  target: number;
+  status: PlanStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
+/** Прочитать планы по фильтрам (полная страница плана). */
+export async function fetchPlans(params: {
+  owner_id?: number;
+  period_type?: string;
+  period_key?: string;
+}): Promise<PlanRow[]> {
+  try {
+    const qs = new URLSearchParams();
+    if (params.owner_id != null) qs.set("owner_id", String(params.owner_id));
+    if (params.period_type) qs.set("period_type", params.period_type);
+    if (params.period_key) qs.set("period_key", params.period_key);
+    const res = await fetch(`/api/sales/plans?${qs.toString()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as PlanRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Поставить/изменить draft план по (owner, metric, period). */
+export async function upsertPlan(input: Omit<PlanRow, "id" | "status" | "approved_by" | "approved_at">): Promise<PlanRow | null> {
+  try {
+    const res = await fetch("/api/sales/plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as PlanRow;
+  } catch {
+    return null;
+  }
+}
+
+export async function submitPlan(planId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/plans/${planId}/submit`, { method: "POST" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function decidePlan(planId: number, approved: boolean, comment?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/plans/${planId}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved, comment }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Список воронок sales для переключателя на доске. */
 export async function fetchFunnels(): Promise<FunnelRow[]> {
   try {
