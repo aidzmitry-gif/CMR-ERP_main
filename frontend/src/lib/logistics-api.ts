@@ -30,6 +30,20 @@ async function postJson<T>(path: string, body: unknown, fallback: T): Promise<T>
   }
 }
 
+async function patchJson<T>(path: string, body: unknown, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`/api${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return fallback;
+    return (await res.json()) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 // ─────────────────────────────── Доставка / дашборд ───────────────────────────────
 
 export interface Shipment {
@@ -80,6 +94,19 @@ export interface Costs {
 export const fetchShipments = () => getJson<Shipment[]>("/logistics/shipments", []);
 export const fetchDashboard = () => getJson<Dashboard | null>("/logistics/dashboard", null);
 export const fetchCosts = () => getJson<Costs | null>("/logistics/costs", null);
+
+/** Сменить главный статус доставки (planned/assigned/in_transit/delivered). */
+export const patchShipmentStatus = (id: number, status: string) =>
+  patchJson<Shipment | null>(`/logistics/shipments/${id}`, { status }, null);
+
+/** Обновить tracking_status (текст) + ETA + трек-номер от перевозчика. */
+export interface TrackingPatch {
+  tracking_status: string;
+  eta?: string | null;
+  tracking_no?: string | null;
+}
+export const patchShipmentTracking = (id: number, patch: TrackingPatch) =>
+  patchJson<Shipment | null>(`/logistics/shipments/${id}/tracking`, patch, null);
 
 // ─────────────────────────────── Импорт из Китая (информационный) ───────────────────────────────
 // Только наблюдение цепочки (события import.*); приёмка на склад/остатки — НЕ здесь

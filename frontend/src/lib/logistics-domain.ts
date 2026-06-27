@@ -238,3 +238,49 @@ export function nextRfqStatus(status: string): string {
 export function rfqStatusLabel(status: string): string {
   return RFQ_LABELS[status] ?? status;
 }
+
+// ─────────────────────────────── Статусы доставки ───────────────────────────────
+
+/** Поток статусов доставки: planned → assigned → in_transit → at_customs → delivered.
+ *  at_customs опционален (бекенд эмитит его как tracking_status; основной status может идти
+ *  in_transit → delivered напрямую). */
+export const DELIVERY_FLOW = [
+  "planned",
+  "assigned",
+  "in_transit",
+  "at_customs",
+  "delivered",
+] as const;
+
+const DELIVERY_LABELS: Record<string, string> = {
+  planned: "Запланирована",
+  assigned: "Перевозчик назначен",
+  in_transit: "В пути",
+  at_customs: "На таможне",
+  delivered: "Доставлено",
+};
+
+/** Разрешённые переходы статуса доставки (форвард по потоку + at_customs↔in_transit).
+ *  Назад двигаться запрещено (был доставлен — не «отдоставить»). */
+const DELIVERY_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
+  planned: ["assigned"],
+  assigned: ["in_transit"],
+  in_transit: ["at_customs", "delivered"],
+  at_customs: ["in_transit", "delivered"],
+  delivered: [],
+};
+
+/** Допустимые следующие статусы доставки из текущего (пустой массив = тупик). */
+export function allowedDeliveryTransitions(status: string): ReadonlyArray<string> {
+  return DELIVERY_TRANSITIONS[status] ?? [];
+}
+
+/** Можно ли двинуть статус доставки `from → to`? Назад и в неизвестное состояние — нельзя. */
+export function canTransitionDelivery(from: string, to: string): boolean {
+  return allowedDeliveryTransitions(from).includes(to);
+}
+
+/** Русская подпись статуса доставки; неизвестное значение возвращается как есть. */
+export function deliveryStatusLabel(status: string): string {
+  return DELIVERY_LABELS[status] ?? status;
+}

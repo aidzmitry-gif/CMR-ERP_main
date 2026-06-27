@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allowedDeliveryTransitions,
   auditSummary,
   auditVariance,
   bestBid,
   bidRisk,
   bidSavings,
+  canTransitionDelivery,
   computeScorecardScore,
+  deliveryStatusLabel,
   nextRfqStatus,
   quoteTariff,
   rankBids,
@@ -219,5 +222,37 @@ describe("logistics-domain · статусы тендера", () => {
     expect(rfqStatusLabel("collecting")).toBe("Сбор ставок");
     expect(rfqStatusLabel("awarded")).toBe("Победитель выбран");
     expect(rfqStatusLabel("weird")).toBe("weird");
+  });
+});
+
+describe("logistics-domain · статусы доставки", () => {
+  it("canTransitionDelivery: разрешённые переходы", () => {
+    expect(canTransitionDelivery("planned", "assigned")).toBe(true);
+    expect(canTransitionDelivery("assigned", "in_transit")).toBe(true);
+    expect(canTransitionDelivery("in_transit", "at_customs")).toBe(true);
+    expect(canTransitionDelivery("at_customs", "delivered")).toBe(true);
+    expect(canTransitionDelivery("in_transit", "delivered")).toBe(true);   // прямой
+    expect(canTransitionDelivery("at_customs", "in_transit")).toBe(true);  // возврат с таможни
+  });
+
+  it("canTransitionDelivery: запрет регресса и из конечного состояния", () => {
+    expect(canTransitionDelivery("delivered", "in_transit")).toBe(false);
+    expect(canTransitionDelivery("delivered", "delivered")).toBe(false);
+    expect(canTransitionDelivery("in_transit", "planned")).toBe(false);
+    expect(canTransitionDelivery("planned", "delivered")).toBe(false);     // через assigned
+    expect(canTransitionDelivery("unknown", "delivered")).toBe(false);
+  });
+
+  it("allowedDeliveryTransitions: список разрешённых следующих", () => {
+    expect(allowedDeliveryTransitions("planned")).toEqual(["assigned"]);
+    expect(allowedDeliveryTransitions("in_transit")).toEqual(["at_customs", "delivered"]);
+    expect(allowedDeliveryTransitions("delivered")).toEqual([]);
+    expect(allowedDeliveryTransitions("unknown")).toEqual([]);
+  });
+
+  it("deliveryStatusLabel: русские подписи", () => {
+    expect(deliveryStatusLabel("in_transit")).toBe("В пути");
+    expect(deliveryStatusLabel("delivered")).toBe("Доставлено");
+    expect(deliveryStatusLabel("alien")).toBe("alien");
   });
 });
