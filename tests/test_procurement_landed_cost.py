@@ -91,6 +91,34 @@ async def test_duplicate_sku_lines_aggregated(api, session):
     assert rows[0].unit_landed_cost_byn == Decimal("100.00")  # (400+600) / (4+6)
 
 
+async def test_zero_qty_line_skipped(api, session):
+    """Позиция с qty=0 не фиксируется (unit неопределён) — не пишем 0, не маскируем дыру."""
+    order = await _order(
+        api,
+        lines=[
+            {"sku_code": "ZERO", "qty": 0, "goods_value_byn": 100},
+            {"sku_code": "OK", "qty": 5, "goods_value_byn": 500},
+        ],
+    )
+    await _receive(api, order["id"])
+
+    codes = {r.sku_code for r in await _rows(session)}
+    assert codes == {"OK"}  # ZERO пропущена
+    assert await SVC.last_landed_cost(session, "ZERO") is None
+
+
+async def test_invalid_status_rejected(api):
+    """Неизвестный статус → 422 (опечатка не должна тихо пропустить фиксацию landed cost)."""
+    r = await api.post(
+        "/procurement/orders",
+        json={"supplier": "S", "status": "recieved", "lines": [{"sku_code": "X", "qty": 1}]},
+    )
+    assert r.status_code == 422
+    order = await _order(api)
+    r = await api.patch(f"/procurement/orders/{order['id']}", json={"status": "bogus"})
+    assert r.status_code == 422
+
+
 async def test_repeated_receive_no_duplicate(api, session):
     order = await _order(api, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
     await _receive(api, order["id"])
