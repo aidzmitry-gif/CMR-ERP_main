@@ -54,6 +54,17 @@ export function LogisticsInsights() {
 
   if (loading) return <Loading />;
 
+  // null от API = backend недоступен (graceful fallback); честно отделяем от «данных нет».
+  if (data === null) {
+    return (
+      <div className="rounded-xl bg-surface p-6 shadow-card">
+        <p className="text-sm text-muted">
+          Не удалось загрузить аналитику экономии. Проверьте подключение к сервису логистики и обновите страницу.
+        </p>
+      </div>
+    );
+  }
+
   const zones = data?.zones ?? [];
   if (zones.length === 0)
     return (

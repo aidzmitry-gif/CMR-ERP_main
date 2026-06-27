@@ -21,23 +21,41 @@ export function LogisticsDelivery() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [costs, setCosts] = useState<Costs | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchShipments(), fetchDashboard(), fetchCosts()]).then(([s, d, c]) => {
-      if (!alive) return;
-      setShipments(s);
-      setDashboard(d);
-      setCosts(c);
-      setLoading(false);
-    });
+    Promise.all([fetchShipments(), fetchDashboard(), fetchCosts()])
+      .then(([s, d, c]) => {
+        if (!alive) return;
+        setShipments(s);
+        setDashboard(d);
+        setCosts(c);
+        // dashboard=null + costs=null + shipments=[] = backend, скорее всего, недоступен
+        setFailed(d === null && c === null && s.length === 0);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (alive) {
+          setFailed(true);
+          setLoading(false);
+        }
+      });
     return () => {
       alive = false;
     };
   }, []);
 
   if (loading) return <Loading />;
+  if (failed)
+    return (
+      <div className="rounded-xl bg-surface p-6 shadow-card">
+        <p className="text-sm text-muted">
+          Не удалось загрузить рейсы и дашборд. Проверьте подключение к сервису логистики и обновите страницу.
+        </p>
+      </div>
+    );
 
   // Дашборд от backend — источник истины; при его отсутствии считаем из списка доставок.
   const summary = summarizeShipments(shipments);
