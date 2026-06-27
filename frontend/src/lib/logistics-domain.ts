@@ -284,3 +284,34 @@ export function canTransitionDelivery(from: string, to: string): boolean {
 export function deliveryStatusLabel(status: string): string {
   return DELIVERY_LABELS[status] ?? status;
 }
+
+// ─────────────────────────────── Стадии импорта ───────────────────────────────
+
+/** Цепочка импорта (зеркало IMPORT_STAGES бэка). ИНФО-этапы для дашборда. */
+export const IMPORT_FLOW = [
+  "factory",
+  "consolidation",
+  "in_transit",
+  "customs",
+  "warehouse",
+] as const;
+
+const IMPORT_LABELS: Record<string, string> = {
+  factory: "Фабрика",
+  consolidation: "Консолидация",
+  in_transit: "В пути",
+  customs: "Таможня",
+  warehouse: "Приёмка на склад",
+};
+
+/** Следующая стадия импорта по цепочке (для кнопки «продвинуть»); финал — на месте. */
+export function nextImportStage(stage: string): string {
+  const i = IMPORT_FLOW.indexOf(stage as (typeof IMPORT_FLOW)[number]);
+  if (i === -1 || i === IMPORT_FLOW.length - 1) return stage;
+  return IMPORT_FLOW[i + 1];
+}
+
+/** Русская подпись стадии импорта; неизвестное значение возвращается как есть. */
+export function importStageLabel(stage: string): string {
+  return IMPORT_LABELS[stage] ?? stage;
+}

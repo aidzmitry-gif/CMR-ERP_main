@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react";
 
 import { Card, KpiTile, Loading, Pill } from "@/components/erp/logistics-ui";
-import { fetchImportBoard, type ImportBoard } from "@/lib/logistics-api";
+import { ImportDrawer } from "@/components/erp/logistics-import-drawer";
+import {
+  fetchImportBoard,
+  fetchImports,
+  type ImportBoard,
+  type ImportShipment,
+} from "@/lib/logistics-api";
 import { formatByn } from "@/lib/format";
 
 // Информационная панель импорта из Китая: наблюдение цепочки фрахт-форвардинга
@@ -19,23 +25,27 @@ const PRIORITY_TONE: Record<string, "slate" | "amber" | "red"> = {
 
 export function LogisticsImport() {
   const [board, setBoard] = useState<ImportBoard | null>(null);
+  const [imports, setImports] = useState<ImportShipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  async function reload() {
+    const [b, list] = await Promise.all([fetchImportBoard(), fetchImports()]);
+    setBoard(b);
+    setImports(list);
+    setFailed(b === null);
+    setLoading(false);
+  }
 
   useEffect(() => {
     let alive = true;
-    fetchImportBoard()
-      .then((b) => {
-        if (!alive) return;
-        setBoard(b);
-        setFailed(b === null);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (!alive) return;
+    reload().catch(() => {
+      if (alive) {
         setFailed(true);
         setLoading(false);
-      });
+      }
+    });
     return () => {
       alive = false;
     };
@@ -112,7 +122,11 @@ export function LogisticsImport() {
                   </p>
                 ) : (
                   stage.cards.map((card) => (
-                    <div key={card.id} className="rounded-lg border border-line bg-surface p-3 shadow-card">
+                    <button
+                      key={card.id}
+                      onClick={() => setOpenId(card.id)}
+                      className="block w-full rounded-lg border border-line bg-surface p-3 text-left shadow-card hover:bg-sunken"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium text-ink">
                           {card.flag} {card.title}
@@ -144,7 +158,7 @@ export function LogisticsImport() {
                           <span>{card.date}</span>
                         </div>
                       )}
-                    </div>
+                    </button>
                   ))
                 )}
               </div>
@@ -152,6 +166,21 @@ export function LogisticsImport() {
           ))}
         </div>
       )}
+
+      {openId != null && (() => {
+        const imp = imports.find((i) => i.id === openId);
+        if (!imp) return null;
+        return (
+          <ImportDrawer
+            imp={imp}
+            onClose={() => setOpenId(null)}
+            onUpdated={(updated) => {
+              setImports((list) => list.map((i) => (i.id === updated.id ? updated : i)));
+              void reload();   // обновим доску (стадия могла сменить колонку)
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

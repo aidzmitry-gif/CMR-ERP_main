@@ -10,6 +10,8 @@ import {
   canTransitionDelivery,
   computeScorecardScore,
   deliveryStatusLabel,
+  importStageLabel,
+  nextImportStage,
   nextRfqStatus,
   quoteTariff,
   rankBids,
@@ -254,5 +256,20 @@ describe("logistics-domain · статусы доставки", () => {
     expect(deliveryStatusLabel("in_transit")).toBe("В пути");
     expect(deliveryStatusLabel("delivered")).toBe("Доставлено");
     expect(deliveryStatusLabel("alien")).toBe("alien");
+  });
+});
+
+describe("logistics-domain · стадии импорта", () => {
+  it("nextImportStage: продвижение по цепочке, финал стоит на месте", () => {
+    expect(nextImportStage("factory")).toBe("consolidation");
+    expect(nextImportStage("customs")).toBe("warehouse");
+    expect(nextImportStage("warehouse")).toBe("warehouse");
+    expect(nextImportStage("alien")).toBe("alien");
+  });
+
+  it("importStageLabel: русские подписи", () => {
+    expect(importStageLabel("customs")).toBe("Таможня");
+    expect(importStageLabel("warehouse")).toBe("Приёмка на склад");
+    expect(importStageLabel("???")).toBe("???");
   });
 });

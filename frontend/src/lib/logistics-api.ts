@@ -140,6 +140,15 @@ export interface ImportBoard {
 export const fetchImports = () => getJson<ImportShipment[]>("/logistics/imports", []);
 export const fetchImportBoard = () => getJson<ImportBoard | null>("/logistics/imports/board", null);
 
+export interface ImportStagePatch {
+  stage: string;
+  customs_status?: string | null;
+}
+/** ИНФО-смена стадии импорта. Склад (warehouse) — это лишь отметка для дашборда;
+ *  оприходование делает wms на procurement.received. Двойного учёта НЕТ. */
+export const patchImportStage = (id: number, patch: ImportStagePatch) =>
+  patchJson<ImportShipment | null>(`/logistics/imports/${id}`, patch, null);
+
 // ─────────────────────────────── Тарифы / зоны ───────────────────────────────
 
 export interface Zone {
