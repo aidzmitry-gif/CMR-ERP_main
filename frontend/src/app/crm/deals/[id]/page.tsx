@@ -13,6 +13,7 @@ import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
+import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Money } from "@/components/money";
@@ -50,14 +51,11 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               <div className="mt-0.5 text-[12.5px] text-muted">
                 {d.description || "Описание не задано"}
               </div>
-              {/* Контрагент — из MDM-витрины (источник истины — 1С).
-                  TODO(Step B): вынести в <SourceTag source="mdm/1c" /> и переиспользовать
-                  на других экранах (drawer-preview, board hover-card, leads-workspace). */}
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-faint">
-                <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
-                  контрагент · из MDM / 1С
-                </span>
-                <span className="text-faint">УНП —</span>
+              {/* Контрагент — из MDM-витрины (источник истины — 1С). Провенанс вынесен в
+                  переиспользуемый <SourceTag> (канон mdm-1c-data-provenance-ui). УНП появится,
+                  как только DealDetail начнёт нести counterparty.unp с бэка (submodule sales). */}
+              <div className="mt-1">
+                <SourceTag entity="контрагент" source="mdm/1c" />
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <PriorityBadge priority={d.priority} withIcon />

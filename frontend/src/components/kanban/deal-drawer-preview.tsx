@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
+import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
@@ -181,9 +182,7 @@ export function DealDrawerPreview({
             <div className="flex-1 overflow-y-auto px-[18px] py-[14px]">
               <div className="flex flex-wrap items-center gap-2">
                 <PriorityBadge priority={deal.priority} withIcon />
-                <span className="rounded-md bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">
-                  контрагент · из MDM / 1С
-                </span>
+                <SourceTag entity="контрагент" source="mdm/1c" />
                 {days != null && (
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
