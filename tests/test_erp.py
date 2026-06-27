@@ -124,6 +124,72 @@ async def test_wms_inventory(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_operational(api, session):
+    """Операции (приёмка/отгрузка/перемещение/коррекция) → движения + оперативный остаток."""
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_stock_released
+
+    loc1 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-01"})).json()
+    loc2 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-02"})).json()
+    assert loc1["is_active"] is True
+
+    base = {"sku_code": "AKB-60", "warehouse": "Минск"}
+    assert (await api.post("/wms/receipt", json={**base, "qty": 10, "location_id": loc1["id"]})).status_code == 201
+    assert (await api.post("/wms/shipment", json={**base, "qty": 3, "location_id": loc1["id"]})).status_code == 201
+    tr = await api.post("/wms/transfer", json={**base, "qty": 2, "from_location_id": loc1["id"], "to_location_id": loc2["id"]})
+    assert tr.status_code == 201 and len(tr.json()) == 2 and tr.json()[0]["doc_ref"].startswith("TRF-")
+    assert (await api.post("/wms/adjustment", json={**base, "qty": -1, "location_id": loc1["id"]})).status_code == 201
+
+    bal = (await api.get("/wms/balances?sku=AKB-60")).json()
+    by_code = {r["location_code"]: r["qty"] for r in bal["rows"]}
+    assert by_code["A-01"] == 4.0  # +10 −3 −2(перемещение) −1(коррекция)
+    assert by_code["A-02"] == 2.0
+    assert bal["sku_count"] == 1
+
+    # фильтр движений по причине
+    moves = (await api.get("/wms/movements?reason=transfer")).json()
+    assert moves and all(m["reason"] == "transfer" for m in moves)
+
+    # transfer на ту же ячейку — 400
+    assert (await api.post("/wms/transfer", json={**base, "qty": 1,
+            "from_location_id": loc1["id"], "to_location_id": loc1["id"]})).status_code == 400
+
+    # снятие резерва (событие sales) → приходное движение reason=release
+    await on_stock_released({"items": [{"sku_code": "AKB-60", "warehouse": "Минск", "qty": 5}]},
+                            SimpleNamespace(session=session))
+    await session.commit()
+    rel = (await api.get("/wms/movements?reason=release")).json()
+    assert rel and rel[0]["kind"] == "in" and rel[0]["qty"] == 5.0
+
+    # RBAC: операции (wms.count) только у склада; логистика (wms.read) — 403
+    assert (await api.post("/wms/receipt", json={**base, "qty": 1},
+            headers={"X-User-Roles": "logistics"})).status_code == 403
+
+
+async def test_wms_inventory_adjustment_movements(api, session):
+    """Проведение инвентаризации пишет корректирующие движения в журнал WMS (не в 1С)."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="ZU-15A", title="ЗУ 15А", unit="шт"))
+    session.add(StockItem(sku_code="ZU-15A", warehouse="Гомель",
+                          qty_available=Decimal(30), cost=Decimal(300)))
+    await session.commit()
+
+    doc = (await api.post("/wms/inventory", json={"warehouse": "Гомель"})).json()
+    det = (await api.post(f"/wms/inventory/{doc['id']}/populate")).json()
+    line = next(line for line in det["lines"] if line["sku_code"] == "ZU-15A")
+    await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 27})  # недостача 3
+    assert (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()["status"] == "done"
+
+    adj = (await api.get("/wms/movements?reason=adjustment")).json()
+    row = next(m for m in adj if m["sku_code"] == "ZU-15A")
+    assert row["kind"] == "out" and row["qty"] == 3.0 and row["doc_ref"] == doc["number"]
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
