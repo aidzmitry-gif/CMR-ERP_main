@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # базовый URL сервиса ЕГР РБ (lookup реквизитов по УНП); пусто — mock-справочник
     egr_base_url: str = ""
 
+    # AuthN (SECURITY.md P1 — Keycloak/OIDC). ``auth_mode``:
+    #   "dev"  — доверять заголовку X-User-Roles (текущее поведение dev и прода, пока realm
+    #            Keycloak не заведён); "oidc" — принимать ТОЛЬКО проверенный Bearer-JWT Keycloak.
+    # Дефолт "dev" — аддитивно для локали/тестов. ⚠️ Прод (environment≠dev) НЕ загрузится без
+    # oidc + issuer + audience (см. валидатор ниже) — намеренный security-гейт: доверие заголовку
+    # в публичном проде = вход суперпользователем без пароля.
+    auth_mode: str = "dev"
+    keycloak_issuer: str = ""    # https://<host>/realms/<realm>; пусто → oidc недоступен
+    keycloak_audience: str = ""  # ожидаемый aud (client_id) в токене
+
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False
     # шлюз LLM (LiteLLM/Ollama, OpenAI-совместимый); пусто — mock-режим без модели
@@ -85,6 +95,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Прод-режим с dev-дефолтом БД (aios:aios). Задайте AIOS_DATABASE_URL "
                 "с реальными кредами или AIOS_ENVIRONMENT=dev для локальной разработки."
+            )
+        # AuthN (SEC-002): прод НЕ должен доверять заголовку X-User-Roles — на публичном
+        # belakb.by это вход суперпользователем без пароля. Требуем проверенный Keycloak-JWT.
+        if self.auth_mode != "oidc":
+            raise ValueError(
+                "Прод-режим требует AIOS_AUTH_MODE=oidc: доверие X-User-Roles в проде = вход "
+                "без пароля. Заведите realm Keycloak или AIOS_ENVIRONMENT=dev для локали."
+            )
+        if not self.keycloak_issuer or not self.keycloak_audience:
+            raise ValueError(
+                "oidc-режим требует AIOS_KEYCLOAK_ISSUER и AIOS_KEYCLOAK_AUDIENCE "
+                "(без проверки aud принимается любой токен realm'а — SEC-001)."
             )
         return self
 
