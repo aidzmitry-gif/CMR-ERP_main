@@ -95,6 +95,25 @@ async def test_query_sku_history_as_of(api, session):
     assert r.json()["result"]["title"] == "Q v2"  # текущая без as_of
 
 
+async def test_snapshot_includes_new_master_fields(session):
+    """volume_m3/vat_code попадают в SCD2-снимок (SNAPSHOT_FIELDS)."""
+    sku = Sku(code="VOL-1", title="товар", unit="шт", volume_m3=0.05, vat_code="НДС20")
+    session.add(sku)
+    await session.flush()
+    v = await record_sku_version(session, sku, date(2026, 1, 1))
+    assert v.volume_m3 == 0.05
+    assert v.vat_code == "НДС20"
+
+
+async def test_sku_card_returns_new_master_fields(api, session):
+    """Карточка SKU-витрины отдаёт volume_m3 и собственный vat_code."""
+    session.add(Sku(code="VC-1", title="товар", unit="шт", volume_m3=0.12, vat_code="НДС20"))
+    await session.commit()
+    card = (await api.get("/system/sku/VC-1")).json()
+    assert card["volume_m3"] == 0.12
+    assert card["vat_code"] == "НДС20"
+
+
 async def test_catalog_exposes_sku_history(api):
     """Каталог и AI-каталог содержат core.sku_history (версионный, ai_exposed)."""
     cat = (await api.get("/system/references")).json()

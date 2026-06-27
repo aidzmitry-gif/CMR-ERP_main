@@ -376,12 +376,12 @@ def build_reference_router() -> APIRouter:
             SkuVersion,
             key_field="sku_code",
             value_fields=(
-                "title", "unit", "category_id", "weight_kg",
-                "tnved_code", "shelf_life_days", "attributes",
+                "title", "unit", "category_id", "weight_kg", "volume_m3",
+                "tnved_code", "vat_code", "shelf_life_days", "attributes",
             ),
             list_fields=(
-                "id", "sku_code", "title", "unit", "category_id", "weight_kg",
-                "tnved_code", "shelf_life_days", "attributes", "start_date", "end_date",
+                "id", "sku_code", "title", "unit", "category_id", "weight_kg", "volume_m3",
+                "tnved_code", "vat_code", "shelf_life_days", "attributes", "start_date", "end_date",
             ),
         ),
         prefix="/sku-history",

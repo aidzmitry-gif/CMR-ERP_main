@@ -746,7 +746,9 @@ export interface SkuVersionRow {
   unit: string | null;
   category_id: number | null;
   weight_kg: number | null;
+  volume_m3: number | null;
   tnved_code: string | null;
+  vat_code: string | null;
   shelf_life_days: number | null;
   attributes: Record<string, unknown>;
 }
@@ -759,6 +761,8 @@ export interface SkuCard {
   category_id: number | null;
   group_path: GroupPathNode[]; // breadcrumb группы от корня к листу ([] — нет группы)
   weight_kg: number | null;
+  volume_m3: number | null; // объём, м³ — вход разнесения фрахта по объёму
+  vat_code: string | null; // свой код НДС (null → наследуется от группы, см. group_vat)
   tnved_code: string | null; // собственный код товара (может быть null → наследуется)
   effective_tnved: EffectiveTnved; // свой ∨ унаследованный от группы (+ источник)
   tnved_rates: TnvedRates | null; // пошлина + НДС по эффективному коду на сегодня; null — нет
@@ -979,7 +983,9 @@ export const SKU_VERSION_FIELDS: { key: keyof SkuVersionRow; label: string }[] =
   { key: "unit", label: "Ед." },
   { key: "category_id", label: "Группа" },
   { key: "weight_kg", label: "Вес, кг" },
+  { key: "volume_m3", label: "Объём, м³" },
   { key: "tnved_code", label: "ТН ВЭД" },
+  { key: "vat_code", label: "НДС-код" },
   { key: "shelf_life_days", label: "Срок годн." },
 ];
 

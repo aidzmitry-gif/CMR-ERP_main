@@ -59,8 +59,8 @@ _VERSIONED = {
         SkuVersion,
         "sku_code",
         (
-            "sku_code", "title", "unit", "category_id", "weight_kg",
-            "tnved_code", "shelf_life_days", "attributes", "start_date", "end_date",
+            "sku_code", "title", "unit", "category_id", "weight_kg", "volume_m3",
+            "tnved_code", "vat_code", "shelf_life_days", "attributes", "start_date", "end_date",
         ),
     ),
 }
@@ -191,7 +191,10 @@ async def _query_skus(
     return {
         "ref": "core.skus",
         "result": [
-            {"code": r.code, "title": r.title, "unit": r.unit, "category_id": r.category_id}
+            {
+                "code": r.code, "title": r.title, "unit": r.unit, "category_id": r.category_id,
+                "vat_code": r.vat_code, "volume_m3": r.volume_m3,
+            }
             for r in rows
         ],
     }

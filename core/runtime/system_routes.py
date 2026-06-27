@@ -432,7 +432,9 @@ async def sku_card(
             "unit": v.unit,
             "category_id": v.category_id,
             "weight_kg": v.weight_kg,
+            "volume_m3": v.volume_m3,
             "tnved_code": v.tnved_code,
+            "vat_code": v.vat_code,
             "shelf_life_days": v.shelf_life_days,
             "attributes": v.attributes,
         }
@@ -452,6 +454,8 @@ async def sku_card(
         "category_id": sku.category_id,
         "group_path": group_path,  # [{code, name}, …] от корня к группе товара (breadcrumb)
         "weight_kg": sku.weight_kg,
+        "volume_m3": sku.volume_m3,  # объём м³ — вход разнесения фрахта по объёму
+        "vat_code": sku.vat_code,  # свой код НДС (None → наследуется от группы, см. group_vat)
         "tnved_code": sku.tnved_code,  # собственный код (может быть None → наследуется)
         "effective_tnved": effective_tnved,  # {code, source: own|group|None, group_code, group_name}
         "tnved_rates": tnved_rates,  # {duty_rate, vat_rate, …} на сегодня или None

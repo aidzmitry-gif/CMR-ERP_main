@@ -126,10 +126,13 @@ class Sku(Base):
     unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
     # группа (категория) номенклатуры — ссылка на иерархический справочник (public)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
-    # «горячие» поля (M4): вес для распределения фрахта, ТН ВЭД для пошлины (→ landed cost),
-    # срок годности в днях для FEFO-алерта (<1 года). Nullable — заполняются по мере данных.
+    # «горячие» поля (M4): вес/объём для распределения фрахта, ТН ВЭД для пошлины (→ landed cost),
+    # НДС-код (свой ∨ наследуется от группы), срок годности в днях для FEFO-алерта (<1 года).
+    # Nullable — заполняются по мере данных.
     weight_kg: Mapped[float | None] = mapped_column()
+    volume_m3: Mapped[float | None] = mapped_column()  # объём, м³ — разнесение фрахта по объёму
     tnved_code: Mapped[str | None] = mapped_column(String(16))  # код ТН ВЭД (пошлина из справочника)
+    vat_code: Mapped[str | None] = mapped_column(String(16))  # свой код НДС (→ ref_vat_rate); None → от группы
     shelf_life_days: Mapped[int | None] = mapped_column()  # срок годности; None — бессрочно
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")  # архив, не удаление
     # переменные характеристики (цвет/размер упаковки/палета/тех.параметры) — JSONB, не EAV;

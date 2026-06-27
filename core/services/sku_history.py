@@ -23,7 +23,8 @@ from core.services import scd2
 #: мастер-поля SKU, чей датированный снимок ведём. Операционные (цена/остаток/себес) — НЕ здесь:
 #: другой владелец (1С/склад) и жизненный цикл (шов §1, mdm-data-class-seam.md).
 SNAPSHOT_FIELDS = (
-    "title", "unit", "category_id", "weight_kg", "tnved_code", "shelf_life_days", "attributes",
+    "title", "unit", "category_id", "weight_kg", "volume_m3", "tnved_code", "vat_code",
+    "shelf_life_days", "attributes",
 )
 
 

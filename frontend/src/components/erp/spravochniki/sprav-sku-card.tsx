@@ -494,12 +494,14 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   />
                   {groupVat?.value && (
                     <Field
-                      label="НДС по умолч. (группа)"
-                      value={groupVat.rate != null ? `${groupVat.rate}%` : groupVat.value}
+                      label="Код НДС"
+                      value={groupVat.rate != null ? `${groupVat.value} · ${groupVat.rate}%` : groupVat.value}
                       mark={
                         groupVat.source === "group" ? (
                           <InheritMark title={`Ставка НДС по умолч. группы «${groupVat.group_name ?? ""}»`} />
-                        ) : undefined
+                        ) : (
+                          <LocalMark />
+                        )
                       }
                     />
                   )}
@@ -657,7 +659,13 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                     prov={prov.weight_kg}
                   />
                   <AttrField label="Габариты (Д×Ш×В)" attr={effAttrs["Габариты"]} />
-                  <AttrField label="Объём" attr={effAttrs["Объём"]} />
+                  <Field
+                    label="Объём, м³"
+                    value={card.volume_m3 != null ? String(card.volume_m3) : "нет данных"}
+                    unset={card.volume_m3 == null}
+                    mono={card.volume_m3 != null}
+                    prov={prov.volume_m3}
+                  />
                   <AttrField label="Кол-во в коробке" attr={effAttrs["Кол-во в коробке"]} />
                 </div>
 
@@ -974,10 +982,22 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                           unset={v.weight_kg == null}
                         />
                         <Field
+                          label="Объём, м³"
+                          value={v.volume_m3 != null ? String(v.volume_m3) : "—"}
+                          mono={v.volume_m3 != null}
+                          unset={v.volume_m3 == null}
+                        />
+                        <Field
                           label="Код ТН ВЭД"
                           value={v.tnved_code ?? "—"}
                           mono={!!v.tnved_code}
                           unset={!v.tnved_code}
+                        />
+                        <Field
+                          label="Код НДС"
+                          value={v.vat_code ?? "—"}
+                          mono={!!v.vat_code}
+                          unset={!v.vat_code}
                         />
                         <Field
                           label="Срок годн., дн."
