@@ -327,6 +327,33 @@ async def test_wms_outbound(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
+async def test_wms_reconciliation(api, session):
+    """Сверка теневого остатка WMS с зеркалом 1С: diff и его денежная оценка."""
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="LFP-12-100", title="LFP АКБ", unit="шт"))
+    session.add(StockItem(sku_code="LFP-12-100", warehouse="Минск",
+                          qty_available=Decimal(14), cost=Decimal(1850)))
+    await session.commit()
+    await api.post("/wms/receipt", json={"sku_code": "LFP-12-100", "qty": 10, "warehouse": "Минск"})
+
+    rec = (await api.get("/wms/reconciliation")).json()
+    assert rec["gateway"] is True
+    row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-12-100" and r["warehouse"] == "Минск")
+    assert row["wms_qty"] == 10.0 and row["onec_qty"] == 14.0 and row["diff"] == -4.0
+    assert row["diff_value"] == -7400.0  # −4 × 1850
+    assert rec["total_abs_diff_value"] >= 7400.0
+
+
+async def test_wms_reconciliation_no_gateway(api_no_gateways):
+    """Шлюз 1С выключен → честный пустой ответ (gateway=False), не 500."""
+    rec = (await api_no_gateways.get("/wms/reconciliation")).json()
+    assert rec["gateway"] is False and rec["rows"] == []
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
