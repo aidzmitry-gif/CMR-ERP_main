@@ -48,21 +48,30 @@ export function ModuleBoard({
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState(false);
 
   async function refresh() {
     try {
       const res = await fetch(`/api${endpoint}`, { cache: "no-store" });
-      if (res.ok) setRows((await res.json()) as Row[]);
+      if (res.ok) {
+        setRows((await res.json()) as Row[]);
+        setError(false);
+      } else {
+        setError(true);
+      }
     } catch {
-      /* ignore */
+      setError(true);
     }
   }
 
   useEffect(() => {
     void fetch(`/api${endpoint}`, { cache: "no-store" })
       .then((res) => (res.ok ? (res.json() as Promise<Row[]>) : Promise.reject()))
-      .then((data) => setRows(data))
-      .catch(() => {});
+      .then((data) => {
+        setRows(data);
+        setError(false);
+      })
+      .catch(() => setError(true));
   }, [endpoint]);
 
   async function onCreate() {
@@ -166,7 +175,7 @@ export function ModuleBoard({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length + (action ? 1 : 0)} className="px-4 py-6 text-center text-muted">
-                  Записей пока нет
+                  {error ? "Нет связи с модулем — эндпоинт недоступен" : "Записей пока нет"}
                 </td>
               </tr>
             )}
