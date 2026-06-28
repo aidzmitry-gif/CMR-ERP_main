@@ -784,6 +784,222 @@ async def test_cashflow_week_mode_backward_compatible(session):
 # FIN-R4-2/3: BankAccount + account_id фильтр
 
 
+# ───────────────────────── Круг 4 B2: reference.*.changed → recompute landed ─────────────────────────
+
+
+def _ref_ctx(session, sku_master=None):
+    """EventContext с подменой sku_master фасада (для landed_inputs_batch контекста)."""
+    services = SimpleNamespace(event_bus=OutboxEventBus(), sku_master=sku_master)
+    return EventContext(session=session, services=services)
+
+
+class _StubSkuMaster:
+    """Мок фасада ядра ``core.services.sku_master`` (REF3-1) — отдаёт фиксированные inputs."""
+
+    def __init__(self, mapping: dict[str, dict | None]):
+        self.mapping = mapping
+        self.calls: list[list[str]] = []
+
+    async def landed_inputs_batch(self, _session, sku_codes):
+        self.calls.append(list(sku_codes))
+        return {c: self.mapping.get(c) for c in sku_codes}
+
+
+async def test_reference_sku_changed_emits_recompute(session):
+    """sku.changed (entity_ref='sku:S-1') → один recompute с этим sku_code и inputs."""
+    from core.domain.models import OutboxEvent
+    from modules.finance.events import on_reference_changed
+
+    stub = _StubSkuMaster({"S-1": {"duty_pct": 5.0, "vat_rate": 20.0}})
+    await on_reference_changed(
+        {
+            "action": "version",
+            "ref_key": "core.skus",
+            "entity_ref": "sku:S-1",
+            "value_hint": "weight_kg",
+            "actor": "ops",
+        },
+        _ref_ctx(session, sku_master=stub),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    assert len(recompute) == 1
+    p = recompute[0].payload
+    assert p["sku_codes"] == ["S-1"]
+    assert p["ref_key"] == "core.skus"
+    assert p["entity_ref"] == "sku:S-1"
+    assert p["inputs"]["S-1"]["duty_pct"] == 5.0
+    assert stub.calls == [["S-1"]]
+
+
+async def test_reference_tnved_changed_resolves_affected_sku(session):
+    """ref_tnved.changed → ищем все Sku где tnved_code совпадает; recompute со списком кодов."""
+    from core.domain.models import OutboxEvent, Sku
+    from modules.finance.events import on_reference_changed
+
+    session.add_all([
+        Sku(code="A-1", title="A1", tnved_code="8418400000"),
+        Sku(code="A-2", title="A2", tnved_code="8418400000"),
+        Sku(code="B-1", title="B1", tnved_code="9999000000"),  # не затронут
+    ])
+    await session.commit()
+    stub = _StubSkuMaster({"A-1": {"duty_pct": 5}, "A-2": {"duty_pct": 5}})
+    await on_reference_changed(
+        {
+            "action": "version",
+            "ref_key": "core.tnved",
+            "entity_ref": "ref_tnved:8418400000",
+            "value_hint": "duty_rate",
+            "actor": "ops",
+        },
+        _ref_ctx(session, sku_master=stub),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    assert len(recompute) == 1
+    assert recompute[0].payload["sku_codes"] == ["A-1", "A-2"]  # отсортировано, без B-1
+
+
+async def test_reference_vat_changed_resolves_affected_sku(session):
+    from core.domain.models import OutboxEvent, Sku
+    from modules.finance.events import on_reference_changed
+
+    session.add_all([
+        Sku(code="V-1", title="V1", vat_code="20"),
+        Sku(code="V-2", title="V2", vat_code="10"),
+    ])
+    await session.commit()
+    await on_reference_changed(
+        {
+            "action": "version",
+            "ref_key": "core.vat_rates",
+            "entity_ref": "ref_vat_rate:20",
+            "actor": "ops",
+        },
+        _ref_ctx(session),  # без stub — inputs={} honest
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    assert recompute[0].payload["sku_codes"] == ["V-1"]
+    assert recompute[0].payload["inputs"] == {}  # фасад не подключён — honest
+
+
+async def test_reference_currency_rate_changed_emits_fx_signal(session):
+    """FX-курс — отдельный канал finance.fx.recompute_requested (затронуты все не-BYN landed)."""
+    from core.domain.models import OutboxEvent
+    from modules.finance.events import on_reference_changed
+
+    await on_reference_changed(
+        {
+            "action": "version",
+            "ref_key": "core.currency_rates",
+            "entity_ref": "ref_currency_rate:USD",
+            "value_hint": "rate",
+            "actor": "ops",
+        },
+        _ref_ctx(session),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    fx = [e for e in events if e.event_type == "finance.fx.recompute_requested"]
+    assert len(fx) == 1
+    assert fx[0].payload["currency_code"] == "USD"
+    # И НЕ должно быть landed.recompute (для FX отдельный сигнал)
+    assert all(e.event_type != "finance.landed.recompute_requested" for e in events)
+
+
+async def test_reference_no_affected_sku_is_honest_silent(session):
+    """ТН ВЭД не привязан ни к одному SKU → НЕТ recompute (honest-empty, не мусорим в outbox)."""
+    from core.domain.models import OutboxEvent
+    from modules.finance.events import on_reference_changed
+
+    await on_reference_changed(
+        {"ref_key": "core.tnved", "entity_ref": "ref_tnved:0000000000"},
+        _ref_ctx(session),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert all(e.event_type != "finance.landed.recompute_requested" for e in events)
+
+
+async def test_reference_unknown_kind_is_ignored(session):
+    """Незнакомый справочник → пропустить, НЕ падать (honest-empty)."""
+    from core.domain.models import OutboxEvent
+    from modules.finance.events import on_reference_changed
+
+    await on_reference_changed(
+        {"ref_key": "core.something_else", "entity_ref": "ref_x:1"}, _ref_ctx(session)
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert events == []
+
+
+async def test_reference_cascade_one_recompute_per_event_dedupes_sku(session):
+    """КАСКАД: 3 reference-эмита подряд → ровно 3 recompute, sku_codes дедуплицированы внутри.
+
+    Защита от: «массовая правка справочника = шквал событий» (см. ТЗ B2 — дебаунс/идемпотентность).
+    Каждый эмит даёт ОДИН outbox-сигнал, дедуп sku — внутри payload (set→sorted list).
+    """
+    from core.domain.models import OutboxEvent, Sku
+    from modules.finance.events import on_reference_changed
+
+    # 2 SKU на одном коде ТН ВЭД + 1 на другом
+    session.add_all([
+        Sku(code="C-1", title="C1", tnved_code="TN-A"),
+        Sku(code="C-2", title="C2", tnved_code="TN-A"),
+        Sku(code="C-3", title="C3", tnved_code="TN-B"),
+    ])
+    await session.commit()
+
+    ctx = _ref_ctx(session)
+    # 3 reference-эмита подряд (каскад): один и тот же TN-A 2 раза + TN-B 1 раз
+    for entity_ref in ("ref_tnved:TN-A", "ref_tnved:TN-A", "ref_tnved:TN-B"):
+        await on_reference_changed(
+            {"ref_key": "core.tnved", "entity_ref": entity_ref}, ctx
+        )
+    await session.commit()
+
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    # 3 входа → 3 recompute (each event idempotent, dedup на стороне читателя через
+    # entity_ref + sku_codes); внутри payload — отсортированный список без дублей
+    assert len(recompute) == 3
+    payloads_a = [e.payload for e in recompute if e.payload["entity_ref"] == "ref_tnved:TN-A"]
+    assert len(payloads_a) == 2
+    for p in payloads_a:
+        assert p["sku_codes"] == ["C-1", "C-2"]  # дедуп + сортировка внутри
+    payload_b = [e.payload for e in recompute if e.payload["entity_ref"] == "ref_tnved:TN-B"][0]
+    assert payload_b["sku_codes"] == ["C-3"]
+
+
+async def test_reference_facade_failure_is_failsoft(session):
+    """Фасад sku_master упал → сигнал всё равно эмитим с inputs={} (fail-soft, B2 хвост)."""
+    from core.domain.models import OutboxEvent, Sku
+    from modules.finance.events import on_reference_changed
+
+    session.add(Sku(code="F-1", title="F1", tnved_code="FX-1"))
+    await session.commit()
+
+    class _Broken:
+        async def landed_inputs_batch(self, _s, _codes):
+            raise RuntimeError("facade down")
+
+    await on_reference_changed(
+        {"ref_key": "core.tnved", "entity_ref": "ref_tnved:FX-1"},
+        _ref_ctx(session, sku_master=_Broken()),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    assert len(recompute) == 1
+    assert recompute[0].payload["sku_codes"] == ["F-1"]
+    assert recompute[0].payload["inputs"] == {}  # fail-soft
+
+
 async def test_cashflow_account_filter(session):
     from modules.finance.cashflow import cashflow_forecast
     from modules.finance.models import BankAccount
