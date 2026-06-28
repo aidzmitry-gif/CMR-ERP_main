@@ -58,9 +58,17 @@ services:
   app:
     build: .
     environment:
-      AIOS_ENVIRONMENT: dev
-      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@postgres:5432/aios
-      AIOS_REDIS_URL: redis://redis:6379/0
+      # SECURITY (прод-дыра): НЕ хардкодить dev. Хардкод в `environment:` ПЕРЕБИВАЕТ серверный
+      # .env, из-за чего прод-гард `_no_dev_defaults_in_prod` (config/settings.py) коротит на
+      # startswith("dev") → app доверяет заголовку X-User-Roles = вход суперюзером без пароля на
+      # публичном belakb.by. Substitution: локаль (env не задан) → дефолт dev; прод задаёт реальные
+      # значения в untracked `.env` рядом с compose ИЛИ в docker-compose.override.yml (см. RELEASE.md §2).
+      AIOS_ENVIRONMENT: ${AIOS_ENVIRONMENT:-dev}
+      AIOS_AUTH_MODE: ${AIOS_AUTH_MODE:-dev}
+      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+psycopg://aios:aios@postgres:5432/aios}
+      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://redis:6379/0}
+      AIOS_KEYCLOAK_ISSUER: ${AIOS_KEYCLOAK_ISSUER:-}
+      AIOS_KEYCLOAK_AUDIENCE: ${AIOS_KEYCLOAK_AUDIENCE:-}
     # SECURITY.md P0-7: в проде забиндить на loopback ("127.0.0.1:8000:8000") и пускать
     # только через TLS-прокси. Не делаю по умолчанию: если прокси/Tailscale ходит к app не
     # через хостовой loopback — bind на 127.0.0.1 оборвёт доступ. См. ops-вопрос в STATUS.
