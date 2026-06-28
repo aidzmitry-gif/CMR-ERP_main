@@ -1040,3 +1040,202 @@ async def test_cashflow_account_filter(session):
     r_all = await cashflow_forecast(session, days=5, mode="day", today=today)
     by_all = {b["bucket_start"]: b for b in r_all["buckets"]}
     assert by_all["2026-07-02"]["inflow"] == 1699.0  # 500 + 200 + 999
+
+
+# ═════════════════════════ Круг 5 — тест-харднинг и edge-cases ═════════════════════════
+
+
+# К5-1: reconcile fetch_payments edge — дубли ref / нет counterparty_ref / запятая в сумме
+# (см. ТЗ круг 5: матчинг не должен схлопывать дубли в один ключ и не падать на «100,00»)
+
+
+async def test_reconcile_duplicate_ref_does_not_collapse(session):
+    """Два ERP-платежа с одинаковыми ref+counterparty НЕ должны схлопываться в один.
+
+    Это РЕАЛЬНЫЕ деньги (счёт и его исправление; пересчёт; задвоение из 1С) — теряя
+    одного из них в выдаче, мы скрываем разницу. Сейчас reconcile собирает `dict[key→p]`,
+    что схлопывает дубли — тест падает на старом коде.
+    """
+    from modules.finance.reconcile import reconcile_with_onec
+
+    session.add_all([
+        Payment(ref="СЧ-DUP", amount=Decimal("100"), kind="receivable",
+                status="pending", counterparty_ref="УНП-1"),
+        Payment(ref="СЧ-DUP", amount=Decimal("200"), kind="receivable",
+                status="pending", counterparty_ref="УНП-1"),  # дубль ref+cp с другой суммой
+    ])
+    await session.commit()
+
+    class _Mock1C:
+        async def fetch_payments(self):
+            # 1С имеет ОДИН платёж по этому ref+cp — должно совпасть с ОДНИМ из ERP,
+            # второй должен оказаться в only_in_erp (а не потеряться).
+            return [{"ref": "СЧ-DUP", "amount": 100, "counterparty_ref": "УНП-1"}]
+
+    r = await reconcile_with_onec(session, _Mock1C())
+    # 2 ERP всего: 1 в matched + 1 в only_in_erp (или distinct по сумме) — главное НЕ потерять
+    erp_total = len(r["matched"]) + len(r["only_in_erp"])
+    assert erp_total == 2, f"дубль ref потерян: {r}"
+
+
+async def test_reconcile_no_counterparty_does_not_collapse_unrelated(session):
+    """Несколько платежей БЕЗ counterparty_ref с одинаковым ref — не должны схлопываться.
+
+    Старый ключ `f"{ref}|{cp or ''}"` для двух Payment(ref="X", cp=None) даёт один ключ "X|" —
+    второй платёж выпадает. Тест падает.
+    """
+    from modules.finance.reconcile import reconcile_with_onec
+
+    session.add_all([
+        Payment(ref="СЧ-A", amount=Decimal("50"), kind="receivable", status="pending"),
+        Payment(ref="СЧ-A", amount=Decimal("70"), kind="receivable", status="pending"),
+    ])
+    await session.commit()
+    r = await reconcile_with_onec(session, None)  # без 1С — все ERP → only_in_erp
+    assert len(r["only_in_erp"]) == 2, f"оба ERP-платежа должны остаться: {r}"
+
+
+async def test_reconcile_amount_with_comma_does_not_crash(session):
+    """1С может прислать сумму строкой '100,00' (русская локаль) — НЕ должно крашить reconcile.
+
+    Сейчас: `float(r.get("amount", 0))` упадёт ValueError на '100,00'. Тест падает.
+    """
+    from modules.finance.reconcile import reconcile_with_onec
+
+    class _Mock1C:
+        async def fetch_payments(self):
+            return [{"ref": "СЧ-RUB", "amount": "100,00", "counterparty_ref": None}]
+
+    # НЕ должно крашить — fail-soft по контракту 1С (см. CLAUDE.md финансы)
+    r = await reconcile_with_onec(session, _Mock1C())
+    assert r["source_available"] is True
+    # парсинг должен дать корректное число (100.00) либо безопасный 0 (но не исключение)
+    parsed_amount = r["only_in_1c"][0]["amount"] if r["only_in_1c"] else None
+    assert parsed_amount is not None, f"платёж с '100,00' потерян: {r}"
+
+
+# К5-2: B2 recompute каскад смешанных типов справочников — дедуп по объединению SKU
+
+
+async def test_b2_cascade_mixed_kinds_dedupes_by_sku(session):
+    """3 события РАЗНЫХ типов (ref_tnved + sku + vat), пересекающие SKU → 3 recompute,
+    каждый со своим dedup-набором; объединение всех уникальных SKU из payloads
+    покрывает ровно затронутые позиции, без дублей."""
+    from core.domain.models import OutboxEvent, Sku
+    from modules.finance.events import on_reference_changed
+
+    # X-1: tnved=T1, vat=V1; X-2: tnved=T1, vat=V2; X-3: tnved=T2, vat=V1
+    session.add_all([
+        Sku(code="X-1", title="X1", tnved_code="T1", vat_code="V1"),
+        Sku(code="X-2", title="X2", tnved_code="T1", vat_code="V2"),
+        Sku(code="X-3", title="X3", tnved_code="T2", vat_code="V1"),
+    ])
+    await session.commit()
+
+    ctx = _ref_ctx(session)
+    # Каскад: смена T1 (затрагивает X-1+X-2), сменa SKU X-1 (один), смена V1 (X-1+X-3)
+    await on_reference_changed(
+        {"ref_key": "core.tnved", "entity_ref": "ref_tnved:T1"}, ctx
+    )
+    await on_reference_changed(
+        {"ref_key": "core.skus", "entity_ref": "sku:X-1"}, ctx
+    )
+    await on_reference_changed(
+        {"ref_key": "core.vat_rates", "entity_ref": "ref_vat_rate:V1"}, ctx
+    )
+    await session.commit()
+
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    recompute = [e for e in events if e.event_type == "finance.landed.recompute_requested"]
+    assert len(recompute) == 3
+
+    # дедуп ВНУТРИ каждого payload (sorted unique)
+    by_ref = {e.payload["entity_ref"]: e.payload["sku_codes"] for e in recompute}
+    assert by_ref["ref_tnved:T1"] == ["X-1", "X-2"]
+    assert by_ref["sku:X-1"] == ["X-1"]
+    assert by_ref["ref_vat_rate:V1"] == ["X-1", "X-3"]
+
+    # объединение всех уникальных SKU из всех payloads = реально затронутые позиции
+    union = set()
+    for codes in by_ref.values():
+        union.update(codes)
+    assert union == {"X-1", "X-2", "X-3"}  # X-1 встречался в 3-х, но в union один
+
+
+# К5-3: платёжный календарь — edge параметры (days вне 1-90, account_id у Payment None)
+
+
+async def test_cashflow_negative_days_does_not_explode(session):
+    """days=-5 / 0 / 200 — кламп безопасный, не исключение."""
+    from modules.finance.cashflow import cashflow_forecast
+
+    today = date(2026, 7, 1)
+    for bad in (-5, 0, 200):
+        r = await cashflow_forecast(session, days=bad, mode="day", today=today)
+        # должен вернуть результат с КЛАМП-длиной (1..90), не падать
+        assert isinstance(r["buckets"], list)
+        assert 1 <= len(r["buckets"]) <= 90
+
+
+async def test_cashflow_payment_with_null_account_id_works(session):
+    """Платёж без account_id (FK ON DELETE SET NULL — счёт удалён) не должен ронять прогноз.
+
+    Случай: BankAccount удалили, Payment.account_id → None по FK. Запрос без account-фильтра
+    должен учитывать; запрос с account_id=X — пропускать (общий кэш не принадлежит ни одному).
+    """
+    from modules.finance.cashflow import cashflow_forecast
+
+    today = date(2026, 7, 1)
+    session.add(
+        Payment(
+            ref="orphan",
+            amount=Decimal("123"),
+            kind="receivable",
+            status="pending",
+            due_date=date(2026, 7, 3),
+            account_id=None,
+        )
+    )
+    await session.commit()
+    # без фильтра — попадает в общий
+    r_all = await cashflow_forecast(session, days=10, mode="day", today=today)
+    by = {b["bucket_start"]: b for b in r_all["buckets"]}
+    assert by["2026-07-03"]["inflow"] == 123.0
+    # с фильтром по несуществующему account_id — НЕ должно крашить и НЕ включать orphan
+    r_filt = await cashflow_forecast(
+        session, days=10, mode="day", today=today, account_id=99999
+    )
+    by_f = {b["bucket_start"]: b for b in r_filt["buckets"]}
+    assert by_f["2026-07-03"]["inflow"] == 0.0
+
+
+# К5-4: money-выходы НЕ float (деньги собственника не должны проходить через float)
+# Сейчас многие схемы возвращают float — тест ДОКУМЕНТИРУЕТ разрыв (NEEDS-ARB:
+# полный переход на str ломает frontend). xfail до решения координатора.
+
+
+@pytest.mark.xfail(
+    reason="NEEDS-ARB: контракт API возит money как float — переход на str ломает frontend; "
+    "вынесено координатору как нетривиальный фикс (см. КООРД-доклад круга 5).",
+    strict=False,
+)
+async def test_money_outputs_use_str_not_float_scan(session):
+    """Деньго-сканер: ни в одном API-ответе не должно быть float для money-полей.
+
+    Float дрейфует копейки на собственнике (приоритет №1 PLATFORM.md). Сейчас:
+    - PaymentOut.amount: float
+    - summary.margin.* / cash.*: float
+    - cashflow.opening_balance / buckets.*.inflow|outflow|net|cumulative: float
+    - BankAccountOut.opening_balance: float
+    """
+    from modules.finance.summary import finance_summary
+
+    session.add(Payment(ref="X", amount=Decimal("1234.56"), kind="receivable",
+                        status="pending"))
+    await session.commit()
+    s = await finance_summary(session)
+    # Сейчас float — тест должен ПАДАТЬ до фикса контракта.
+    for key in ("revenue", "landed", "gross"):
+        assert not isinstance(s["margin"][key], float), (
+            f"margin.{key} — float, деньги собственника не должны проходить через float"
+        )
