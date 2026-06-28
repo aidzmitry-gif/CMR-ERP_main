@@ -10,6 +10,7 @@ import {
   type ImportBoard,
   type ImportShipment,
 } from "@/lib/logistics-api";
+import { totalFreightByn } from "@/lib/logistics-domain";
 import { formatByn } from "@/lib/format";
 
 // Информационная панель импорта из Китая: наблюдение цепочки фрахт-форвардинга
@@ -70,6 +71,11 @@ export function LogisticsImport() {
     .reduce((n, s) => n + s.count, 0);
   const atCustoms = stages.find((s) => s.id === "customs")?.count ?? 0;
   const received = stages.find((s) => s.id === "warehouse")?.count ?? 0;
+  // LOG3-7: видимый импорт-фрахт (BYN) — ровно то, что улетело в finance как freight.cost
+  // (stage='warehouse' + amount>0, LOG3-1). totalFreightByn — общий контракт-зеркало
+  // сходимости (logistics-domain.ts), не дрейфуем «на экране 50k, в финансах 8k».
+  const importFreightTotal = totalFreightByn([], imports);
+  const hasReceived = received > 0;
 
   return (
     <div className="space-y-4">
@@ -79,12 +85,26 @@ export function LogisticsImport() {
         (закупка → склад) — здесь не дублируются.
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <KpiTile label="Всего поставок" value={total} tone="ink" />
         <KpiTile label="В движении" value={inTransit} tone="brand" />
         <KpiTile label="На таможне" value={atCustoms} tone="amber" />
         <KpiTile label="Принято на склад" value={received} tone="emerald" sub="факт прихода (учёт — в WMS)" />
+        <KpiTile
+          label="Σ фрахт импорта"
+          value={formatByn(importFreightTotal)}
+          sub="BYN · принято (warehouse) — в финансах"
+          tone="brand"
+        />
       </div>
+
+      {hasReceived && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+          Фрахт по поставкам в стадии «склад» учтён в финансах (событие{" "}
+          <span className="font-medium">logistics.freight.cost</span>, leg=&quot;import&quot;) — оприходование на
+          склад делает закупки→WMS, двойного учёта НЕТ.
+        </div>
+      )}
 
       {total === 0 ? (
         <Card title="Цепочка импорта">

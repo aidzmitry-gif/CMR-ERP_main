@@ -19,9 +19,12 @@ import {
   scoreGrade,
   summarizeShipments,
   tariffWeightPrice,
+  totalFreightByn,
   vehicleFits,
   type AuditItem,
   type Bid,
+  type FreightImport,
+  type FreightShipment,
   type ShipmentLike,
   type TariffRates,
 } from "@/lib/logistics-domain";
@@ -271,5 +274,47 @@ describe("logistics-domain · стадии импорта", () => {
     expect(importStageLabel("customs")).toBe("Таможня");
     expect(importStageLabel("warehouse")).toBe("Приёмка на склад");
     expect(importStageLabel("???")).toBe("???");
+  });
+});
+
+describe("logistics-domain · totalFreightByn (LOG3-8)", () => {
+  // Зеркало сервера: ровно эти суммы летят на finance как freight.cost
+  // (domestic при delivered + amount>0, import при warehouse + amount>0).
+  it("пусто → 0", () => {
+    expect(totalFreightByn([], [])).toBe(0);
+  });
+
+  it("только domestic delivered: суммирует, игнорирует не-delivered и amount≤0", () => {
+    const dom: FreightShipment[] = [
+      { status: "delivered", amount: 100 },
+      { status: "delivered", amount: 250.5 },
+      { status: "in_transit", amount: 1000 }, // не в финансах
+      { status: "delivered", amount: 0 },     // amount=0 — не эмитим
+      { status: "delivered", amount: -5 },    // защита от мусора
+    ];
+    expect(totalFreightByn(dom, [])).toBe(350.5);
+  });
+
+  it("только import warehouse: суммирует, игнорирует не-warehouse и amount≤0", () => {
+    const imp: FreightImport[] = [
+      { stage: "warehouse", amount: 8000 },
+      { stage: "warehouse", amount: 1200.75 },
+      { stage: "in_transit", amount: 5000 },  // ещё в пути — не в финансах
+      { stage: "customs", amount: 9999 },     // на таможне — не в финансах
+      { stage: "warehouse", amount: 0 },      // не эмитим
+    ];
+    expect(totalFreightByn([], imp)).toBe(9200.75);
+  });
+
+  it("оба плеча: domestic + import, ровно сходится с сервером", () => {
+    const dom: FreightShipment[] = [
+      { status: "delivered", amount: 300 },
+      { status: "planned", amount: 1000 },     // не учитываем
+    ];
+    const imp: FreightImport[] = [
+      { stage: "warehouse", amount: 8000 },
+      { stage: "factory", amount: 2000 },      // ещё не дошло
+    ];
+    expect(totalFreightByn(dom, imp)).toBe(8300);
   });
 });

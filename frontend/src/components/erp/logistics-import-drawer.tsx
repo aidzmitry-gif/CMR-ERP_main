@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { GhostButton, Pill } from "@/components/erp/logistics-ui";
+import { SourceTag } from "@/components/source-tag";
 import {
   patchImportStage,
   type ImportShipment,
@@ -96,15 +97,31 @@ export function ImportDrawer({
           )}
 
           <section className="grid grid-cols-2 gap-3 text-sm">
-            <Field label="Поставщик" value={imp.supplier || "—"} />
+            <div>
+              <div className="text-xs text-muted">Поставщик</div>
+              <div className="text-ink">{imp.supplier || "—"}</div>
+              {imp.supplier && <SourceTag entity="Поставщик" source="1c" />}
+            </div>
             <Field label="Контейнер" value={imp.container_no || "—"} />
             <Field label="Incoterms" value={imp.incoterms || "—"} />
             <Field label="Маршрут" value={imp.route || "—"} />
             <Field label="Количество" value={formatNumber(imp.qty) + " шт"} />
-            <Field label="Стоимость" value={formatByn(imp.amount)} />
+            <Field
+              label="Фрахт плеча"
+              value={formatByn(imp.amount)}
+              hint="BYN · в финансах при приёмке"
+            />
             <Field label="ETA" value={imp.eta ?? "—"} />
             <Field label="PO" value={imp.po_ref || "—"} />
           </section>
+
+          {imp.stage === "warehouse" && imp.amount > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+              Фрахт <span className="font-medium tabular-nums">{formatByn(imp.amount)}</span> учтён
+              в финансах при приёмке (событие <code>logistics.freight.cost</code>,
+              leg=&quot;import&quot;). Оприходование — за WMS.
+            </div>
+          )}
 
           <section>
             <div className="mb-2 text-xs font-medium text-muted">Цепочка</div>
@@ -177,11 +194,12 @@ export function ImportDrawer({
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
       <div className="text-xs text-muted">{label}</div>
-      <div className="text-ink">{value}</div>
+      <div className="text-ink tabular-nums">{value}</div>
+      {hint && <div className="text-[10px] text-faint">{hint}</div>}
     </div>
   );
 }

@@ -304,13 +304,16 @@ async def test_freight_audit_overbill_emits_refund(session, api):
 async def test_procurement_received_creates_import_shipment(session):
     """ИНФО-связка procurement→logistics: приёмка закупки → отметка в импорт-цепочке.
 
+    LOG3-3: импорт-маркер обязателен для создания НОВОЙ записи (origin='import' /
+    incoterms / страна не РБ) — иначе внутренние закупки засоряли бы импорт-доску.
     Склад при этом НЕ движется логистикой (это wms на тот же эвент) — двойного учёта нет.
     """
     from modules.logistics.events import on_procurement_received
     from modules.logistics.models import ImportShipment
 
     await on_procurement_received(
-        {"item": "АКБ 280Ач", "qty": 200, "warehouse": "Главный", "entity_ref": "purchase:42"},
+        {"item": "АКБ 280Ач", "qty": 200, "warehouse": "Главный",
+         "entity_ref": "purchase:42", "origin": "import", "incoterms": "FOB"},
         _ctx(session),
     )
     await session.commit()
@@ -323,11 +326,22 @@ async def test_procurement_received_creates_import_shipment(session):
     assert "logistics.import.received" in types
 
     # повторное событие по той же закупке — НЕ создаёт второй ImportShipment (обновляет stage)
+    # маркер уже не нужен: запись по po_ref существует.
     await on_procurement_received(
         {"item": "АКБ 280Ач", "qty": 200, "entity_ref": "purchase:42"}, _ctx(session)
     )
     await session.commit()
     assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
+
+    # LOG3-3: внутренняя закупка БЕЗ маркера и БЕЗ существующей записи — НЕ создаём.
+    await on_procurement_received(
+        {"item": "Внутренний винт", "qty": 100, "entity_ref": "purchase:9999"},
+        _ctx(session),
+    )
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1, (
+        "LOG3-3: внутренняя закупка без import-маркера не должна создавать ImportShipment"
+    )
 
     # без entity_ref игнорируется (защита от мусорных payload)
     await on_procurement_received({"item": "X", "qty": 1}, _ctx(session))

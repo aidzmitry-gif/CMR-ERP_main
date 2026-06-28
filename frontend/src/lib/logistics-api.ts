@@ -482,8 +482,27 @@ export interface CostInsights {
   tender_savings_total: number;
   tenders: TenderSaving[];
   audit_to_recover: number;
+  // LOG3-6: китайский импорт-фрахт — раньше выпадал из KPI «сколько мы тратим на логистику».
+  import_freight_total: number;
+  import_freight_avg: number;
+  import_freight_count: number;
   recommendations: string[];
 }
 
 export const fetchCostInsights = (weightKg = 30) =>
   getJson<CostInsights | null>(`/logistics/cost-insights?weight_kg=${weightKg}`, null);
+
+// ─────────────────────────────── Импорт в движении (LOG3-5) ───────────────────────────────
+
+/** Импорт-поставка в движении (pull-провайдер для нетто-пополнения).
+ *  Видна, пока stage ∈ {factory, consolidation, in_transit, customs}. */
+export interface ImportInTransit {
+  po_ref: string;
+  cargo: string;
+  qty: number;
+  eta?: string | null;
+  stage: string;
+}
+
+export const fetchImportsInTransit = () =>
+  getJson<ImportInTransit[]>("/logistics/imports/in-transit", []);

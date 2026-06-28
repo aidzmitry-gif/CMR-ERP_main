@@ -315,3 +315,33 @@ export function nextImportStage(stage: string): string {
 export function importStageLabel(stage: string): string {
   return IMPORT_LABELS[stage] ?? stage;
 }
+
+// ─────────────────────────────── Σ видимого фрахта (LOG3-8) ───────────────────────────────
+
+export interface FreightShipment {
+  status: string;
+  amount: number;
+}
+export interface FreightImport {
+  stage: string;
+  amount: number;
+}
+
+/** Σ видимого фрахта логистики в BYN: доставки delivered + импорт в warehouse, amount > 0.
+ *
+ *  Зеркало серверного контракта (LOG3-1 + LOG3-2): ровно эти суммы летят на finance как
+ *  ``logistics.freight.cost`` (``leg='domestic'`` при delivered ``Shipment``, ``leg='import'``
+ *  при warehouse ``ImportShipment``). Страховка против дрейфа «на экране 1000, в финансах 800». */
+export function totalFreightByn(
+  domestic: FreightShipment[],
+  imports: FreightImport[],
+): number {
+  let total = 0;
+  for (const s of domestic) {
+    if (s.status === "delivered" && s.amount > 0) total += s.amount;
+  }
+  for (const i of imports) {
+    if (i.stage === "warehouse" && i.amount > 0) total += i.amount;
+  }
+  return round2(total);
+}

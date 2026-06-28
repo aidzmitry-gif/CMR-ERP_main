@@ -80,7 +80,7 @@ export function LogisticsInsights() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile
           label="Потенциал по зонам"
           value={formatByn(data?.potential_savings ?? 0)}
@@ -97,6 +97,16 @@ export function LogisticsInsights() {
           label="К возврату (аудит)"
           value={formatByn(data?.audit_to_recover ?? 0)}
           tone={(data?.audit_to_recover ?? 0) > 0 ? "red" : "emerald"}
+        />
+        <KpiTile
+          label="Импорт-фрахт (плечо)"
+          value={formatByn(data?.import_freight_total ?? 0)}
+          sub={
+            (data?.import_freight_count ?? 0) > 0
+              ? `${data?.import_freight_count} поставок · средн. ${formatByn(data?.import_freight_avg ?? 0)}`
+              : "пока нет поставок с фрахтом"
+          }
+          tone="ink"
         />
       </div>
 
