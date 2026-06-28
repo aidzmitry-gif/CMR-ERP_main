@@ -82,6 +82,28 @@ def _git(*args: str) -> str:
         return ""
 
 
+def _alembic_heads() -> list[str]:
+    """Головы alembic-цепочки = revision, на которые никто не ссылается down_revision'ом.
+    Чистый python, БЕЗ запуска alembic (медленно/нужна БД). Скан по ФАЙЛАМ НА ДИСКЕ
+    (linked-worktree-полосы пишут .py до stage — коллизия видна по диску). Каталог — от git toplevel."""
+    top = _git("rev-parse", "--show-toplevel")
+    migr = (Path(top) if top else Path.cwd()) / "migrations" / "versions"
+    if not migr.is_dir():
+        return []
+    revs: set[str] = set()
+    downs: set[str] = set()
+    for f in migr.glob("*.py"):
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if m := re.search(r'^revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            revs.add(m.group(1))
+        if d := re.search(r'^down_revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            downs.add(d.group(1))
+    return sorted(revs - downs)
+
+
 def _clean(s: str) -> str:
     """Убрать control/ANSI-байты из недоверенной строки (subject/ref/путь) перед
     записью в журнал и печатью — CR/ESC иначе портят строку лога в терминале."""
@@ -214,14 +236,28 @@ SHARED_BRANCHES = {"main", "sales-2.0-redesign", "theme/dark-mode-cd"}
 
 
 def pre_commit(coord: Path) -> int:
-    """Гард ПЕРЕД коммитом (advisory): предупредить о рисках общей ветки. Всегда 0 —
-    pre-commit НЕ блокирует (ломать поток флота хуже флага). Блок amend — в prepare_commit_msg.
+    """Гард ПЕРЕД коммитом. БЛОК (return 1) только на объективной аварии: staged-миграция при
+    >1 alembic head (dual-head → падёт `alembic upgrade` в проде, деньги/безопасность). Обход
+    (осознанно, напр. перед мержем-починкой цепочки): AIOS_ALLOW_MULTI_HEADS=1. Остальное —
+    advisory (return 0): предупреждения о хотспотах/shared-kernel/миграции на общей ветке.
     """
+    norm = {f.replace("\\", "/")
+            for f in _git("diff", "--cached", "--name-only").splitlines() if f}
+    # БЛОК: staged-миграция при нескольких головах цепочки = два head (на любой ветке).
+    if any(MIGRATION_RE.search(f) for f in norm):
+        heads = _alembic_heads()
+        if len(heads) > 1 and os.environ.get("AIOS_ALLOW_MULTI_HEADS") != "1":
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            print(f"[coordination] ⛔ alembic multiple heads ({len(heads)}): {', '.join(heads)}. "
+                  "Коммит миграции заблокирован — два head ломают `alembic upgrade` в проде. "
+                  "Бери номер через scripts/next_migration.py (down_revision = ОДИН head), или "
+                  "почини цепочку. Обход (осознанно): AIOS_ALLOW_MULTI_HEADS=1 git commit …")
+            _append(coord, f"- {ts} · commit BLOCKED · migration guard: multiple heads ({', '.join(heads)})")
+            return 1
+    # ADVISORY: риски общей ветки (не блокируем — флага достаточно).
     branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
     if branch not in SHARED_BRANCHES:
         return 0
-    norm = {f.replace("\\", "/")
-            for f in _git("diff", "--cached", "--name-only").splitlines() if f}
     hot = sorted(norm & HOTSPOTS)
     if hot:
         print(f"[coordination] ⚠ общая ветка '{branch}': тронуты хотспоты: {', '.join(hot)}. "
@@ -270,12 +306,16 @@ def on_commit(coord: Path) -> None:
     _report(flags)
 
 
-def on_push(coord: Path, remote: str) -> None:
+def on_push(coord: Path, remote: str) -> int:
+    """Лог пуша + БЛОК изоляции: прямой push в ОБЩУЮ ветку с >1 коммита утащит чужие
+    незапушенные коммиты. Блок (return 1), обход AIOS_ALLOW_PUSH=1. Lane-ветки (не общие) —
+    пушатся свободно. fail-open сохранён top-level except'ом в main."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     zero = "0" * 40
     all_files: set[str] = set()
     diffs: list[str] = []
     lines_logged = 0
+    blocked: list[str] = []  # общие ветки, куда летит >1 коммита
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4:
@@ -300,9 +340,18 @@ def on_push(coord: Path, remote: str) -> None:
         _append(coord, f"- {ts} · push → {remote}/{dest} · {n} коммит(ов){warn}")
         print(f"[coordination] push → {remote}/{dest}: {n} коммит(ов)")
         lines_logged += 1
+        if dest in SHARED_BRANCHES and n > 1:
+            blocked.append(f"{dest} ({n} коммитов)")
     if not lines_logged:
-        return
+        return 0
     _report(_flags(sorted(all_files), "\n".join(diffs)))
+    if blocked and os.environ.get("AIOS_ALLOW_PUSH") != "1":
+        print(f"[coordination] ⛔ прямой push в общую ветку с >1 коммита: {', '.join(blocked)}. "
+              "Утащишь чужие незапушенные коммиты. Пушь ТОЛЬКО свой — cherry-pick на чистую ветку "
+              "от origin (scripts/lane_worktree.py). Обход (осознанно): AIOS_ALLOW_PUSH=1 git push …")
+        _append(coord, f"- {ts} · push BLOCKED · isolation: >1 коммита в общую ветку ({', '.join(blocked)})")
+        return 1
+    return 0
 
 
 def main() -> int:
@@ -319,7 +368,7 @@ def main() -> int:
     if mode == "post-commit":
         on_commit(coord)
     elif mode == "pre-push":
-        on_push(coord, sys.argv[2] if len(sys.argv) > 2 else "origin")
+        return on_push(coord, sys.argv[2] if len(sys.argv) > 2 else "origin")
     return 0
 
 
