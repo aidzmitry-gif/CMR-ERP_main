@@ -1,0 +1,206 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { Card, KpiTile, Loading, Pill } from "@/components/erp/logistics-ui";
+import { ImportDrawer } from "@/components/erp/logistics-import-drawer";
+import {
+  fetchImportBoard,
+  fetchImports,
+  type ImportBoard,
+  type ImportShipment,
+} from "@/lib/logistics-api";
+import { totalFreightByn } from "@/lib/logistics-domain";
+import { formatByn } from "@/lib/format";
+
+// Информационная панель импорта из Китая: наблюдение цепочки фрахт-форвардинга
+// (фабрика → консолидация → плечо → таможня → склад) по событиям import.*.
+// ВАЖНО: приёмка на склад и остатки здесь НЕ ведутся — это procurement→wms
+// (двойной учёт запрещён). Стадия «склад» тут лишь отражает факт прихода.
+
+const PRIORITY_TONE: Record<string, "slate" | "amber" | "red"> = {
+  Высокий: "red",
+  Средний: "amber",
+  Низкий: "slate",
+};
+
+export function LogisticsImport() {
+  const [board, setBoard] = useState<ImportBoard | null>(null);
+  const [imports, setImports] = useState<ImportShipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  async function reload() {
+    const [b, list] = await Promise.all([fetchImportBoard(), fetchImports()]);
+    setBoard(b);
+    setImports(list);
+    setFailed(b === null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    reload().catch(() => {
+      if (alive) {
+        setFailed(true);
+        setLoading(false);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) return <Loading />;
+
+  // Ошибка фетча (backend недоступен) — честно отличаем от «данных нет».
+  if (failed)
+    return (
+      <Card title="Импорт из Китая">
+        <p className="py-6 text-center text-sm text-muted">
+          Не удалось загрузить цепочку импорта. Проверьте подключение к сервису логистики и обновите страницу.
+        </p>
+      </Card>
+    );
+
+  const stages = board?.stages ?? [];
+  const total = stages.reduce((n, s) => n + s.count, 0);
+  const inTransit = stages
+    .filter((s) => !["factory", "warehouse"].includes(s.id))
+    .reduce((n, s) => n + s.count, 0);
+  const atCustoms = stages.find((s) => s.id === "customs")?.count ?? 0;
+  const received = stages.find((s) => s.id === "warehouse")?.count ?? 0;
+  // LOG3-7: видимый импорт-фрахт (BYN) — ровно то, что улетело в finance как freight.cost
+  // (stage='warehouse' + amount>0, LOG3-1). totalFreightByn — общий контракт-зеркало
+  // сходимости (logistics-domain.ts), не дрейфуем «на экране 50k, в финансах 8k».
+  const importFreightTotal = totalFreightByn([], imports);
+  const hasReceived = received > 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-line bg-sunken px-4 py-3 text-xs text-muted">
+        Панель информационная: показывает движение импортных поставок по событиям{" "}
+        <span className="font-medium text-ink">import.*</span>. Приёмка на склад и остатки ведутся в WMS
+        (закупка → склад) — здесь не дублируются.
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiTile label="Всего поставок" value={total} tone="ink" />
+        <KpiTile label="В движении" value={inTransit} tone="brand" />
+        <KpiTile label="На таможне" value={atCustoms} tone="amber" />
+        <KpiTile label="Принято на склад" value={received} tone="emerald" sub="факт прихода (учёт — в WMS)" />
+        <KpiTile
+          label="Σ фрахт импорта"
+          value={formatByn(importFreightTotal)}
+          sub="BYN · принято (warehouse) — в финансах"
+          tone="brand"
+        />
+      </div>
+
+      {hasReceived && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+          Фрахт по поставкам в стадии «склад» учтён в финансах (событие{" "}
+          <span className="font-medium">logistics.freight.cost</span>, leg=&quot;import&quot;) — оприходование на
+          склад делает закупки→WMS, двойного учёта НЕТ.
+        </div>
+      )}
+
+      {total === 0 ? (
+        <Card title="Цепочка импорта">
+          <p className="py-6 text-center text-sm text-muted">
+            Импортных поставок пока нет. Они появляются из заявок закупки и событий{" "}
+            <span className="font-medium text-ink">import.*</span> — подключим по мере наполнения цепочки.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {stages.map((s) => (
+              <span
+                key={s.id}
+                className="rounded-md bg-sunken px-2 py-1 text-[11px] text-muted"
+                style={s.color ? { borderLeft: `3px solid ${s.color}` } : undefined}
+              >
+                {s.title}
+              </span>
+            ))}
+          </div>
+        </Card>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {stages.map((stage) => (
+            <div key={stage.id} className="min-w-[240px] flex-1">
+              <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color || "#94A3B8" }} />
+                  {stage.title}
+                </span>
+                <span className="text-xs text-muted">{stage.count}</span>
+              </div>
+              <div className="space-y-2">
+                {stage.cards.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[11px] text-faint">
+                    пусто
+                  </p>
+                ) : (
+                  stage.cards.map((card) => (
+                    <button
+                      key={card.id}
+                      onClick={() => setOpenId(card.id)}
+                      className="block w-full rounded-lg border border-line bg-surface p-3 text-left shadow-card hover:bg-sunken"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-ink">
+                          {card.flag} {card.title}
+                        </span>
+                        {card.priority && (
+                          <Pill text={card.priority} tone={PRIORITY_TONE[card.priority] ?? "slate"} />
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-xs text-muted">{card.subtitle}</div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+                        <span className="font-medium text-muted">{card.code}</span>
+                        {card.status_tag && <Pill text={card.status_tag} tone="blue" />}
+                        {card.amount != null && card.amount > 0 && (
+                          <span className="tabular-nums text-money">{formatByn(card.amount)}</span>
+                        )}
+                      </div>
+                      {card.tags && card.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {card.tags.map((t, i) => (
+                            <span key={i} className="rounded bg-sunken px-1.5 py-0.5 text-[10px] text-muted">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {(card.owner || card.date) && (
+                        <div className="mt-1.5 flex items-center justify-between text-[10px] text-faint">
+                          <span>{card.owner}</span>
+                          <span>{card.date}</span>
+                        </div>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {openId != null && (() => {
+        const imp = imports.find((i) => i.id === openId);
+        if (!imp) return null;
+        return (
+          <ImportDrawer
+            imp={imp}
+            onClose={() => setOpenId(null)}
+            onUpdated={(updated) => {
+              setImports((list) => list.map((i) => (i.id === updated.id ? updated : i)));
+              void reload();   // обновим доску (стадия могла сменить колонку)
+            }}
+          />
+        );
+      })()}
+    </div>
+  );
+}

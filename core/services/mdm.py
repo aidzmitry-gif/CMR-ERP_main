@@ -73,6 +73,45 @@ async def duplicate_clusters(session: AsyncSession) -> list[dict]:
     return clusters
 
 
+async def import_preview(session: AsyncSession, onec) -> dict:
+    """Dry-run предпросмотр импорта контрагентов из кэша 1С в MDM — БЕЗ записи (REF3-9).
+
+    Читает кэш 1С через фасад (``onec.fetch_counterparties`` — только чтение) и считает, сколько
+    записей при реальном прогоне СОЗДАЛОСЬ БЫ / совпало по УНП с активным эталоном / без УНП
+    (нельзя детерминированно сматчить). Матч — по УНП (natural key), как ``match_candidates``.
+    НИЧЕГО не пишет: реальный upsert/дедуп — зона Синк (``reference_import``), здесь только метрика
+    готовности моста (мост ~4109 контрагентов сейчас откачен). Возврат:
+    ``{total, would_create, would_match_by_unp, without_unp}``.
+    """
+    cache = await onec.fetch_counterparties()
+    existing_unps = {
+        u
+        for (u,) in (
+            await session.execute(
+                select(Counterparty.unp).where(
+                    Counterparty.is_active.is_(True), Counterparty.unp.is_not(None)
+                )
+            )
+        ).all()
+    }
+    total = would_create = would_match = without_unp = 0
+    for rec in cache:
+        total += 1
+        unp = (rec.get("unp") or rec.get("УНП") or "").strip() if isinstance(rec, dict) else ""
+        if not unp:
+            without_unp += 1
+        elif unp in existing_unps:
+            would_match += 1
+        else:
+            would_create += 1
+    return {
+        "total": total,
+        "would_create": would_create,
+        "would_match_by_unp": would_match,
+        "without_unp": without_unp,
+    }
+
+
 async def match_candidates(
     session: AsyncSession, *, unp: str | None, exclude_id: int | None = None
 ) -> list[Counterparty]:

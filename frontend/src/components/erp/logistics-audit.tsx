@@ -2,9 +2,15 @@
 
 import { useEffect, useState } from "react";
 
-import { Card, EmptyState, GhostButton, KpiTile, Loading, Pill } from "@/components/erp/logistics-ui";
+import { Card, GhostButton, KpiTile, Loading, Pill } from "@/components/erp/logistics-ui";
 import { auditSummary, auditVariance } from "@/lib/logistics-domain";
-import { fetchAudit, seedAudit, type AuditEntry, type AuditReport } from "@/lib/logistics-api";
+import {
+  createAuditEntry,
+  fetchAudit,
+  seedAudit,
+  type AuditEntry,
+  type AuditReport,
+} from "@/lib/logistics-api";
 import { formatByn } from "@/lib/format";
 
 const DEFAULT_PERIOD = "2026-06";
@@ -21,6 +27,14 @@ export function LogisticsAudit() {
   const [report, setReport] = useState<AuditReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Форма приёмки счёта (POST /costs/audit)
+  const [shipmentCode, setShipmentCode] = useState("");
+  const [carrierCode, setCarrierCode] = useState("");
+  const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [expectedAmount, setExpectedAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [lastEntry, setLastEntry] = useState<AuditEntry | null>(null);
 
   async function load(p: string) {
     setReport(await fetchAudit(p));
@@ -41,11 +55,43 @@ export function LogisticsAudit() {
     setBusy(false);
   }
 
+  async function onSubmitInvoice() {
+    setFormError(null);
+    if (!shipmentCode || !carrierCode || !invoiceAmount) {
+      setFormError("Заполните № отгрузки, код перевозчика и сумму счёта.");
+      return;
+    }
+    const invoice = parseFloat(invoiceAmount);
+    if (!Number.isFinite(invoice) || invoice <= 0) {
+      setFormError("Сумма счёта должна быть положительным числом.");
+      return;
+    }
+    setBusy(true);
+    const expectedNum = expectedAmount ? parseFloat(expectedAmount) : null;
+    const entry = await createAuditEntry({
+      shipment_code: shipmentCode,
+      carrier_code: carrierCode,
+      invoice_amount: invoice,
+      expected_amount: expectedNum != null && Number.isFinite(expectedNum) ? expectedNum : null,
+      reason: reason || undefined,
+    });
+    setBusy(false);
+    if (!entry) {
+      setFormError("Не удалось зарегистрировать счёт. Проверьте код перевозчика и попробуйте снова.");
+      return;
+    }
+    setLastEntry(entry);
+    setShipmentCode("");
+    setCarrierCode("");
+    setInvoiceAmount("");
+    setExpectedAmount("");
+    setReason("");
+    await load(period);
+  }
+
   if (loading) return <Loading />;
 
   const items: AuditEntry[] = report?.items ?? [];
-  if (items.length === 0)
-    return <EmptyState text={`Аудит счетов за ${period} ещё не проводился.`} onSeed={onSeed} busy={busy} />;
 
   // Свод от backend — основной; при отсутствии считаем из позиций (та же доменная логика).
   const summary = auditSummary(items);
@@ -62,6 +108,43 @@ export function LogisticsAudit() {
       </div>
 
       <Card
+        title="Зарегистрировать счёт перевозчика"
+        hint="Если ожидаемая сумма не задана — посчитается из тарифа (по зоне и весу). На переплату (variance > 0) уйдёт событие freight.audit_refund в финансы."
+      >
+        {formError && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+            {formError}
+          </div>
+        )}
+        {lastEntry && !formError && (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            Счёт {lastEntry.shipment_code} зарегистрирован, отклонение{" "}
+            <span className="font-semibold">
+              {lastEntry.variance > 0 ? "+" : ""}
+              {formatByn(lastEntry.variance)}
+            </span>
+            {lastEntry.variance > 0 && " — в финансы ушло событие к возврату."}
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="№ отгрузки" value={shipmentCode} onChange={setShipmentCode} placeholder="напр. ЛОГ-2026-0099" />
+          <Field label="Код перевозчика" value={carrierCode} onChange={setCarrierCode} placeholder="dpd / autolight / …" />
+          <Field label="Сумма счёта (BYN)" value={invoiceAmount} onChange={setInvoiceAmount} placeholder="30.00" type="number" />
+          <Field label="Ожидалось (опц.)" value={expectedAmount} onChange={setExpectedAmount} placeholder="из тарифа, если пусто" type="number" />
+          <Field label="Причина (опц.)" value={reason} onChange={setReason} placeholder="напр. доплата за вес" />
+          <div className="flex items-end">
+            <button
+              onClick={onSubmitInvoice}
+              disabled={busy}
+              className="w-full rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
+            >
+              Зарегистрировать
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card
         title="Аудит счетов перевозчиков"
         hint="Сверка выставленного счёта с ожидаемым по тарифу; переплаты — к возврату."
         action={
@@ -76,6 +159,11 @@ export function LogisticsAudit() {
           </div>
         }
       >
+        {items.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted">
+            Счетов за {period} ещё нет. Заведите первый счёт формой выше — переплаты автоматически уйдут в финансы.
+          </p>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="border-b border-line text-left text-xs text-muted">
@@ -117,7 +205,35 @@ export function LogisticsAudit() {
             </tbody>
           </table>
         </div>
+        )}
       </Card>
     </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: "text" | "number";
+}) {
+  return (
+    <label className="block text-xs text-muted">
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+      />
+    </label>
   );
 }

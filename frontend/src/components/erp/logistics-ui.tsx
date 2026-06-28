@@ -111,13 +111,20 @@ export function GradeBadge({ grade }: { grade: Grade | string }) {
 }
 
 /** Небольшая статус-пилюля. */
-export function Pill({ text, tone = "slate" }: { text: string; tone?: "slate" | "blue" | "emerald" | "amber" | "violet" }) {
+export function Pill({
+  text,
+  tone = "slate",
+}: {
+  text: string;
+  tone?: "slate" | "blue" | "emerald" | "amber" | "violet" | "red";
+}) {
   const cls = {
     slate: "bg-sunken text-muted",
     blue: "bg-blue-50 text-blue-600",
     emerald: "bg-emerald-50 text-emerald-600",
     amber: "bg-amber-50 text-amber-600",
     violet: "bg-violet-50 text-violet-600",
+    red: "bg-red-50 text-red-600",
   }[tone];
   return <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-medium", cls)}>{text}</span>;
 }

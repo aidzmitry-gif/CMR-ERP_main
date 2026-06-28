@@ -97,6 +97,19 @@ ruff check .                      # линт (line-length 100, py312, isort)
   Поэтому локальный `main` обгоняет `origin/main` на чужие незапушенные коммиты. **Правило пуша:**
   пушить ТОЛЬКО свой коммит — cherry-pick его на чистую ветку от `origin/main` (через временный
   worktree), не утаскивая чужие коммиты. Push/коммит — только по явной просьбе пользователя.
+- **🔴 НИКАКОГО `git commit --amend` / `reset` / `rebase` на ОБЩЕЙ ветке** (`main`,
+  `sales-2.0-redesign`, `theme/dark-mode-cd`). Несколько сессий коммитят в неё разом → HEAD
+  дрейфует под тобой → amend затрёт ЧУЖОЙ коммит (так и случилось 2026-06-27: аменд снёс коммит
+  CRM-сессии, чинил через `reset --soft` + reflog). Всегда делай **НОВЫЙ** коммит. Гард в
+  `prepare-commit-msg`-хуке блокирует amend на общей ветке (обход, если HEAD точно твой:
+  `AIOS_ALLOW_AMEND=1 git commit --amend`). **Лучше — своя ветка/worktree на сессию**
+  (`git worktree add ../_wt_<полоса> -b sales-2.0-<полоса>`): HEAD не дрейфует, amend безопасен,
+  пуш — cherry-pick своего на чистую ветку от origin (правило выше).
+- **Git-хуки координации** (`.githooks/`, `core.hooksPath` уже настроен): `pre-commit`/`post-commit`/
+  `pre-push` (advisory: журнал `coordination/.activity.local.md` + флаги хотспот/миграция/событие
+  шины/субмодуль) и `prepare-commit-msg` (блок amend на общей ветке). Логика — `scripts/coordination_hook.py`.
+  ПЕРЕД коммитом в общую ветку: `git status` — staged ТОЛЬКО свои файлы (`git add` по именам, НЕ `add .`);
+  `git log -1` — HEAD твой? Сверься с `coordination/ACTIVE-SESSIONS.md` (полосы/хотспоты/счётчик миграций).
 - **🗺️ Карта связей — [coordination/DEPENDENCY-MAP.md](coordination/DEPENDENCY-MAP.md).** Сверяться
   ПЕРЕД параллельной работой: граф межмодульных событий, shared-kernel данные, 4 файла-хотспота
   (`config/settings.py`, `config/modules.py`, `core/services/__init__.py`, `core/db/base.py`),

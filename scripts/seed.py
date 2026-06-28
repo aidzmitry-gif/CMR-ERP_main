@@ -10,6 +10,21 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
+from modules.hr.models import Candidate
+from modules.procurement.models import PurchaseRequest
+from modules.production.models import ProductionOrder
+from modules.sales.models import (
+    Activity,
+    ContractTemplate,
+    Deal,
+    DealItem,
+    KpiTarget,
+    Lead,
+    LossReason,
+    Message,
+    PriceQuote,
+)
+from modules.wms.models import WarehouseOp
 from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, SurvivorshipRule, User
@@ -26,25 +41,10 @@ from core.domain.reference import (
     VatRate,
 )
 from core.services import build_services
-from modules.hr.models import Candidate
 from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
 from modules.legal.models import LegalCase
 from modules.office.models import OfficeDoc
-from modules.procurement.models import PurchaseRequest
-from modules.production.models import ProductionOrder
-from modules.sales.models import (
-    Activity,
-    ContractTemplate,
-    Deal,
-    DealItem,
-    KpiTarget,
-    Lead,
-    LossReason,
-    Message,
-    PriceQuote,
-)
-from modules.wms.models import WarehouseOp
 
 KPI_DATE = date(2026, 6, 2)
 
@@ -310,22 +310,45 @@ def _demo_leads() -> list[Lead]:
 
 
 def _kpi_targets() -> list[KpiTarget]:
+    # ~15 дневных показателей менеджера/РОП (регламент заказчика, [[sales-deals-real-spec]]).
+    # icon/tone — из ограниченных фронт-юнионов (KpiIcon/KpiTone), чтобы mapKpi и полоса KPI
+    # не падали; деньги (unit="money") форматируются в BYN на скорборде.
     D = Decimal
     return [
         KpiTarget(key="calls_key", title="Звонки ключевым клиентам", target=D("40"), unit="count", icon="phone-key", tone="blue", sort_order=1),
         KpiTarget(key="calls_all", title="Всего звонков", target=D("100"), unit="count", icon="phone", tone="indigo", sort_order=2),
-        KpiTarget(key="ship_plan", title="План по сумме отгрузки", target=D("8000000"), unit="money", icon="ruble", tone="green", sort_order=3),
-        KpiTarget(key="calls_cold", title="Холодные звонки", target=D("60"), unit="count", icon="snow", tone="cyan", sort_order=4),
-        KpiTarget(key="requests", title="Обработка заявок", target=D("30"), unit="count", icon="doc", tone="slate", sort_order=5),
+        KpiTarget(key="calls_cold", title="Холодные звонки", target=D("60"), unit="count", icon="snow", tone="cyan", sort_order=3),
+        KpiTarget(key="requests", title="Обработка заявок", target=D("30"), unit="count", icon="doc", tone="slate", sort_order=4),
+        KpiTarget(key="new_leads", title="Новых лидов принято", target=D("25"), unit="count", icon="phone", tone="cyan", sort_order=5),
+        KpiTarget(key="qualified", title="Квалифицировано лидов", target=D("15"), unit="count", icon="doc", tone="indigo", sort_order=6),
+        KpiTarget(key="quotes", title="Подготовлено цен/КП", target=D("20"), unit="count", icon="doc", tone="blue", sort_order=7),
+        KpiTarget(key="meetings", title="Встреч проведено", target=D("5"), unit="count", icon="doc", tone="slate", sort_order=8),
+        KpiTarget(key="invoices_sent", title="Счетов отправлено", target=D("12"), unit="count", icon="doc", tone="blue", sort_order=9),
+        KpiTarget(key="contracts", title="Договоров заключено", target=D("3"), unit="count", icon="doc", tone="green", sort_order=10),
+        KpiTarget(key="won_count", title="Сделок выиграно", target=D("4"), unit="count", icon="doc", tone="green", sort_order=11),
+        KpiTarget(key="tasks_done", title="Задач закрыто", target=D("18"), unit="count", icon="doc", tone="slate", sort_order=12),
+        KpiTarget(key="ship_plan", title="План по сумме отгрузки", target=D("8000000"), unit="money", icon="ruble", tone="green", sort_order=13),
+        KpiTarget(key="invoices_sum", title="Сумма выставленных счетов", target=D("3000000"), unit="money", icon="ruble", tone="green", sort_order=14),
+        KpiTarget(key="won_sum", title="Сумма выигранных сделок", target=D("2000000"), unit="money", icon="ruble", tone="green", sort_order=15),
     ]
 
 
 def _activities() -> list[Activity]:
     acts: list[Activity] = []
-    for key, n in (("calls_key", 24), ("calls_all", 58), ("calls_cold", 32), ("requests", 18)):
+    counts = (
+        ("calls_key", 24), ("calls_all", 58), ("calls_cold", 32), ("requests", 18),
+        ("new_leads", 16), ("qualified", 9), ("quotes", 13), ("meetings", 3),
+        ("invoices_sent", 7), ("contracts", 2), ("won_count", 3), ("tasks_done", 11),
+    )
+    for key, n in counts:
         acts += [Activity(kpi_key=key, owner="Иван Петров", value=Decimal("1"), date=KPI_DATE) for _ in range(n)]
-    for value in (2_500_000, 1_700_000, 1_000_000):
-        acts.append(Activity(kpi_key="ship_plan", owner="Иван Петров", value=Decimal(value), date=KPI_DATE))
+    money = (
+        ("ship_plan", (2_500_000, 1_700_000, 1_000_000)),
+        ("invoices_sum", (1_200_000, 900_000)),
+        ("won_sum", (1_100_000, 500_000)),
+    )
+    for key, values in money:
+        acts += [Activity(kpi_key=key, owner="Иван Петров", value=Decimal(v), date=KPI_DATE) for v in values]
     return acts
 
 
@@ -673,6 +696,20 @@ async def main() -> None:
             cat = cat_by_code.get(code)
             if cat and cat.tnved_code is None:
                 cat.tnved_code = tnved
+        # «Общие данные группы» — свободные атрибуты (Производитель/Импортёр, упаковка, габариты)
+        # по умолчанию на группе → товар без своего ключа наследует вверх по дереву (демо).
+        # Тестовые SKU (TEST-AAA/2.1) пусты по этим полям → в карточке покажутся «↑ из группы».
+        GROUP_ATTR_DEFAULTS = {
+            "01": {"Производитель": "GP Batteries", "Импортёр": "ООО Аккумуляторные решения",
+                   "Кол-во в коробке": "10 шт", "Габариты": "10,5 × 44,5 мм"},
+            "02": {"Производитель": "Космос", "Импортёр": "ООО Аккумуляторные решения",
+                   "Кол-во в коробке": "10 шт"},
+            "39": {"Импортёр": "ООО Аккумуляторные решения", "Кол-во в коробке": "20 шт"},
+        }
+        for code, attrs in GROUP_ATTR_DEFAULTS.items():
+            cat = cat_by_code.get(code)
+            if cat and not cat.attributes:
+                cat.attributes = attrs
 
         # Номенклатура (по коду, идемпотентно) — с привязкой к группе + демо-характеристики.
         existing_codes = set((await s.execute(select(Sku.code))).scalars().all())

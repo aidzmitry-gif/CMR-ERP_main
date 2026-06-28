@@ -2,10 +2,18 @@
 
 import { Mail, Phone, Shield, Star, User } from "lucide-react";
 
+import { SourceTag } from "@/components/source-tag";
 import type { CounterpartyCard } from "@/lib/reference-data";
 import { formatAuditDate, formatTouchTs, provenanceCounts, touchKindMeta } from "@/lib/spravochniki-card";
 
 import { Field } from "./provenance-badge";
+
+/** Происхождение эталона по алиасам: синк из 1С → mdm/1c, из Bitrix → bitrix, иначе MDM/ERP. */
+function counterpartyOrigin(aliases: { source: string }[]): string {
+  if (aliases.some((a) => a.source === "1c")) return "mdm/1c";
+  if (aliases.some((a) => a.source === "bitrix")) return "bitrix";
+  return "mdm";
+}
 
 /** Русское склонение существительного по числу: [1, 2-4, 5+]. */
 function plural(n: number, forms: [string, string, string]): string {
@@ -46,6 +54,9 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
             )}
             <span className="mt-0.5 rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               #{card.id}
+            </span>
+            <span className="mt-0.5">
+              <SourceTag entity="Контрагент" source={counterpartyOrigin(card.aliases)} unp={card.unp} />
             </span>
           </div>
         </div>

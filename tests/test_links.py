@@ -1,4 +1,5 @@
 """Тесты межмодульных взаимосвязей (через событийную шину, §2.5)."""
+from decimal import Decimal
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -159,3 +160,190 @@ async def test_logistics_delivered_emits(session, api):
     assert r.status_code == 200
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "logistics.shipment.delivered" in types
+
+
+async def test_freight_cost_creates_finance_expense(session):
+    from modules.finance.events import on_freight_cost
+    from modules.finance.models import Payment
+
+    await on_freight_cost(
+        {"deal_id": 7, "ref": "ОТГ-1", "carrier": "DPD", "amount": 320.50}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()
+    assert len(rows) == 1
+    assert float(rows[0].amount) == 320.50 and rows[0].ref == "freight:ОТГ-1"
+
+    # нулевой тариф не создаёт расход
+    await on_freight_cost({"ref": "ОТГ-2", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(Payment).where(Payment.kind == "freight"))).scalars().all()) == 1
+
+
+async def test_freight_refund_creates_credit(session):
+    from modules.finance.events import on_freight_refund
+    from modules.finance.models import Payment
+
+    # переплата перевозчику (variance>0) → кредит против фрахта: kind=freight_refund, сумма < 0
+    await on_freight_refund(
+        {"shipment_code": "ЛОГ-1", "carrier": "dpd", "amount": 50, "entity_ref": "audit:3"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (
+        await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert float(rows[0].amount) == -50.0 and rows[0].ref == "freight_refund:audit:3"
+
+    # нулевая/пустая сумма не создаёт записи
+    await on_freight_refund({"shipment_code": "ЛОГ-2", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len(
+        (await session.execute(select(Payment).where(Payment.kind == "freight_refund"))).scalars().all()
+    ) == 1
+
+
+async def test_landed_cost_creates_finance_expense(session):
+    from modules.finance.events import on_landed_cost
+    from modules.finance.models import Payment
+
+    # готовая сумма себестоимости → расход kind=landed
+    await on_landed_cost(
+        {"sku_code": "SKU-1", "amount": 1200.00, "entity_ref": "purchase:5"}, _ctx(session)
+    )
+    # сумма как unit×qty (amount не задан)
+    await on_landed_cost(
+        {"sku_code": "SKU-2", "unit_landed_cost_byn": 10, "qty": 3}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()
+    assert len(rows) == 2
+    by_ref = {r.ref: float(r.amount) for r in rows}
+    assert by_ref["landed:purchase:5"] == 1200.0
+    assert by_ref["landed:SKU-2"] == 30.0
+
+    # нулевая себестоимость не маскирует дыру — записи нет
+    await on_landed_cost({"sku_code": "SKU-3", "amount": 0}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()) == 2
+
+
+async def test_finance_summary_margin_and_cash(session):
+    from modules.finance.models import Payment
+    from modules.finance.summary import finance_summary
+
+    # выручка 1000 (оплачено 400), фрахт 100, возврат -30, landed 600
+    session.add_all([
+        Payment(ref="inv:1", amount=Decimal("600"), status="paid", kind="receivable"),
+        Payment(ref="inv:2", amount=Decimal("400"), status="pending", kind="receivable"),
+        Payment(ref="freight:1", amount=Decimal("100"), status="pending", kind="freight"),
+        Payment(ref="freight_refund:1", amount=Decimal("-30"), status="pending", kind="freight_refund"),
+        Payment(ref="landed:1", amount=Decimal("600"), status="pending", kind="landed"),
+    ])
+    await session.commit()
+    s = await finance_summary(session)
+
+    # маржа = 1000 − 600 (landed) − 70 (фрахт 100 − возврат 30) = 330
+    assert s["margin"]["revenue"] == 1000.0
+    assert s["margin"]["landed"] == 600.0
+    assert s["margin"]["freight"] == 70.0
+    assert s["margin"]["gross"] == 330.0
+    assert round(s["margin"]["pct"], 1) == 33.0
+    # касса: приток = оплачено 600 + возврат 30 = 630; отток = 100+600 = 700; нетто = -70
+    assert s["cash"]["received"] == 600.0
+    assert s["cash"]["inflow"] == 630.0
+    assert s["cash"]["outflow"] == 700.0
+    assert s["cash"]["net"] == -70.0
+    assert s["currency"] == "BYN"
+
+
+async def test_finance_summary_empty_is_honest(session):
+    from modules.finance.summary import finance_summary
+
+    s = await finance_summary(session)
+    assert s["margin"]["revenue"] == 0.0 and s["margin"]["gross"] == 0.0
+    assert s["margin"]["pct"] is None  # нет выручки → не делим на ноль
+    assert s["cash"]["net"] == 0.0
+
+
+async def test_delivered_shipment_emits_freight_cost(session, api):
+    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+    # назначаем перевозчика с тарифом → amount > 0
+    await api.post(
+        f"/logistics/shipments/{ship['id']}/carrier-order",
+        json={"carrier": "DPD", "shipping_cost": 150},
+    )
+    await api.patch(f"/logistics/shipments/{ship['id']}", json={"status": "delivered"})
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.freight.cost" in types
+
+
+async def test_freight_audit_overbill_emits_refund(session, api):
+    # счёт перевозчика больше тарифа → переплата → событие «к возврату»
+    r = await api.post(
+        "/logistics/costs/audit",
+        json={"shipment_code": "ЛОГ-1", "carrier_code": "dpd",
+              "invoice_amount": 250, "expected_amount": 200},
+    )
+    assert r.status_code == 201 and float(r.json()["variance"]) == 50
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.freight.audit_refund" in types
+
+    # счёт ≤ тарифа → переплаты нет → события нет
+    await api.post(
+        "/logistics/costs/audit",
+        json={"shipment_code": "ЛОГ-2", "carrier_code": "dpd",
+              "invoice_amount": 180, "expected_amount": 200},
+    )
+    refunds = [e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+               if e.event_type == "logistics.freight.audit_refund"]
+    assert len(refunds) == 1
+
+
+async def test_procurement_received_creates_import_shipment(session):
+    """ИНФО-связка procurement→logistics: приёмка закупки → отметка в импорт-цепочке.
+
+    LOG3-3: импорт-маркер обязателен для создания НОВОЙ записи (origin='import' /
+    incoterms / страна не РБ) — иначе внутренние закупки засоряли бы импорт-доску.
+    Склад при этом НЕ движется логистикой (это wms на тот же эвент) — двойного учёта нет.
+    """
+    from modules.logistics.events import on_procurement_received
+    from modules.logistics.models import ImportShipment
+
+    await on_procurement_received(
+        {"item": "АКБ 280Ач", "qty": 200, "warehouse": "Главный",
+         "entity_ref": "purchase:42", "origin": "import", "incoterms": "FOB"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (await session.execute(select(ImportShipment))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].po_ref == "purchase:42" and rows[0].stage == "warehouse"
+    assert rows[0].cargo == "АКБ 280Ач" and rows[0].qty == 200
+    assert rows[0].customs_status == "Принято закупкой"
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "logistics.import.received" in types
+
+    # повторное событие по той же закупке — НЕ создаёт второй ImportShipment (обновляет stage)
+    # маркер уже не нужен: запись по po_ref существует.
+    await on_procurement_received(
+        {"item": "АКБ 280Ач", "qty": 200, "entity_ref": "purchase:42"}, _ctx(session)
+    )
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
+
+    # LOG3-3: внутренняя закупка БЕЗ маркера и БЕЗ существующей записи — НЕ создаём.
+    await on_procurement_received(
+        {"item": "Внутренний винт", "qty": 100, "entity_ref": "purchase:9999"},
+        _ctx(session),
+    )
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1, (
+        "LOG3-3: внутренняя закупка без import-маркера не должна создавать ImportShipment"
+    )
+
+    # без entity_ref игнорируется (защита от мусорных payload)
+    await on_procurement_received({"item": "X", "qty": 1}, _ctx(session))
+    await session.commit()
+    assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1

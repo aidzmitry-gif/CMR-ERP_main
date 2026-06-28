@@ -54,6 +54,18 @@ async def test_category_default_fields_patch(api):
     assert row["country"] is None
 
 
+async def test_category_attributes_patch(api):
+    """PATCH группы пишет свободные «общие данные» (Производитель/коробка) в attributes (JSONB)."""
+    await api.post(BASE, json={"code": "CAT-0500", "name": "Реле"})
+    r = await api.patch(
+        f"{BASE}/CAT-0500",
+        json={"attributes": {"Производитель": "Omron", "Кол-во в коробке": "50"}},
+    )
+    assert r.status_code == 200
+    row = next(g for g in (await api.get(BASE)).json() if g["code"] == "CAT-0500")
+    assert row["attributes"] == {"Производитель": "Omron", "Кол-во в коробке": "50"}
+
+
 async def test_query_categories(api):
     await api.post(BASE, json={"code": "CAT-0200", "name": "Кабельная продукция"})
 
@@ -76,6 +88,24 @@ async def test_sku_links_to_category(api, session):
 
     r = await api.post("/system/references/query", json={"ref": "core.skus", "key": "AKB-60"})
     assert r.json()["result"][0]["category_id"] == grp["id"]
+
+
+async def test_query_skus_by_category(api, session):
+    """reference.query core.skus с category_id → только товары этой группы (членство)."""
+    a = (await api.post(BASE, json={"code": "CAT-0600", "name": "Реле"})).json()
+    b = (await api.post(BASE, json={"code": "CAT-0601", "name": "Диоды"})).json()
+    session.add_all([
+        Sku(code="REL-1", title="Реле 1", unit="шт", category_id=a["id"]),
+        Sku(code="REL-2", title="Реле 2", unit="шт", category_id=a["id"]),
+        Sku(code="DIO-1", title="Диод 1", unit="шт", category_id=b["id"]),
+    ])
+    await session.commit()
+
+    r = await api.post(
+        "/system/references/query", json={"ref": "core.skus", "category_id": a["id"]}
+    )
+    codes = {row["code"] for row in r.json()["result"]}
+    assert codes == {"REL-1", "REL-2"}  # только группа A, без DIO-1
 
 
 async def test_catalog_and_ai_expose_groups(api):

@@ -161,6 +161,38 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         description="Номенклатура (товарные позиции) + характеристики.",
     ),
     Reference(
+        key="core.sku_history",
+        title="История номенклатуры",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/sku-history",
+        columns=(
+            ReferenceColumn(
+                "sku_code", "Код товара", "string", editable=False,
+                semantic="natural key номенклатуры (core.skus)",
+            ),
+            _TITLE,
+            ReferenceColumn("unit", "Ед.", "string"),
+            ReferenceColumn(
+                "category_id", "Группа", "number",
+                semantic="группа номенклатуры на дату версии (core.nomenclature_groups)",
+            ),
+            ReferenceColumn("weight_kg", "Вес, кг", "number"),
+            ReferenceColumn("volume_m3", "Объём, м³", "number"),
+            ReferenceColumn("tnved_code", "ТН ВЭД", "string", semantic="код ТН ВЭД на дату версии"),
+            ReferenceColumn("vat_code", "НДС-код", "string", semantic="свой код НДС на дату версии"),
+            ReferenceColumn("shelf_life_days", "Срок годн., дн.", "number"),
+            ReferenceColumn("start_date", "Действует с", "date"),
+            ReferenceColumn("end_date", "По", "date", semantic="пусто = текущая версия"),
+        ),
+        permissions=("refs.view", "refs.edit"),
+        versioned=True,
+        ai_exposed=True,
+        description="Датированные версии мастер-характеристик номенклатуры (SCD2): документ "
+        "«на дату» видит характеристики, действовавшие тогда. Только мастер-данные "
+        "(цена/остаток = операционные, истина 1С — не здесь).",
+    ),
+    Reference(
         key="core.nomenclature_groups",
         title="Группы номенклатуры",
         department="Общие",
@@ -240,12 +272,20 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
                 "parent_id", "Синтетический счёт", "number",
                 semantic="родительский счёт (синтетика); пусто = корень",
             ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода счёта в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
             _ACTIVE,
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
         description="План счетов бухучёта РБ (постановление Минфина №50): синтетика + субсчета "
-        "(иерархия parent_id). Используется финансовым модулем для проводок.",
+        "(иерархия parent_id), датированный ввод/вывод из оборота. Для проводок финмодуля.",
     ),
     Reference(
         key="core.regions",
@@ -261,12 +301,20 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
                 "parent_id", "Входит в", "number",
                 semantic="родительский регион (область→район→город); пусто = корень",
             ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода региона в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
             _ACTIVE,
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
-        description="Гео-справочник РБ (область→район→город, иерархия parent_id): адреса "
-        "контрагентов и территориальная аналитика продаж (territory).",
+        description="Гео-справочник РБ (область→район→город, иерархия parent_id), датированный "
+        "ввод/вывод из оборота: адреса контрагентов и территориальная аналитика (territory).",
     ),
 )
 

@@ -508,6 +508,24 @@ export function DealsWorkspace({
           >
             <Clock size={16} /> Только висяки
           </button>
+          <Link
+            href="/crm/deals/stages"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            <SlidersHorizontal size={16} /> Стадии
+          </Link>
+          <Link
+            href="/crm/deals/analytics"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            Аналитика
+          </Link>
+          <Link
+            href="/crm/deals/planning"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            План
+          </Link>
           <button
             onClick={() => openModal(stages[0]?.id ?? "new")}
             className="ml-auto inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"

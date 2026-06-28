@@ -10,9 +10,14 @@ export type ClaimStatus = "open" | "resolved" | "rejected";
 export interface Claim {
   id: number;
   supplier: string;
+  supplier_id: number | null;
   item: string;
   reason: string;
   order_code: string;
+  claim_type: string; // брак / недопоставка / пересорт / срок
+  qty_affected: number;
+  amount_byn: number | null;
+  resolution: string;
   status: ClaimStatus;
   source: string;
   entity_ref: string;
@@ -20,7 +25,27 @@ export interface Claim {
 
 export interface ClaimPatch {
   supplier?: string;
+  supplier_id?: number | null;
   status?: ClaimStatus;
+  resolution?: string;
+}
+
+export interface ClaimInput {
+  supplier?: string;
+  supplier_id?: number | null;
+  item?: string;
+  reason?: string;
+  order_code?: string;
+  claim_type?: string;
+  qty_affected?: number;
+  amount_byn?: number | null;
+}
+
+/** Типы претензий (для фильтра/формы). Свободные значения — лейбл совпадает со значением. */
+export const CLAIM_TYPES = ["брак", "недопоставка", "пересорт", "срок"] as const;
+
+export function claimTypeLabel(t: string): string {
+  return t || "—";
 }
 
 const STATUS_LABELS: Record<ClaimStatus, string> = {
@@ -95,7 +120,7 @@ export async function fetchClaims(): Promise<Claim[]> {
   }
 }
 
-/** Назначить поставщика и/или сменить статус претензии. null — отказ бэка. */
+/** Назначить поставщика / урегулировать претензию. null — отказ бэка. */
 export async function updateClaim(id: number, patch: ClaimPatch): Promise<Claim | null> {
   try {
     const res = await fetch(`/api/procurement/claims/${id}`, {
@@ -108,4 +133,37 @@ export async function updateClaim(id: number, patch: ClaimPatch): Promise<Claim 
   } catch {
     return null;
   }
+}
+
+/** Завести претензию вручную (закупщик). null — отказ бэка. */
+export async function createClaim(input: ClaimInput): Promise<Claim | null> {
+  try {
+    const res = await fetch("/api/procurement/claims", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Claim;
+  } catch {
+    return null;
+  }
+}
+
+/** Фильтр претензий по статусу/типу/строке (для UI). */
+export function filterClaims(
+  claims: Claim[],
+  opts: { status?: ClaimStatus | "all"; type?: string; query?: string },
+): Claim[] {
+  const q = (opts.query ?? "").trim().toLowerCase();
+  return claims.filter((c) => {
+    if (opts.status && opts.status !== "all" && c.status !== opts.status) return false;
+    if (opts.type && opts.type !== "all" && c.claim_type !== opts.type) return false;
+    if (!q) return true;
+    return (
+      c.item.toLowerCase().includes(q) ||
+      c.order_code.toLowerCase().includes(q) ||
+      c.supplier.toLowerCase().includes(q)
+    );
+  });
 }

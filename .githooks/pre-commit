@@ -1,0 +1,10 @@
+#!/bin/sh
+# Advisory ПЕРЕД коммитом: предупреждает о хотспотах/миграциях на общей ветке.
+# НЕ блокирует (как post-commit/pre-push). Блок amend — в prepare-commit-msg.
+root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+if [ -x "$root/.venv/Scripts/python.exe" ]; then py="$root/.venv/Scripts/python.exe"
+elif [ -x "$root/.venv/bin/python" ]; then py="$root/.venv/bin/python"
+elif command -v python >/dev/null 2>&1; then py=python
+else py=python3; fi
+"$py" "$root/scripts/coordination_hook.py" pre-commit || true
+exit 0

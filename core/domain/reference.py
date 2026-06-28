@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric, String
+from sqlalchemy import JSON, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -145,6 +145,11 @@ class Account(Base):
     title: Mapped[str] = mapped_column(String(255))
     kind: Mapped[str | None] = mapped_column(String(16))  # актив | пассив | активно-пассивный
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_account.id"))
+    # Датированный ввод/вывод из оборота (мягкий вывод дополняет is_active): счёт действует
+    # в периоде [effective_from, effective_to); NULL/NULL = бессрочно, end NULL = в силе. Не
+    # полноценный SCD2 (значения счёта не датируются по версиям) — только период действия.
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (
@@ -166,6 +171,10 @@ class Region(Base):
     title: Mapped[str] = mapped_column(String(255))
     kind: Mapped[str | None] = mapped_column(String(16))  # область | район | город
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ref_region.id"))
+    # Датированный ввод/вывод из оборота (мягкий вывод дополняет is_active): регион действует
+    # в периоде [effective_from, effective_to); end NULL = в силе (переименования/слияния районов).
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (
@@ -195,8 +204,47 @@ class NomenclatureCategory(Base):
     vat_code: Mapped[str | None] = mapped_column(String(16))  # → ref_vat_rate (НДС по умолч.)
     unit: Mapped[str | None] = mapped_column(String(16))  # → ref_unit (ед.изм по умолч.)
     country: Mapped[str | None] = mapped_column(String(8))  # → ref_country (страна происхожд.)
+    # Свободные «общие данные группы» (Производитель/Марка/Импортёр, Кол-во в коробке, Габариты, …) —
+    # JSONB-хвост по умолчанию, как у Sku.attributes. Товар без своего ключа наследует от группы
+    # вверх по parent_id (см. core/services/tnved.effective_group_attr). Не EAV; типизированные
+    # «горячие» ссылки (НДС/ед/страна/ТН ВЭД) — отдельными колонками выше.
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
     __table_args__ = (
         Index("ix_ref_nom_category_parent", "parent_id"),
+    )
+
+
+class SkuVersion(Base):
+    """История мастер-характеристик номенклатуры — датированная (SCD Type 2).
+
+    Снимок мастер-полей ``Sku`` (наименование, ед., группа, вес, ТН ВЭД, срок годности,
+    свободные характеристики) с полуоткрытым интервалом ``[start_date, end_date)``; текущая —
+    ``end_date IS NULL``. Документ «на дату» видит характеристики, действовавшие тогда (как
+    курс/НДС). Натуральный ключ — **мягкий** ``sku_code`` (без FK к ``sku.id``, как
+    ``vat_code``/``tnved_code``): резолв в reference_query/scd2, не трогает схему ``Sku``.
+
+    Операционные данные (цена/остаток/себестоимость) сюда НЕ кладём — у них другой владелец
+    (1С/склад) и жизненный цикл; история — только мастер-характеристики (шов §1).
+    """
+
+    __tablename__ = "ref_sku_version"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # surrogate key
+    sku_code: Mapped[str] = mapped_column(String(64))  # natural key (мягкая ссылка на sku.code)
+    title: Mapped[str] = mapped_column(String(255))
+    unit: Mapped[str] = mapped_column(String(16))
+    category_id: Mapped[int | None] = mapped_column()  # мягкая ссылка (без FK — снимок, не связь)
+    weight_kg: Mapped[float | None] = mapped_column()
+    volume_m3: Mapped[float | None] = mapped_column()
+    tnved_code: Mapped[str | None] = mapped_column(String(16))
+    vat_code: Mapped[str | None] = mapped_column(String(16))
+    shelf_life_days: Mapped[int | None] = mapped_column()
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    start_date: Mapped[date] = mapped_column(Date)  # действует с (вкл.)
+    end_date: Mapped[date | None] = mapped_column(Date)  # по (искл.); NULL = текущая
+
+    __table_args__ = (
+        Index("ix_ref_sku_version_lookup", "sku_code", "start_date"),
     )

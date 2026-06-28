@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Card, KpiTile, Loading, Pill } from "@/components/erp/logistics-ui";
+import { ShipmentDrawer } from "@/components/erp/logistics-shipment-drawer";
 import { summarizeShipments } from "@/lib/logistics-domain";
 import { fetchCosts, fetchDashboard, fetchShipments, type Costs, type Dashboard, type Shipment } from "@/lib/logistics-api";
 import { formatByn, formatNumber } from "@/lib/format";
@@ -20,22 +21,41 @@ export function LogisticsDelivery() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [costs, setCosts] = useState<Costs | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchShipments(), fetchDashboard(), fetchCosts()]).then(([s, d, c]) => {
-      if (!alive) return;
-      setShipments(s);
-      setDashboard(d);
-      setCosts(c);
-      setLoading(false);
-    });
+    Promise.all([fetchShipments(), fetchDashboard(), fetchCosts()])
+      .then(([s, d, c]) => {
+        if (!alive) return;
+        setShipments(s);
+        setDashboard(d);
+        setCosts(c);
+        // dashboard=null + costs=null + shipments=[] = backend, скорее всего, недоступен
+        setFailed(d === null && c === null && s.length === 0);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (alive) {
+          setFailed(true);
+          setLoading(false);
+        }
+      });
     return () => {
       alive = false;
     };
   }, []);
 
   if (loading) return <Loading />;
+  if (failed)
+    return (
+      <div className="rounded-xl bg-surface p-6 shadow-card">
+        <p className="text-sm text-muted">
+          Не удалось загрузить рейсы и дашборд. Проверьте подключение к сервису логистики и обновите страницу.
+        </p>
+      </div>
+    );
 
   // Дашборд от backend — источник истины; при его отсутствии считаем из списка доставок.
   const summary = summarizeShipments(shipments);
@@ -80,7 +100,11 @@ export function LogisticsDelivery() {
               </thead>
               <tbody>
                 {shipments.map((s) => (
-                  <tr key={s.id} className="border-b border-line last:border-0 hover:bg-sunken">
+                  <tr
+                    key={s.id}
+                    onClick={() => setOpenId(s.id)}
+                    className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken"
+                  >
                     <td className="px-3 py-2 text-muted">{s.number}</td>
                     <td className="px-3 py-2 font-medium text-ink">{s.customer}</td>
                     <td className="px-3 py-2 text-muted">
@@ -124,6 +148,20 @@ export function LogisticsDelivery() {
           </div>
         </Card>
       )}
+
+      {openId != null && (() => {
+        const ship = shipments.find((s) => s.id === openId);
+        if (!ship) return null;
+        return (
+          <ShipmentDrawer
+            shipment={ship}
+            onClose={() => setOpenId(null)}
+            onUpdated={(updated) =>
+              setShipments((list) => list.map((s) => (s.id === updated.id ? updated : s)))
+            }
+          />
+        );
+      })()}
     </div>
   );
 }

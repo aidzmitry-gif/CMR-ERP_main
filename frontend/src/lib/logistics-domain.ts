@@ -73,6 +73,39 @@ export function bidSavings(bids: Bid[]): number {
   return round2(Math.max(...prices) - Math.min(...prices));
 }
 
+/** Порог «подозрительно дёшево»: ≥25% ниже медианы при ≥3 ставках = риск демпинга. */
+export const DUMPING_THRESHOLD_PCT = 25;
+export const DUMPING_MIN_BIDS = 3;
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const n = s.length;
+  const mid = Math.floor(n / 2);
+  return n % 2 ? s[mid] : round2((s[mid - 1] + s[mid]) / 2);
+}
+
+export interface BidRisk {
+  median: number;
+  deviationPct: number;
+  isSuspiciouslyCheap: boolean;
+}
+
+/** Риск-признаки ставки: дельта от медианы (% дешевле = +) + флаг демпинга.
+ *  Зеркало backend `pricing.bid_risk` (формула и пороги совпадают). */
+export function bidRisk(bid: Bid, all: Bid[]): BidRisk {
+  const prices = all.map((b) => b.price).filter((p) => p > 0);
+  const m = median(prices);
+  if (m <= 0 || bid.price <= 0) return { median: m, deviationPct: 0, isSuspiciouslyCheap: false };
+  const deviationPct = round2(((m - bid.price) / m) * 100);
+  return {
+    median: m,
+    deviationPct,
+    isSuspiciouslyCheap:
+      prices.length >= DUMPING_MIN_BIDS && deviationPct >= DUMPING_THRESHOLD_PCT,
+  };
+}
+
 // ─────────────────────────────── Scorecard перевозчика ───────────────────────────────
 
 export interface ScoreMetrics {
@@ -204,4 +237,111 @@ export function nextRfqStatus(status: string): string {
 /** Русская подпись статуса тендера; неизвестное значение возвращается как есть. */
 export function rfqStatusLabel(status: string): string {
   return RFQ_LABELS[status] ?? status;
+}
+
+// ─────────────────────────────── Статусы доставки ───────────────────────────────
+
+/** Поток статусов доставки: planned → assigned → in_transit → at_customs → delivered.
+ *  at_customs опционален (бекенд эмитит его как tracking_status; основной status может идти
+ *  in_transit → delivered напрямую). */
+export const DELIVERY_FLOW = [
+  "planned",
+  "assigned",
+  "in_transit",
+  "at_customs",
+  "delivered",
+] as const;
+
+const DELIVERY_LABELS: Record<string, string> = {
+  planned: "Запланирована",
+  assigned: "Перевозчик назначен",
+  in_transit: "В пути",
+  at_customs: "На таможне",
+  delivered: "Доставлено",
+};
+
+/** Разрешённые переходы статуса доставки (форвард по потоку + at_customs↔in_transit).
+ *  Назад двигаться запрещено (был доставлен — не «отдоставить»). */
+const DELIVERY_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
+  planned: ["assigned"],
+  assigned: ["in_transit"],
+  in_transit: ["at_customs", "delivered"],
+  at_customs: ["in_transit", "delivered"],
+  delivered: [],
+};
+
+/** Допустимые следующие статусы доставки из текущего (пустой массив = тупик). */
+export function allowedDeliveryTransitions(status: string): ReadonlyArray<string> {
+  return DELIVERY_TRANSITIONS[status] ?? [];
+}
+
+/** Можно ли двинуть статус доставки `from → to`? Назад и в неизвестное состояние — нельзя. */
+export function canTransitionDelivery(from: string, to: string): boolean {
+  return allowedDeliveryTransitions(from).includes(to);
+}
+
+/** Русская подпись статуса доставки; неизвестное значение возвращается как есть. */
+export function deliveryStatusLabel(status: string): string {
+  return DELIVERY_LABELS[status] ?? status;
+}
+
+// ─────────────────────────────── Стадии импорта ───────────────────────────────
+
+/** Цепочка импорта (зеркало IMPORT_STAGES бэка). ИНФО-этапы для дашборда. */
+export const IMPORT_FLOW = [
+  "factory",
+  "consolidation",
+  "in_transit",
+  "customs",
+  "warehouse",
+] as const;
+
+const IMPORT_LABELS: Record<string, string> = {
+  factory: "Фабрика",
+  consolidation: "Консолидация",
+  in_transit: "В пути",
+  customs: "Таможня",
+  warehouse: "Приёмка на склад",
+};
+
+/** Следующая стадия импорта по цепочке (для кнопки «продвинуть»); финал — на месте. */
+export function nextImportStage(stage: string): string {
+  const i = IMPORT_FLOW.indexOf(stage as (typeof IMPORT_FLOW)[number]);
+  if (i === -1 || i === IMPORT_FLOW.length - 1) return stage;
+  return IMPORT_FLOW[i + 1];
+}
+
+/** Русская подпись стадии импорта; неизвестное значение возвращается как есть. */
+export function importStageLabel(stage: string): string {
+  return IMPORT_LABELS[stage] ?? stage;
+}
+
+// ─────────────────────────────── Σ видимого фрахта (LOG3-8) ───────────────────────────────
+
+export interface FreightShipment {
+  status: string;
+  amount: number;
+}
+export interface FreightImport {
+  stage: string;
+  amount: number;
+}
+
+/** Σ видимого фрахта логистики в BYN: доставки delivered + импорт в warehouse, amount > 0.
+ *
+ *  Зеркало серверного контракта (LOG3-1 + LOG3-2): ровно эти суммы летят на finance как
+ *  ``logistics.freight.cost`` (``leg='domestic'`` при delivered ``Shipment``, ``leg='import'``
+ *  при warehouse ``ImportShipment``). Страховка против дрейфа «на экране 1000, в финансах 800». */
+export function totalFreightByn(
+  domestic: FreightShipment[],
+  imports: FreightImport[],
+): number {
+  let total = 0;
+  for (const s of domestic) {
+    if (s.status === "delivered" && s.amount > 0) total += s.amount;
+  }
+  for (const i of imports) {
+    if (i.stage === "warehouse" && i.amount > 0) total += i.amount;
+  }
+  return round2(total);
 }

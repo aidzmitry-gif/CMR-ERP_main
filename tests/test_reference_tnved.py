@@ -18,28 +18,31 @@ async def test_tnved_in_catalog(api):
     assert by_key["core.tnved"]["endpoint"] == "/system/refs/tnved"
 
 
-async def test_tnved_versioning_via_router(api):
+async def test_tnved_versioning_router_moderated_and_reads(api, session):
     base = "/system/refs/tnved"
-    # первая версия (открытая)
+    # ТН ВЭД — чувствительный ref (пошлина = деньги/налог): добавление версии через API
+    # не применяется сразу, а уходит на согласование (human-in-the-loop).
     r = await api.post(
         f"{base}/versions",
         json={"code": "8507100000", "start_date": "2024-01-01", "name": "Аккумуляторы",
               "duty_rate": "5.0", "vat_code": "НДС20", "unit": "шт"},
     )
-    assert r.status_code == 200
-    # ставка снижена с 2026 — новая версия закрывает первую
-    r = await api.post(
-        f"{base}/versions",
-        json={"code": "8507100000", "start_date": "2026-01-01", "name": "Аккумуляторы",
-              "duty_rate": "0.0", "vat_code": "НДС20", "unit": "шт"},
-    )
-    assert r.status_code == 200
+    assert r.json()["status"] == "pending_approval"
+    assert (await api.get(f"{base}?key=8507100000")).json() == []  # без согласования не записано
+
+    # SCD2-чтение (current/as-of) на версиях, заведённых напрямую (сидирование / после согласования)
+    session.add_all([
+        TnvedCode(code="8507100000", name="Аккумуляторы", duty_rate=5, vat_code="НДС20",
+                  unit="шт", start_date=date(2024, 1, 1), end_date=date(2026, 1, 1)),
+        TnvedCode(code="8507100000", name="Аккумуляторы", duty_rate=0, vat_code="НДС20",
+                  unit="шт", start_date=date(2026, 1, 1), end_date=None),
+    ])
+    await session.commit()
 
     # текущая версия — ставка 0
     cur = (await api.get(f"{base}/current", params={"key": "8507100000"})).json()
     assert float(cur["duty_rate"]) == 0.0
     assert cur["end_date"] is None
-
     # на дату внутри первого периода → старая ставка 5%
     old = (await api.get(f"{base}/as-of", params={"key": "8507100000", "on": "2025-06-01"})).json()
     assert float(old["duty_rate"]) == 5.0
@@ -256,3 +259,110 @@ async def test_sku_card_exposes_group_defaults(api, session):
     assert card["effective_country"]["source"] == "group"
     assert card["group_vat"]["value"] == "НДС20"
     assert card["group_vat"]["rate"] == 20.0  # резолвлено из ref_vat_rate на сегодня
+
+
+# ── Свободные атрибуты группы (Производитель/коробка/габариты) — JSONB-наследование ──
+
+
+async def test_effective_group_attr_own_wins(session):
+    """Свой ключ в Sku.attributes побеждает значение группы."""
+    grp = NomenclatureCategory(code="GAT1", name="Батарейки",
+                               attributes={"Производитель": "GP Batteries"})
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="ATT-1", title="АКБ", category_id=grp.id,
+              attributes={"Производитель": "Panasonic"})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Panasonic"
+    assert eff["source"] == "own"
+
+
+async def test_effective_group_attr_inherited(session):
+    """Нет своего ключа → наследуем от группы вверх по дереву (число → строка)."""
+    root = NomenclatureCategory(code="GAT10", name="Импорт",
+                                attributes={"Производитель": "Космос", "Кол-во в коробке": 10})
+    session.add(root)
+    await session.flush()
+    child = NomenclatureCategory(code="GAT11", name="Подгруппа", parent_id=root.id)  # пусто
+    session.add(child)
+    await session.flush()
+    sku = Sku(code="ATT-2", title="Товар", category_id=child.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Космос"
+    assert eff["source"] == "group"
+    assert eff["group_code"] == "GAT10"  # от корня, не от пустого child
+    # значение нормализуется в строку (атрибуты свободного типа)
+    box = await tnved.effective_group_attr(session, sku, "Кол-во в коробке")
+    assert box["value"] == "10"
+
+
+async def test_effective_group_attr_skips_archived(session):
+    """Архивная группа не дарит атрибут вниз; подъём идёт к активному предку."""
+    root = NomenclatureCategory(code="GAT20", name="Импорт",
+                                attributes={"Производитель": "Космос"})
+    session.add(root)
+    await session.flush()
+    mid = NomenclatureCategory(code="GAT21", name="Старое", parent_id=root.id,
+                               attributes={"Производитель": "Устаревший"}, is_active=False)
+    session.add(mid)
+    await session.flush()
+    sku = Sku(code="ATT-3", title="Товар", category_id=mid.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff["value"] == "Космос"  # архивный mid пропущен
+    assert eff["group_code"] == "GAT20"
+
+
+async def test_effective_group_attr_none_when_nowhere(session):
+    """Ключа нет ни у товара, ни в группах → value None (не выдумываем)."""
+    grp = NomenclatureCategory(code="GAT30", name="Прочее", attributes={})
+    session.add(grp)
+    await session.flush()
+    sku = Sku(code="ATT-4", title="X", category_id=grp.id, attributes={})
+    session.add(sku)
+    await session.flush()
+    eff = await tnved.effective_group_attr(session, sku, "Производитель")
+    assert eff == {"value": None, "source": None, "group_code": None, "group_name": None}
+
+
+async def test_sku_card_exposes_effective_attrs(api, session):
+    """Карточка SKU отдаёт effective_attrs: своё (own) + унаследованное от группы (group)."""
+    grp = NomenclatureCategory(code="GE1", name="Группа",
+                               attributes={"Производитель": "GP Batteries", "Кол-во в коробке": "10 шт"})
+    session.add(grp)
+    await session.flush()
+    session.add(Sku(code="GE-SKU", title="Товар", category_id=grp.id,
+                    attributes={"Марка": "GP Ultra"}))  # своя марка, производитель — от группы
+    await session.commit()
+
+    attrs = (await api.get("/system/sku/GE-SKU")).json()["effective_attrs"]
+    assert attrs["Производитель"] == {
+        "value": "GP Batteries", "source": "group", "group_code": "GE1", "group_name": "Группа",
+    }
+    assert attrs["Кол-во в коробке"]["value"] == "10 шт"
+    assert attrs["Кол-во в коробке"]["source"] == "group"
+    assert attrs["Марка"]["value"] == "GP Ultra"
+    assert attrs["Марка"]["source"] == "own"
+
+
+async def test_sku_card_country_falls_back_to_legacy_jsonb(api, session):
+    """Страна из легаси JSONB-ключа «Страна происхождения» не пропадает с карточки.
+
+    Типизированной колонки country нет (ни у товара, ни у группы) → effective_country
+    должно подхватить значение из Sku.attributes (как пишет синк 1С), а не отдать None.
+    """
+    grp = NomenclatureCategory(code="GCL1", name="Группа")  # без типизированной country
+    session.add(grp)
+    await session.flush()
+    session.add(Sku(code="CL-SKU", title="АКБ", category_id=grp.id,
+                    attributes={"Страна происхождения": "Китай"}))
+    await session.commit()
+
+    card = (await api.get("/system/sku/CL-SKU")).json()
+    assert card["effective_country"]["value"] == "Китай"
+    assert card["effective_country"]["source"] == "own"

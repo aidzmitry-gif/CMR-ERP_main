@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
-import type { FieldProvenance, SkuBatchRow, SkuCard } from "@/lib/reference-data";
+import { SourceTag } from "@/components/source-tag";
+import { changedFields, fetchSkuLandedInputs } from "@/lib/reference-data";
+import type {
+  FieldProvenance,
+  GroupInherited,
+  SkuBatchRow,
+  SkuCard,
+  SkuLandedInputs,
+} from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
 import { ProvenanceBadge } from "./provenance-badge";
@@ -238,6 +246,118 @@ function attrValue(v: unknown): string {
   return String(v);
 }
 
+/** Поле свободного атрибута (своё ∨ от группы). Пусто → честное «нет данных». */
+function AttrField({ label, attr }: { label: string; attr?: GroupInherited }) {
+  if (!attr?.value) return <Field label={label} value="нет данных" unset />;
+  return (
+    <Field
+      label={label}
+      value={attr.value}
+      mark={
+        attr.source === "group" ? (
+          <InheritMark title={`По умолч. группы «${attr.group_name ?? ""}»`} />
+        ) : (
+          <LocalMark />
+        )
+      }
+    />
+  );
+}
+
+/** Строка мастер-входа: подпись → значение + per-field SourceTag (own=ERP/group/tnved). */
+function LandedRow({
+  label,
+  value,
+  source,
+}: {
+  label: string;
+  value: React.ReactNode;
+  source: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[12.5px] text-muted">{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="text-sm font-semibold tabular-nums text-ink">{value}</span>
+        {source && source !== "none" && <SourceTag source={source} />}
+      </span>
+    </div>
+  );
+}
+
+/** Блок «Маржа-вход» — из /system/sku/{code}/landed-inputs: те же числа, что у закупки (REF3-4).
+ *  4 состояния: загрузка · ошибка · пусто (нет ТН ВЭД → маржа неполная) · успех. Провенанс по полю. */
+function LandedInputsCard({ code }: { code: string }) {
+  const [state, setState] = useState<"loading" | "error" | "ready">("loading");
+  const [data, setData] = useState<SkuLandedInputs | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setState("loading");
+    fetchSkuLandedInputs(code).then((d) => {
+      if (!live) return;
+      if (d) {
+        setData(d);
+        setState("ready");
+      } else {
+        setState("error");
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [code]);
+
+  return (
+    <Card>
+      <Eyebrow>Маржа-вход (себестоимость)</Eyebrow>
+      {state === "loading" && <p className="mt-2 text-[12px] text-faint">Загрузка входа маржи…</p>}
+      {state === "error" && (
+        <p className="mt-2 text-[12px] text-red-600">
+          Вход маржи недоступен — нет данных или прав доступа (нужно право на маржу/себестоимость).
+        </p>
+      )}
+      {state === "ready" &&
+        data &&
+        (data.effective_tnved.code ? (
+          <>
+            <div className="mt-2.5 space-y-2">
+              <LandedRow
+                label="Пошлина ТН ВЭД"
+                value={data.duty_pct != null ? `${data.duty_pct}%` : "—"}
+                source={data.provenance.tnved}
+              />
+              <LandedRow
+                label="Ставка НДС"
+                value={data.vat_rate != null ? `${data.vat_rate}%` : "—"}
+                source={data.provenance.vat}
+              />
+              <LandedRow
+                label="Вес, кг"
+                value={data.weight_kg != null ? String(data.weight_kg) : "нет"}
+                source={data.provenance.weight}
+              />
+              <LandedRow
+                label="Объём, м³"
+                value={data.volume_m3 != null ? String(data.volume_m3) : "нет"}
+                source={data.provenance.volume}
+              />
+            </div>
+            <p className="mt-2.5 border-t border-line pt-2.5 text-[11px] text-faint">
+              Те же числа, что у закупки при расчёте landed cost. Код ТН ВЭД {data.effective_tnved.code}
+              {data.effective_tnved.source === "group" ? " (унаследован от группы)" : ""}.
+            </p>
+          </>
+        ) : (
+          <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+            Пошлина не определена — нет кода ТН ВЭД (ни своего, ни от группы). Себестоимость не
+            посчитать, маржа неполная.
+          </div>
+        ))}
+    </Card>
+  );
+}
+
 const TABS = [
   { id: "overview", label: "Обзор" },
   { id: "specs", label: "Характеристики" },
@@ -249,12 +369,22 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
+// Ключи attributes с отдельным рендером (производитель/упаковка/габариты — свои Field'ы с
+// наследованием; страна — effective_country). Исключаем их из таблицы JSONB-хвоста, чтобы не дублить.
+const DEDICATED_ATTR_KEYS = new Set([
+  "Производитель", "Марка", "Бренд", "Импортёр",
+  "Кол-во в коробке", "Габариты", "Объём",
+  "Страна происхождения", "Страна",
+]);
+
 export function SpravSkuCard({ card }: { card: SkuCard }) {
   const [tab, setTab] = useState<TabId>("overview");
 
   const prov = card.provenance ?? {};
   const counts = provenanceCounts(prov);
-  const attrs = Object.entries(card.attributes ?? {});
+  // JSONB-хвост для таблицы тех.характеристик — БЕЗ ключей, у которых есть отдельное поле
+  // (производитель/упаковка/габариты — отдельные Field'ы с наследованием; страна — effective_country).
+  const attrs = Object.entries(card.attributes ?? {}).filter(([k]) => !DEDICATED_ATTR_KEYS.has(k));
   const eff = card.effective_tnved ?? {
     code: card.tnved_code ?? null,
     source: card.tnved_code ? ("own" as const) : null,
@@ -277,12 +407,14 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
       ? Math.round(((stock.price - stock.cost) / stock.price) * 100)
       : null;
 
-  // «Производительские» атрибуты для блока «Сведения о производителе» (таб Обзор) —
-  // подмножество JSONB-attributes по известным ключам; пусто → честная заглушка.
-  const makerKeys = ["Производитель", "Марка", "Бренд", "Импортёр", "Страна происхождения", "Страна"];
+  // Эффективные атрибуты (своё ∨ от группы) — backend отдаёт только непустые ключи.
+  const effAttrs = card.effective_attrs ?? {};
+  // «Производительские» поля для блока «Сведения о производителе» (таб Обзор) — по известным
+  // ключам; берём эффективное значение (унаследованное от группы помечается «↑ из группы»).
+  const makerKeys = ["Производитель", "Марка", "Бренд", "Импортёр"];
   const makerAttrs = makerKeys
-    .map((k) => [k, card.attributes?.[k]] as const)
-    .filter(([, v]) => v != null && v !== "");
+    .map((k) => [k, effAttrs[k]] as const)
+    .filter(([, v]) => v?.value != null && v.value !== "");
 
   // Заполненность карточки — доля непустых «горячих» полей (демо-метрика полноты golden record).
   const fillChecks = [
@@ -317,14 +449,13 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   <Badge tone="mut">В архиве</Badge>
                 )}
                 <Badge tone="mono">{card.code}</Badge>
-                {sync ? (
-                  <Badge tone="violet" title={`Происхождение: ${sync.origin} · статус: ${sync.state}`}>
-                    ↧ синк из 1С
-                    {sync.last_synced_at ? ` · ${sync.last_synced_at.slice(0, 16).replace("T", " ")}` : ""}
-                  </Badge>
-                ) : (
-                  <Badge tone="mut" title="Связь с 1С ещё не установлена">
-                    нет синка с 1С
+                <SourceTag
+                  entity="Номенклатура"
+                  source={sync ? (sync.origin === "1c" ? "mdm/1c" : sync.origin) : "erp"}
+                />
+                {sync?.last_synced_at && (
+                  <Badge tone="violet" title={`Статус синка: ${sync.state}`}>
+                    ↧ {sync.last_synced_at.slice(0, 16).replace("T", " ")}
                   </Badge>
                 )}
                 <Badge tone="mut">🤖 в каталоге AI</Badge>
@@ -463,12 +594,14 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   />
                   {groupVat?.value && (
                     <Field
-                      label="НДС по умолч. (группа)"
-                      value={groupVat.rate != null ? `${groupVat.rate}%` : groupVat.value}
+                      label="Код НДС"
+                      value={groupVat.rate != null ? `${groupVat.value} · ${groupVat.rate}%` : groupVat.value}
                       mark={
                         groupVat.source === "group" ? (
                           <InheritMark title={`Ставка НДС по умолч. группы «${groupVat.group_name ?? ""}»`} />
-                        ) : undefined
+                        ) : (
+                          <LocalMark />
+                        )
                       }
                     />
                   )}
@@ -492,13 +625,24 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   {makerAttrs.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {makerAttrs.map(([k, v]) => (
-                        <Field key={k} label={k} value={attrValue(v)} />
+                        <Field
+                          key={k}
+                          label={k}
+                          value={v.value}
+                          mark={
+                            v.source === "group" ? (
+                              <InheritMark title={`По умолч. группы «${v.group_name ?? ""}»`} />
+                            ) : (
+                              <LocalMark />
+                            )
+                          }
+                        />
                       ))}
                     </div>
                   ) : (
                     <p className="text-[12px] text-faint">
-                      Производитель, марка, импортёр и страна происхождения появятся, когда будут
-                      заполнены на товаре или унаследованы от группы. Сейчас не заданы.
+                      Производитель, марка, импортёр появятся, когда будут заполнены на товаре или
+                      унаследованы от группы. Сейчас не заданы.
                     </p>
                   )}
                 </Collapsible>
@@ -535,6 +679,8 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   </>
                 )}
               </Card>
+
+              <LandedInputsCard code={card.code} />
 
               <Card>
                 <Eyebrow>Золотая запись</Eyebrow>
@@ -614,9 +760,15 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                     mono={card.weight_kg != null}
                     prov={prov.weight_kg}
                   />
-                  <Field label="Габариты (Д×Ш×В)" value="нет данных" unset />
-                  <Field label="Объём" value="нет данных" unset />
-                  <Field label="Кол-во в коробке" value="нет данных" unset />
+                  <AttrField label="Габариты (Д×Ш×В)" attr={effAttrs["Габариты"]} />
+                  <Field
+                    label="Объём, м³"
+                    value={card.volume_m3 != null ? String(card.volume_m3) : "нет данных"}
+                    unset={card.volume_m3 == null}
+                    mono={card.volume_m3 != null}
+                    prov={prov.volume_m3}
+                  />
+                  <AttrField label="Кол-во в коробке" attr={effAttrs["Кол-во в коробке"]} />
                 </div>
 
                 <p className="mt-5 text-[13.5px] font-bold text-ink">Учёт и налоги</p>
@@ -890,12 +1042,87 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
         )}
 
         {/* ──────── ТАБ: ИСТОРИЯ ──────── */}
-        {tab === "history" && (
-          <EmptyState
-            title="🕘 Аудит изменений"
-            hint="Журнал изменений полей (было → стало, кто, когда, источник 1С/ERP) появится, когда для номенклатуры включат аудит. Происхождение по полям уже видно во вкладке «Обзор» (блок «Происхождение полей»)."
-          />
-        )}
+        {tab === "history" &&
+          (card.history.length > 0 ? (
+            <Card>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[13.5px] font-bold text-ink">🕘 История характеристик</p>
+                <Badge tone="violet">SCD2</Badge>
+              </div>
+              <p className="mt-1 text-[12px] text-muted">
+                Датированные версии мастер-полей: документ «на дату» видит характеристики,
+                действовавшие тогда. Цена/остаток — операционные (истина 1С), здесь не ведутся.
+              </p>
+              <ol className="mt-3 space-y-3">
+                {card.history.map((v, i) => {
+                  const older = card.history[i + 1] ?? null; // история по убыванию: следующая — старее
+                  const changes = changedFields(v, older);
+                  const current = v.end_date === null;
+                  return (
+                    <li key={`${v.start_date}-${i}`} className="rounded-xl bg-sunken p-3.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={current ? "ok" : "mut"}>{current ? "текущая" : "архив"}</Badge>
+                        <span className="text-[12.5px] font-semibold text-ink">
+                          с {fmtDate(v.start_date)}
+                          {v.end_date ? ` по ${fmtDate(v.end_date)}` : ""}
+                        </span>
+                        {older === null ? (
+                          <Badge tone="info">первая версия</Badge>
+                        ) : changes.length > 0 ? (
+                          <span className="text-[11px] text-faint">
+                            изменено: {changes.join(", ")}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                        <Field label="Наименование" value={v.title} />
+                        <Field label="Ед." value={v.unit ?? "—"} />
+                        <Field
+                          label="Вес, кг"
+                          value={v.weight_kg != null ? String(v.weight_kg) : "—"}
+                          mono={v.weight_kg != null}
+                          unset={v.weight_kg == null}
+                        />
+                        <Field
+                          label="Объём, м³"
+                          value={v.volume_m3 != null ? String(v.volume_m3) : "—"}
+                          mono={v.volume_m3 != null}
+                          unset={v.volume_m3 == null}
+                        />
+                        <Field
+                          label="Код ТН ВЭД"
+                          value={v.tnved_code ?? "—"}
+                          mono={!!v.tnved_code}
+                          unset={!v.tnved_code}
+                        />
+                        <Field
+                          label="Код НДС"
+                          value={v.vat_code ?? "—"}
+                          mono={!!v.vat_code}
+                          unset={!v.vat_code}
+                        />
+                        <Field
+                          label="Срок годн., дн."
+                          value={v.shelf_life_days != null ? String(v.shelf_life_days) : "—"}
+                          mono={v.shelf_life_days != null}
+                          unset={v.shelf_life_days == null}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+              <p className="mt-3 border-t border-line pt-3 text-[12px] text-faint">
+                Происхождение по полям (источник 1С/ERP) — во вкладке «Обзор». Журнал «кто/когда»
+                правил — отдельная проекция событий справочника.
+              </p>
+            </Card>
+          ) : (
+            <EmptyState
+              title="🕘 История характеристик (SCD2)"
+              hint="Датированных версий по этому товару пока нет — появятся, когда мастер-поля номенклатуры начнут версионировать при правке. Документ «на дату» будет видеть характеристики, действовавшие тогда. Происхождение по полям уже видно во вкладке «Обзор»."
+            />
+          ))}
       </div>
     </div>
   );

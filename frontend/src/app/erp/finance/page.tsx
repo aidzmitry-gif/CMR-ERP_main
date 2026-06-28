@@ -1,26 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { ModuleBoard } from "@/components/erp/module-board";
+import { FinanceView } from "@/components/erp/finance-view";
 
 export default function FinancePage() {
   return (
     <AppShell crumbs={["ERP", "Финансы"]}>
-      <ModuleBoard
-        title="Финансы"
-        subtitle="Платежи по сделкам и документам. Оплата помечает счёт в CRM оплаченным."
-        endpoint="/finance/payments"
-        columns={[
-          { key: "ref", label: "Назначение" },
-          { key: "amount", label: "Сумма" },
-          { key: "status", label: "Статус" },
-        ]}
-        fields={[
-          { key: "ref", label: "Назначение" },
-          { key: "amount", label: "Сумма", type: "number", default: 0 },
-        ]}
-        statusKey="status"
-        statusFlow={["pending", "paid"]}
-        patchPath="/finance/payments"
-      />
+      <FinanceView />
     </AppShell>
   );
 }
