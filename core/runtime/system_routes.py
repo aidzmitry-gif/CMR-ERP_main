@@ -12,7 +12,15 @@ from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sk
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
-from core.services import mdm, reference_quality, reference_query, scd2, sku_history, tnved
+from core.services import (
+    mdm,
+    reference_quality,
+    reference_query,
+    scd2,
+    sku_history,
+    sku_master,
+    tnved,
+)
 from core.services.auth import CurrentUser, require_permission
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
@@ -136,6 +144,15 @@ async def system_references_ai_catalog(request: Request) -> dict:
                     "core.skus": "SKU + эффективные ТН ВЭД/НДС/ед/страна (own ∨ от группы)",
                 },
             },
+            # отдельный read-эндпоинт (не reference.query): мастер-входы landed cost по SKU
+            "related": [
+                {
+                    "name": "sku.landed_inputs",
+                    "endpoint": "/system/sku/{code}/landed-inputs",
+                    "params": ["on_date"],
+                    "note": "пошлина ТН ВЭД+НДС (на дату) + вес/объём/страна с провенансом по полю",
+                },
+            ],
         },
         "references": [
             {
@@ -506,6 +523,27 @@ async def sku_card(
         "batches": batches,  # {rows, total_qty, nearest_expiry} партии+FEFO или None — нет партий
         "history": history,  # [{start_date, end_date, …}] версии мастер-характеристик (SCD2), новые сверху
     }
+
+
+@router.get("/system/sku/{code}/landed-inputs")
+async def sku_landed_inputs(
+    code: str,
+    on_date: date | None = None,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("sales.deal.read")),
+) -> dict:
+    """Мастер-входы landed cost по SKU на дату — те же числа, что считает закупка (REF3-2).
+
+    Тонкая обёртка над ``core.services.sku_master.landed_inputs``: эффективная пошлина ТН ВЭД +
+    ставка НДС (на дату), вес/объём/страна/ед. + провенанс по каждому полю. Дефолт ``on_date`` —
+    сегодня; ``on_date`` до открытия версии ТН ВЭД → ставки ``None`` (не падение). 404 — нет SKU.
+    ⚠ Под правом ``sales.deal.read``: несёт коммерческий вход маржи (себестоимость), а ``/system``
+    пропускается middleware → защищаем пообъектно (как карточка SKU/landed cost).
+    """
+    result = await sku_master.landed_inputs(session, code, on_date)
+    if result is None:
+        raise HTTPException(status_code=404, detail="номенклатура не найдена")
+    return result
 
 
 async def _group_breadcrumb(session: AsyncSession, category_id: int | None) -> list[dict]:
