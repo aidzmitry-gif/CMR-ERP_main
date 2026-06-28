@@ -63,6 +63,16 @@ async def test_margin_blind_imported_without_dimensions(session):
     assert "NODIM" in mb["sample_keys"]
 
 
+async def test_margin_blind_zero_weight_is_hole(session):
+    # 0.0 вес И 0.0 объём = та же дыра, что None (нулевой вес физтовара не валиден) — не маскируем нулём
+    session.add(TnvedCode(code="8507", name="акк", duty_rate=Decimal("10"), start_date=date(2020, 1, 1)))
+    session.add(Sku(code="ZERO", title="нулевой вес", unit="шт", tnved_code="8507", weight_kg=0.0, volume_m3=0.0))
+    await session.commit()
+    res = await reference_quality.audit_reference(session, "core.skus")
+    mb = next(i for i in res["issues"] if i["kind"] == "margin_blind")
+    assert "ZERO" in mb["sample_keys"]
+
+
 async def test_audit_clean_score_is_one(session):
     session.add_all([Unit(code="PCS", title="штука"), Unit(code="KG", title="килограмм")])
     await session.commit()

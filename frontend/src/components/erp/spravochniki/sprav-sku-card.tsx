@@ -314,7 +314,7 @@ function LandedInputsCard({ code }: { code: string }) {
       {state === "loading" && <p className="mt-2 text-[12px] text-faint">Загрузка входа маржи…</p>}
       {state === "error" && (
         <p className="mt-2 text-[12px] text-red-600">
-          Не удалось загрузить вход маржи. Повторите позже.
+          Вход маржи недоступен — нет данных или прав доступа (нужно право на маржу/себестоимость).
         </p>
       )}
       {state === "ready" &&

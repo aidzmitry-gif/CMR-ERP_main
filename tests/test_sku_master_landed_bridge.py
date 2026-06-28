@@ -61,6 +61,16 @@ async def test_landed_inputs_unknown_sku_is_none(session):
     assert await sku_master.landed_inputs(session, "NOPE") is None  # None, НЕ нули
 
 
+async def test_landed_inputs_zero_weight_normalized_to_none(session):
+    """0.0 вес/объём = дыра в данных → нормализуем в None + провенанс none (не маскируем нулём)."""
+    await _seed_tnved(session)
+    session.add(Sku(code="Z", title="нулевой", unit="шт", weight_kg=0.0, volume_m3=0.0, tnved_code="8507"))
+    await session.commit()
+    inp = await sku_master.landed_inputs(session, "Z", date(2024, 6, 1))
+    assert inp["weight_kg"] is None and inp["volume_m3"] is None
+    assert inp["provenance"]["weight"] == "none" and inp["provenance"]["volume"] == "none"
+
+
 async def test_landed_inputs_batch_one_answer(session):
     await _seed_tnved(session)
     session.add_all([

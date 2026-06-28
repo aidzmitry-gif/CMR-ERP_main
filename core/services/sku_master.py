@@ -35,6 +35,10 @@ async def _resolve_vat_rate(session: AsyncSession, vat_code: str | None, on: dat
 
 async def _inputs_for(session: AsyncSession, sku: Sku, on: date) -> dict:
     """Мастер-входы landed cost для уже загруженного ``Sku`` на дату ``on`` (см. ``landed_inputs``)."""
+    # нулевой вес/объём физического товара = дыра в данных, не валидный вход разнесения фрахта →
+    # нормализуем 0.0 в None (принцип «None ≠ нули»: не отдаём фиктивный вес как достоверный).
+    weight_kg = sku.weight_kg or None
+    volume_m3 = sku.volume_m3 or None
     eff_tnved = await tnved.effective_code_for_sku(session, sku)
     rates = await tnved.resolve(session, eff_tnved["code"], on) if eff_tnved.get("code") else None
 
@@ -61,8 +65,8 @@ async def _inputs_for(session: AsyncSession, sku: Sku, on: date) -> dict:
 
     return {
         "sku_code": sku.code,
-        "weight_kg": sku.weight_kg,
-        "volume_m3": sku.volume_m3,
+        "weight_kg": weight_kg,
+        "volume_m3": volume_m3,
         "unit": eff_unit["value"],
         "country": eff_country["value"],
         # эффективный ТН ВЭД (свой ∨ от группы) + откуда взят — вход пошлины
@@ -76,8 +80,8 @@ async def _inputs_for(session: AsyncSession, sku: Sku, on: date) -> dict:
         "vat_rate": vat_rate,  # ставка НДС % на дату или None
         # провенанс по полю: own (на товаре) | group (от группы) | tnved (от кода ТН ВЭД) | none
         "provenance": {
-            "weight": "own" if sku.weight_kg is not None else "none",
-            "volume": "own" if sku.volume_m3 is not None else "none",
+            "weight": "own" if weight_kg is not None else "none",
+            "volume": "own" if volume_m3 is not None else "none",
             "unit": eff_unit["source"] or "none",
             "country": eff_country["source"] or "none",
             "tnved": eff_tnved["source"] or "none",

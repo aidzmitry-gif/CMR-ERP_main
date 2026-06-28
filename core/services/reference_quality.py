@@ -154,8 +154,10 @@ async def _margin_blind(session: AsyncSession, rows) -> dict | None:
         eff = await tnved.effective_code_for_sku(session, sku)
         if not eff.get("code"):
             blind.append(sku.code)  # нет ставки пошлины (ни своей, ни от группы) → себес не посчитать
-        elif sku.weight_kg is None and sku.volume_m3 is None:
-            blind.append(sku.code)  # импортный (есть ТН ВЭД), но фрахт не разнести (нет веса/объёма)
+        elif not sku.weight_kg and not sku.volume_m3:
+            # импортный (есть ТН ВЭД), но фрахт не разнести: ни веса, ни объёма. 0.0 = та же дыра,
+            # что и None (нулевой вес физического товара не валиден) — не маскируем нулём.
+            blind.append(sku.code)
     return _issue("margin_blind", "landed_cost", blind) if blind else None
 
 
