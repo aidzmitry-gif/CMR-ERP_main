@@ -737,3 +737,90 @@ async def test_cost_center_includes_claim_refund_and_excludes_po_planned(session
     # Закупки: expense=1000, income=200 (компенсация); po_planned игнорится
     assert by["Закупки"]["expense"] == 1000.0
     assert by["Закупки"]["income"] == 200.0
+
+
+# ───────────────────────── Круг 4: Платёжный календарь ─────────────────────────
+
+
+# FIN-R4-1: дневной режим cashflow + кумулятив
+
+
+async def test_cashflow_day_mode_buckets_by_date(session):
+    from modules.finance.cashflow import cashflow_forecast
+
+    today = date(2026, 7, 1)
+    session.add(
+        Payment(ref="in-d1", amount=Decimal("300"), kind="receivable", status="pending",
+                due_date=date(2026, 7, 2))
+    )
+    session.add(
+        Payment(ref="out-d4", amount=Decimal("100"), kind="landed", status="pending",
+                due_date=date(2026, 7, 5))
+    )
+    await session.commit()
+    r = await cashflow_forecast(session, days=10, mode="day", today=today)
+    assert r["mode"] == "day"
+    assert r["bucket_size_days"] == 1
+    by_date = {b["bucket_start"]: b for b in r["buckets"]}
+    assert by_date["2026-07-02"]["inflow"] == 300.0
+    assert by_date["2026-07-05"]["outflow"] == 100.0
+    # кумулятив растёт на приток, уменьшается на отток
+    assert by_date["2026-07-02"]["cumulative"] == by_date["2026-07-01"]["cumulative"] + 300.0
+
+
+async def test_cashflow_week_mode_backward_compatible(session):
+    """Старый клиент с `weeks` алиасом не сломается (мы рендерим week_start в weeks[])."""
+    from modules.finance.cashflow import cashflow_forecast
+
+    today = date(2026, 7, 1)
+    r = await cashflow_forecast(session, weeks=4, mode="week", today=today)
+    assert r["mode"] == "week"
+    assert r["bucket_size_days"] == 7
+    assert len(r["weeks"]) == 4
+    assert "week_start" in r["weeks"][0]  # legacy field
+    assert "bucket_start" in r["buckets"][0]  # canonical
+
+
+# FIN-R4-2/3: BankAccount + account_id фильтр
+
+
+async def test_cashflow_account_filter(session):
+    from modules.finance.cashflow import cashflow_forecast
+    from modules.finance.models import BankAccount
+
+    acc_main = BankAccount(code="main", title="Основной", currency="BYN",
+                           opening_balance=Decimal("1000"))
+    acc_cny = BankAccount(code="cny", title="Валюта", currency="CNY")
+    session.add_all([acc_main, acc_cny])
+    await session.flush()
+
+    today = date(2026, 7, 1)
+    # Счёт main: 500 приток
+    session.add(
+        Payment(ref="m-in", amount=Decimal("500"), kind="receivable", status="pending",
+                due_date=date(2026, 7, 2), account_id=acc_main.id)
+    )
+    # Счёт cny: 200 приток (не должен попасть в выборку main)
+    session.add(
+        Payment(ref="c-in", amount=Decimal("200"), kind="receivable", status="pending",
+                due_date=date(2026, 7, 2), account_id=acc_cny.id)
+    )
+    # Без счёта: 999 — общий кэш, не суммируется в main
+    session.add(
+        Payment(ref="no-acc", amount=Decimal("999"), kind="receivable", status="pending",
+                due_date=date(2026, 7, 2))
+    )
+    await session.commit()
+
+    r_main = await cashflow_forecast(
+        session, days=5, mode="day", today=today, account_id=acc_main.id
+    )
+    by = {b["bucket_start"]: b for b in r_main["buckets"]}
+    assert by["2026-07-02"]["inflow"] == 500.0  # только main
+    # opening_balance = paid_recv(0) − paid_out(0) + BankAccount.opening(1000) = 1000
+    assert r_main["opening_balance"] == 1000.0
+
+    # Без фильтра — все три (общий кэш + main + cny)
+    r_all = await cashflow_forecast(session, days=5, mode="day", today=today)
+    by_all = {b["bucket_start"]: b for b in r_all["buckets"]}
+    assert by_all["2026-07-02"]["inflow"] == 1699.0  # 500 + 200 + 999

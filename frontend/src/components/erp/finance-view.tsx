@@ -73,12 +73,33 @@ interface CashflowWeek {
   net: number;
   cumulative: number;
 }
+interface CashflowBucket {
+  bucket_start: string;
+  inflow: number;
+  outflow: number;
+  net: number;
+  cumulative: number;
+}
 interface CashflowResp {
   as_of: string;
   currency: string;
+  mode?: "week" | "day";
+  bucket_size_days?: number;
+  account_id?: number | null;
   opening_balance: number;
   weeks: CashflowWeek[];
+  buckets?: CashflowBucket[];
   not_dated: { inflow: number; outflow: number };
+}
+
+interface BankAccount {
+  id: number;
+  code: string;
+  title: string;
+  currency: string;
+  opening_balance: number;
+  opening_at: string | null;
+  is_active: boolean;
 }
 
 interface MarginRow {
@@ -163,12 +184,20 @@ function Card({ title, value, tone }: { title: string; value: string; tone?: "po
   );
 }
 
-type TabId = "summary" | "payments" | "aging" | "cashflow" | "margin" | "reconcile";
+type TabId =
+  | "summary"
+  | "payments"
+  | "aging"
+  | "cashflow"
+  | "calendar"
+  | "margin"
+  | "reconcile";
 const TABS: { id: TabId; label: string }[] = [
   { id: "summary", label: "Касса и маржа" },
   { id: "payments", label: "Платежи" },
   { id: "aging", label: "Aging" },
   { id: "cashflow", label: "Cash-flow" },
+  { id: "calendar", label: "Календарь" },
   { id: "margin", label: "Маржа" },
   { id: "reconcile", label: "Сверка 1С" },
 ];
@@ -210,6 +239,7 @@ export function FinanceView() {
         {tab === "payments" && <PaymentsTab />}
         {tab === "aging" && <AgingTab />}
         {tab === "cashflow" && <CashflowTab />}
+        {tab === "calendar" && <CalendarTab />}
         {tab === "margin" && <MarginTab />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>
@@ -884,5 +914,259 @@ function ReconcileTab() {
         <Section title="Только в 1С" rows={data.only_in_1c} tone="warn" />
       </div>
     </>
+  );
+}
+
+// ──────────────────────────── Tab 7: Платёжный календарь (Р4) ────────────────────────────
+
+function CalendarTab() {
+  const [accountId, setAccountId] = useState<string>("");
+  const [days, setDays] = useState(30);
+  const [bump, setBump] = useState(0);
+  const accounts = useFetch<BankAccount[]>(
+    `/api/finance/bank-accounts?active_only=true&_=${bump}`,
+  );
+  const qs = new URLSearchParams({
+    mode: "day",
+    days: String(days),
+    _: String(bump),
+  });
+  if (accountId) qs.set("account_id", accountId);
+  const calendar = useFetch<CashflowResp>(`/api/finance/cashflow-forecast?${qs.toString()}`);
+
+  const accs = accounts.data ?? [];
+  const buckets = calendar.data?.buckets ?? [];
+
+  return (
+    <div className="space-y-4">
+      {/* Управление */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Банк-счёт
+          <select
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            className="min-w-[14rem] rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          >
+            <option value="">Все счета (общий кэш)</option>
+            {accs.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.title} ({a.currency})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Горизонт, дн.
+          <input
+            type="number"
+            min={7}
+            max={90}
+            value={days}
+            onChange={(e) => setDays(Math.max(1, Math.min(90, Number(e.target.value) || 30)))}
+            className="w-24 rounded-md border border-line bg-sunken px-2 py-1 text-sm tabular-nums text-ink"
+          />
+        </label>
+        <BankAccountForm onCreated={() => setBump((b) => b + 1)} />
+      </div>
+
+      {/* Состояние */}
+      {accounts.error && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+          Не удалось загрузить список счетов.
+        </p>
+      )}
+      {calendar.loading && <p className="text-sm text-muted">Загрузка календаря…</p>}
+      {calendar.error && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+          Нет связи с прогнозом — попробуйте позже.
+        </p>
+      )}
+
+      {/* Таблица день × приток/отток/нетто/кумулятив */}
+      {calendar.data && buckets.length > 0 && (
+        <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+          <div className="border-b border-line px-4 py-2.5 text-sm text-muted">
+            На {calendar.data.as_of}. Начальное сальдо:{" "}
+            <span className="font-semibold text-ink">
+              {formatByn(calendar.data.opening_balance)}
+            </span>
+            . Не датировано: +{formatByn(calendar.data.not_dated.inflow)} / −
+            {formatByn(calendar.data.not_dated.outflow)}.
+          </div>
+          <table className="w-full text-sm">
+            <thead className="border-b border-line text-left text-xs text-muted">
+              <tr>
+                <th className="px-4 py-2.5 font-medium">День</th>
+                <th className="px-4 py-2.5 text-right font-medium">Приток</th>
+                <th className="px-4 py-2.5 text-right font-medium">Отток</th>
+                <th className="px-4 py-2.5 text-right font-medium">Нетто</th>
+                <th className="px-4 py-2.5 text-right font-medium">Кумулятив</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.map((b) => {
+                const danger = b.cumulative < 0;
+                return (
+                  <tr
+                    key={b.bucket_start}
+                    className={`border-b border-line last:border-0 ${
+                      danger ? "bg-rose-50 dark:bg-rose-900/20" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-2 text-ink">{b.bucket_start}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-emerald-600">
+                      {b.inflow ? `+${formatByn(b.inflow)}` : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-rose-600">
+                      {b.outflow ? `−${formatByn(b.outflow)}` : "—"}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right tabular-nums ${
+                        b.net > 0
+                          ? "text-emerald-600"
+                          : b.net < 0
+                            ? "text-rose-600"
+                            : "text-muted"
+                      }`}
+                    >
+                      {b.net ? formatByn(b.net) : "—"}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right tabular-nums font-medium ${
+                        danger ? "text-rose-700 dark:text-rose-300" : "text-ink"
+                      }`}
+                    >
+                      {formatByn(b.cumulative)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {calendar.data && buckets.length === 0 && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-muted shadow-card">
+          На горизонте нет ни одного датированного платежа.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [title, setTitle] = useState("");
+  const [currency, setCurrency] = useState("BYN");
+  const [opening, setOpening] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(async () => {
+    if (!code.trim() || !title.trim()) {
+      setError("Код и название обязательны");
+      return;
+    }
+    setPosting(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/finance/bank-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: code.trim(),
+          title: title.trim(),
+          currency,
+          opening_balance: Number(opening) || 0,
+        }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      setCode("");
+      setTitle("");
+      setOpening("");
+      setOpen(false);
+      onCreated?.();
+    } catch {
+      setError("Не удалось завести счёт (возможно, код занят)");
+    } finally {
+      setPosting(false);
+    }
+  }, [code, title, currency, opening, onCreated]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-auto rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
+      >
+        + Завести счёт
+      </button>
+    );
+  }
+  return (
+    <div className="flex w-full flex-wrap items-end gap-2 rounded-md bg-sunken p-3">
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Код
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="main"
+          className="w-28 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+        />
+      </label>
+      <label className="flex flex-1 flex-col gap-1 text-xs text-muted">
+        Название
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Расчётный счёт BYN"
+          className="min-w-[12rem] rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Валюта
+        <select
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          className="w-24 rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+        >
+          {["BYN", "USD", "EUR", "CNY", "RUB"].map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Сальдо на старте
+        <input
+          type="number"
+          step="0.01"
+          value={opening}
+          onChange={(e) => setOpening(e.target.value)}
+          className="w-32 rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums text-ink"
+        />
+      </label>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={posting}
+        className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+      >
+        {posting ? "…" : "Создать"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="rounded-md bg-surface px-3 py-1.5 text-sm text-muted"
+      >
+        Отмена
+      </button>
+      {error && <span className="w-full text-xs text-rose-600">{error}</span>}
+    </div>
   );
 }
