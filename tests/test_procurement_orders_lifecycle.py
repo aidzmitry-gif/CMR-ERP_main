@@ -46,6 +46,14 @@ async def test_legal_transitions_emit_events(api, session):
     assert changes[0].payload["from"] == "draft"
 
 
+async def test_received_sets_received_at(api):
+    """P4: переход в received проставляет received_at (основа своевременности scorecard)."""
+    o = await _order(api, status="ordered")
+    assert o["received_at"] is None  # открытый — факта приёмки ещё нет
+    received = (await api.patch(f"/procurement/orders/{o['id']}", json={"status": "received"})).json()
+    assert received["received_at"] is not None
+
+
 async def test_backward_transition_rejected(api):
     o = await _order(api, status="shipped")
     r = await api.patch(f"/procurement/orders/{o['id']}", json={"status": "ordered"})

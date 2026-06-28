@@ -71,5 +71,39 @@ async def test_negative_bid_price_rejected(api):
     assert r.status_code == 422
 
 
+async def test_award_creates_draft_po_and_emits_po_drafted(api, session):
+    """P7: award → черновик PO у победителя с позицией из RFQ + эмит procurement.po.drafted."""
+    rfq = (
+        await api.post("/procurement/rfq", json={"item": "АКБ", "sku_code": "AKB-1", "qty": 10})
+    ).json()
+    rid = rfq["id"]
+    await api.post(f"/procurement/rfq/{rid}/bids", json={"supplier_id": 7, "price_byn": 20})
+    bid = (await api.post(f"/procurement/rfq/{rid}/bids", json={"supplier_id": 9, "price_byn": 15})).json()
+    win = bid["best_bid_id"]  # 15 — лучшая цена
+    awarded = (await api.post(f"/procurement/rfq/{rid}/award", json={"bid_id": win})).json()
+
+    oid = awarded["created_order_id"]
+    assert oid is not None
+    order = (await api.get(f"/procurement/orders/{oid}")).json()
+    assert order["status"] == "draft"  # черновик, не «в пути»
+    assert order["supplier_id"] == 9
+    assert len(order["lines"]) == 1
+    ln = order["lines"][0]
+    assert ln["sku_code"] == "AKB-1" and ln["qty"] == 10.0
+    assert ln["goods_value_byn"] == 150.0  # цена 15 × кол-во 10
+
+    drafted = [
+        e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+        if e.event_type == "procurement.po.drafted"
+    ]
+    assert len(drafted) == 1
+    p = drafted[0].payload
+    assert p["po_ref"] == order["number"]
+    assert p["supplier_id"] == 9
+    assert p["planned_amount"] == "150.00"  # str(BYN) для finance FIN-B1
+    assert p["currency"] == "BYN"
+    assert p["deal_id"] is None  # PO обслуживает много сделок (фриз §2)
+
+
 async def test_rfq_404(api):
     assert (await api.get("/procurement/rfq/9999")).status_code == 404

@@ -52,7 +52,7 @@ async def test_receive_fixates_unit_cost_no_freight(api, session):
     row = rows[0]
     assert row.sku_code == "SKU-1"
     assert row.purchase_order_id == order["id"]
-    assert row.stage == "estimated"
+    assert row.stage == "actual"  # реальная приёмка (cost-estimate — estimated)
     assert row.unit_landed_cost_byn == Decimal("150.00")  # 1500 / 10, без фрахта
     assert row.shipment_id
 
@@ -109,6 +109,7 @@ async def test_receive_emits_landed_cost_calculated(api, session):
     assert payload["sku_code"] == "EMIT-1"
     assert payload["unit_landed_cost_byn"] == "150.00"  # JSON-safe (Decimal → str)
     assert payload["purchase_order_id"] == order["id"]
+    assert payload["stage"] == "actual"  # реальная приёмка (P4)
     # qty + total — Финансам для landed-маржи (unit×qty)
     assert Decimal(payload["qty"]) == Decimal("10")
     assert Decimal(payload["total_landed_byn"]) == Decimal("1500.00")
@@ -161,7 +162,7 @@ async def test_last_landed_cost_returns_dict(api, session):
     got = await SVC.last_landed_cost(session, "SKU-9")
     assert got is not None
     assert got["unit_landed_cost_byn"] == Decimal("25.00")  # 200 / 8
-    assert got["stage"] == "estimated"
+    assert got["stage"] == "actual"
     assert got["shipment_id"]
     assert got["fixed_at"] is not None
     assert got["fx_rate"] is None  # в минимальном срезе fx не считаем

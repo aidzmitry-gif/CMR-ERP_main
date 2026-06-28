@@ -62,6 +62,34 @@ async def test_resolve_emits_event(api, session):
     assert p["status"] == "resolved"
 
 
+async def test_resolve_enriches_order_id(api, session):
+    """P6: претензия с order_code → resolved → payload claim.resolved содержит order_id (резолв номера)."""
+    order = (await api.post(
+        "/procurement/orders",
+        json={"supplier_id": 5, "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]},
+    )).json()
+    claim = (await api.post(
+        "/procurement/claims",
+        json={"supplier_id": 5, "claim_type": "брак", "amount_byn": 500, "order_code": order["number"]},
+    )).json()
+    await api.patch(f"/procurement/claims/{claim['id']}", json={"status": "resolved"})
+
+    events = await _claim_events(session)
+    assert len(events) == 1
+    assert events[0].payload["order_id"] == order["id"]
+
+
+async def test_resolve_order_id_none_without_order_code(api, session):
+    """Без order_code → order_id=None, событие не падает (существующие поля не меняются)."""
+    claim = (await api.post(
+        "/procurement/claims", json={"supplier_id": 5, "claim_type": "брак", "amount_byn": 100}
+    )).json()
+    await api.patch(f"/procurement/claims/{claim['id']}", json={"status": "resolved"})
+    events = await _claim_events(session)
+    assert len(events) == 1
+    assert events[0].payload["order_id"] is None
+
+
 async def test_invalid_claim_status_rejected(api):
     """Неизвестный статус претензии → 422 (закрытый набор, не свободная строка)."""
     claim = (await api.post("/procurement/claims", json={"supplier_id": 1, "claim_type": "брак"})).json()
