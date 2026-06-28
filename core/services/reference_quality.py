@@ -36,7 +36,7 @@ from core.domain.reference import (
     Unit,
     VatRate,
 )
-from core.services import mdm
+from core.services import mdm, tnved
 
 #: вес класса проблемы в сводном score (доля «веса проблем» к числу строк). # ponytail:
 #: веса-эвристика; дубли мягче пропусков/битых ссылок. Калибровать, когда появится эталон качества.
@@ -45,6 +45,10 @@ WEIGHTS: dict[str, float] = {
     "broken_ref": 1.0,
     "orphan": 1.0,
     "duplicate": 0.5,
+    # «слепой по марже» SKU — нельзя посчитать landed cost (ось A, деньги). # ponytail: частично
+    # пересекается с missing/tnved_code (то проверяет ТОЛЬКО своё поле; margin_blind — эффективный
+    # код own ∨ group); двойной учёт допускаем (score clamp в [0,1]), это разные линзы.
+    "margin_blind": 1.0,
 }
 #: сколько ключей-примеров отдавать на проблему (для дрилдауна в UI).
 SAMPLE = 5
@@ -137,6 +141,24 @@ def _result(ref: str, total: int, issues: list[dict]) -> dict:
 # ── Аудиторы по справочникам ─────────────────────────────────────────────────
 
 
+async def _margin_blind(session: AsyncSession, rows) -> dict | None:
+    """SKU, по которым НЕЛЬЗЯ посчитать landed cost (ось маржи): нет эфф. ТН ВЭД (ни своего, ни
+    от группы) ИЛИ есть ТН ВЭД (импортный), но нет ни веса, ни объёма (фрахт не на что разнести).
+
+    Переиспользует ``tnved.effective_code_for_sku`` (own ∨ group). # ponytail: эффективный код
+    резолвится по каждому SKU отдельным обходом дерева групп (O(n·глубина)) — как и весь движок
+    (см. шапку модуля); на проде вынести в SQL ``LEFT JOIN``/материализованную вьюху.
+    """
+    blind: list = []
+    for sku in rows:
+        eff = await tnved.effective_code_for_sku(session, sku)
+        if not eff.get("code"):
+            blind.append(sku.code)  # нет ставки пошлины (ни своей, ни от группы) → себес не посчитать
+        elif sku.weight_kg is None and sku.volume_m3 is None:
+            blind.append(sku.code)  # импортный (есть ТН ВЭД), но фрахт не разнести (нет веса/объёма)
+    return _issue("margin_blind", "landed_cost", blind) if blind else None
+
+
 async def _audit_skus(session: AsyncSession) -> dict:
     rows = await _all(session, Sku)
     tnved_codes = await _keyset(session, TnvedCode, "code")
@@ -144,6 +166,7 @@ async def _audit_skus(session: AsyncSession) -> dict:
     issues = _missing(rows, "code", ("unit", "category_id", "tnved_code"))
     issues.append(_broken(rows, "code", "tnved_code", tnved_codes))
     issues.append(_broken(rows, "code", "category_id", cat_ids))
+    issues.append(await _margin_blind(session, rows))  # ось A: «слепые по марже» SKU
     return _result("core.skus", len(rows), issues)
 
 

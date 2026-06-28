@@ -32,6 +32,37 @@ async def test_audit_skus_missing_and_broken(session):
     assert res["score"] < 1.0
 
 
+async def test_audit_skus_margin_blind(session):
+    # группа с ТН ВЭД (наследуется) и группа без — для проверки own ∨ group
+    session.add(TnvedCode(code="8536", name="реле", duty_rate=Decimal("5"), start_date=date(2020, 1, 1)))
+    cat_no = NomenclatureCategory(code="CN", name="без ТН")
+    cat_tn = NomenclatureCategory(code="CT", name="с ТН", tnved_code="8536")
+    session.add_all([cat_no, cat_tn])
+    await session.flush()
+    session.add_all([
+        Sku(code="BLIND", title="нет ТН нигде", unit="шт", category_id=cat_no.id, weight_kg=1.0),
+        Sku(code="GROUPTN", title="ТН от группы", unit="шт", category_id=cat_tn.id, weight_kg=2.0),
+    ])
+    await session.commit()
+
+    res = await reference_quality.audit_reference(session, "core.skus")
+    mb = next((i for i in res["issues"] if i["kind"] == "margin_blind"), None)
+    assert mb is not None
+    assert "BLIND" in mb["sample_keys"]  # нет эфф. ТН ВЭД → слеп по марже
+    assert "GROUPTN" not in mb["sample_keys"]  # ТН ВЭД унаследован от группы → НЕ слеп
+    assert res["score"] < 1.0  # score учитывает вес margin_blind
+
+
+async def test_margin_blind_imported_without_dimensions(session):
+    # есть ТН ВЭД (импортный), но нет ни веса, ни объёма → фрахт не разнести
+    session.add(TnvedCode(code="8507", name="акк", duty_rate=Decimal("10"), start_date=date(2020, 1, 1)))
+    session.add(Sku(code="NODIM", title="без габаритов", unit="шт", tnved_code="8507"))
+    await session.commit()
+    res = await reference_quality.audit_reference(session, "core.skus")
+    mb = next(i for i in res["issues"] if i["kind"] == "margin_blind")
+    assert "NODIM" in mb["sample_keys"]
+
+
 async def test_audit_clean_score_is_one(session):
     session.add_all([Unit(code="PCS", title="штука"), Unit(code="KG", title="килограмм")])
     await session.commit()
