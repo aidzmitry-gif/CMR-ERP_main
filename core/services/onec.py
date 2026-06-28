@@ -11,10 +11,17 @@ from typing import Protocol
 
 
 class OneCGateway(Protocol):
-    """Чтение из 1С (часть 6) и запись документов (часть 9)."""
+    """Чтение из 1С (часть 6) и запись документов (часть 9).
+
+    ⚠ ``fetch_payments`` добавлен аддитивно для сверки финансов (FIN-C4): СТРОГО ЧТЕНИЕ.
+    Реализатор может вернуть ``[]`` — fail-soft на стороне ``finance.reconcile``. Полоса
+    Синк (integrations) на момент расширения не открыта — согласовать при открытии.
+    """
 
     async def fetch_counterparties(self) -> list[dict]: ...
 
     async def fetch_stock(self) -> list[dict]: ...
+
+    async def fetch_payments(self) -> list[dict]: ...
 
     async def post_document(self, doc_type: str, payload: dict) -> dict: ...

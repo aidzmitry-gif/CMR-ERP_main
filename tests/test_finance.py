@@ -415,3 +415,325 @@ async def test_reconcile_1c_failsoft_on_exception(session):
 
     r = await reconcile_with_onec(session, _Broken())
     assert r["source_available"] is False
+
+
+# ───────────────────────── Круг 3 ─────────────────────────
+
+
+# FIN-C1: claim.resolved → claim_refund (УЖЕ BYN, без fx)
+
+
+async def test_claim_resolved_creates_claim_refund_credit(session):
+    from modules.finance.events import on_claim_resolved
+
+    await on_claim_resolved(
+        {
+            "claim_id": 11,
+            "supplier_id": 555,
+            "claim_type": "брак",
+            "amount_byn": "350.00",  # СТРОКА, УЖЕ в BYN
+            "resolution": "resolved",
+            "status": "resolved",
+            "entity_ref": "claim:11",
+        },
+        _ctx(session),
+    )
+    await session.commit()
+    p = (await session.execute(select(Payment).where(Payment.kind == "claim_refund"))).scalars().one()
+    assert p.amount == Decimal("350.00")  # AS-IS, без буфера ×1.10
+    assert p.status == "pending"
+    assert p.counterparty_ref == "555"  # supplier_id строкой
+
+
+async def test_claim_rejected_creates_nothing(session):
+    from modules.finance.events import on_claim_resolved
+
+    await on_claim_resolved(
+        {"claim_id": 12, "supplier_id": 555, "amount_byn": "100", "resolution": "rejected"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment))).scalars().all()
+    assert rows == []
+
+
+async def test_claim_zero_amount_creates_nothing(session):
+    from modules.finance.events import on_claim_resolved
+
+    await on_claim_resolved(
+        {"claim_id": 13, "supplier_id": 1, "amount_byn": "0", "resolution": "resolved"},
+        _ctx(session),
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment))).scalars().all()
+    assert rows == []
+
+
+# FIN-C2: FX в on_freight_refund (USD/BYN/неизвестная валюта)
+
+
+async def test_freight_refund_usd_applies_fx_buffer(session):
+    from modules.finance.events import on_freight_refund
+    from modules.finance.fx import FX_BUFFER, RATES
+
+    await on_freight_refund(
+        {"shipment_code": "SH-1", "amount": "50", "currency": "USD", "entity_ref": "audit:1"},
+        _ctx(session),
+    )
+    await session.commit()
+    p = (
+        await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
+    ).scalars().one()
+    expected_byn = (Decimal("50") * RATES["USD"] * FX_BUFFER).quantize(Decimal("0.01"))
+    assert p.amount == -expected_byn  # хранится ОТРИЦАТЕЛЬНОЙ — кредит против фрахта
+    assert p.currency == "USD"
+    assert Decimal(str(p.amount_orig)) == Decimal("50")
+
+
+async def test_freight_refund_byn_keeps_amount_orig_none(session):
+    from modules.finance.events import on_freight_refund
+
+    await on_freight_refund(
+        {"shipment_code": "SH-2", "amount": "75", "currency": "BYN"}, _ctx(session)
+    )
+    await session.commit()
+    p = (
+        await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
+    ).scalars().one()
+    assert p.amount == Decimal("-75")
+    assert p.amount_orig is None and p.currency == "BYN"
+
+
+async def test_freight_refund_unknown_currency_skips(session):
+    from modules.finance.events import on_freight_refund
+
+    await on_freight_refund(
+        {"shipment_code": "SH-3", "amount": "10", "currency": "JPY"}, _ctx(session)
+    )
+    await session.commit()
+    rows = (
+        await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
+    ).scalars().all()
+    assert rows == []  # не упало, проводки нет
+
+
+# FIN-A2: finance.payment.created amount → str (точность денег)
+
+
+async def test_payment_created_emits_amount_as_string(session):
+    from core.domain.models import OutboxEvent
+    from modules.finance.events import on_document_posted
+
+    await on_document_posted(
+        {"kind": "invoice", "number": "СЧ-D", "amount": "1234.56", "deal_id": 1},
+        _ctx(session),
+    )
+    await session.commit()
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    created = [e for e in events if e.event_type == "finance.payment.created"]
+    assert len(created) == 1
+    raw_amount = created[0].payload["amount"]
+    assert isinstance(raw_amount, str)  # не float!
+    # копейки восстанавливаются без дрейфа
+    assert Decimal(raw_amount) == Decimal("1234.56")
+
+
+# FIN-B1: procurement.po.drafted → po_planned (status=planned, due_date=eta)
+
+
+async def test_po_drafted_creates_planned_payment(session):
+    from modules.finance.events import on_po_drafted
+
+    await on_po_drafted(
+        {
+            "po_ref": "PO-2025-001",
+            "supplier_id": 77,
+            "planned_amount": "5000.00",
+            "currency": "BYN",
+            "eta_date": "2026-08-01",
+            "deal_id": None,
+        },
+        _ctx(session),
+    )
+    await session.commit()
+    p = (await session.execute(select(Payment).where(Payment.kind == "po_planned"))).scalars().one()
+    assert p.status == "planned"
+    assert p.due_date == date(2026, 8, 1)
+    assert p.amount == Decimal("5000.00")
+    assert p.counterparty_ref == "77"
+
+
+async def test_po_drafted_zero_amount_skipped(session):
+    from modules.finance.events import on_po_drafted
+
+    await on_po_drafted(
+        {"po_ref": "PO-X", "supplier_id": 1, "planned_amount": "0"}, _ctx(session)
+    )
+    await session.commit()
+    rows = (await session.execute(select(Payment))).scalars().all()
+    assert rows == []
+
+
+async def test_cashflow_includes_po_planned_in_outflow(session):
+    from modules.finance.cashflow import cashflow_forecast
+
+    today = date(2026, 7, 1)
+    # PO на 800 со сроком в неделе 1 (понедельник 2026-07-06 → 2026-07-08)
+    session.add(
+        Payment(
+            ref="po:PO-A",
+            amount=Decimal("800"),
+            kind="po_planned",
+            status="planned",
+            due_date=date(2026, 7, 8),
+        )
+    )
+    await session.commit()
+    r = await cashflow_forecast(session, weeks=3, today=today)
+    assert r["weeks"][1]["outflow"] == 800.0
+
+
+async def test_aging_does_not_include_po_planned(session):
+    from modules.finance.aging import aging_buckets
+
+    today = date.today()
+    session.add(
+        Payment(
+            ref="po:OLD",
+            amount=Decimal("500"),
+            kind="po_planned",
+            status="planned",
+            due_date=today - timedelta(days=120),  # был бы overdue, но не AR/AP
+        )
+    )
+    await session.commit()
+    r = await aging_buckets(session)
+    assert r["ar"]["total"] == 0.0 and r["ap"]["total"] == 0.0  # planned НЕ в overdue
+
+
+# FIN-A3: claim_refund в summary и margin; po_planned НЕ в марже
+
+
+async def test_summary_claim_refund_reduces_net_landed(session):
+    from modules.finance.summary import finance_summary
+
+    session.add_all([
+        Payment(ref="r1", amount=Decimal("1500"), kind="receivable", status="paid"),
+        Payment(ref="l1", amount=Decimal("1000"), kind="landed", status="pending"),
+        Payment(ref="c1", amount=Decimal("200"), kind="claim_refund", status="pending"),
+    ])
+    await session.commit()
+    r = await finance_summary(session)
+    # net_landed = 1000 − 200 = 800; gross = 1500 − 800 = 700
+    assert r["margin"]["landed"] == 800.0
+    assert r["margin"]["claim_refund"] == 200.0
+    assert r["margin"]["gross"] == 700.0
+
+
+async def test_margin_by_deal_subtracts_claim_refund_and_excludes_po_planned(session):
+    from modules.finance.margin import margin_by_deal
+
+    session.add_all([
+        Payment(ref="r-d1", amount=Decimal("1500"), kind="receivable", status="paid", deal_id=1),
+        Payment(ref="l-d1", amount=Decimal("1000"), kind="landed", status="pending", deal_id=1),
+        Payment(ref="c-d1", amount=Decimal("200"), kind="claim_refund",
+                status="pending", deal_id=1),
+        # po_planned — НЕ в маржу
+        Payment(ref="po-d1", amount=Decimal("999"), kind="po_planned",
+                status="planned", deal_id=1, due_date=date(2026, 8, 1)),
+    ])
+    await session.commit()
+    r = await margin_by_deal(session)
+    row = next(it for it in r["items"] if it["key"] == 1)
+    assert row["landed"] == 800.0  # 1000 − 200
+    assert row["gross"] == 700.0  # 1500 − 800 (po_planned игнор)
+
+
+# FIN-A1: reconcile_deal_margin (finance ↔ facade)
+
+
+async def test_reconcile_deal_margin_match_when_facade_equals_finance(session):
+    from modules.finance.margin import reconcile_deal_margin
+
+    session.add_all([
+        Payment(ref="r-1", amount=Decimal("1500"), kind="receivable", status="paid", deal_id=42),
+        Payment(ref="l-1", amount=Decimal("1000"), kind="landed", status="pending", deal_id=42),
+    ])
+    await session.commit()
+
+    class _Facade:
+        async def last_landed_cost_batch(self, _s, codes):
+            return {c: {"unit_landed_cost_byn": "1000"} for c in codes}
+
+    r = await reconcile_deal_margin(
+        session, _Facade(), deal_id=42, items={"SKU-X": Decimal("1")}
+    )
+    assert r["source_facade_available"] is True
+    assert r["finance_landed"] == 1000.0
+    assert r["facade_landed"] == 1000.0
+    assert r["delta"] == 0.0
+
+
+async def test_reconcile_deal_margin_mismatch_detected(session):
+    from modules.finance.margin import reconcile_deal_margin
+
+    session.add(
+        Payment(ref="l-2", amount=Decimal("800"), kind="landed",
+                status="pending", deal_id=43)
+    )
+    await session.commit()
+
+    class _Facade:
+        async def last_landed_cost_batch(self, _s, codes):
+            return {c: {"unit_landed_cost_byn": "500"} for c in codes}  # 500 vs 800
+
+    r = await reconcile_deal_margin(
+        session, _Facade(), deal_id=43, items={"S": Decimal("1")}
+    )
+    assert r["delta"] == 300.0  # 800 − 500
+
+
+async def test_reconcile_deal_margin_facade_off_honest(session):
+    from modules.finance.margin import reconcile_deal_margin
+
+    session.add(
+        Payment(ref="l-3", amount=Decimal("100"), kind="landed",
+                status="pending", deal_id=44)
+    )
+    await session.commit()
+    r = await reconcile_deal_margin(session, None, deal_id=44, items={"S": Decimal("1")})
+    assert r["source_facade_available"] is False
+    assert r["facade_landed"] is None
+    assert r["delta"] is None
+    assert r["finance_landed"] == 100.0  # finance всё равно отдаётся
+
+
+async def test_reconcile_deal_margin_no_items_honest(session):
+    from modules.finance.margin import reconcile_deal_margin
+
+    class _Facade:
+        async def last_landed_cost_batch(self, _s, codes):
+            return {}
+
+    r = await reconcile_deal_margin(session, _Facade(), deal_id=99, items={})
+    assert r["source_facade_available"] is False  # без sku → нечего сверять
+    assert r["finance_landed"] == 0.0  # сделки не было → 0 honest
+
+
+# FIN-C5: cost_center учитывает claim_refund (доход в центр Закупки) и игнорит po_planned
+
+
+async def test_cost_center_includes_claim_refund_and_excludes_po_planned(session):
+    from modules.finance.cost_center import group_by_cost_center
+
+    session.add_all([
+        Payment(ref="l", amount=Decimal("1000"), kind="landed", status="pending"),
+        Payment(ref="c", amount=Decimal("200"), kind="claim_refund", status="pending"),
+        Payment(ref="po", amount=Decimal("9999"), kind="po_planned", status="planned"),
+    ])
+    await session.commit()
+    r = await group_by_cost_center(session)
+    by = {c["name"]: c for c in r["centers"]}
+    # Закупки: expense=1000, income=200 (компенсация); po_planned игнорится
+    assert by["Закупки"]["expense"] == 1000.0
+    assert by["Закупки"]["income"] == 200.0

@@ -9,7 +9,15 @@ import { formatByn } from "@/lib/format";
 
 interface FinanceSummary {
   currency: string;
-  margin: { revenue: number; landed: number; freight: number; gross: number; pct: number | null };
+  margin: {
+    revenue: number;
+    landed: number;
+    landed_gross?: number;
+    claim_refund?: number;
+    freight: number;
+    gross: number;
+    pct: number | null;
+  };
   cash: {
     inflow: number;
     outflow: number;
@@ -19,6 +27,18 @@ interface FinanceSummary {
     freight_refund: number;
   };
   costs: { kind: string; label: string; amount: number }[];
+}
+
+interface ReconDealResp {
+  deal_id: number;
+  finance_landed: number;
+  facade_landed: number | null;
+  delta: number | null;
+  revenue: number;
+  gross_finance: number;
+  level: string;
+  source_facade_available: boolean;
+  currency: string;
 }
 
 interface Payment {
@@ -90,6 +110,8 @@ const KIND_LABEL: Record<string, string> = {
   freight: "Фрахт",
   freight_refund: "Возврат фрахта",
   landed: "Себестоимость",
+  claim_refund: "Компенсация по претензии",
+  po_planned: "PO планируемый",
 };
 
 const BUCKETS = ["current", "1-30", "31-60", "61-90", "90+", "no_due"] as const;
@@ -281,6 +303,12 @@ function SummaryTab() {
       {s.margin.revenue === 0 && (
         <p className="mt-2 text-xs text-muted">
           Выручки по фактам пока нет — маржа появится после первых проведённых счетов.
+        </p>
+      )}
+      {(s.margin.claim_refund ?? 0) > 0 && (
+        <p className="mt-2 text-xs text-muted">
+          Компенсация по претензии (приток от поставщика): +{formatByn(s.margin.claim_refund ?? 0)} —
+          уменьшает чистую себестоимость на эту величину.
         </p>
       )}
 
@@ -663,8 +691,120 @@ function MarginTab() {
   };
   return (
     <div className="grid gap-4">
+      <ReconcileDealCard />
       <Section title="Маржа по сделкам" resp={byDeal} keyLabel="Сделка" />
       <Section title="Маржа по контрагентам" resp={byCp} keyLabel="Контрагент (УНП)" isCounterparty />
+    </div>
+  );
+}
+
+// ──────────────────────────── Сходимость маржи finance↔facade (FIN-A1) ────────────────────────────
+
+function ReconcileDealCard() {
+  const [dealId, setDealId] = useState("");
+  const [items, setItems] = useState("");
+  const [resp, setResp] = useState<ReconDealResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  const onCheck = useCallback(async () => {
+    const id = Number(dealId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    setLoading(true);
+    setError(false);
+    setResp(null);
+    try {
+      const qs = new URLSearchParams({ deal_id: String(id) });
+      if (items.trim()) qs.set("items", items.trim());
+      const r = await fetch(`/api/finance/margin/reconcile-deal?${qs.toString()}`, {
+        cache: "no-store",
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      setResp((await r.json()) as ReconDealResp);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [dealId, items]);
+
+  return (
+    <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+      <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
+        Сходимость маржи finance ↔ landed-фасад
+      </div>
+      <div className="p-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            ID сделки
+            <input
+              type="number"
+              value={dealId}
+              onChange={(e) => setDealId(e.target.value)}
+              className="w-32 rounded-md border border-line bg-sunken px-2 py-1 text-sm tabular-nums text-ink"
+              placeholder="42"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1 text-xs text-muted">
+            Позиции (SKU:qty через запятую — опц.)
+            <input
+              type="text"
+              value={items}
+              onChange={(e) => setItems(e.target.value)}
+              className="min-w-[12rem] rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+              placeholder="S-001:2,S-002:5"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={loading || !dealId}
+            onClick={onCheck}
+            className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20 disabled:opacity-60"
+          >
+            {loading ? "Проверяю…" : "Проверить"}
+          </button>
+        </div>
+        {error && (
+          <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-900/30 dark:text-rose-200">
+            Не удалось получить сверку — повторите.
+          </p>
+        )}
+        {resp && (
+          <div className="mt-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <Card title="Finance (landed)" value={formatByn(resp.finance_landed)} />
+              <Card
+                title="Facade (контроль)"
+                value={resp.facade_landed != null ? formatByn(resp.facade_landed) : "—"}
+              />
+              <Card
+                title="Расхождение Δ"
+                value={resp.delta != null ? formatByn(resp.delta) : "—"}
+                tone={resp.delta != null && resp.delta !== 0 ? "neg" : "pos"}
+              />
+              <Card
+                title="Валовая (по finance)"
+                value={formatByn(resp.gross_finance)}
+                tone={resp.gross_finance >= 0 ? "pos" : "neg"}
+              />
+            </div>
+            {!resp.source_facade_available ? (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                Landed-фасад недоступен (нет позиций или сервис не настроен) — Finance-сторона
+                отдана честно, контрольная величина пуста.
+              </p>
+            ) : resp.delta != null && resp.delta !== 0 ? (
+              <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-900/30 dark:text-rose-200">
+                Проводки finance отстали или опередили себестоимость — Δ ≠ 0. Перепосчитать landed.
+              </p>
+            ) : (
+              <p className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
+                Совпадает: проводки finance соответствуют landed-фасаду (агрегат по SKU).
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
