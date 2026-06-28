@@ -34,6 +34,11 @@ interface ApiDeal {
   stage_changed_at?: string | null;
   lost_reason_code?: string | null;
   lost_comment?: string | null;
+  // Крайняя дата отгрузки + штраф за опоздание (дата уходит сигналом в закупки).
+  ship_deadline?: string | null;
+  penalty_rate_pct?: number | null;
+  penalty_cap_pct?: number | null;
+  penalty_terms?: string | null;
 }
 
 interface ApiStage {
@@ -332,6 +337,11 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       // Причина отказа (SALES-40) — бэк отдаёт в DealRead, detail её раньше ронял.
       lostReasonCode: d.lost_reason_code ?? undefined,
       lostComment: d.lost_comment ?? undefined,
+      // Крайняя дата отгрузки + штраф за опоздание (дата уходит в закупки).
+      shipDeadline: d.ship_deadline ?? undefined,
+      penaltyRatePct: d.penalty_rate_pct ?? undefined,
+      penaltyCapPct: d.penalty_cap_pct ?? undefined,
+      penaltyTerms: d.penalty_terms ?? undefined,
     };
   } catch {
     return getDealDetail(id);

@@ -149,6 +149,13 @@ export interface DealDetail {
   lostReasonCode?: string;
   lostComment?: string;
 
+  /** Крайняя дата отгрузки клиенту — уходит сигналом в закупки (sales.deal.ship_deadline.set). */
+  shipDeadline?: string;
+  /** Штраф за опоздание: ставка %/день просрочки, потолок % от суммы, свободное примечание. */
+  penaltyRatePct?: number;
+  penaltyCapPct?: number;
+  penaltyTerms?: string;
+
   /** Себестоимость / прибыль / маржа для metrics-полосы (считается на клиенте по позициям). */
   pricing?: {
     cost?: number;

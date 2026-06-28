@@ -25,7 +25,8 @@ describe("DealEditButton", () => {
     fireEvent.change(textboxes[0], { target: { value: "Новая поставка" } }); // Описание
     fireEvent.change(textboxes[2], { target: { value: "Встреча" } }); // Следующий шаг
     fireEvent.change(screen.getByPlaceholderText("12.05.2024"), { target: { value: "01.06.2026" } });
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "555" } });
+    // Несколько number-инпутов (сумма + штраф %/день + потолок) — сумма первая.
+    fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "555" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await waitFor(() =>

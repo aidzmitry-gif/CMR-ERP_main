@@ -81,10 +81,31 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                       Причина: {LOSS_REASONS.find((r) => r.code === d.lostReasonCode)?.title ?? d.lostReasonCode}
                     </span>
                   )}
-                {/* TODO(SALES): regular / temperature / ship-бейджи — ждут полей бэкенда */}
+                {/* TODO(SALES): regular / temperature бейджи — ждут полей бэкенда */}
               </div>
               {d.lostComment && (d.stage?.id === "lost" || d.stage?.id === "cond_lost") && (
                 <div className="mt-1 text-[12.5px] text-muted">Комментарий: {d.lostComment}</div>
+              )}
+              {/* Крайняя дата отгрузки + штраф за опоздание (дата уходит сигналом в закупки). */}
+              {(d.shipDeadline ||
+                d.penaltyTerms ||
+                d.penaltyRatePct != null ||
+                d.penaltyCapPct != null) && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+                  {d.shipDeadline && (
+                    <span className="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
+                      Крайняя отгрузка: {d.shipDeadline} → в закупки
+                    </span>
+                  )}
+                  {(d.penaltyRatePct != null || d.penaltyCapPct != null || d.penaltyTerms) && (
+                    <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 font-semibold text-muted">
+                      Штраф за опоздание
+                      {d.penaltyRatePct != null ? `: ${d.penaltyRatePct}%/день` : ""}
+                      {d.penaltyCapPct != null ? ` · макс ${d.penaltyCapPct}%` : ""}
+                      {d.penaltyTerms ? ` · ${d.penaltyTerms}` : ""}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -94,6 +115,10 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 amount={d.amount}
                 nextStep={d.nextStep}
                 dealDate={d.dealDate}
+                shipDeadline={d.shipDeadline ?? ""}
+                penaltyRatePct={d.penaltyRatePct ?? null}
+                penaltyCapPct={d.penaltyCapPct ?? null}
+                penaltyTerms={d.penaltyTerms ?? ""}
               />
             </div>
           </div>
