@@ -438,6 +438,159 @@ async def test_wms_dashboard(api, session):
     assert isinstance(d["alerts_count"], int) and isinstance(d["movements_today_in"], float)
 
 
+# --------------------------------------------------------------------------- #
+#  Круг 5 — тест-харднинг WMS (edge-cases; падают на старом/откаченном коде)
+# --------------------------------------------------------------------------- #
+async def test_wms_accept_idempotent_exactly_one_mirror(api, session):
+    """QC-гейт: pending_qc БЕЗ движения; accept → ровно одно зеркало; повтор accept не плодит.
+
+    Падал бы на старом коде, если убрать идемпотентность accept (3 accept → 3 движения =
+    тройной фантомный приход на свободный остаток — деньго-баг) или гейт qc-после-accept.
+    """
+    from types import SimpleNamespace
+
+    from modules.wms.events import on_goods_received
+
+    await on_goods_received(
+        {"item": "AKB-132", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:51"},
+        SimpleNamespace(session=session),
+    )
+    await session.commit()
+    rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
+    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
+    # гейт: до accept движения прихода нет
+    assert (await api.get("/wms/movements?reason=receipt")).json() == []
+
+    await api.post(f"/wms/receipts/{rid}/qc",
+                   json={"decisions": [{"line_id": line["id"], "accepted_qty": 8, "rejected_qty": 2}]})
+    assert (await api.post(f"/wms/receipts/{rid}/accept")).json()["status"] == "accepted"
+
+    # три повторных accept не должны добавить ни одного лишнего движения
+    for _ in range(3):
+        assert (await api.post(f"/wms/receipts/{rid}/accept")).status_code == 200
+    mv = [m for m in (await api.get("/wms/movements?reason=receipt")).json()
+          if m["doc_ref"].startswith("ПРМ-")]
+    assert len(mv) == 1 and mv[0]["qty"] == 8.0  # ровно одно зеркало по принятым 8 (брак 2 вне)
+
+    # QC после проведения запрещён (статус уже accepted, не pending_qc)
+    assert (await api.post(f"/wms/receipts/{rid}/qc",
+                           json={"decisions": []})).status_code == 409
+
+
+async def test_wms_alerts_emit_oversell_clamp_and_dedup(api, session):
+    """low-stock на ЭМИТ-пути: oversell 1С клампится в 0 (дефицит не раздут) + дедуп порогов.
+
+    Падал бы на старом коде без max(avail−res,0): free=−2 → deficit=6 (раздут) в payload,
+    который кормит Закупки = перезаказ за деньги. И без дедупа — два события на одну пару.
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent, Sku
+    from modules.integrations.models import StockItem
+
+    session.add_all([
+        Sku(code="INOX-2", title="Нерж 2", unit="т"),
+        # oversell: reserved(5) > available(3) → свободный остаток отрицателен до клампа
+        StockItem(sku_code="INOX-2", warehouse="Минск", qty_available=Decimal(3),
+                  qty_reserved=Decimal(5), cost=Decimal(9800)),
+    ])
+    await session.commit()
+    # два активных порога на одну (sku,warehouse): первый по id выигрывает пару (min 4, reorder 10)
+    await api.post("/wms/thresholds", json={"sku_code": "INOX-2", "warehouse": "Минск", "min_qty": 4, "reorder_qty": 10})
+    await api.post("/wms/thresholds", json={"sku_code": "INOX-2", "warehouse": "Минск", "min_qty": 6, "reorder_qty": 20})
+
+    r = await api.post("/wms/alerts/emit")
+    assert r.json() == {"emitted": 1, "gateway": True}  # дедуп: одно событие, не два
+    evs = [e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+           if e.event_type == "wms.stock.low"]
+    assert len(evs) == 1
+    p = evs[0].payload
+    assert p["free_qty"] == 0.0  # клампнут в 0, не −2
+    assert p["deficit"] == 4.0   # 4 − 0 (НЕ 6); первый порог пары выиграл
+    assert p["reorder_qty"] == 10.0 and p["severity"] == "out_of_stock"
+
+
+async def test_wms_ops_funnel_rbac(api):
+    """RBAC складской воронки (крит-фикс круга 2): запись требует wms.count, чужой модуль — 403.
+
+    Падал бы на старом коде, где /ops,/board,POST,PATCH были БЕЗ require_permission:
+    PATCH чужой роли вернул бы 404 (дошёл до хендлера), а не 403.
+    """
+    log = {"X-User-Roles": "logistics"}  # wms.read, без wms.count
+    # чтение воронки роли склада доступно
+    assert (await api.get("/wms/ops", headers=log)).status_code == 200
+    assert (await api.get("/wms/board", headers=log)).status_code == 200
+    # запись (создание/смена стадии) — только wms.count → 403 даже до обращения к данным
+    assert (await api.post("/wms/ops", json={"title": "x"}, headers=log)).status_code == 403
+    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"}, headers=log)).status_code == 403
+    # роль без доступа к модулю склада — 403 даже на чтение (гейт доступа к модулю)
+    assert (await api.get("/wms/ops", headers={"X-User-Roles": "sales"})).status_code == 403
+
+
+async def test_wms_reconciliation_does_not_overwrite_1c(api, session):
+    """Сверка отдаёт diff, но НЕ перетирает 1С (истина склада): StockItem не меняется.
+
+    Падал бы, если бы сверка писала обратно в зеркало 1С (синхронизировала остаток),
+    нарушив инвариант «1С = истина, фаза 1» — данные/деньги.
+    """
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add(Sku(code="LFP-24-200", title="LFP 24-200", unit="шт"))
+    item = StockItem(sku_code="LFP-24-200", warehouse="Минск",
+                     qty_available=Decimal(14), cost=Decimal(1850))
+    session.add(item)
+    await session.commit()
+    await api.post("/wms/receipt", json={"sku_code": "LFP-24-200", "qty": 10, "warehouse": "Минск"})
+
+    rec = (await api.get("/wms/reconciliation")).json()
+    row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-24-200")
+    assert row["wms_qty"] == 10.0 and row["onec_qty"] == 14.0 and row["diff"] == -4.0
+
+    # 1С-зеркало осталось 14 — сверка ничего не записала обратно
+    await session.refresh(item)
+    assert float(item.qty_available) == 14.0
+
+
+async def test_wms_cycle_count_correcting_movement_valued(api, session):
+    """Цикл-каунт: расхождение пересчёта → корректирующее движение + деньго-оценка (str-точность).
+
+    Падал бы, если проведение перестанет писать adjustment-движение (теневой остаток не
+    сойдётся) или сломается денежная оценка расхождения.
+    """
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.integrations.models import StockItem
+
+    session.add_all([
+        Sku(code="ROLL-8", title="Рулон 8", unit="т"),
+        StockItem(sku_code="ROLL-8", warehouse="Гомель",
+                  qty_available=Decimal(30), cost=Decimal("1850.50")),
+    ])
+    await session.commit()
+    plan = (await api.post("/wms/cycle-plans",
+            json={"warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01"})).json()
+    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
+    line = next(line for line in doc["lines"] if line["sku_code"] == "ROLL-8")
+    await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 27})  # недостача 3
+    assert (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()["status"] == "done"
+
+    # корректирующее движение в журнал WMS (не в 1С)
+    adj = next(m for m in (await api.get("/wms/movements?reason=adjustment")).json()
+               if m["sku_code"] == "ROLL-8")
+    assert adj["kind"] == "out" and adj["qty"] == 3.0 and adj["doc_ref"] == doc["number"]
+    # деньго-оценка расхождения: −3 × 1850.50 = −5551.5 (точно, через Decimal(str()))
+    det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
+    dl = next(line for line in det["lines"] if line["sku_code"] == "ROLL-8")
+    assert dl["variance"] == -3.0 and dl["variance_value"] == -5551.5
+    assert det["summary"]["shortage_value"] == -5551.5
+
+
 async def test_logistics(api):
     r = await api.post(
         "/logistics/shipments",
