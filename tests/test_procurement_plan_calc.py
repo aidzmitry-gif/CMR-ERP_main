@@ -9,8 +9,11 @@ from datetime import date, timedelta
 
 from modules.procurement.plan import (
     DEFAULT_METHODS,
+    LAST_MILE_BUFFER_DAYS,
     STAGE_ORDER,
+    arrival_deadline,
     build_milestone_plan,
+    parse_deadline,
     total_transit_days,
 )
 
@@ -56,3 +59,19 @@ def test_unknown_stage_duration_treated_as_zero():
     plans, start = build_milestone_plan(durations, date(2026, 10, 1))
     assert total_transit_days(durations) == 10
     assert start == date(2026, 10, 1) - timedelta(days=10)
+
+
+def test_parse_deadline_formats():
+    assert parse_deadline("2026-12-31") == date(2026, 12, 31)  # ISO
+    assert parse_deadline("31.12.2026") == date(2026, 12, 31)  # DD.MM.YYYY
+    assert parse_deadline("31,12,2026") == date(2026, 12, 31)  # DD,MM,YYYY (как в таблице)
+    assert parse_deadline("01/10/2026") == date(2026, 10, 1)   # DD/MM/YYYY
+    assert parse_deadline("") is None
+    assert parse_deadline(None) is None
+    assert parse_deadline("24 июля 2026") is None  # неразобранное → None (honest-empty)
+
+
+def test_arrival_deadline_subtracts_buffer():
+    assert arrival_deadline(date(2026, 12, 31)) == date(2026, 12, 31) - timedelta(days=LAST_MILE_BUFFER_DAYS)
+    assert arrival_deadline(date(2026, 12, 31), buffer_days=0) == date(2026, 12, 31)
+    assert arrival_deadline(None) is None
