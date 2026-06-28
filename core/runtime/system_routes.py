@@ -279,6 +279,24 @@ async def mdm_duplicates(
     return {"clusters": await mdm.duplicate_clusters(session)}
 
 
+@router.get("/system/mdm/import-preview")
+async def mdm_import_preview(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> dict:
+    """Dry-run предпросмотр импорта контрагентов из кэша 1С → MDM (REF3-9): сколько создалось бы /
+    совпало по УНП / без УНП — БЕЗ единой записи. Реальный прогон (upsert/дедуп) — зона Синк.
+
+    Фасад 1С не подключён (``core.services.onec is None``) → 503 graceful (не 500). Под ``refs.view``
+    (мастер-данные контрагентов; ``/system`` минует middleware → защищаем пообъектно).
+    """
+    onec = request.app.state.core.services.onec
+    if onec is None:
+        raise HTTPException(status_code=503, detail="фасад 1С не подключён (модуль integrations)")
+    return await mdm.import_preview(session, onec)
+
+
 @router.get("/system/mdm/rules")
 async def mdm_rules(
     entity_type: str | None = None, session: AsyncSession = Depends(get_session)
