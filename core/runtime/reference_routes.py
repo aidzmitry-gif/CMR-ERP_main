@@ -68,16 +68,46 @@ async def _by_key(session: AsyncSession, model: type, key_field: str, value):
     return obj
 
 
-def _emit_change(request: Request, session, model, action: str, key, actor: str) -> None:
-    """Записать правку справочника в аудит (concept §8): outbox-событие → проекция в audit_log.
+#: tablename → ключ реестра (core.*) для payload событий ``reference.*.changed`` — чтобы
+#: downstream (Закупки/Финансы) подписывались по стабильному ключу справочника, а не по имени
+#: таблицы. Незнакомая таблица → ``core.<table>`` (fallback, не падаем).
+_REF_KEY_BY_TABLE = {
+    "ref_unit": "core.units",
+    "ref_currency": "core.currencies",
+    "ref_currency_rate": "core.currency_rates",
+    "ref_country": "core.countries",
+    "ref_bank": "core.banks",
+    "ref_vat_rate": "core.vat_rates",
+    "ref_tnved": "core.tnved",
+    "ref_account": "core.accounts",
+    "ref_region": "core.regions",
+    "ref_nomenclature_category": "core.nomenclature_groups",
+    "ref_sku_version": "core.sku_history",
+}
 
-    Эмитится в той же транзакции, что и мутация (до commit) — at-least-once. ``entity_ref``
-    указывает на конкретную запись справочника, ``actor`` — кто правил (личность из X-User).
+
+def _emit_change(
+    request: Request, session, model, action: str, key, actor: str, *, hint: str | None = None
+) -> None:
+    """Записать правку справочника в аудит + дать downstream сигнал к пересчёту (concept §8, REF3-7).
+
+    Эмитится в той же транзакции, что и мутация (до commit) — at-least-once. Payload
+    (обратносовместимое расширение): к ``action``/``entity_ref``/``actor`` добавлены ``ref_key``
+    (ключ реестра, напр. ``core.tnved``) и ``value_hint`` — лёгкая подсказка «что поменялось»
+    (изменённые поля / ``create`` / ``archive``). Закупки/Финансы могут подписаться на смену
+    ставки ТН ВЭД/НДС и пересчитать landed cost, не вытягивая всю запись.
     """
+    table = model.__tablename__
     request.app.state.core.event_bus.emit(
         session,
-        f"reference.{model.__tablename__}.changed",
-        {"action": action, "entity_ref": f"{model.__tablename__}:{key}", "actor": actor},
+        f"reference.{table}.changed",
+        {
+            "action": action,
+            "ref_key": _REF_KEY_BY_TABLE.get(table, f"core.{table}"),
+            "entity_ref": f"{table}:{key}",
+            "value_hint": hint,
+            "actor": actor,
+        },
     )
 
 
@@ -149,7 +179,9 @@ def build_simple_ref_router(
             raise HTTPException(
                 status_code=409, detail=f"запись с таким {key_field} уже существует"
             ) from exc
-        _emit_change(request, session, model, "create", getattr(obj, key_field), user.username)
+        _emit_change(
+            request, session, model, "create", getattr(obj, key_field), user.username, hint="create"
+        )
         await session.commit()
         await session.refresh(obj)
         return _row(obj, fields)
@@ -163,10 +195,12 @@ def build_simple_ref_router(
         user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
-        for field in editable:
-            if field in payload:
-                setattr(obj, field, _coerce(model, field, payload[field]))
-        _emit_change(request, session, model, "update", code, user.username)
+        changed = [field for field in editable if field in payload]
+        for field in changed:
+            setattr(obj, field, _coerce(model, field, payload[field]))
+        _emit_change(
+            request, session, model, "update", code, user.username, hint=",".join(changed) or None
+        )
         await session.commit()
         return _row(obj, fields)
 
@@ -179,7 +213,7 @@ def build_simple_ref_router(
     ) -> dict:
         obj = await _by_key(session, model, key_field, code)
         obj.is_active = False
-        _emit_change(request, session, model, "archive", code, user.username)
+        _emit_change(request, session, model, "archive", code, user.username, hint="archive")
         await session.commit()
         return {"archived": code}
 
@@ -226,7 +260,10 @@ def build_simple_ref_router(
                 if not dry_run:
                     for field, value in changes.items():
                         setattr(obj, field, value)
-                    _emit_change(request, session, model, "bulk_upsert", key, user.username)
+                    _emit_change(
+                        request, session, model, "bulk_upsert", key, user.username,
+                        hint=",".join(changes) or None,
+                    )
             else:
                 missing = [f for f in required if not raw.get(f)]
                 if missing:
@@ -235,7 +272,9 @@ def build_simple_ref_router(
                 would_create.append({"key": key})
                 if not dry_run:
                     session.add(model(**coerced))
-                    _emit_change(request, session, model, "bulk_upsert", key, user.username)
+                    _emit_change(
+                        request, session, model, "bulk_upsert", key, user.username, hint="create"
+                    )
         if dry_run:
             return {
                 "dry_run": True,
@@ -320,6 +359,12 @@ def build_versioned_ref_router(
             obj = await scd2.add_version(session, model, key_field, key, start, **values)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # сигнал downstream: новая версия ставки/курса → пересчитать landed (REF3-7). Несенситивные
+        # версии (currency_rate) пишутся здесь; сенситивные (vat/tnved) ушли в модерацию выше.
+        _emit_change(
+            request, session, model, "version", key, user.username,
+            hint=",".join(values) or "version",
+        )
         try:
             await session.commit()
         except IntegrityError as exc:  # NOT NULL / уникальность на коммите → 409, не 500
