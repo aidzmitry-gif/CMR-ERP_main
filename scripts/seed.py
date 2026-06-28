@@ -10,21 +10,6 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
-from modules.hr.models import Candidate
-from modules.procurement.models import PurchaseRequest
-from modules.production.models import ProductionOrder
-from modules.sales.models import (
-    Activity,
-    ContractTemplate,
-    Deal,
-    DealItem,
-    KpiTarget,
-    Lead,
-    LossReason,
-    Message,
-    PriceQuote,
-)
-from modules.wms.models import WarehouseOp
 from sqlalchemy import select
 
 from core.domain.models import Contact, Counterparty, Sku, SurvivorshipRule, User
@@ -41,10 +26,25 @@ from core.domain.reference import (
     VatRate,
 )
 from core.services import build_services
+from modules.hr.models import Candidate
 from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
 from modules.legal.models import LegalCase
 from modules.office.models import OfficeDoc
+from modules.procurement.models import PurchaseRequest
+from modules.production.models import ProductionOrder
+from modules.sales.models import (
+    Activity,
+    ContractTemplate,
+    Deal,
+    DealItem,
+    KpiTarget,
+    Lead,
+    LossReason,
+    Message,
+    PriceQuote,
+)
+from modules.wms.models import WarehouseOp
 
 KPI_DATE = date(2026, 6, 2)
 
