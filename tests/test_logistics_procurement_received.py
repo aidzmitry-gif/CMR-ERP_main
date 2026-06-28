@@ -62,6 +62,69 @@ def test_looks_like_import_incoterms_or_country():
     assert not _looks_like_import({"incoterms": "  "})  # пробелы не считаются
 
 
+# --- Круг 5 харднинг: таблица классификации стран/маркеров ----------------
+# Фиксируем КАЖДЫЙ пограничный случай явно — тест-харднинг по докладу координатора
+# (round5: «пограничные страны таблицей»). Любое изменение списка _DOMESTIC_COUNTRIES
+# или эвристики origin/incoterms должно либо проходить эту таблицу, либо обновлять её.
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "payload, expected, why",
+    [
+        # --- внутренние страны (НЕ импорт) ---
+        ({"country": "РБ"}, False, "канон Беларусь"),
+        ({"country": "BY"}, False, "ISO2 BY"),
+        ({"country": "BLR"}, False, "ISO3 BLR"),
+        ({"country": "Беларусь"}, False, "полное имя кириллицей"),
+        ({"country": "Belarus"}, False, "полное имя латиницей"),
+        ({"country": "РФ"}, False, "M1 ревью: РФ — внутренний рынок CRM"),
+        ({"country": "RU"}, False, "ISO2 RU"),
+        ({"country": "RUS"}, False, "ISO3 RUS"),
+        ({"country": "Россия"}, False, "полное имя кириллицей"),
+        ({"country": "Russia"}, False, "полное имя латиницей"),
+        ({"country": " РБ "}, False, "пробелы вокруг — strip должен сработать"),
+        ({"country": "by"}, False, "регистр игнорируется (upper)"),
+        # --- внешние страны (импорт по стране) ---
+        ({"country": "CN"}, True, "Китай ISO2"),
+        ({"country": "Китай"}, True, "Китай кириллицей"),
+        ({"country": "UA"}, True, "Украина ISO2"),
+        ({"country": "Украина"}, True, "Украина кириллицей"),
+        ({"country": "PL"}, True, "Польша ISO2"),
+        ({"country": "Польша"}, True, "Польша кириллицей"),
+        ({"country": "DE"}, True, "Германия — внешний рынок"),
+        ({"country": "TR"}, True, "Турция — внешний рынок"),
+        # --- origin маркер (приоритет) ---
+        ({"origin": "import"}, True, "явный маркер origin"),
+        ({"origin": "IMPORT"}, True, "регистр в origin"),
+        ({"origin": "domestic"}, False, "явный domestic — не импорт (нет других маркеров)"),
+        # --- incoterms маркер ---
+        ({"incoterms": "FOB"}, True, "FOB — экспортный термин"),
+        ({"incoterms": "CIF"}, True, "CIF — экспортный термин"),
+        ({"incoterms": "EXW"}, True, "EXW — Incoterms 2020"),
+        ({"incoterms": "DAP"}, True, "DAP"),
+        ({"incoterms": ""}, False, "пустой incoterms — нет маркера"),
+        ({"incoterms": "  "}, False, "только пробелы — нет маркера"),
+        # --- пустой / нерелевантный payload ---
+        ({}, False, "пустой payload — нет маркеров"),
+        ({"item": "Винт", "qty": 100}, False, "только груз — нет маркеров импорта"),
+        ({"country": None, "incoterms": None}, False, "None-поля не падают"),
+        ({"country": ""}, False, "пустая страна = неопределённо"),
+        # --- комбинированные ---
+        ({"country": "CN", "incoterms": "FOB"}, True, "оба маркера — импорт"),
+        ({"country": "РБ", "incoterms": "FOB"}, True, "incoterms сильнее: incoterms у локальной поставки = аномалия → импорт"),
+        ({"country": "CN", "origin": "domestic"}, True, "страна перевешивает: CN явно импорт"),
+    ],
+)
+def test_looks_like_import_table(payload, expected, why):
+    """Параметризованная таблица классификации payload procurement.received.
+
+    DoD круга 5: фиксирует ТЕКУЩУЮ эвристику и блокирует регрессии.
+    """
+    assert _looks_like_import(payload) is expected, (
+        f"payload={payload!r} ожидался {'импорт' if expected else 'НЕ импорт'} ({why})"
+    )
+
+
 @pytest.mark.api
 async def test_internal_purchase_no_marker_no_record(api, session):
     """LOG3-3: внутренняя закупка без import-маркера и без существующей записи → запись НЕ создаётся."""
@@ -187,3 +250,66 @@ async def test_empty_entity_ref_noop(api, session):
     await session.flush()
     assert (await session.execute(select(ImportShipment))).scalars().all() == []
     assert bus.events == []
+
+
+# --- Круг 5 харднинг: import.received без подписчиков не роняет шину --------
+
+@pytest.mark.api
+async def test_import_received_no_subscribers_does_not_break_bus(session):
+    """R5-4: INFO-эвент `logistics.import.received` эмитится и доставляется БЕЗ подписчиков.
+
+    Контракт LOG3-4: «оставлено INFO без обязательного подписчика — осознанно». Тест
+    проверяет, что relay при отсутствии handlers НЕ кидает исключение, OutboxEvent
+    помечается processed_at и пишется AuditLog-проекция (как для любого события).
+    """
+    from core.domain.models import AuditLog, OutboxEvent
+    from core.services.eventbus import EventContext, OutboxEventBus
+
+    bus = OutboxEventBus()
+    # Никаких subscribe(...) — потребителей нет вообще.
+    assert bus._handlers.get("logistics.import.received") is None
+
+    bus.emit(
+        session,
+        "logistics.import.received",
+        {
+            "import_id": 1, "number": "ИМП-2026-0001",
+            "po_ref": "purchase:1", "freight_amount": "1000",
+            "eta": None, "supplier": "X", "entity_ref": "ИМП-2026-0001",
+        },
+    )
+    await session.flush()
+
+    ctx = EventContext(session=session, services=object())
+    # relay_once без подписчиков — НЕ должен кинуть.
+    processed = await bus.relay_once(session, ctx)
+    assert processed == 1
+
+    # Эвент помечен и аудит-проекция записана (контракт outbox-доставки).
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert len(events) == 1 and events[0].processed_at is not None
+    audits = (await session.execute(select(AuditLog))).scalars().all()
+    audit = next(a for a in audits if a.action == "logistics.import.received")
+    assert audit.entity_ref == "ИМП-2026-0001"
+
+
+@pytest.mark.api
+async def test_freight_cost_no_subscribers_does_not_break_bus(session):
+    """R5-4 hardening: даже денежный freight.cost без подписчиков relay не роняет.
+
+    Зеркальный тест: при отвалившемся finance-подписчике эмит логистики не должен
+    мешать другим событиям в той же сессии (at-least-once + idempotent processed_at).
+    """
+    from core.domain.models import OutboxEvent
+    from core.services.eventbus import EventContext, OutboxEventBus
+
+    bus = OutboxEventBus()
+    bus.emit(session, "logistics.freight.cost", {
+        "ref": "import:1", "leg": "import", "amount": "8500.50",
+        "po_ref": "purchase:1", "entity_ref": "import:1",
+    })
+    await session.flush()
+    processed = await bus.relay_once(session, EventContext(session=session, services=object()))
+    assert processed == 1
+    e = (await session.execute(select(OutboxEvent))).scalars().first()
+    assert e is not None and e.processed_at is not None

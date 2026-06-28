@@ -107,6 +107,45 @@ async def test_import_freight_only_first_transition_to_warehouse(api, session):
     assert events == [], "повторный PATCH в тот же warehouse не должен эмитить"
 
 
+async def test_import_freight_outbox_helper_isolated(session):
+    """R5-1: helper `_import_freight_already_emitted` — изолированная проверка.
+
+    Защищает outbox-страховку (B2 круга 3) от регрессии: помечает defence-in-depth
+    через outbox-lookup, который срабатывает, когда `prev_stage`-проверка не помогает
+    (сценарий warehouse→customs→warehouse). Если кто-то выкосит helper или сломает
+    его условие — этот тест упадёт ДО интеграционных.
+    """
+    from core.domain.models import OutboxEvent
+    from modules.logistics.routes import _import_freight_already_emitted
+
+    # пустой outbox → ничего не эмиттилось → False
+    assert await _import_freight_already_emitted(session, 42) is False
+
+    # эмит чужого ref (другой import id) — для 42 всё ещё False (фильтр по ref)
+    session.add(OutboxEvent(
+        event_type="logistics.freight.cost", version=1,
+        payload={"ref": "import:99", "leg": "import", "amount": "1000"},
+    ))
+    await session.flush()
+    assert await _import_freight_already_emitted(session, 42) is False
+
+    # эмит ровно нашего ref → True (повторный эмит должен быть заблокирован)
+    session.add(OutboxEvent(
+        event_type="logistics.freight.cost", version=1,
+        payload={"ref": "import:42", "leg": "import", "amount": "2500"},
+    ))
+    await session.flush()
+    assert await _import_freight_already_emitted(session, 42) is True
+
+    # чужой event_type с тем же ref — НЕ считается freight (фильтр по типу)
+    session.add(OutboxEvent(
+        event_type="logistics.import.received", version=1,
+        payload={"ref": "import:777"},
+    ))
+    await session.flush()
+    assert await _import_freight_already_emitted(session, 777) is False
+
+
 async def test_import_freight_no_doubling_on_rollback_and_retransition(api, session):
     """B2 (ревью круга 3): warehouse → customs → warehouse НЕ задваивает freight.cost.
 
