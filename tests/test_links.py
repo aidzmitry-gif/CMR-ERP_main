@@ -59,15 +59,30 @@ async def test_reserve_creates_stock_movement(session):
     assert rows[0].sku_code == "ROLL-5" and rows[0].kind == "out" and float(rows[0].qty) == 12
 
 
-async def test_goods_received_creates_stock_movement(session):
-    from modules.wms.events import on_goods_received
-    from modules.wms.models import StockMovement
+async def test_goods_received_creates_receipt_pending_qc(session):
+    """Приёмка (procurement/production) → документ ``Receipt`` в ``pending_qc`` БЕЗ движения.
 
-    await on_goods_received({"item": "Болты M8", "qty": 500, "warehouse": "Главный"}, _ctx(session))
+    QC-гейт (круг 2): зеркало движения по приёмке откладывается до QC-приёмки
+    (``POST /wms/receipts/{id}/accept``) и пишется по ФАКТИЧЕСКИ принятому кол-ву — брак
+    не попадает на свободный остаток (деньго-защита). Т.е. WMS по-прежнему дублирует
+    движение, но в правильной точке потока (см. ``test_wms_receipt_accept`` в test_erp.py).
+    """
+    from modules.wms.events import on_goods_received
+    from modules.wms.models import Receipt, ReceiptLine, StockMovement
+
+    await on_goods_received(
+        {"item": "Болты M8", "qty": 500, "warehouse": "Главный", "entity_ref": "purchase:7"},
+        _ctx(session),
+    )
     await session.commit()
-    rows = (await session.execute(select(StockMovement))).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].sku_code == "Болты M8" and rows[0].kind == "in"
+    receipts = (await session.execute(select(Receipt))).scalars().all()
+    assert len(receipts) == 1
+    assert receipts[0].status == "pending_qc" and receipts[0].source == "procurement"
+    lines = (await session.execute(select(ReceiptLine))).scalars().all()
+    assert len(lines) == 1
+    assert lines[0].sku_code == "Болты M8" and float(lines[0].expected_qty) == 500
+    # движения пока НЕТ — оно появится только после QC-accept (по принятому кол-ву)
+    assert (await session.execute(select(StockMovement))).scalars().all() == []
 
 
 async def test_procurement_received_emits(session, api):
