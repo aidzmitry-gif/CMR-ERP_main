@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Package, Wallet } from "lucide-react";
 
 import { formatByn } from "@/lib/format";
 import { SourceTag } from "@/components/source-tag";
-import { changedFields } from "@/lib/reference-data";
-import type { FieldProvenance, GroupInherited, SkuBatchRow, SkuCard } from "@/lib/reference-data";
+import { changedFields, fetchSkuLandedInputs } from "@/lib/reference-data";
+import type {
+  FieldProvenance,
+  GroupInherited,
+  SkuBatchRow,
+  SkuCard,
+  SkuLandedInputs,
+} from "@/lib/reference-data";
 import { provenanceCounts } from "@/lib/spravochniki-card";
 
 import { ProvenanceBadge } from "./provenance-badge";
@@ -255,6 +261,100 @@ function AttrField({ label, attr }: { label: string; attr?: GroupInherited }) {
         )
       }
     />
+  );
+}
+
+/** Строка мастер-входа: подпись → значение + per-field SourceTag (own=ERP/group/tnved). */
+function LandedRow({
+  label,
+  value,
+  source,
+}: {
+  label: string;
+  value: React.ReactNode;
+  source: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[12.5px] text-muted">{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="text-sm font-semibold tabular-nums text-ink">{value}</span>
+        {source && source !== "none" && <SourceTag source={source} />}
+      </span>
+    </div>
+  );
+}
+
+/** Блок «Маржа-вход» — из /system/sku/{code}/landed-inputs: те же числа, что у закупки (REF3-4).
+ *  4 состояния: загрузка · ошибка · пусто (нет ТН ВЭД → маржа неполная) · успех. Провенанс по полю. */
+function LandedInputsCard({ code }: { code: string }) {
+  const [state, setState] = useState<"loading" | "error" | "ready">("loading");
+  const [data, setData] = useState<SkuLandedInputs | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setState("loading");
+    fetchSkuLandedInputs(code).then((d) => {
+      if (!live) return;
+      if (d) {
+        setData(d);
+        setState("ready");
+      } else {
+        setState("error");
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [code]);
+
+  return (
+    <Card>
+      <Eyebrow>Маржа-вход (себестоимость)</Eyebrow>
+      {state === "loading" && <p className="mt-2 text-[12px] text-faint">Загрузка входа маржи…</p>}
+      {state === "error" && (
+        <p className="mt-2 text-[12px] text-red-600">
+          Не удалось загрузить вход маржи. Повторите позже.
+        </p>
+      )}
+      {state === "ready" &&
+        data &&
+        (data.effective_tnved.code ? (
+          <>
+            <div className="mt-2.5 space-y-2">
+              <LandedRow
+                label="Пошлина ТН ВЭД"
+                value={data.duty_pct != null ? `${data.duty_pct}%` : "—"}
+                source={data.provenance.tnved}
+              />
+              <LandedRow
+                label="Ставка НДС"
+                value={data.vat_rate != null ? `${data.vat_rate}%` : "—"}
+                source={data.provenance.vat}
+              />
+              <LandedRow
+                label="Вес, кг"
+                value={data.weight_kg != null ? String(data.weight_kg) : "нет"}
+                source={data.provenance.weight}
+              />
+              <LandedRow
+                label="Объём, м³"
+                value={data.volume_m3 != null ? String(data.volume_m3) : "нет"}
+                source={data.provenance.volume}
+              />
+            </div>
+            <p className="mt-2.5 border-t border-line pt-2.5 text-[11px] text-faint">
+              Те же числа, что у закупки при расчёте landed cost. Код ТН ВЭД {data.effective_tnved.code}
+              {data.effective_tnved.source === "group" ? " (унаследован от группы)" : ""}.
+            </p>
+          </>
+        ) : (
+          <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+            Пошлина не определена — нет кода ТН ВЭД (ни своего, ни от группы). Себестоимость не
+            посчитать, маржа неполная.
+          </div>
+        ))}
+    </Card>
   );
 }
 
@@ -579,6 +679,8 @@ export function SpravSkuCard({ card }: { card: SkuCard }) {
                   </>
                 )}
               </Card>
+
+              <LandedInputsCard code={card.code} />
 
               <Card>
                 <Eyebrow>Золотая запись</Eyebrow>

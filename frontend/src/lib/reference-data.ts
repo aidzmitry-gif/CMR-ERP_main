@@ -272,6 +272,8 @@ export interface QualityByKind {
   duplicate: number;
   broken_ref: number;
   orphan: number;
+  // «слепые по марже» SKU (нет ТН ВЭД → landed cost не посчитать); только для core.skus (REF3-5/6).
+  margin_blind?: number;
 }
 
 /** Строка сводки качества по одному справочнику. */
@@ -840,6 +842,42 @@ export async function fetchSkuCard(code: string, roles?: string): Promise<SkuCar
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as SkuCard;
+  } catch {
+    return null;
+  }
+}
+
+// ── Мастер-входы landed cost по SKU (REF3-1/2/4) ─────────────────────────────
+
+/** Провенанс поля мастер-входа: own (на товаре) | group (от группы) | tnved (от кода ТН ВЭД) | none. */
+export type LandedInputSource = "own" | "group" | "tnved" | "none";
+
+/** Мастер-входы landed cost по SKU — те же числа, что считает закупка (фасад core.sku_master). */
+export interface SkuLandedInputs {
+  sku_code: string;
+  weight_kg: number | null;
+  volume_m3: number | null;
+  unit: string | null;
+  country: string | null;
+  effective_tnved: { code: string | null; source: "own" | "group" | null; group_code: string | null };
+  duty_pct: number | null; // эфф. пошлина ТН ВЭД % на дату; null — нет кода/версии
+  vat_code: string | null;
+  vat_rate: number | null; // ставка НДС % на дату; null — не определена
+  provenance: Record<string, LandedInputSource>; // {weight|volume|unit|country|tnved|vat → источник}
+}
+
+/** Мастер-входы landed cost по SKU на дату (клиент, через прокси). `null` — ошибка/нет доступа. */
+export async function fetchSkuLandedInputs(
+  code: string,
+  onDate?: string,
+): Promise<SkuLandedInputs | null> {
+  try {
+    const q = onDate ? `?on_date=${encodeURIComponent(onDate)}` : "";
+    const res = await fetch(`/api/system/sku/${encodeURIComponent(code)}/landed-inputs${q}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as SkuLandedInputs;
   } catch {
     return null;
   }

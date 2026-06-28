@@ -22,6 +22,7 @@ const KIND_LABEL: Record<string, string> = {
   duplicate: "Дубли",
   broken_ref: "Битые ссылки",
   orphan: "Сироты",
+  margin_blind: "Маржа-слепые", // SKU без ТН ВЭД → себестоимость не считается (REF3-5/6)
 };
 
 /** Цветной индикатор score (доля качества в %). */
@@ -117,6 +118,7 @@ export function SpravQuality({ summary }: { summary: QualitySummaryRow[] }) {
   }
 
   const worst = summary.filter((r) => r.score < 0.95).length;
+  const marginBlind = summary.reduce((s, r) => s + (r.by_kind.margin_blind ?? 0), 0);
 
   return (
     <div className="space-y-4">
@@ -125,6 +127,11 @@ export function SpravQuality({ summary }: { summary: QualitySummaryRow[] }) {
         <span>📊 score = доля «чистых» записей (1 − взвешенная доля проблемных)</span>
         <span>🔎 клик по строке — детали и примеры</span>
         {worst > 0 && <span className="font-semibold text-amber-700">⚠ требуют внимания: {worst}</span>}
+        {marginBlind > 0 && (
+          <span className="font-semibold text-amber-700" title="SKU без ТН ВЭД — себестоимость не считается">
+            🚫 маржа-слепых SKU: {marginBlind}
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-2xl bg-surface shadow-card">
@@ -138,6 +145,12 @@ export function SpravQuality({ summary }: { summary: QualitySummaryRow[] }) {
               <th className="px-4 py-2 text-right font-semibold">Дубли</th>
               <th className="px-4 py-2 text-right font-semibold">Битые</th>
               <th className="px-4 py-2 text-right font-semibold">Сироты</th>
+              <th
+                className="px-4 py-2 text-right font-semibold"
+                title="SKU без эфф. ТН ВЭД — себестоимость (landed cost) не посчитать"
+              >
+                Маржа-слепые
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -164,10 +177,22 @@ export function SpravQuality({ summary }: { summary: QualitySummaryRow[] }) {
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{r.by_kind.duplicate || "—"}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{r.by_kind.broken_ref || "—"}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{r.by_kind.orphan || "—"}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {r.by_kind.margin_blind ? (
+                        <span
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[12px] font-semibold text-amber-700"
+                          title="Нет ТН ВЭД (ни своего, ни от группы) — landed cost не посчитать; клик по строке → коды"
+                        >
+                          {r.by_kind.margin_blind}
+                        </span>
+                      ) : (
+                        <span className="text-ink">—</span>
+                      )}
+                    </td>
                   </tr>
                   {isOpen && (
                     <tr className="bg-sunken/30">
-                      <td colSpan={7} className="p-0">
+                      <td colSpan={8} className="p-0">
                         <DetailPanel refKey={r.ref} />
                       </td>
                     </tr>
