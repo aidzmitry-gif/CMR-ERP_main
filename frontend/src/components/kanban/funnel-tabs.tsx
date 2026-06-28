@@ -44,33 +44,11 @@ export function FunnelTabs({ active }: { active?: string }) {
     router.replace(`${pathname}?${next.toString()}`);
   }
 
-  if (status === "loading") {
-    return (
-      <div className="mb-3 flex gap-2">
-        {[1, 2].map((i) => (
-          <span key={i} className="h-7 w-32 animate-pulse rounded-md bg-sunken" />
-        ))}
-      </div>
-    );
-  }
-  if (status === "error") {
-    return (
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-[12.5px] text-muted">Не удалось загрузить воронки.</span>
-        <button onClick={() => void load()} className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white">
-          Повторить
-        </button>
-      </div>
-    );
-  }
-  if (funnels.length === 0) {
-    return (
-      <div className="mb-3 text-[12.5px] text-muted">
-        Воронки не настроены — выполните миграцию или зайдите в редактор стадий.
-      </div>
-    );
-  }
-  if (funnels.length === 1) return null;
+  // Скрываем все «технические» состояния — пока воронки не пришли, доска работает на
+  // дефолтной (new_clients из канона). Шум типа «Воронки не настроены» больше не лезет
+  // в макет, только когда бэк уверенно прислал ≥2 воронки — рисуем таб.
+  if (status === "loading" || status === "error") return null;
+  if (funnels.length <= 1) return null;
   const current = active ?? funnels[0].code;
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1 border-b border-line">
