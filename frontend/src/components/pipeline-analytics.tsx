@@ -31,6 +31,18 @@ type Analytics = {
   won_count: number;
 };
 
+// S3-6: взвешенный прогноз валовой маржи воронки (`/sales/pipeline/margin-forecast`).
+type MarginForecast = {
+  funnel: string;
+  owner: string | null;
+  revenue_weighted: number;
+  gross_weighted: number | null;
+  margin_pct_blended: number | null;
+  deals_priced: number;
+  deals_total: number;
+  reason: string | null;
+};
+
 type Status = "loading" | "error" | "ready";
 
 export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFunnel?: string }) {
@@ -39,6 +51,7 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
   const [owner, setOwner] = useState("");
   const [status, setStatus] = useState<Status>("loading");
   const [data, setData] = useState<Analytics | null>(null);
+  const [margin, setMargin] = useState<MarginForecast | null>(null);
   const [stuck, setStuck] = useState<number | null>(null);
 
   useEffect(() => {
@@ -53,6 +66,15 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
       const res = await fetch(`/api/sales/pipeline/analytics?${qs.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       setData((await res.json()) as Analytics);
+      // S3-6: прогноз маржи воронки — отдельный endpoint, тот же фильтр funnel/owner.
+      try {
+        const mres = await fetch(`/api/sales/pipeline/margin-forecast?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        setMargin(mres.ok ? ((await mres.json()) as MarginForecast) : null);
+      } catch {
+        setMargin(null);
+      }
       // «Висяки» — отдельный отчёт; ?stuck_days=14 канонично.
       try {
         const sres = await fetch(`/api/sales/deals?stuck_days=14`, { cache: "no-store" });
@@ -156,6 +178,54 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
               </div>
               <div className="text-[11px] text-faint">сделки в стадии дольше 14 дней (?stuck_days=14)</div>
             </div>
+          </div>
+
+          {/* S3-6: Маржа воронки — взвеш. валовая прибыль и маржа% (BYN), honest-баннер при null */}
+          <div className="rounded-xl border border-line p-4">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-[13px] font-bold text-ink">Маржа воронки</h3>
+              {margin && (
+                <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-muted">
+                  оценка по {margin.deals_priced} из {margin.deals_total} сделкам
+                </span>
+              )}
+            </div>
+            {!margin ? (
+              <div className="text-[12px] text-faint">Прогноз маржи недоступен.</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-muted">Выручка взвеш.</div>
+                    <div className="mt-1 text-lg font-bold text-ink tabular-nums">
+                      {formatByn(margin.revenue_weighted)}
+                    </div>
+                    <div className="text-[11px] text-faint">цена клиенту × вероятность стадии</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-muted">Вал. прибыль взвеш.</div>
+                    <div className="mt-1 text-lg font-bold text-money tabular-nums">
+                      {margin.gross_weighted != null ? formatByn(margin.gross_weighted) : "—"}
+                    </div>
+                    <div className="text-[11px] text-faint">(цена − landed себес) × вероятность</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-muted">Маржа %</div>
+                    <div className="mt-1 text-lg font-bold text-ink tabular-nums">
+                      {margin.margin_pct_blended != null ? `${margin.margin_pct_blended}%` : "—"}
+                    </div>
+                    <div className="text-[11px] text-faint">вал. прибыль / выручка (взвеш.)</div>
+                  </div>
+                </div>
+                {margin.gross_weighted == null && (
+                  <div className="mt-2 text-[11px] text-faint">
+                    {margin.reason ||
+                      "Себестоимость закупок не подключена — валовая прибыль не рассчитана."}{" "}
+                    Выручка показана; маржа появится после интеграции landed cost (procurement).
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Воронкообразная визуализация: стадия + count-полоса + сумма/взвеш + возраст + конверсия */}
