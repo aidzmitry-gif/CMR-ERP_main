@@ -669,3 +669,78 @@ async def test_plan_approved_upserts_kpi_target(api, session):
         select(KpiTarget).where(KpiTarget.key == "tenders_count")
     )).scalars().first()
     assert absent is None
+
+
+# ── Крайняя дата отгрузки + штраф за опоздание → сигнал в закупки ───────────────
+async def test_deal_ship_deadline_and_penalty_persist(api):
+    """Поля крайней даты и штрафа сохраняются при создании и обновлении сделки."""
+    deal = await _new_deal(
+        api, "SD-1", ship_deadline="2026-07-15",
+        penalty_rate_pct=0.1, penalty_cap_pct=10, penalty_terms="0.1%/день, макс 10%",
+    )
+    assert deal["ship_deadline"] == "2026-07-15"
+    assert deal["penalty_rate_pct"] == 0.1
+    assert deal["penalty_cap_pct"] == 10
+    assert deal["penalty_terms"] == "0.1%/день, макс 10%"
+
+    upd = (await api.patch(
+        f"/sales/deals/{deal['id']}", json={"ship_deadline": "2026-07-20"}
+    )).json()
+    assert upd["ship_deadline"] == "2026-07-20"
+    got = (await api.get(f"/sales/deals/{deal['id']}")).json()
+    assert got["ship_deadline"] == "2026-07-20"
+
+
+async def test_ship_deadline_emits_to_procurement(api, session):
+    """Выставление/смена крайней даты → sales.deal.ship_deadline.set (дата+штраф+позиции)."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from modules.sales.models import DealItem
+
+    sku = await _seed_sku(session, "SKU-SD", "Товар к сроку")
+    deal = await _new_deal(api, "SD-2", counterparty="ООО Срок")
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
+    await session.commit()
+
+    await api.patch(f"/sales/deals/{deal['id']}", json={
+        "ship_deadline": "2026-08-01", "penalty_rate_pct": 0.5,
+        "penalty_cap_pct": 15, "penalty_terms": "0.5%/день",
+    })
+    evs = (await session.execute(
+        select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.ship_deadline.set")
+    )).scalars().all()
+    assert len(evs) == 1
+    p = evs[0].payload
+    assert p["deal_id"] == deal["id"]
+    assert p["ship_deadline"] == "2026-08-01"
+    assert p["penalty_rate_pct"] == 0.5 and p["penalty_cap_pct"] == 15
+    assert p["counterparty"] == "ООО Срок"
+    assert any(it["sku_code"] == "SKU-SD" and it["qty"] == 4 for it in p["items"])
+
+    # та же дата повторно → нового сигнала нет (эмит только на смену)
+    await api.patch(f"/sales/deals/{deal['id']}", json={"ship_deadline": "2026-08-01"})
+    # PATCH другого поля → тоже не эмитит
+    await api.patch(f"/sales/deals/{deal['id']}", json={"title": "Переименовал"})
+    evs2 = (await session.execute(
+        select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.ship_deadline.set")
+    )).scalars().all()
+    assert len(evs2) == 1
+
+
+async def test_penalty_out_of_range_rejected(api):
+    """Штраф вне диапазона режется в 422 на валидации, а не падает в 500 (overflow колонок БД)."""
+    # ставка > Numeric(6,2) предела (9999.99) → 422
+    r = await api.post("/sales/deals", json={
+        "number": "PN-1", "title": "t", "counterparty": "c", "penalty_rate_pct": 99999,
+    })
+    assert r.status_code == 422
+    # отрицательная ставка → 422
+    r2 = await api.post("/sales/deals", json={
+        "number": "PN-2", "title": "t", "counterparty": "c", "penalty_rate_pct": -1,
+    })
+    assert r2.status_code == 422
+    # примечание длиннее String(512) → 422
+    deal = await _new_deal(api, "PN-3")
+    r3 = await api.patch(f"/sales/deals/{deal['id']}", json={"penalty_terms": "x" * 513})
+    assert r3.status_code == 422
