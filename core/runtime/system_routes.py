@@ -594,24 +594,27 @@ async def update_sku(
     sku = (await session.execute(select(Sku).where(Sku.code == code))).scalars().first()
     if sku is None:
         raise HTTPException(status_code=404, detail="номенклатура не найдена")
-    changed = [f for f in _SKU_EDITABLE if f in payload]
+    # реально изменившиеся мастер-поля (значение отличается). no-op PATCH — те же значения ИЛИ без
+    # мастер-полей в payload — не эмитит событие и не плодит версию: downstream без ложного пересчёта.
+    changed = [f for f in _SKU_EDITABLE if f in payload and getattr(sku, f) != payload[f]]
     for field in changed:
         setattr(sku, field, payload[field])
-    try:
-        await sku_history.record_sku_version(session, sku, date.today())
-    except ValueError:
-        # повторная правка в тот же день: SCD2 не открывает вторую версию с той же даты —
-        # обновляем снимок текущей открытой версии на месте (today-версия = последнее состояние дня).
-        current = await scd2.current_version(session, SkuVersion, "sku_code", sku.code)
-        if current is not None:
-            for field in sku_history.SNAPSHOT_FIELDS:
-                setattr(current, field, getattr(sku, field))
-    request.app.state.core.event_bus.emit(
-        session,
-        "reference.sku.changed",
-        {"action": "update", "ref_key": "core.skus", "entity_ref": f"sku:{code}",
-         "value_hint": ",".join(changed) or None, "actor": user.username},
-    )
+    if changed:
+        try:
+            await sku_history.record_sku_version(session, sku, date.today())
+        except ValueError:
+            # повторная правка в тот же день: SCD2 не открывает вторую версию с той же даты —
+            # обновляем снимок текущей открытой версии на месте (today-версия = последнее состояние дня).
+            current = await scd2.current_version(session, SkuVersion, "sku_code", sku.code)
+            if current is not None:
+                for field in sku_history.SNAPSHOT_FIELDS:
+                    setattr(current, field, getattr(sku, field))
+        request.app.state.core.event_bus.emit(
+            session,
+            "reference.sku.changed",
+            {"action": "update", "ref_key": "core.skus", "entity_ref": f"sku:{code}",
+             "value_hint": ",".join(changed), "actor": user.username},
+        )
     await session.commit()
     return {"code": sku.code, "changed": changed}
 

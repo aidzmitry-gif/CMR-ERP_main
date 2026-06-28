@@ -7,9 +7,17 @@ from datetime import date
 
 from sqlalchemy import select
 
-from core.domain.models import Sku
+from core.domain.models import OutboxEvent, Sku
 from core.domain.reference import SkuVersion
 from core.services import sku_history
+
+
+async def _sku_changed_events(session) -> list:
+    return (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "reference.sku.changed")
+        )
+    ).scalars().all()
 
 
 async def test_record_sku_version_idempotent_and_dated(session):
@@ -87,6 +95,31 @@ async def test_patch_sku_same_day_change_coalesces(api, session):
 
 async def test_patch_sku_404(api):
     assert (await api.patch("/system/sku/NOPE", json={"weight_kg": 1.0})).status_code == 404
+
+
+async def test_patch_sku_emits_changed_with_entity_ref_and_hint(api, session):
+    """Круг5: реальная правка мастер-поля → ровно одно reference.sku.changed с entity_ref+value_hint."""
+    session.add(Sku(code="EV1", title="t", unit="шт", weight_kg=1.0))
+    await session.commit()
+    await api.patch("/system/sku/EV1", json={"weight_kg": 4.0, "tnved_code": "8507"})
+    evs = await _sku_changed_events(session)
+    assert len(evs) == 1
+    p = evs[0].payload
+    assert p["entity_ref"] == "sku:EV1" and p["ref_key"] == "core.skus"
+    assert set(p["value_hint"].split(",")) == {"weight_kg", "tnved_code"}
+
+
+async def test_patch_sku_no_op_does_not_emit(api, session):
+    """Круг5: no-op PATCH (те же значения ИЛИ без мастер-полей) НЕ эмитит событие и не плодит версию."""
+    session.add(Sku(code="EV2", title="t", unit="шт", weight_kg=2.0))
+    await session.commit()
+    await api.patch("/system/sku/EV2", json={"weight_kg": 2.0})  # то же значение → no-op
+    await api.patch("/system/sku/EV2", json={"note": "не мастер-поле"})  # нет мастер-полей → no-op
+    assert await _sku_changed_events(session) == []
+    vers = (
+        await session.execute(select(SkuVersion).where(SkuVersion.sku_code == "EV2"))
+    ).scalars().all()
+    assert vers == []  # версию тоже не плодим
 
 
 async def test_sku_history_as_of_via_query(api, session):

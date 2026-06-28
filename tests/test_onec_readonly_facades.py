@@ -53,3 +53,39 @@ async def test_onec_facade_implements_full_protocol(services):
     assert await onec.fetch_payments() is not None
     assert await onec.fetch_bank_balance("51-1") is not None
     assert await onec.fetch_balance_sheet(date(2026, 6, 28)) is not None
+
+
+# ── Круг 5 харднинг: READ-ONLY инвариант 1С read-фасадов ──────────────────────
+
+
+async def test_facades_mock_when_base_url_empty():
+    """base_url пуст → mock, без сети, без исключений (dev/прототип)."""
+    c = OneCClient(base_url="")
+    assert await c.fetch_payments()  # непустой mock
+    assert await c.fetch_bank_balance("51-1") is not None
+    assert (await c.fetch_balance_sheet(date(2026, 6, 28)))["total_assets"] > 0
+
+
+async def test_facades_no_throw_with_unreachable_url():
+    """Недостижимый OData URL: фасад НЕ кидает и не блокирует (read-only деградирует, не падает).
+
+    Текущая реализация отдаёт mock (реальный OData GET — TODO при подключении 1С); инвариант
+    круга 5 — отсутствие исключения/записи, а не «сходить в сеть».
+    """
+    c = OneCClient(base_url="http://127.0.0.1:9/odata")  # порт 9 заведомо закрыт
+    assert await c.fetch_payments() is not None
+    assert await c.fetch_bank_balance("51-1") is not None
+    assert await c.fetch_balance_sheet(date(2026, 6, 28)) is not None
+
+
+def test_onec_client_has_no_write_methods():
+    """READ-ONLY инвариант: на коннекторе НЕТ patch_/update_/delete_/create_/write_/save_ методов.
+
+    Единственная запись (исходящая ERP→1С) — `post_document` (часть 9); круг 4 read-фасадов НЕ
+    добавил write-путей (мастер-данные 1С заморожены, onec-write-frozen).
+    """
+    writeish = [
+        m for m in dir(OneCClient)
+        if m.startswith(("patch_", "update_", "delete_", "create_", "write_", "save_", "put_"))
+    ]
+    assert writeish == []

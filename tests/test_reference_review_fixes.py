@@ -1,5 +1,29 @@
 """Фиксы code-review: authz на reference.query/MDM-reads, resolve active-only, 422 вместо 500."""
+import pytest
+
 from core.domain.models import Sku
+
+#: все reference/MDM-чтения под правом refs.view (коммерческие мастер-данные; /system минует
+#: middleware → защита пообъектно). Сводный sweep круга 5: снятие любого гейта → красный тест.
+_REFS_VIEW_ENDPOINTS = [
+    ("post", "/system/references/query", {"ref": "core.units"}),
+    ("get", "/system/mdm/duplicates", None),
+    ("get", "/system/mdm/fuzzy?name=тест", None),
+    ("get", "/system/references/quality", None),
+    ("get", "/system/references/quality/core.skus", None),
+    ("get", "/system/mdm/import-preview", None),
+]
+
+
+@pytest.mark.parametrize("method,path,body", _REFS_VIEW_ENDPOINTS)
+async def test_refs_view_endpoints_forbidden_without_right(api, method, path, body):
+    """Роль без refs.view (warehouse) → 401/403 на каждом гейтнутом reference/MDM-чтении."""
+    headers = {"X-User-Roles": "warehouse"}
+    if method == "post":
+        r = await api.post(path, json=body, headers=headers)
+    else:
+        r = await api.get(path, headers=headers)
+    assert r.status_code in (401, 403), f"{method} {path} не под refs.view!"
 
 
 async def test_reference_query_requires_refs_view(api):
