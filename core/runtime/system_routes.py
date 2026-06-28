@@ -546,6 +546,53 @@ async def sku_landed_inputs(
     return result
 
 
+#: мастер-поля SKU, правимые через витрину. Совпадают со снимком истории (sku_history.SNAPSHOT_FIELDS):
+#: что версионируем, то и правим. Операционные (цена/остаток/себес) — НЕ здесь (владелец 1С/склад).
+_SKU_EDITABLE = sku_history.SNAPSHOT_FIELDS
+
+
+@router.patch("/system/sku/{code}")
+async def update_sku(
+    code: str,
+    request: Request,
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+) -> dict:
+    """Правка мастер-полей номенклатуры (витрина) + датированная версия истории (SCD2, REF3-8).
+
+    Смена ``weight_kg``/``volume_m3``/``tnved_code``/``vat_code``/… фиксирует снимок в
+    ``ref_sku_version`` через единый путь ``sku_history.record_sku_version`` (идемпотентно — без
+    изменений версию не плодим). Правка в тот же день, что уже открытая версия, обновляет её
+    снимок на месте (SCD2 запрещает две версии с одной даты). Под ``system.write`` (мутация
+    мастер-данных, как прочие справочники — право не ослабляем); эмитит ``reference.sku.changed``
+    (ref_key=core.skus) — downstream-сигнал смены ТН ВЭД/НДС товара (REF3-7).
+    """
+    sku = (await session.execute(select(Sku).where(Sku.code == code))).scalars().first()
+    if sku is None:
+        raise HTTPException(status_code=404, detail="номенклатура не найдена")
+    changed = [f for f in _SKU_EDITABLE if f in payload]
+    for field in changed:
+        setattr(sku, field, payload[field])
+    try:
+        await sku_history.record_sku_version(session, sku, date.today())
+    except ValueError:
+        # повторная правка в тот же день: SCD2 не открывает вторую версию с той же даты —
+        # обновляем снимок текущей открытой версии на месте (today-версия = последнее состояние дня).
+        current = await scd2.current_version(session, SkuVersion, "sku_code", sku.code)
+        if current is not None:
+            for field in sku_history.SNAPSHOT_FIELDS:
+                setattr(current, field, getattr(sku, field))
+    request.app.state.core.event_bus.emit(
+        session,
+        "reference.sku.changed",
+        {"action": "update", "ref_key": "core.skus", "entity_ref": f"sku:{code}",
+         "value_hint": ",".join(changed) or None, "actor": user.username},
+    )
+    await session.commit()
+    return {"code": sku.code, "changed": changed}
+
+
 async def _group_breadcrumb(session: AsyncSession, category_id: int | None) -> list[dict]:
     """Путь по дереву групп от корня к группе товара: ``[{code, name}, …]``.
 
