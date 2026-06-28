@@ -58,11 +58,17 @@ services:
   app:
     build: .
     environment:
-      # SECURITY: prod-задавать через host-env (/opt/cmr-erp/.env) → AIOS_ENVIRONMENT=prod,
-      # иначе config.settings._no_dev_defaults_in_prod не сработает и webhook-токены НЕ enforced.
+      # SECURITY (прод-дыра #2): задавать прод-значения через host-env (/opt/cmr-erp/.env) или
+      # docker-compose.override.yml. НЕ хардкодить dev — хардкод в `environment:` ПЕРЕБИВАЕТ
+      # серверный .env, из-за чего прод-гард `_no_dev_defaults_in_prod` (config/settings.py)
+      # коротит и app доверяет X-User-Roles = вход суперюзером без пароля на публичном belakb.by.
+      # Substitution: локаль (env не задан) → дефолт dev; прод задаёт реальные значения.
       AIOS_ENVIRONMENT: ${AIOS_ENVIRONMENT:-dev}
-      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@postgres:5432/aios
-      AIOS_REDIS_URL: redis://redis:6379/0
+      AIOS_AUTH_MODE: ${AIOS_AUTH_MODE:-dev}
+      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+psycopg://aios:aios@postgres:5432/aios}
+      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://redis:6379/0}
+      AIOS_KEYCLOAK_ISSUER: ${AIOS_KEYCLOAK_ISSUER:-}
+      AIOS_KEYCLOAK_AUDIENCE: ${AIOS_KEYCLOAK_AUDIENCE:-}
       # Телефония zruchna — задаётся на хосте через /opt/cmr-erp/.env (compose автозагрузка).
       # Пустые → коннектор отключён (graceful). См. coordination/belakb-golive-plan.md §Фаза-2.
       AIOS_TELEPHONY_WEBHOOK_TOKEN: ${AIOS_TELEPHONY_WEBHOOK_TOKEN:-}
