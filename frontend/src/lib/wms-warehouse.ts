@@ -95,6 +95,8 @@ export interface Dashboard {
   tasks_putaway_open: number;
   tasks_pick_open: number;
   alerts_count: number;
+  alerts_deficit_value: number; // Σ дефицит×себес 1С; 0 без шлюза
+  inventory_value: number; // оценка остатка WMS в деньгах (1С-себес); 0 без шлюза
   inventories_open: number;
   recon_max_diff_value: number;
   recon_total_diff_value: number;
@@ -145,6 +147,25 @@ export function dueState(nextDue: string | null, todayIso: string): "overdue" | 
   return "upcoming";
 }
 
+/** Русский плюрал для «позиция» (1 позиция / 2 позиции / 5 позиций). */
+function pluralPositions(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "позиция";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "позиции";
+  return "позиций";
+}
+
+/** Текст тоста об успешной отправке сигнала дозаказа в закупки (WMS-R3-2). */
+export function alertsEmitMessage(n: number): string {
+  return `Сигнал отправлен в закупки, ${n} ${pluralPositions(n)}`;
+}
+
+/** Можно ли слать сигнал: шлюз 1С подключён и есть нарушенные пороги (иначе кнопка disabled). */
+export function canEmitAlerts(a: Alerts): boolean {
+  return a.gateway && a.rows.length > 0;
+}
+
 // ---- Fetch helpers ----
 function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;
@@ -184,6 +205,7 @@ async function post(path: string, body?: unknown): Promise<boolean> {
 export const fetchDashboardServer = (r?: string) =>
   ssr<Dashboard>("/wms/dashboard", r, {
     receipts_pending_qc: 0, tasks_putaway_open: 0, tasks_pick_open: 0, alerts_count: 0,
+    alerts_deficit_value: 0, inventory_value: 0,
     inventories_open: 0, recon_max_diff_value: 0, recon_total_diff_value: 0,
     movements_today_in: 0, movements_today_out: 0, gateway: false,
   });
@@ -209,6 +231,18 @@ export const patchTask = (id: number, patch: Record<string, unknown>) =>
   }).then((r) => r.ok).catch(() => false);
 export const createCyclePlan = (body: Record<string, unknown>) => post("/wms/cycle-plans", body);
 export const fetchCyclePlans = () => api<CyclePlan[]>("/wms/cycle-plans", []);
+
+/** Опубликовать сигнал дозаказа `wms.stock.low` по нарушенным порогам → Закупки (WMS-R3-2).
+ *  Возвращает число отправленных позиций или null (ошибка/шлюз 503 — баннер на фронте). */
+export async function emitAlerts(): Promise<{ emitted: number } | null> {
+  try {
+    const res = await fetch(`/api/wms/alerts/emit`, { method: "POST" });
+    if (!res.ok) return null;
+    return (await res.json()) as { emitted: number };
+  } catch {
+    return null;
+  }
+}
 
 /** Запустить пересчёт по плану → возвращает созданный документ инвентаризации (для перехода). */
 export async function runCyclePlan(id: number): Promise<{ id: number } | null> {

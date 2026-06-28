@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, ClipboardCheck, Boxes, PackageCheck, RefreshCw, Scale, Truck } from "lucide-react";
+import { AlertTriangle, Banknote, ClipboardCheck, Boxes, Coins, PackageCheck, RefreshCw, Scale, Truck } from "lucide-react";
 import Link from "next/link";
 
 import { SourceTag } from "@/components/source-tag";
@@ -66,6 +66,11 @@ export function WmsDashboard({ initial }: { initial: Dashboard }) {
               value={formatNumber(d.inventories_open)} sub="открытых" />
         <Card href="/erp/wms/alerts" icon={<AlertTriangle size={15} />} label="Дефицит (low-stock)"
               value={formatNumber(d.alerts_count)} tone={d.alerts_count ? "text-red-600" : undefined} source />
+        <Card href="/erp/wms/alerts" icon={<Banknote size={15} />} label="Дефицит в деньгах"
+              value={formatByn(d.alerts_deficit_value)} tone={d.alerts_deficit_value ? "text-red-600" : undefined}
+              sub="к дозаказу" source />
+        <Card href="/erp/wms/balances" icon={<Coins size={15} />} label="Стоимость остатка"
+              value={formatByn(d.inventory_value)} sub="оценка по себес. 1С" source />
         <Card href="/erp/wms/reconciliation" icon={<Scale size={15} />} label="Расхождение с 1С"
               value={formatByn(d.recon_total_diff_value)} tone={d.recon_total_diff_value ? "text-red-600" : undefined}
               sub={`макс ${formatByn(d.recon_max_diff_value)}`} source />
