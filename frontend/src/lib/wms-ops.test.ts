@@ -10,6 +10,9 @@ describe("reasonLabel", () => {
     expect(reasonLabel("adjustment")).toBe("Коррекция");
     expect(reasonLabel("release")).toBe("Снятие резерва");
   });
+  it("пустая строка возвращает «—»", () => {
+    expect(reasonLabel("")).toBe("—");
+  });
   it("неизвестная причина возвращается как есть", () => {
     expect(reasonLabel("weird")).toBe("weird");
   });
