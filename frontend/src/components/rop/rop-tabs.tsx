@@ -1,4 +1,4 @@
-import clsx from "clsx";
+﻿import clsx from "clsx";
 import Link from "next/link";
 
 /** Под-навигация раздела РОП. Построенные экраны кликабельны, остальные — заглушки
@@ -8,6 +8,7 @@ const TABS: { key: string; label: string; href?: string }[] = [
   { key: "overview", label: "Обзор РОП", href: "/crm/rop" },
   { key: "scoreboard", label: "Скорборд", href: "/crm/rop/scoreboard" },
   { key: "planning", label: "Планирование", href: "/crm/rop/planning" },
+  { key: "plan-fact", label: "План/Факт", href: "/crm/rop/plan-fact" },
   { key: "pace", label: "Темп", href: "/crm/rop/pace" },
   { key: "cash", label: "Деньги", href: "/crm/rop/cash" },
   { key: "activity", label: "Активность", href: "/crm/rop/activity" },
@@ -18,7 +19,7 @@ const TABS: { key: string; label: string; href?: string }[] = [
 export function RopTabs({
   active,
 }: {
-  active: "overview" | "scoreboard" | "planning" | "pace" | "cash" | "activity" | "stages" | "loss";
+  active: "overview" | "scoreboard" | "planning" | "plan-fact" | "pace" | "cash" | "activity" | "stages" | "loss";
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-line">
