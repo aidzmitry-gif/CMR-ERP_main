@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ActiveCallProvider } from "@/components/calls/active-call-provider";
+import { ChatsPanel } from "@/components/chats-panel";
 import { CurrencyProvider } from "@/components/kanban/currency-context";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
@@ -43,6 +44,7 @@ export async function AppShell({
                 flex-потомок реально получил скролл, а не растягивал родителя (типовой flexbox-гоча). */}
             <div className="flex min-h-0 flex-1 overflow-y-auto">{children}</div>
           </div>
+          <ChatsPanel />
         </div>
       </ActiveCallProvider>
     </CurrencyProvider>

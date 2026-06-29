@@ -16,7 +16,6 @@ import { Clock, LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { ChatsPanel } from "@/components/chats-panel";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
@@ -729,8 +728,6 @@ export function DealsWorkspace({
 
         <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />
       </main>
-
-      <ChatsPanel />
 
       {modalOpen && (
         <CreateDealModal
