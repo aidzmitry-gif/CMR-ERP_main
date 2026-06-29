@@ -192,6 +192,7 @@ type TabId =
   | "calendar"
   | "margin"
   | "pnl"
+  | "dds"
   | "reconcile";
 const TABS: { id: TabId; label: string }[] = [
   { id: "summary", label: "Касса и маржа" },
@@ -201,6 +202,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "calendar", label: "Календарь" },
   { id: "margin", label: "Маржа" },
   { id: "pnl", label: "P&L" },
+  { id: "dds", label: "ДДС" },
   { id: "reconcile", label: "Сверка 1С" },
 ];
 
@@ -244,6 +246,7 @@ export function FinanceView() {
         {tab === "calendar" && <CalendarTab />}
         {tab === "margin" && <MarginTab />}
         {tab === "pnl" && <PnlTab />}
+        {tab === "dds" && <DdsTab />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>
     </main>
@@ -989,6 +992,164 @@ function PnlTab() {
             </p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────── Tab: ДДС (Движение Денежных Средств) ────────────────────────────
+
+interface DdsResp {
+  period_from: string | null;
+  period_to: string | null;
+  currency: string;
+  inflows: string;
+  outflows: string;
+  net_cashflow: string;
+  bank_balance: string | null;
+  breakdown: Record<string, string>;
+}
+
+const DDS_BREAKDOWN_LABELS: Record<string, string> = {
+  receivable: "Поступления (счета)",
+  payroll: "ФОТ",
+  opex: "Прочие операционные",
+  tax: "Налоги",
+  bank_fee: "Банковские расходы",
+  freight: "Фрахт",
+  landed: "Себестоимость (landed)",
+  po_planned: "PO планируемый",
+};
+
+function DdsTab() {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfYear = `${today.slice(0, 4)}-01-01`;
+
+  const [from, setFrom] = useState(firstOfYear);
+  const [to, setTo] = useState(today);
+  const [query, setQuery] = useState(`period_from=${firstOfYear}&period_to=${today}`);
+
+  const { data, loading, error } = useFetch<DdsResp>(`/api/finance/cashflow?${query}`);
+
+  const apply = useCallback(() => {
+    setQuery(`period_from=${from}&period_to=${to}`);
+  }, [from, to]);
+
+  const downloadCsv = useCallback(() => {
+    const url = `/api/finance/cashflow?period_from=${from}&period_to=${to}&format=csv`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cashflow_${from}_${to}.csv`;
+    a.click();
+  }, [from, to]);
+
+  const net = data ? parseFloat(data.net_cashflow) : 0;
+  const netTone = net > 0 ? "pos" : net < 0 ? "neg" : undefined;
+
+  return (
+    <div className="space-y-4">
+      {/* Фильтр периода */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          С
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          По
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
+        >
+          Применить
+        </button>
+        <button
+          type="button"
+          onClick={downloadCsv}
+          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
+        >
+          Скачать CSV
+        </button>
+      </div>
+
+      {/* Состояние */}
+      {loading && <p className="text-sm text-muted">Загрузка…</p>}
+      {error && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+          Нет данных ДДС — проверьте подключение к финансовому модулю.
+        </p>
+      )}
+
+      {data && !loading && (
+        <>
+          {/* Карточки-KPI */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Card title="Поступления" value={formatByn(parseFloat(data.inflows))} tone="pos" />
+            <Card title="Выбытия" value={formatByn(parseFloat(data.outflows))} tone="neg" />
+            <Card title="Нетто" value={formatByn(net)} tone={netTone} />
+            <div className="rounded-xl bg-surface p-4 shadow-card">
+              <div className="text-xs font-medium text-muted">Остаток на счёте</div>
+              <div className="mt-1 text-lg font-bold text-muted">
+                {data.bank_balance != null ? formatByn(parseFloat(data.bank_balance)) : "—"}
+              </div>
+              {data.bank_balance == null && (
+                <div className="mt-0.5 text-xs text-muted">нет связи с 1С</div>
+              )}
+            </div>
+          </div>
+
+          {/* Разбивка по видам */}
+          <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+            <div className="border-b border-line px-4 py-2.5 text-xs text-muted">
+              Разбивка · {data.period_from ?? "начало"} — {data.period_to ?? "сейчас"} ·{" "}
+              {data.currency}
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line">
+                  <th className="px-4 py-2 text-left font-medium text-muted">Вид</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted">Сумма, BYN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.breakdown).map(([kind, amount]) => {
+                  const val = parseFloat(amount);
+                  const isInflow = kind === "receivable";
+                  return (
+                    <tr key={kind} className="border-b border-line last:border-0">
+                      <td className="px-4 py-3 text-ink">
+                        {DDS_BREAKDOWN_LABELS[kind] ?? kind}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right tabular-nums ${
+                          val === 0
+                            ? "text-muted"
+                            : isInflow
+                              ? "text-emerald-600"
+                              : "text-rose-600"
+                        }`}
+                      >
+                        {val !== 0 ? formatByn(val) : <span className="text-muted">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
