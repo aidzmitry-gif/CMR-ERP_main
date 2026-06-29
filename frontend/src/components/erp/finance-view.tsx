@@ -191,6 +191,7 @@ type TabId =
   | "cashflow"
   | "calendar"
   | "margin"
+  | "pnl"
   | "reconcile";
 const TABS: { id: TabId; label: string }[] = [
   { id: "summary", label: "Касса и маржа" },
@@ -199,6 +200,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "cashflow", label: "Cash-flow" },
   { id: "calendar", label: "Календарь" },
   { id: "margin", label: "Маржа" },
+  { id: "pnl", label: "P&L" },
   { id: "reconcile", label: "Сверка 1С" },
 ];
 
@@ -241,6 +243,7 @@ export function FinanceView() {
         {tab === "cashflow" && <CashflowTab />}
         {tab === "calendar" && <CalendarTab />}
         {tab === "margin" && <MarginTab />}
+        {tab === "pnl" && <PnlTab />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>
     </main>
@@ -835,6 +838,158 @@ function ReconcileDealCard() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────── Tab P&L (Р5) ────────────────────────────
+
+interface PnlResp {
+  from_date: string | null;
+  to_date: string | null;
+  currency: string;
+  revenue: string;
+  cogs: string;
+  freight: string;
+  gross_profit: string;
+  payroll: string;
+  opex: string;
+  tax: string;
+  bank_fee: string;
+  operating_profit: string;
+}
+
+function PnlTab() {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfYear = `${today.slice(0, 4)}-01-01`;
+
+  const [from, setFrom] = useState(firstOfYear);
+  const [to, setTo] = useState(today);
+  const [query, setQuery] = useState(`period_from=${firstOfYear}&period_to=${today}`);
+
+  const { data, loading, error } = useFetch<PnlResp>(`/api/finance/pnl?${query}`);
+
+  const apply = useCallback(() => {
+    setQuery(`period_from=${from}&period_to=${to}`);
+  }, [from, to]);
+
+  const downloadCsv = useCallback(() => {
+    const url = `/api/finance/pnl?period_from=${from}&period_to=${to}&format=csv`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pnl_${from}_${to}.csv`;
+    a.click();
+  }, [from, to]);
+
+  const PNL_ROWS: { label: string; key: keyof PnlResp; bold?: boolean; indent?: boolean }[] = [
+    { label: "Выручка (признанная, accrual)", key: "revenue" },
+    { label: "Себестоимость (нетто)", key: "cogs", indent: true },
+    { label: "Фрахт (нетто)", key: "freight", indent: true },
+    { label: "ФОТ (опер. персонал)", key: "payroll", indent: true },
+    { label: "Прочие операционные (Opex)", key: "opex", indent: true },
+    { label: "Налоги", key: "tax", indent: true },
+    { label: "Банковские расходы", key: "bank_fee", indent: true },
+    { label: "Операционная прибыль", key: "operating_profit", bold: true },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Фильтр периода */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          С
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          По
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
+        >
+          Применить
+        </button>
+        <button
+          type="button"
+          onClick={downloadCsv}
+          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
+        >
+          Скачать CSV
+        </button>
+      </div>
+
+      {/* Состояние */}
+      {loading && <p className="text-sm text-muted">Загрузка…</p>}
+      {error && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+          Нет данных P&L — проверьте подключение к финансовому модулю.
+        </p>
+      )}
+
+      {/* Таблица P&L */}
+      {data && !loading && (
+        <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+          <div className="border-b border-line px-4 py-2.5 text-xs text-muted">
+            Период: {data.from_date ?? "начало"} — {data.to_date ?? "сейчас"} · {data.currency}
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {PNL_ROWS.map(({ label, key, bold, indent }) => {
+                const raw = data[key] as string;
+                const val = parseFloat(raw);
+                const isProfit = key === "operating_profit";
+                const positive = val >= 0;
+                return (
+                  <tr
+                    key={key}
+                    className={`border-b border-line last:border-0 ${bold ? "bg-sunken" : ""}`}
+                  >
+                    <td
+                      className={`px-4 py-3 ${indent ? "pl-8 text-muted" : "font-medium text-ink"} ${bold ? "font-semibold text-ink" : ""}`}
+                    >
+                      {label}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right tabular-nums ${
+                        isProfit
+                          ? positive
+                            ? "font-bold text-emerald-600"
+                            : "font-bold text-rose-600"
+                          : "text-ink"
+                      }`}
+                    >
+                      {parseFloat(raw) !== 0 || key === "operating_profit"
+                        ? formatByn(val)
+                        : <span className="text-muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {data.revenue === "0.00" && (
+            <p className="px-4 py-3 text-xs text-muted">
+              Нет признанной выручки за период. Выручка признаётся по отгрузке (событие{" "}
+              <code className="rounded bg-sunken px-1 py-0.5 font-mono text-xs">
+                sales.deal.handoff
+              </code>
+              ).
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
