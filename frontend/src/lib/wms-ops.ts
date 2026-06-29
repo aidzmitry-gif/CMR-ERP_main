@@ -42,7 +42,7 @@ export interface Balances {
   sku_count: number;
 }
 
-const REASON_LABELS: Record<string, string> = {
+export const REASON_LABELS: Record<string, string> = {
   receipt: "Приёмка",
   shipment: "Отгрузка",
   reserve: "Резерв",

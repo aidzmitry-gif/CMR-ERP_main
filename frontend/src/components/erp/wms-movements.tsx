@@ -10,6 +10,7 @@ import {
   adjustment,
   fetchMovements,
   locationLabel,
+  REASON_LABELS,
   reasonLabel,
   receipt,
   shipment,
@@ -41,18 +42,7 @@ function formatDate(iso: string | null): string {
   });
 }
 
-const REASON_LABELS_LOCAL: Record<string, string> = {
-  "": "Все типы",
-  receipt: "Приёмка",
-  shipment: "Отгрузка",
-  transfer: "Перемещение",
-  adjustment: "Коррекция",
-  reserve: "Резерв",
-  release: "Снятие резерва",
-  pick: "Подбор",
-  pack: "Упаковка",
-};
-
+// ponytail: client-side cap 50; add server-side cursor pagination when journal grows large
 const PAGE_SIZE = 50;
 
 function MovementsLog({ rows }: { rows: StockMovement[] }) {
@@ -81,8 +71,9 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
           onChange={(e) => setReasonFilter(e.target.value)}
           className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
         >
-          {Object.entries(REASON_LABELS_LOCAL).map(([r, label]) => (
-            <option key={r} value={r}>{label}</option>
+          <option value="">Все типы</option>
+          {Object.entries(REASON_LABELS).filter(([k]) => k !== "").map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
           ))}
         </select>
         <input
