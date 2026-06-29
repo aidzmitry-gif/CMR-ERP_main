@@ -31,7 +31,7 @@ export function ChatsPanel() {
   return (
     // Внешний слот фиксирован узким (рейка) — доска не «дышит» при наведении.
     // Видимая панель — absolute-оверлей, раскрывается влево ПОВЕРХ доски по :hover.
-    <aside className="relative w-[68px] shrink-0">
+    <aside className="relative w-0 shrink-0">
       <div className="group absolute inset-y-0 right-0 z-30 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
           <h3 className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
