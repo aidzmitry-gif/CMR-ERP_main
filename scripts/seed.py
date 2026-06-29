@@ -30,6 +30,22 @@ from modules.hr.models import Candidate
 from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
 from modules.legal.models import LegalCase
+from modules.logistics import seeds as logistics_seeds
+from modules.logistics.models import (
+    Carrier,
+    CarrierBid,
+    CarrierCargoCapability,
+    CarrierRfq,
+    CarrierRfqInvite,
+    CarrierScorecard,
+    CarrierTariff,
+    CarrierVehicle,
+    FreightAuditLog,
+    ImportShipment,
+    Shipment,
+    Zone,
+)
+from modules.logistics.schemas import CARRIERS_RB
 from modules.office.models import OfficeDoc
 from modules.procurement.models import (
     PurchaseOrder,
@@ -1236,6 +1252,274 @@ async def main() -> None:
         if (await s.execute(select(SupplierClaim))).scalars().first() is None:
             s.add_all(_demo_claims(existing_suppliers))
             print("seed: претензии поставщикам добавлены")
+
+        # ── Логистика ──────────────────────────────────────────────────────────
+        # Перевозчики (Carrier) — идемпотентно по code
+        existing_carrier_codes = {
+            c.code
+            for c in (await s.execute(select(Carrier))).scalars().all()
+            if c.code
+        }
+        if not existing_carrier_codes:
+            for item in CARRIERS_RB:
+                s.add(
+                    Carrier(
+                        name=item["name"],
+                        code=item["code"],
+                        kind=item["kind"],
+                        mode=item["mode"],
+                        integration=item["integration"],
+                        track_url=item["track_url"],
+                    )
+                )
+            # «Свой транспорт» — внутренний перевозчик без track_url
+            s.add(
+                Carrier(
+                    name="Свой транспорт",
+                    code="own",
+                    kind="РБ",
+                    mode="авто",
+                    integration="manual",
+                    track_url="",
+                )
+            )
+            await s.flush()
+            existing_carrier_codes = {
+                c.code
+                for c in (await s.execute(select(Carrier))).scalars().all()
+                if c.code
+            }
+            print(f"seed: логистика — перевозчики: {len(existing_carrier_codes)}")
+
+        # Зоны доставки (Zone) — идемпотентно по code
+        if (await s.execute(select(Zone))).scalars().first() is None:
+            for z in logistics_seeds.ZONES_SEED:
+                s.add(Zone(**z))
+            await s.flush()
+            print("seed: логистика — зоны добавлены")
+
+        # Тарифная матрица (CarrierTariff) — идемпотентно (пустая таблица)
+        if (await s.execute(select(CarrierTariff))).scalars().first() is None:
+            for t in logistics_seeds.TARIFFS_SEED:
+                s.add(CarrierTariff(**t))
+            await s.flush()
+            print(f"seed: логистика — тарифы: {len(logistics_seeds.TARIFFS_SEED)}")
+
+        # Scorecard перевозчиков — идемпотентно (пустая таблица)
+        if (await s.execute(select(CarrierScorecard))).scalars().first() is None:
+            for sc in logistics_seeds.SCORECARD_SEED:
+                s.add(CarrierScorecard(**sc))
+            await s.flush()
+            print("seed: логистика — scorecard добавлен")
+
+        # Аудит счетов (FreightAuditLog) — идемпотентно (пустая таблица)
+        if (await s.execute(select(FreightAuditLog))).scalars().first() is None:
+            for a in logistics_seeds.AUDIT_SEED:
+                s.add(FreightAuditLog(**a))
+            await s.flush()
+            print("seed: логистика — аудит счетов добавлен")
+
+        # Парк машин (CarrierVehicle) — идемпотентно (пустая таблица)
+        if (await s.execute(select(CarrierVehicle))).scalars().first() is None:
+            for v in logistics_seeds.VEHICLES_SEED:
+                s.add(CarrierVehicle(**v))
+            await s.flush()
+            print(f"seed: логистика — транспорт: {len(logistics_seeds.VEHICLES_SEED)}")
+
+        # Допуски по категориям груза (CarrierCargoCapability) — идемпотентно
+        if (await s.execute(select(CarrierCargoCapability))).scalars().first() is None:
+            for cap in logistics_seeds.CAPABILITIES_SEED:
+                s.add(CarrierCargoCapability(**cap))
+            await s.flush()
+            print("seed: логистика — допуски грузов добавлены")
+
+        # Доставки по РБ/РФ (Shipment) — демо-воронка (4 статуса)
+        if (await s.execute(select(Shipment))).scalars().first() is None:
+            D = Decimal
+            s.add_all(
+                [
+                    Shipment(
+                        number="ЛОГ-2026-0051",
+                        customer="ООО МеталлПром",
+                        address="г. Гомель, ул. Советская, 12",
+                        route_from="Минск",
+                        route_to="Гомель",
+                        carrier="Автолайт Экспресс",
+                        carrier_code="autolight",
+                        carrier_order_no="AL-88421",
+                        cargo="Металлопрокат лист 5 мм · 12 паллет",
+                        weight_kg=D("3840"),
+                        amount=D("210"),
+                        payer="компания",
+                        priority="Высокий",
+                        owner="Иванов И.И.",
+                        status="in_transit",
+                        eta="14.06",
+                        tracking_no="AL-2026-88421",
+                        tracking_status="В пути · Бобруйск",
+                    ),
+                    Shipment(
+                        number="ЛОГ-2026-0055",
+                        customer="АО СтройКомплект",
+                        address="г. Минск, пр. Независимости, 58",
+                        route_from="Минск",
+                        route_to="Минск",
+                        carrier="DPD",
+                        carrier_code="dpd",
+                        carrier_order_no="DPD-9901234",
+                        cargo="Комплектующие · 3 коробки",
+                        weight_kg=D("24"),
+                        amount=D("14"),
+                        payer="клиент",
+                        priority="Средний",
+                        owner="Петров П.П.",
+                        status="assigned",
+                        eta="13.06",
+                        tracking_no="DPD-9901234",
+                        tracking_status="Принято к доставке",
+                    ),
+                    Shipment(
+                        number="ЛОГ-2026-0048",
+                        customer="ПАО ХимПром",
+                        address="г. Брест, ул. Ленина, 5",
+                        route_from="Минск",
+                        route_to="Брест",
+                        carrier="СДЭК",
+                        carrier_code="cdek",
+                        carrier_order_no="CDEK-77001",
+                        cargo="Аккумуляторные ячейки LiFePO4 · 8 ящиков",
+                        weight_kg=D("96"),
+                        amount=D("31"),
+                        payer="компания",
+                        priority="Средний",
+                        owner="Сидоров С.С.",
+                        status="delivered",
+                        eta="10.06",
+                        tracking_no="CDEK-77001",
+                        tracking_status="Доставлено",
+                    ),
+                    Shipment(
+                        number="ЛОГ-2026-0060",
+                        customer="ООО РегионСталь",
+                        address="г. Витебск, ул. Замковая, 3",
+                        route_from="Минск",
+                        route_to="Витебск",
+                        carrier="Европочта",
+                        carrier_code="evropochta",
+                        cargo="Power bank 10000 · 20 шт",
+                        weight_kg=D("4.2"),
+                        amount=D("8.50"),
+                        payer="клиент",
+                        priority="Низкий",
+                        owner="Иванов И.И.",
+                        status="planned",
+                        eta="16.06",
+                    ),
+                ]
+            )
+            await s.flush()
+            print("seed: логистика — доставки РБ/РФ добавлены")
+
+        # Импорт из Китая (ImportShipment) — демо-воронка (3 стадии)
+        if (await s.execute(select(ImportShipment))).scalars().first() is None:
+            D = Decimal
+            s.add_all(
+                [
+                    ImportShipment(
+                        number="ИМП-2026-0041",
+                        supplier="Shenzhen SunPower Co.",
+                        flag="🇨🇳",
+                        container_no="TEMU2345678",
+                        route="Шэньчжэнь → Брест (ж/д) → Минск",
+                        incoterms="FOB",
+                        mode="море+ж/д",
+                        cargo="АКБ LiFePO4 ячейки 3.2V · 2000 шт",
+                        qty=2000,
+                        amount=D("18500"),
+                        priority="Высокий",
+                        owner="Иванов И.И.",
+                        stage="in_transit",
+                        eta="25.07",
+                        po_ref="PO-2026-0301",
+                        insight="Контейнер в пути — 22 дня до Бреста",
+                    ),
+                    ImportShipment(
+                        number="ИМП-2026-0038",
+                        supplier="Guangzhou Cells Ltd.",
+                        flag="🇨🇳",
+                        container_no="MSCU8812001",
+                        route="Гуанчжоу → Гамбург → Брест",
+                        incoterms="EXW",
+                        mode="море",
+                        cargo="LiFePO4 ячейки партия 12 · 2000 шт",
+                        qty=2000,
+                        amount=D("16200"),
+                        priority="Высокий",
+                        owner="Сидоров С.С.",
+                        stage="customs",
+                        customs_status="Таможенное оформление в Бресте",
+                        eta="12.06",
+                        po_ref="PO-2026-0289",
+                        insight="Таможня — оплата пошлины 5% → выпуск сегодня",
+                    ),
+                    ImportShipment(
+                        number="ИМП-2026-0044",
+                        supplier="ООО ТехноИмпорт",
+                        flag="🇧🇾",
+                        container_no="",
+                        route="Минск → (авто)",
+                        incoterms="CIF",
+                        mode="авто",
+                        cargo="Зарядные устройства ЗУ-30А · 50 шт",
+                        qty=50,
+                        amount=D("4200"),
+                        priority="Средний",
+                        owner="Петров П.П.",
+                        stage="warehouse",
+                        customs_status="",
+                        eta="10.06",
+                        po_ref="PO-2026-0305",
+                        insight="Принято на склад, идёт приёмочный контроль",
+                    ),
+                ]
+            )
+            await s.flush()
+            print("seed: логистика — импорт из Китая добавлен")
+
+        # Тендер на перевозку (CarrierRfq + приглашения + ставки)
+        if (await s.execute(select(CarrierRfq))).scalars().first() is None:
+            D = Decimal
+            rfq_data = logistics_seeds.RFQ_DEMO.copy()
+            rfq_data["weight_kg"] = D(str(rfq_data["weight_kg"]))
+            rfq_data["declared_value"] = D(str(rfq_data["declared_value"]))
+            rfq = CarrierRfq(**rfq_data)
+            s.add(rfq)
+            await s.flush()
+            for carrier_code in logistics_seeds.RFQ_DEMO_INVITES:
+                s.add(
+                    CarrierRfqInvite(
+                        rfq_id=rfq.id,
+                        carrier_code=carrier_code,
+                        channel="manual",
+                        status="responded",
+                    )
+                )
+            await s.flush()
+            for bid in logistics_seeds.RFQ_DEMO_BIDS:
+                s.add(
+                    CarrierBid(
+                        rfq_id=rfq.id,
+                        carrier_code=bid["carrier_code"],
+                        price=D(str(bid["price"])),
+                        eta_days=bid["eta_days"],
+                        vehicle_class=bid["vehicle_class"],
+                        comment=bid["comment"],
+                        round=1,
+                    )
+                )
+            await s.flush()
+            print("seed: логистика — тендер + ставки добавлены")
+        # ── /Логистика ─────────────────────────────────────────────────────────
 
         # ── WMS: ячейки, движения, приёмки, пороги, задачи, план пересчёта, инвентаризация ──
 
