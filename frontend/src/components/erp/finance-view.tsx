@@ -193,6 +193,7 @@ type TabId =
   | "margin"
   | "pnl"
   | "dds"
+  | "balance"
   | "reconcile";
 const TABS: { id: TabId; label: string }[] = [
   { id: "summary", label: "Касса и маржа" },
@@ -203,6 +204,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "margin", label: "Маржа" },
   { id: "pnl", label: "P&L" },
   { id: "dds", label: "ДДС" },
+  { id: "balance", label: "Баланс" },
   { id: "reconcile", label: "Сверка 1С" },
 ];
 
@@ -247,6 +249,7 @@ export function FinanceView() {
         {tab === "margin" && <MarginTab />}
         {tab === "pnl" && <PnlTab />}
         {tab === "dds" && <DdsTab />}
+        {tab === "balance" && <BalanceTab />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>
     </main>
@@ -1148,6 +1151,187 @@ function DdsTab() {
                 })}
               </tbody>
             </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────── Tab: Баланс (Р7) ────────────────────────────
+
+interface BalanceResp {
+  as_of: string;
+  currency: string;
+  accounts_receivable: string;
+  cash: string | null;
+  inventory_value: string | null;
+  total_assets: string;
+  accounts_payable: string;
+  payroll_payable: string;
+  tax_payable: string;
+  total_liabilities: string;
+  equity: string;
+}
+
+function BalanceTab() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [asOf, setAsOf] = useState(today);
+  const [query, setQuery] = useState(`as_of=${today}`);
+
+  const { data, loading, error } = useFetch<BalanceResp>(`/api/finance/balance-sheet?${query}`);
+
+  const apply = useCallback(() => {
+    setQuery(`as_of=${asOf}`);
+  }, [asOf]);
+
+  const downloadCsv = useCallback(() => {
+    const url = `/api/finance/balance-sheet?as_of=${asOf}&format=csv`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `balance_sheet_${asOf}.csv`;
+    a.click();
+  }, [asOf]);
+
+  const equity = data ? parseFloat(data.equity) : 0;
+  const equityTone = equity > 0 ? "pos" : equity < 0 ? "neg" : undefined;
+
+  return (
+    <div className="space-y-4">
+      {/* Фильтр даты */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          На дату
+          <input
+            type="date"
+            value={asOf}
+            onChange={(e) => setAsOf(e.target.value)}
+            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
+        >
+          Применить
+        </button>
+        <button
+          type="button"
+          onClick={downloadCsv}
+          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
+        >
+          Скачать CSV
+        </button>
+      </div>
+
+      {loading && <p className="text-sm text-muted">Загрузка…</p>}
+      {error && (
+        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+          Нет данных баланса — проверьте подключение к финансовому модулю.
+        </p>
+      )}
+
+      {data && !loading && (
+        <>
+          {/* Две колонки: Активы / Пассивы */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Активы */}
+            <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+              <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
+                Активы · {data.currency}
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Дебиторская задолженность</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-ink">
+                      {formatByn(parseFloat(data.accounts_receivable))}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Денежные средства (банк)</td>
+                    <td className={`px-4 py-3 text-right tabular-nums ${data.cash == null ? "text-muted" : "text-ink"}`}>
+                      {data.cash != null ? formatByn(parseFloat(data.cash)) : <span className="text-xs">нет связи с 1С</span>}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Запасы (склад)</td>
+                    <td className={`px-4 py-3 text-right tabular-nums ${data.inventory_value == null ? "text-muted" : "text-ink"}`}>
+                      {data.inventory_value != null
+                        ? formatByn(parseFloat(data.inventory_value))
+                        : <span className="text-xs">нет связи с 1С</span>}
+                    </td>
+                  </tr>
+                  <tr className="bg-sunken">
+                    <td className="px-4 py-3 font-semibold text-ink">ИТОГО Активы</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-ink">
+                      {formatByn(parseFloat(data.total_assets))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Пассивы */}
+            <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+              <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
+                Пассивы · {data.currency}
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Кредиторская задолженность</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-ink">
+                      {formatByn(parseFloat(data.accounts_payable))}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Задолженность по ФОТ</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-ink">
+                      {formatByn(parseFloat(data.payroll_payable))}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-line">
+                    <td className="px-4 py-3 text-muted">Задолженность по налогам</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-ink">
+                      {formatByn(parseFloat(data.tax_payable))}
+                    </td>
+                  </tr>
+                  <tr className="bg-sunken">
+                    <td className="px-4 py-3 font-semibold text-ink">ИТОГО Пассивы</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-ink">
+                      {formatByn(parseFloat(data.total_liabilities))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Капитал */}
+          <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+            <table className="w-full text-sm">
+              <tbody>
+                <tr>
+                  <td className="px-4 py-4 text-base font-bold text-ink">Капитал (Equity)</td>
+                  <td
+                    className={`px-4 py-4 text-right text-base tabular-nums font-bold ${
+                      equityTone === "pos"
+                        ? "text-emerald-600"
+                        : equityTone === "neg"
+                          ? "text-rose-600"
+                          : "text-ink"
+                    }`}
+                  >
+                    {formatByn(equity)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="px-4 pb-3 text-xs text-muted">
+              На {data.as_of}. Equity = Активы − Пассивы. Поля «нет связи с 1С» считаются как 0 в итоге.
+            </p>
           </div>
         </>
       )}
