@@ -31,7 +31,15 @@ from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
 from modules.legal.models import LegalCase
 from modules.office.models import OfficeDoc
-from modules.procurement.models import PurchaseRequest
+from modules.procurement.models import (
+    PurchaseOrder,
+    PurchaseOrderLine,
+    PurchaseRequest,
+    Rfq,
+    RfqBid,
+    Supplier,
+    SupplierClaim,
+)
 from modules.production.models import ProductionOrder
 from modules.sales.models import (
     Activity,
@@ -369,6 +377,135 @@ def _demo_purchases() -> list[PurchaseRequest]:
     return [
         PurchaseRequest(number=n, supplier=sup, flag=fl, item=it, qty=q, amount=D(a), priority=pr, owner=o, stage=st, due_date=dd, insight=ins)
         for n, sup, fl, it, q, a, pr, o, st, dd, ins in rows
+    ]
+
+
+def _demo_suppliers() -> list[Supplier]:
+    """Демо-поставщики: китайские, европейский и белорусские — для scorecard и RFQ."""
+    return [
+        Supplier(
+            name="Shenzhen SunPower Co.", country="Китай", flag="🇨🇳",
+            contact_person="Mr. Li Wei", phone="+86 755 8800 1234", email="sales@sz-sunpower.cn",
+            payment_terms="30% предоплата / 70% по факту отгрузки", lead_time_days=45,
+            incoterms="FOB", status="active",
+            notes="Основной поставщик аккумуляторных ячеек. Работаем с 2022 г.",
+        ),
+        Supplier(
+            name="Guangzhou Cells Ltd.", country="Китай", flag="🇨🇳",
+            contact_person="Ms. Chen Fang", phone="+86 20 3300 5678", email="export@gz-cells.com",
+            payment_terms="100% предоплата", lead_time_days=35,
+            incoterms="EXW", status="active",
+            notes="LiFePO4 ячейки 3.2V, хорошая цена при объёме от 1000 шт.",
+        ),
+        Supplier(
+            name="Baltic Components GmbH", country="Германия", flag="🇩🇪",
+            contact_person="Hans Müller", phone="+49 30 1234 5678", email="info@baltic-comp.de",
+            payment_terms="Net 30", lead_time_days=14,
+            incoterms="DAP", status="active",
+            notes="Европейские компоненты для промышленных применений. Высокое качество.",
+        ),
+        Supplier(
+            name="ООО БелтехСнаб", country="Беларусь", flag="🇧🇾",
+            contact_person="Сергей Ковалёв", phone="+375 17 290-11-22", email="snab@beltechsnab.by",
+            payment_terms="Оплата по выставленному счёту в течение 5 дней", lead_time_days=7,
+            incoterms="EXW", status="active",
+            notes="Местный поставщик расходных материалов и мелкой комплектации.",
+        ),
+        Supplier(
+            name="ООО ТехноИмпорт", country="Беларусь", flag="🇧🇾",
+            contact_person="Анна Петрова", phone="+375 29 777-88-99", email="a.petrova@technoimport.by",
+            payment_terms="50% предоплата / 50% при получении", lead_time_days=21,
+            incoterms="CIF", status="active",
+            notes="Импортёр зарядных устройств и аксессуаров из Китая. Таможенное оформление включено.",
+        ),
+    ]
+
+
+def _demo_rfq_and_bids(supplier_ids: dict[str, int]) -> tuple[list[Rfq], list[RfqBid]]:
+    """Демо-RFQ (тендеры) с предложениями поставщиков."""
+    D = Decimal
+    rfqs = [
+        Rfq(
+            item="Ячейки LiFePO4 3.2V 100Ah",
+            sku_code="LFP-24-200",
+            qty=D("2000"),
+            status="awarded",
+            due_date=date(2026, 6, 20),
+        ),
+        Rfq(
+            item="Зарядные устройства ЗУ-30А",
+            sku_code="ZU-30A",
+            qty=D("150"),
+            status="open",
+            due_date=date(2026, 7, 10),
+        ),
+        Rfq(
+            item="Power bank 10000 мА·ч",
+            sku_code="REBAR-10",
+            qty=D("300"),
+            status="cancelled",
+            due_date=date(2026, 5, 30),
+        ),
+    ]
+    # Биды добавляем позже, когда будут rfq.id
+    return rfqs, []
+
+
+def _demo_po_and_lines(supplier_ids: dict[str, int]) -> tuple[list[PurchaseOrder], list[PurchaseOrderLine]]:
+    """Демо-заказы поставщикам с позициями: один едет (shipped), один подтверждён (ordered)."""
+    D = Decimal
+    po_shipped = PurchaseOrder(
+        number="PO-2026-0301",
+        supplier="Shenzhen SunPower Co.",
+        supplier_id=supplier_ids.get("Shenzhen SunPower Co."),
+        status="shipped",
+        eta_date=date(2026, 7, 25),
+        freight_byn=D("18500"),
+        transport_method_code="container",
+    )
+    po_ordered = PurchaseOrder(
+        number="PO-2026-0305",
+        supplier="ООО ТехноИмпорт",
+        supplier_id=supplier_ids.get("ООО ТехноИмпорт"),
+        status="ordered",
+        eta_date=date(2026, 8, 10),
+        freight_byn=D("4200"),
+        transport_method_code="truck",
+    )
+    return [po_shipped, po_ordered], []
+
+
+def _demo_claims(supplier_ids: dict[str, int]) -> list[SupplierClaim]:
+    """Демо-претензии: одна открытая (авто от брака), одна урегулированная (ручная)."""
+    D = Decimal
+    return [
+        SupplierClaim(
+            supplier="Shenzhen SunPower Co.",
+            supplier_id=supplier_ids.get("Shenzhen SunPower Co."),
+            item="Ячейки LiFePO4 3.2V",
+            reason="Брак при входном контроле — вздутие корпуса у 12 шт из партии LOT-CN-2401",
+            order_code="PO-2026-0288",
+            claim_type="брак",
+            qty_affected=12,
+            amount_byn=D("43200"),
+            status="open",
+            source="production",
+            entity_ref="production:ПЗ-2026-0184",
+        ),
+        SupplierClaim(
+            supplier="ООО ТехноИмпорт",
+            supplier_id=supplier_ids.get("ООО ТехноИмпорт"),
+            item="Зарядные устройства ЗУ-30А",
+            reason="Недопоставка: по накладной 150 шт, фактически получено 138 шт",
+            order_code="PO-2026-0290",
+            claim_type="недопоставка",
+            qty_affected=12,
+            amount_byn=D("9120"),
+            resolution="Поставщик согласился довезти 12 шт в следующей партии или компенсировать",
+            status="resolved",
+            source="manual",
+            entity_ref="",
+        ),
     ]
 
 
@@ -840,6 +977,110 @@ async def main() -> None:
         ):
             if (await s.execute(select(model))).scalars().first() is None:
                 s.add_all(demo())
+
+        # Поставщики procurement (идемпотентно по имени)
+        existing_suppliers = {
+            r.name: r.id
+            for r in (await s.execute(select(Supplier))).scalars().all()
+        }
+        if not existing_suppliers:
+            for sup in _demo_suppliers():
+                s.add(sup)
+            await s.flush()
+            existing_suppliers = {
+                r.name: r.id
+                for r in (await s.execute(select(Supplier))).scalars().all()
+            }
+            print(f"seed: поставщики — {len(existing_suppliers)} записей")
+
+        # RFQ (тендеры) — идемпотентно (только если таблица пуста)
+        if (await s.execute(select(Rfq))).scalars().first() is None:
+            rfqs, _ = _demo_rfq_and_bids(existing_suppliers)
+            s.add_all(rfqs)
+            await s.flush()
+            # Биды на первый (awarded) и второй (open) RFQ
+            all_rfqs = (await s.execute(select(Rfq))).scalars().all()
+            rfq_by_sku = {r.sku_code: r for r in all_rfqs}
+            D = Decimal
+            awarded_rfq = rfq_by_sku.get("LFP-24-200")
+            open_rfq = rfq_by_sku.get("ZU-30A")
+            if awarded_rfq:
+                bid_gz = RfqBid(
+                    rfq_id=awarded_rfq.id,
+                    supplier_id=existing_suppliers.get("Guangzhou Cells Ltd."),
+                    price_byn=D("1550"),
+                    lead_time_days=35,
+                    incoterms="EXW",
+                    note="Лучшая цена при объёме 2000+ шт. Отгрузка со склада Гуанчжоу.",
+                    is_winner=True,
+                )
+                bid_sz = RfqBid(
+                    rfq_id=awarded_rfq.id,
+                    supplier_id=existing_suppliers.get("Shenzhen SunPower Co."),
+                    price_byn=D("1680"),
+                    lead_time_days=45,
+                    incoterms="FOB",
+                    note="Стабильный поставщик, но цена выше на 8%.",
+                    is_winner=False,
+                )
+                s.add_all([bid_gz, bid_sz])
+            if open_rfq:
+                bid_ti = RfqBid(
+                    rfq_id=open_rfq.id,
+                    supplier_id=existing_suppliers.get("ООО ТехноИмпорт"),
+                    price_byn=D("760"),
+                    lead_time_days=21,
+                    incoterms="CIF",
+                    note="Включено таможенное оформление.",
+                    is_winner=False,
+                )
+                s.add(bid_ti)
+            print("seed: RFQ + биды добавлены")
+
+        # PO (заказы) с позициями — идемпотентно (только если таблица пуста)
+        if (await s.execute(select(PurchaseOrder))).scalars().first() is None:
+            orders, _ = _demo_po_and_lines(existing_suppliers)
+            s.add_all(orders)
+            await s.flush()
+            all_orders = (await s.execute(select(PurchaseOrder))).scalars().all()
+            po_by_number = {o.number: o for o in all_orders}
+            D = Decimal
+            # Позиции shipped-заказа (партия батареек из Шэньчжэня)
+            po301 = po_by_number.get("PO-2026-0301")
+            if po301:
+                s.add_all([
+                    PurchaseOrderLine(
+                        order_id=po301.id, sku_code="AKB-60",
+                        qty=D("500"), goods_value_byn=D("115750"), weight=D("12.0"), volume=D("0.0480"),
+                    ),
+                    PurchaseOrderLine(
+                        order_id=po301.id, sku_code="AKB-100",
+                        qty=D("300"), goods_value_byn=D("105600"), weight=D("6.9"), volume=D("0.0288"),
+                    ),
+                    PurchaseOrderLine(
+                        order_id=po301.id, sku_code="LFP-12-100",
+                        qty=D("200"), goods_value_byn=D("37000"), weight=D("3.8"), volume=D("0.0140"),
+                    ),
+                ])
+            # Позиции ordered-заказа (зарядные от белорусского импортёра)
+            po305 = po_by_number.get("PO-2026-0305")
+            if po305:
+                s.add_all([
+                    PurchaseOrderLine(
+                        order_id=po305.id, sku_code="ZU-30A",
+                        qty=D("50"), goods_value_byn=D("38000"), weight=D("40.0"), volume=D("0.2500"),
+                    ),
+                    PurchaseOrderLine(
+                        order_id=po305.id, sku_code="ZU-15A",
+                        qty=D("80"), goods_value_byn=D("33600"), weight=D("48.0"), volume=D("0.3200"),
+                    ),
+                ])
+            print("seed: заказы PO + позиции добавлены")
+
+        # Претензии — идемпотентно (только если таблица пуста)
+        if (await s.execute(select(SupplierClaim))).scalars().first() is None:
+            s.add_all(_demo_claims(existing_suppliers))
+            print("seed: претензии поставщикам добавлены")
 
         await s.commit()
         print("seed: готово")
