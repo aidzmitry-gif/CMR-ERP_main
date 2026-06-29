@@ -51,10 +51,10 @@ export const REASON_LABELS: Record<string, string> = {
   adjustment: "Коррекция",
   pick: "Подбор",
   pack: "Упаковка",
-  "": "—",
 };
 
 export function reasonLabel(reason: string): string {
+  if (!reason) return "—";
   return REASON_LABELS[reason] ?? reason;
 }
 

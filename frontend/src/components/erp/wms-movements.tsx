@@ -72,7 +72,7 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
           className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
         >
           <option value="">Все типы</option>
-          {Object.entries(REASON_LABELS).filter(([k]) => k !== "").map(([k, v]) => (
+          {Object.entries(REASON_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
         </select>
