@@ -52,7 +52,18 @@ from modules.sales.models import (
     Message,
     PriceQuote,
 )
-from modules.wms.models import WarehouseOp
+from modules.wms.models import (
+    CycleCountPlan,
+    InventoryCount,
+    InventoryLine,
+    Location,
+    Receipt,
+    ReceiptLine,
+    StockMovement,
+    StockThreshold,
+    Task,
+    WarehouseOp,
+)
 
 KPI_DATE = date(2026, 6, 2)
 
@@ -620,6 +631,150 @@ def _demo_courses() -> list[Course]:
     ]
 
 
+def _wms_locations() -> list[Location]:
+    """Зоны и ячейки основного склада (адресное хранение, demo)."""
+    rows = [
+        # warehouse, zone, code, title
+        ("Минск (центр.)", "A", "A-01-01", "Стеллаж A, ряд 01, ячейка 01"),
+        ("Минск (центр.)", "A", "A-01-02", "Стеллаж A, ряд 01, ячейка 02"),
+        ("Минск (центр.)", "A", "A-02-01", "Стеллаж A, ряд 02, ячейка 01"),
+        ("Минск (центр.)", "B", "B-01-01", "Стеллаж B, ряд 01, ячейка 01"),
+        ("Минск (центр.)", "B", "B-02-01", "Стеллаж B, ряд 02, ячейка 01"),
+        ("Минск (центр.)", "QC", "QC-IN", "Зона входного контроля качества"),
+        ("Минск (центр.)", "RECV", "RECV-01", "Приёмная зона (буфер)"),
+        ("Гомель", "A", "A-01-01", "Стеллаж A, ряд 01, ячейка 01"),
+        ("Гомель", "B", "B-01-01", "Стеллаж B, ряд 01, ячейка 01"),
+    ]
+    return [Location(warehouse=wh, zone=zo, code=co, title=ti) for wh, zo, co, ti in rows]
+
+
+def _wms_movements() -> list[StockMovement]:
+    """Журнал движений WMS: приход/расход/перемещение (demo, теневой учёт)."""
+    D = Decimal
+    rows = [
+        # sku_code, warehouse, kind, qty, reason, batch_ref, doc_ref, note
+        ("AKB-60", "Минск (центр.)", "in", D("30"), "receipt", "LOT-CN-2401", "РЦ-2026-0041", "Приёмка партии из Шэньчжэня"),
+        ("AKB-100", "Минск (центр.)", "in", D("26"), "receipt", "LOT-CN-2405", "РЦ-2026-0041", "Приёмка партии из Шэньчжэня"),
+        ("AKB-60", "Минск (центр.)", "out", D("5"), "shipment", "", "ОТ-2026-0101", "Отгрузка АО БетаТех"),
+        ("REBAR-10", "Минск (центр.)", "out", D("12"), "reserve", "", "CRM-2024-0156", "Резерв под сделку АльфаМеталл"),
+        ("REBAR-10", "Минск (центр.)", "in", D("3"), "release", "", "CRM-2024-0158", "Снятие резерва ТехноСервис"),
+        ("TESTER-D", "Минск (центр.)", "in", D("45"), "receipt", "LOT-AS-01", "РЦ-2026-0042", "Приход от ООО Аккумуляторные решения"),
+        ("ZU-30A", "Минск (центр.)", "out", D("8"), "shipment", "", "ОТ-2026-0160", "Отгрузка ООО РегионСталь"),
+    ]
+    return [
+        StockMovement(sku_code=sk, warehouse=wh, kind=ki, qty=q, reason=re, batch_ref=br, doc_ref=dr, note=no)
+        for sk, wh, ki, q, re, br, dr, no in rows
+    ]
+
+
+def _wms_receipts_and_lines() -> tuple[list[Receipt], list[tuple[Receipt, list[tuple]]]]:
+    """Документы приёмки с QC-строками (demo)."""
+    D = Decimal
+    rcpt_done = Receipt(
+        number="РЦ-2026-0041",
+        source="procurement",
+        entity_ref="procurement:PO-2026-0301",
+        warehouse="Минск (центр.)",
+        status="putaway_done",
+        counterparty="Shenzhen SunPower Co.",
+        decided_by="Кладовщик Соколов",
+    )
+    lines_done = [
+        # sku_code, sku_title, expected_qty, accepted_qty, rejected_qty, reject_reason, batch_ref
+        ("AKB-60", "Щелочная батарейка AAA LR03 (демо)", D("30"), D("30"), D("0"), "", "LOT-CN-2401"),
+        ("AKB-100", "Щелочная батарейка AA LR6 (демо)", D("26"), D("26"), D("0"), "", "LOT-CN-2405"),
+        ("LFP-12-100", "Солевая батарейка AAA R03 (демо)", D("200"), D("198"), D("2"), "Повреждена упаковка", "LOT-CN-2401"),
+    ]
+    rcpt_qc = Receipt(
+        number="РЦ-2026-0042",
+        source="procurement",
+        entity_ref="procurement:PO-2026-0305",
+        warehouse="Минск (центр.)",
+        status="pending_qc",
+        counterparty="ООО ТехноИмпорт",
+    )
+    lines_qc = [
+        ("ZU-30A", "Зарядное устройство ЗУ-30А (демо)", D("50"), None, None, "", ""),
+        ("ZU-15A", "Зарядное устройство ЗУ-15А (демо)", D("80"), None, None, "", ""),
+    ]
+    return (
+        [rcpt_done, rcpt_qc],
+        [(rcpt_done, lines_done), (rcpt_qc, lines_qc)],
+    )
+
+
+def _wms_thresholds() -> list[StockThreshold]:
+    """Пороги дефицита по ходовым SKU (demo): min_qty и рекомендуемый дозаказ."""
+    D = Decimal
+    rows = [
+        # sku_code, warehouse, min_qty, reorder_qty
+        ("AKB-60", "Минск (центр.)", D("10"), D("100")),
+        ("AKB-100", "Минск (центр.)", D("10"), D("100")),
+        ("REBAR-10", "Минск (центр.)", D("20"), D("200")),
+        ("REBAR-12", "Минск (центр.)", D("20"), D("200")),
+        ("ZU-30A", "Минск (центр.)", D("5"), D("50")),
+        ("TESTER-D", "Минск (центр.)", D("5"), D("30")),
+    ]
+    return [StockThreshold(sku_code=sk, warehouse=wh, min_qty=mn, reorder_qty=ro) for sk, wh, mn, ro in rows]
+
+
+def _wms_tasks() -> list[Task]:
+    """Задачи кладовщику: put-away (размещение) и pick (подбор), demo."""
+    D = Decimal
+    return [
+        Task(kind="putaway", status="done", sku_code="AKB-60", qty=D("30"),
+             warehouse="Минск (центр.)", doc_ref="РЦ-2026-0041",
+             assignee="Кладовщик Соколов", priority="high",
+             note="Разместить в A-01-01 (батарейки AAA)"),
+        Task(kind="putaway", status="open", sku_code="ZU-30A", qty=D("50"),
+             warehouse="Минск (центр.)", doc_ref="РЦ-2026-0042",
+             assignee="Кладовщик Соколов", priority="normal",
+             note="Ожидает прохождения QC"),
+        Task(kind="pick", status="open", sku_code="REBAR-10", qty=D("12"),
+             warehouse="Минск (центр.)", doc_ref="CRM-2024-0156",
+             assignee="Кладовщик Игнатов", priority="high",
+             note="Подбор под сделку АльфаМеталл"),
+        Task(kind="pick", status="done", sku_code="AKB-60", qty=D("5"),
+             warehouse="Минск (центр.)", doc_ref="ОТ-2026-0101",
+             assignee="Кладовщик Соколов", priority="normal",
+             note="Отгрузка АО БетаТех — выполнено"),
+    ]
+
+
+def _wms_cycle_plan() -> CycleCountPlan:
+    """План циклического пересчёта основного склада (ежемесячно)."""
+    return CycleCountPlan(
+        warehouse="Минск (центр.)",
+        zone=None,
+        cadence_days=30,
+        next_due_date=date(2026, 7, 15),
+        active=True,
+        abc_class="A",
+    )
+
+
+def _wms_inventory_count_and_lines() -> tuple[InventoryCount, list[InventoryLine]]:
+    """Демо-документ инвентаризации (проведён) с расхождениями по 3 позициям."""
+    D = Decimal
+    count = InventoryCount(
+        number="ИНВ-2026-0003",
+        warehouse="Минск (центр.)",
+        status="done",
+        note="Плановая инвентаризация зоны A, июнь 2026",
+    )
+    lines_data = [
+        # sku_code, sku_title, unit, expected_qty, counted_qty, unit_cost
+        ("AKB-60", "Щелочная батарейка AAA LR03 (демо)", "шт", D("41"), D("39"), D("228")),
+        ("AKB-100", "Щелочная батарейка AA LR6 (демо)", "шт", D("26"), D("26"), D("349")),
+        ("TESTER-D", "Тестер АКБ цифровой (демо)", "шт", D("45"), D("43"), D("168")),
+    ]
+    lines = [
+        InventoryLine(sku_code=sk, sku_title=ti, unit=u, expected_qty=ex, counted_qty=co, unit_cost=uc)
+        for sk, ti, u, ex, co, uc in lines_data
+    ]
+    return count, lines
+
+
 async def main() -> None:
     services = build_services()
     services.db.init_engine()
@@ -1081,6 +1236,83 @@ async def main() -> None:
         if (await s.execute(select(SupplierClaim))).scalars().first() is None:
             s.add_all(_demo_claims(existing_suppliers))
             print("seed: претензии поставщикам добавлены")
+
+        # ── WMS: ячейки, движения, приёмки, пороги, задачи, план пересчёта, инвентаризация ──
+
+        # Ячейки/зоны (Location) — идемпотентно по (code, warehouse)
+        existing_loc_codes = set(
+            (await s.execute(select(Location.code, Location.warehouse))).all()
+        )
+        new_locs = [
+            loc for loc in _wms_locations()
+            if (loc.code, loc.warehouse) not in existing_loc_codes
+        ]
+        if new_locs:
+            s.add_all(new_locs)
+            await s.flush()
+            print(f"seed: WMS locations — {len(new_locs)} записей")
+
+        # Движения склада (StockMovement) — идемпотентно: пропускаем если уже есть
+        if (await s.execute(select(StockMovement))).scalars().first() is None:
+            s.add_all(_wms_movements())
+            print("seed: WMS движения добавлены")
+
+        # Приёмки (Receipt) + строки (ReceiptLine) — идемпотентно по номеру
+        existing_rcpt_nums = set(
+            (await s.execute(select(Receipt.number))).scalars().all()
+        )
+        receipts_list, receipts_lines_pairs = _wms_receipts_and_lines()
+        new_receipts = [r for r in receipts_list if r.number not in existing_rcpt_nums]
+        if new_receipts:
+            new_nums = {r.number for r in new_receipts}
+            s.add_all(new_receipts)
+            await s.flush()
+            rcpt_by_num = {r.number: r for r in new_receipts}
+            for rcpt, lines_data in receipts_lines_pairs:
+                if rcpt.number not in new_nums:
+                    continue
+                for sk, ti, ex, ac, rj, rr, br in lines_data:
+                    s.add(ReceiptLine(
+                        receipt_id=rcpt_by_num[rcpt.number].id,
+                        sku_code=sk,
+                        sku_title=ti,
+                        expected_qty=ex,
+                        accepted_qty=ac,
+                        rejected_qty=rj,
+                        reject_reason=rr,
+                        batch_ref=br,
+                    ))
+            print(f"seed: WMS приёмки — {len(new_receipts)} документа")
+
+        # Пороги дефицита (StockThreshold) — идемпотентно по (sku_code, warehouse)
+        existing_thr = set(
+            (await s.execute(select(StockThreshold.sku_code, StockThreshold.warehouse))).all()
+        )
+        new_thr = [t for t in _wms_thresholds() if (t.sku_code, t.warehouse) not in existing_thr]
+        if new_thr:
+            s.add_all(new_thr)
+            print(f"seed: WMS пороги дефицита — {len(new_thr)} записей")
+
+        # Задачи кладовщика (Task) — идемпотентно: пропускаем если уже есть
+        if (await s.execute(select(Task))).scalars().first() is None:
+            s.add_all(_wms_tasks())
+            print("seed: WMS задачи добавлены")
+
+        # План цикл-пересчёта (CycleCountPlan) — один план на основной склад
+        if (await s.execute(select(CycleCountPlan))).scalars().first() is None:
+            s.add(_wms_cycle_plan())
+            print("seed: WMS план цикл-пересчёта добавлен")
+
+        # Инвентаризация (InventoryCount + InventoryLine) — идемпотентно по номеру
+        existing_inv = set((await s.execute(select(InventoryCount.number))).scalars().all())
+        if "ИНВ-2026-0003" not in existing_inv:
+            inv_count, inv_lines = _wms_inventory_count_and_lines()
+            s.add(inv_count)
+            await s.flush()
+            for line in inv_lines:
+                line.count_id = inv_count.id
+                s.add(line)
+            print("seed: WMS инвентаризация добавлена")
 
         await s.commit()
         print("seed: готово")
