@@ -312,7 +312,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   // subOrder — порядок sub-items по slug модуля; {} → дефолт (как в MODULES[i].sub).
   // logoText — кастомный текст логотипа («ERP» по умолчанию); пользователь
   //   редактирует кликом по логотипу. TODO(Step B): загрузка изображения.
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [order, setOrder] = useState<string[] | null>(null);
@@ -329,7 +329,8 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
-      setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
+      const stored = localStorage.getItem(COLLAPSED_KEY);
+      setCollapsed(stored === null ? true : stored === "1");
     } catch {
       /* */
     }
