@@ -9,7 +9,7 @@
 ``SLUG_TO_PACKAGE``. Слаги `home`/`analytics`/`it` не имеют backend-модуля (фронтовые/системные).
 
 Реального логина пока нет (Keycloak — часть 5): текущая роль приходит заголовком
-``X-User-Roles`` (dev). Роли ``director``/``commercial`` и суперроль ``Админ`` — полный доступ.
+``X-User-Roles`` (dev). Роли ``director``/``commercial`` и суперроль ``admin`` — полный доступ.
 """
 from __future__ import annotations
 
@@ -109,8 +109,8 @@ SLUG_TO_PACKAGE: dict[str, str] = {
 # Обратное сопоставление: пакет модуля → UI-слаг (для backend-ограничения по префиксу роута).
 PACKAGE_TO_SLUG: dict[str, str] = {pkg: slug for slug, pkg in SLUG_TO_PACKAGE.items()}
 
-# Роли с полным доступом ко всему (минуя матрицу). `Админ` — dev-суперюзер по умолчанию.
-SUPER_ROLES: frozenset[str] = frozenset({"Админ", "director", "commercial"})
+# Роли с полным доступом ко всему (минуя матрицу). "admin" — dev-суперюзер (ASCII, HTTP-safe).
+SUPER_ROLES: frozenset[str] = frozenset({"admin", "director", "commercial"})
 
 
 def allowed_slugs(roles: Iterable[str]) -> set[str]:

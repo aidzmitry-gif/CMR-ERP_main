@@ -182,7 +182,7 @@ def test_has_permission_roles():
     from core.services.auth import CurrentUser, has_permission
 
     core = SimpleNamespace(roles=[Role("Менеджер", ("sales.deal.read",))])
-    assert has_permission(core, CurrentUser("u", ["Админ"]), "anything") is True
+    assert has_permission(core, CurrentUser("u", ["admin"]), "anything") is True
     assert has_permission(core, CurrentUser("u", ["Менеджер"]), "sales.deal.read") is True
     assert has_permission(core, CurrentUser("u", ["Менеджер"]), "sales.deal.approve") is False
     assert has_permission(core, CurrentUser("u", ["Гость"]), "sales.deal.read") is False

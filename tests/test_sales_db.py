@@ -986,7 +986,7 @@ def test_has_permission_by_role():
     core = _Core()
     assert has_permission(core, CurrentUser("u", ["Менеджер"]), "sales.deal.approve") is False
     assert has_permission(core, CurrentUser("u", ["РОП"]), "sales.deal.approve") is True
-    assert has_permission(core, CurrentUser("u", ["Админ"]), "whatever") is True
+    assert has_permission(core, CurrentUser("u", ["admin"]), "whatever") is True
 
 
 async def test_audit_log_projection(session):
