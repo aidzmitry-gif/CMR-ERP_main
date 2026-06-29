@@ -51,22 +51,23 @@ export function FunnelTabs({ active }: { active?: string }) {
   if (funnels.length <= 1) return null;
   const current = active ?? funnels[0].code;
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1 border-b border-line">
+    <div className="flex items-center gap-1">
       {funnels.map((f) => {
         const isActive = f.code === current;
         return (
           <button
             key={f.code}
             onClick={() => switchTo(f.code)}
-            className={`relative px-3 py-1.5 text-sm ${
-              isActive ? "font-semibold text-accent-ink" : "text-muted hover:text-ink"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+              isActive
+                ? "border-accent bg-accent-soft text-accent-ink"
+                : "border-line bg-surface text-muted hover:bg-sunken"
             }`}
           >
             {f.title}
-            <span className="ml-1.5 rounded bg-sunken px-1.5 py-0.5 text-[10px] tabular-nums text-muted">
+            <span className="rounded px-1 py-0.5 text-[10px] tabular-nums text-muted">
               {f.active_deals}
             </span>
-            {isActive && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-accent" />}
           </button>
         );
       })}

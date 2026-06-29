@@ -18,14 +18,12 @@ export default async function DealsPage({
   const [stages, kpis] = await Promise.all([fetchBoardStages(role, activeFunnel), fetchKpis(role)]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]}>
-      <div className="px-6 pt-3">
-        <FunnelTabs active={activeFunnel} />
-      </div>
       {/* CurrencyProvider поднят в app/crm/layout.tsx — общий на весь CRM */}
       <DealsWorkspace
         key={activeFunnel}
         initialStages={stages}
         initialKpis={kpis}
+        funnelTabs={<FunnelTabs active={activeFunnel} />}
         switcher={<CompanySwitcher />}
       />
     </AppShell>

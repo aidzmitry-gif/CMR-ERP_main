@@ -312,10 +312,12 @@ export function DealsWorkspace({
   initialStages,
   initialKpis,
   switcher,
+  funnelTabs,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
   switcher?: React.ReactNode;
+  funnelTabs?: React.ReactNode;
 }) {
   const router = useRouter();
   const { fmt } = useCurrency();
@@ -477,6 +479,7 @@ export function DealsWorkspace({
       <main className="flex-1 overflow-auto p-6">
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
+          {funnelTabs}
           {switcher}
           <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
