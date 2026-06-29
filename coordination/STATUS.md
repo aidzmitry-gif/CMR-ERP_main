@@ -1,30 +1,35 @@
 # Готовность проекта (snapshot)
 
-> **Обновлено:** 2026-06-12
+> **Обновлено:** 2026-06-28 (грунтованная переоценка после кругов 1–3 + реконсиляция origin; 12 агентов читали реальный код)
 > **Как обновить метрики:** `python scripts/readiness.py` → перенести объективные цифры сюда.
 > **% — субъективная оценка** (учитывает зрелость UI, AI-мок, наличие миграций); правится вручную при реальном сдвиге блока, не каждую сессию.
 > Этот файл **не грузится автоматически** в контекст — читать по запросу «сколько готово».
 
-## Средняя готовность платформы: **~42–45%**
+## Средняя готовность платформы: **~57%** (диапазон 55–60; было ~42–45 до кругов 1–3)
 
-| Модуль | loc / роуты | Миграции | Фронт | % |
+> 📌 **Канонический источник % — `coordination/readiness.json`** (ведётся ИНКРЕМЕНТАЛЬНО: лейн в `КООРД: DONE` даёт `[%: NN]` → координатор правит одну строку json). `readiness.py` рендерит их в авто-блок ниже при каждом прогоне (PreCompact + вручную) — пере-замер агентами НЕ нужен. Эта таблица — читаемый снимок с колонкой «тормоз»; цифры держать в синхроне с json.
+
+> Money-критичное ядро (Продажи/Справочники/Логистика/Финансы/Закупки/Склад/Производство + Ядро) — **68–85%**; тонкие модули (Офис-бандл/HR/Маркетинг/Сервис) **15–34%** тянут среднее вниз. % = курируемая оценка по доказательствам (глубина бэка, миграции/ORM, зрелость фронта, доля реальных данных vs demo, тесты; AI-mock по дизайну).
+
+| Модуль | % | Бэк/Фронт/Данные | UI | Главный тормоз до выше |
 |---|---|---|---|---|
-| **CRM / Продажи** (эталон) | 2439 / 41 | 12 | bespoke: DealsWorkspace, LeadsWorkspace, РОП, Owner | **70** |
-| **Логистика** | 2793 / 45 | 5 | живой 6-вкладочный воркспейс (тендер/тарифы/автопарк/доставка/insights/scorecard/аудит) | **65** |
-| **Производство** | 1223 / 30 | 4 | FunnelBoard + панели (BOM/ОТК/нормы/выработка) | **55** |
-| **Закупки** | 1830 / 28 | 4 | FunnelBoard + 5 экранов (заказы/редактор/поставщики/RFQ/претензии) + MRP-lite | **68** |
-| **Склад (WMS)** | 317 / 6 | 0 (на shared stock) | FunnelBoard | **38** |
-| **HR** | 225 / 6 | 0 | FunnelBoard | **33** |
-| **Юр / База знаний / Офис** | ядро-заглушки | 0 | FunnelBoard (demo) | **30** |
-| **Финансы** | 150 / 3 | 0 | ModuleBoard | **25** |
-| **Маркетинг** | 121 / 3 | 0 | ModuleBoard | **25** |
-| **Сервис** | 92 / 2 | 0 | ModuleBoard | **20** |
-| Ядро-платформа | contract/loader/eventbus/outbox/RBAC | — | — | **75** |
+| **CRM / Продажи** (эталон) | **85** | 90/85/70 | bespoke | AI-mock по дизайну; маржа/цена ← фасад procurement + нет методики ценообразования; данные seeded, не боевая 1С |
+| **Ядро-платформа** | **82** | 85/—/75 | — | Temporal-воркер, реальный LLM-вызов, шлюзы 1С/склад (Protocol) — заглушки (отложено); безопасность ~2.5/5 |
+| **Справочники / MDM** | **78** | 88/75/62 | bespoke | мост 1С→MDM (~4109 контрагентов) откачен (только dry-run); часть фронта demo |
+| **Логистика** | **72** | 82/78/45 | bespoke | данные seeded (нет live-перевозчиков/1С); уведомления тендера + AI-инсайты — заглушки |
+| **Финансы** | **72** | 82/80/45 | bespoke | нет seed (honest-empty на чистой БД); 1С-сверка (`fetch_payments`) — заглушка |
+| **Закупки** | **68** | 82/68/35 | FunnelBoard + bespoke | данные: засеяна лишь demo-воронка, остальное honest-empty без 1С; landed = мин.срез (Горизонт 2) |
+| **Склад (WMS)** | **68** | 82/78/45 | bespoke | остаток — demo-зеркало 1С (не live pull); миграции вне checkout; тесты узкие (круг 3) |
+| **Производство** | **68** | 78/72/30 | bespoke | не интегрирован (нет подписок/прав/AI); данные ~70% honest-empty/demo |
+| **Юр / БЗ / Офис** | **34** | 40/33/10 | bespoke(office)/FunnelBoard | Office зрел (~55), Legal/Knowledge — заглушки; Knowledge без RAG; данные demo |
+| **HR** | **22** | 25/25/15 | FunnelBoard | HR-домен (ЗП/ОКК/дисциплина/договоры) только в прототипах; данные demo |
+| **Маркетинг** | **15** | 18/15/5 | ModuleBoard | агентная система/pSEO — только HTML-прототипы; нет миграции/seed |
+| **Сервис** | **15** | 18/15/5 | ModuleBoard | намеренный каркас-заглушка; нет миграции/событий/логики |
 
-Всего миграций: **36**.
+Голова миграций (alembic): **0070** (реальный счётчик — в авто-блоке ниже).
 
-> Примечание: у sales/logistics `page.tsx` тонкий (10–14 loc), потому что делегирует
-> в богатый компонент-воркспейс — это самый зрелый UI, а не отсутствие фронта.
+> **Сквозные тормоза (тянут вниз ВСЕХ):** данные — seeded/demo, не живой фид 1С (data-измерение почти у всех 30–62%); AI-слой — mock по дизайну (`AIOS_AI_ENABLED` off); прод не флипнут в secure-режим (AuthN P1-1 в коде, ждёт realm Keycloak); методика ценообразования не реализована.
+> Примечание: у sales/logistics/wms `page.tsx` тонкий, потому что делегирует в богатый bespoke-воркспейс — это зрелый UI, а не отсутствие фронта.
 
 ## Сквозные факторы (тянут вниз ВСЕХ)
 - **AI-слой — «Итерация-1»**: моки/ghost-плейсхолдеры по дизайну, реальных агентов нет.
@@ -43,56 +48,60 @@
 - **ModuleBoard** — простая generic-таблица (CRUD-каркас).
 
 <!-- READINESS:AUTO — авто-блок scripts/readiness.py --write, не редактируй вручную -->
-### Объективные метрики (авто, обновлено 2026-06-28)
+### Объективные метрики + готовность (авто, обновлено 2026-06-29)
 
-Свежие цифры из кода: loc (без миграций) · роуты · миграции модуля · тип фронта.
-Таблица с **%** выше — курируемая вручную; сверяй её с этими числами.
+loc · роуты · миграции · тип фронта — из кода; **%** — курируемая готовность из `coordination/readiness.json` (ведётся ИНКРЕМЕНТАЛЬНО — лейн в `КООРД: DONE` даёт `[%: NN]`, координатор правит одну строку json; не пере-замер).
 
-| пакет | loc | роуты | мигр | ui |
-|---|---:|---:|---:|---|
-| `sales` | 5237 | 69 | 18 | bespoke (33 loc) |
-| `procurement` | 1830 | 28 | 4 | FunnelBoard |
-| `production` | 1223 | 30 | 4 | FunnelBoard |
-| `wms` | 2479 | 42 | 6 | bespoke (15 loc) |
-| `logistics` | 3306 | 51 | 5 | bespoke (10 loc) |
-| `finance` | 1378 | 13 | 3 | bespoke (10 loc) |
-| `marketing` | 121 | 3 | 0 | ModuleBoard |
-| `service` | 92 | 2 | 0 | ModuleBoard |
-| `hr` | 225 | 6 | 1 | FunnelBoard |
-| **всего миграций** | | | **71** | |
+| пакет | loc | роуты | мигр | ui | % |
+|---|---:|---:|---:|---|---:|
+| `sales` | 5364 | 63 | 19 | bespoke (33 loc) | **87** |
+| `procurement` | 2547 | 32 | 6 | FunnelBoard | **71** |
+| `production` | 1223 | 30 | 4 | FunnelBoard | **68** |
+| `wms` | 2479 | 42 | 6 | bespoke (15 loc) | **68** |
+| `logistics` | 3340 | 51 | 5 | bespoke (10 loc) | **72** |
+| `finance` | 2443 | 19 | 5 | bespoke (10 loc) | **94** |
+| `marketing` | 121 | 3 | 0 | ModuleBoard | **15** |
+| `service` | 92 | 2 | 0 | ModuleBoard | **15** |
+| `hr` | 373 | 10 | 2 | FunnelBoard | **48** |
+| **всего миграций** | | | **77** | | |
+
+**Общая готовность платформы: ~57%** (курируемые % из `coordination/readiness.json`, обновлены 2026-06-29). Не-модульные юниты (core, reference/MDM, office-bundle) — в курируемой таблице выше и в json.
 
 <!-- /READINESS:AUTO -->
 
 <!-- COORD:AUTO — снимок координации флота, scripts/readiness.py --write -->
-### Координация флота (авто, 2026-06-28 10:28)
+### Координация флота (авто, 2026-06-29 23:17)
 
-- Ветка `sales-2.0-redesign` · HEAD `4d6f718 feat(refs): REF3-9 — read-only dry-run проба моста кэш 1С → MDM` · впереди origin **119** · незакоммичено **545**
-- Голова миграций (alembic): **0071**
+- Ветка `sales-2.0-redesign` · HEAD `a43e546 chore(coord): readiness — hr 35→48% (payroll UI + список/фильтры + 7 тестов)` · впереди origin **33** · незакоммичено **503**
+- Голова миграций (alembic): **0077**
 
 **Открытые доклады полос (REPORTS.md):**
-- - `2026-06-28 00:24` · сессия `2270ceed` · **КООРД:** DONE Закупки — ТЗ закрыто: landed cost facade + PurchaseOrder/ETA + /cost-estimate (Китай) + эмит landed_cost.calculated (qty+total для finance); миграция 0056; 20 backend + 7 fe тестов; [DoD ✓review ✓tests ✓lint ✓commit ✓one-head] ⚠ общий worktree склеил мой 185cdda с logistics-стейджем (modules/logistics+test_logistics_tender) — нужны per-session worktree; §2/счётчик за координатором`
-- - `2026-06-28 01:00` · сессия `ce567d7c` · **КООРД:** DONE Финансы — операц. финконтур P1-P11 закрыт; миграции 0061+0063 (down=0060/0062); 8 локальных коммитов: super 2fccdbf/f469ece/91a1597 + fin-7 20411ce/de2ba38; 23 pytest pass [DoD: ✓review(self) ✓tests(23 PASS finance) ✓lint(ruff+tsc finance) ✓commit(локально, не пушено) ✓migration(0061+0063 in linear chain, head=0066) ✗depmap(§2 — за координатором)] · qty в landed payload получен (закупки 178d3be) — landed-маржа зажглась через total_landed_byn
-- - `2026-06-28 01:01` · сессия `ce567d7c` · **КООРД:** DONE Финансы — ТЗ `_tz_finance.md` P1-P11 закрыт ранее в этом заходе (связь падала уже после финального доклада); состояние подтверждено: 23 pytest PASS, миграции 0061+0063 в линейном чейне (head 0066), 8 локальных коммитов fin-7+super, ничего недоделанного не осталось — жду команды на push или следующий ТЗ
-- - `2026-06-28 01:27` · сессия `c3a71f5f` · **КООРД:** DONE Логистика — все 10 пунктов ТЗ закрыты (D1 негоциация/торг • D2 info-подписка procurement.received → новое событие logistics.import.received • D3 ShipmentDrawer+таймлайн • D4 ручной трекинг+DELIVERY_FLOW transitions • D5 CRUD перевозчиков+тарифов • D6 bid_risk (медиана+флаг демпинга) + зеркало bidRisk на фронте • D7 форма приёмки счёта • D8 ImportDrawer+ИНФО-продвижение • D9 правка KPI+recompute • D10 явные error-состояния); миграция 0061 НЕ потребовалась (схему не трогал, только PATCH-эндпоинты); **новое событие шины `logistics.import.received` (INFO)** — пометить в DEPENDENCY-MAP §2 за координатором; ⚠ side-info: sales' коммит `f68a55d` ломает full-app load (`NameError: DealHandoffOut` в `modules/sales/routes.py:891`) — все api-fixture тесты падают, чужая зона, фикс за полосой Продажи; DoD: ✓review(self+ruff+tsc) ✓tests(pytest unit 12 PASS + vitest 29 PASS; api-fixture тесты блокирует sales-NameError) ✓lint(ruff+tsc чисто) ✓commit(локально, инкрементально, по именам; не пушено).
-- - `2026-06-28 01:30` · сессия `1b5d8576` · **КООРД:** DONE Продажи — ТЗ_tz_sales.md 11/11 закрыт: факт-маржа через landed cost (П1+П2), мульти-воронки + миграция 0062 + переключатель (П3+П4+П5), pipeline-аналитика API+UI (П6+П7), встречный план РОП на PlanTarget (П8+П9), won→office handoff контракт (П10), 21 PASS sales-suite (П11) [DoD: ✓review(ручной+ruff+tsc) ✓tests(21 PASS) ✓lint ✓commit(локально, не пушено, по именам) ✓migration(0062 один head — впишите в §5) ✗depmap(новое событие sales.deal.handoff — за координатором §2)]; NEEDS-MIG 0062 (Deal.funnel/Stage.funnel) и INFO sales.deal.handoff в граф межмодульных связей.`
-- - `2026-06-28 01:42` · сессия `bfb82d3b` · **КООРД:** DONE Склад — складское ядро по `_tz_wms.md` (приёмка+QC, put-away/pick, волна+pack, сверка с 1С, low-stock, цикл-каунт, дашборд, этикетки, навигация); миграции 0064/0066/0068/0069 (head один=0070, линейна); адверсариальное ревью → 3 фикса (крит. RBAC воронки, деньго-кламп дефицита, populate); всё локально, НЕ пушено [DoD: ✓review(multi-agent+фиксы) ✓tests(pytest -k wms 15 passed; vitest зелёные) ✓lint(ruff . + tsc) ✓one-head(0070) ✓commit(инкрементально локально) ✗push(правило владельца) ✗depmap(§2 ребро sales.stock.released→wms — за координатором)]
-- - `2026-06-28 01:48` · сессия `2270ceed` · **КООРД:** DONE Закупки — ТЗ 11/11 (поставщики+scorecard, RFQ/award, PO-lifecycle+события, приход по позициям, landed/предв.себес, претензии, 4 фронт-экрана), миграция 0065, adversarial-ревью пройдено+фиксы; 82 backend+33 fe тестов; [DoD ✓review ✓tests ✓lint ✓commit ✓one-head]; эмиты для Финансов (landed_cost.calculated qty+total, claim.resolved), WMS (received по позициям), Sales (landed фасад); §2/счётчик/STATUS/sidebar — за координатором; НЕ пушено`
-- - `2026-06-28 01:53` · сессия `73bd6c8c` · **КООРД:** DONE Справочники — ТЗ _tz_reference.md закрыт (12 пунктов, ~16 локальных коммитов 0da276b…82d395a) + адверсариальное ревью (11 находок, 10 исправлено). Миграции **0067** (Account/Region effective_from/to), **0070** (SKU volume_m3/vat_code + ref_sku_version) — атомарно через next_migration.py, прошу вписать в счётчик. [DoD: ✓review(workflow 17 агентов) ✓tests(pytest 95 + vitest 17) ✓lint(ruff+tsc) ✓commit(локально, не пушено) ✓migration(0067/0070, down линейны) ✓security(гейты refs.view на query+MDM-reads, модерация ставок) ✗depmap(новых межмодульных событий шины нет — §2 не трогал)]. NEEDS-ARB(low, отложено): SCD2 partial-unique индекс против гонки открытых версий — общие таблицы currency/vat/tnved, нужна координированная миграция.
-- - `2026-06-28 08:07` · сессия `1b5d8576` · **КООРД:** DONE Продажи — DealHandoffOut объявлен в schemas.py + импортирован в routes.py на HEAD modules/sales=163776b (фикс пришёл коммитом 846b928 поверх f68a55d); import main зелёный, 21 PASS sales-suite. Дополнительно: fix(crm) e24e510 — FunnelTabs больше не рисует плашку «Воронки не настроены» над доской (UX-регресс на скрине оператора). Если у других полос app-import падает — их сабмодуль modules/sales на устаревшем указателе (нужно git submodule update до 163776b или текущего HEAD).`
-- - `2026-06-28 08:40` · сессия `1b5d8576` · **КООРД:** DONE Продажи — fix funnels/chats SQLite-dev: сабмодуль a949ed0 (try/except OperationalError|ProgrammingError → [] + rollback), bump 4ad5fb0; 21/21 PASS sales-suite; happy-path не сломан. Правильное лечение для пользователей — пересоздать dev.db (rm dev.db + python scripts/seed.py), graceful — страховка.`
-- - `2026-06-28 09:29` · сессия `1b5d8576` · **КООРД:** INFO sales — ТЗ 11/11 закрыт ЛОКАЛЬНО (sub a949ed0, super 4ad5fb0, НЕ запушено: 20 коммитов vs origin/main; мигр.0062; события sales.plan.* + sales.deal.handoff). Недоделки: (1) подборщик товара sales-deal-picker.html ждёт Gate 1 оператора; (2) datetime «Следующий шаг» в итоге звонка не реализован; (3) security-техдолг IDOR /calls/stream + BOLA /calls/{cid}/link-deal заглушены документально — ждут идентичности продавца (Keycloak P1, не моя полоса); (4) старая dev.db без funnel — graceful fallback зашит, лечение = пересоздать dev.db.
-- - `2026-06-28 10:22` · сессия `ce567d7c` · **КООРД:** DONE finance — ТЗ-Р3 (`_tz_finance_r3.md`) FIN-C1+C2+A1+A2+B1+C3+C4+A3+UX1+C5 закрыты; локальные коммиты fin-7 `953aea8` (10 пунктов в submodule) и super `67d2f0e` (bump fin-7 + `core/services/onec.py:fetch_payments` + `finance-view.tsx` + 18 новых тестов); миграций нет; pytest 37 PASS (4 deselected: API-тесты падают из-за NameError в чужих полосах wms/logistics — не моё, но `create_app` не строится), ruff/tsc чисто. Подтверждаю Закупкам: `on_landed_cost` НЕ читает `stage` (только qty/total/unit) — **P4 закупок (estimated↔actual) безопасно приземляется на финансы**. Логистике: `on_freight_cost` терпит payload без `deal_id` (`leg='import'` OK). Push не делал — за оператором.
+- - `2026-06-28 17:46` · сессия `73bd6c8c` · **КООРД:** DONE reference — круг 4: 1С read-only фасады для финотчётов. `fetch_payments` РЕАЛИЗОВАН в OneCClient (был только в Protocol → finance ловил AttributeError); `fetch_bank_balance(account_code)→dict|None` + `fetch_balance_sheet(on_date)→dict|None` добавлены (mock + TODO реального OData GET при base_url; post_document не тронут; READ-ONLY). Контракт `fetch_payments` совпал с УЖЕ существующим потребителем `finance.reconcile` (ключ `ref`+`counterparty_ref`+`amount`) — проверено тестом через реальный `reconcile_with_onec` (3 платежа различимы). Гейт: `import main` PASS, 5 тестов PASS, ruff чисто по файлам полосы. Коммит f2d48c8 локально, НЕ пушено. ⚠ `core/services/onec.py` (хотспот) в круге 4 правили ОБЕ полосы — reference и finance (5b71649): сигнатуры идентичны, клоббера нет, но учти двойное касание. [DoD: ✓import-main ✓tests(5) ✓lint(свои файлы) ✓commit ✗push(правило) ⚠lane_check-foreign-fail] [%: 90]
+- - `2026-06-28 17:46` · сессия `73bd6c8c` · **КООРД:** INFO reference — (1) Контракт для finance Р6/Р7 на подтверждение: `fetch_bank_balance(account_code) → {account_code, name, bank, balance:float, currency, as_of}|None`; `fetch_balance_sheet(on_date) → {on_date, currency, assets:[{code,name,amount}], liabilities:[{code,name,amount}], total_assets, total_liabilities}|None` (актив==пассив). `fetch_payments` строка: `{ref, counterparty_ref, amount, id, doc_number, date, currency, direction:in|out, account_code, bank, counterparty, unp, purpose}`. (2) `scripts/lane_check.py reference` падает на ЧУЖОМ: ruff I-rule в `scripts/seed.py` + `tests/test_links.py::test_goods_received` (wms `on_goods_received` в `modules/wms/events.py` не создаёт StockMovement) — оба вне зоны reference, маршрутизируй владельцам (блокируют общий lane-гейт).
+- - `2026-06-28 18:02` · сессия `bfb82d3b` · **КООРД:** DONE wms — общий lane_check разблокирован: `test_links::test_goods_received` приведён к QC-гейту приёмки (Receipt pending_qc без движения; зеркало StockMovement — при QC-accept по факту). Поведение менялось намеренно (круг 2, _tz_wms.md), хендлер не трогал. test_links 20/20. Коммит super 6d94627, не пушено. [%: 72] (круг 3 закрыл интеграцию: модуль публикует wms.stock.low→procurement и wms.shipment.completed→office + оценка остатка в деньгах; backend≈85, frontend≈80).**
+- - `2026-06-28 18:02` · сессия `2270ceed` · **КООРД:** DONE procurement — круг 4 **B2**: подписка `reference.ref_tnved.changed`+`reference.sku.changed` → дебаунс-пересчёт плановой (estimated) landed через готовый фасад `sku_master.landed_inputs`+`allocate_landed_cost`; факт важнее оценки в фасаде. Миграции НЕТ. **§2 DEPENDENCY-MAP (за тобой) — новое ребро `reference → procurement` (потребитель `reference.ref_tnved.changed`/`reference.sku.changed` `{action,ref_key,entity_ref,value_hint,actor}`; шина без wildcard — по конкретным типам).** НДС/курс оставил Финансам (НДС возвратный/PO в BYN). Локально: ZAK-3 `8be7155`, super `071a267`, НЕ пушено. **Сиблинг-шум гейта (не мой):** seed.py ruff, prod-guard import-main (security), WMS test_links (`4e09c6a` сменил `on_goods_received`). [DoD: ✓review(code-reviewer, 0 issues) ✓tests(9 нов.+184 pytest) ✓lint(мои файлы ruff) ✓no-migration ✓commit(локально по именам+gitlink) ✗push(правило)] [%: 70]
+- - `2026-06-28 18:45` · сессия `d9f87a8c` · **КООРД:** INFO hr — контракт hr.payroll.* зафиксирован: accrued{employee_id, employee_name, period:"YYYY-MM", amount_byn:str(BYN), entity_ref:"payroll:<id>"}→Payment(payroll,pending); paid{employee_id, period, amount_byn:str(BYN), entity_ref:"payroll:<id>"}→settle by entity_ref→paid. Граница: только hr.employee (OpEx), цеховой ФОТ у production read-only без событий — двойного счёта нет. finance Р5 можно размораживать.**
+- - `2026-06-28 18:48` · сессия `ce567d7c` · **КООРД:** DONE finance — Круг 5 харднинг (commits 8d274c3 в fin-7, 8ec3cbd в super); 3 реальных бага в reconcile_with_onec починены (дубли ref+cp / Payment без УНП / float() на '100,00'); +7 тестов (К5-1..К5-3 PASS) + 1 xfail (К5-4 money-str scan); 54 pytest PASS. NEEDS-ARB: money-выходы в API остаются float — приоритет №1 PLATFORM.md, переход на str ломает фронт; жду решения по вариантам A/B/C (моя рекомендация A с правкой фронта 2-3ч). Баги списком: reconcile-dup-collapse, reconcile-no-cp-collapse, reconcile-comma-crash — все починены [%: 100]
+- - `2026-06-28 18:49` · сессия `c3a71f5f` · **КООРД:** DONE logistics — круг5 харднинг (4/4): R5-1 outbox-helper изолирован • R5-2 _looks_like_import таблица 31 кейс (РФ внутр., CN/UA/PL/DE/TR импорт, FOB/CIF/EXW/DAP, ISO2/ISO3/кириллица/латиница, пробелы/None/регистр) • R5-3 bid_risk медиана из 1/равные/выброс + защита от /0 на price=0 и all-zero + граница 25.0% и 24.9% • R5-4 import.received + freight.cost без подписчиков relay_once не падает, processed_at+AuditLog проставляются. DoD: ✓ `lane_check.py logistics GATE PASS` ✓ `import main` ✓ ruff clean ✓ pytest 101 PASS (+18 новых). Submodule logistics не трогал → bump НЕ требуется; коммит `c532ecc` локальный, не push. Без миграций. [%: 95]**
+- - `2026-06-28 18:51` · сессия `2270ceed` · **КООРД:** DONE procurement — круг5 харднинг: 5 edge-тестов (дедуп MRP-lite пост-commit / обратный waterfall при недостижимом сроке / estimated не перетирает actual / reference-дебаунс идемпотентность между батчами / claim.resolved без дубль-эмита). Все 5 закрепляют существующие гарды (кругов 3-4), каждый **падал бы при снятии гарда** (доказано по конструкции). 203 procurement/landed PASS, ruff чисто, tests-only (без правок submodule → без gitlink). Локально `a6f1552`, НЕ пушено. **Багов НЕ найдено — все гарды на месте.** [DoD: ✓gate(pytest 203) ✓non-tautology(каждый тест пинит named-гард) ✓ruff ✓commit(локально по имени) ✗push(правило) ✗submodule(не трогал)] [%: 70]
+- - `2026-06-28 18:51` · сессия `2270ceed` · **КООРД:** INFO procurement — потенциальный, НЕ почивший (для трекинга, не баг): после приёмки плановая `estimated`-строка SKU остаётся stale в таблице (фасад её не отдаёт — `_ACTUAL_FIRST`, безвредно), не чистится. И известный Горизонт-2 разрыв: факт (`_fixate_landed_cost`) опускает пошлину, оценка её включает → число «падает» при приёмке. Под обоими — spawn_task `task_fc401241` (внести пошлину в факт, чтобы план↔факт сошлись).
+- - `2026-06-28 18:51` · сессия `bfb82d3b` · **КООРД:** DONE wms — круг5 харднинг: +5 edge-тестов (QC-гейт/идемпотентность accept, oversell-кламп+дедуп low-stock, RBAC воронки 403, сверка не перетирает 1С, цикл-каунт adjustment+деньги). lane_check wms GATE PASS (51 passed). Багов 0 — фиксы кругов 2-3 держатся, NEEDS-ARB не нужен. Коммит super 49c7c83, не пушено. [%: 73] (закрыт хвост «тесты узкие» из readiness-ноты wms).**
+- - `2026-06-28 19:01` · сессия `73bd6c8c` · **КООРД:** DONE reference — круг5 харднинг: SCD2-инварианты (новая закрывает старую, ровно одна открытая, отказ не-возр. start, as_of-границы) + refs.view RBAC sweep (все query/MDM-reads→403, снятие гейта=красный) + reference.sku.changed (правка→1 событие entity_ref+value_hint; ФИКС: no-op PATCH больше НЕ эмитит/не плодит версию — доказанно красный на старом коде) + 1С read-only инвариант (base_url=None/недостижимый OData→mock/None без throw; нет write-методов). 109 reference-тестов PASS, ruff чисто, import main OK. Коммит 602ebf4 локально, НЕ push. БАГИ: [1] FIXED no-op эмит reference.sku.changed; [2] INFO — partial-unique индекс SCD2 (end_date IS NULL) на общих таблицах всё ещё отсутствует, гонка двойной открытой версии не защищена БД (отложено кругом 2, нужна координированная миграция). Граф §2 не меняю (reference.sku.changed уже сообщён кругом 3, новых рёбер нет). [DoD: ✓tests(109) ✓import-main ✓lint ✓red-on-old-code ✓commit ✗push] [%: 92]
+- - `2026-06-28 19:06` · сессия `1b5d8576` · **КООРД:** DONE sales — круг5 харднинг 5/5: 2 реальных бага найдено+починено (R5-3 чужая стадия воронки→422; R5-4 ДЕНЬГО — margin при слепом landed-фасаде отдавал gross=0 вместо honest-null, теперь priced==0→None + forecast gross_weighted=None), оба падали на старом коде; R5-1/R5-2/R5-5 — guard-тесты (границы штрафа/дата-edge/идемпотентность handoff). lane_check sales=GATE PASS (1001 passed). Коммиты локально: sub a396a0e, super 0c01360 (bump gitlink), НЕ пушено. INFO найдено-непочинено: (1) funnel-only PATCH оставляет чужую стадию → off-board (существующий ponytail, не регрессия, кандидат на фикс); (2) ship_deadline str→date в будущем сломает falsy-guard очистки. [%: 88]
 
 **Свежие пуши (PUSH-LOG.md):**
-- - `2026-06-27 10:41` · сессия `c5a977e6` · ветка `sales-2.0-redesign` · **62b25c2** feat(coord): git-гард против amend на общей ветке + правило «своя ветка на сессию»
 -   файлы: .githooks/pre-commit, .githooks/prepare-commit-msg, CLAUDE.md, scripts/coordination_hook.py
+- - `2026-06-28 14:01` · сессия `c5a977e6` · ветка `sales-2.0-redesign` · **5b746ef** merge: реконсиляция origin ↔ local (sales-2.0-redesign)
+-   файлы: core/services/reference_query.py, frontend/src/components/deal-metrics.tsx, frontend/src/components/source-tag.tsx, scripts/seed.py, tests/test_reference_tnved.py, zak-cost-calc-preview.html
+- - `2026-06-28 18:01` · сессия `c5a977e6` · ветка `reconcile/krug4-2026-06-28` · **071a267** feat(procurement): reference→landed пересчёт (круг 4 B2) + тесты + bump gitlink
+-   файлы: modules/procurement, tests/test_procurement_reference_recompute.py
 
 **Недавняя активность (.activity.local.md):**
-- - 2026-06-28 10:20 · commit · sales-2.0-redesign 0587935 · "feat(refs): REF3-5 — гейт качества margin_blind (SKU без landed cost)" · 2 файл(ов)
-- - 2026-06-28 10:21 · commit · sales-2.0-redesign 67d2f0e · "feat(finance): bump fin-7 (ТЗ-Р3) + core onec.fetch_payments + UX + tests" · 4 файл(ов)
-- - 2026-06-28 10:21 ·   └ submodule modules/finance: 1 нов. коммит(ов) · 953aea8 feat(finance): ТЗ-Р3 — финконтур (10 пунктов) · ⚠ новое событие шины (обнови граф §2) | ⚠ событие добавлено, но DEPENDENCY-MAP не тронут
-- - 2026-06-28 10:23 · commit · sales-2.0-redesign c509ca0 · "feat(refs): REF3-7 — стабильный контракт reference.*.changed (подписка downstream)" · 2 файл(ов)
-- - 2026-06-28 10:26 · commit · sales-2.0-redesign 4330a83 · "feat(refs): REF3-8 — запись SCD2-версии SKU при правке мастер-полей" · 2 файл(ов) · ⚠ новое событие шины (обнови граф §2) | ⚠ событие добавлено, но DEPENDENCY-MAP не тронут
-- - 2026-06-28 10:28 · commit · sales-2.0-redesign 4d6f718 · "feat(refs): REF3-9 — read-only dry-run проба моста кэш 1С → MDM" · 3 файл(ов)
+- - 2026-06-29 23:04 ·   └ submodule modules/finance: 1 нов. коммит(ов) · 6a2e798 feat(finance): Р6 ДДС — cash-basis отчёт + эндпоинт /finance/cashflow + CSV
+- - 2026-06-29 23:08 · commit · sales-2.0-redesign 2563603 · "chore(coord): readiness — finance 92→94% (Р6 ДДС)" · 1 файл(ов)
+- - 2026-06-29 23:15 · commit · sales-2.0-redesign f167e29 · "feat(hr): payroll UI — list endpoint, frontend page, tests" · 7 файл(ов)
+- - 2026-06-29 23:15 ·   └ submodule modules/finance: 1 нов. коммит(ов) · 0227ecb feat(finance): Р7 Balance Sheet — баланс активов/пассивов на дату
+- - 2026-06-29 23:15 ·   └ submodule modules/hr: 1 нов. коммит(ов) · 0ba1f25 feat(hr): GET /hr/payroll list + single entry endpoints
+- - 2026-06-29 23:16 · commit · sales-2.0-redesign a43e546 · "chore(coord): readiness — hr 35→48% (payroll UI + список/фильтры + 7 тестов)" · 1 файл(ов)
 
 <!-- /COORD:AUTO -->
