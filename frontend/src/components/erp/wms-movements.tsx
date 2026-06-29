@@ -11,7 +11,6 @@ import {
   fetchMovements,
   locationLabel,
   receipt,
-  reasonLabel,
   shipment,
   type StockMovement,
   transfer,
@@ -106,14 +105,13 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
               <th className="px-4 py-2 font-medium">Тип</th>
               <th className="px-4 py-2 font-medium">SKU</th>
               <th className="px-4 py-2 text-right font-medium">Кол-во</th>
-              <th className="px-4 py-2 font-medium">Причина</th>
               <th className="px-4 py-2 font-medium">Документ</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                <td colSpan={5} className="px-4 py-6 text-center text-muted">
                   Движений по фильтру нет
                 </td>
               </tr>
@@ -142,7 +140,6 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
                 >
                   {m.kind === "in" ? "+" : "−"}{formatNumber(m.qty)}
                 </td>
-                <td className="px-4 py-2.5 text-muted">{reasonLabel(m.reason)}</td>
                 <td className="px-4 py-2.5 text-faint">{m.doc_ref || "—"}</td>
               </tr>
             ))}
