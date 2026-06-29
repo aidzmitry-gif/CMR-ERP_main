@@ -1,0 +1,21 @@
+{
+  "_doc": "Единый источник % готовности. ВЕДЁТСЯ ИНКРЕМЕНТАЛЬНО — не пере-замером. Лейн в конце хода: 'КООРД: DONE <lane> — … [%: NN]'; координатор правит ОДНУ строку этого файла + 'updated'. Полный пере-замер (workflow readiness-assessment, 12 агентов) — редко, для калибровки. readiness.py читает этот файл и рендерит % в авто-блок STATUS.md при каждом прогоне (PreCompact + вручную). Ключи modules.* для 9 сканируемых модулей совпадают с MODULES в readiness.py; core/reference/office_bundle — не-модульные юниты (в курируемой таблице STATUS.md).",
+  "updated": "2026-06-28",
+  "overall_pct": 57,
+  "overall_note": "money-критичное ядро 68-85; тонкие модули 15-34 тянут среднее вниз. Сквозные тормоза у всех: данные seeded/demo не живой 1С, AI mock по дизайну, прод не флипнут в secure (ждёт realm Keycloak), нет методики ценообразования.",
+  "method": "курируемая оценка по доказательствам из кода (бэк/фронт/данные/тесты; AI-mock по дизайну). bespoke>FunnelBoard>ModuleBoard. data = доля реальных/1С/seeded vs demo/honest-empty.",
+  "modules": {
+    "sales":        {"pct": 87, "backend": 91, "frontend": 86, "data": 70, "note": "эталон; лиды на /leads (404 снят, Шаг1) + крайняя дата отгрузки/штраф (мигр.0073, сигнал в закупки); AI-mock по дизайну, маржа/цена ← фасад procurement + нет методики цены, данные seeded не 1С"},
+    "reference":    {"pct": 80, "backend": 90, "frontend": 75, "data": 62, "note": "Справочники/MDM (core-level) + 1С read-фасады для финотчётов (круг 4: fetch_payments/bank_balance/balance_sheet); мост 1С→MDM (~4109 контр.) откачен — dry-run; часть фронта demo (lane self-est 90)"},
+    "logistics":    {"pct": 72, "backend": 82, "frontend": 78, "data": 45, "note": "данные seeded (нет live-перевозчиков/1С); уведомления тендера + AI-инсайты — заглушки"},
+    "finance":      {"pct": 92, "backend": 94, "frontend": 90, "data": 55, "note": "Р5 P&L DONE (мигр.0076 entity_ref+desc, hr.payroll/deal.handoff accrual, /finance/pnl агрегат, UI-вкладка P&L + CSV, 11 тестов); Р6 ДДС / Р7 Баланс — следующие; 1С fetch_payments реализован Справочниками"},
+    "procurement":  {"pct": 71, "backend": 84, "frontend": 70, "data": 35, "note": "круг4: план сбора машины+ship-deadline (B1) + reference→landed пересчёт (B2); засеяна лишь demo-воронка, остальное honest-empty без 1С"},
+    "wms":          {"pct": 68, "backend": 82, "frontend": 78, "data": 45, "note": "остаток — demo-зеркало 1С (не live pull); тесты узкие (круг 3)"},
+    "production":   {"pct": 68, "backend": 78, "frontend": 72, "data": 30, "note": "не интегрирован (нет подписок/прав/AI); данные ~70% honest-empty/demo"},
+    "core":         {"pct": 82, "backend": 85, "frontend": 0,  "data": 75, "note": "Ядро-платформа (не модуль): Temporal/LLM/1С-шлюзы — заглушки (отложено); безопасность ~2.5/5"},
+    "office_bundle":{"pct": 34, "backend": 40, "frontend": 33, "data": 10, "note": "Юр/БЗ/Офис: Office зрел ~55, Legal/Knowledge — заглушки; Knowledge без RAG"},
+    "hr":           {"pct": 35, "backend": 45, "frontend": 28, "data": 15, "note": "payroll_entry + /hr/payroll/accrue+pay + hr.payroll.accrued/paid emit (мигр.0077); CRUD+воронка подбора; ЗП/ОКК/дисциплина/договоры только прототипы"},
+    "marketing":    {"pct": 15, "backend": 18, "frontend": 15, "data": 5,  "note": "агентная система/pSEO — только HTML-прототипы; нет миграции/seed"},
+    "service":      {"pct": 15, "backend": 18, "frontend": 15, "data": 5,  "note": "намеренный каркас-заглушка; нет миграции/событий/логики"}
+  }
+}
