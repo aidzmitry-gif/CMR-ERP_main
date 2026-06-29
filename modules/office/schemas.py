@@ -79,3 +79,35 @@ class CarrierRequestOut(BaseModel):
     carrier: str
     region: str
     doc: OfficeDocOut
+
+
+class LegalContractCreate(BaseModel):
+    counterparty_name: str
+    contract_type: str = "supply"   # supply | service | lease | nda
+    status: str = "active"
+    signed_at: str | None = None
+    expires_at: str | None = None
+    amount_byn: str = "0.00"
+    description: str = ""
+    number: str = ""                 # если пустой — автономер
+
+
+class LegalContractOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    number: str
+    counterparty_name: str
+    contract_type: str
+    status: str
+    signed_at: str | None = None
+    expires_at: str | None = None
+    amount_byn: str
+    description: str
+
+
+class LegalContractPatch(BaseModel):
+    status: str | None = None
+    description: str | None = None
+    expires_at: str | None = None
+    amount_byn: str | None = None

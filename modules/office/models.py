@@ -48,3 +48,21 @@ class OfficeDoc(Base):
     overdue_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")          # дни просрочки оплаты
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class LegalContract(Base):
+    """Реестр юридических договоров с контрагентами."""
+
+    __tablename__ = "legal_contract"
+    __table_args__ = {"schema": "office"}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    counterparty_name: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    contract_type: Mapped[str] = mapped_column(String(64), default="supply", server_default="supply")
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active")
+    signed_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    expires_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    amount_byn: Mapped[str] = mapped_column(String(20), default="0.00", server_default="0.00")
+    description: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
