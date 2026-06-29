@@ -18,6 +18,141 @@ import {
   type WmsLocation,
 } from "@/lib/wms-ops";
 
+const KIND_BADGE: Record<string, string> = {
+  receipt: "bg-green-100 text-green-700",
+  shipment: "bg-red-100 text-red-700",
+  transfer: "bg-blue-100 text-blue-700",
+  adjustment: "bg-amber-100 text-amber-700",
+  reserve: "bg-purple-100 text-purple-700",
+  release: "bg-slate-100 text-slate-600",
+  pick: "bg-orange-100 text-orange-700",
+  pack: "bg-cyan-100 text-cyan-700",
+};
+
+function reasonBadge(reason: string) {
+  return KIND_BADGE[reason] ?? "bg-sunken text-muted";
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit", month: "2-digit", year: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+const REASONS = ["", "receipt", "shipment", "transfer", "adjustment", "reserve", "release", "pick", "pack"];
+const REASON_LABELS_LOCAL: Record<string, string> = {
+  "": "Все типы",
+  receipt: "Приёмка",
+  shipment: "Отгрузка",
+  transfer: "Перемещение",
+  adjustment: "Коррекция",
+  reserve: "Резерв",
+  release: "Снятие резерва",
+  pick: "Подбор",
+  pack: "Упаковка",
+};
+
+const PAGE_SIZE = 50;
+
+function MovementsLog({ rows }: { rows: StockMovement[] }) {
+  const [reasonFilter, setReasonFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const visible = useMemo(() => {
+    let out = rows;
+    if (reasonFilter) out = out.filter((m) => m.reason === reasonFilter);
+    if (dateFrom) out = out.filter((m) => m.created_at && m.created_at >= dateFrom);
+    if (dateTo) out = out.filter((m) => m.created_at && m.created_at <= dateTo + "T23:59:59");
+    return out.slice(0, PAGE_SIZE);
+  }, [rows, reasonFilter, dateFrom, dateTo]);
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <select
+          value={reasonFilter}
+          onChange={(e) => setReasonFilter(e.target.value)}
+          className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+        >
+          {REASONS.map((r) => (
+            <option key={r} value={r}>{REASON_LABELS_LOCAL[r]}</option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+        />
+        <span className="text-xs text-faint">—</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+        />
+        {visible.length === PAGE_SIZE && (
+          <span className="ml-auto text-xs text-faint">Показаны последние {PAGE_SIZE}</span>
+        )}
+      </div>
+      <div className="overflow-hidden rounded-xl border border-line bg-surface">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-2 font-medium">Дата</th>
+              <th className="px-4 py-2 font-medium">Тип</th>
+              <th className="px-4 py-2 font-medium">SKU</th>
+              <th className="px-4 py-2 text-right font-medium">Кол-во</th>
+              <th className="px-4 py-2 font-medium">Причина</th>
+              <th className="px-4 py-2 font-medium">Документ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                  Движений по фильтру нет
+                </td>
+              </tr>
+            )}
+            {visible.map((m) => (
+              <tr key={m.id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2.5 text-xs tabular-nums text-muted">
+                  {formatDate(m.created_at)}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span
+                    className={clsx(
+                      "inline-flex rounded-md px-2 py-0.5 text-xs font-medium",
+                      reasonBadge(m.reason),
+                    )}
+                  >
+                    {REASON_LABELS_LOCAL[m.reason] ?? m.reason}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted">{m.sku_code}</td>
+                <td
+                  className={clsx(
+                    "px-4 py-2.5 text-right font-semibold tabular-nums",
+                    m.kind === "in" ? "text-green-600" : "text-red-600",
+                  )}
+                >
+                  {m.kind === "in" ? "+" : "−"}{formatNumber(m.qty)}
+                </td>
+                <td className="px-4 py-2.5 text-muted">{reasonLabel(m.reason)}</td>
+                <td className="px-4 py-2.5 text-faint">{m.doc_ref || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 type OpKind = "receipt" | "shipment" | "transfer" | "adjustment";
 
 const OPS: { id: OpKind; label: string; Icon: typeof ArrowDownToLine }[] = [
@@ -133,37 +268,7 @@ export function WmsMovements({
       </div>
 
       {/* Журнал движений */}
-      <div className="mt-4 overflow-hidden rounded-xl border border-line bg-surface">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-2 font-medium">Код</th>
-              <th className="px-4 py-2 font-medium">Операция</th>
-              <th className="px-4 py-2 font-medium">Склад</th>
-              <th className="px-4 py-2 text-right font-medium">Кол-во</th>
-              <th className="px-4 py-2 font-medium">Документ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted">Движений пока нет</td>
-              </tr>
-            )}
-            {rows.map((m) => (
-              <tr key={m.id} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5 font-mono text-xs text-muted">{m.sku_code}</td>
-                <td className="px-4 py-2.5 text-ink">{reasonLabel(m.reason)}</td>
-                <td className="px-4 py-2.5 text-muted">{m.warehouse}</td>
-                <td className={clsx("px-4 py-2.5 text-right font-semibold tabular-nums", m.kind === "in" ? "text-green-600" : "text-red-600")}>
-                  {m.kind === "in" ? "+" : "−"}{formatNumber(m.qty)}
-                </td>
-                <td className="px-4 py-2.5 text-faint">{m.doc_ref || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <MovementsLog rows={rows} />
     </div>
   );
 }
