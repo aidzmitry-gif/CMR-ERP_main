@@ -10,6 +10,7 @@ import {
   adjustment,
   fetchMovements,
   locationLabel,
+  reasonLabel,
   receipt,
   shipment,
   type StockMovement,
@@ -40,7 +41,6 @@ function formatDate(iso: string | null): string {
   });
 }
 
-const REASONS = ["", "receipt", "shipment", "transfer", "adjustment", "reserve", "release", "pick", "pack"];
 const REASON_LABELS_LOCAL: Record<string, string> = {
   "": "Все типы",
   receipt: "Приёмка",
@@ -60,13 +60,18 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const visible = useMemo(() => {
-    let out = rows;
-    if (reasonFilter) out = out.filter((m) => m.reason === reasonFilter);
-    if (dateFrom) out = out.filter((m) => m.created_at && m.created_at >= dateFrom);
-    if (dateTo) out = out.filter((m) => m.created_at && m.created_at <= dateTo + "T23:59:59");
-    return out.slice(0, PAGE_SIZE);
-  }, [rows, reasonFilter, dateFrom, dateTo]);
+  const visible = useMemo(
+    () =>
+      rows
+        .filter(
+          (m) =>
+            (!reasonFilter || m.reason === reasonFilter) &&
+            (!dateFrom || (m.created_at && m.created_at >= dateFrom)) &&
+            (!dateTo || (m.created_at && m.created_at <= dateTo + "T23:59:59")),
+        )
+        .slice(0, PAGE_SIZE),
+    [rows, reasonFilter, dateFrom, dateTo],
+  );
 
   return (
     <div className="mt-4">
@@ -76,8 +81,8 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
           onChange={(e) => setReasonFilter(e.target.value)}
           className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
         >
-          {REASONS.map((r) => (
-            <option key={r} value={r}>{REASON_LABELS_LOCAL[r]}</option>
+          {Object.entries(REASON_LABELS_LOCAL).map(([r, label]) => (
+            <option key={r} value={r}>{label}</option>
           ))}
         </select>
         <input
@@ -128,7 +133,7 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
                       reasonBadge(m.reason),
                     )}
                   >
-                    {REASON_LABELS_LOCAL[m.reason] ?? m.reason}
+                    {reasonLabel(m.reason)}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 font-mono text-xs text-muted">{m.sku_code}</td>

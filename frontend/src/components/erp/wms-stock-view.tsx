@@ -5,14 +5,8 @@ import { RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { formatNumber } from "@/lib/format";
-import { fetchStockMirror, type StockMirror } from "@/lib/wms-stock";
-
-export interface StockThreshold {
-  sku_code: string;
-  warehouse: string;
-  min_qty: number;
-  active: boolean;
-}
+import { filterByWarehouse, fetchStockMirror, type StockMirror } from "@/lib/wms-stock";
+import { type StockThreshold } from "@/lib/wms-warehouse";
 
 export function WmsStockView({
   initial,
@@ -39,10 +33,9 @@ export function WmsStockView({
     setBusy(false);
   }
 
-  const rows = useMemo(
-    () => (warehouse ? data.rows.filter((r) => r.warehouse === warehouse) : data.rows),
-    [data.rows, warehouse],
-  );
+  const rows = useMemo(() => filterByWarehouse(data.rows, warehouse), [data.rows, warehouse]);
+  const tabCls = (active: boolean) =>
+    clsx("rounded-md px-3 py-1.5 text-sm font-medium", active ? "bg-surface text-accent-ink shadow-sm" : "text-muted");
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -68,24 +61,11 @@ export function WmsStockView({
       )}
 
       <div className="mt-4 inline-flex rounded-lg border border-line bg-sunken p-1">
-        <button
-          onClick={() => setWarehouse("")}
-          className={clsx(
-            "rounded-md px-3 py-1.5 text-sm font-medium",
-            warehouse === "" ? "bg-surface text-accent-ink shadow-sm" : "text-muted",
-          )}
-        >
+        <button onClick={() => setWarehouse("")} className={tabCls(warehouse === "")}>
           Все склады
         </button>
         {data.warehouses.map((w) => (
-          <button
-            key={w}
-            onClick={() => setWarehouse(w)}
-            className={clsx(
-              "rounded-md px-3 py-1.5 text-sm font-medium",
-              warehouse === w ? "bg-surface text-accent-ink shadow-sm" : "text-muted",
-            )}
-          >
+          <button key={w} onClick={() => setWarehouse(w)} className={tabCls(warehouse === w)}>
             {w}
           </button>
         ))}

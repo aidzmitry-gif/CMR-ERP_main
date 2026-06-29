@@ -79,6 +79,13 @@ export interface Alerts {
   gateway: boolean;
 }
 
+export interface StockThreshold {
+  sku_code: string;
+  warehouse: string;
+  min_qty: number;
+  active: boolean;
+}
+
 export interface CyclePlan {
   id: number;
   warehouse: string;
@@ -218,6 +225,7 @@ export const fetchReconServer = (r?: string) =>
 export const fetchAlertsServer = (r?: string) =>
   ssr<Alerts>("/wms/alerts", r, { rows: [], gateway: false });
 export const fetchCyclePlansServer = (r?: string) => ssr<CyclePlan[]>("/wms/cycle-plans", r, []);
+export const fetchThresholdsServer = (r?: string) => ssr<StockThreshold[]>("/wms/thresholds", r, []);
 
 // ---- Client ----
 export const fetchReceipt = (id: number) => api<ReceiptDetail | null>(`/wms/receipts/${id}`, null);

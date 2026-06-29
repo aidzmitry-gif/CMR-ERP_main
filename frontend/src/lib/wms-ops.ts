@@ -49,6 +49,8 @@ const REASON_LABELS: Record<string, string> = {
   release: "Снятие резерва",
   transfer: "Перемещение",
   adjustment: "Коррекция",
+  pick: "Подбор",
+  pack: "Упаковка",
   "": "—",
 };
 
