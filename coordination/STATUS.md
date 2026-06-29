@@ -54,26 +54,26 @@ loc · роуты · миграции · тип фронта — из кода; 
 
 | пакет | loc | роуты | мигр | ui | % |
 |---|---:|---:|---:|---|---:|
-| `sales` | 5364 | 63 | 19 | bespoke (33 loc) | **87** |
-| `procurement` | 2547 | 32 | 6 | FunnelBoard | **71** |
-| `production` | 1223 | 30 | 4 | FunnelBoard | **68** |
-| `wms` | 2479 | 42 | 6 | bespoke (15 loc) | **68** |
+| `sales` | 5364 | 63 | 19 | bespoke (33 loc) | **88** |
+| `procurement` | 2547 | 32 | 6 | FunnelBoard | **76** |
+| `production` | 1223 | 30 | 5 | FunnelBoard | **72** |
+| `wms` | 2479 | 42 | 6 | bespoke (15 loc) | **75** |
 | `logistics` | 3340 | 51 | 5 | bespoke (10 loc) | **72** |
-| `finance` | 2443 | 19 | 5 | bespoke (10 loc) | **94** |
+| `finance` | 2443 | 19 | 5 | bespoke (10 loc) | **97** |
 | `marketing` | 121 | 3 | 0 | ModuleBoard | **15** |
 | `service` | 92 | 2 | 0 | ModuleBoard | **15** |
-| `hr` | 373 | 10 | 2 | FunnelBoard | **48** |
-| **всего миграций** | | | **77** | | |
+| `hr` | 459 | 13 | 3 | FunnelBoard | **55** |
+| **всего миграций** | | | **80** | | |
 
-**Общая готовность платформы: ~57%** (курируемые % из `coordination/readiness.json`, обновлены 2026-06-29). Не-модульные юниты (core, reference/MDM, office-bundle) — в курируемой таблице выше и в json.
+**Общая готовность платформы: ~60%** (курируемые % из `coordination/readiness.json`, обновлены 2026-06-30). Не-модульные юниты (core, reference/MDM, office-bundle) — в курируемой таблице выше и в json.
 
 <!-- /READINESS:AUTO -->
 
 <!-- COORD:AUTO — снимок координации флота, scripts/readiness.py --write -->
-### Координация флота (авто, 2026-06-29 23:17)
+### Координация флота (авто, 2026-06-30 00:14)
 
-- Ветка `sales-2.0-redesign` · HEAD `a43e546 chore(coord): readiness — hr 35→48% (payroll UI + список/фильтры + 7 тестов)` · впереди origin **33** · незакоммичено **503**
-- Голова миграций (alembic): **0077**
+- Ветка `sales-2.0-redesign` · HEAD `0d0d798 feat(sales-rop-plan): РОП план/факт — вкладка + компонент + тесты` · впереди origin **51** · незакоммичено **520**
+- Голова миграций (alembic): **0080**
 
 **Открытые доклады полос (REPORTS.md):**
 - - `2026-06-28 17:46` · сессия `73bd6c8c` · **КООРД:** DONE reference — круг 4: 1С read-only фасады для финотчётов. `fetch_payments` РЕАЛИЗОВАН в OneCClient (был только в Protocol → finance ловил AttributeError); `fetch_bank_balance(account_code)→dict|None` + `fetch_balance_sheet(on_date)→dict|None` добавлены (mock + TODO реального OData GET при base_url; post_document не тронут; READ-ONLY). Контракт `fetch_payments` совпал с УЖЕ существующим потребителем `finance.reconcile` (ключ `ref`+`counterparty_ref`+`amount`) — проверено тестом через реальный `reconcile_with_onec` (3 платежа различимы). Гейт: `import main` PASS, 5 тестов PASS, ruff чисто по файлам полосы. Коммит f2d48c8 локально, НЕ пушено. ⚠ `core/services/onec.py` (хотспот) в круге 4 правили ОБЕ полосы — reference и finance (5b71649): сигнатуры идентичны, клоббера нет, но учти двойное касание. [DoD: ✓import-main ✓tests(5) ✓lint(свои файлы) ✓commit ✗push(правило) ⚠lane_check-foreign-fail] [%: 90]
@@ -97,11 +97,11 @@ loc · роуты · миграции · тип фронта — из кода; 
 -   файлы: modules/procurement, tests/test_procurement_reference_recompute.py
 
 **Недавняя активность (.activity.local.md):**
-- - 2026-06-29 23:04 ·   └ submodule modules/finance: 1 нов. коммит(ов) · 6a2e798 feat(finance): Р6 ДДС — cash-basis отчёт + эндпоинт /finance/cashflow + CSV
-- - 2026-06-29 23:08 · commit · sales-2.0-redesign 2563603 · "chore(coord): readiness — finance 92→94% (Р6 ДДС)" · 1 файл(ов)
-- - 2026-06-29 23:15 · commit · sales-2.0-redesign f167e29 · "feat(hr): payroll UI — list endpoint, frontend page, tests" · 7 файл(ов)
-- - 2026-06-29 23:15 ·   └ submodule modules/finance: 1 нов. коммит(ов) · 0227ecb feat(finance): Р7 Balance Sheet — баланс активов/пассивов на дату
-- - 2026-06-29 23:15 ·   └ submodule modules/hr: 1 нов. коммит(ов) · 0ba1f25 feat(hr): GET /hr/payroll list + single entry endpoints
-- - 2026-06-29 23:16 · commit · sales-2.0-redesign a43e546 · "chore(coord): readiness — hr 35→48% (payroll UI + список/фильтры + 7 тестов)" · 1 файл(ов)
+- - 2026-06-30 00:06 · commit · sales-2.0-redesign e19c084 · "fix(wms/fe): убрать \"\" sentinel из REASON_LABELS — чистый публичный контракт" · 2 файл(ов)
+- - 2026-06-30 00:10 · commit · sales-2.0-redesign 7bcf78d · "test(wms/fe): покрыть reasonLabel('') — guard if (!reason) return '—'" · 1 файл(ов)
+- - 2026-06-30 05:13 · commit · sales-2.0-redesign 0ee244f · "feat(prod-events): Production подписывается на sales.deal.handoff + procurement.order.received" · 3 файл(ов) · ⚠ миграция (сверь единственный head — §5)
+- - 2026-06-30 05:13 ·   └ submodule modules/production: 0 нов. коммит(ов) · 2ff2125→6bfb7f7
+- - 2026-06-30 00:11 · commit · sales-2.0-redesign 177919d · "fix(prod-events): переименовать мигр. 0041→0080 (коллизия с sales_call_log)" · 1 файл(ов) · ⚠ миграция (сверь единственный head — §5)
+- - 2026-06-30 00:13 · commit · sales-2.0-redesign 0d0d798 · "feat(sales-rop-plan): РОП план/факт — вкладка + компонент + тесты" · 4 файл(ов)
 
 <!-- /COORD:AUTO -->
