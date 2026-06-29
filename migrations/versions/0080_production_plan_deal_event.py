@@ -5,15 +5,15 @@
   используется для идемпотентности при повторном emit ``sales.deal.handoff``.
 - ``source_event`` (VARCHAR(128), nullable) — имя события-источника («sales.deal.handoff»).
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0080
+Revises: 0079
 Create Date: 2026-06-29
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0080"
+down_revision = "0079"
 branch_labels = None
 depends_on = None
 
