@@ -14,7 +14,7 @@
     "production":   {"pct": 68, "backend": 78, "frontend": 72, "data": 30, "note": "не интегрирован (нет подписок/прав/AI); данные ~70% honest-empty/demo"},
     "core":         {"pct": 82, "backend": 85, "frontend": 0,  "data": 75, "note": "Ядро-платформа (не модуль): Temporal/LLM/1С-шлюзы — заглушки (отложено); безопасность ~2.5/5"},
     "office_bundle":{"pct": 34, "backend": 40, "frontend": 33, "data": 10, "note": "Юр/БЗ/Офис: Office зрел ~55, Legal/Knowledge — заглушки; Knowledge без RAG"},
-    "hr":           {"pct": 35, "backend": 45, "frontend": 28, "data": 15, "note": "payroll_entry + /hr/payroll/accrue+pay + hr.payroll.accrued/paid emit (мигр.0077); CRUD+воронка подбора; ЗП/ОКК/дисциплина/договоры только прототипы"},
+    "hr":           {"pct": 48, "backend": 58, "frontend": 42, "data": 15, "note": "payroll UI DONE: GET /hr/payroll (список+фильтры), страница /erp/hr/payroll, форма начисления/выплаты, 7 тестов; payroll_entry мигр.0077; ЗП/ОКК/дисциплина/договоры только прототипы"},
     "marketing":    {"pct": 15, "backend": 18, "frontend": 15, "data": 5,  "note": "агентная система/pSEO — только HTML-прототипы; нет миграции/seed"},
     "service":      {"pct": 15, "backend": 18, "frontend": 15, "data": 5,  "note": "намеренный каркас-заглушка; нет миграции/событий/логики"}
   }
