@@ -7,9 +7,12 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: aios
-      POSTGRES_PASSWORD: aios
-      POSTGRES_DB: aios
+      # Креды БД переопределяются на проде из корневого .env (untracked, SECURITY.md P0-4 —
+      # ротация). Дефолт aios/aios — ТОЛЬКО dev; в проде на этих кредах прод-гард приложения
+      # валит старт (config/settings.py). Прод обязан задать AIOS_PG_* + AIOS_DATABASE_URL.
+      POSTGRES_USER: ${AIOS_PG_USER:-aios}
+      POSTGRES_PASSWORD: ${AIOS_PG_PASSWORD:-aios}
+      POSTGRES_DB: ${AIOS_PG_DB:-aios}
     # SECURITY.md P0-7: published-порт только на loopback — Postgres (aios/aios) не торчит
     # в LAN/Tailscale/интернет. Контейнеры ходят по имени сервиса `postgres:5432` (docker-сеть),
     # локальный seed/psql — через localhost. Наружу БД не нужна никому.
@@ -19,7 +22,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aios -d aios"]
+      test: ["CMD-SHELL", "pg_isready -U ${AIOS_PG_USER:-aios} -d ${AIOS_PG_DB:-aios}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -40,12 +43,13 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # admin/admin и aios/aios — dev-дефолты; на проде задать в корневом .env (SECURITY.md P0-4).
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${AIOS_KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${AIOS_KC_ADMIN_PASSWORD:-admin}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
-      KC_DB_USERNAME: aios
-      KC_DB_PASSWORD: aios
+      KC_DB_USERNAME: ${AIOS_PG_USER:-aios}
+      KC_DB_PASSWORD: ${AIOS_PG_PASSWORD:-aios}
     # SECURITY.md P0-7: в проде забиндить на loopback ("127.0.0.1:8080:8080") и пускать
     # только через TLS-прокси/туннель. Не делаю по умолчанию: зависит от топологии прокси
     # (на хосте через loopback vs прямой Tailscale-доступ). admin/admin — только dev.
@@ -57,13 +61,20 @@ services:
 
   app:
     build: .
+    # SECURITY (прод-дыра #2, P0-5.1): env_file — блáнкет-покрытие ЛЮБОГО ключа из корневого
+    # .env (untracked, git pull не перетирает), включая поля без явной ${...}-подстановки ниже
+    # (SMTP_*/TELEGRAM_*/INTAKE_WEBHOOK_TOKEN/SELLER_*). ``required: false`` — локальный dev
+    # без .env не ломается (см. дефолты в environment: ниже).
+    env_file:
+      - path: .env
+        required: false
     environment:
-      # SECURITY (прод-дыра #2): задавать прод-значения через host-env (/opt/cmr-erp/.env) или
-      # docker-compose.override.yml. НЕ хардкодить dev — хардкод в `environment:` ПЕРЕБИВАЕТ
-      # серверный .env, из-за чего прод-гард `_no_dev_defaults_in_prod` (config/settings.py)
-      # коротит и app доверяет X-User-Roles = вход суперюзером без пароля на публичном belakb.by.
-      # Substitution: локаль (env не задан) → дефолт dev; прод задаёт реальные значения.
-      AIOS_ENVIRONMENT: ${AIOS_ENVIRONMENT:-dev}
+      # НЕ хардкодить dev — хардкод в `environment:` ПЕРЕБИВАЕТ серверный .env, из-за чего
+      # прод-гард `_no_dev_defaults_in_prod` (config/settings.py) коротит и app доверяет
+      # X-User-Roles = вход суперюзером без пароля на публичном belakb.by. Дефолты ниже
+      # безопасны: без .env компоуз поднимается в `prod`, и прод-гард ГРОМКО валит старт
+      # (auth_mode≠oidc) — вместо тихого dev-режима. Локальная разработка: `cp .env.example .env`.
+      AIOS_ENVIRONMENT: ${AIOS_ENVIRONMENT:-prod}
       AIOS_AUTH_MODE: ${AIOS_AUTH_MODE:-dev}
       AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+psycopg://aios:aios@postgres:5432/aios}
       AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://redis:6379/0}

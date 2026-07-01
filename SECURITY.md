@@ -100,6 +100,18 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
       `environment="prod"` по умолчанию; `model_validator` падает на старте, если прод-режим
       несёт dev-креды `aios:aios`. ⚠️ Локальная разработка/тесты теперь требуют явного
       `AIOS_ENVIRONMENT=dev` (выставлено в `tests/conftest.py`).
+      - ✅ **P0-5.1. Компоуз больше не коротит гард (2026-07-01).** Дыра: `docker-compose.yml`
+        сервис `app` ХАРДКОДИЛ `AIOS_ENVIRONMENT: dev` + `aios:aios@postgres` в `environment:`
+        и НЕ имел `env_file` — т.е. серверный `.env` (по DEPLOY.md) приложением игнорировался,
+        а валидатор P0-5 коротился (environment=dev → `return self`). Следствие: деплой
+        коммитнутого compose как есть = публичный belakb.by в dev-режиме (доверие `X-User-Roles`,
+        вход супер-юзером без пароля) при следующем выкате линии с AuthN P1-1. Фикс: `app` читает
+        `env_file: .env` (untracked, `git pull` не перетирает), а `environment:` даёт БЕЗОПАСНЫЕ
+        дефолты через интерполяцию (`${AIOS_ENVIRONMENT:-prod}` и т.д.) — прод без `.env` падает
+        ГРОМКО на гарде, а не стартует тихо. Креды БД/Keycloak в `postgres`/`keycloak` тоже
+        параметризованы (`${AIOS_PG_*}`/`${AIOS_KC_*}`, дефолт dev) — прод задаёт их в `.env`
+        (P0-4). Гейт выката — `docker compose config | grep AIOS_ENVIRONMENT` → `production`
+        (см. DEPLOY.md §1 + чеклист §5). Тест: `tests/unit/test_settings_guard.py`.
 - [x] **P0-6. Telegram webhook secret-token.** ✅ 2026-06-24. `core/runtime/telegram_routes.py`:
       `_check_telegram_secret` constant-compare заголовка `X-Telegram-Bot-Api-Secret-Token` с
       `config.telegram_webhook_secret` (env `AIOS_TELEGRAM_WEBHOOK_SECRET`) → 401 при несовпадении;
@@ -125,8 +137,12 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
       жёстко `RS256` (alg=none и HS256-confusion отвергаются — проверено адверсариально), роли
       из `realm_access.roles`, fail-closed → «Гость». За флагом `auth_mode` (`dev`=заголовок как
       раньше / `oidc`=токен); единый резолвер identity для middleware и route-deps. **Прод-гард:**
-      `environment≠dev` НЕ загрузится без `auth_mode=oidc`+issuer+audience (SEC-002). 13 тестов,
-      ruff/полный прогон зелёные.
+      `environment≠dev` НЕ загрузится без `auth_mode=oidc`+issuer+audience (SEC-002). **Громкая
+      страховка (2026-07-01):** при `auth_mode≠oidc` приложение пишет WARNING на старте
+      (`core/runtime/app.py` lifespan) — dev-режим (доверие `X-User-Roles`) больше не «тихий»,
+      виден в логах. Приложение не может само знать про публичный bind/прокси, поэтому реальный
+      гейт — `environment`+`auth_mode` (fail-closed выше), а WARNING ловит случай `environment=dev`
+      на публичном хосте. 13 тестов, ruff/полный прогон зелёные.
       _Хвост (отдельные шаги):_ (1) завести realm/client в Keycloak (audience-mapper → `client_id`
       в `aud`); (2) фронт шлёт `Authorization: Bearer` вместо cookie→`X-User-Roles`; (3) маппинг
       Keycloak-ролей → наши (+ `resource_access` client-роли сейчас игнорируются); (4) флипнуть прод

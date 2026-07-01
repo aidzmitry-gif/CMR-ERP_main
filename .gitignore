@@ -11,6 +11,8 @@ dist/
 venv/
 env/
 .env
+# Серверный оверрайд compose (прод-порты/секреты) — untracked, не перетирается git pull
+docker-compose.override.yml
 
 # Локальная dev-БД (SQLite)
 dev.db

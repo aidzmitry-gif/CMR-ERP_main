@@ -9,17 +9,38 @@ dev-дефолтные креды БД (страховка от деплоя с 
 - Домен + TLS через reverse proxy (nginx / Caddy / Traefik) перед backend (`:8000`) и frontend (`:3000`).
 
 ## 1. Секреты — `.env` в корне проекта
-Скопируйте `.env.example` → `.env` и замените на прод-значения:
+`docker-compose.yml` НЕ хардкодит окружение: сервис `app` читает `.env` (`env_file`), а дефолты
+в compose безопасны (`AIOS_ENVIRONMENT=prod`). Поэтому `.env` — untracked (`.gitignore`), и
+`git pull` его НЕ перетирает. Скопируйте `.env.example` → `.env` и замените на прод-значения:
 ```env
 AIOS_ENVIRONMENT=production
 AIOS_DEBUG=false
+# Креды БД — в URL приложения И в сервисах postgres/keycloak (одни и те же значения):
+AIOS_PG_USER=<user>
+AIOS_PG_PASSWORD=<СИЛЬНЫЙ_ПАРОЛЬ>
+AIOS_PG_DB=<db>
 AIOS_DATABASE_URL=postgresql+psycopg://<user>:<СИЛЬНЫЙ_ПАРОЛЬ>@postgres:5432/<db>
 AIOS_REDIS_URL=redis://redis:6379/0
+# Keycloak admin (вместо dev admin/admin):
+AIOS_KC_ADMIN_USER=<admin-user>
+AIOS_KC_ADMIN_PASSWORD=<СИЛЬНЫЙ_ПАРОЛЬ>
+# Реальная аутентификация (ОБЯЗАТЕЛЬНО в проде, см. ниже):
+AIOS_AUTH_MODE=oidc
+AIOS_KEYCLOAK_ISSUER=https://<host>/realms/<realm>
+AIOS_KEYCLOAK_AUDIENCE=<client_id>
 AIOS_TELEPHONY_WEBHOOK_TOKEN=<длинный-случайный-секрет>   # вебхук АТС
 AIOS_INTAKE_WEBHOOK_TOKEN=<длинный-случайный-секрет>      # сайт/почта → лиды
 # SMTP / Telegram — по необходимости (см. .env.example)
 ```
-⚠️ НЕ используйте `aios:aios` в проде — прод-гард уронит старт приложения (это и есть страховка).
+⚠️ **Прод-гард — страховка от тихого небезопасного старта (SECURITY.md P0-5/P1-1).** Приложение
+НЕ запустится, если `environment≠dev` и при этом: креды БД = `aios:aios`, ЛИБО `auth_mode≠oidc`
+(доверие заголовку `X-User-Roles` = вход супер-юзером без пароля), ЛИБО не заданы issuer/audience.
+Это by design — лучше явный отказ старта, чем публичный belakb.by в dev-режиме.
+
+**Проверка конфигурации ПЕРЕД выкатом** (на прод-`.env`):
+```bash
+docker compose config | grep AIOS_ENVIRONMENT   # должно быть: production (не dev!)
+```
 
 ## 2. База данных + backend
 ```bash
@@ -54,11 +75,12 @@ BACKEND_URL=http://app:8000 npm start        # Next :3000
 ## 5. Чеклист готовности
 - [x] backend-тесты: `pytest -m "not integration"` — **454 passed**
 - [x] frontend прод-сборка: `npm run build` — **80/80 страниц**
-- [ ] `.env` заполнен прод-секретами (не dev-дефолты)
+- [ ] `.env` заполнен прод-секретами (не dev-дефолты `aios:aios` / `admin/admin`)
+- [ ] `docker compose config | grep AIOS_ENVIRONMENT` → `production` (не `dev`)
+- [ ] `AIOS_AUTH_MODE=oidc` + issuer/audience заданы (иначе старт упадёт by design)
 - [ ] миграции применены (`alembic upgrade head` — авто на старте `app`)
 - [ ] reverse proxy + TLS перед `:8000` и `:3000`
 - [ ] вебхуки сайта/почты/АТС настроены с токенами
-- [ ] (рекомендуется) реальная аутентификация Keycloak вместо dev-логина
 
 ## Известные ограничения (dev-заглушки — заменить в проде)
 - **Логин** — dev-переключатель ролей (cookie `aios_user`/`aios_role`). Прод: Keycloak OIDC (заложен в compose).

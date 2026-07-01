@@ -70,6 +70,16 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # SECURITY.md P1-1: dev-режим AuthN доверяет заголовку X-User-Roles (вход без пароля).
+        # Прод-гард (config/settings.py) уже запрещает auth_mode≠oidc при environment≠dev; здесь
+        # — ГРОМКАЯ страховка, чтобы любой запуск в dev-режиме был виден в логах (а не «тихо»).
+        if services.config.auth_mode != "oidc":
+            logger.warning(
+                "AuthN в DEV-режиме (auth_mode=%s): доверяю заголовку X-User-Roles — вход БЕЗ "
+                "пароля. НЕ для публичного/прод-доступа. Выставьте AIOS_AUTH_MODE=oidc + Keycloak "
+                "(SECURITY.md P1-1).",
+                services.config.auth_mode,
+            )
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
         background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
