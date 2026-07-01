@@ -44,8 +44,6 @@ def main() -> int:
     base = args.crm.rstrip("/")
     ext_id = args.project_id
 
-    steps: list[tuple[str, callable]] = []
-
     def step_link():
         post_json(
             f"{base}/marketing/seo/webhook",

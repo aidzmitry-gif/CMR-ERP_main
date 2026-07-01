@@ -88,9 +88,9 @@ async def test_seo_webhook_snapshot_updated(session, api):
 
 @pytest.mark.asyncio
 async def test_seo_webhook_hmac_enforced(session, monkeypatch):
-    from config.settings import get_settings
     from httpx import ASGITransport, AsyncClient
 
+    from config.settings import get_settings
     from core.runtime.app import create_app
     from core.runtime.deps import get_session
 
@@ -210,9 +210,9 @@ async def test_seo_task_webhook_and_list(session, api):
 
 @pytest.mark.asyncio
 async def test_seo_deep_link_and_dashboard(session, monkeypatch):
-    from config.settings import get_settings
     from httpx import ASGITransport, AsyncClient
 
+    from config.settings import get_settings
     from core.runtime.app import create_app
     from core.runtime.deps import get_session
 
