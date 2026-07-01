@@ -240,4 +240,29 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
       { label: "Завершаемость", value: "76%", delta: "+4%" },
     ],
   },
+
+  service: {
+    createLabel: "Создать заявку",
+    kpis: [
+      { label: "Заявок в работе", value: "12", target: "20", note: "60% от плана", percent: 60, tone: "blue" },
+      { label: "Закрыто сегодня", value: "4", target: "8", note: "50% плана", percent: 50, tone: "green" },
+      { label: "SLA выполнен", value: "87%", note: "цель ≥ 90%", percent: 87, tone: "amber" },
+    ],
+    statusNote: "12 заявок в работе · 3 просрочены · 2 ждут ответа",
+    panel: {
+      title: "Активные обращения",
+      tabs: ["Лента", "Клиенты", "Задачи"],
+      items: [
+        { title: "Онбординг: сделка CRM-042", text: "Клиент подключён, ждёт инструкций", tone: "info" },
+        { title: "Рекламация #SR-007", text: "Ожидает ответа клиента 2 дня", tone: "alert", badge: 1 },
+        { title: "Техподдержка #SR-011", text: "Решено, ожидает закрытия", tone: "ok" },
+      ],
+    },
+    summary: [
+      { label: "Всего заявок", value: "38", delta: "+5%" },
+      { label: "Закрыто", value: "26", delta: "+8%" },
+      { label: "SLA", value: "87%", delta: "-2%" },
+      { label: "Среднее время", value: "4.2 ч", delta: "-0.3" },
+    ],
+  },
 };
