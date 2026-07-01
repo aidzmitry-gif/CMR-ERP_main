@@ -7,35 +7,37 @@ import { formatByn } from "@/lib/format";
 
 // ──────────────────────────── Контракты ответов /finance/* ────────────────────────────
 
+// Money-поля — строки BYN (backend отдаёт Decimal→str, деньги не через float).
+// Проценты (pct) — остаются number: это не деньги.
 interface FinanceSummary {
   currency: string;
   margin: {
-    revenue: number;
-    landed: number;
-    landed_gross?: number;
-    claim_refund?: number;
-    freight: number;
-    gross: number;
+    revenue: string;
+    landed: string;
+    landed_gross?: string;
+    claim_refund?: string;
+    freight: string;
+    gross: string;
     pct: number | null;
   };
   cash: {
-    inflow: number;
-    outflow: number;
-    net: number;
-    received: number;
-    pending_receivable: number;
-    freight_refund: number;
+    inflow: string;
+    outflow: string;
+    net: string;
+    received: string;
+    pending_receivable: string;
+    freight_refund: string;
   };
-  costs: { kind: string; label: string; amount: number }[];
+  costs: { kind: string; label: string; amount: string }[];
 }
 
 interface ReconDealResp {
   deal_id: number;
-  finance_landed: number;
-  facade_landed: number | null;
-  delta: number | null;
-  revenue: number;
-  gross_finance: number;
+  finance_landed: string;
+  facade_landed: string | null;
+  delta: string | null;
+  revenue: string;
+  gross_finance: string;
   level: string;
   source_facade_available: boolean;
   currency: string;
@@ -44,20 +46,20 @@ interface ReconDealResp {
 interface Payment {
   id: number;
   ref: string;
-  amount: number;
+  amount: string;
   status: string;
   kind: string;
   due_date: string | null;
   paid_at: string | null;
   deal_id: number | null;
   counterparty_ref: string | null;
-  outstanding: number | null;
+  outstanding: string | null;
   is_overdue: boolean | null;
 }
 
 interface AgingSide {
-  buckets: Record<string, number>;
-  total: number;
+  buckets: Record<string, string>;
+  total: string;
 }
 interface AgingResp {
   as_of: string;
@@ -68,17 +70,17 @@ interface AgingResp {
 
 interface CashflowWeek {
   week_start: string;
-  inflow: number;
-  outflow: number;
-  net: number;
-  cumulative: number;
+  inflow: string;
+  outflow: string;
+  net: string;
+  cumulative: string;
 }
 interface CashflowBucket {
   bucket_start: string;
-  inflow: number;
-  outflow: number;
-  net: number;
-  cumulative: number;
+  inflow: string;
+  outflow: string;
+  net: string;
+  cumulative: string;
 }
 interface CashflowResp {
   as_of: string;
@@ -86,10 +88,10 @@ interface CashflowResp {
   mode?: "week" | "day";
   bucket_size_days?: number;
   account_id?: number | null;
-  opening_balance: number;
+  opening_balance: string;
   weeks: CashflowWeek[];
   buckets?: CashflowBucket[];
-  not_dated: { inflow: number; outflow: number };
+  not_dated: { inflow: string; outflow: string };
 }
 
 interface BankAccount {
@@ -97,17 +99,17 @@ interface BankAccount {
   code: string;
   title: string;
   currency: string;
-  opening_balance: number;
+  opening_balance: string;
   opening_at: string | null;
   is_active: boolean;
 }
 
 interface MarginRow {
   key: number | string | null;
-  revenue: number;
-  landed: number;
-  freight: number;
-  gross: number;
+  revenue: string;
+  landed: string;
+  freight: string;
+  gross: string;
   pct: number | null;
 }
 interface MarginResp {
@@ -119,9 +121,9 @@ interface ReconResp {
   as_of: string;
   source: string;
   source_available: boolean;
-  matched: { ref: string; amount: number; counterparty_ref: string | null }[];
-  only_in_erp: { ref: string; amount: number; counterparty_ref: string | null }[];
-  only_in_1c: { ref: string | null; amount: number; counterparty_ref: string | null }[];
+  matched: { ref: string; amount: string; counterparty_ref: string | null }[];
+  only_in_erp: { ref: string; amount: string; counterparty_ref: string | null }[];
+  only_in_1c: { ref: string | null; amount: string; counterparty_ref: string | null }[];
 }
 
 // ──────────────────────────── Подсобки ────────────────────────────
@@ -146,7 +148,8 @@ const BUCKET_LABEL: Record<string, string> = {
 };
 
 function isInflow(p: Payment): boolean {
-  return p.kind === "receivable" ? p.amount >= 0 : p.amount < 0;
+  const amount = parseFloat(p.amount);
+  return p.kind === "receivable" ? amount >= 0 : amount < 0;
 }
 
 function StatusBadge({ status, overdue }: { status: string; overdue?: boolean | null }) {
@@ -317,37 +320,41 @@ function SummaryTab() {
       {/* Касса — ДДС-lite */}
       <h2 className="text-sm font-semibold text-muted">Касса (ДДС-lite)</h2>
       <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card title="Поступления" value={formatByn(s.cash.inflow)} tone="pos" />
-        <Card title="Расходы" value={formatByn(s.cash.outflow)} tone="neg" />
+        <Card title="Поступления" value={formatByn(parseFloat(s.cash.inflow))} tone="pos" />
+        <Card title="Расходы" value={formatByn(parseFloat(s.cash.outflow))} tone="neg" />
         <Card
           title="Сальдо"
-          value={formatByn(s.cash.net)}
-          tone={s.cash.net >= 0 ? "pos" : "neg"}
+          value={formatByn(parseFloat(s.cash.net))}
+          tone={parseFloat(s.cash.net) >= 0 ? "pos" : "neg"}
         />
-        <Card title="К поступлению (счета)" value={formatByn(s.cash.pending_receivable)} />
+        <Card
+          title="К поступлению (счета)"
+          value={formatByn(parseFloat(s.cash.pending_receivable))}
+        />
       </div>
 
       {/* Фактическая маржа */}
       <h2 className="mt-6 text-sm font-semibold text-muted">Фактическая маржа (по фактам)</h2>
       <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card title="Выручка" value={formatByn(s.margin.revenue)} />
-        <Card title="Себестоимость (landed)" value={formatByn(s.margin.landed)} />
-        <Card title="Фрахт (нетто)" value={formatByn(s.margin.freight)} />
+        <Card title="Выручка" value={formatByn(parseFloat(s.margin.revenue))} />
+        <Card title="Себестоимость (landed)" value={formatByn(parseFloat(s.margin.landed))} />
+        <Card title="Фрахт (нетто)" value={formatByn(parseFloat(s.margin.freight))} />
         <Card
           title={`Валовая прибыль${s.margin.pct != null ? ` · ${s.margin.pct.toFixed(1)}%` : ""}`}
-          value={formatByn(s.margin.gross)}
-          tone={s.margin.gross >= 0 ? "pos" : "neg"}
+          value={formatByn(parseFloat(s.margin.gross))}
+          tone={parseFloat(s.margin.gross) >= 0 ? "pos" : "neg"}
         />
       </div>
-      {s.margin.revenue === 0 && (
+      {parseFloat(s.margin.revenue) === 0 && (
         <p className="mt-2 text-xs text-muted">
           Выручки по фактам пока нет — маржа появится после первых проведённых счетов.
         </p>
       )}
-      {(s.margin.claim_refund ?? 0) > 0 && (
+      {parseFloat(s.margin.claim_refund ?? "0") > 0 && (
         <p className="mt-2 text-xs text-muted">
-          Компенсация по претензии (приток от поставщика): +{formatByn(s.margin.claim_refund ?? 0)} —
-          уменьшает чистую себестоимость на эту величину.
+          Компенсация по претензии (приток от поставщика): +
+          {formatByn(parseFloat(s.margin.claim_refund ?? "0"))} — уменьшает чистую себестоимость на
+          эту величину.
         </p>
       )}
 
@@ -360,7 +367,7 @@ function SummaryTab() {
               <tr key={c.kind} className="border-b border-line last:border-0">
                 <td className="px-4 py-2.5 text-ink">{c.label}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {formatByn(c.amount)}
+                  {formatByn(parseFloat(c.amount))}
                 </td>
               </tr>
             ))}
@@ -399,7 +406,7 @@ function SummaryTab() {
                   className={`px-4 py-2.5 text-right tabular-nums ${isInflow(p) ? "text-emerald-600" : "text-rose-600"}`}
                 >
                   {isInflow(p) ? "+" : "−"}
-                  {formatByn(Math.abs(p.amount))}
+                  {formatByn(Math.abs(parseFloat(p.amount)))}
                 </td>
               </tr>
             ))}
@@ -472,9 +479,11 @@ function PaymentsTab() {
                 <td className="px-4 py-2.5">
                   <StatusBadge status={p.status} overdue={p.is_overdue} />
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatByn(p.amount)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                  {formatByn(parseFloat(p.amount))}
+                </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">
-                  {p.outstanding != null ? formatByn(p.outstanding) : "—"}
+                  {p.outstanding != null ? formatByn(parseFloat(p.outstanding)) : "—"}
                 </td>
                 <td className="px-4 py-2.5 text-right">
                   {p.kind === "receivable" && p.status !== "paid" && (
@@ -542,16 +551,23 @@ function AgingTab() {
     <State
       loading={loading}
       error={error}
-      empty={!loading && !error && data != null && data.ar.total === 0 && data.ap.total === 0}
+      empty={
+        !loading &&
+        !error &&
+        data != null &&
+        parseFloat(data.ar.total) === 0 &&
+        parseFloat(data.ap.total) === 0
+      }
       what="aging"
     />
   );
-  if (loading || error || !data || (data.ar.total === 0 && data.ap.total === 0)) return bar;
+  if (loading || error || !data || (parseFloat(data.ar.total) === 0 && parseFloat(data.ap.total) === 0))
+    return bar;
   const isAccent = (b: string) => b === "61-90" || b === "90+";
   const Side = ({ title, side }: { title: string; side: AgingSide }) => (
     <div className="overflow-hidden rounded-xl bg-surface shadow-card">
       <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
-        {title} · {formatByn(side.total)}
+        {title} · {formatByn(parseFloat(side.total))}
       </div>
       <table className="w-full text-sm">
         <tbody>
@@ -566,7 +582,7 @@ function AgingTab() {
                 {BUCKET_LABEL[b]}
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                {formatByn(side.buckets[b] ?? 0)}
+                {formatByn(parseFloat(side.buckets[b] ?? "0"))}
               </td>
             </tr>
           ))}
@@ -589,17 +605,18 @@ function AgingTab() {
 
 function CashflowTab() {
   const { data, loading, error } = useFetch<CashflowResp>("/api/finance/cashflow-forecast?weeks=8");
-  const bar = <State loading={loading} error={error} empty={!loading && !error && data?.weeks.every((w) => w.inflow === 0 && w.outflow === 0)} what="прогноз кэш-фло" />;
+  const bar = <State loading={loading} error={error} empty={!loading && !error && data?.weeks.every((w) => parseFloat(w.inflow) === 0 && parseFloat(w.outflow) === 0)} what="прогноз кэш-фло" />;
   if (loading || error || !data) return bar;
   const max = Math.max(
     1,
-    ...data.weeks.map((w) => Math.max(w.inflow, w.outflow)),
+    ...data.weeks.map((w) => Math.max(parseFloat(w.inflow), parseFloat(w.outflow))),
   );
   return (
     <>
       <p className="text-xs text-muted">
-        На {data.as_of}. Начальное сальдо: {formatByn(data.opening_balance)}. Не датировано:
-        +{formatByn(data.not_dated.inflow)} / −{formatByn(data.not_dated.outflow)}.
+        На {data.as_of}. Начальное сальдо: {formatByn(parseFloat(data.opening_balance))}. Не
+        датировано: +{formatByn(parseFloat(data.not_dated.inflow))} / −
+        {formatByn(parseFloat(data.not_dated.outflow))}.
       </p>
       <div className="mt-2 overflow-hidden rounded-xl bg-surface shadow-card">
         <table className="w-full text-sm">
@@ -617,30 +634,30 @@ function CashflowTab() {
           </thead>
           <tbody>
             {data.weeks.map((w) => {
-              const inW = `${(w.inflow / max) * 50}%`;
-              const outW = `${(w.outflow / max) * 50}%`;
+              const inW = `${(parseFloat(w.inflow) / max) * 50}%`;
+              const outW = `${(parseFloat(w.outflow) / max) * 50}%`;
               return (
                 <tr key={w.week_start} className="border-b border-line last:border-0">
                   <td className="px-4 py-2.5 text-ink">{w.week_start}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600">
-                    +{formatByn(w.inflow)}
+                    +{formatByn(parseFloat(w.inflow))}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-rose-600">
-                    −{formatByn(w.outflow)}
+                    −{formatByn(parseFloat(w.outflow))}
                   </td>
                   <td
                     className={`px-4 py-2.5 text-right tabular-nums ${
-                      w.net >= 0 ? "text-emerald-600" : "text-rose-600"
+                      parseFloat(w.net) >= 0 ? "text-emerald-600" : "text-rose-600"
                     }`}
                   >
-                    {formatByn(w.net)}
+                    {formatByn(parseFloat(w.net))}
                   </td>
                   <td
                     className={`px-4 py-2.5 text-right tabular-nums ${
-                      w.cumulative >= 0 ? "text-ink" : "text-rose-600"
+                      parseFloat(w.cumulative) >= 0 ? "text-ink" : "text-rose-600"
                     }`}
                   >
-                    {formatByn(w.cumulative)}
+                    {formatByn(parseFloat(w.cumulative))}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex h-3 items-center gap-0.5">
@@ -708,15 +725,21 @@ function MarginTab() {
                     <span>#{String(row.key)}</span>
                   )}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatByn(row.revenue)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatByn(row.landed)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatByn(row.freight)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                  {formatByn(parseFloat(row.revenue))}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                  {formatByn(parseFloat(row.landed))}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                  {formatByn(parseFloat(row.freight))}
+                </td>
                 <td
                   className={`px-4 py-2.5 text-right tabular-nums ${
-                    row.gross >= 0 ? "text-emerald-600" : "text-rose-600"
+                    parseFloat(row.gross) >= 0 ? "text-emerald-600" : "text-rose-600"
                   }`}
                 >
-                  {formatByn(row.gross)}
+                  {formatByn(parseFloat(row.gross))}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {row.pct != null ? `${row.pct.toFixed(1)}%` : "—"}
@@ -811,20 +834,20 @@ function ReconcileDealCard() {
         {resp && (
           <div className="mt-3 space-y-2">
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Card title="Finance (landed)" value={formatByn(resp.finance_landed)} />
+              <Card title="Finance (landed)" value={formatByn(parseFloat(resp.finance_landed))} />
               <Card
                 title="Facade (контроль)"
-                value={resp.facade_landed != null ? formatByn(resp.facade_landed) : "—"}
+                value={resp.facade_landed != null ? formatByn(parseFloat(resp.facade_landed)) : "—"}
               />
               <Card
                 title="Расхождение Δ"
-                value={resp.delta != null ? formatByn(resp.delta) : "—"}
-                tone={resp.delta != null && resp.delta !== 0 ? "neg" : "pos"}
+                value={resp.delta != null ? formatByn(parseFloat(resp.delta)) : "—"}
+                tone={resp.delta != null && parseFloat(resp.delta) !== 0 ? "neg" : "pos"}
               />
               <Card
                 title="Валовая (по finance)"
-                value={formatByn(resp.gross_finance)}
-                tone={resp.gross_finance >= 0 ? "pos" : "neg"}
+                value={formatByn(parseFloat(resp.gross_finance))}
+                tone={parseFloat(resp.gross_finance) >= 0 ? "pos" : "neg"}
               />
             </div>
             {!resp.source_facade_available ? (
@@ -832,7 +855,7 @@ function ReconcileDealCard() {
                 Landed-фасад недоступен (нет позиций или сервис не настроен) — Finance-сторона
                 отдана честно, контрольная величина пуста.
               </p>
-            ) : resp.delta != null && resp.delta !== 0 ? (
+            ) : resp.delta != null && parseFloat(resp.delta) !== 0 ? (
               <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-900/30 dark:text-rose-200">
                 Проводки finance отстали или опередили себестоимость — Δ ≠ 0. Перепосчитать landed.
               </p>
@@ -1366,7 +1389,7 @@ function ReconcileTab() {
     tone,
   }: {
     title: string;
-    rows: { ref: string | null; amount: number; counterparty_ref: string | null }[];
+    rows: { ref: string | null; amount: string; counterparty_ref: string | null }[];
     tone?: "ok" | "warn";
   }) => (
     <div className="overflow-hidden rounded-xl bg-surface shadow-card">
@@ -1395,7 +1418,9 @@ function ReconcileTab() {
                     "—"
                   )}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatByn(r.amount)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                  {formatByn(parseFloat(r.amount))}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1489,10 +1514,10 @@ function CalendarTab() {
           <div className="border-b border-line px-4 py-2.5 text-sm text-muted">
             На {calendar.data.as_of}. Начальное сальдо:{" "}
             <span className="font-semibold text-ink">
-              {formatByn(calendar.data.opening_balance)}
+              {formatByn(parseFloat(calendar.data.opening_balance))}
             </span>
-            . Не датировано: +{formatByn(calendar.data.not_dated.inflow)} / −
-            {formatByn(calendar.data.not_dated.outflow)}.
+            . Не датировано: +{formatByn(parseFloat(calendar.data.not_dated.inflow))} / −
+            {formatByn(parseFloat(calendar.data.not_dated.outflow))}.
           </div>
           <table className="w-full text-sm">
             <thead className="border-b border-line text-left text-xs text-muted">
@@ -1506,7 +1531,7 @@ function CalendarTab() {
             </thead>
             <tbody>
               {buckets.map((b) => {
-                const danger = b.cumulative < 0;
+                const danger = parseFloat(b.cumulative) < 0;
                 return (
                   <tr
                     key={b.bucket_start}
@@ -1516,28 +1541,28 @@ function CalendarTab() {
                   >
                     <td className="px-4 py-2 text-ink">{b.bucket_start}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-emerald-600">
-                      {b.inflow ? `+${formatByn(b.inflow)}` : "—"}
+                      {parseFloat(b.inflow) ? `+${formatByn(parseFloat(b.inflow))}` : "—"}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-rose-600">
-                      {b.outflow ? `−${formatByn(b.outflow)}` : "—"}
+                      {parseFloat(b.outflow) ? `−${formatByn(parseFloat(b.outflow))}` : "—"}
                     </td>
                     <td
                       className={`px-4 py-2 text-right tabular-nums ${
-                        b.net > 0
+                        parseFloat(b.net) > 0
                           ? "text-emerald-600"
-                          : b.net < 0
+                          : parseFloat(b.net) < 0
                             ? "text-rose-600"
                             : "text-muted"
                       }`}
                     >
-                      {b.net ? formatByn(b.net) : "—"}
+                      {parseFloat(b.net) ? formatByn(parseFloat(b.net)) : "—"}
                     </td>
                     <td
                       className={`px-4 py-2 text-right tabular-nums font-medium ${
                         danger ? "text-rose-700 dark:text-rose-300" : "text-ink"
                       }`}
                     >
-                      {formatByn(b.cumulative)}
+                      {formatByn(parseFloat(b.cumulative))}
                     </td>
                   </tr>
                 );

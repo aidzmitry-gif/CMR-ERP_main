@@ -109,7 +109,7 @@ async def test_two_partial_allocations_close_invoice(session, api):
     r1 = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": 400})
     assert r1.status_code == 201
     detail1 = (await api.get(f"/finance/payments/{pid}")).json()
-    assert detail1["status"] == "partial" and detail1["outstanding"] == 600.0
+    assert detail1["status"] == "partial" and detail1["outstanding"] == "600.00"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "finance.payment.paid" not in types
 
@@ -117,7 +117,7 @@ async def test_two_partial_allocations_close_invoice(session, api):
     r2 = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": 600})
     assert r2.status_code == 201
     detail2 = (await api.get(f"/finance/payments/{pid}")).json()
-    assert detail2["status"] == "paid" and detail2["outstanding"] == 0.0
+    assert detail2["status"] == "paid" and detail2["outstanding"] == "0.00"
     assert len(detail2["allocations"]) == 2
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "finance.payment.paid" in types
@@ -199,20 +199,20 @@ async def test_aging_buckets_split_correctly(session):
     r = await aging_buckets(session)
     assert r["currency"] == "BYN"
     ar = r["ar"]["buckets"]
-    assert ar["current"] == 100.0
-    assert ar["1-30"] == 200.0
-    assert ar["31-60"] == 300.0
-    assert ar["no_due"] == 50.0
-    assert r["ar"]["total"] == 650.0
+    assert ar["current"] == "100.00"
+    assert ar["1-30"] == "200.00"
+    assert ar["31-60"] == "300.00"
+    assert ar["no_due"] == "50.00"
+    assert r["ar"]["total"] == "650.00"
     ap = r["ap"]["buckets"]
-    assert ap["90+"] == 400.0 and ap["current"] == 500.0
+    assert ap["90+"] == "400.00" and ap["current"] == "500.00"
 
 
 async def test_aging_empty(session):
     from modules.finance.aging import aging_buckets
 
     r = await aging_buckets(session)
-    assert r["ar"]["total"] == 0.0 and r["ap"]["total"] == 0.0
+    assert r["ar"]["total"] == "0.00" and r["ap"]["total"] == "0.00"
 
 
 # ───────────────────────── P4: cost center ─────────────────────────
@@ -230,10 +230,10 @@ async def test_cost_center_default_from_kind(session):
     await session.commit()
     r = await group_by_cost_center(session)
     by = {c["name"]: c for c in r["centers"]}
-    assert by["Продажи"]["income"] == 1000.0
-    assert by["Закупки"]["expense"] == 600.0
-    assert by["Логистика"]["expense"] == 100.0
-    assert by["Спец"]["expense"] == 70.0
+    assert by["Продажи"]["income"] == "1000.00"
+    assert by["Закупки"]["expense"] == "600.00"
+    assert by["Логистика"]["expense"] == "100.00"
+    assert by["Спец"]["expense"] == "70.00"
 
 
 async def test_cost_center_empty_is_honest(session):
@@ -319,13 +319,13 @@ async def test_cashflow_forecast_groups_by_week_with_cumulative(session):
     session.add(Payment(ref="no-due", amount=Decimal("777"), kind="receivable", status="pending"))
     await session.commit()
     r = await cashflow_forecast(session, weeks=3, today=today)
-    assert r["opening_balance"] == 400.0
+    assert r["opening_balance"] == "400.00"
     weeks = r["weeks"]
-    assert weeks[0]["inflow"] == 200.0 and weeks[0]["outflow"] == 0.0
-    assert weeks[0]["net"] == 200.0 and weeks[0]["cumulative"] == 600.0
-    assert weeks[1]["outflow"] == 150.0 and weeks[1]["cumulative"] == 450.0
-    assert weeks[2]["cumulative"] == 450.0  # пустая неделя — кумулятив сохраняется
-    assert r["not_dated"]["inflow"] == 777.0
+    assert weeks[0]["inflow"] == "200.00" and weeks[0]["outflow"] == "0.00"
+    assert weeks[0]["net"] == "200.00" and weeks[0]["cumulative"] == "600.00"
+    assert weeks[1]["outflow"] == "150.00" and weeks[1]["cumulative"] == "450.00"
+    assert weeks[2]["cumulative"] == "450.00"  # пустая неделя — кумулятив сохраняется
+    assert r["not_dated"]["inflow"] == "777.00"
 
 
 # ───────────────────────── P7: margin by deal / counterparty ─────────────────────────
@@ -346,11 +346,11 @@ async def test_margin_by_deal_ranks_and_isolates_unattributed(session):
     r = await margin_by_deal(session)
     by_key = {row["key"]: row for row in r["items"]}
     # deal 1: 1000 - 400 - 100 = 500 (50%), deal 2: 500 - 450 = 50 (10%)
-    assert by_key[1]["gross"] == 500.0 and by_key[1]["pct"] == 50.0
-    assert by_key[2]["gross"] == 50.0 and by_key[2]["pct"] == 10.0
+    assert by_key[1]["gross"] == "500.00" and by_key[1]["pct"] == 50.0
+    assert by_key[2]["gross"] == "50.00" and by_key[2]["pct"] == 10.0
     # неатрибутированное — в конце независимо от gross
     assert r["items"][-1]["key"] is None
-    assert r["items"][-1]["gross"] == 999.0
+    assert r["items"][-1]["gross"] == "999.00"
 
 
 async def test_margin_by_counterparty_groups(session):
@@ -365,7 +365,7 @@ async def test_margin_by_counterparty_groups(session):
     await session.commit()
     r = await margin_by_counterparty(session)
     assert r["items"][0]["key"] == "УНП-1"
-    assert r["items"][0]["gross"] == 500.0
+    assert r["items"][0]["gross"] == "500.00"
 
 
 # ───────────────────────── P8: reconcile-1c (fail-soft) ─────────────────────────
@@ -590,7 +590,7 @@ async def test_cashflow_includes_po_planned_in_outflow(session):
     )
     await session.commit()
     r = await cashflow_forecast(session, weeks=3, today=today)
-    assert r["weeks"][1]["outflow"] == 800.0
+    assert r["weeks"][1]["outflow"] == "800.00"
 
 
 async def test_aging_does_not_include_po_planned(session):
@@ -608,7 +608,7 @@ async def test_aging_does_not_include_po_planned(session):
     )
     await session.commit()
     r = await aging_buckets(session)
-    assert r["ar"]["total"] == 0.0 and r["ap"]["total"] == 0.0  # planned НЕ в overdue
+    assert r["ar"]["total"] == "0.00" and r["ap"]["total"] == "0.00"  # planned НЕ в overdue
 
 
 # FIN-A3: claim_refund в summary и margin; po_planned НЕ в марже
@@ -625,9 +625,9 @@ async def test_summary_claim_refund_reduces_net_landed(session):
     await session.commit()
     r = await finance_summary(session)
     # net_landed = 1000 − 200 = 800; gross = 1500 − 800 = 700
-    assert r["margin"]["landed"] == 800.0
-    assert r["margin"]["claim_refund"] == 200.0
-    assert r["margin"]["gross"] == 700.0
+    assert r["margin"]["landed"] == "800.00"
+    assert r["margin"]["claim_refund"] == "200.00"
+    assert r["margin"]["gross"] == "700.00"
 
 
 async def test_margin_by_deal_subtracts_claim_refund_and_excludes_po_planned(session):
@@ -645,8 +645,8 @@ async def test_margin_by_deal_subtracts_claim_refund_and_excludes_po_planned(ses
     await session.commit()
     r = await margin_by_deal(session)
     row = next(it for it in r["items"] if it["key"] == 1)
-    assert row["landed"] == 800.0  # 1000 − 200
-    assert row["gross"] == 700.0  # 1500 − 800 (po_planned игнор)
+    assert row["landed"] == "800.00"  # 1000 − 200
+    assert row["gross"] == "700.00"  # 1500 − 800 (po_planned игнор)
 
 
 # FIN-A1: reconcile_deal_margin (finance ↔ facade)
@@ -669,9 +669,9 @@ async def test_reconcile_deal_margin_match_when_facade_equals_finance(session):
         session, _Facade(), deal_id=42, items={"SKU-X": Decimal("1")}
     )
     assert r["source_facade_available"] is True
-    assert r["finance_landed"] == 1000.0
-    assert r["facade_landed"] == 1000.0
-    assert r["delta"] == 0.0
+    assert r["finance_landed"] == "1000.00"
+    assert r["facade_landed"] == "1000.00"
+    assert r["delta"] == "0.00"
 
 
 async def test_reconcile_deal_margin_mismatch_detected(session):
@@ -690,7 +690,7 @@ async def test_reconcile_deal_margin_mismatch_detected(session):
     r = await reconcile_deal_margin(
         session, _Facade(), deal_id=43, items={"S": Decimal("1")}
     )
-    assert r["delta"] == 300.0  # 800 − 500
+    assert r["delta"] == "300.00"  # 800 − 500
 
 
 async def test_reconcile_deal_margin_facade_off_honest(session):
@@ -705,7 +705,7 @@ async def test_reconcile_deal_margin_facade_off_honest(session):
     assert r["source_facade_available"] is False
     assert r["facade_landed"] is None
     assert r["delta"] is None
-    assert r["finance_landed"] == 100.0  # finance всё равно отдаётся
+    assert r["finance_landed"] == "100.00"  # finance всё равно отдаётся
 
 
 async def test_reconcile_deal_margin_no_items_honest(session):
@@ -717,7 +717,7 @@ async def test_reconcile_deal_margin_no_items_honest(session):
 
     r = await reconcile_deal_margin(session, _Facade(), deal_id=99, items={})
     assert r["source_facade_available"] is False  # без sku → нечего сверять
-    assert r["finance_landed"] == 0.0  # сделки не было → 0 honest
+    assert r["finance_landed"] == "0.00"  # сделки не было → 0 honest
 
 
 # FIN-C5: cost_center учитывает claim_refund (доход в центр Закупки) и игнорит po_planned
@@ -735,8 +735,8 @@ async def test_cost_center_includes_claim_refund_and_excludes_po_planned(session
     r = await group_by_cost_center(session)
     by = {c["name"]: c for c in r["centers"]}
     # Закупки: expense=1000, income=200 (компенсация); po_planned игнорится
-    assert by["Закупки"]["expense"] == 1000.0
-    assert by["Закупки"]["income"] == 200.0
+    assert by["Закупки"]["expense"] == "1000.00"
+    assert by["Закупки"]["income"] == "200.00"
 
 
 # ───────────────────────── Круг 4: Платёжный календарь ─────────────────────────
@@ -762,10 +762,12 @@ async def test_cashflow_day_mode_buckets_by_date(session):
     assert r["mode"] == "day"
     assert r["bucket_size_days"] == 1
     by_date = {b["bucket_start"]: b for b in r["buckets"]}
-    assert by_date["2026-07-02"]["inflow"] == 300.0
-    assert by_date["2026-07-05"]["outflow"] == 100.0
-    # кумулятив растёт на приток, уменьшается на отток
-    assert by_date["2026-07-02"]["cumulative"] == by_date["2026-07-01"]["cumulative"] + 300.0
+    assert by_date["2026-07-02"]["inflow"] == "300.00"
+    assert by_date["2026-07-05"]["outflow"] == "100.00"
+    # кумулятив растёт на приток, уменьшается на отток (деньги — строки, сравниваем как Decimal)
+    assert Decimal(by_date["2026-07-02"]["cumulative"]) == Decimal(
+        by_date["2026-07-01"]["cumulative"]
+    ) + 300
 
 
 async def test_cashflow_week_mode_backward_compatible(session):
@@ -1032,14 +1034,14 @@ async def test_cashflow_account_filter(session):
         session, days=5, mode="day", today=today, account_id=acc_main.id
     )
     by = {b["bucket_start"]: b for b in r_main["buckets"]}
-    assert by["2026-07-02"]["inflow"] == 500.0  # только main
+    assert by["2026-07-02"]["inflow"] == "500.00"  # только main
     # opening_balance = paid_recv(0) − paid_out(0) + BankAccount.opening(1000) = 1000
-    assert r_main["opening_balance"] == 1000.0
+    assert r_main["opening_balance"] == "1000.00"
 
     # Без фильтра — все три (общий кэш + main + cny)
     r_all = await cashflow_forecast(session, days=5, mode="day", today=today)
     by_all = {b["bucket_start"]: b for b in r_all["buckets"]}
-    assert by_all["2026-07-02"]["inflow"] == 1699.0  # 500 + 200 + 999
+    assert by_all["2026-07-02"]["inflow"] == "1699.00"  # 500 + 200 + 999
 
 
 # ═════════════════════════ Круг 5 — тест-харднинг и edge-cases ═════════════════════════
@@ -1200,42 +1202,105 @@ async def test_cashflow_payment_with_null_account_id_works(session):
     # без фильтра — попадает в общий
     r_all = await cashflow_forecast(session, days=10, mode="day", today=today)
     by = {b["bucket_start"]: b for b in r_all["buckets"]}
-    assert by["2026-07-03"]["inflow"] == 123.0
+    assert by["2026-07-03"]["inflow"] == "123.00"
     # с фильтром по несуществующему account_id — НЕ должно крашить и НЕ включать orphan
     r_filt = await cashflow_forecast(
         session, days=10, mode="day", today=today, account_id=99999
     )
     by_f = {b["bucket_start"]: b for b in r_filt["buckets"]}
-    assert by_f["2026-07-03"]["inflow"] == 0.0
+    assert by_f["2026-07-03"]["inflow"] == "0.00"
 
 
-# К5-4: money-выходы НЕ float (деньги собственника не должны проходить через float)
-# Сейчас многие схемы возвращают float — тест ДОКУМЕНТИРУЕТ разрыв (NEEDS-ARB:
-# полный переход на str ломает frontend). xfail до решения координатора.
+# К5-4: money-выходы — СТРОКИ, не float (деньги собственника не проходят через float).
+# Фикс закрыт полосой finance-money-str: xfail СНЯТ, скан теперь ЗЕЛЁНЫЙ и охраняет контракт.
 
 
-@pytest.mark.xfail(
-    reason="NEEDS-ARB: контракт API возит money как float — переход на str ломает frontend; "
-    "вынесено координатору как нетривиальный фикс (см. КООРД-доклад круга 5).",
-    strict=False,
-)
-async def test_money_outputs_use_str_not_float_scan(session):
-    """Деньго-сканер: ни в одном API-ответе не должно быть float для money-полей.
+async def test_money_outputs_use_str_not_float_scan(session, api):
+    """Деньго-сканер: money-поля во всех finance-ответах — строки, не float.
 
-    Float дрейфует копейки на собственнике (приоритет №1 PLATFORM.md). Сейчас:
-    - PaymentOut.amount: float
-    - summary.margin.* / cash.*: float
-    - cashflow.opening_balance / buckets.*.inflow|outflow|net|cumulative: float
-    - BankAccountOut.opening_balance: float
+    Float дрейфует копейки на собственнике (приоритет №1 PLATFORM.md). Проверяем
+    compute-слой (summary/cashflow) напрямую + API-схемы (PaymentOut/AllocationOut/
+    BankAccountOut) через реальную сериализацию. ``pct`` (процент) — намеренно НЕ деньги.
     """
+    from modules.finance.cashflow import cashflow_forecast
     from modules.finance.summary import finance_summary
 
     session.add(Payment(ref="X", amount=Decimal("1234.56"), kind="receivable",
-                        status="pending"))
+                        status="pending", due_date=date(2026, 7, 3)))
     await session.commit()
+
+    # 1) summary — маржа + касса + затраты
     s = await finance_summary(session)
-    # Сейчас float — тест должен ПАДАТЬ до фикса контракта.
-    for key in ("revenue", "landed", "gross"):
-        assert not isinstance(s["margin"][key], float), (
-            f"margin.{key} — float, деньги собственника не должны проходить через float"
-        )
+    for key in ("revenue", "landed", "landed_gross", "claim_refund", "freight", "gross"):
+        assert isinstance(s["margin"][key], str), f"margin.{key} — не str"
+    for key in ("inflow", "outflow", "net", "received", "pending_receivable", "freight_refund"):
+        assert isinstance(s["cash"][key], str), f"cash.{key} — не str"
+    for c in s["costs"]:
+        assert isinstance(c["amount"], str), f"costs[{c['kind']}].amount — не str"
+
+    # 2) cashflow — opening_balance + бакеты
+    cf = await cashflow_forecast(session, days=10, mode="day", today=date(2026, 7, 1))
+    assert isinstance(cf["opening_balance"], str)
+    for b in cf["buckets"]:
+        for key in ("inflow", "outflow", "net", "cumulative"):
+            assert isinstance(b[key], str), f"cashflow bucket.{key} — не str"
+
+    # 3) API-схемы: PaymentOut.amount/outstanding, BankAccountOut.opening_balance, AllocationOut.amount
+    payments = (await api.get("/finance/payments")).json()
+    assert payments and isinstance(payments[0]["amount"], str), "PaymentOut.amount — не str"
+    assert isinstance(payments[0]["outstanding"], str), "PaymentOut.outstanding — не str"
+
+    acc = (await api.post("/finance/bank-accounts", json={
+        "code": "scan", "title": "Скан", "currency": "BYN", "opening_balance": "10.00"
+    })).json()
+    assert isinstance(acc["opening_balance"], str), "BankAccountOut.opening_balance — не str"
+
+    pid = payments[0]["id"]
+    alloc = (await api.post(f"/finance/payments/{pid}/allocations", json={"amount": "1.00"})).json()
+    assert isinstance(alloc["amount"], str), "AllocationOut.amount — не str"
+
+
+# ───────────────────────── finance-money-str: точечные контракты money=str ─────────────────────────
+
+
+async def test_payment_api_amount_is_string(session, api):
+    """PaymentOut.amount — строка, не float."""
+    session.add(Payment(ref="T-STR", amount=Decimal("999.99"), kind="receivable", status="pending"))
+    await session.commit()
+    r = await api.get("/finance/payments")
+    rows = r.json()
+    assert len(rows) == 1
+    assert isinstance(rows[0]["amount"], str), "amount должен быть строкой"
+    assert rows[0]["amount"] == "999.99"
+
+
+async def test_bank_account_opening_balance_is_string(session, api):
+    """BankAccountOut.opening_balance — строка."""
+    r = await api.post("/finance/bank-accounts", json={
+        "code": "test-main", "title": "Тест", "currency": "BYN", "opening_balance": "5000.00"
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert isinstance(body["opening_balance"], str), "opening_balance должен быть строкой"
+    assert body["opening_balance"] == "5000.00"
+
+
+async def test_allocation_amount_is_string(session, api):
+    """AllocationOut.amount — строка."""
+    session.add(Payment(ref="T-ALLOC", amount=Decimal("200.00"), kind="receivable", status="pending"))
+    await session.commit()
+    pid = (await session.execute(select(Payment.id))).scalar_one()
+    r = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": "100.00"})
+    assert r.status_code == 201
+    body = r.json()
+    assert isinstance(body["amount"], str), "allocation amount должен быть строкой"
+
+
+async def test_payment_amount_roundtrip_no_float_error(session, api):
+    """Деньги проходят сквозь API без float-дрейфа."""
+    precise = "1234567.89"
+    session.add(Payment(ref="T-PRECISE", amount=Decimal(precise), kind="receivable", status="pending"))
+    await session.commit()
+    r = await api.get("/finance/payments")
+    row = r.json()[0]
+    assert Decimal(row["amount"]) == Decimal(precise), "float-дрейф недопустим для денег собственника"
