@@ -466,51 +466,70 @@ function Column({
   );
 }
 
-function RightPanel({ panel }: { panel: FunnelPanel }) {
+// Строки правой панели. `reveal` — скрывать текст/заголовки до hover (режим свёрнутой чат-рейки).
+function PanelRows({ panel, reveal }: { panel: FunnelPanel; reveal: boolean }) {
+  const hide = reveal ? "opacity-0 transition-opacity duration-200 group-hover:opacity-100" : "";
   return (
-    <aside className="relative w-0 shrink-0">
-      <div className="group absolute inset-y-0 right-0 z-40 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
-        <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
-          <span className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            {panel.title}
-          </span>
-        </div>
-        {panel.tabs && panel.tabs.length > 0 && (
-          <div className="flex items-center gap-1 border-b border-line px-4 py-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            {panel.tabs.map((tab, i) => (
-              <span
-                key={tab}
-                className={clsx(
-                  "rounded-md px-2.5 py-1 text-xs font-medium",
-                  i === 0 ? "bg-accent-soft text-accent-ink" : "text-muted",
-                )}
-              >
-                {tab}
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="flex-1 divide-y divide-line overflow-y-auto overflow-x-hidden thin-scroll">
-          {panel.items.map((it, i) => (
-            <div key={i} className="px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className={clsx("h-2.5 w-2.5 shrink-0 rounded-full", PANEL_TONE[it.tone ?? "info"])} />
-                <span className="flex-1 truncate text-sm font-medium text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                  {it.title}
-                </span>
-                {it.badge ? (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
-                    {it.badge}
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-0.5 pl-5 text-xs text-muted opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                {it.text}
-              </p>
-            </div>
+    <>
+      {panel.tabs && panel.tabs.length > 0 && (
+        <div className={clsx("flex items-center gap-1 border-b border-line px-4 py-2", hide)}>
+          {panel.tabs.map((tab, i) => (
+            <span
+              key={tab}
+              className={clsx(
+                "rounded-md px-2.5 py-1 text-xs font-medium",
+                i === 0 ? "bg-accent-soft text-accent-ink" : "text-muted",
+              )}
+            >
+              {tab}
+            </span>
           ))}
         </div>
+      )}
+      <div className="flex-1 divide-y divide-line overflow-y-auto overflow-x-hidden thin-scroll">
+        {panel.items.map((it, i) => (
+          <div key={i} className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className={clsx("h-2.5 w-2.5 shrink-0 rounded-full", PANEL_TONE[it.tone ?? "info"])} />
+              <span className={clsx("flex-1 truncate text-sm font-medium text-ink", hide)}>{it.title}</span>
+              {it.badge ? (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+                  {it.badge}
+                </span>
+              ) : null}
+            </div>
+            <p className={clsx("mt-0.5 pl-5 text-xs text-muted", hide)}>{it.text}</p>
+          </div>
+        ))}
       </div>
+    </>
+  );
+}
+
+function RightPanel({ panel }: { panel: FunnelPanel }) {
+  // Чат (`panel.chat`) — сворачивается в узкую рейку-аватарки, раскрывается по hover (общее
+  // правило чат-рейки; z-40 поверх глобального ChatsPanel). Оперативные ленты — AI-агенты,
+  // «Цех · сегодня», «Мои дедлайны» — НЕ чат: остаются полностью видимыми, ничего не прячем.
+  if (panel.chat) {
+    return (
+      <aside className="relative w-0 shrink-0">
+        <div className="group absolute inset-y-0 right-0 z-40 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
+          <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
+            <span className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+              {panel.title}
+            </span>
+          </div>
+          <PanelRows panel={panel} reveal />
+        </div>
+      </aside>
+    );
+  }
+  // mr-[68px] освобождает место под глобальную чат-рейку (ChatsPanel, 68px, absolute right-0):
+  // оперативная панель стоит СЛЕВА от неё, а не под ней — иначе рейка перекрыла бы её правый край.
+  return (
+    <aside className="mr-[68px] flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-surface">
+      <div className="border-b border-line px-4 py-3.5 font-semibold text-ink">{panel.title}</div>
+      <PanelRows panel={panel} reveal={false} />
     </aside>
   );
 }

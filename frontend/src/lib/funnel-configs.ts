@@ -94,6 +94,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Цикл: поступление → приёмка → контроль → размещение → отгрузка · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты и дела",
+      chat: true,
       items: [
         { title: "Отдел закупок", text: "Поставка по CRM-0156 завтра к 14:00, готовьте зону A", tone: "info", badge: 2 },
         { title: "Производство", text: "Партия №П-441 готова к приёмке на склад", tone: "info", badge: 1 },
@@ -125,6 +126,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Воронка подбора — от создания вакансии до прохождения испытательного срока",
     panel: {
       title: "Чаты и контакты",
+      chat: true,
       items: [
         { title: "Соколова А. (рекрутер)", text: "Смирнова А. подтвердила скрининг на 15:00", tone: "info", badge: 2 },
         { title: "Ковалёв Сергей", text: "Готов прийти на интервью в четверг", tone: "ok" },
@@ -161,6 +163,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Документооборот после продажи · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты",
+      chat: true,
       items: [
         { title: "ООО МеталлПром", text: "Когда планируете отгрузку по 0156?", tone: "info", badge: 1 },
         { title: "Склад", text: "Заказ 0156 собран, готов к отгрузке", tone: "ok" },
@@ -190,6 +193,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Контроль документов и взыскание · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты и дела",
+      chat: true,
       items: [
         { title: "Бухгалтерия", text: "Подтвердите сумму долга по ООО АльфаМеталл", tone: "info", badge: 1 },
         { title: "ФССП", text: "Исполнительное производство по ИП Сидоров возбуждено", tone: "info" },
