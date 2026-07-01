@@ -117,6 +117,7 @@ export function DealEditButton({
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-muted">Следующий шаг</span>
                 <input
+                  type="datetime-local"
                   value={form.next_step}
                   onChange={(e) => setForm({ ...form, next_step: e.target.value })}
                   className={INPUT}

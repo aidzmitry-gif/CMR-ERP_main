@@ -23,7 +23,9 @@ describe("DealEditButton", () => {
 
     const textboxes = screen.getAllByRole("textbox") as HTMLInputElement[];
     fireEvent.change(textboxes[0], { target: { value: "Новая поставка" } }); // Описание
-    fireEvent.change(textboxes[2], { target: { value: "Встреча" } }); // Следующий шаг
+    // next_step теперь datetime-local — не входит в role="textbox", ищем напрямую
+    const nextStepInput = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
+    fireEvent.change(nextStepInput, { target: { value: "2026-07-15T09:00" } });
     fireEvent.change(screen.getByPlaceholderText("12.05.2024"), { target: { value: "01.06.2026" } });
     // Несколько number-инпутов (сумма + штраф %/день + потолок) — сумма первая.
     fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "555" } });
@@ -36,7 +38,7 @@ describe("DealEditButton", () => {
           title: "Новая поставка",
           amount: 555,
           deal_date: "01.06.2026",
-          next_step: "Встреча",
+          next_step: "2026-07-15T09:00",
         }),
       ),
     );

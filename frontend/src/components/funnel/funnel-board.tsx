@@ -33,7 +33,8 @@ import {
 import { FaTelegramPlane, FaWeixin, FaWhatsapp } from "react-icons/fa";
 import { useEffect, useMemo, useState } from "react";
 import { createFunnelCard, fetchFunnelBoard, moveFunnelCard } from "@/lib/funnel-api";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNextStep } from "@/lib/format";
+import Gate1PickerModal from "./gate1-picker-modal";
 import type {
   FunnelCard,
   FunnelKpi,
@@ -673,7 +674,7 @@ function DetailDrawer({
           {card.next_step && (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Следующий шаг</div>
-              <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{card.next_step}</div>
+              <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{formatNextStep(card.next_step)}</div>
             </div>
           )}
 
@@ -828,6 +829,7 @@ export function FunnelBoard({
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState<FunnelCard | null>(null);
   const [selected, setSelected] = useState<{ card: FunnelCard; stageId: string } | null>(null);
+  const [gate1DealId, setGate1DealId] = useState<number | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -854,6 +856,10 @@ export function FunnelBoard({
     if (!target) return;
     setStages((prev) => moveCard(prev, id, target));
     void moveFunnelCard(patchPath, id, target);
+    const targetStage = stages.find((s) => s.id === target);
+    if (targetStage?.title.includes("Gate 1")) {
+      setGate1DealId(id);
+    }
   }
 
   async function onCreate() {
@@ -1136,6 +1142,15 @@ export function FunnelBoard({
           stages={stages}
           extras={detailExtras}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {gate1DealId !== null && (
+        <Gate1PickerModal
+          dealId={gate1DealId}
+          dealTitle={stages.flatMap((s) => s.cards).find((c) => c.id === gate1DealId)?.title ?? ""}
+          onClose={() => setGate1DealId(null)}
+          onConfirm={() => setGate1DealId(null)}
         />
       )}
     </>

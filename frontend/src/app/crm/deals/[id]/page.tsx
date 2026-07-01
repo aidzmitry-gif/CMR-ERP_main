@@ -22,6 +22,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Money } from "@/components/money";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
+import { formatNextStep } from "@/lib/format";
 import { currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
@@ -275,7 +276,7 @@ function NextStepStub({
     <Card>
       <PanelHeader icon="⏭" title="Следующий шаг" />
       <CardBody className="space-y-2">
-        <div className="text-[13.5px] font-semibold text-ink">{nextStep || "—"}</div>
+        <div className="text-[13.5px] font-semibold text-ink">{formatNextStep(nextStep)}</div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted">
           <span>
             <span aria-hidden>🕒</span> {datetime || "когда — не задано"}

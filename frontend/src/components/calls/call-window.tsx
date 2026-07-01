@@ -973,9 +973,9 @@ function DoneSummary({
           Следующий шаг
         </div>
         <input
+          type="datetime-local"
           value={next}
           onChange={(e) => setNext(e.target.value)}
-          placeholder="напр. Прислать счёт утром, перезвонить в 15:00"
           className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-accent"
         />
       </div>

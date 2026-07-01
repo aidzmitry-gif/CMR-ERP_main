@@ -21,6 +21,7 @@ import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
+import { formatNextStep } from "@/lib/format";
 import { useCurrency } from "./currency-context";
 
 /**
@@ -270,19 +271,18 @@ export function DealDrawerPreview({
                 </div>
                 {stepEditing ? (
                   <div className="space-y-2">
-                    <textarea
+                    <input
+                      type="datetime-local"
                       autoFocus
                       value={stepDraft}
                       onChange={(e) => setStepDraft(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commitStep();
+                        if (e.key === "Enter") commitStep();
                         if (e.key === "Escape") {
                           setStepDraft(deal.nextStep ?? "");
                           setStepEditing(false);
                         }
                       }}
-                      rows={2}
-                      placeholder="Что сделать дальше? Ctrl+Enter — сохранить"
                       className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none"
                     />
                     <div className="flex gap-2">
@@ -302,7 +302,7 @@ export function DealDrawerPreview({
                     </div>
                   </div>
                 ) : (
-                  <div className="text-[13px] text-ink">{deal.nextStep || "—"}</div>
+                  <div className="text-[13px] text-ink">{formatNextStep(deal.nextStep)}</div>
                 )}
               </section>
 
