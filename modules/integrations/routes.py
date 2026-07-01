@@ -4,7 +4,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -86,6 +86,30 @@ def _check_intake_token(core: Core, params: dict) -> None:
         logger.warning("intake: приём без AIOS_INTAKE_WEBHOOK_TOKEN — открыт")
 
 
+def _extract_utm(params: dict) -> dict[str, str]:
+    """UTM из явных полей формы или из landing_url / referrer."""
+    out = {
+        "utm_source": str(params.get("utm_source") or params.get("utmSource") or "").strip(),
+        "utm_medium": str(params.get("utm_medium") or params.get("utmMedium") or "").strip(),
+        "utm_campaign": str(params.get("utm_campaign") or params.get("utmCampaign") or "").strip(),
+        "landing_url": str(params.get("landing_url") or params.get("landingUrl") or params.get("page_url") or "").strip(),
+    }
+    if out["utm_source"] and out["utm_campaign"]:
+        return out
+    for key in ("landing_url", "page_url", "referrer", "url"):
+        raw = str(params.get(key) or "").strip()
+        if not raw:
+            continue
+        qs = parse_qs(urlparse(raw).query)
+        out["landing_url"] = out["landing_url"] or raw
+        out["utm_source"] = out["utm_source"] or (qs.get("utm_source", [""])[0] or "")
+        out["utm_medium"] = out["utm_medium"] or (qs.get("utm_medium", [""])[0] or "")
+        out["utm_campaign"] = out["utm_campaign"] or (qs.get("utm_campaign", [""])[0] or "")
+        if out["utm_source"]:
+            break
+    return out
+
+
 def _parse_sender(s: str) -> tuple[str, str]:
     """«Имя <addr@dom>» → (имя, адрес); просто адрес → ('', адрес)."""
     m = re.match(r"^\s*(.*?)\s*<([^>]+)>\s*$", s)
@@ -107,6 +131,7 @@ async def web_lead_intake(
     """
     params = await _collect_params(request)
     _check_intake_token(core, params)
+    utm = _extract_utm(params)
     core.event_bus.emit(
         session,
         "intake.lead.received",
@@ -119,6 +144,7 @@ async def web_lead_intake(
             "region": str(params.get("region", "") or "").strip(),
             "product": str(params.get("product", "") or "").strip(),
             "message": str(params.get("message", "") or "").strip(),
+            **utm,
         },
     )
     await session.commit()

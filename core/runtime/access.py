@@ -19,6 +19,7 @@ from config.access import PACKAGE_TO_SLUG, is_package_allowed
 # Префиксы, открытые всегда (системные/инфраструктурные роуты и dev-доки).
 OPEN_PREFIXES: tuple[str, ...] = (
     "/health", "/system", "/approvals", "/telegram", "/docs", "/redoc", "/openapi.json",
+    "/marketing/seo/webhook",
 )
 
 

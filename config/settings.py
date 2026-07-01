@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
     intake_webhook_token: str = ""
 
+    # SEO/GEO Growth Platform: входящий webhook от SEO-сервиса (HMAC в X-SEO-Signature).
+    # Прод публичен → задавать обязательно (AIOS_SEO_WEBHOOK_SECRET).
+    seo_webhook_secret: str = ""
+
+    # Базовый URL SEO/GEO UI для deep-link из CRM (AIOS_SEO_UI_BASE_URL).
+    seo_ui_base_url: str = "http://localhost:3000"
+
     # Реквизиты своей организации (продавец) для договоров SALES-53 — конфиг, не shared-схема
     # (ТЗ C.5). Переопределяются env AIOS_SELLER_*. Реквизиты покупателя берутся по УНП из ЕГР.
     seller_name: str = "ООО «Аккумуляторные решения»"

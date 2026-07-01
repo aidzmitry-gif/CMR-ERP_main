@@ -133,7 +133,17 @@ const MODULES: ModuleItem[] = [
   },
   { slug: "logistics", label: "Логистика", Icon: Truck, href: "/erp/logistics" },
   { slug: "finance", label: "Финансы", Icon: Wallet, href: "/erp/finance" },
-  { slug: "marketing", label: "Маркетинг", Icon: Megaphone, href: "/erp/marketing" },
+  {
+    slug: "marketing",
+    label: "Маркетинг",
+    Icon: Megaphone,
+    href: "/erp/marketing",
+    sub: [
+      { label: "Кампании", href: "/erp/marketing" },
+      { label: "SEO / GEO", href: "/erp/marketing/seo" },
+      { label: "Гео-фабрика", href: "/erp/marketing/geo" },
+    ],
+  },
   { slug: "service", label: "Сервис и поддержка", Icon: Headphones, href: "/erp/service" },
   {
     slug: "hr",
@@ -365,6 +375,8 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     pathname.startsWith("/crm/plan") ||
     pathname.startsWith("/crm/rop");
 
+  const marketingActive = pathname.startsWith("/erp/marketing");
+
   // dev-выход: чистим cookie сессии и уводим на экран входа
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -374,7 +386,17 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
 
   function moduleActive(m: ModuleItem): boolean {
     if (m.slug === "crm") return crmActive;
+    if (m.slug === "marketing") return marketingActive;
     return !!m.href && pathname === m.href;
+  }
+
+  function subActive(href?: string): boolean {
+    if (!href) return false;
+    if (pathname === href) return true;
+    // Prefix match for nested routes only (e.g. /erp/marketing/seo/projects/…),
+    // not for module root paths like /erp/marketing (would shadow sibling sub-items).
+    const depth = href.split("/").filter(Boolean).length;
+    return depth > 2 && pathname.startsWith(href + "/");
   }
 
   // ─── Collapse / hover-expand ────────────────────────────────────────────────
@@ -690,7 +712,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                 {showFull && m.sub && active && (
                   <div className="mb-1 mt-1 flex flex-col">
                     {applySubOrder(m.sub, subOrder[m.slug]).map((s) => {
-                      const sactive = !!s.href && pathname === s.href;
+                      const sactive = subActive(s.href);
                       const isSubDragSrc =
                         draggingSub?.module === m.slug && draggingSub?.label === s.label;
                       const scls = clsx(
