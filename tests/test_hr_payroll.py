@@ -118,3 +118,40 @@ async def test_accrue_unknown_employee_404(api):
         json={"employee_id": 999999, "period": "2026-06", "amount_byn": "100.00"},
     )
     assert r.status_code == 404
+
+
+async def test_payroll_summary_empty(api):
+    """GET /hr/payroll/summary → 200 + пустой список."""
+    r = await api.get("/hr/payroll/summary")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_payroll_summary_aggregates(api):
+    """Два начисления за один период → count=2, total_byn = сумма."""
+    emp1 = await _make_employee(api)
+    emp2_r = await api.post("/hr/employees", json={"full_name": "Сидоров Сидор"})
+    emp2 = emp2_r.json()["id"]
+    await api.post("/hr/payroll/accrue", json={"employee_id": emp1, "period": "2026-10", "amount_byn": "1000.00"})
+    await api.post("/hr/payroll/accrue", json={"employee_id": emp2, "period": "2026-10", "amount_byn": "2000.00"})
+    r = await api.get("/hr/payroll/summary")
+    assert r.status_code == 200
+    periods = {s["period"]: s for s in r.json()}
+    assert "2026-10" in periods
+    s = periods["2026-10"]
+    assert s["count"] == 2
+    from decimal import Decimal
+    assert Decimal(s["total_byn"]) == Decimal("3000.00")
+    assert s["pending_count"] == 2
+
+
+async def test_payroll_summary_pending_decreases(api):
+    """После pay pending_count уменьшается."""
+    emp_id = await _make_employee(api)
+    await api.post("/hr/payroll/accrue", json={"employee_id": emp_id, "period": "2026-11", "amount_byn": "500.00"})
+    await api.post("/hr/payroll/pay", json={"employee_id": emp_id, "period": "2026-11"})
+    r = await api.get("/hr/payroll/summary")
+    assert r.status_code == 200
+    periods = {s["period"]: s for s in r.json()}
+    assert "2026-11" in periods
+    assert periods["2026-11"]["pending_count"] == 0

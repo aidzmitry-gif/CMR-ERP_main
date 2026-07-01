@@ -18,7 +18,15 @@ interface PayrollEntry {
   status: string;
 }
 
+interface PayrollPeriodSummary {
+  period: string;
+  total_byn: string;
+  count: number;
+  pending_count: number;
+}
+
 type StatusFilter = "all" | "pending" | "paid";
+type ViewMode = "summary" | "detail";
 
 // ──────────────────────────── Вспомогательные компоненты ────────────────────────────
 
@@ -38,11 +46,23 @@ function StatusBadge({ status }: { status: string }) {
 // ──────────────────────────── Главный вид ────────────────────────────
 
 export function HrPayrollView() {
+  // Detail mode state
   const [entries, setEntries] = useState<PayrollEntry[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+
+  // View mode
+  const [viewMode, setViewMode] = useState<ViewMode>("summary");
+
+  // Summary mode state
+  const [summaries, setSummaries] = useState<PayrollPeriodSummary[]>([]);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [errorSummary, setErrorSummary] = useState(false);
+  const [expandedPeriod, setExpandedPeriod] = useState<string | null>(null);
+  const [periodEntries, setPeriodEntries] = useState<PayrollEntry[]>([]);
+  const [loadingPeriod, setLoadingPeriod] = useState(false);
 
   // Форма начисления
   const [showForm, setShowForm] = useState(false);
@@ -67,9 +87,51 @@ export function HrPayrollView() {
     }
   }, [statusFilter]);
 
+  const loadSummaries = useCallback(async () => {
+    setLoadingSummary(true);
+    setErrorSummary(false);
+    try {
+      const r = await fetch("/api/hr/payroll/summary", { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      setSummaries((await r.json()) as PayrollPeriodSummary[]);
+    } catch {
+      setErrorSummary(true);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, []);
+
+  const togglePeriod = useCallback(
+    async (p: string) => {
+      if (expandedPeriod === p) {
+        setExpandedPeriod(null);
+        setPeriodEntries([]);
+        return;
+      }
+      setExpandedPeriod(p);
+      setLoadingPeriod(true);
+      try {
+        const r = await fetch(`/api/hr/payroll?period=${encodeURIComponent(p)}`, {
+          cache: "no-store",
+        });
+        if (!r.ok) throw new Error(String(r.status));
+        setPeriodEntries((await r.json()) as PayrollEntry[]);
+      } catch {
+        setPeriodEntries([]);
+      } finally {
+        setLoadingPeriod(false);
+      }
+    },
+    [expandedPeriod],
+  );
+
   useEffect(() => {
     loadEntries();
   }, [loadEntries]);
+
+  useEffect(() => {
+    loadSummaries();
+  }, [loadSummaries]);
 
   useEffect(() => {
     fetch("/api/hr/employees", { cache: "no-store" })
@@ -103,12 +165,13 @@ export function HrPayrollView() {
       setShowForm(false);
       setAmount("");
       await loadEntries();
+      await loadSummaries();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Ошибка начисления");
     } finally {
       setPosting(false);
     }
-  }, [empId, period, amount, loadEntries]);
+  }, [empId, period, amount, loadEntries, loadSummaries]);
 
   const onPay = useCallback(
     async (entry: PayrollEntry) => {
@@ -120,16 +183,27 @@ export function HrPayrollView() {
         });
         if (!r.ok) throw new Error(String(r.status));
         await loadEntries();
+        await loadSummaries();
+        if (expandedPeriod === entry.period) {
+          const r2 = await fetch(
+            `/api/hr/payroll?period=${encodeURIComponent(entry.period)}`,
+            { cache: "no-store" },
+          );
+          if (r2.ok) setPeriodEntries((await r2.json()) as PayrollEntry[]);
+        }
       } catch {
         // молчаливый fallback — UI обновится при следующей загрузке
       }
     },
-    [loadEntries],
+    [loadEntries, loadSummaries, expandedPeriod],
   );
+
+  const fmtByn = (v: string) =>
+    parseFloat(v).toLocaleString("ru-BY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <main className="flex-1 overflow-auto p-6">
-      {/* Заголовок + фильтр */}
+      {/* Заголовок + кнопка */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-ink">Начисления зарплаты</h1>
@@ -144,20 +218,18 @@ export function HrPayrollView() {
         </button>
       </div>
 
-      {/* Фильтр статуса */}
+      {/* Вкладки режима */}
       <div className="mt-4 flex gap-2">
-        {(["all", "pending", "paid"] as StatusFilter[]).map((s) => (
+        {(["summary", "detail"] as ViewMode[]).map((m) => (
           <button
-            key={s}
+            key={m}
             type="button"
-            onClick={() => setStatusFilter(s)}
+            onClick={() => setViewMode(m)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              statusFilter === s
-                ? "bg-ink text-surface"
-                : "bg-sunken text-muted hover:text-ink"
+              viewMode === m ? "bg-ink text-surface" : "bg-sunken text-muted hover:text-ink"
             }`}
           >
-            {s === "all" ? "Все" : s === "pending" ? "Ожидают" : "Выплачены"}
+            {m === "summary" ? "Ведомость" : "Детально"}
           </button>
         ))}
       </div>
@@ -223,67 +295,208 @@ export function HrPayrollView() {
         </div>
       )}
 
-      {/* Состояние */}
-      {loading && <p className="mt-6 text-sm text-muted">Загрузка…</p>}
-      {error && (
-        <p className="mt-6 rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
-          Не удалось загрузить начисления — проверьте подключение к HR-модулю.
-        </p>
+      {/* ── Режим «Ведомость» ── */}
+      {viewMode === "summary" && (
+        <>
+          {loadingSummary && <p className="mt-6 text-sm text-muted">Загрузка…</p>}
+          {errorSummary && (
+            <p className="mt-6 rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+              Не удалось загрузить ведомость — проверьте подключение к HR-модулю.
+            </p>
+          )}
+          {!loadingSummary && !errorSummary && (
+            <div className="mt-4 overflow-hidden rounded-xl bg-surface shadow-card">
+              <table className="w-full text-sm">
+                <thead className="border-b border-line text-left text-xs text-muted">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Период</th>
+                    <th className="px-4 py-2.5 font-medium">Сотрудников</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Итог, BYN</th>
+                    <th className="px-4 py-2.5 font-medium">Ожидает</th>
+                    <th className="px-4 py-2.5 font-medium">Выплачено</th>
+                    <th className="px-4 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaries.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-muted">
+                        Ведомость пуста.
+                      </td>
+                    </tr>
+                  ) : (
+                    summaries.flatMap((s) => {
+                      const mainRow = (
+                        <tr
+                          key={s.period}
+                          className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken"
+                          onClick={() => togglePeriod(s.period)}
+                        >
+                          <td className="px-4 py-2.5 font-medium text-ink">{s.period}</td>
+                          <td className="px-4 py-2.5 tabular-nums text-muted">{s.count}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-medium text-ink">
+                            {fmtByn(s.total_byn)}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {s.pending_count > 0 ? (
+                              <span className="flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                                <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+                                {s.pending_count}
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+                                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                                0
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 tabular-nums text-muted">
+                            {s.count - s.pending_count}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-xs text-muted">
+                            {expandedPeriod === s.period ? "▲" : "▼"}
+                          </td>
+                        </tr>
+                      );
+                      if (expandedPeriod !== s.period) return [mainRow];
+                      const detailRow = (
+                        <tr key={`${s.period}-detail`} className="bg-sunken">
+                          <td colSpan={6} className="px-6 py-3">
+                            {loadingPeriod ? (
+                              <p className="text-xs text-muted">Загрузка…</p>
+                            ) : periodEntries.length === 0 ? (
+                              <p className="text-xs text-muted">Нет данных.</p>
+                            ) : (
+                              <table className="w-full text-xs">
+                                <thead className="text-left text-muted">
+                                  <tr>
+                                    <th className="py-1 pr-4 font-medium">Сотрудник</th>
+                                    <th className="py-1 pr-4 text-right font-medium">Сумма, BYN</th>
+                                    <th className="py-1 pr-4 font-medium">Статус</th>
+                                    <th className="py-1" />
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {periodEntries.map((e) => (
+                                    <tr key={e.id} className="border-t border-line">
+                                      <td className="py-1 pr-4 text-ink">{empName(e.employee_id)}</td>
+                                      <td className="py-1 pr-4 text-right tabular-nums text-ink">
+                                        {fmtByn(e.amount_byn)}
+                                      </td>
+                                      <td className="py-1 pr-4">
+                                        <StatusBadge status={e.status} />
+                                      </td>
+                                      <td className="py-1 text-right">
+                                        {e.status === "pending" && (
+                                          <button
+                                            type="button"
+                                            onClick={(ev) => {
+                                              ev.stopPropagation();
+                                              void onPay(e);
+                                            }}
+                                            className="rounded-md bg-emerald-600/10 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-600/20 dark:text-emerald-300"
+                                          >
+                                            Выплатить
+                                          </button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                      return [mainRow, detailRow];
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Таблица */}
-      {!loading && !error && (
-        <div className="mt-4 overflow-hidden rounded-xl bg-surface shadow-card">
-          <table className="w-full text-sm">
-            <thead className="border-b border-line text-left text-xs text-muted">
-              <tr>
-                <th className="px-4 py-2.5 font-medium">Сотрудник</th>
-                <th className="px-4 py-2.5 font-medium">Период</th>
-                <th className="px-4 py-2.5 text-right font-medium">Сумма, BYN</th>
-                <th className="px-4 py-2.5 font-medium">Статус</th>
-                <th className="px-4 py-2.5 font-medium">Дата</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {entries.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted">
-                    Начислений пока нет.
-                  </td>
-                </tr>
-              ) : (
-                entries.map((e) => (
-                  <tr key={e.id} className="border-b border-line last:border-0 hover:bg-sunken">
-                    <td className="px-4 py-2.5 text-ink">{empName(e.employee_id)}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-muted">{e.period}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink font-medium">
-                      {parseFloat(e.amount_byn).toLocaleString("ru-BY", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <StatusBadge status={e.status} />
-                    </td>
-                    <td className="px-4 py-2.5 text-muted" />
-                    <td className="px-4 py-2.5 text-right">
-                      {e.status === "pending" && (
-                        <button
-                          type="button"
-                          onClick={() => onPay(e)}
-                          className="rounded-md bg-emerald-600/10 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-600/20 dark:text-emerald-300"
-                        >
-                          Выплатить
-                        </button>
-                      )}
-                    </td>
+      {/* ── Режим «Детально» ── */}
+      {viewMode === "detail" && (
+        <>
+          {/* Фильтр статуса */}
+          <div className="mt-4 flex gap-2">
+            {(["all", "pending", "paid"] as StatusFilter[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  statusFilter === s
+                    ? "bg-ink text-surface"
+                    : "bg-sunken text-muted hover:text-ink"
+                }`}
+              >
+                {s === "all" ? "Все" : s === "pending" ? "Ожидают" : "Выплачены"}
+              </button>
+            ))}
+          </div>
+
+          {loading && <p className="mt-6 text-sm text-muted">Загрузка…</p>}
+          {error && (
+            <p className="mt-6 rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
+              Не удалось загрузить начисления — проверьте подключение к HR-модулю.
+            </p>
+          )}
+
+          {!loading && !error && (
+            <div className="mt-4 overflow-hidden rounded-xl bg-surface shadow-card">
+              <table className="w-full text-sm">
+                <thead className="border-b border-line text-left text-xs text-muted">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Сотрудник</th>
+                    <th className="px-4 py-2.5 font-medium">Период</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Сумма, BYN</th>
+                    <th className="px-4 py-2.5 font-medium">Статус</th>
+                    <th className="px-4 py-2.5 font-medium">Дата</th>
+                    <th className="px-4 py-2.5" />
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {entries.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-muted">
+                        Начислений пока нет.
+                      </td>
+                    </tr>
+                  ) : (
+                    entries.map((e) => (
+                      <tr key={e.id} className="border-b border-line last:border-0 hover:bg-sunken">
+                        <td className="px-4 py-2.5 text-ink">{empName(e.employee_id)}</td>
+                        <td className="px-4 py-2.5 tabular-nums text-muted">{e.period}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-ink font-medium">
+                          {fmtByn(e.amount_byn)}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <StatusBadge status={e.status} />
+                        </td>
+                        <td className="px-4 py-2.5 text-muted" />
+                        <td className="px-4 py-2.5 text-right">
+                          {e.status === "pending" && (
+                            <button
+                              type="button"
+                              onClick={() => onPay(e)}
+                              className="rounded-md bg-emerald-600/10 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-600/20 dark:text-emerald-300"
+                            >
+                              Выплатить
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </main>
   );
