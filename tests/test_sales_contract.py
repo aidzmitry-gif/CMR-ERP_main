@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, Sku
-from modules.sales.models import DealItem
+from modules.sales.models import DealItem, PriceQuote
 
 TEMPLATE_BODY = (
     "ДОГОВОР {{number}}\n"
@@ -142,3 +142,58 @@ async def test_prepare_contract_unknown_template_404(api):
         f"/sales/deals/{deal['id']}/contract", json={"template_code": "nope", "unp": ""}
     )
     assert r.status_code == 404
+
+
+async def test_render_invoice_uses_real_deal_data(api, session):
+    """kind=invoice → печатная форма счёта (sales-invoice-template.html), не договор."""
+    deal = await _make_deal(api, counterparty="ООО «АвтоЗапчасть»")
+    session.add(Sku(code="AKB-77", title="АКБ 6СТ-77", unit="шт"))
+    await session.flush()
+    sku = (await session.execute(select(Sku).where(Sku.code == "AKB-77"))).scalars().first()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("2")))
+    session.add(
+        PriceQuote(sku_code="AKB-77", counterparty="ООО «АвтоЗапчасть»", price=Decimal("150.00"))
+    )
+    await session.flush()
+    await session.commit()
+
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert inv.status_code == 201, inv.text
+    doc = inv.json()
+    assert doc["kind"] == "invoice"
+
+    r = await api.get(f"/sales/documents/{doc['id']}/render")
+    assert r.status_code == 200, r.text
+    assert "text/html" in r.headers["content-type"]
+    html = r.text
+    assert doc["number"] in html
+    assert "АКБ 6СТ-77" in html  # наименование позиции сделки
+    assert "Счёт-протокол на оплату" in html
+    # 2 * 150.00 = 300.00 нетто, НДС 20% = 60.00, итого 360.00
+    assert "360.00" in html or "360,00" in html
+
+
+async def test_render_invoice_without_price_quote_is_zero(api, session):
+    """Нет котировки цены — честный ноль, без падения (не demo-данные)."""
+    deal = await _make_deal(api, counterparty="ООО «БезЦены»")
+    session.add(Sku(code="AKB-88", title="АКБ 6СТ-88", unit="шт"))
+    await session.flush()
+    sku = (await session.execute(select(Sku).where(Sku.code == "AKB-88"))).scalars().first()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    await session.flush()
+    await session.commit()
+
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert inv.status_code == 201, inv.text
+    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    assert r.status_code == 200, r.text
+    assert "АКБ 6СТ-88" in r.text
+
+
+async def test_render_order_kind_still_400(api):
+    """kind=order — не имеет печатной формы; понятная ошибка, не 500."""
+    deal = await _make_deal(api, counterparty="ООО «Заказ»")
+    order = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
+    assert order.status_code == 201, order.text
+    r = await api.get(f"/sales/documents/{order.json()['id']}/render")
+    assert r.status_code == 400

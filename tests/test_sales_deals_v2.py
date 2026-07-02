@@ -1,6 +1,6 @@
 """БД-тесты «Сделки 2.0»: отказ+причины (SALES-40), история стадий (SALES-43),
 прогноз (SALES-44), счётчик непрочитанных (SALES-49). SQLite в памяти."""
-from datetime import datetime
+from datetime import date, datetime
 
 
 async def _new_deal(api, number, **extra):
@@ -687,6 +687,36 @@ async def test_plan_approved_upserts_kpi_target(api, session):
     assert absent is None
 
 
+# ── /sales/kpis?period=YYYY-MM: произвольный месяц ──────────────────────────────
+async def test_kpis_arbitrary_month_aggregates_only_that_month(session, api):
+    """period=2026-05 агрегирует Activity только за май 2026, апрель/июнь не подмешиваются."""
+    from decimal import Decimal
+
+    from modules.sales.models import Activity, KpiTarget
+
+    session.add(KpiTarget(key="calls", title="Звонки", target=Decimal("20"),
+                          unit="count", icon="phone", tone="neutral", sort_order=1))
+    session.add(Activity(kpi_key="calls", value=Decimal("3"), date=date(2026, 4, 30)))
+    session.add(Activity(kpi_key="calls", value=Decimal("5"), date=date(2026, 5, 1)))
+    session.add(Activity(kpi_key="calls", value=Decimal("7"), date=date(2026, 5, 31)))
+    session.add(Activity(kpi_key="calls", value=Decimal("11"), date=date(2026, 6, 1)))
+    await session.commit()
+
+    rows = (await api.get("/sales/kpis?period=2026-05")).json()
+    calls_row = next(r for r in rows if r["key"] == "calls")
+    assert calls_row["actual"] == 12.0  # только 5+7 (апрель/июнь не подмешаны)
+    # план: 20/день × число рабочих дней мая-2026 (21 будний день пн-пт)
+    assert calls_row["target"] == 20.0 * 21
+
+
+async def test_kpis_invalid_period_does_not_crash(api):
+    """Невалидный period (не relative-ключ и не YYYY-MM) — честный фоллбэк, не 500."""
+    for bad_period in ("2026-13", "foo", "2026-5"):
+        r = await api.get(f"/sales/kpis?period={bad_period}")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+
 # ── Крайняя дата отгрузки + штраф за опоздание → сигнал в закупки ───────────────
 async def test_deal_ship_deadline_and_penalty_persist(api):
     """Поля крайней даты и штрафа сохраняются при создании и обновлении сделки."""
@@ -760,3 +790,39 @@ async def test_penalty_out_of_range_rejected(api):
     deal = await _new_deal(api, "PN-3")
     r3 = await api.patch(f"/sales/deals/{deal['id']}", json={"penalty_terms": "x" * 513})
     assert r3.status_code == 422
+
+
+# ── повтор прошлого заказа ──────────────────────────────────────────────────
+
+async def test_repeat_last_order_returns_prior_deal_items(api, session):
+    """Вторая сделка того же контрагента → позиции подтягиваются из первой (с позициями)."""
+    from modules.sales.models import DealItem
+
+    sku1 = await _seed_sku(session, "RLO-1", "Товар 1")
+    sku2 = await _seed_sku(session, "RLO-2", "Товар 2")
+    first = await _new_deal(api, "RLO-D1", counterparty="ООО Повтор")
+    session.add_all([
+        DealItem(deal_id=first["id"], sku_id=sku1.id, qty=5),
+        DealItem(deal_id=first["id"], sku_id=sku2.id, qty=3),
+    ])
+    await session.commit()
+    second = await _new_deal(api, "RLO-D2", counterparty="ООО Повтор")
+
+    r = await api.get(f"/sales/deals/{second['id']}/repeat-last-order")
+    assert r.status_code == 200
+    items = r.json()
+    assert {(i["code"], i["qty"]) for i in items} == {("RLO-1", 5.0), ("RLO-2", 3.0)}
+
+
+async def test_repeat_last_order_empty_when_no_prior_deals(api):
+    """Нет предыдущих сделок контрагента с позициями → пустой список, статус 200."""
+    deal = await _new_deal(api, "RLO-D3", counterparty="ООО Без Истории")
+    r = await api.get(f"/sales/deals/{deal['id']}/repeat-last-order")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_repeat_last_order_404_for_missing_deal(api):
+    """Несуществующая сделка → 404."""
+    r = await api.get("/sales/deals/999999/repeat-last-order")
+    assert r.status_code == 404
