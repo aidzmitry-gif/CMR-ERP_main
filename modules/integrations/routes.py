@@ -4,7 +4,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
-from urllib.parse import parse_qsl, parse_qs, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
