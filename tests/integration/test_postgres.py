@@ -62,7 +62,12 @@ async def test_lifespan_background_relay_on_postgres(postgres_url, monkeypatch):
     app = create_app()
     try:
         async with app.router.lifespan_context(app):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # fail-closed RBAC: POST /sales/deals без роли → 403; шлём супер-роль (как pg_app/api).
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+                headers={"X-User-Roles": "director"},
+            ) as client:
                 await client.post(
                     "/sales/deals",
                     json={"number": "PG-RELAY-1", "title": "Relay", "counterparty": "c"},
