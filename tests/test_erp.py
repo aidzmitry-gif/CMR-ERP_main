@@ -603,7 +603,7 @@ async def test_logistics(api):
 async def test_finance(api):
     r = await api.post("/finance/payments", json={"ref": "Счёт СЧ-1", "amount": 5000})
     assert r.status_code == 201
-    assert (await api.get("/finance/payments")).json()[0]["amount"] == 5000
+    assert (await api.get("/finance/payments")).json()[0]["amount"] == "5000.00"  # money=str (Decimal→str)
 
 
 async def test_marketing(api):

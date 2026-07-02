@@ -259,17 +259,17 @@ async def test_finance_summary_margin_and_cash(session):
     await session.commit()
     s = await finance_summary(session)
 
-    # маржа = 1000 − 600 (landed) − 70 (фрахт 100 − возврат 30) = 330
-    assert s["margin"]["revenue"] == 1000.0
-    assert s["margin"]["landed"] == 600.0
-    assert s["margin"]["freight"] == 70.0
-    assert s["margin"]["gross"] == 330.0
+    # маржа = 1000 − 600 (landed) − 70 (фрахт 100 − возврат 30) = 330 — money=str (Decimal→str), pct float
+    assert s["margin"]["revenue"] == "1000.00"
+    assert s["margin"]["landed"] == "600.00"
+    assert s["margin"]["freight"] == "70.00"
+    assert s["margin"]["gross"] == "330.00"
     assert round(s["margin"]["pct"], 1) == 33.0
     # касса: приток = оплачено 600 + возврат 30 = 630; отток = 100+600 = 700; нетто = -70
-    assert s["cash"]["received"] == 600.0
-    assert s["cash"]["inflow"] == 630.0
-    assert s["cash"]["outflow"] == 700.0
-    assert s["cash"]["net"] == -70.0
+    assert s["cash"]["received"] == "600.00"
+    assert s["cash"]["inflow"] == "630.00"
+    assert s["cash"]["outflow"] == "700.00"
+    assert s["cash"]["net"] == "-70.00"
     assert s["currency"] == "BYN"
 
 
@@ -277,9 +277,9 @@ async def test_finance_summary_empty_is_honest(session):
     from modules.finance.summary import finance_summary
 
     s = await finance_summary(session)
-    assert s["margin"]["revenue"] == 0.0 and s["margin"]["gross"] == 0.0
-    assert s["margin"]["pct"] is None  # нет выручки → не делим на ноль
-    assert s["cash"]["net"] == 0.0
+    assert s["margin"]["revenue"] == "0.00" and s["margin"]["gross"] == "0.00"  # money=str
+    assert s["margin"]["pct"] is None  # нет выручки → не делим на ноль (pct — float, не деньги)
+    assert s["cash"]["net"] == "0.00"
 
 
 async def test_delivered_shipment_emits_freight_cost(session, api):
