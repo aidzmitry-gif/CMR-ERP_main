@@ -59,3 +59,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 extend-select = ["I"]  # сортировка импортов
+
+[tool.ruff.lint.isort]
+# Явно — иначе isort определяет first-party по наличию пакетов на диске, а в worktree
+# без выкаченных сабмодулей modules/ пуст → modules.* уезжает в third-party и порядок
+# расходится с CI (где сабмодули есть). Фиксируем детерминированно.
+known-first-party = ["core", "modules", "config"]

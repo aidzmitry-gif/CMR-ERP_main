@@ -10,6 +10,7 @@ vi.mock("next/font/google", () => ({
 }));
 vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => <a>{children}</a> }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", className: "mock-font" }) }));
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));

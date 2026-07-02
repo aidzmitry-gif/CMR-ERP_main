@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 
 async def test_sales_handlers_ctx_none_are_noop():
+    from modules.leads.events import on_campaign_launched
     from modules.sales.events import (
-        on_campaign_launched,
         on_incoming_message_ai,
         on_payment_paid,
         on_shipment_delivered,

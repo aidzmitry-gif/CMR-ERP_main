@@ -107,8 +107,8 @@ async def test_production_completed_emits(session, api):
 
 
 async def test_campaign_creates_leads(session):
-    from modules.sales.events import on_campaign_launched
-    from modules.sales.models import Lead
+    from modules.leads.events import on_campaign_launched
+    from modules.leads.models import Lead
 
     # кампания питает приём лидов (front-of-funnel), а не создаёт сделки напрямую
     await on_campaign_launched({"name": "Весна", "leads": 3, "channel": "email"}, _ctx(session))

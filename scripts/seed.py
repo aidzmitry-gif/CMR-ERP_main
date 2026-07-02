@@ -29,6 +29,7 @@ from core.services import build_services
 from modules.hr.models import Candidate
 from modules.integrations.models import Batch, StockItem
 from modules.knowledge.models import Course
+from modules.leads.models import Lead
 from modules.legal.models import LegalCase
 from modules.logistics import seeds as logistics_seeds
 from modules.logistics.models import (
@@ -63,7 +64,6 @@ from modules.sales.models import (
     Deal,
     DealItem,
     KpiTarget,
-    Lead,
     LossReason,
     Message,
     PriceQuote,

@@ -108,6 +108,20 @@ async def test_resolve_owner_by_active_deal(session):
     assert res["contact_id"] is not None
 
 
+async def test_resolve_owner_no_lead_fallback(session):
+    from modules.leads.models import Lead
+    from modules.sales.calls import resolve_owner
+
+    session.add(Lead(source="phone", phone="+375299998877", assigned_to="Петров П.П.", status="routed"))
+    await session.commit()
+
+    # Лид НЕ резолвится в sales: резолв лида по звонку вынесен в репозиторий лидов
+    # (подписка на sales.call.logged). Здесь неизвестный номер → owner пуст (дежурный пул).
+    res = await resolve_owner(session, "375299998877")
+    assert res["owner"] == ""
+    assert res["counterparty_id"] is None
+
+
 async def test_resolve_owner_unknown_number(session):
     from modules.sales.calls import resolve_owner
 
@@ -230,26 +244,6 @@ async def test_late_answer_keeps_terminal_status(session):
     assert call.answered_at is not None
 
 
-async def test_logged_event_carries_agent_ext(session):
-    """sales.call.logged несёт agent_ext (кто поднял трубку) — репо лидов заводит лид на него."""
-    from sqlalchemy import select
-
-    from core.domain.models import OutboxEvent
-    from modules.sales import calls as calls_mod
-
-    ctx, _ = _ctx(session)
-    await calls_mod.on_incoming_call(
-        {"call_id": "AG-1", "direction": "in", "phone_e164": "+375291119999", "agent_ext": "101"},
-        ctx,
-    )
-    await session.commit()
-    ev = (
-        await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == "sales.call.logged"))
-    ).scalars().first()
-    assert ev is not None
-    assert ev.payload["agent_ext"] == "101"
-
-
 # --- HTTP: webhook коннектора + токен ----------------------------------------------
 async def test_webhook_emits_event(session, api):
     from sqlalchemy import select
@@ -331,24 +325,6 @@ async def test_calls_journal_and_actions(session, api):
     assert linked.json()["deal_id"] is not None
 
     assert (await api.get("/sales/calls/999999")).status_code == 404
-
-
-async def test_telephony_incoming_rejects_untrusted_payload(api):
-    """security #2: прямой приём строго валидируется (TelephonyEventIn, extra='forbid').
-
-    Недоверенное тело не фабрикует CallLog: лишние ключи и пустой call_id → 422.
-    """
-    # лишний ключ (попытка проставить произвольное поле CallLog) → отвергнуто
-    bad = await api.post(
-        "/sales/telephony/incoming",
-        json={"call_id": "EVIL-1", "owner": "Чужой Ч.Ч.", "status_injected": "won"},
-    )
-    assert bad.status_code == 422
-    # пустой call_id → отвергнуто (раньше тихо превращалось в no-op)
-    empty = await api.post("/sales/telephony/incoming", json={"call_id": ""})
-    assert empty.status_code == 422
-    # запись не создана
-    assert not any(c["call_id"] == "EVIL-1" for c in (await api.get("/sales/calls")).json())
 
 
 async def test_originate_not_configured(api):

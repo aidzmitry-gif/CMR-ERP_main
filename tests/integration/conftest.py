@@ -67,7 +67,7 @@ async def pg_app(postgres_url, monkeypatch):
     try:
         async with AsyncClient(
             transport=transport, base_url="http://test", headers={"X-User-Roles": "director"}
-        ) as client:
+        ) as client:  # fail-closed (P0-1): без супер-роли все /sales/* отдают 403
             yield client
     finally:
         await app.state.core.services.db.disconnect()
