@@ -66,3 +66,24 @@ class LegalContract(Base):
     amount_byn: Mapped[str] = mapped_column(String(20), default="0.00", server_default="0.00")
     description: Mapped[str] = mapped_column(String(500), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class LegalClaim(Base):
+    """Претензия контрагенту (по просрочке оплаты, браку, недопоставке и т.п.)."""
+
+    __tablename__ = "legal_claim"
+    __table_args__ = {"schema": "office"}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    counterparty_name: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    claim_type: Mapped[str] = mapped_column(String(64), default="overdue_payment", server_default="overdue_payment")
+    # overdue_payment | defect | shortage | other
+    status: Mapped[str] = mapped_column(String(32), default="open", server_default="open")
+    # open | sent | responded | resolved | rejected
+    amount_byn: Mapped[str] = mapped_column(String(20), default="0.00", server_default="0.00")
+    filed_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    resolved_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    description: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    office_doc_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

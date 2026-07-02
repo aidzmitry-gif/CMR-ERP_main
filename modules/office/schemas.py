@@ -111,3 +111,36 @@ class LegalContractPatch(BaseModel):
     description: str | None = None
     expires_at: str | None = None
     amount_byn: str | None = None
+
+
+class LegalClaimCreate(BaseModel):
+    counterparty_name: str
+    claim_type: str = "overdue_payment"
+    status: str = "open"
+    amount_byn: str = "0.00"
+    filed_at: str | None = None
+    description: str = ""
+    office_doc_ref: str = ""
+    number: str = ""
+
+
+class LegalClaimOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    number: str
+    counterparty_name: str
+    claim_type: str
+    status: str
+    amount_byn: str
+    filed_at: str | None = None
+    resolved_at: str | None = None
+    description: str
+    office_doc_ref: str = ""
+
+
+class LegalClaimPatch(BaseModel):
+    status: str | None = None
+    resolved_at: str | None = None
+    description: str | None = None
+    amount_byn: str | None = None

@@ -7,8 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.runtime.deps import get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
-from modules.knowledge.models import Course
-from modules.knowledge.schemas import CourseCreate, CourseOut, StageUpdate
+from modules.knowledge.models import Course, CourseEnrollment
+from modules.knowledge.schemas import (
+    CourseCreate,
+    CourseEnrollmentCreate,
+    CourseEnrollmentOut,
+    CourseEnrollmentPatch,
+    CourseOut,
+    StageUpdate,
+)
 from modules.knowledge.stages import STAGES
 
 router = APIRouter(tags=["knowledge"])
@@ -71,6 +78,70 @@ async def update_course(
     if obj is None:
         raise HTTPException(status_code=404, detail="Курс не найден")
     obj.stage = payload.stage
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+# --------------------------------------------------------------------------- #
+#  Учёт прохождения курсов (назначения сотрудникам)
+# --------------------------------------------------------------------------- #
+
+@router.get("/enrollments", response_model=list[CourseEnrollmentOut])
+async def list_enrollments(
+    employee_name: str | None = None,
+    status: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Реестр назначений курсов с фильтрами по сотруднику и статусу."""
+    q = select(CourseEnrollment).order_by(CourseEnrollment.id.desc())
+    if employee_name:
+        q = q.where(CourseEnrollment.employee_name == employee_name)
+    if status:
+        q = q.where(CourseEnrollment.status == status)
+    return (await session.execute(q)).scalars().all()
+
+
+@router.post("/enrollments", response_model=CourseEnrollmentOut, status_code=201)
+async def create_enrollment(
+    payload: CourseEnrollmentCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Назначить курс сотруднику."""
+    obj = CourseEnrollment(**payload.model_dump())
+    session.add(obj)
+    await session.flush()
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+@router.get("/enrollments/{enrollment_id}", response_model=CourseEnrollmentOut)
+async def get_enrollment(enrollment_id: int, session: AsyncSession = Depends(get_session)):
+    obj = await session.get(CourseEnrollment, enrollment_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Назначение не найдено")
+    return obj
+
+
+@router.patch("/enrollments/{enrollment_id}", response_model=CourseEnrollmentOut)
+async def patch_enrollment(
+    enrollment_id: int,
+    payload: CourseEnrollmentPatch,
+    session: AsyncSession = Depends(get_session),
+):
+    """Обновить статус/прогресс/дату завершения. При status=completed — дата и прогресс выставляются автоматически."""
+    from datetime import date
+
+    obj = await session.get(CourseEnrollment, enrollment_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Назначение не найдено")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(obj, field, value)
+    if obj.status == "completed":
+        if not obj.completed_at:
+            obj.completed_at = date.today().isoformat()
+        obj.progress = 100
     await session.commit()
     await session.refresh(obj)
     return obj
