@@ -156,48 +156,203 @@ function OvertimeModal({ data, onClose, onApprove, onReject }: OvertimeModalProp
 }
 
 // ── Tab: Мой день ─────────────────────────────────────────────────────────────
+// Скорборд «Моя выработка» — перенос блока План/Факт с доски Sales (sales-board-mockup.html)
+// один-в-один: полоса с разделителями, крупный headline, «/ план», светофор-бар + метка темпа,
+// «% выполнено», строка-прогноз run-rate, статус-пилюля темпа, сегменты периода.
+
+type MetricKind = "num" | "pct";
+
+interface Metric {
+  label: string;
+  fact: number;
+  plan: number;
+  kind: MetricKind;
+  unit?: string;
+  headline?: boolean;
+  proj?: boolean; // строить прогноз run-rate (не для ставочных: пунктуальность/ср.смена/явка)
+}
+
+type PeriodKey = "day" | "week" | "month" | "quarter" | "year";
+
+const PERIODS: { id: PeriodKey; label: string }[] = [
+  { id: "day", label: "День" },
+  { id: "week", label: "Неделя" },
+  { id: "month", label: "Месяц" },
+  { id: "quarter", label: "Квартал" },
+  { id: "year", label: "Год" },
+];
+
+// el — % прошедшего времени периода (метка темпа + база прогноза); overtime — чип переработок.
+const PERIOD_META: Record<PeriodKey, { el: number; sub: string; overtime: string }> = {
+  day: { el: 71, sub: "— сегодня, 02 июля", overtime: "—" },
+  week: { el: 80, sub: "— неделя 27 июн – 03 июл", overtime: "+2 ч" },
+  month: { el: 71, sub: "— Июль 2026 · норма по контракту 168 ч", overtime: "+3 ч · на согл." },
+  quarter: { el: 34, sub: "— III квартал 2026 (июл–сен)", overtime: "+9 ч" },
+  year: { el: 50, sub: "— 2026 год", overtime: "+34 ч" },
+};
+
+const METRICS: Record<PeriodKey, Metric[]> = {
+  day: [
+    { label: "Отработано", fact: 5.7, plan: 8, kind: "num", unit: "ч", headline: true, proj: true },
+    { label: "Смены", fact: 1, plan: 1, kind: "num", unit: "дн", proj: true },
+    { label: "Явка в отделе", fact: 9, plan: 12, kind: "num" },
+    { label: "Пунктуальность", fact: 100, plan: 100, kind: "pct" },
+    { label: "Ср. смена", fact: 5.7, plan: 8, kind: "num", unit: "ч" },
+  ],
+  week: [
+    { label: "Отработано", fact: 34, plan: 40, kind: "num", unit: "ч", headline: true, proj: true },
+    { label: "Смены", fact: 4, plan: 5, kind: "num", unit: "дн", proj: true },
+    { label: "Явка в отделе", fact: 10, plan: 12, kind: "num" },
+    { label: "Пунктуальность", fact: 98, plan: 100, kind: "pct" },
+    { label: "Ср. смена", fact: 8.5, plan: 8, kind: "num", unit: "ч" },
+  ],
+  month: [
+    { label: "Отработано", fact: 142, plan: 168, kind: "num", unit: "ч", headline: true, proj: true },
+    { label: "Смены", fact: 15, plan: 21, kind: "num", unit: "дн", proj: true },
+    { label: "Явка в отделе", fact: 9, plan: 12, kind: "num" },
+    { label: "Пунктуальность", fact: 96, plan: 100, kind: "pct" },
+    { label: "Ср. смена", fact: 7.4, plan: 8, kind: "num", unit: "ч" },
+  ],
+  quarter: [
+    { label: "Отработано", fact: 168, plan: 504, kind: "num", unit: "ч", headline: true, proj: true },
+    { label: "Смены", fact: 21, plan: 63, kind: "num", unit: "дн", proj: true },
+    { label: "Явка в отделе", fact: 10, plan: 12, kind: "num" },
+    { label: "Пунктуальность", fact: 95, plan: 100, kind: "pct" },
+    { label: "Ср. смена", fact: 7.6, plan: 8, kind: "num", unit: "ч" },
+  ],
+  year: [
+    { label: "Отработано", fact: 980, plan: 1980, kind: "num", unit: "ч", headline: true, proj: true },
+    { label: "Смены", fact: 128, plan: 247, kind: "num", unit: "дн", proj: true },
+    { label: "Явка в отделе", fact: 10, plan: 12, kind: "num" },
+    { label: "Пунктуальность", fact: 96, plan: 100, kind: "pct" },
+    { label: "Ср. смена", fact: 7.7, plan: 8, kind: "num", unit: "ч" },
+  ],
+};
 
 /** Светофор выполнения (как KpiCard, Сделки 2.0): ≥100 зелёный · ≥70 янтарь · иначе красный. */
-function perfTone(pct: number): { bar: string; text: string } {
-  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" };
-  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" };
-  return { bar: "bg-red-500", text: "text-red-600 dark:text-red-400" };
+function tone(pct: number): { bar: string; text: string; dot: string } {
+  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" };
+  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" };
+  return { bar: "bg-red-500", text: "text-red-600 dark:text-red-400", dot: "bg-red-500" };
 }
 
-/** Компактная КПЭ-карточка: число / цель + прогресс-бар + % (визуал как KpiCard). */
-function StatCard({ label, value, target, unit, pct }: {
-  label: string; value: string; target: string; unit?: string; pct: number;
-}) {
-  const t = perfTone(pct);
-  return (
-    <div className="rounded-xl bg-surface p-4 shadow-card">
-      <div className="text-xs leading-tight text-muted">{label}</div>
-      <div className="mt-2 text-lg font-semibold text-ink">
-        {value}
-        <span className="text-sm font-normal text-muted"> / {target}{unit ? ` ${unit}` : ""}</span>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
-        <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
-      <div className={`mt-1.5 flex items-center gap-1 text-xs ${t.text}`}>
-        <span className="text-[9px] leading-none">●</span>{pct}% выполнено
-      </div>
-    </div>
-  );
+/** Цвет прогноза для учёта времени: у нормы (90–110%) — зелёный; выше — переработка (янтарь); ниже — недоработка (красный). */
+function projTone(pct: number): string {
+  if (pct > 110) return "text-amber-600 dark:text-amber-400";
+  if (pct >= 90) return "text-emerald-600 dark:text-emerald-400";
+  return "text-red-600 dark:text-red-400";
 }
 
-/** Элемент вторичной полосы-сводки (как второй ряд План/Факт). */
-function SummaryItem({ label, value, sub, accent }: {
-  label: string; value: string; sub?: string; accent?: boolean;
-}) {
+function fmtNum(n: number): string {
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r)
+    ? r.toLocaleString("ru-RU")
+    : r.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function fmtVal(v: number, kind: MetricKind): string {
+  return kind === "pct" ? `${v}%` : fmtNum(v);
+}
+
+/** Скорборд «Моя выработка» — плотный, разметка как План/Факт на доске Sales. */
+function Scoreboard() {
+  const [period, setPeriod] = useState<PeriodKey>("month");
+  const meta = PERIOD_META[period];
+  const metrics = METRICS[period];
+  const el = meta.el;
+
+  // Пилюля темпа: выполнение headline (Отработано) против прошедшего времени.
+  const head = metrics[0];
+  const headPct = Math.round((head.fact / head.plan) * 100);
+  const diff = headPct - el;
+  const pace =
+    diff >= 5
+      ? { cls: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300", txt: `Опережаем график на ${diff} п.п.` }
+      : diff >= -5
+        ? { cls: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300", txt: "Идём в графике" }
+        : { cls: "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300", txt: `Отстаём на ${-diff} п.п.` };
+
   return (
-    <div className="min-w-0">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={`text-base font-semibold ${accent ? "text-amber-600 dark:text-amber-400" : "text-ink"}`}>
-        {value}
-        {sub && <span className="ml-1.5 text-xs font-normal text-muted">{sub}</span>}
+    <section className="rounded-2xl bg-surface px-4 py-3.5 shadow-card">
+      {/* Шапка: заголовок + статус темпа + сегменты периода */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 text-[15px] font-bold text-ink">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15" />
+          Моя выработка
+          <span className="ml-1 text-xs font-normal text-muted">{meta.sub}</span>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${pace.cls}`}>
+            {pace.txt}
+            <span className="font-normal opacity-75">· прошло {el}% периода</span>
+          </span>
+          {meta.overtime !== "—" && (
+            <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+              Переработки {meta.overtime}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-0.5 rounded-lg border border-line p-0.5">
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                period === p.id ? "bg-accent text-white" : "text-muted hover:text-ink"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
+
+      {/* Полоса метрик: headline шире, разделители между колонками. Прокрутка при нехватке ширины — не сплющивать. */}
+      <div className="overflow-x-auto">
+      <div
+        className="grid min-w-[880px]"
+        style={{ gridTemplateColumns: `1.5fr ${"1fr ".repeat(metrics.length - 1).trim()}` }}
+      >
+        {metrics.map((m, i) => {
+          const pct = Math.round((m.fact / m.plan) * 100);
+          const t = tone(pct);
+          const w = Math.min(pct, 100);
+          const projFact = m.proj ? Math.round((m.fact * 100) / el) : 0;
+          const projPct = m.proj ? Math.round((projFact / m.plan) * 100) : 0;
+          return (
+            <div key={m.label} className={`relative px-4 py-1 ${i === 0 ? "pl-1" : "border-l border-line"}`}>
+              <div className="whitespace-nowrap text-[11.5px] text-muted">{m.label}</div>
+              <div className={`mt-1 font-bold leading-tight tracking-tight text-ink ${m.headline ? "text-[26px]" : "text-lg"}`}>
+                {fmtVal(m.fact, m.kind)}
+                <span className="text-[12.5px] font-normal text-faint"> / {fmtVal(m.plan, m.kind)}</span>
+                {m.unit && <span className="text-[11px] font-normal text-faint"> {m.unit}</span>}
+              </div>
+              <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
+                <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${w}%` }} />
+                <span
+                  className="absolute -top-px -bottom-px w-0.5 bg-ink/50"
+                  style={{ left: `${Math.min(el, 100)}%` }}
+                  title={`нужно к этому дню: ${el}%`}
+                />
+              </div>
+              <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+                {pct}% выполнено
+              </div>
+              {m.proj && (
+                <div className="mt-1 text-[10.5px] text-muted">
+                  → идём на{" "}
+                  <span className="font-bold text-ink">
+                    {fmtNum(projFact)}
+                    {m.unit ? ` ${m.unit}` : ""}
+                  </span>{" "}
+                  <span className={`font-bold ${projTone(projPct)}`}>({projPct}%)</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      </div>
+    </section>
   );
 }
 
@@ -219,71 +374,44 @@ function MyDayTab() {
   const normSec = 8 * 3600;
   const progress = Math.min(100, (elapsed / normSec) * 100);
   const hoursElapsed = elapsed / 3600;
-  const monthHours = 142;
-  const monthNorm = 168;
-  const overtimeHours = 3;
-  const daysWorked = 15;
-  const daysNorm = 21;
-  const onlineNow = EMPLOYEES.filter((e) => e.online).length;
-
-  const stats = [
-    { label: "Отработано сегодня", value: hoursElapsed.toFixed(1), target: "8", unit: "ч", pct: Math.round(progress) },
-    { label: "Норма месяца", value: String(monthHours), target: String(monthNorm), unit: "ч", pct: Math.round((monthHours / monthNorm) * 100) },
-    { label: "Дней отработано", value: String(daysWorked), target: String(daysNorm), unit: "дн", pct: Math.round((daysWorked / daysNorm) * 100) },
-    { label: "Онлайн сейчас", value: String(onlineNow), target: String(EMPLOYEES.length), pct: Math.round((onlineNow / EMPLOYEES.length) * 100) },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Верх: смена (компактно) + КПЭ-сетка */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
-        {/* Таймер смены */}
-        <div className="rounded-xl bg-surface p-4 shadow-card">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted">Текущая смена</div>
-              <div className="mt-1 font-mono text-3xl font-bold text-ink tabular-nums">{fmtHMS(elapsed)}</div>
-            </div>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${active ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-sunken text-muted"}`}>
-              ● {active ? "идёт" : "завершена"}
-            </span>
+      {/* Таймер смены — компактная полоса (личные «часы»: старт/счётчик/стоп) */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl bg-surface px-5 py-4 shadow-card">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Текущая смена</div>
+          <div className="mt-0.5 font-mono text-3xl font-bold tabular-nums text-ink">{fmtHMS(elapsed)}</div>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${active ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-sunken text-muted"}`}>
+          ● {active ? "смена идёт" : "смена завершена"}
+        </span>
+        {active ? (
+          <button
+            onClick={() => setActive(false)}
+            className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300"
+          >
+            Завершить день
+          </button>
+        ) : (
+          <span className="rounded-lg bg-emerald-100 px-4 py-2 text-sm font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+            День завершён
+          </span>
+        )}
+        <div className="min-w-[180px] flex-1">
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>Начало 08:30</span>
+            <span>{hoursElapsed.toFixed(1)} / 8 ч</span>
           </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-sunken">
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sunken">
             <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-xs text-muted">
-            <span>Начало 08:30</span>
-            <span>{hoursElapsed.toFixed(1)} / 8 ч · план 16:30</span>
-          </div>
-          {active ? (
-            <button
-              onClick={() => setActive(false)}
-              className="mt-3 w-full rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300"
-            >
-              Завершить день
-            </button>
-          ) : (
-            <div className="mt-3 rounded-lg bg-emerald-100 px-4 py-2 text-center text-sm font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-              Рабочий день завершён
-            </div>
-          )}
-        </div>
-        {/* КПЭ-сетка (компактные карточки со светофор-баром) */}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {stats.map((s) => (
-            <StatCard key={s.label} {...s} />
-          ))}
+          <div className="mt-1 text-[11px] text-muted">План завершения — 16:30</div>
         </div>
       </div>
 
-      {/* Вторичная полоса-сводка (как второй ряд План/Факт) */}
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl bg-surface px-5 py-3.5 shadow-card">
-        <SummaryItem label="Переработки" value={`+${overtimeHours} ч`} sub="на согласовании" accent />
-        <SummaryItem label="Средняя смена" value="7.4 ч" />
-        <SummaryItem label="Опозданий (мес.)" value="0" />
-        <SummaryItem label="Отпуск / больничный" value="2 дн" sub="июнь" />
-        <SummaryItem label="Статус" value="Рабочий день" sub="без командировок" />
-      </div>
+      {/* Скорборд «Моя выработка» — плотный, стиль План/Факт */}
+      <Scoreboard />
 
       {/* Напоминание */}
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300">
