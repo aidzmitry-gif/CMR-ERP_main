@@ -22,7 +22,6 @@ import { DealCard } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
-import { KpiCard } from "@/components/kpi-card";
 import {
   createDeal,
   createDealTask,
@@ -309,6 +308,109 @@ function Column({
   );
 }
 
+// ── План/Факт: компактный скорборд (перенос блока с sales-board-mockup.html) ────
+// Доля прошедшего времени периода (0..1) из реального `now` — база метки темпа и прогноза run-rate.
+function periodElapsed(now: number, period: string): number {
+  const d = new Date(now);
+  const clamp = (x: number) => Math.max(0.02, Math.min(1, x));
+  const dayFrac = (d.getHours() * 60 + d.getMinutes()) / (24 * 60);
+  if (period === "day") {
+    const cur = d.getHours() * 60 + d.getMinutes();
+    return clamp((cur - 9 * 60) / (18 * 60 - 9 * 60)); // рабочий день 9:00–18:00
+  }
+  if (period === "week") {
+    const dow = (d.getDay() + 6) % 7; // 0=Пн … 6=Вс
+    return clamp((Math.min(dow, 5) + (dow < 5 ? dayFrac : 0)) / 5); // Пн–Пт
+  }
+  if (period === "month") {
+    const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return clamp((d.getDate() - 1 + dayFrac) / dim);
+  }
+  if (period === "quarter") {
+    const qs = new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1).getTime();
+    const qe = new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3 + 3, 1).getTime();
+    return clamp((now - qs) / (qe - qs));
+  }
+  const ys = new Date(d.getFullYear(), 0, 1).getTime();
+  const ye = new Date(d.getFullYear() + 1, 0, 1).getTime();
+  return clamp((now - ys) / (ye - ys));
+}
+
+/** Светофор выполнения (Сделки 2.0): ≥100 зелёный · ≥70 янтарь · иначе красный. */
+function kpiTone(pct: number): { bar: string; text: string; dot: string } {
+  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" };
+  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" };
+  return { bar: "bg-red-500", text: "text-red-600 dark:text-red-400", dot: "bg-red-500" };
+}
+
+/** Цвет прогноза (продажи: больше — лучше). */
+function projClass(pct: number): string {
+  if (pct >= 100) return "text-emerald-600 dark:text-emerald-400";
+  if (pct >= 85) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+/** Ячейка План/Факт: разметка как в скорборде мокапа (плоская, без карточки-бокса). */
+function PlanFactCell({
+  kpi,
+  fmt,
+  elapsed,
+  onLog,
+}: {
+  kpi: Kpi;
+  fmt: (v: number) => string;
+  elapsed: number | null;
+  onLog?: () => void;
+}) {
+  const t = kpiTone(kpi.percent);
+  const value = kpi.money ? fmt(kpi.value) : kpi.value;
+  const target = kpi.money ? fmt(kpi.target) : kpi.target;
+  // прогноз run-rate — только когда прошло ≥10% периода (иначе оценка неустойчива).
+  const showProj = elapsed != null && elapsed >= 0.1 && kpi.target > 0;
+  const projVal = showProj ? Math.round(kpi.value / elapsed) : 0;
+  const projPct = showProj ? Math.round((projVal / kpi.target) * 100) : 0;
+  return (
+    <div className="bg-surface px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[11.5px] leading-tight text-muted">{kpi.label}</div>
+        {onLog && !kpi.money && (
+          <button
+            onClick={onLog}
+            title="Отметить (+1)"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-faint hover:bg-sunken hover:text-accent-ink"
+          >
+            <Plus size={14} />
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-ink">
+        {value}
+        <span className="text-[13px] font-normal text-faint"> / {target}</span>
+      </div>
+      <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
+        <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(kpi.percent, 100)}%` }} />
+        {elapsed != null && (
+          <span
+            className="absolute -top-px -bottom-px w-0.5 bg-ink/40"
+            style={{ left: `${Math.min(elapsed * 100, 100)}%` }}
+            title={`нужно к этому моменту: ${Math.round(elapsed * 100)}%`}
+          />
+        )}
+      </div>
+      <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+        {kpi.percent}% выполнено
+      </div>
+      {showProj && (
+        <div className="mt-1 truncate text-[10.5px] text-muted">
+          → идём на <span className="font-bold text-ink">{kpi.money ? fmt(projVal) : projVal}</span>{" "}
+          <span className={`font-bold ${projClass(projPct)}`}>({projPct}%)</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DealsWorkspace({
   initialStages,
   initialKpis,
@@ -589,11 +691,24 @@ export function DealsWorkspace({
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-            {kpis.map((kpi) => (
-              <KpiCard key={kpi.id} kpi={kpi} fmt={fmt} onLog={() => handleLog(kpi.id)} />
-            ))}
-          </div>
+          {(() => {
+            const elapsed = now != null ? periodElapsed(now, period) : null;
+            return (
+              <div className="overflow-hidden rounded-2xl bg-line shadow-card">
+                <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+                  {kpis.map((kpi) => (
+                    <PlanFactCell
+                      key={kpi.id}
+                      kpi={kpi}
+                      fmt={fmt}
+                      elapsed={elapsed}
+                      onLog={() => handleLog(kpi.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </section>
 
         <PipelineRow stages={stages} now={now} fmt={fmt} />
