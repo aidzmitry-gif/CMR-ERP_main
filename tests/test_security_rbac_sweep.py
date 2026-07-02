@@ -134,12 +134,25 @@ async def client(app, session):
         app.dependency_overrides.pop(get_session, None)
 
 
-def test_sweep_discovered_module_write_routes(write_routes):
+def test_sweep_discovered_module_write_routes(app, prefix_map, write_routes):
     """Свип реально что-то нашёл (пустой enumeration = ложно-зелёный).
 
     Заодно закрепляет: ключевые бизнес-модули присутствуют в наборе (защита от того, что
     ``create_app``/enumeration тихо сломались и routes исчезли)."""
-    assert write_routes, "свип не нашёл ни одного write-роута — enumeration сломан"
+    if not write_routes:
+        # DIAGNOSTIC (CI-only фейл, локально не воспроизводится): показать, ЧТО видит окружение.
+        from config.access import PACKAGE_TO_SLUG
+
+        core = app.state.core
+        registry = [(getattr(r, "prefix", None), getattr(r, "module", None)) for r in core.routers]
+        n_routes = sum(1 for _ in app.routes)
+        raise AssertionError(
+            "свип не нашёл ни одного write-роута — enumeration сломан. DIAG: "
+            f"app.routes={n_routes}; core.routers={len(core.routers)}; "
+            f"prefix_map({len(prefix_map)})={prefix_map[:4]}; "
+            f"registry(prefix,module)[:8]={registry[:8]}; "
+            f"PACKAGE_TO_SLUG_keys={sorted(PACKAGE_TO_SLUG)}"
+        )
     found_packages = {pkg for _, _, pkg, _ in write_routes}
     for expected in ("sales", "procurement", "wms", "finance"):
         assert expected in found_packages, f"нет write-роутов модуля {expected} — свип неполон"
