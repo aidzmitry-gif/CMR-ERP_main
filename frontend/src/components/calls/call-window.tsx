@@ -28,6 +28,7 @@ import {
   fetchSkus,
   fetchStock,
   lookupCounterparty,
+  updateDeal,
   type SkuOption,
   type StockRow,
 } from "@/lib/api";
@@ -136,6 +137,38 @@ const TERMS = [
   "Отсрочка 30 дней",
   "По факту отгрузки",
 ];
+
+/** Локальная дата+время → значение `<input type="datetime-local">` (без секунд, без TZ). */
+function toDatetimeLocal(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Ближайший будущий понедельник 09:00 (сегодня-понедельник → следующий, не сегодня). */
+function nextMonday9(from: Date): Date {
+  const d = new Date(from);
+  const day = d.getDay(); // 0=вс..6=сб, понедельник=1
+  const add = ((1 - day + 7) % 7) || 7;
+  d.setDate(d.getDate() + add);
+  d.setHours(9, 0, 0, 0);
+  return d;
+}
+
+/** Chip-пресеты «Следующего шага»: подпись + вычисленное значение datetime-local. */
+function nextStepPresets(now: Date = new Date()): { label: string; value: string }[] {
+  const tomorrow10 = new Date(now);
+  tomorrow10.setDate(tomorrow10.getDate() + 1);
+  tomorrow10.setHours(10, 0, 0, 0);
+
+  const in3days = new Date(now);
+  in3days.setDate(in3days.getDate() + 3);
+
+  return [
+    { label: "Завтра 10:00", value: toDatetimeLocal(tomorrow10) },
+    { label: "Через 3 дня", value: toDatetimeLocal(in3days) },
+    { label: "Понедельник 09:00", value: toDatetimeLocal(nextMonday9(now)) },
+  ];
+}
 
 export function CallWindow({
   context,
@@ -444,6 +477,7 @@ export function CallWindow({
         {/* ── Тело ── */}
         {phase === "done" ? (
           <DoneSummary
+            ctx={ctx}
             seconds={seconds}
             title={title}
             onClose={onClose}
@@ -451,6 +485,7 @@ export function CallWindow({
             setTaskDraft={setTaskDraft}
             addTask={addTask}
             busy={busy}
+            flash={flash}
           />
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-px overflow-y-auto bg-line md:grid-cols-[1fr_1fr_0.9fr]">
@@ -920,6 +955,7 @@ function ReqRow({ k, v }: { k: string; v: string }) {
 }
 
 function DoneSummary({
+  ctx,
   seconds,
   title,
   onClose,
@@ -927,7 +963,9 @@ function DoneSummary({
   setTaskDraft,
   addTask,
   busy,
+  flash,
 }: {
+  ctx: CallContext;
   seconds: number;
   title: string;
   onClose: () => void;
@@ -935,10 +973,36 @@ function DoneSummary({
   setTaskDraft: (v: string) => void;
   addTask: () => void;
   busy: boolean;
+  flash: (msg: string) => void;
 }) {
   const [result, setResult] = useState("Дозвонился");
   const [next, setNext] = useState("");
+  const [saving, setSaving] = useState(false);
   const dur = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const presets = useMemo(() => nextStepPresets(), []);
+
+  /** Сохранить итог звонка: next_step(текст)+next_step_at(дата) на сделке + задача-напоминание.
+   * Для лида/нового клиента (нет числового id сделки) — только задача-заметка (как addTask). */
+  async function saveAndClose() {
+    if (!next) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    const isoLocal = next.length === 16 ? `${next}:00` : next; // datetime-local без секунд
+    if (ctx.kind === "deal") {
+      await updateDeal(ctx.dealId, { next_step: result, next_step_at: isoLocal });
+      await createDealTask(ctx.dealId, { title: `Следующий шаг: ${result}`, due_at: isoLocal });
+      flash("✅ Следующий шаг сохранён");
+    } else if (ctx.kind === "lead") {
+      await createDealTask(`lead:${ctx.leadId}`, {
+        title: `Следующий шаг: ${result}`,
+        due_at: isoLocal,
+      });
+    }
+    setSaving(false);
+    onClose();
+  }
 
   return (
     <div className="space-y-4 p-5">
@@ -972,6 +1036,22 @@ function DoneSummary({
         <div className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
           Следующий шаг
         </div>
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {presets.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => setNext(p.value)}
+              className={`rounded-lg border px-2.5 py-1 text-[12px] font-medium transition ${
+                next === p.value
+                  ? "border-accent bg-accent/10 text-accent-ink"
+                  : "border-line text-muted hover:bg-sunken"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <input
           type="datetime-local"
           value={next}
@@ -996,7 +1076,13 @@ function DoneSummary({
         🔴 Запись сохранена · ИИ-транскрибация и резюме подтянутся в карточку (SALES-50).
       </div>
 
-      <Button variant="money" block onClick={onClose} icon={<Check size={15} />}>
+      <Button
+        variant="money"
+        block
+        onClick={() => void saveAndClose()}
+        disabled={saving}
+        icon={<Check size={15} />}
+      >
         Сохранить и закрыть
       </Button>
     </div>

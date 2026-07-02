@@ -24,6 +24,7 @@ export interface Deal {
   owner: string;
   date?: string;
   nextStep?: string;
+  nextStepAt?: string; // ISO дата+время следующего шага (слайс 4) — для группировки «По датам действий»
   closedDate?: string;
   starred?: boolean;
   // развёрнутый блок «что нужно сделать» (как у карточки в стадии КП на макете)

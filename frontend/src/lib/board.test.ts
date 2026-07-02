@@ -4,8 +4,10 @@ import {
   LOST_STAGE,
   STAGE_PROBABILITY,
   STUCK_DAYS,
+  dateBucketId,
   daysInStage,
   ensureLostStage,
+  groupByDateBucket,
   isOpenStage,
   isStuck,
   moveDealToStage,
@@ -172,5 +174,55 @@ describe("isStuck (SALES-43)", () => {
 
   it("не висяк без даты входа в стадию", () => {
     expect(isStuck(deal("1", 100), "new", NOW)).toBe(false);
+  });
+});
+
+describe("dateBucketId / groupByDateBucket (П4, слайс 4)", () => {
+  // Локальное время (не UTC): 11.06.2026 12:00 — избегаем TZ-сдвига полуночи «сегодня».
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime();
+  const at = (y: number, m: number, d: number, h = 12) => new Date(y, m, d, h).toISOString();
+
+  it("без next_step_at — честный бакет «Без даты» (не «Позже»)", () => {
+    expect(dateBucketId(deal("1", 100), NOW)).toBe("no_date");
+  });
+
+  it("неразборчивая дата — тоже «Без даты»", () => {
+    expect(dateBucketId(deal("1", 100, { nextStepAt: "не-дата" }), NOW)).toBe("no_date");
+  });
+
+  it("вчера/раньше сегодняшней полуночи — просрочено", () => {
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 10, 23) }), NOW)).toBe("overdue");
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 1) }), NOW)).toBe("overdue");
+  });
+
+  it("сегодня (00:00..23:59 календарного дня) — «Сегодня» независимо от текущего часа", () => {
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 11, 0) }), NOW)).toBe("today");
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 11, 23) }), NOW)).toBe("today");
+  });
+
+  it("завтра — «Завтра»", () => {
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 12, 1) }), NOW)).toBe("tomorrow");
+  });
+
+  it("через 3-6 дней — «Неделя», через 8-29 — «Месяц», 31+ — «Позже»", () => {
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 14) }), NOW)).toBe("week");
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 20) }), NOW)).toBe("month");
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 6, 20) }), NOW)).toBe("later");
+  });
+
+  it("groupByDateBucket возвращает все 7 бакетов (даже пустые) и не теряет сделки", () => {
+    const deals = [
+      deal("1", 100, { nextStepAt: at(2026, 5, 10, 23) }), // overdue
+      deal("2", 200, { nextStepAt: at(2026, 5, 11, 8) }), // today
+      deal("3", 300), // no_date
+    ];
+    const buckets = groupByDateBucket(deals, NOW);
+    expect(buckets).toHaveLength(7);
+    expect(buckets.find((b) => b.id === "overdue")?.deals.map((d) => d.id)).toEqual(["1"]);
+    expect(buckets.find((b) => b.id === "today")?.deals.map((d) => d.id)).toEqual(["2"]);
+    expect(buckets.find((b) => b.id === "no_date")?.deals.map((d) => d.id)).toEqual(["3"]);
+    expect(buckets.find((b) => b.id === "tomorrow")?.deals).toEqual([]);
+    const total = buckets.reduce((n, b) => n + b.deals.length, 0);
+    expect(total).toBe(deals.length);
   });
 });

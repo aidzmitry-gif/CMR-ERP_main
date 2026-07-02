@@ -24,6 +24,7 @@ interface ApiDeal {
   stage: string;
   owner: string;
   next_step: string | null;
+  next_step_at?: string | null;
   deal_date: string | null;
   closed_date: string | null;
   focus: boolean;
@@ -66,6 +67,7 @@ function mapDeal(d: ApiDeal): Deal {
     date: d.deal_date ?? undefined,
     closedDate: d.closed_date ?? undefined,
     nextStep: d.next_step ?? undefined,
+    nextStepAt: d.next_step_at ?? undefined,
     starred: d.starred,
     // Сделки 2.0: вероятность/прогноз (SALES-44), история стадий (SALES-43), причина отказа (SALES-40)
     probability: d.probability ?? undefined,

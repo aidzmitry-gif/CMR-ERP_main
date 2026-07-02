@@ -15,6 +15,8 @@ vi.mock("@/lib/api", () => ({
   getKpis: vi.fn().mockResolvedValue([]),
   logActivity: vi.fn().mockResolvedValue(true),
   updateDealStage: vi.fn().mockResolvedValue(true),
+  updateDeal: vi.fn().mockResolvedValue(true),
+  createDealTask: vi.fn().mockResolvedValue(true),
   fetchChats: vi.fn().mockResolvedValue([]),
   lookupCounterparty: vi.fn().mockResolvedValue(null),
   loseDeal: vi.fn().mockResolvedValue(true),
@@ -201,5 +203,31 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.getByText("Госзакупки РБ")).toBeInTheDocument();
     // переключатель вида (канбан/список) скрыт в комбинированном режиме
     expect(screen.queryByTitle("Список")).toBeNull();
+  });
+
+  // --- П4 (слайс 4): группировка «По датам действий» ---
+
+  it("группа «По датам действий» показывает сделку в бакете «Без даты» (нет next_step_at)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("По датам действий"));
+    expect(screen.getByText("Без даты")).toBeInTheDocument();
+    expect(screen.getByText("Просрочено")).toBeInTheDocument();
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument(); // карточка всё ещё видна
+    // Стадийные колонки скрыты в режиме дат.
+    expect(screen.queryByText("Новая заявка")).toBeNull();
+  });
+
+  it("переключатель группировки скрыт в режиме списка", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("Список"));
+    expect(screen.queryByTitle("По датам действий")).toBeNull();
+  });
+
+  it("возврат к «По стадиям» восстанавливает канбан-колонки", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("По датам действий"));
+    fireEvent.click(screen.getByTitle("По стадиям"));
+    expect(screen.getByText("Новая заявка")).toBeInTheDocument();
+    expect(screen.queryByText("Без даты")).toBeNull();
   });
 });

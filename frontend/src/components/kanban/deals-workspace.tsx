@@ -12,7 +12,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import clsx from "clsx";
-import { Clock, LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
@@ -36,6 +36,7 @@ import {
 } from "@/lib/api";
 import {
   daysInStage,
+  groupByDateBucket,
   isOpenStage,
   isStuck,
   LOSS_REASONS,
@@ -443,6 +444,86 @@ function FunnelSection({
   );
 }
 
+/** Колонка группировки «По датам действий» (П4) — как {@link Column}, но без drag&drop
+ * (перенос карточки сюда не меняет её дату шага) и с фикс. цветом бакета вместо стадии. */
+function DateColumn({
+  bucket,
+  fmt,
+  children,
+}: {
+  bucket: { id: string; title: string; color: string; deals: Deal[] };
+  fmt: (value: number) => string;
+  children: React.ReactNode;
+}) {
+  const sum = bucket.deals.reduce((a, d) => a + d.amount, 0);
+  return (
+    <div className="flex w-[300px] shrink-0 flex-col gap-3">
+      <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+        <div className="h-1" style={{ backgroundColor: bucket.color }} />
+        <div className="px-4 py-3">
+          <div className="font-semibold text-ink">{bucket.title}</div>
+          <div className="mt-0.5 text-xs text-muted">
+            {bucket.deals.length} {pluralDeals(bucket.deals.length)} · {fmt(sum)}
+          </div>
+        </div>
+      </div>
+      <div className="flex min-h-20 flex-col gap-3 rounded-xl p-1">
+        {bucket.deals.length > 0 ? (
+          children
+        ) : (
+          <div className="rounded-xl border border-dashed border-line-strong py-4 text-center text-xs text-faint">
+            Пусто
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Карточка сделки для группировки «По датам действий» — тот же клик-превью/двойной клик
+ * что и {@link DraggableDeal}, но без dnd-kit хуков (тащить между датами тут нельзя). */
+function StaticDealCard({
+  deal,
+  extras,
+  fmt,
+  onPreview,
+  onOpen,
+}: {
+  deal: Deal;
+  extras: CardExtras;
+  fmt: (value: number) => string;
+  onPreview: (d: Deal) => void;
+  onOpen: (d: Deal) => void;
+}) {
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+  }, []);
+
+  function handleClickCapture(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest("button")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onOpen(deal);
+      return;
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      onPreview(deal);
+    }, 230);
+  }
+
+  return (
+    <div data-testid={`deal-card-${deal.id}`} onClickCapture={handleClickCapture}>
+      <DealCard deal={deal} fmt={fmt} {...extras} />
+    </div>
+  );
+}
+
 // ── План/Факт: компактный скорборд (перенос блока с sales-board-mockup.html) ────
 // Доля прошедшего времени периода (0..1) из реального `now` — база метки темпа и прогноза run-rate.
 function periodElapsed(now: number, period: string): number {
@@ -615,6 +696,9 @@ export function DealsWorkspace({
   const [priority, setPriority] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
+  // П4 (слайс 4): переключатель группировки канбана — по стадиям (умолчание) / по датам
+  // следующего действия (next_step_at). Действует только для view="board".
+  const [groupBy, setGroupBy] = useState<"stage" | "dates">("stage");
   const [stuckOnly, setStuckOnly] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
@@ -1017,6 +1101,31 @@ export function DealsWorkspace({
         {/* Переключатель вида — не показываем в «Все вместе» (комбинированный вид — только канбан) */}
         {!combinedStages && (
           <div className="mt-5 flex items-center justify-end gap-2">
+            {/* П4: группировка канбана — по стадиям / по датам следующего действия. */}
+            {view === "board" && (
+              <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+                <button
+                  onClick={() => setGroupBy("stage")}
+                  title="По стадиям"
+                  className={clsx(
+                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                    groupBy === "stage" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
+                  )}
+                >
+                  <LayoutList size={14} /> По стадиям
+                </button>
+                <button
+                  onClick={() => setGroupBy("dates")}
+                  title="По датам действий"
+                  className={clsx(
+                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                    groupBy === "dates" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
+                  )}
+                >
+                  <Calendar size={14} /> По датам действий
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
               <button
                 onClick={() => setView("board")}
@@ -1061,6 +1170,25 @@ export function DealsWorkspace({
               />
             ))}
           </>
+        ) : view === "board" && groupBy === "dates" ? (
+          /* П4: группировка по датам действий (next_step_at) — честные бакеты, без drag&drop
+           * (перенос между бакетами = смена next_step_at, не текущее действие карточки). */
+          <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
+            {groupByDateBucket(flatDeals.map((f) => f.deal), now ?? Date.now()).map((bucket) => (
+              <DateColumn key={bucket.id} bucket={bucket} fmt={fmt}>
+                {bucket.deals.map((deal) => (
+                  <StaticDealCard
+                    key={deal.id}
+                    deal={deal}
+                    extras={cardExtras(deal, findDeal(deal.id)?.stageId ?? "new")}
+                    fmt={fmt}
+                    onPreview={setPreviewDeal}
+                    onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                  />
+                ))}
+              </DateColumn>
+            ))}
+          </div>
         ) : view === "board" ? (
           /* Канбан с drag&drop */
           <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>

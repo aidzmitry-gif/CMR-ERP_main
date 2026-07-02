@@ -96,3 +96,51 @@ export function isStuck(deal: Deal, stageId: string, now: number, threshold = ST
   const days = daysInStage(deal.stageChangedAt, now);
   return days != null && days >= threshold;
 }
+
+/** Бакет вида «По датам действий» (П4, слайс 4) — id колонки для {@link dateBucketId}. */
+export type DateBucketId = "overdue" | "today" | "tomorrow" | "week" | "month" | "later" | "no_date";
+
+/** Метаданные колонок группировки «По датам действий» (порядок = порядок мокапа,
+ * цвета — как в `sales-board-mockup.html`). «Без даты» — честный отдельный бакет
+ * (НЕ подмешивается в «Позже» — сделка без next_step_at это не «когда-то потом», а «неизвестно»). */
+export const DATE_BUCKETS: { id: DateBucketId; title: string; color: string }[] = [
+  { id: "overdue", title: "Просрочено", color: "#EF4444" },
+  { id: "today", title: "Сегодня", color: "var(--brand)" },
+  { id: "tomorrow", title: "Завтра", color: "#6366F1" },
+  { id: "week", title: "Неделя", color: "#8B5CF6" },
+  { id: "month", title: "Месяц", color: "#F59E0B" },
+  { id: "later", title: "Позже", color: "#14B8A6" },
+  { id: "no_date", title: "Без даты", color: "#94A3B8" },
+];
+
+/** Классифицировать сделку по `nextStepAt` относительно `now` в один из {@link DATE_BUCKETS}.
+ * Без даты → `no_date` (честный бакет, не «Позже»). Сутки считаются календарными (не 24ч-окном),
+ * чтобы «Сегодня 23:59» и «Сегодня 00:01» попадали в одну колонку. */
+export function dateBucketId(deal: Deal, now: number): DateBucketId {
+  if (!deal.nextStepAt) return "no_date";
+  const ts = Date.parse(deal.nextStepAt);
+  if (Number.isNaN(ts)) return "no_date";
+
+  const d0 = new Date(now);
+  d0.setHours(0, 0, 0, 0);
+  const startOfToday = d0.getTime();
+  const DAY = 86_400_000;
+
+  if (ts < startOfToday) return "overdue";
+  if (ts < startOfToday + DAY) return "today";
+  if (ts < startOfToday + 2 * DAY) return "tomorrow";
+  if (ts < startOfToday + 7 * DAY) return "week";
+  if (ts < startOfToday + 30 * DAY) return "month";
+  return "later";
+}
+
+/** Сгруппировать сделки по бакетам дат действий (П4). Пустые бакеты возвращаются тоже
+ * (title/color фиксированы) — вызывающий код сам решает, скрывать ли пустые колонки. */
+export function groupByDateBucket(
+  deals: Deal[],
+  now: number,
+): { id: DateBucketId; title: string; color: string; deals: Deal[] }[] {
+  const byId = new Map<DateBucketId, Deal[]>(DATE_BUCKETS.map((b) => [b.id, []]));
+  for (const d of deals) byId.get(dateBucketId(d, now))!.push(d);
+  return DATE_BUCKETS.map((b) => ({ ...b, deals: byId.get(b.id)! }));
+}

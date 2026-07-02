@@ -89,6 +89,27 @@ async def test_update_deal_flags(api):
     assert r2["starred"] is True
 
 
+async def test_update_deal_next_step_at(api):
+    """next_step_at (дата+время шага) сохраняется и читается независимо от next_step (текст)."""
+    created = (
+        await api.post("/sales/deals", json={"number": "NSA-1", "title": "t", "counterparty": "c"})
+    ).json()
+    assert created["next_step_at"] is None
+
+    r = await api.patch(
+        f"/sales/deals/{created['id']}",
+        json={"next_step": "Перезвонить", "next_step_at": "2026-07-10T09:00:00"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["next_step"] == "Перезвонить"
+    assert body["next_step_at"] == "2026-07-10T09:00:00"
+
+    # чтение сделки отдельным GET подтверждает, что значение реально осело в БД
+    r2 = await api.get(f"/sales/deals/{created['id']}")
+    assert r2.json()["next_step_at"] == "2026-07-10T09:00:00"
+
+
 async def test_update_deal_stage(api):
     created = (
         await api.post("/sales/deals", json={"number": "U1", "title": "t", "counterparty": "c", "stage": "new"})
