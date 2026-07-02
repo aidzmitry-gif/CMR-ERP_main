@@ -13,16 +13,33 @@ export function DealEditButton({
   amount,
   nextStep,
   dealDate,
+  shipDeadline = "",
+  penaltyRatePct = null,
+  penaltyCapPct = null,
+  penaltyTerms = "",
 }: {
   dealId: string;
   title: string;
   amount: number;
   nextStep: string;
   dealDate: string;
+  shipDeadline?: string;
+  penaltyRatePct?: number | null;
+  penaltyCapPct?: number | null;
+  penaltyTerms?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ title, amount, next_step: nextStep, deal_date: dealDate });
+  const [form, setForm] = useState({
+    title,
+    amount,
+    next_step: nextStep,
+    deal_date: dealDate,
+    ship_deadline: shipDeadline,
+    penalty_rate_pct: penaltyRatePct != null ? String(penaltyRatePct) : "",
+    penalty_cap_pct: penaltyCapPct != null ? String(penaltyCapPct) : "",
+    penalty_terms: penaltyTerms,
+  });
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -32,6 +49,11 @@ export function DealEditButton({
       amount: Number(form.amount),
       next_step: form.next_step,
       deal_date: form.deal_date,
+      // Крайняя дата отгрузки + штраф; пустое поле → null. Смена даты → сигнал в закупки (бэк).
+      ship_deadline: form.ship_deadline || null,
+      penalty_rate_pct: form.penalty_rate_pct === "" ? null : Number(form.penalty_rate_pct),
+      penalty_cap_pct: form.penalty_cap_pct === "" ? null : Number(form.penalty_cap_pct),
+      penalty_terms: form.penalty_terms || null,
     });
     setSaving(false);
     setOpen(false);
@@ -95,8 +117,65 @@ export function DealEditButton({
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-muted">Следующий шаг</span>
                 <input
+                  type="datetime-local"
                   value={form.next_step}
                   onChange={(e) => setForm({ ...form, next_step: e.target.value })}
+                  className={INPUT}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  Крайняя дата отгрузки
+                </span>
+                <input
+                  type="date"
+                  value={form.ship_deadline}
+                  onChange={(e) => setForm({ ...form, ship_deadline: e.target.value })}
+                  className={INPUT}
+                />
+                <span className="mt-1 block text-[11px] text-faint">
+                  Уходит сигналом в закупки — чтобы успели к сроку.
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-muted">Штраф, %/день</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={9999.99}
+                    step={0.01}
+                    value={form.penalty_rate_pct}
+                    onChange={(e) => setForm({ ...form, penalty_rate_pct: e.target.value })}
+                    placeholder="0.1"
+                    className={INPUT}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-muted">
+                    Потолок, % от суммы
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={9999.99}
+                    step={0.01}
+                    value={form.penalty_cap_pct}
+                    onChange={(e) => setForm({ ...form, penalty_cap_pct: e.target.value })}
+                    placeholder="10"
+                    className={INPUT}
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  Условия штрафа (примечание)
+                </span>
+                <input
+                  value={form.penalty_terms}
+                  onChange={(e) => setForm({ ...form, penalty_terms: e.target.value })}
+                  placeholder="0.1% за каждый день просрочки, не более 10%"
+                  maxLength={512}
                   className={INPUT}
                 />
               </label>

@@ -18,6 +18,7 @@ export function DealCard({
   lostReasonTitle,
   wonResult = false,
   onLose,
+  fmt = formatMoney,
 }: {
   deal: Deal;
   days?: number | null;
@@ -27,6 +28,7 @@ export function DealCard({
   lostReasonTitle?: string;
   wonResult?: boolean;
   onLose?: () => void;
+  fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
 
@@ -60,10 +62,10 @@ export function DealCard({
       <div className="mt-2 font-semibold text-ink">{deal.company}</div>
       <div className="text-xs text-muted">{deal.description}</div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-ink">{formatMoney(deal.amount)}</span>
+        <span className="font-semibold text-ink">{fmt(deal.amount)}</span>
         {probability != null && probability > 0 && weighted != null && (
           <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink">
-            {probability}% · ≈ {formatMoney(weighted)}
+            {probability}% · ≈ {fmt(weighted)}
           </span>
         )}
       </div>

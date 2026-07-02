@@ -1,18 +1,9 @@
 import type { Deal, LossReason, Stage } from "@/lib/types";
+import { LOST_STAGE, STAGE_PROBABILITY } from "@/lib/sales-stages";
 
-/** Терминальная стадия «отказ» (SALES-40). Бэкенд отдаёт её в /sales/board;
- * для fallback без бэка добавляем сами через {@link ensureLostStage}. */
-export const LOST_STAGE = { id: "lost", title: "Закрыто: Отказ", color: "#EF4444" } as const;
-
-/** Дефолты вероятности по стадии (SALES-44). Переопределяются полем `deal.probability`. */
-export const STAGE_PROBABILITY: Record<string, number> = {
-  new: 10,
-  qual: 30,
-  prop: 50,
-  appr: 75,
-  won: 100,
-  lost: 0,
-};
+// Единый источник стадий — sales-stages.ts (канон, зеркало backend stages.py).
+// Реэкспорт сохраняет существующих импортёров `@/lib/board` (SALES-40/44).
+export { LOST_STAGE, STAGE_PROBABILITY };
 
 /** Порог «висяка» в днях (SALES-43): дольше — оранжевая подсветка и фильтр «Только висяки». */
 export const STUCK_DAYS = 4;
@@ -77,6 +68,12 @@ export function probabilityFor(deal: Deal, stageId: string): number {
 export function weightedAmount(deal: Deal, stageId: string): number {
   return (deal.amount * probabilityFor(deal, stageId)) / 100;
 }
+
+/** Стадия «в работе» — открытый pipeline (без won/lost/cond_lost). Единый критерий
+ *  охвата для взвешенного прогноза: и итог PipelineRow, и «взвешенно» в шапке колонки
+ *  считают по нему — иначе Σ колонок ≠ итогу (cond_lost даёт 5% в колонке, но не в итоге). */
+export const isOpenStage = (s: Stage): boolean =>
+  s.id !== "won" && s.id !== "lost" && s.id !== "cond_lost";
 
 /** Взвешенная сумма стадии — сумма взвешенных сумм её сделок (для шапки колонки). */
 export function stageWeightedSum(stage: Stage): number {

@@ -23,3 +23,12 @@ export function plural(n: number, forms: [one: string, few: string, many: string
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
   return forms[2];
 }
+
+/** Форматирует datetime-local строку ("YYYY-MM-DDTHH:mm") → "15 июл 14:30"
+ *  или возвращает как есть (обратная совместимость со старыми текстовыми значениями). */
+export function formatNextStep(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}

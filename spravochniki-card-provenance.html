@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Карточка контрагента — происхождение по полям (field-level provenance)</title>
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .ring-slate-100{--tw-ring-color:#172033 !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-red-50{background:#2A1717 !important} html.dark .text-red-700{color:#F87171 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-violet-50{background:#211A33 !important} html.dark .text-violet-700{color:#C4B5FD !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    /* —— Источник поля: бейдж + всплывающая подсказка —— */
+    .prov{position:relative;display:inline-flex;align-items:center;gap:3px;border-radius:999px;
+      padding:1px 7px 1px 6px;font:600 11px ui-sans-serif,system-ui;cursor:help;white-space:nowrap;user-select:none}
+    .prov .tip{position:absolute;bottom:calc(100% + 7px);right:0;width:max-content;max-width:260px;
+      background:#0f172a;color:#f1f5f9;font:500 11.5px/1.45 ui-sans-serif,system-ui;text-align:left;
+      padding:8px 11px;border-radius:9px;box-shadow:0 12px 30px rgba(0,0,0,.3);opacity:0;visibility:hidden;
+      transform:translateY(4px);transition:.16s;z-index:60;pointer-events:none}
+    .prov:hover .tip{opacity:1;visibility:visible;transform:translateY(0)}
+    .prov .tip b{color:#fff} .prov .tip .k{color:#94a3b8}
+    html.dark .prov .tip{background:#1E293B;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+    /* цвета источников */
+    .src-egr{background:#ecfdf5;color:#047857}    html.dark .src-egr{background:#16271F;color:#34D399}
+    .src-erp{background:#eef2ff;color:#4338ca}    html.dark .src-erp{background:#211A33;color:#C4B5FD}
+    .src-1c{background:#eff6ff;color:#1d4ed8}      html.dark .src-1c{background:#16233F;color:#7FA8FF}
+    .src-bitrix{background:#fff7ed;color:#c2410c} html.dark .src-bitrix{background:#2A2114;color:#FBBF24}
+    .src-manual{background:#f1f5f9;color:#475569} html.dark .src-manual{background:#16202F;color:#AEB9C9}
+    .fld{display:flex;items-center:center;justify-content:space-between;gap:8px}
+    .theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+      background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+      border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+      box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+    .theme-tgl:hover{background:#1545CC !important}
+    html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+      box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <!-- Хлебная крошка -->
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <!-- Заголовок -->
+    <div>
+      <h1 class="text-xl font-bold text-ink">Контрагент — происхождение по каждому полю</h1>
+      <p class="mt-1 text-sm text-muted">Field-level provenance: у <span class="font-medium text-ink">каждого поля</span> виден источник и дата, а не у записи целиком. Это превращает карточку из витрины в арбитр — видно, какому полю верить и что синк из 1С <span class="font-medium text-ink">не имеет права</span> затереть. Веха M2 дорожной карты независимости от 1С/Битрикс.</p>
+    </div>
+
+    <!-- Легенда источников -->
+    <div class="rounded-2xl bg-white p-4 shadow-card">
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Источники (по убыванию доверия)</p>
+        <span class="prov src-egr">🏛 ЕГР<span class="tip"><b>Госреестр (ЕГР)</b><br><span class="k">Доверие: эталон.</span> Реквизиты из первоисточника — УНП, наименование, юр.адрес. Синк не затирает.</span></span>
+        <span class="prov src-erp">✦ ERP<span class="tip"><b>ERP — закреплено правилом</b><br><span class="k">Доверие: высокое.</span> Поле, за которое отвечает ERP как система-истина; внешний синк не перезаписывает.</span></span>
+        <span class="prov src-manual">✍ Вручную<span class="tip"><b>Ручная правка в ERP</b><br><span class="k">Доверие: свежее.</span> Поправлено человеком; survivorship защищает от затирания синком.</span></span>
+        <span class="prov src-1c">📥 1С<span class="tip"><b>1С (входной адаптер)</b><br><span class="k">Доверие: точно по УНП/деньгам.</span> Импорт мастер-данных; по правилу может уступать ERP/ЕГР/ручному.</span></span>
+        <span class="prov src-bitrix">🔵 Битрикс<span class="tip"><b>Битрикс24</b><br><span class="k">Доверие: контакты/общение.</span> Богат на касания, но в названиях/реквизитах ненадёжен — низкий приоритет.</span></span>
+      </div>
+    </div>
+
+    <!-- Карточка-шапка -->
+    <div class="rounded-2xl bg-white p-5 shadow-card space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-lg font-bold text-ink">ОАО «БелАвтоТех»</h2>
+            <span class="text-brand" title="Мастер-данные (golden record)">★</span>
+            <span class="font-mono text-[13px] text-slate-500">CP-000231</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">собран из <b>3</b> источников</span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🤖 в каталоге AI</span>
+            <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">права: <span class="font-mono">refs.view · refs.edit</span></span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="spravochniki-merge-rules.html" class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">⚖ Правила слияния</a>
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Сохранить</button>
+        </div>
+      </div>
+
+      <!-- Таб-бар -->
+      <div class="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+        <span class="rounded-full bg-brand-100 px-3 py-1 text-[13px] font-semibold text-brand-600">Реквизиты</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Контакты</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Алиасы и источники</span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">Конфликты <span class="ml-1 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">1</span></span>
+        <span class="rounded-full px-3 py-1 text-[13px] text-slate-500 hover:bg-slate-50">История</span>
+      </div>
+    </div>
+
+    <!-- Двухколоночный grid -->
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+
+      <!-- ЛЕВО — форма Реквизиты с источником на каждом поле -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="flex items-center justify-between">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Реквизиты</p>
+          <p class="text-[11px] text-slate-400">наведи на бейдж справа от поля — откуда значение</p>
+        </div>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+
+          <!-- Полное наименование -->
+          <div class="sm:col-span-2">
+            <div class="fld"><label class="text-[12px] text-slate-500">Полное наименование</label>
+              <span class="prov src-egr">🏛 ЕГР<span class="tip"><b>ЕГР · 02.06.2026</b><br><span class="k">эталон, синк не затирает</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-emerald-100">
+              <input class="w-full bg-transparent text-sm outline-none" value="Открытое акционерное общество «БелАвтоТех»" />
+            </div>
+          </div>
+
+          <!-- Краткое наименование -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">Краткое наименование</label>
+              <span class="prov src-manual">✍ Вручную<span class="tip"><b>Ручная правка · М. Иванова · 12.06.2026</b><br><span class="k">было из 1С «БелАвтоТех ОАО» — поправлено</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none" value="ОАО «БелАвтоТех»" />
+            </div>
+          </div>
+
+          <!-- УНП -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">УНП</label>
+              <span class="prov src-egr">🏛 ЕГР<span class="tip"><b>ЕГР · 02.06.2026</b><br><span class="k">natural key, источник истины — госреестр</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-emerald-100">
+              <input class="w-full bg-transparent font-mono text-sm outline-none" value="100045678" />
+            </div>
+          </div>
+
+          <!-- Тип -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">Тип</label>
+              <span class="prov src-erp">✦ ERP<span class="tip"><b>ERP · А. Петров · 10.06.2026</b><br><span class="k">было «Клиент» → «Клиент + Поставщик»</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none" value="Клиент + Поставщик" />
+            </div>
+          </div>
+
+          <!-- Отрасль -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">Отрасль</label>
+              <span class="prov src-1c">📥 1С<span class="tip"><b>1С · 02.06.2026</b><br><span class="k">импорт; не закреплено правилом — синк обновит</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none" value="Автокомпоненты и запчасти" />
+            </div>
+          </div>
+
+          <!-- Юр. адрес -->
+          <div class="sm:col-span-2">
+            <div class="fld"><label class="text-[12px] text-slate-500">Юридический адрес</label>
+              <span class="prov src-egr">🏛 ЕГР<span class="tip"><b>ЕГР · 02.06.2026</b><br><span class="k">адрес регистрации из госреестра</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-emerald-100">
+              <input class="w-full bg-transparent text-sm outline-none" value="220073, г. Минск, ул. Скрыганова, д. 14, оф. 305" />
+            </div>
+          </div>
+
+          <!-- Телефон — КОНФЛИКТ -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">Телефон</label>
+              <span class="prov src-manual">✍ Вручную ⚠<span class="tip"><b>Ручная правка · 18.06.2026</b><br><span class="k">конфликт: 1С прислал старый «+375 17 200-11-22». Правило <b>most_recent</b> оставило ручной. <b>Синк НЕ затёр.</b></span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-amber-200">
+              <input class="w-full bg-transparent text-sm outline-none" value="+375 29 388-21-40" />
+            </div>
+            <p class="mt-1 text-[11px] text-amber-700">⚠ 1С прислал другой номер — правило оставило ручной. <a href="#" class="underline">сравнить</a></p>
+          </div>
+
+          <!-- e-mail -->
+          <div>
+            <div class="fld"><label class="text-[12px] text-slate-500">e-mail</label>
+              <span class="prov src-bitrix">🔵 Битрикс<span class="tip"><b>Битрикс24 · 10.06.2026</b><br><span class="k">контактные данные из CRM; низкий приоритет по реквизитам</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none" value="office@belavtotech.by" />
+            </div>
+          </div>
+
+          <!-- Ответственный менеджер -->
+          <div class="sm:col-span-2">
+            <div class="fld"><label class="text-[12px] text-slate-500">Ответственный менеджер</label>
+              <span class="prov src-erp">✦ ERP<span class="tip"><b>ERP · назначен в CRM</b><br><span class="k">внутреннее поле ERP, в 1С/Битрикс не выгружается</span></span></span></div>
+            <div class="mt-1 rounded-xl bg-slate-50 px-3 py-2">
+              <input class="w-full bg-transparent text-sm outline-none" value="А. Петров" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ПРАВО — sidebar -->
+      <div class="space-y-4">
+
+        <!-- Доверие к записи -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Доверие к данным</p>
+          <div class="mt-3 flex items-end justify-between">
+            <span class="text-3xl font-bold text-ink">94<span class="text-base font-semibold text-slate-400">%</span></span>
+            <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">высокое</span>
+          </div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-emerald-500" style="width:94%"></div></div>
+          <p class="mt-3 text-[12px] text-muted">Взвешено по источникам: реквизиты из ЕГР (эталон), 1 поле из Битрикс (низкое доверие), 1 конфликт разрешён.</p>
+          <div class="mt-3 space-y-1.5 text-[12px]">
+            <div class="flex items-center justify-between"><span class="text-slate-500">🏛 из ЕГР</span><span class="font-semibold text-ink">3 поля</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">✦ закреплено ERP</span><span class="font-semibold text-ink">2 поля</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">✍ правлено вручную</span><span class="font-semibold text-ink">2 поля</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">📥 из 1С</span><span class="font-semibold text-ink">1 поле</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">🔵 из Битрикс</span><span class="font-semibold text-ink">1 поле</span></div>
+          </div>
+        </div>
+
+        <!-- Защита от синка -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Защита при синке</p>
+          <p class="mt-2 flex items-center gap-1.5 text-sm font-semibold text-emerald-700">🛡 5 полей защищены</p>
+          <p class="mt-2 text-[12px] text-muted">Следующий синк из 1С обновит только <b>незакреплённые</b> поля (отрасль). Реквизиты ЕГР, ручные правки и ERP-поля — <b>не тронет</b>.</p>
+          <a href="spravochniki-merge-rules.html" class="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-white px-3 py-2 text-sm font-medium text-brand-600 shadow-card ring-1 ring-slate-200">⚖ Открыть правила слияния →</a>
+        </div>
+
+        <!-- Источники записи -->
+        <div class="rounded-2xl bg-white p-5 shadow-card">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Источники (alias)</p>
+          <div class="mt-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">✦ ERP · CP-000231</span>
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">эталон</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">📥 1С · 0000-0231</span>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">alias</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">🔵 Bitrix24 · 14502</span>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">alias</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Карта происхождения: все поля одним списком -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Карта происхождения — все поля и их источники</p>
+        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">хранится: JSONB <span class="font-mono">provenance</span> на записи</span>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th class="px-3 py-2 font-semibold">Поле</th>
+              <th class="px-3 py-2 font-semibold">Значение</th>
+              <th class="px-3 py-2 font-semibold">Источник</th>
+              <th class="px-3 py-2 font-semibold">Дата</th>
+              <th class="px-3 py-2 font-semibold">Правило слияния</th>
+              <th class="px-3 py-2 font-semibold">Защита от синка</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Полное наименование</td>
+              <td class="px-3 py-2.5 text-slate-600">ОАО «БелАвтоТех» (полное)</td>
+              <td class="px-3 py-2.5"><span class="prov src-egr">🏛 ЕГР</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">source_priority: ЕГР</td>
+              <td class="px-3 py-2.5"><span class="text-emerald-700">🛡 защищено</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">УНП</td>
+              <td class="px-3 py-2.5 font-mono text-slate-600">100045678</td>
+              <td class="px-3 py-2.5"><span class="prov src-egr">🏛 ЕГР</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">source_priority: ЕГР</td>
+              <td class="px-3 py-2.5"><span class="text-emerald-700">🛡 защищено</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Краткое наименование</td>
+              <td class="px-3 py-2.5 text-slate-600">ОАО «БелАвтоТех»</td>
+              <td class="px-3 py-2.5"><span class="prov src-manual">✍ Вручную</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">12.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">manual_only</td>
+              <td class="px-3 py-2.5"><span class="text-emerald-700">🛡 защищено</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Тип</td>
+              <td class="px-3 py-2.5 text-slate-600">Клиент + Поставщик</td>
+              <td class="px-3 py-2.5"><span class="prov src-erp">✦ ERP</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">10.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">source_priority: ERP</td>
+              <td class="px-3 py-2.5"><span class="text-emerald-700">🛡 защищено</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Юридический адрес</td>
+              <td class="px-3 py-2.5 text-slate-600">220073, г. Минск, ул. Скрыганова…</td>
+              <td class="px-3 py-2.5"><span class="prov src-egr">🏛 ЕГР</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">source_priority: ЕГР</td>
+              <td class="px-3 py-2.5"><span class="text-emerald-700">🛡 защищено</span></td>
+            </tr>
+            <tr class="bg-amber-50/40 hover:bg-amber-50/70">
+              <td class="px-3 py-2.5">Телефон</td>
+              <td class="px-3 py-2.5 font-mono text-slate-600">+375 29 388-21-40</td>
+              <td class="px-3 py-2.5"><span class="prov src-manual">✍ Вручную ⚠</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">18.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">most_recent</td>
+              <td class="px-3 py-2.5"><span class="text-amber-700">⚠ конфликт решён</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">e-mail</td>
+              <td class="px-3 py-2.5 text-slate-600">office@belavtotech.by</td>
+              <td class="px-3 py-2.5"><span class="prov src-bitrix">🔵 Битрикс</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">10.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">non_empty_wins</td>
+              <td class="px-3 py-2.5"><span class="text-slate-400">— обновляемо</span></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5">Отрасль</td>
+              <td class="px-3 py-2.5 text-slate-600">Автокомпоненты и запчасти</td>
+              <td class="px-3 py-2.5"><span class="prov src-1c">📥 1С</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06.2026</td>
+              <td class="px-3 py-2.5 font-mono text-[12px] text-slate-500">non_empty_wins</td>
+              <td class="px-3 py-2.5"><span class="text-slate-400">— синк обновит</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 border-t border-slate-100 pt-3 text-[11px] text-slate-400">«Защита от синка» = поле закреплено правилом за источником выше 1С → импорт его не перезапишет. Незащищённые поля синк обновляет. Правила правятся на экране <a href="spravochniki-merge-rules.html" class="text-brand-600">⚖ Правила слияния</a>.</p>
+    </div>
+
+    <!-- Пояснение -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Зачем это (M2 дорожной карты)</p>
+      <p class="mt-2 text-sm text-muted">Раньше источник знали про <span class="font-medium text-ink">всю запись</span>. Теперь — про <span class="font-medium text-ink">каждое поле</span>. Это закрывает главную причину, по которой ERP оставался «вторым после 1С»: ручная правка переживает синк. Менеджер правит телефон — и 1С его <b>не затирает</b>, потому что правило поля закрепило ручной ввод. После этой вехи безопасен <a href="spravochniki-import-1c-preview.html" class="text-brand-600">двусторонний обмен с 1С</a> (веха M3). Хранение: JSONB-колонка <span class="font-mono">provenance</span> на записи; правила — таблица <span class="font-mono">survivorship_rule</span>.</p>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные, BYN. Дорожная карта: coordination/reference-independence-roadmap.md (M2). Концепция: db-and-reference-data-concept.md (v3, §4.1).</p>
+
+  </div>
+<script>
+/* демо-отклик: кнопка/ссылка-заглушка показывает тост (нет «ничего не произошло»). */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,a[href="#"],[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

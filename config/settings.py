@@ -25,6 +25,18 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     # базовый URL 1С (OData/REST); пусто — используется mock-источник
     onec_base_url: str = ""
+    # базовый URL сервиса ЕГР РБ (lookup реквизитов по УНП); пусто — mock-справочник
+    egr_base_url: str = ""
+
+    # AuthN (SECURITY.md P1 — Keycloak/OIDC). ``auth_mode``:
+    #   "dev"  — доверять заголовку X-User-Roles (текущее поведение dev и прода, пока realm
+    #            Keycloak не заведён); "oidc" — принимать ТОЛЬКО проверенный Bearer-JWT Keycloak.
+    # Дефолт "dev" — аддитивно для локали/тестов. ⚠️ Прод (environment≠dev) НЕ загрузится без
+    # oidc + issuer + audience (см. валидатор ниже) — намеренный security-гейт: доверие заголовку
+    # в публичном проде = вход суперпользователем без пароля.
+    auth_mode: str = "dev"
+    keycloak_issuer: str = ""    # https://<host>/realms/<realm>; пусто → oidc недоступен
+    keycloak_audience: str = ""  # ожидаемый aud (client_id) в токене
 
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False
@@ -60,6 +72,13 @@ class Settings(BaseSettings):
     # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
     intake_webhook_token: str = ""
 
+    # SEO/GEO Growth Platform: входящий webhook от SEO-сервиса (HMAC в X-SEO-Signature).
+    # Прод публичен → задавать обязательно (AIOS_SEO_WEBHOOK_SECRET).
+    seo_webhook_secret: str = ""
+
+    # Базовый URL SEO/GEO UI для deep-link из CRM (AIOS_SEO_UI_BASE_URL).
+    seo_ui_base_url: str = "http://localhost:3000"
+
     # Реквизиты своей организации (продавец) для договоров SALES-53 — конфиг, не shared-схема
     # (ТЗ C.5). Переопределяются env AIOS_SELLER_*. Реквизиты покупателя берутся по УНП из ЕГР.
     seller_name: str = "ООО «Аккумуляторные решения»"
@@ -83,6 +102,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Прод-режим с dev-дефолтом БД (aios:aios). Задайте AIOS_DATABASE_URL "
                 "с реальными кредами или AIOS_ENVIRONMENT=dev для локальной разработки."
+            )
+        # AuthN (SEC-002): прод НЕ должен доверять заголовку X-User-Roles — на публичном
+        # belakb.by это вход суперпользователем без пароля. Требуем проверенный Keycloak-JWT.
+        if self.auth_mode != "oidc":
+            raise ValueError(
+                "Прод-режим требует AIOS_AUTH_MODE=oidc: доверие X-User-Roles в проде = вход "
+                "без пароля. Заведите realm Keycloak или AIOS_ENVIRONMENT=dev для локали."
+            )
+        if not self.keycloak_issuer or not self.keycloak_audience:
+            raise ValueError(
+                "oidc-режим требует AIOS_KEYCLOAK_ISSUER и AIOS_KEYCLOAK_AUDIENCE "
+                "(без проверки aud принимается любой токен realm'а — SEC-001)."
             )
         return self
 

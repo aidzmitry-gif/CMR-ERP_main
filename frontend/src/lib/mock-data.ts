@@ -1,3 +1,4 @@
+import { progressionIndex, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { Chat, DealDetail, FunnelTotal, Kpi, Stage } from "@/lib/types";
 
 // Демо-данные прототипа (как на макете). Подставляются вместо реального API.
@@ -12,9 +13,7 @@ export const KPIS: Kpi[] = [
 
 export const STAGES: Stage[] = [
   {
-    id: "new",
-    title: "Новая заявка",
-    color: "#3B82F6",
+    ...STAGE_BY_ID.new,
     count: 125,
     sum: 8_450_000,
     deals: [
@@ -24,9 +23,7 @@ export const STAGES: Stage[] = [
     ],
   },
   {
-    id: "qual",
-    title: "Квалификация",
-    color: "#8B5CF6",
+    ...STAGE_BY_ID.qual,
     count: 68,
     sum: 12_300_000,
     deals: [
@@ -36,9 +33,7 @@ export const STAGES: Stage[] = [
     ],
   },
   {
-    id: "prop",
-    title: "Коммерческое предл.",
-    color: "#F59E0B",
+    ...STAGE_BY_ID.has_price,
     count: 35,
     sum: 9_750_000,
     deals: [
@@ -47,9 +42,7 @@ export const STAGES: Stage[] = [
     ],
   },
   {
-    id: "appr",
-    title: "Согласование",
-    color: "#14B8A6",
+    ...STAGE_BY_ID.contract,
     count: 18,
     sum: 6_200_000,
     deals: [
@@ -58,9 +51,7 @@ export const STAGES: Stage[] = [
     ],
   },
   {
-    id: "won",
-    title: "Закрыто: Успешно",
-    color: "#22C55E",
+    ...STAGE_BY_ID.won,
     count: 42,
     sum: 15_600_000,
     deals: [
@@ -93,7 +84,8 @@ export const CHATS: Chat[] = [
 
 /** Подобрать детальную карточку по id сделки (для страницы /crm/deals/[id]). */
 export function getDealDetail(id: string): DealDetail {
-  const deal = STAGES.flatMap((s) => s.deals).find((d) => d.id === id);
+  const stage = STAGES.find((s) => s.deals.some((d) => d.id === id));
+  const deal = stage?.deals.find((d) => d.id === id);
   if (!deal) return DEAL_DETAIL;
   return {
     number: deal.number,
@@ -110,6 +102,9 @@ export function getDealDetail(id: string): DealDetail {
     focus: false,
     starred: deal.starred ?? false,
     dealDate: deal.date ?? "",
+    stage: stage
+      ? { idx: progressionIndex(stage.id), id: stage.id, title: stage.title }
+      : undefined,
   };
 }
 

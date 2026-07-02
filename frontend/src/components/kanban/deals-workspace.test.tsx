@@ -6,6 +6,10 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+// next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id]
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock("@/lib/api", () => ({
   createDeal: vi.fn(),
   getKpis: vi.fn().mockResolvedValue([]),

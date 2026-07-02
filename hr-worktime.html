@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<title>Учёт рабочего времени — HR (макет Gate 1)</title>
+<script>
+/* ── Тема: инит до рендера, без мигания ── */
+(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){
+  document.documentElement.classList.toggle('dark',t==='dark');
+  var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');
+  if(i)i.textContent=t==='dark'?'☀️':'🌙';
+  if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';
+  try{localStorage.setItem('theme',t);}catch(e){}
+}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
+</script>
+<style>
+/* ═══════════════════════════════════════════════
+   Дизайн-система C (светлая) + D (тёмная)
+   Токены идентичны sales-board-mockup.html
+═══════════════════════════════════════════════ */
+:root{
+  --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --canvas:#EEF1F5; --surface:#fff; --sunken:#F4F6F9;
+  --ink:#0F172A; --muted:#5B6B82; --faint:#93A1B5;
+  --line:#E2E8F0; --line-strong:#CBD5E1;
+  --brand:#1E5EFF; --brand-50:#E3ECFF; --brand-100:#E3ECFF; --brand-700:#1545CC;
+  --ok:#0E7C4A; --warn:#B45309; --bad:#DC2626;
+  --green-soft:#ECFDF5; --green-ink:#047857;
+  --amber-soft:#FFFBEB; --amber-ink:#B45309;
+  --red-soft:#FEF2F2;  --red-ink:#B91C1C;
+  --blue-soft:#EFF5FF; --blue-ink:#1D4ED8;
+  --violet-soft:#EDE9FE; --violet-ink:#6D28D9;
+  --shadow-card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --pop:0 1px 2px rgba(20,20,40,.06),0 12px 28px rgba(20,20,40,.12);
+}
+html.dark{
+  --canvas:#0E1116; --surface:#171B22; --sunken:#1F242C;
+  --ink:#E8EAED; --muted:#9BA3AE; --faint:#6B7280;
+  --line:#2A3038; --line-strong:#3A424C;
+  --brand:#6E8BFF; --brand-50:#232A3D; --brand-100:#232A3D; --brand-700:#8AA0FF;
+  --ok:#34D399; --warn:#FBBF24; --bad:#F87171;
+  --green-soft:#16271F; --green-ink:#34D399;
+  --amber-soft:#2A2114; --amber-ink:#FBBF24;
+  --red-soft:#3A1D1D;  --red-ink:#F87171;
+  --blue-soft:#1B2740; --blue-ink:#7FA8FF;
+  --violet-soft:#241B3A; --violet-ink:#C4B5FD;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --pop:0 2px 4px rgba(0,0,0,.5),0 18px 40px rgba(0,0,0,.55);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;
+  -webkit-font-smoothing:antialiased;transition:background .2s,color .2s;min-height:100vh}
+input,select,textarea{background:var(--surface);color:var(--ink);font-family:inherit}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+button{font-family:inherit}
+
+/* ── Layout ── */
+.app{display:flex;min-height:100vh}
+
+/* ── Sidebar (collapse→expand on hover, как sales-board-mockup) ── */
+.side{position:relative;width:64px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--line);z-index:31}
+.side-inner{position:absolute;top:0;left:0;height:100%;width:64px;background:var(--surface);
+  border-right:1px solid var(--line);padding:18px 12px;overflow:hidden;white-space:nowrap;
+  transition:width .22s cubic-bezier(.4,0,.2,1)}
+.side:hover .side-inner{width:230px;box-shadow:12px 0 28px rgba(16,24,40,.10)}
+.logo{font-weight:800;font-size:15px;color:var(--ink);padding:4px 8px 18px;display:flex;gap:10px;align-items:center}
+.logo .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;font-weight:800}
+.logo .lbl{opacity:0;transition:opacity .18s}
+.side:hover .logo .lbl{opacity:1}
+.nav-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);
+  padding:12px 8px 5px;opacity:0;transition:opacity .18s}
+.side:hover .nav-group{opacity:1}
+.nav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;
+  color:var(--muted);font-size:13.5px;cursor:pointer}
+.nav-item:hover{background:var(--sunken)}
+.nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+.nav-item .ic{width:24px;text-align:center;flex-shrink:0}
+.nav-item .lbl{opacity:0;transition:opacity .18s}
+.side:hover .nav-item .lbl{opacity:1}
+.nav-user{position:absolute;bottom:14px;left:0;right:0;padding:0 12px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer}
+.nav-user .av{width:36px;height:36px;border-radius:50%;background:#1E5EFF;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff;flex-shrink:0}
+.nav-user .info{opacity:0;transition:opacity .18s;overflow:hidden}
+.side:hover .nav-user .info{opacity:1}
+.nav-user .info .nm{font-weight:600;font-size:12px;color:var(--ink)}
+.nav-user .info .role{font-size:11px;color:var(--faint)}
+
+/* ── Main ── */
+main{flex:1;overflow:auto;padding:24px;min-width:0}
+
+/* ── Page header ── */
+.page-hd{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap}
+.page-hd h1{font-size:20px;font-weight:800;color:var(--ink);flex:1;display:flex;align-items:center;gap:8px}
+.page-hd .sub{font-size:13px;color:var(--muted);font-weight:400}
+.theme-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);
+  background:var(--surface);border-radius:8px;padding:7px 13px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer}
+.theme-btn:hover{background:var(--sunken)}
+
+/* ── Tabs ── */
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--line);margin-bottom:22px;overflow-x:auto}
+.tab-btn{border:none;background:none;padding:10px 20px;font-size:14px;font-weight:500;
+  color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;
+  white-space:nowrap;transition:.15s;margin-bottom:-2px}
+.tab-btn:hover{color:var(--ink)}
+.tab-btn.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:700}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── Reminder banner ── */
+.reminder{display:flex;align-items:center;gap:12px;border-radius:12px;
+  padding:13px 16px;margin-bottom:20px;font-size:13.5px}
+.reminder.warn{background:var(--amber-soft);border:1px solid #FCD34D;color:var(--amber-ink)}
+.reminder.info{background:var(--blue-soft);border:1px solid #93C5FD;color:var(--blue-ink)}
+.reminder.ok{background:var(--green-soft);border:1px solid #6EE7B7;color:var(--green-ink)}
+.reminder .ic{font-size:20px;flex-shrink:0}
+.reminder .r-txt{flex:1}
+.reminder b{font-weight:700}
+.reminder .r-action{flex-shrink:0;border:none;background:var(--brand);color:#fff;
+  border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.reminder .r-action:hover{background:var(--brand-700)}
+
+/* ── Day widget (Tab 1) ── */
+.day-widget{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-card);
+  padding:24px 28px;margin-bottom:18px;display:flex;align-items:center;gap:32px;flex-wrap:wrap}
+.dw-clock{flex:1;min-width:180px}
+.dw-clock .dw-label{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--faint);font-weight:700;margin-bottom:6px}
+.dw-clock .dw-timer{font-size:52px;font-weight:800;color:var(--ink);
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1;transition:color .3s}
+.dw-clock .dw-timer.running{color:var(--brand)}
+.dw-clock .dw-since{font-size:12.5px;color:var(--muted);margin-top:7px}
+.dw-action{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:10px}
+.start-btn{display:inline-flex;align-items:center;gap:10px;padding:16px 28px;border-radius:12px;
+  border:2px solid transparent;font-size:15px;font-weight:700;cursor:pointer;transition:.18s;white-space:nowrap}
+.start-btn.go{background:var(--green-soft);color:var(--green-ink);border-color:#6EE7B7}
+.start-btn.go:hover{background:#D1FAE5}
+.start-btn.stop-it{background:var(--red-soft);color:var(--red-ink);border-color:#FCA5A5}
+.start-btn.stop-it:hover{background:#FFE4E6}
+.dw-norm-wrap{background:var(--sunken);border-radius:10px;padding:14px 16px;margin-bottom:18px}
+.dw-norm-wrap .nw-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:13.5px}
+.dw-norm-wrap .nw-top b{font-weight:700}
+.dw-norm-wrap .nw-top .nw-pct{font-weight:700;color:var(--brand)}
+.norm-bar{height:9px;background:var(--line);border-radius:99px;overflow:hidden;margin-bottom:5px}
+.norm-bar-fill{height:100%;border-radius:99px;background:var(--brand);transition:width .5s ease}
+.norm-bar-fill.over{background:var(--warn)}
+.norm-bl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* ── Stats cards grid ── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);padding:16px 18px}
+.stat-card .sc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.stat-card .sc-title{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700}
+.stat-card .sc-val{font-size:28px;font-weight:800;color:var(--ink);line-height:1;letter-spacing:-.02em}
+.stat-card .sc-sub{font-size:12px;color:var(--muted);margin-top:5px}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;border-radius:99px;padding:3px 9px}
+.badge.online{background:var(--green-soft);color:var(--green-ink)}
+.badge.offline{background:var(--sunken);color:var(--muted)}
+.badge.overtime{background:var(--amber-soft);color:var(--amber-ink)}
+.badge.pending{background:var(--red-soft);color:var(--red-ink)}
+
+/* ── Demo state toggle (Tab 1 bottom) ── */
+.demo-states{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);padding:16px 18px;margin-top:4px}
+.demo-states .ds-title{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700;margin-bottom:12px}
+.demo-states .ds-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ds-item{border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;transition:.15s}
+.ds-item:hover{border-color:var(--brand);background:var(--brand-100)}
+.ds-item.current{border-color:var(--brand);background:var(--brand-100)}
+.ds-item .ds-name{font-weight:600;font-size:13px;color:var(--ink)}
+.ds-item .ds-desc{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+/* ── Presence board (Tab 2) ── */
+.presence-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.dept-filter{display:flex;gap:5px;flex-wrap:wrap}
+.dept-chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;
+  padding:5px 12px;font-size:12.5px;color:var(--muted);cursor:pointer;white-space:nowrap;transition:.13s}
+.dept-chip:hover{background:var(--sunken)}
+.dept-chip.active{background:var(--brand-100);color:var(--brand-700);border-color:transparent;font-weight:600}
+.view-toggle{margin-left:auto;display:flex;gap:2px;border:1px solid var(--line);
+  border-radius:9px;padding:3px;background:var(--surface);flex-shrink:0}
+.view-toggle button{border:none;background:none;padding:5px 12px;border-radius:7px;
+  font-size:12.5px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+.view-toggle button.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+
+.dept-section{margin-bottom:22px}
+.dept-title{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);
+  font-weight:700;margin-bottom:10px;padding-left:2px}
+.presence-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.person-card{background:var(--surface);border-radius:12px;box-shadow:var(--shadow-card);
+  padding:12px 14px;display:flex;align-items:center;gap:11px}
+.person-card.is-me{border:1.5px solid var(--brand)}
+.p-av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13px;color:#fff;flex-shrink:0;position:relative}
+.p-av .sdot{position:absolute;bottom:0;right:0;width:11px;height:11px;border-radius:50%;border:2px solid var(--surface)}
+.p-av .sdot.on{background:#22C55E}
+.p-av .sdot.off{background:#94A3B8}
+.p-info{flex:1;min-width:0}
+.p-info .pname{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-info .prole{font-size:11.5px;color:var(--muted)}
+.p-right{text-align:right;flex-shrink:0}
+.p-right .phrs{font-size:16px;font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1}
+.p-right .phrs.live{color:var(--brand)}
+.p-right .psub{font-size:10.5px;color:var(--faint);margin-top:2px}
+
+/* ── Tabel (Tab 3) ── */
+.tabel-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.period-nav{display:flex;align-items:center;gap:8px;background:var(--surface);
+  border:1px solid var(--line);border-radius:10px;padding:6px 12px}
+.period-nav button{border:none;background:none;color:var(--muted);cursor:pointer;
+  font-size:18px;line-height:1;padding:2px 4px;border-radius:6px;transition:.12s}
+.period-nav button:hover{background:var(--sunken);color:var(--ink)}
+.period-label{font-weight:700;font-size:14px;color:var(--ink);min-width:110px;text-align:center}
+.legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
+.leg-chip{min-width:22px;height:18px;border-radius:4px;display:flex;align-items:center;
+  justify-content:center;font-size:10px;font-weight:700;padding:0 4px}
+
+.tabel-wrap{overflow-x:auto;border-radius:12px;box-shadow:var(--shadow-card)}
+.tabel{border-collapse:collapse;background:var(--surface);width:100%;font-size:12px}
+.tabel thead th{padding:7px 4px;background:var(--sunken);color:var(--faint);font-weight:600;
+  text-align:center;border-bottom:2px solid var(--line);white-space:nowrap;
+  position:sticky;top:0;z-index:2}
+.tabel thead th.th-left{text-align:left;padding-left:10px}
+.tabel thead th.th-name{min-width:150px}
+.tabel thead th.th-day{min-width:30px;font-size:10.5px}
+.tabel thead th.th-day.wk{color:var(--line-strong)}
+.tabel thead th.th-tot{min-width:44px;background:var(--brand-100);color:var(--brand-700);font-size:11px}
+.tabel tbody td{padding:3px 2px;border-bottom:1px solid var(--line);
+  border-right:1px dashed var(--line);text-align:center;vertical-align:middle}
+.tabel tbody td.td-left{text-align:left;padding:6px 10px;border-right:2px solid var(--line)}
+.tabel tbody td.td-tot{background:var(--brand-100);color:var(--brand-700);
+  font-weight:700;font-size:12px;border-right:1px solid var(--line)}
+.tabel tbody tr:hover td:not(.td-tot){background:var(--sunken)}
+
+.dc{width:28px;height:26px;border-radius:5px;display:flex;align-items:center;
+  justify-content:center;font-weight:700;margin:0 auto;font-size:11.5px;cursor:default}
+.dc.norm{color:var(--ink)}
+.dc.wknd{background:var(--sunken);color:var(--faint);font-size:10px}
+.dc.vac{background:var(--blue-soft);color:var(--blue-ink)}
+.dc.sick{background:var(--amber-soft);color:var(--amber-ink)}
+.dc.trip{background:var(--violet-soft);color:var(--violet-ink)}
+.dc.pers{background:var(--sunken);color:var(--muted)}
+.dc.ot{background:var(--amber-soft);color:var(--amber-ink);position:relative;cursor:pointer}
+.dc.ot::after{content:'!';position:absolute;top:-4px;right:-4px;width:13px;height:13px;
+  border-radius:50%;background:var(--warn);color:#fff;font-size:8px;
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+html.dark .dc.ot::after{color:#0E1116}
+.dc.ot:hover{filter:brightness(.93)}
+.dc.ot-ok{background:var(--green-soft);color:var(--green-ink);position:relative}
+.dc.ot-ok::after{content:'✓';position:absolute;top:-4px;right:-4px;width:13px;height:13px;
+  border-radius:50%;background:var(--ok);color:#fff;font-size:9px;
+  display:flex;align-items:center;justify-content:center;font-weight:800}
+html.dark .dc.ot-ok::after{color:#0E1116}
+
+/* ── Modal overlay ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;
+  display:none;align-items:center;justify-content:center;padding:16px}
+.overlay.show{display:flex}
+.modal{background:var(--surface);border-radius:16px;box-shadow:var(--pop);
+  width:480px;max-width:100%;overflow:hidden}
+.m-head{display:flex;justify-content:space-between;align-items:center;
+  padding:18px 22px;border-bottom:1px solid var(--line)}
+.m-head h3{font-size:16px;font-weight:800}
+.m-close{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);cursor:pointer;color:var(--muted);font-size:16px;
+  display:flex;align-items:center;justify-content:center}
+.m-close:hover{background:var(--sunken)}
+.m-body{padding:18px 22px}
+.m-row{display:flex;justify-content:space-between;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.m-row:last-child{border-bottom:none}
+.m-row .lbl{color:var(--muted)}
+.m-row .val{font-weight:600}
+.ot-box{background:var(--amber-soft);border-radius:10px;padding:12px 16px;
+  margin:12px 0;display:flex;align-items:center;gap:12px;font-size:13.5px;color:var(--amber-ink)}
+.ot-box b{font-weight:800}
+.m-note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:4px}
+.m-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.btn-reject{border:1px solid var(--line);background:var(--surface);color:var(--muted);
+  border-radius:9px;padding:10px 20px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s}
+.btn-reject:hover{background:var(--red-soft);color:var(--red-ink);border-color:#FCA5A5}
+.btn-approve{border:none;background:var(--green-ink);color:#fff;
+  border-radius:9px;padding:10px 20px;font-size:13.5px;font-weight:700;cursor:pointer;transition:.15s}
+.btn-approve:hover{filter:brightness(.92)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ── -->
+  <nav class="side">
+    <div class="side-inner">
+      <div class="logo">
+        <div class="mark">AI</div>
+        <div class="lbl">AI-First OS</div>
+      </div>
+      <div class="nav-group">Рабочий стол</div>
+      <div class="nav-item"><span class="ic">🏠</span><span class="lbl">Главная</span></div>
+      <div class="nav-group">Модули</div>
+      <div class="nav-item"><span class="ic">📊</span><span class="lbl">CRM / Сделки</span></div>
+      <div class="nav-item"><span class="ic">🛒</span><span class="lbl">Закупки</span></div>
+      <div class="nav-item"><span class="ic">🏭</span><span class="lbl">Производство</span></div>
+      <div class="nav-item"><span class="ic">📦</span><span class="lbl">Склад</span></div>
+      <div class="nav-item"><span class="ic">🚚</span><span class="lbl">Логистика</span></div>
+      <div class="nav-item"><span class="ic">💰</span><span class="lbl">Финансы</span></div>
+      <div class="nav-item active"><span class="ic">👥</span><span class="lbl">HR / Кадры</span></div>
+      <div class="nav-user">
+        <div class="av" style="width:36px;height:36px;border-radius:50%;background:#1E5EFF;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff;flex-shrink:0">Ж</div>
+        <div class="info">
+          <div class="nm">Жуковская О.Н.</div>
+          <div class="role">Финансы / HR</div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Main ── -->
+  <main>
+    <!-- Page header -->
+    <div class="page-hd">
+      <h1>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--brand);flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Учёт рабочего времени
+        <span class="sub">— Табель T-13 · HR</span>
+      </h1>
+      <button class="theme-btn" id="themeTgl" onclick="toggleTheme()">
+        <span id="themeIco">🌙</span>
+        <span id="themeTxt">Тёмная</span>
+      </button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tabBtn-myDay" onclick="switchTab('myDay',this)">🕐 Мой день</button>
+      <button class="tab-btn" id="tabBtn-presence" onclick="switchTab('presence',this)">👥 Кто онлайн</button>
+      <button class="tab-btn" id="tabBtn-tabel" onclick="switchTab('tabel',this)">📋 Табель</button>
+    </div>
+
+    <!-- ═══ TAB 1: МОЙ ДЕНЬ ═══ -->
+    <div id="tab-myDay" class="tab-panel active">
+
+      <!-- Reminder banner (state: day is running, end-of-day warning) -->
+      <div class="reminder warn" id="reminderBanner">
+        <div class="ic">⏰</div>
+        <div class="r-txt">
+          <b>Не забудьте завершить рабочий день!</b>
+          Вы начали в 09:14. Нажмите кнопку при уходе — данные запишутся в табель.
+        </div>
+        <button class="r-action" onclick="stopDayNow()">Завершить день</button>
+      </div>
+
+      <!-- Day widget -->
+      <div class="day-widget">
+        <div class="dw-clock">
+          <div class="dw-label" id="timerLabel">Идёт рабочий день</div>
+          <div class="dw-timer running" id="dayTimer">03:42:15</div>
+          <div class="dw-since" id="timerSince">Начало: 09:14 · Сегодня, 2 июля 2026</div>
+        </div>
+        <div class="dw-action">
+          <button class="start-btn stop-it" id="dayBtn" onclick="toggleDay()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            Завершить день
+          </button>
+          <div style="font-size:11.5px;color:var(--muted);text-align:center">2 июля 2026</div>
+        </div>
+      </div>
+
+      <!-- Norm progress bar -->
+      <div class="dw-norm-wrap">
+        <div class="nw-top">
+          <span>Прогресс нормы (8 ч/день)</span>
+          <span class="nw-pct" id="normPct">46%</span>
+        </div>
+        <div class="norm-bar">
+          <div class="norm-bar-fill" id="normFill" style="width:46%"></div>
+        </div>
+        <div class="norm-bl">
+          <span>09:14 — начало</span>
+          <span id="normWorked">3ч 42м отработано</span>
+          <span>17:14 — план завершения</span>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="sc-head">
+            <span class="sc-title">Сегодня</span>
+            <span class="badge online">● онлайн</span>
+          </div>
+          <div class="sc-val" id="statToday">3:42</div>
+          <div class="sc-sub">идёт отсчёт</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-head">
+            <span class="sc-title">Июнь 2026</span>
+          </div>
+          <div class="sc-val">128 ч</div>
+          <div class="sc-sub">из 168 ч норма месяца (21 р.д.)</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-head">
+            <span class="sc-title">Переработки (июнь)</span>
+            <span class="badge pending">ожидают</span>
+          </div>
+          <div class="sc-val">+6 ч</div>
+          <div class="sc-sub">на согласовании руководителя</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-head">
+            <span class="sc-title">Отпуск / больничный</span>
+          </div>
+          <div class="sc-val">2 д</div>
+          <div class="sc-sub">командировка 1–2 июня</div>
+        </div>
+      </div>
+
+      <!-- Demo states panel -->
+      <div class="demo-states">
+        <div class="ds-title">🎭 Демо: состояния кнопки «Рабочий день»</div>
+        <div class="ds-grid">
+          <div class="ds-item" id="ds-not-started" onclick="setDemoState('not-started')">
+            <div class="ds-name">⚪ День не начат</div>
+            <div class="ds-desc">Баннер «Вы не отметили начало» + кнопка «Начать»</div>
+          </div>
+          <div class="ds-item current" id="ds-running" onclick="setDemoState('running')">
+            <div class="ds-name">🟢 Смена идёт (03:42…)</div>
+            <div class="ds-desc">Живой счётчик + баннер «Не забудьте завершить»</div>
+          </div>
+          <div class="ds-item" id="ds-done" onclick="setDemoState('done')">
+            <div class="ds-name">✅ День завершён</div>
+            <div class="ds-desc">Итог 8ч 03м, баннер «Записано в табель»</div>
+          </div>
+          <div class="ds-item" id="ds-overtime" onclick="setDemoState('overtime')">
+            <div class="ds-name">🟠 Переработка (10:15…)</div>
+            <div class="ds-desc">Счётчик > 8ч, бар красный + пуш руководителю</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB 2: КТО ОНЛАЙН ═══ -->
+    <div id="tab-presence" class="tab-panel">
+      <div class="presence-toolbar">
+        <div class="dept-filter" id="deptFilter">
+          <button class="dept-chip active" onclick="filterDept('all',this)">Все</button>
+          <button class="dept-chip" onclick="filterDept('Руководство',this)">Руководство</button>
+          <button class="dept-chip" onclick="filterDept('Продажи',this)">Продажи</button>
+          <button class="dept-chip" onclick="filterDept('Производство',this)">Производство</button>
+          <button class="dept-chip" onclick="filterDept('ЗСЛ',this)">Закупки / Склад / Лог.</button>
+          <button class="dept-chip" onclick="filterDept('Финансы/HR',this)">Финансы / HR</button>
+        </div>
+        <div class="view-toggle">
+          <button class="active" onclick="setView('all',this)">Все</button>
+          <button onclick="setView('dept',this)">Мой отдел</button>
+        </div>
+      </div>
+      <div id="presenceBoard"></div>
+    </div>
+
+    <!-- ═══ TAB 3: ТАБЕЛЬ ═══ -->
+    <div id="tab-tabel" class="tab-panel">
+      <div class="tabel-toolbar">
+        <div class="period-nav">
+          <button onclick="changePeriod(-1)">‹</button>
+          <div class="period-label" id="periodLabel">Июнь 2026</div>
+          <button onclick="changePeriod(1)">›</button>
+        </div>
+        <div class="legend">
+          <div class="leg-item"><div class="leg-chip" style="background:var(--sunken);color:var(--faint)">В</div>Выходной</div>
+          <div class="leg-item"><div class="leg-chip" style="background:var(--blue-soft);color:var(--blue-ink)">О</div>Отпуск</div>
+          <div class="leg-item"><div class="leg-chip" style="background:var(--amber-soft);color:var(--amber-ink)">Б</div>Больничный</div>
+          <div class="leg-item"><div class="leg-chip" style="background:var(--violet-soft);color:var(--violet-ink)">К</div>Командировка</div>
+          <div class="leg-item"><div class="leg-chip" style="background:var(--sunken);color:var(--muted)">А</div>За свой счёт</div>
+          <div class="leg-item"><div class="leg-chip" style="background:var(--amber-soft);color:var(--amber-ink)">9</div>Переработка (нажать)</div>
+        </div>
+        <button class="theme-btn" style="margin-left:auto" onclick="showToast('Экспорт T-13 — будет доступен после Gate 2')">
+          ⬇ Экспорт T-13
+        </button>
+      </div>
+      <div class="tabel-wrap">
+        <table class="tabel" id="tabelTable"></table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ── Попап согласования переработки ── -->
+<div class="overlay" id="overtimeOverlay">
+  <div class="modal">
+    <div class="m-head">
+      <h3>Согласование переработки</h3>
+      <button class="m-close" onclick="closeOvertimeModal()">✕</button>
+    </div>
+    <div class="m-body">
+      <div class="m-row"><span class="lbl">Сотрудник</span><span class="val" id="ot-name">—</span></div>
+      <div class="m-row"><span class="lbl">Дата</span><span class="val" id="ot-date">—</span></div>
+      <div class="m-row"><span class="lbl">Норма рабочих часов</span><span class="val">8 ч (по контракту)</span></div>
+      <div class="m-row"><span class="lbl">Фактически отработано</span><span class="val" id="ot-actual">—</span></div>
+      <div class="ot-box">
+        ⚠️
+        <div><b id="ot-extra">—</b> на согласование</div>
+      </div>
+      <div class="m-note">
+        При согласовании — часы добавятся в итог табеля и пойдут в расчёт переработки месяца.<br>
+        При отклонении — в табеле останется норма 8 ч.
+        <br><br>
+        <i>⚠️ Открытые вопросы (Gate 1): кто «руководитель» для согласования — РОП отдела или директор?</i>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn-reject" onclick="rejectOvertime()">✕ Отклонить</button>
+      <button class="btn-approve" onclick="approveOvertime()">✓ Согласовать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Demo toast -->
+<div id="_demoToast" style="position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 18px;
+  border-radius:10px;box-shadow:var(--pop);z-index:99999;opacity:0;pointer-events:none;
+  transition:.22s;max-width:90vw;white-space:nowrap"></div>
+
+<script>
+'use strict';
+
+/* ══════════════════════════════════════
+   ДАННЫЕ: 20 сотрудников из config/access.py::USERS
+══════════════════════════════════════ */
+const USERS_DATA = [
+  {id:'00001',name:'Харькович Д.С.', role:'Директор',            dept:'Руководство',        online:false, clockIn:null,    todayMin:0,   color:'#6D28D9'},
+  {id:'00002',name:'Харькович С.Д.', role:'Коммерческий директор',dept:'Руководство',        online:true,  clockIn:'10:05', todayMin:217, color:'#1D4ED8'},
+  {id:'00003',name:'Шляхтина Т.В.', role:'Помощник руководителя',dept:'Администрация',       online:true,  clockIn:'08:58', todayMin:256, color:'#0E7C4A'},
+  {id:'00004',name:'Рязанов Е.В.',   role:'РОП',                  dept:'Продажи',             online:true,  clockIn:'08:45', todayMin:269, color:'#DC2626'},
+  {id:'00005',name:'Макаров',         role:'Менеджер продаж',      dept:'Продажи',             online:true,  clockIn:'09:02', todayMin:252, color:'#B45309'},
+  {id:'00006',name:'Карчевская',      role:'Менеджер продаж',      dept:'Продажи',             online:false, clockIn:null,    todayMin:0,   color:'#7C3AED'},
+  {id:'00007',name:'Кадурин',         role:'Менеджер продаж',      dept:'Продажи',             online:true,  clockIn:'09:15', todayMin:239, color:'#0891B2'},
+  {id:'00008',name:'Мальцев',         role:'Менеджер продаж',      dept:'Продажи',             online:true,  clockIn:'08:30', todayMin:284, color:'#15803D'},
+  {id:'00009',name:'Кравец',          role:'Работа с клиентами',   dept:'Продажи',             online:false, clockIn:'09:00', todayMin:480, color:'#1D4ED8'},
+  {id:'00010',name:'Сарнацкая',       role:'Работа с клиентами',   dept:'Продажи',             online:true,  clockIn:'09:10', todayMin:244, color:'#9333EA'},
+  {id:'00011',name:'Генисева А.А.',   role:'Закупки',              dept:'ЗСЛ',                 online:true,  clockIn:'09:00', todayMin:254, color:'#B45309'},
+  {id:'00012',name:'Корнейчук Я.В.', role:'Склад',                dept:'ЗСЛ',                 online:false, clockIn:null,    todayMin:480, color:'#64748B'},
+  {id:'00013',name:'Мацкевич Е.М.',  role:'Логистика',            dept:'ЗСЛ',                 online:true,  clockIn:'08:50', todayMin:264, color:'#0E7C4A'},
+  {id:'00014',name:'Дым',             role:'Производство',         dept:'Производство',        online:true,  clockIn:'07:00', todayMin:374, color:'#7C3AED'},
+  {id:'00015',name:'Коровкин',        role:'Производство',         dept:'Производство',        online:true,  clockIn:'07:00', todayMin:374, color:'#DC2626'},
+  {id:'00016',name:'Семенюк',         role:'Производство',         dept:'Производство',        online:false, clockIn:'07:00', todayMin:480, color:'#0891B2'},
+  {id:'00017',name:'Самедов',         role:'Производство',         dept:'Производство',        online:true,  clockIn:'07:00', todayMin:374, color:'#15803D'},
+  {id:'00018',name:'Русинович',       role:'Производство',         dept:'Производство',        online:false, clockIn:'07:00', todayMin:480, color:'#B45309'},
+  {id:'00019',name:'Жуковская О.Н.', role:'Финансы / HR-исполнитель',dept:'Финансы/HR',      online:true,  clockIn:'09:14', todayMin:222, color:'#1E5EFF', isMe:true},
+  {id:'00020',name:'Ведерникова Д.В.',role:'Кадры (HR)',           dept:'Финансы/HR',          online:true,  clockIn:'09:05', todayMin:249, color:'#9333EA'},
+];
+
+/* Июнь 2026: дни месяца и выходные */
+const DAYS_N = 30;
+const WEEKENDS = new Set([6,7,13,14,20,21,27,28]);
+const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+
+/* Табель-данные для июня 2026 */
+function buildTabel(){
+  const t = {};
+  USERS_DATA.forEach(u=>{
+    const row = {};
+    for(let d=1;d<=DAYS_N;d++){
+      row[d] = WEEKENDS.has(d) ? {h:0,code:'В'} : {h:8,code:null};
+    }
+    t[u.id] = row;
+  });
+
+  /* Харькович Д.С. — командировка 3–5 июня */
+  ['00001'].forEach(id=>{[3,4,5].forEach(d=>{ t[id][d]={h:0,code:'К'}; }); });
+
+  /* Харькович С.Д. — переработки */
+  t['00002'][3]  = {h:10,code:null,ot:true};
+  t['00002'][10] = {h:9, code:null,ot:true};
+  t['00002'][24] = {h:9, code:null,ot:true,approved:true};
+
+  /* Рязанов Е.В. — РОП, частые переработки */
+  t['00004'][2]  = {h:10,code:null,ot:true};
+  t['00004'][3]  = {h:10,code:null,ot:true};
+  t['00004'][9]  = {h:9, code:null,ot:true};
+  t['00004'][17] = {h:10,code:null,ot:true,approved:true};
+  t['00004'][23] = {h:9, code:null,ot:true};
+
+  /* Мальцев — отпуск 15–19 июня */
+  for(let d=15;d<=19;d++) t['00008'][d]={h:0,code:'О'};
+
+  /* Карчевская — больничный 22–30 */
+  for(let d=22;d<=26;d++) t['00006'][d]={h:0,code:'Б'};
+
+  /* Кравец — завершил, обычные 8ч */
+
+  /* Производство (Дым, Коровкин, Самедов) — смены 9ч */
+  ['00014','00015','00017'].forEach(id=>{
+    [1,2,3,4,5,8,9,10,11,12].forEach(d=>{ t[id][d]={h:9,code:null,ot:true}; });
+    t[id][17]={h:9,code:null,ot:true,approved:true};
+  });
+
+  /* Семенюк, Русинович — тоже переработки, некоторые согласованы */
+  ['00016','00018'].forEach(id=>{
+    [1,2,3].forEach(d=>{ t[id][d]={h:10,code:null,ot:true,approved:true}; });
+    [8,9].forEach(d=>{ t[id][d]={h:9,code:null,ot:true}; });
+  });
+
+  /* Корнейчук — нет среды (плавающий выходной) */
+  [3,10,17,24].forEach(d=>{ t['00012'][d]={h:0,code:'В'}; });
+
+  /* Жуковская — командировка 1–2 июня */
+  t['00019'][1]={h:0,code:'К'};
+  t['00019'][2]={h:0,code:'К'};
+
+  return t;
+}
+const TABEL = buildTabel();
+
+/* ══════════════════════════════════════
+   TAB SWITCHING
+══════════════════════════════════════ */
+function switchTab(id, btn){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='presence') renderPresence();
+  if(id==='tabel') renderTabel();
+}
+
+/* ══════════════════════════════════════
+   TIMER (Tab 1)
+══════════════════════════════════════ */
+let dayRunning = true;
+let daySeconds = 3*3600 + 42*60 + 15; /* demo: уже 03:42:15 */
+
+function fmt(s){
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sc=s%60;
+  return pad(h)+':'+pad(m)+':'+pad(sc);
+}
+function pad(n){return n<10?'0'+n:''+n;}
+function fmtHM(s){
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  return h+'ч'+(m?' '+m+'м':'');
+}
+
+setInterval(()=>{
+  if(!dayRunning) return;
+  daySeconds++;
+  const el=document.getElementById('dayTimer');
+  if(el) el.textContent=fmt(daySeconds);
+  updateNorm();
+  const tod=document.getElementById('statToday');
+  if(tod) tod.textContent=fmt(daySeconds).slice(0,5);
+}, 1000);
+
+function updateNorm(){
+  const norm=8*3600;
+  const pct=Math.min(Math.round(daySeconds/norm*100),100);
+  const over=daySeconds>norm;
+  const fill=document.getElementById('normFill');
+  if(fill){fill.style.width=(over?100:pct)+'%';fill.className='norm-bar-fill'+(over?' over':'');}
+  const pctEl=document.getElementById('normPct');
+  if(pctEl) pctEl.textContent=pct+'%';
+  const wEl=document.getElementById('normWorked');
+  if(wEl) wEl.textContent=fmtHM(daySeconds)+' отработано';
+}
+
+function toggleDay(){
+  dayRunning=!dayRunning;
+  const btn=document.getElementById('dayBtn');
+  const timer=document.getElementById('dayTimer');
+  const lbl=document.getElementById('timerLabel');
+  if(dayRunning){
+    btn.className='start-btn stop-it';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Завершить день';
+    if(timer) timer.classList.add('running');
+    if(lbl) lbl.textContent='Идёт рабочий день';
+    setBanner('warn','⏰','Не забудьте завершить рабочий день!','Нажмите кнопку при уходе.','Завершить день','stopDayNow()');
+    setDemoHighlight('running');
+  } else {
+    btn.className='start-btn go';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg> Начать день';
+    if(timer) timer.classList.remove('running');
+    if(lbl) lbl.textContent='День не начат';
+    setBanner('ok','✅','День завершён!','Данные записаны в табель. Хорошего вечера!',null,null);
+    setDemoHighlight('done');
+  }
+}
+function stopDayNow(){
+  dayRunning=false;
+  const btn=document.getElementById('dayBtn');
+  const timer=document.getElementById('dayTimer');
+  const lbl=document.getElementById('timerLabel');
+  if(btn){btn.className='start-btn go';btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg> Начать день';}
+  if(timer) timer.classList.remove('running');
+  if(lbl) lbl.textContent='День завершён';
+  setBanner('ok','✅','День завершён!',''+fmtHM(daySeconds)+' записано в табель.',null,null);
+  setDemoHighlight('done');
+}
+
+function setBanner(type,ic,title,desc,btnLabel,btnFn){
+  const b=document.getElementById('reminderBanner');
+  if(!b) return;
+  b.className='reminder '+type;
+  let html='<div class="ic">'+ic+'</div><div class="r-txt"><b>'+title+'</b> '+desc+'</div>';
+  if(btnLabel) html+='<button class="r-action" onclick="'+btnFn+'">'+btnLabel+'</button>';
+  b.innerHTML=html;
+}
+
+function setDemoState(state){
+  document.querySelectorAll('.ds-item').forEach(i=>i.classList.remove('current'));
+  const el=document.getElementById('ds-'+state);
+  if(el) el.classList.add('current');
+
+  if(state==='not-started'){
+    dayRunning=false; daySeconds=0;
+    document.getElementById('dayTimer').textContent='00:00:00';
+    document.getElementById('dayTimer').classList.remove('running');
+    document.getElementById('timerLabel').textContent='День не начат';
+    document.getElementById('timerSince').textContent='Нажмите кнопку, чтобы начать рабочий день';
+    const btn=document.getElementById('dayBtn');
+    btn.className='start-btn go';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg> Начать день';
+    setBanner('info','🔔','Вы не отметили начало рабочего дня!','Нажмите кнопку, когда начнёте работу. Рабочее время считается с нажатия.','Начать день','startDayNow()');
+  } else if(state==='running'){
+    dayRunning=true; daySeconds=3*3600+42*60+15;
+    document.getElementById('dayTimer').classList.add('running');
+    document.getElementById('timerLabel').textContent='Идёт рабочий день';
+    document.getElementById('timerSince').textContent='Начало: 09:14 · Сегодня, 2 июля 2026';
+    const btn=document.getElementById('dayBtn');
+    btn.className='start-btn stop-it';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Завершить день';
+    setBanner('warn','⏰','Не забудьте завершить рабочий день!','Нажмите кнопку при уходе — данные запишутся в табель.','Завершить день','stopDayNow()');
+  } else if(state==='done'){
+    dayRunning=false; daySeconds=8*3600+3*60;
+    document.getElementById('dayTimer').textContent='08:03:00';
+    document.getElementById('dayTimer').classList.remove('running');
+    document.getElementById('timerLabel').textContent='День завершён';
+    document.getElementById('timerSince').textContent='09:14 — 17:17 · Итого: 8ч 03м';
+    const btn=document.getElementById('dayBtn');
+    btn.className='start-btn go';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg> Начать день';
+    setBanner('ok','✅','День завершён!','8ч 03м записано в табель. Хорошего вечера!',null,null);
+    updateNorm();
+  } else if(state==='overtime'){
+    dayRunning=true; daySeconds=10*3600+15*60+33;
+    document.getElementById('dayTimer').classList.add('running');
+    document.getElementById('timerLabel').textContent='Переработка! Идёт смена';
+    document.getElementById('timerSince').textContent='Начало: 07:00 · Сегодня, 2 июля 2026 · Норма 8ч превышена';
+    const btn=document.getElementById('dayBtn');
+    btn.className='start-btn stop-it';
+    btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Завершить день';
+    setBanner('warn','🟠','Переработка 2ч 15м!','Отправлен запрос на согласование руководителю.','Завершить день','stopDayNow()');
+  }
+  updateNorm();
+}
+
+function startDayNow(){
+  dayRunning=true; daySeconds=0;
+  document.getElementById('dayTimer').classList.add('running');
+  document.getElementById('timerLabel').textContent='Идёт рабочий день';
+  const btn=document.getElementById('dayBtn');
+  btn.className='start-btn stop-it';
+  btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Завершить день';
+  setBanner('warn','⏰','Рабочий день начат!','Счётчик запущен. Не забудьте завершить день при уходе.','Завершить день','stopDayNow()');
+  setDemoHighlight('running');
+}
+
+function setDemoHighlight(state){
+  document.querySelectorAll('.ds-item').forEach(i=>i.classList.remove('current'));
+  const m={'not-started':'ds-not-started','running':'ds-running','done':'ds-done','overtime':'ds-overtime'};
+  const el=document.getElementById(m[state]);
+  if(el) el.classList.add('current');
+}
+
+/* ══════════════════════════════════════
+   PRESENCE BOARD (Tab 2)
+══════════════════════════════════════ */
+let currentDept='all', currentView='all';
+let presenceTick=0;
+
+function filterDept(dept,btn){
+  currentDept=dept;
+  document.querySelectorAll('.dept-chip').forEach(c=>c.classList.remove('active'));
+  btn.classList.add('active');
+  renderPresence();
+}
+function setView(view,btn){
+  currentView=view;
+  document.querySelectorAll('.view-toggle button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderPresence();
+}
+
+function initials(name){return name.split(' ').map(w=>w[0]||'').slice(0,2).join('').toUpperCase();}
+function fmtMin(m){
+  if(!m) return '—';
+  const h=Math.floor(m/60),mn=m%60;
+  return h+'ч'+(mn?' '+pad(mn)+'м':'');
+}
+
+function renderPresence(){
+  const board=document.getElementById('presenceBoard');
+  if(!board) return;
+
+  let users=USERS_DATA.slice();
+  if(currentView==='dept') users=users.filter(u=>u.dept==='Финансы/HR');
+  if(currentDept!=='all') users=users.filter(u=>u.dept===currentDept);
+
+  const onlineAll=USERS_DATA.filter(u=>u.online).length;
+  const offAll=USERS_DATA.length-onlineAll;
+
+  /* summary strip */
+  let html='<div style="display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap">';
+  html+='<div class="stat-card" style="flex:1;min-width:140px"><div class="sc-head"><span class="sc-title">Онлайн</span><span class="badge online">●</span></div><div class="sc-val">'+onlineAll+'</div><div class="sc-sub">из '+USERS_DATA.length+' сотрудников</div></div>';
+  html+='<div class="stat-card" style="flex:1;min-width:140px"><div class="sc-head"><span class="sc-title">Офлайн / завершили</span></div><div class="sc-val">'+offAll+'</div><div class="sc-sub">завершили или не начали</div></div>';
+  html+='</div>';
+
+  /* group by dept */
+  const depts={};
+  users.forEach(u=>{if(!depts[u.dept])depts[u.dept]=[];depts[u.dept].push(u);});
+
+  for(const [dept,members] of Object.entries(depts)){
+    const onl=members.filter(u=>u.online).length;
+    html+='<div class="dept-section">';
+    html+='<div class="dept-title">'+dept+'&ensp;<span style="font-weight:400;text-transform:none;font-size:11px;color:var(--faint)">'+onl+'/'+members.length+' онлайн</span></div>';
+    html+='<div class="presence-grid">';
+    members.forEach(u=>{
+      const todayM=u.online ? u.todayMin+presenceTick : u.todayMin;
+      const hrsStr=u.online ? fmtMin(todayM) : (u.todayMin>0?fmtMin(u.todayMin)+' (завершил)':'Не отметился');
+      html+='<div class="person-card'+(u.isMe?' is-me':'')+'">';
+      html+='<div class="p-av" style="background:'+u.color+'">'+initials(u.name);
+      html+='<div class="sdot '+(u.online?'on':'off')+'"></div></div>';
+      html+='<div class="p-info"><div class="pname">'+u.name+(u.isMe?' <span style="font-size:10px;color:var(--brand);font-weight:700">(вы)</span>':'')+'</div><div class="prole">'+u.role+'</div></div>';
+      html+='<div class="p-right"><div class="phrs'+(u.online?' live':'')+'">'+hrsStr+'</div><div class="psub">'+(u.online?'● онлайн':'○ офлайн')+'</div></div>';
+      html+='</div>';
+    });
+    html+='</div></div>';
+  }
+  board.innerHTML=html;
+}
+
+setInterval(()=>{
+  presenceTick++;
+  if(document.getElementById('tab-presence').classList.contains('active')) renderPresence();
+}, 60000);
+
+/* ══════════════════════════════════════
+   TABEL (Tab 3)
+══════════════════════════════════════ */
+let overtimeTarget=null;
+const PERIODS=['Апрель 2026','Май 2026','Июнь 2026','Июль 2026'];
+let periodIdx=2;
+
+function changePeriod(dir){
+  periodIdx=Math.max(0,Math.min(PERIODS.length-1,periodIdx+dir));
+  document.getElementById('periodLabel').textContent=PERIODS[periodIdx];
+}
+
+function dcClass(cell){
+  if(!cell||cell.h===0){
+    if(!cell) return 'wknd';
+    if(cell.code==='В') return 'wknd';
+    if(cell.code==='О') return 'vac';
+    if(cell.code==='Б') return 'sick';
+    if(cell.code==='К') return 'trip';
+    if(cell.code==='А') return 'pers';
+    return 'wknd';
+  }
+  if(cell.ot&&cell.approved) return 'ot-ok';
+  if(cell.ot) return 'ot';
+  return 'norm';
+}
+function dcText(cell){
+  if(!cell) return '';
+  if(cell.code) return cell.code;
+  return cell.h||'';
+}
+
+function renderTabel(){
+  const tbl=document.getElementById('tabelTable');
+  if(!tbl) return;
+
+  let html='<thead><tr>';
+  html+='<th class="th-left" style="min-width:44px">Таб.№</th>';
+  html+='<th class="th-left th-name">ФИО / Должность</th>';
+  for(let d=1;d<=DAYS_N;d++){
+    const dow=DOW[(new Date(2026,5,d)).getDay()];
+    const wk=WEEKENDS.has(d);
+    html+='<th class="th-day'+(wk?' wk':'')+'">'+d+'<br><span style="font-size:9px;font-weight:400">'+dow+'</span></th>';
+  }
+  html+='<th class="th-tot">Дни</th><th class="th-tot">Часы</th><th class="th-tot">Ком.</th><th class="th-tot">Болн.</th><th class="th-tot">Отп.</th><th class="th-tot">Свой</th>';
+  html+='</tr></thead><tbody>';
+
+  USERS_DATA.forEach(u=>{
+    html+='<tr'+(u.isMe?' style="box-shadow:inset 3px 0 0 var(--brand)"':'')+'>';
+    html+='<td class="td-left" style="font-size:10.5px;color:var(--faint);vertical-align:middle">'+u.id+'</td>';
+    html+='<td class="td-left"><div style="font-weight:600;font-size:12.5px">'+u.name+'</div><div style="font-size:10.5px;color:var(--muted)">'+u.role+'</div></td>';
+
+    let days=0,hours=0,trip=0,sick=0,vac=0,pers=0;
+
+    for(let d=1;d<=DAYS_N;d++){
+      const cell=TABEL[u.id]?.[d];
+      const cls=dcClass(cell);
+      const txt=dcText(cell);
+      const isOt=cell&&cell.ot&&!cell.approved;
+
+      if(cell){
+        if(cell.code==='К') trip++;
+        else if(cell.code==='Б') sick++;
+        else if(cell.code==='О') vac++;
+        else if(cell.code==='А') pers++;
+        else if(cell.h>0){
+          days++;
+          hours+=cell.ot&&!cell.approved ? 8 : (cell.h||0);
+        }
+      }
+
+      if(isOt){
+        html+='<td><div class="dc '+cls+'" onclick="openOvertimeModal(\''+u.id+'\','+d+','+cell.h+')" title="Переработка '+cell.h+'ч — нажмите для согласования">'+txt+'</div></td>';
+      } else {
+        html+='<td><div class="dc '+cls+'">'+txt+'</div></td>';
+      }
+    }
+
+    html+='<td class="td-tot">'+days+'</td>';
+    html+='<td class="td-tot">'+hours+'</td>';
+    html+='<td class="td-tot">'+(trip||'—')+'</td>';
+    html+='<td class="td-tot">'+(sick?sick+'д':'—')+'</td>';
+    html+='<td class="td-tot">'+(vac?vac+'д':'—')+'</td>';
+    html+='<td class="td-tot">'+(pers||'—')+'</td>';
+    html+='</tr>';
+  });
+
+  html+='</tbody>';
+  tbl.innerHTML=html;
+}
+
+function openOvertimeModal(userId,day,hours){
+  const u=USERS_DATA.find(x=>x.id===userId);
+  if(!u) return;
+  document.getElementById('ot-name').textContent=u.name;
+  document.getElementById('ot-date').textContent=day+' июня 2026 ('+DOW[(new Date(2026,5,day)).getDay()]+')';
+  document.getElementById('ot-actual').textContent=hours+' ч';
+  document.getElementById('ot-extra').textContent='+'+(hours-8)+'ч сверхнормативных часа';
+  overtimeTarget={userId,day};
+  document.getElementById('overtimeOverlay').classList.add('show');
+}
+function closeOvertimeModal(){
+  document.getElementById('overtimeOverlay').classList.remove('show');
+  overtimeTarget=null;
+}
+function approveOvertime(){
+  if(!overtimeTarget) return;
+  const {userId,day}=overtimeTarget;
+  if(TABEL[userId]&&TABEL[userId][day]) TABEL[userId][day].approved=true;
+  closeOvertimeModal();
+  renderTabel();
+  showToast('✓ Переработка согласована — часы добавлены в табель');
+}
+function rejectOvertime(){
+  if(!overtimeTarget) return;
+  const {userId,day}=overtimeTarget;
+  if(TABEL[userId]&&TABEL[userId][day]){TABEL[userId][day].ot=false;TABEL[userId][day].approved=false;}
+  closeOvertimeModal();
+  renderTabel();
+  showToast('Переработка отклонена — в табеле останется 8ч');
+}
+
+/* ══════════════════════════════════════
+   UTILS
+══════════════════════════════════════ */
+function showToast(msg){
+  const t=document.getElementById('_demoToast');
+  if(!t) return;
+  t.textContent=msg;
+  t.style.opacity='1';
+  t.style.transform='translateX(-50%) translateY(0)';
+  clearTimeout(t._h);
+  t._h=setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},2500);
+}
+
+/* ══════════════════════════════════════
+   INIT
+══════════════════════════════════════ */
+renderPresence();
+renderTabel();
+updateNorm();
+
+/* Close modal on overlay click */
+document.getElementById('overtimeOverlay').addEventListener('click',function(e){
+  if(e.target===this) closeOvertimeModal();
+});
+
+/* Apply saved theme labels on load */
+try{
+  if(localStorage.getItem('theme')==='dark'){
+    document.getElementById('themeIco').textContent='☀️';
+    document.getElementById('themeTxt').textContent='Светлая';
+  }
+}catch(e){}
+
+/* Generic demo toast for buttons without handlers */
+document.addEventListener('click',function(e){
+  const el=e.target.closest('button');
+  if(!el) return;
+  if(el.hasAttribute('onclick')||el.closest('[onclick]')) return;
+  if(el.closest('.overlay')) return;
+  const label=(el.textContent||'').trim().slice(0,32)||'Действие';
+  showToast('Демо: «'+label+'» — действие появится с бэкендом');
+},true);
+</script>
+</body>
+</html>

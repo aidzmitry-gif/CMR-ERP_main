@@ -1,0 +1,29 @@
+{
+  "worker": "hr-okk",
+  "checks": [
+    {
+      "id": "lint",
+      "kind": "lint",
+      "desc": "ruff modules/hr/ tests/test_hr_okk.py чисто",
+      "cmd": ".venv\\Scripts\\ruff.exe check modules/hr/ tests/test_hr_okk.py --line-length 100",
+      "passes": true,
+      "evidence": "auto: exit 0"
+    },
+    {
+      "id": "pytest",
+      "kind": "test",
+      "desc": "pytest tests/test_hr_okk.py все зелёные",
+      "cmd": ".venv\\Scripts\\python.exe -m pytest tests/test_hr_okk.py -x -q",
+      "passes": true,
+      "evidence": "auto: exit 0"
+    },
+    {
+      "id": "import_main",
+      "kind": "test",
+      "desc": "import main не падает",
+      "cmd": ".venv\\Scripts\\python.exe -c \"import os; os.environ.setdefault('AIOS_AUTH_MODE','dev'); os.environ.setdefault('AIOS_ENVIRONMENT','dev'); import main\"",
+      "passes": true,
+      "evidence": "auto: exit 0"
+    }
+  ]
+}

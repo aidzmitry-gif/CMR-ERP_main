@@ -18,11 +18,17 @@ from core.runtime.deps import get_core, get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
 from modules.office import events
 from modules.office.carriers import CARRIERS, get_carrier
-from modules.office.models import OfficeDoc
+from modules.office.models import LegalClaim, LegalContract, OfficeDoc
 from modules.office.schemas import (
     CarrierOut,
     CarrierRequest,
     CarrierRequestOut,
+    LegalClaimCreate,
+    LegalClaimOut,
+    LegalClaimPatch,
+    LegalContractCreate,
+    LegalContractOut,
+    LegalContractPatch,
     OfficeDocCreate,
     OfficeDocOut,
     StageUpdate,
@@ -177,3 +183,131 @@ async def carrier_request(
         region=obj.region,
         doc=OfficeDocOut.model_validate(obj),
     )
+
+
+# --------------------------------------------------------------------------- #
+#  Реестр юридических договоров
+# --------------------------------------------------------------------------- #
+
+@router.get("/contracts", response_model=list[LegalContractOut])
+async def list_contracts(
+    status: str | None = None,
+    contract_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Реестр договоров с фильтрами по статусу и типу."""
+    q = select(LegalContract).order_by(LegalContract.id.desc())
+    if status:
+        q = q.where(LegalContract.status == status)
+    if contract_type:
+        q = q.where(LegalContract.contract_type == contract_type)
+    return (await session.execute(q)).scalars().all()
+
+
+@router.post("/contracts", response_model=LegalContractOut, status_code=201)
+async def create_contract(
+    payload: LegalContractCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Создать договор. Автономер ДОГ-{YYYY}-{NNNN} если number не задан."""
+    from datetime import date
+
+    data = payload.model_dump()
+    obj = LegalContract(**data)
+    session.add(obj)
+    await session.flush()
+    if not obj.number:
+        year = date.today().year
+        obj.number = f"ДОГ-{year}-{obj.id:04d}"
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+@router.get("/contracts/{contract_id}", response_model=LegalContractOut)
+async def get_contract(contract_id: int, session: AsyncSession = Depends(get_session)):
+    obj = await session.get(LegalContract, contract_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    return obj
+
+
+@router.patch("/contracts/{contract_id}", response_model=LegalContractOut)
+async def patch_contract(
+    contract_id: int,
+    payload: LegalContractPatch,
+    session: AsyncSession = Depends(get_session),
+):
+    """Изменить статус, описание, дату истечения или сумму договора."""
+    obj = await session.get(LegalContract, contract_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(obj, field, value)
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+# --------------------------------------------------------------------------- #
+#  Реестр юридических претензий
+# --------------------------------------------------------------------------- #
+
+@router.get("/claims", response_model=list[LegalClaimOut])
+async def list_claims(
+    status: str | None = None,
+    claim_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Реестр претензий с фильтрами по статусу и типу."""
+    q = select(LegalClaim).order_by(LegalClaim.id.desc())
+    if status:
+        q = q.where(LegalClaim.status == status)
+    if claim_type:
+        q = q.where(LegalClaim.claim_type == claim_type)
+    return (await session.execute(q)).scalars().all()
+
+
+@router.post("/claims", response_model=LegalClaimOut, status_code=201)
+async def create_claim(
+    payload: LegalClaimCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Создать претензию. Автономер ПРЕТ-{YYYY}-{NNNN} если number не задан."""
+    from datetime import date
+
+    data = payload.model_dump()
+    obj = LegalClaim(**data)
+    session.add(obj)
+    await session.flush()
+    if not obj.number:
+        year = date.today().year
+        obj.number = f"ПРЕТ-{year}-{obj.id:04d}"
+    await session.commit()
+    await session.refresh(obj)
+    return obj
+
+
+@router.get("/claims/{claim_id}", response_model=LegalClaimOut)
+async def get_claim(claim_id: int, session: AsyncSession = Depends(get_session)):
+    obj = await session.get(LegalClaim, claim_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Претензия не найдена")
+    return obj
+
+
+@router.patch("/claims/{claim_id}", response_model=LegalClaimOut)
+async def patch_claim(
+    claim_id: int,
+    payload: LegalClaimPatch,
+    session: AsyncSession = Depends(get_session),
+):
+    """Изменить статус, resolved_at, описание или сумму претензии."""
+    obj = await session.get(LegalClaim, claim_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Претензия не найдена")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(obj, field, value)
+    await session.commit()
+    await session.refresh(obj)
+    return obj

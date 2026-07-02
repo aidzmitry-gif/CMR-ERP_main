@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { SpravImport } from "@/components/erp/spravochniki/sprav-import";
+import { SpravImportShell } from "@/components/erp/spravochniki/sprav-import-shell";
 
 export default function SpravImportPage() {
   return (
-    <AppShell crumbs={["ERP", "Справочники", "Импорт из 1С"]}>
-      <SpravImport />
+    <AppShell crumbs={["ERP", "Справочники", "Импорт"]}>
+      <SpravImportShell />
     </AppShell>
   );
 }

@@ -15,7 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import Counterparty, CounterpartyAlias
-from core.services import mdm
+from core.services import mdm, survivorship
+from core.services.survivorship import FieldValue, Rule, is_empty
+
+#: поля контрагента, к которым применяется survivorship при импорте (имя — единственное
+#: мастер-поле модели сейчас; расширяется вместе с моделью).
+_IMPORT_FIELDS = ("name",)
 
 
 @dataclass
@@ -23,6 +28,7 @@ class UpsertResult:
     counterparty: Counterparty
     created: bool
     alias_added: bool
+    updated_fields: tuple[str, ...] = ()  # какие поля синк реально изменил (по правилам)
 
 
 async def _has_alias(
@@ -40,6 +46,25 @@ async def _has_alias(
     return row is not None
 
 
+def _apply_field(
+    cp: Counterparty, field: str, incoming, source: str, at: str | None, rule: Rule
+) -> bool:
+    """Применить survivorship-правило к одному полю; обновить provenance. True — поле изменилось."""
+    current = None
+    if not is_empty(getattr(cp, field)):
+        prov = (cp.provenance or {}).get(field, {})
+        current = FieldValue(getattr(cp, field), prov.get("source", "1c"), prov.get("at"))
+    winner = survivorship.decide(current, FieldValue(incoming, source, at), rule)
+    changed = winner.value != getattr(cp, field)
+    if changed:
+        setattr(cp, field, winner.value)
+    # provenance отражает источник победителя (фиксируем «кто владеет полем»)
+    prov = dict(cp.provenance or {})
+    prov[field] = {"source": winner.source, "at": winner.at}
+    cp.provenance = prov
+    return changed
+
+
 async def upsert_counterparty(
     session: AsyncSession,
     *,
@@ -47,22 +72,42 @@ async def upsert_counterparty(
     name: str | None,
     source: str = "1c",
     external_ref: str | None = None,
+    at: str | None = None,
+    rules: dict[str, Rule] | None = None,
 ) -> UpsertResult:
-    """Создать/сопоставить контрагента по УНП и зафиксировать внешний id как alias.
+    """Создать/сопоставить контрагента по УНП, применить survivorship-правила, зафиксировать alias.
 
-    Идемпотентно: повторный вызов с теми же данными не создаёт ни дубль контрагента,
-    ни дубль алиаса. Существующее имя НЕ перезатирается (только заполняем пустое).
+    Идемпотентно: повтор не плодит ни дублей, ни алиасов. Поля обновляются **по правилам
+    слияния** (``survivorship_rule``), а не «непустое в пустое»: синк из 1С не затирает то,
+    что закреплено за ЕГР/ERP/ручным вводом. Источник каждого поля пишется в ``provenance``.
+    ``at`` — дата значения из источника (ISO) для стратегии ``most_recent``. ``rules`` можно
+    передать предзагруженными (батч), иначе грузятся здесь.
     """
     if not unp:
         raise ValueError("нужен УНП (natural key)")
+    if rules is None:
+        rules = await survivorship.load_rules(session, "counterparty")
     candidates = await mdm.match_candidates(session, unp=unp)
     created = False
+    updated: list[str] = []
+    incoming = {"name": name}
     if candidates:
         counterparty = candidates[0]
-        if not counterparty.name and name:
-            counterparty.name = name
+        for field in _IMPORT_FIELDS:
+            val = incoming.get(field)
+            if val is None:
+                continue
+            if _apply_field(
+                counterparty, field, val, source, at, survivorship.rule_for(rules, field)
+            ):
+                updated.append(field)
     else:
         counterparty = Counterparty(name=name or "", unp=unp)
+        counterparty.provenance = {
+            f: {"source": source, "at": at}
+            for f in _IMPORT_FIELDS
+            if incoming.get(f) is not None
+        }
         session.add(counterparty)
         await session.flush()  # получить id для alias
         created = True
@@ -71,7 +116,7 @@ async def upsert_counterparty(
     if external_ref and not await _has_alias(session, counterparty.id, source, external_ref):
         await mdm.add_source_alias(session, counterparty.id, source, external_ref)
         alias_added = True
-    return UpsertResult(counterparty, created, alias_added)
+    return UpsertResult(counterparty, created, alias_added, tuple(updated))
 
 
 async def import_counterparties(session: AsyncSession, rows: list[dict], *, source: str = "1c") -> dict:
@@ -80,6 +125,7 @@ async def import_counterparties(session: AsyncSession, rows: list[dict], *, sour
     Возвращает сводку для предпросмотра/лога адаптера.
     """
     created = matched = aliased = 0
+    rules = await survivorship.load_rules(session, "counterparty")  # один раз на батч
     for row in rows:
         result = await upsert_counterparty(
             session,
@@ -87,6 +133,7 @@ async def import_counterparties(session: AsyncSession, rows: list[dict], *, sour
             name=row.get("name"),
             source=source,
             external_ref=row.get("external_ref") or row.get("id"),
+            rules=rules,
         )
         if result.created:
             created += 1

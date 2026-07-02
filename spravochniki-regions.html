@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Регионы и города — дерево (превью)</title>
+  <!-- ════════════════════════════════════════════════════════════════════
+       Справочник «Регионы и города» — иерархия Страна → Область → Город.
+       adjacency-list (parent_id) + ltree-путь. Создано Claude. 2 темы, демо.
+       ════════════════════════════════════════════════════════════════════ -->
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode:'class', theme:{ extend:{
+      colors:{ canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+      boxShadow:{ card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+    } } };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .bg-ink{background:#0E1729 !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .text-slate-300{color:#475569 !important}
+    html.dark .text-slate-200{color:#334155 !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .theme-tgl{position:fixed;top:14px;right:16px;z-index:50;display:inline-flex;align-items:center;gap:7px;
+      background:#fff;border:1px solid #e2e8f0;color:#64748b;border-radius:10px;padding:7px 12px;font:600 12.5px ui-sans-serif,system-ui;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+    html.dark .theme-tgl{background:#111A2E;border-color:#1E293B;color:#94A3B8}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <a href="spravochniki-preview.html" class="text-[12px] text-muted hover:text-brand-600">← Все справочники (реестр)</a>
+    <div>
+      <h1 class="text-xl font-bold text-ink">Регионы и города — дерево</h1>
+      <p class="mt-1 text-sm text-muted">Страна → Область → Город. parent_id + ltree-путь, защита от циклов.</p>
+    </div>
+
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-base font-bold text-ink">Регионы и города 🌳</h2>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">схема: public</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">/refs/regions</span>
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">иерархия</span>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">parent_id + ltree</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="rounded-xl bg-slate-50 px-3 py-2 w-56">
+            <input class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Поиск по дереву…" />
+          </div>
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">+ Добавить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+
+      <!-- ЛЕВО: дерево регионов -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Дерево регионов</div>
+        <div class="mt-3 text-sm">
+          <ul class="space-y-0.5">
+            <!-- Беларусь -->
+            <li>
+              <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                <span class="text-slate-400">▾</span><span class="text-slate-300">⠿</span>
+                <span class="font-medium text-ink">🇧🇾 Беларусь</span>
+                <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">142 клиента</span>
+              </div>
+              <ul class="ml-5 space-y-0.5 border-l border-slate-100 pl-2">
+                <!-- Минская область (раскрыта, выбран город) -->
+                <li>
+                  <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                    <span class="text-slate-400">▾</span><span class="text-slate-300">⠿</span>
+                    <span class="text-ink">Минская область</span>
+                    <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">68</span>
+                  </div>
+                  <ul class="ml-5 space-y-0.5 border-l border-slate-100 pl-2">
+                    <li><div class="flex items-center gap-2 rounded-lg bg-brand-100 px-2 py-1.5 text-brand-600"><span class="text-brand-600/60">·</span><span class="font-semibold">Минск</span><span class="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-brand-600">54</span></div></li>
+                    <li><div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60"><span class="text-slate-300">·</span><span class="text-ink">Борисов</span><span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">8</span></div></li>
+                    <li><div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60"><span class="text-slate-300">·</span><span class="text-ink">Солигорск</span><span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">6</span></div></li>
+                  </ul>
+                </li>
+                <li>
+                  <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                    <span class="text-slate-400">▸</span><span class="text-slate-300">⠿</span>
+                    <span class="text-ink">Брестская область</span>
+                    <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">24</span>
+                  </div>
+                </li>
+                <li>
+                  <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                    <span class="text-slate-400">▸</span><span class="text-slate-300">⠿</span>
+                    <span class="text-ink">Гомельская область</span>
+                    <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">22</span>
+                  </div>
+                </li>
+                <li>
+                  <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                    <span class="text-slate-400">▸</span><span class="text-slate-300">⠿</span>
+                    <span class="text-ink">Гродненская · Витебская · Могилёвская</span>
+                    <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">28</span>
+                  </div>
+                </li>
+              </ul>
+            </li>
+            <!-- Россия (свёрнута) -->
+            <li class="pt-1">
+              <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                <span class="text-slate-400">▸</span><span class="text-slate-300">⠿</span>
+                <span class="font-medium text-ink">🇷🇺 Россия</span>
+                <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">34</span>
+              </div>
+            </li>
+            <!-- Китай (свёрнут — поставщики) -->
+            <li class="pt-1">
+              <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50/60">
+                <span class="text-slate-400">▸</span><span class="text-slate-300">⠿</span>
+                <span class="font-medium text-ink">🇨🇳 Китай</span>
+                <span class="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">поставщики</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+          ▾ раскрыт · ▸ свёрнут · ⠿ перетащить для переноса · счётчик — клиенты по поддереву
+        </div>
+      </div>
+
+      <!-- ПРАВО: карточка узла «Минск» -->
+      <div class="rounded-2xl bg-white p-5 shadow-card">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Узел</div>
+        <div class="mt-2 flex items-center gap-2">
+          <h3 class="text-base font-bold text-ink">Минск</h3>
+          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Активен</span>
+        </div>
+        <dl class="mt-4 space-y-3 border-t border-slate-100 pt-4 text-sm">
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Код</dt><dd class="font-mono text-[13px] text-slate-500">RGN-0102-01</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Тип</dt><dd class="text-ink">Город</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Родитель</dt><dd class="text-ink">Минская область</dd></div>
+          <div class="flex items-start justify-between gap-3"><dt class="text-muted">Путь</dt><dd class="text-right font-mono text-[13px] text-slate-500">by.minsk_obl.minsk</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Уровень</dt><dd class="text-ink">3 (страна→обл→город)</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Почт. индекс (диапазон)</dt><dd class="font-mono text-[13px] text-slate-500">220000–220140</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Часовой пояс</dt><dd class="text-ink">UTC+3</dd></div>
+          <div class="flex items-center justify-between gap-3"><dt class="text-muted">Клиентов</dt><dd class="text-ink">54</dd></div>
+        </dl>
+        <div class="mt-5 flex flex-col gap-2 border-t border-slate-100 pt-4">
+          <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">Добавить район/город</button>
+          <div class="flex gap-2">
+            <button class="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">Переместить…</button>
+            <button class="flex-1 rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">🗃 В архив</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- БД -->
+    <div class="rounded-2xl bg-ink p-5 text-slate-300 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Как это устроено в БД</div>
+      <pre class="mt-3 overflow-x-auto rounded-xl bg-black/30 p-3 text-[12px] leading-relaxed text-slate-200">-- Дерево регионов: страна → область → город (adjacency-list + защита от циклов)
+WITH RECURSIVE region_tree AS (
+    SELECT id, parent_id, name, kind, 1 AS level
+    FROM public.region WHERE code = 'BY'            -- корень: страна
+  UNION ALL
+    SELECT r.id, r.parent_id, r.name, r.kind, t.level + 1
+    FROM public.region r JOIN region_tree t ON r.parent_id = t.id
+) CYCLE id SET is_cycle USING path
+SELECT name, kind, level FROM region_tree WHERE NOT is_cycle ORDER BY level, name;
+
+-- ltree-путь для быстрых выборок (клиенты по области/городу) и AI:
+-- SELECT * FROM region WHERE ltree_path <@ 'by.minsk_obl';</pre>
+      <p class="mt-3 text-sm text-slate-400">
+        Город привязывается к контрагенту (адрес) и к маршрутам доставки. <code class="font-mono text-slate-300">kind</code> = страна/область/город.
+        Счётчик клиентов — агрегат по поддереву (область включает свои города).
+      </p>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Справочник «Регионы и города» · демо-данные · 2 темы · создано Claude.</p>
+  </div>
+
+<script>
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,a[href="#"],[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Закупки · Редактор машины (состав, пересчёт, документы)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Утверждённый дизайн (frontend/DESIGN.md, 2026-06-17): токены C+D, Inter, мягкие тени.
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: {
+          canvas: "rgb(var(--canvas) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          sunken: "rgb(var(--sunken) / <alpha-value>)",
+          ink: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--muted) / <alpha-value>)",
+          faint: "rgb(var(--faint) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", soft: "rgb(var(--accent-soft) / <alpha-value>)" },
+          money: { DEFAULT: "rgb(var(--money) / <alpha-value>)", soft: "rgb(var(--money-soft) / <alpha-value>)" },
+        },
+        fontFamily: { sans: ["Inter","system-ui","-apple-system","Segoe UI","Roboto","Arial","sans-serif"] },
+        boxShadow: {
+          card: "0 1px 1px rgba(20,20,40,0.03), 0 2px 4px rgba(20,20,40,0.04), 0 6px 16px rgba(20,20,40,0.04), inset 0 1px 0 rgba(255,255,255,0.6)",
+          pop: "0 1px 2px rgba(20,20,40,0.06), 0 12px 28px rgba(20,20,40,0.12)",
+        },
+        borderRadius: { lg: "10px", xl: "12px", "2xl": "14px" },
+      } },
+    };
+  </script>
+  <style>
+    :root{ --canvas:238 241 245; --surface:255 255 255; --sunken:244 246 249; --ink:15 23 42; --muted:91 107 130; --faint:147 161 181; --line:226 232 240; --accent:30 94 255; --accent-soft:227 236 255; --money:14 124 74; --money-soft:226 243 234; }
+    .dark{ --canvas:14 17 22; --surface:23 27 34; --sunken:31 36 44; --ink:232 234 237; --muted:155 163 174; --faint:107 114 128; --line:42 48 56; --accent:110 139 255; --accent-soft:35 42 61; --money:52 211 153; --money-soft:22 39 31; }
+    body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-feature-settings:"cv05","ss01";-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+    .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:60;height:40px;padding:0 14px;border-radius:9999px;background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);display:flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;font-weight:600;color:rgb(var(--ink))}
+    .theme-toggle:hover{border-color:rgb(var(--accent))}
+    .num{font-variant-numeric:tabular-nums}
+    /* строка в состоянии «только что убрали/добавили» — мягкая подсветка */
+    @keyframes flashOut { from{background:rgba(239,68,68,.18)} to{background:transparent} }
+    @keyframes flashIn  { from{background:rgba(16,185,129,.18)} to{background:transparent} }
+    tr.flash-out{animation:flashOut 1.1s ease}
+    tr.flash-in {animation:flashIn 1.1s ease}
+    /* шапка-сводка: дельта мигает при изменении */
+    @keyframes pulse { 0%{transform:scale(1)} 35%{transform:scale(1.12)} 100%{transform:scale(1)} }
+    .pulse{animation:pulse .5s ease}
+  </style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-toggle" onclick="toggleTheme()" title="Светлая / тёмная тема"><span id="themeIcon">🌙</span><span class="theme-lbl">Тёмная</span></button>
+  <script>
+    function applyTheme(d){ document.documentElement.classList.toggle('dark', d); const i=document.getElementById('themeIcon'), l=document.querySelector('.theme-lbl'); if(i) i.textContent=d?'☀️':'🌙'; if(l) l.textContent=d?'Светлая':'Тёмная'; }
+    function toggleTheme(){ const d=!document.documentElement.classList.contains('dark'); applyTheme(d); try{localStorage.setItem('zak-theme', d?'dark':'light')}catch(e){} }
+    (function(){ const p=new URLSearchParams(location.search).get('theme'); let s; try{s=localStorage.getItem('zak-theme')}catch(e){} applyTheme(p ? p==='dark' : s==='dark'); })();
+  </script>
+
+  <!-- ⚠️ Статичный прототип будущего Next.js-экрана /crm/procurement/shipments/[id]/edit (Редактор машины).
+       Здесь JS РАБОЧИЙ (демо-модель в памяти) — чтобы показать реальную механику: достать/добавить позицию,
+       пересчёт веса/объёма/landed/фрахта, версии документов. Данные демо (BYN; инвойсы CNY/$). -->
+
+  <div class="mx-auto max-w-[1240px] p-6 space-y-4">
+
+    <!-- Заголовок + навигация -->
+    <div class="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <div class="text-[12px] text-muted"><a href="zak-shipment-preview.html" class="text-accent">← Машины</a> · редактирование состава</div>
+        <h1 class="mt-0.5 text-xl font-bold text-ink">Машина <span id="moId">MO-2026-016</span> · сбор открыт</h1>
+        <p class="mt-1 text-sm text-muted">Состав машины — живой. Любое изменение позиций пересчитывает вес, объём, фрахт и себестоимость,
+          а документы (инвойс, упаковочный лист) помечаются устаревшими до пересборки.</p>
+      </div>
+      <div class="flex items-center gap-1.5 text-[13px]">
+        <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+        <a href="zak-board-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Воронка</a>
+        <a href="zak-cost-calc-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Калькулятор</a>
+      </div>
+    </div>
+
+    <!-- ШАПКА-СВОДКА (живая) -->
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Позиций в машине</div>
+        <div class="mt-1 text-2xl font-bold text-ink"><span id="kCount">0</span></div>
+        <div class="text-[11px] text-faint"><span id="kClients">0</span> сделок · <span id="kSup">0</span> поставщиков</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Вес брутто</div>
+        <div class="mt-1 text-2xl font-bold text-ink"><span id="kWeight" class="num">0</span> <span class="text-[12px] font-medium text-muted">кг</span></div>
+        <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line"><div id="kWeightBar" class="h-full rounded-full bg-emerald-500" style="width:0%"></div></div>
+        <div class="text-[10px] text-faint">лимит борта 1 200 кг</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Объём</div>
+        <div class="mt-1 text-2xl font-bold text-ink"><span id="kVol" class="num">0</span> <span class="text-[12px] font-medium text-muted">м³</span></div>
+        <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line"><div id="kVolBar" class="h-full rounded-full bg-amber-400" style="width:0%"></div></div>
+        <div class="text-[10px] text-faint">лимит борта 14 м³</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Себест. (landed)</div>
+          <div class="text-[10px] font-semibold text-faint">фрахт/кг: <span id="kFreightRate">—</span></div>
+        </div>
+        <div class="mt-1 text-2xl font-bold text-ink"><span id="kLanded" class="num">0</span> <span class="text-[12px] font-medium text-muted">BYN</span></div>
+        <div class="text-[11px] text-faint">в т.ч. фрахт <span id="kFreight" class="num">0</span> BYN <span id="kFreightDelta" class="font-semibold"></span></div>
+      </div>
+    </div>
+
+    <!-- БАННЕР: документы устарели -->
+    <div id="docBanner" class="hidden rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-start gap-2">
+          <span class="text-amber-600 dark:text-amber-300 text-lg leading-none">⚠</span>
+          <div>
+            <div class="text-sm font-semibold text-amber-800 dark:text-amber-200">Состав изменился — документы устарели</div>
+            <div id="docBannerWhy" class="text-[12px] text-amber-700 dark:text-amber-300/90">Инвойс v1 и упаковочный лист v1 больше не соответствуют составу.</div>
+          </div>
+        </div>
+        <button onclick="rebuildDocs()" class="rounded-lg bg-amber-500 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-amber-600">Пересобрать пакет документов →</button>
+      </div>
+    </div>
+
+    <!-- ОСНОВНАЯ СЕТКА: состав машины + зал ожидания -->
+    <div class="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
+
+      <!-- ── СОСТАВ МАШИНЫ ── -->
+      <div class="rounded-2xl bg-surface p-5 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">В машине</div>
+          <div id="selBar" class="hidden items-center gap-2 text-[12px]">
+            <span id="selCount" class="text-muted">0 выбрано</span>
+            <button onclick="moveSelected('out')" class="rounded-lg border border-red-300 dark:border-red-500/40 px-2.5 py-1 text-[12px] font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15">↩ Достать в зал ожидания</button>
+          </div>
+        </div>
+        <div class="mt-2 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-line">
+                <th class="w-7 pb-1.5"></th>
+                <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Позиция</th>
+                <th class="pb-1.5 text-left text-[11px] font-semibold text-faint">Поставщик</th>
+                <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Кол-во</th>
+                <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Вес</th>
+                <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Товар</th>
+                <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">+ фрахт</th>
+                <th class="pb-1.5 text-right text-[11px] font-semibold text-faint">Landed полн.</th>
+                <th class="pb-1.5 text-center text-[11px] font-semibold text-faint">Статус</th>
+                <th class="w-8 pb-1.5"></th>
+              </tr>
+            </thead>
+            <tbody id="inBody" class="divide-y divide-line/60"></tbody>
+          </table>
+          <div id="inEmpty" class="hidden py-8 text-center text-[13px] text-faint">В машине нет позиций. Добавьте из зала ожидания справа →</div>
+        </div>
+      </div>
+
+      <!-- ── ЗАЛ ОЖИДАНИЯ ── -->
+      <div class="rounded-2xl bg-surface p-5 shadow-card">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Зал ожидания · без машины</div>
+            <div class="text-[11px] text-faint">готовы к отгрузке, ждут борт</div>
+          </div>
+          <span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted"><span id="poolCount">0</span> поз.</span>
+        </div>
+        <div id="poolBody" class="mt-2 space-y-2"></div>
+        <div id="poolEmpty" class="hidden py-6 text-center text-[12px] text-faint">Зал ожидания пуст.</div>
+      </div>
+
+    </div>
+
+    <!-- ИИ-проверка влезаемости / сроков (живая) -->
+    <div id="aiBox" class="rounded-2xl border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 p-4">
+      <div class="flex items-center gap-2">
+        <span class="text-violet-500 dark:text-violet-300">✦</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">ИИ-контроль сборки</span>
+      </div>
+      <div id="aiList" class="mt-2 space-y-1.5 text-[13px] text-violet-700 dark:text-violet-300"></div>
+    </div>
+
+    <!-- СИГНАЛЫ ПРОДАВЦУ (back-signal при изъятии позиции со сделкой) -->
+    <div id="signalsBox" class="hidden rounded-2xl bg-surface p-5 shadow-card">
+      <div class="flex items-center gap-2">
+        <span class="text-amber-500">📨</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">Сигналы продавцу · сроки сделок под угрозой</span>
+      </div>
+      <div class="mt-1 text-[11px] text-faint">Позицию сняли с машины — продавец и карточка сделки уведомляются о сдвиге ETA (правило «обращение→запись»). Здесь — что ушло продавцу.</div>
+      <div id="signalsList" class="mt-2 space-y-1.5"></div>
+    </div>
+
+    <!-- ДОКУМЕНТЫ + ВЕРСИИ -->
+    <div class="rounded-2xl bg-surface p-5 shadow-card">
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-faint">Документы машины</div>
+      <div class="mt-2 grid gap-3 sm:grid-cols-2">
+        <!-- Инвойс -->
+        <div class="rounded-xl border border-line bg-sunken p-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-ink">Commercial Invoice</span>
+            <span id="invVerBadge" class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"></span>
+          </div>
+          <div class="mt-1 text-[12px] text-muted">Текущая: <span id="invVer">v1</span> · позиций <span id="invLines">0</span> · сумма <span id="invSum" class="num">0</span> CNY</div>
+          <div id="invHist" class="mt-2 space-y-1 text-[11px] text-faint"></div>
+        </div>
+        <!-- Упаковочный лист -->
+        <div class="rounded-xl border border-line bg-sunken p-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-ink">Packing List</span>
+            <span id="plVerBadge" class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"></span>
+          </div>
+          <div class="mt-1 text-[12px] text-muted">Текущая: <span id="plVer">v1</span> · мест <span id="plLines">0</span> · брутто <span id="plWeight" class="num">0</span> кг</div>
+          <div id="plHist" class="mt-2 space-y-1 text-[11px] text-faint"></div>
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-faint">При пересборке создаётся новая версия, прежняя сохраняется в истории (важно для таможни — какой пакет был на дату отправки).</div>
+    </div>
+
+    <p class="text-xs text-faint">Рабочий прототип механики (демо-данные в памяти, без сохранения). Иллюстрирует поведение будущего экрана.</p>
+  </div>
+
+  <!-- МОДАЛКА «Разбить позицию» (частичная задержка/отгрузка) -->
+  <div id="splitModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onclick="if(event.target===this) closeSplit()">
+    <div class="w-full max-w-md rounded-2xl bg-surface p-5 shadow-pop">
+      <div class="text-sm font-semibold text-ink">Разбить позицию</div>
+      <div id="splitName" class="mt-0.5 text-[12px] text-muted"></div>
+      <div class="mt-3 text-[12px] text-muted">Сколько единиц <b>задерживается</b> (поедет позже)? Они уйдут в зал ожидания, остаток останется в машине. Вес, объём и себестоимость пересчитаются автоматически.</div>
+      <div class="mt-3 flex items-center gap-2">
+        <input id="splitQty" type="number" min="1" class="w-32 rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none" oninput="splitPreview()">
+        <span id="splitUnit" class="text-[12px] text-muted">шт</span>
+        <span id="splitOf" class="ml-auto text-[11px] text-faint"></span>
+      </div>
+      <div id="splitPreview" class="mt-3 rounded-xl border border-line bg-sunken p-3 text-[12px] text-muted"></div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button onclick="closeSplit()" class="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium text-muted hover:text-ink">Отмена</button>
+        <button id="splitGo" onclick="doSplit()" class="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">Разбить → задержку в зал</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ───────────────────────── МОДЕЛЬ (демо, в памяти) ─────────────────────────
+// landed на единицу = себестоимость без фрахта (фрахт считаем отдельно, т.к. он
+// перераспределяется на весь состав машины по весу). Это и есть суть «±позиция → фрахт меняется».
+const LIMIT_W = 1200, LIMIT_V = 14;        // борт: 1200 кг / 14 м³
+const FREIGHT_USD_KG = 2.0, USD_BYN = 3.0; // фрахт 2 $/кг → BYN
+const FREIGHT_BYN_KG = FREIGHT_USD_KG * USD_BYN; // 6.0 BYN/кг
+
+// ⚠️ ДЕМО-данные в памяти. При порте: wPer/vPer/landedPer тянуть из справочника номенклатуры
+// (ref_nomenclature_category/sku — вес/тара/коробка) и расчёта калькулятора (пошлина из ref_tnved
+// на дату), а не из констант. Источник истины — MDM (синк с 1С); здесь зашито для самодостаточного HTML.
+// ЧИСЛОВАЯ модель: qty — число, unit — единица; wPer/vPer/landedPer — НА ЕДИНИЦУ. Полные вес/объём/
+// себестоимость = qty × *Per (геттеры lineW/lineV/lineGoods) → можно «разбить позицию» и пересчитать.
+// deal — сделка продаж (FK; 'пополнение' = на склад); client — клиент сделки; due — обещанный клиенту срок.
+let inMachine = [
+  {id:'p1', name:'Модуль ESP8266-12F',        sup:'Shenzhen Hangxin', qty:800,  unit:'шт', wPer:0.0075, vPer:0.000025, landedPer:2.475, deal:'СД-2280', client:'ООО «Спектр»',   due:'10 июля', status:'выкуплен'},
+  {id:'p2', name:'Конд. алюм. 1000мкФ 35В',   sup:'Yuxin Electronics', qty:8000, unit:'шт', wPer:0.00175,vPer:0.000005, landedPer:0.481, deal:'пополнение', status:'в производстве'},
+  {id:'p3', name:'Реле 24VDC SPDT 10A',       sup:'Suzhou Precision',  qty:600,  unit:'шт', wPer:0.015,  vPer:0.00005,  landedPer:7.483, deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля',  status:'задержка', warn:'поставщик сдвинул отгрузку на +9 дней'},
+  {id:'p4', name:'Дисплей OLED 0.96" I2C',    sup:'阿里巴巴 (1688)',    qty:1500, unit:'шт', wPer:0.00467,vPer:0.0000333,landedPer:3.473, deal:'СД-2284', client:'ИП Сидоров',    due:'14 июля', status:'выкуплен'},
+];
+let pool = [  // зал ожидания — товар физически на складе Китая, без машины
+  {id:'w1', name:'Транзистор IRFZ44N TO-220', sup:'Taobao · разъёмы',  qty:4000, unit:'шт', wPer:0.00125,vPer:0.000005, landedPer:0.66,  deal:'пополнение', status:'на складе Китая', tag:'прибыл 24 июня'},
+  {id:'w2', name:'Разъём XT60 пара',          sup:'Shenzhen Hangxin',  qty:2000, unit:'шт', wPer:0.004,  vPer:0.000015, landedPer:1.56,  deal:'СД-2291', client:'ООО «Радиус»', due:'12 июля', status:'на складе Китая', tag:'прибыл 25 июня'},
+  {id:'w3', name:'Реле SRD-05VDC (часть)',    sup:'Yuxin Electronics', qty:500,  unit:'шт', wPer:0.006,  vPer:0.00002,  landedPer:2.30,  deal:'СД-2270', client:'ЧУП «Энергия»', due:'8 июля', status:'на складе Китая', tag:'достали из MO-014'},
+];
+const selected = new Set();
+let invVer = 1, plVer = 1;            // версии документов
+let docsStale = false;               // документы устарели после изменения состава
+const invHistory = [], plHistory = []; // истории версий
+let lastFreight = null;              // для дельты фрахта
+const dealSignals = [];              // back-signal продавцу при изъятии позиции со сделкой
+
+// ───────────────────────── РАСЧЁТ ─────────────────────────
+// Геттеры позиции: полные вес/объём/себес = qty × *Per (на единицу из MDM). Числовая модель →
+// можно «разбить позицию» (часть едет, часть задержалась) и пересчитать всё.
+const lineW = r => r.qty * r.wPer;                 // полный вес позиции, кг
+const lineV = r => r.qty * r.vPer;                 // полный объём позиции, м³
+const lineGoods = r => r.qty * r.landedPer;        // себест. товара позиции БЕЗ фрахта, BYN
+const qtyText = r => `${fmt(r.qty)} ${r.unit||'шт'}`;
+
+// Фрахт машины = вес × ставка. Он РАСПРЕДЕЛЯЕТСЯ обратно на позиции по доле веса —
+// поэтому добавил/убрал/разбил позицию → доля фрахта (и landed-с-фрахтом) меняется у ВСЕХ остальных.
+// freightById[id] — доля фрахта позиции; landedFullById[id] — landed С фрахтом (то, что видит продавец как себес).
+function totals(){
+  const w = inMachine.reduce((s,r)=>s+lineW(r),0);
+  const v = inMachine.reduce((s,r)=>s+lineV(r),0);
+  const goods = inMachine.reduce((s,r)=>s+lineGoods(r),0);
+  const freight = +(w * FREIGHT_BYN_KG).toFixed(0);   // фрахт всей машины
+  const landed = goods + freight;
+  const sups = new Set(inMachine.map(r=>r.sup)).size;
+  const deals = new Set(inMachine.filter(r=>r.deal!=='пополнение').map(r=>r.deal)).size;
+  // распределение фрахта по доле веса
+  const freightById = {}, landedFullById = {};
+  inMachine.forEach(r=>{
+    const share = w>0 ? +(freight * lineW(r) / w).toFixed(0) : 0;
+    freightById[r.id] = share;
+    landedFullById[r.id] = +(lineGoods(r) + share).toFixed(0);
+  });
+  return {w,v,goods,freight,landed,sups,deals,count:inMachine.length,freightById,landedFullById,freightRateByn:FREIGHT_BYN_KG};
+}
+const fmt = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 0});
+const fmtW = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 1});  // вес с десятыми
+
+// ───────────────────────── РЕНДЕР ─────────────────────────
+function statusChip(s){
+  const m = {
+    'выкуплен':       ['bg-emerald-50 dark:bg-emerald-500/15','text-emerald-700 dark:text-emerald-300'],
+    'в производстве': ['bg-violet-50 dark:bg-violet-500/15','text-violet-600 dark:text-violet-300'],
+    'на складе Китая':['bg-blue-50 dark:bg-blue-500/15','text-blue-600 dark:text-blue-300'],
+    'задержка':       ['bg-red-50 dark:bg-red-500/15','text-red-600 dark:text-red-300'],
+  };
+  const [bg,fg] = m[s] || ['bg-sunken','text-muted'];
+  return `<span class="inline-flex items-center rounded-full ${bg} px-2 py-0.5 text-[11px] font-semibold ${fg}">${s}</span>`;
+}
+
+function render(){
+  const t = totals();
+  // шапка
+  document.getElementById('kCount').textContent = t.count;
+  document.getElementById('kClients').textContent = t.deals;
+  document.getElementById('kSup').textContent = t.sups;
+  document.getElementById('kWeight').textContent = fmtW(t.w);
+  document.getElementById('kVol').textContent = t.v.toFixed(2);
+  document.getElementById('kLanded').textContent = fmt(t.landed);
+  document.getElementById('kFreight').textContent = fmt(t.freight);
+  document.getElementById('kFreightRate').textContent = FREIGHT_USD_KG.toFixed(1)+' $/кг';
+  const wPct = Math.min(100, Math.round(t.w/LIMIT_W*100));
+  const vPct = Math.min(100, Math.round(t.v/LIMIT_V*100));
+  const wBar = document.getElementById('kWeightBar'), vBar = document.getElementById('kVolBar');
+  wBar.style.width = wPct+'%'; wBar.className = 'h-full rounded-full '+(wPct>100?'bg-red-500':wPct>90?'bg-amber-400':'bg-emerald-500');
+  vBar.style.width = vPct+'%'; vBar.className = 'h-full rounded-full '+(vPct>100?'bg-red-500':vPct>90?'bg-amber-400':'bg-amber-400');
+  // дельта фрахта
+  const fd = document.getElementById('kFreightDelta');
+  if(lastFreight!==null && t.freight!==lastFreight){
+    const d = t.freight - lastFreight;
+    fd.textContent = (d>0?'▲ +':'▼ ')+fmt(Math.abs(d));
+    fd.className = 'font-semibold '+(d>0?'text-red-500':'text-emerald-500')+' pulse';
+    setTimeout(()=>fd.classList.remove('pulse'), 520);
+  } else fd.textContent = '';
+  lastFreight = t.freight;
+
+  // таблица «в машине»
+  const tb = document.getElementById('inBody'); tb.innerHTML='';
+  inMachine.forEach(r=>{
+    const tr = document.createElement('tr');
+    if(r.status==='задержка') tr.className='bg-red-50/40 dark:bg-red-500/5';
+    tr.dataset.id = r.id;
+    const fr = t.freightById[r.id]||0, full = t.landedFullById[r.id]||lineGoods(r);
+    const dealCell = r.deal==='пополнение'
+      ? `<span class="mt-0.5 block text-[11px] text-muted">пополнение</span>`
+      : `<a href="#" onclick="return false" title="Открыть сделку ${r.deal}${r.client?' · '+r.client:''}" class="mt-0.5 block text-[11px] font-medium text-accent hover:underline">${r.deal}${r.due?` · до ${r.due}`:''}</a>`;
+    tr.innerHTML = `
+      <td class="py-2 align-top"><input type="checkbox" onchange="toggleSel('${r.id}')" ${selected.has(r.id)?'checked':''} class="accent-[rgb(var(--accent))]"></td>
+      <td class="py-2 align-top font-medium text-ink">${r.name}${r.warn?`<div class="text-[11px] font-normal text-red-600 dark:text-red-300">⚠ ${r.warn}</div>`:''}</td>
+      <td class="py-2 align-top text-[12px] text-muted">${r.sup}</td>
+      <td class="py-2 align-top text-right text-muted num">${qtyText(r)}</td>
+      <td class="py-2 align-top text-right text-muted num">${fmtW(lineW(r))} кг</td>
+      <td class="py-2 align-top text-right text-muted num">${fmt(lineGoods(r))}</td>
+      <td class="py-2 align-top text-right text-[12px] text-faint num">+${fmt(fr)}</td>
+      <td class="py-2 align-top text-right font-semibold text-ink num" title="Себестоимость с долей фрахта — её видит продавец">${fmt(full)}</td>
+      <td class="py-2 align-top text-center">${statusChip(r.status)}${dealCell}</td>
+      <td class="py-2 align-top text-right whitespace-nowrap">
+        <button title="Разбить позицию: часть едет, часть остаётся (частичная задержка)" onclick="openSplit('${r.id}')" class="rounded-md px-1.5 text-[13px] leading-none text-faint hover:text-accent">✂</button>
+        <button title="Достать в зал ожидания" onclick="moveOne('${r.id}','out')" class="rounded-md px-1.5 text-[15px] leading-none text-faint hover:text-red-500">↩</button>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  document.getElementById('inEmpty').classList.toggle('hidden', inMachine.length>0);
+
+  // зал ожидания
+  const pb = document.getElementById('poolBody'); pb.innerHTML='';
+  pool.forEach(r=>{
+    const div = document.createElement('div');
+    div.className='flex items-center justify-between gap-2 rounded-xl border border-line bg-sunken p-2.5';
+    div.dataset.id = r.id;
+    div.innerHTML = `
+      <div class="min-w-0">
+        <div class="truncate text-[13px] font-medium text-ink">${r.name}</div>
+        <div class="truncate text-[11px] text-muted">${r.sup} · ${qtyText(r)} · ${fmtW(lineW(r))} кг · ${fmt(lineGoods(r))} BYN</div>
+        <div class="text-[10px] text-faint">${statusChipText(r)} · ${r.deal}</div>
+      </div>
+      <button onclick="moveOne('${r.id}','in')" class="shrink-0 rounded-lg border border-accent px-2.5 py-1 text-[12px] font-semibold text-accent hover:bg-accent-soft">＋ В машину</button>`;
+    pb.appendChild(div);
+  });
+  document.getElementById('poolCount').textContent = pool.length;
+  document.getElementById('poolEmpty').classList.toggle('hidden', pool.length>0);
+  document.getElementById('poolBody').classList.toggle('hidden', pool.length===0);
+
+  // селект-бар
+  document.getElementById('selBar').classList.toggle('hidden', selected.size===0);
+  document.getElementById('selBar').classList.toggle('flex', selected.size>0);
+  document.getElementById('selCount').textContent = selected.size+' выбрано';
+
+  renderDocs(t);
+  renderAI(t);
+  renderSignals();
+}
+function statusChipText(r){ return r.tag || r.status; }
+
+// ───────────────────────── ДОКУМЕНТЫ ─────────────────────────
+function renderDocs(t){
+  const goodsCNY = Math.round(t.goods / 0.42); // обратный демо-курс BYN→CNY для «суммы инвойса»
+  document.getElementById('invVer').textContent = 'v'+invVer;
+  document.getElementById('invLines').textContent = inMachine.length;
+  document.getElementById('invSum').textContent = fmt(goodsCNY);
+  document.getElementById('plVer').textContent = 'v'+plVer;
+  document.getElementById('plLines').textContent = inMachine.length;
+  document.getElementById('plWeight').textContent = fmt(t.w);
+
+  const badge = (stale)=> stale
+    ? '<span class="bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300">устарел</span>'
+    : '<span class="bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">актуален</span>';
+  document.getElementById('invVerBadge').outerHTML = `<span id="invVerBadge" class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${docsStale?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'}">${docsStale?'устарел':'актуален'}</span>`;
+  document.getElementById('plVerBadge').outerHTML  = `<span id="plVerBadge" class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${docsStale?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'}">${docsStale?'устарел':'актуален'}</span>`;
+
+  document.getElementById('invHist').innerHTML = invHistory.map(h=>`<div>• ${h}</div>`).join('') || '<div class="text-faint/70">истории нет</div>';
+  document.getElementById('plHist').innerHTML  = plHistory.map(h=>`<div>• ${h}</div>`).join('')  || '<div class="text-faint/70">истории нет</div>';
+
+  document.getElementById('docBanner').classList.toggle('hidden', !docsStale);
+}
+
+function rebuildDocs(){
+  const t = totals();
+  invHistory.unshift(`v${invVer} — ${inMachine.length} поз. (заменён при пересборке)`);
+  plHistory.unshift(`v${plVer} — брутто ${fmtW(t.w)} кг (заменён при пересборке)`);
+  invVer++; plVer++;
+  docsStale = false;
+  render();
+}
+
+// ───────────────────────── ИИ-КОНТРОЛЬ ─────────────────────────
+function renderAI(t){
+  const out = [];
+  if(t.w > LIMIT_W) out.push(['red', `Перегруз по весу: ${fmtW(t.w)} кг > лимит ${fmt(LIMIT_W)} кг. Убери позицию или раздели на две машины.`]);
+  else if(t.w/LIMIT_W > 0.9) out.push(['amber', `Вес близок к лимиту (${Math.round(t.w/LIMIT_W*100)}%). Запас на упаковку ~${fmtW(LIMIT_W-t.w)} кг.`]);
+  if(t.v > LIMIT_V) out.push(['red', `Перегруз по объёму: ${t.v.toFixed(2)} м³ > ${LIMIT_V} м³.`]);
+  const delayed = inMachine.find(r=>r.status==='задержка');
+  if(delayed){
+    const dealNote = (delayed.deal&&delayed.deal!=='пополнение')
+      ? ` Она под сделку ${delayed.deal} (${delayed.client||'клиент'}, обещано к ${delayed.due||'—'}) — изъяв, предупреди продавца о новом сроке.`
+      : '';
+    out.push(['amber', `«${delayed.name}» задерживается — держит всю машину. Достань в зал ожидания, чтобы не сдвигать ETA остальных ${inMachine.length-1} позиций.${dealNote}`]);
+  }
+  if(docsStale) out.push(['violet', `Состав изменился — инвойс и упаковочный лист нужно пересобрать перед отправкой (иначе на таможню уйдёт старый пакет).`]);
+  if(pool.length && t.w/LIMIT_W < 0.85) out.push(['violet', `В зале ожидания ${pool.length} поз. — есть запас ${fmtW(LIMIT_W-t.w)} кг. Добор снизит фрахт на единицу.`]);
+  if(!out.length) out.push(['emerald', `Состав сбалансирован, лимиты в норме, документы актуальны.`]);
+  const c = {red:'text-red-600 dark:text-red-300',amber:'text-amber-700 dark:text-amber-300',violet:'text-violet-700 dark:text-violet-300',emerald:'text-emerald-700 dark:text-emerald-300'};
+  document.getElementById('aiList').innerHTML = out.map(([k,txt])=>`<div class="${c[k]}">• ${txt}</div>`).join('');
+}
+
+// ───────────────────────── ДЕЙСТВИЯ ─────────────────────────
+function toggleSel(id){ selected.has(id)?selected.delete(id):selected.add(id); render(); }
+
+// Изъятие позиции из машины → зал ожидания. Если позиция привязана к сделке —
+// эмитим сигнал продавцу (back-signal): срок клиента под угрозой. По правилу проекта «обращение→запись».
+function takeOut(r){
+  const mo = document.getElementById('moId').textContent;
+  if(r.deal && r.deal!=='пополнение'){
+    dealSignals.unshift({deal:r.deal, client:r.client||'клиент', due:r.due||'—', item:r.name,
+      text:`Позиция «${r.name}» снята с машины ${mo}. Сделка ${r.deal} (${r.client||'клиент'}) — обещано к ${r.due||'—'}: срок под угрозой, ETA поедет. Подтвердить новый срок с клиентом.`});
+  }
+  r.tag = 'достали из ' + mo;
+  if(r.status==='задержка'){ r.status='на складе Китая'; r.warn=null; } // в зале ждёт борт
+  pool.unshift(r);
+}
+function moveOne(id, dir){
+  if(dir==='out'){
+    const i = inMachine.findIndex(r=>r.id===id); if(i<0) return;
+    const [r] = inMachine.splice(i,1);
+    takeOut(r); selected.delete(id);
+  } else {
+    const i = pool.findIndex(r=>r.id===id); if(i<0) return;
+    const [r] = pool.splice(i,1);
+    r.tag = null; inMachine.push(r);
+  }
+  markStale(dir);
+  render();
+  flash(id, dir);
+}
+function moveSelected(dir){
+  [...selected].forEach(id=>{
+    const i = inMachine.findIndex(r=>r.id===id); if(i<0) return;
+    const [r] = inMachine.splice(i,1);
+    takeOut(r);
+  });
+  selected.clear(); markStale('out'); render();
+}
+function markStale(dir){
+  docsStale = true;
+  document.getElementById('docBannerWhy').textContent =
+    (dir==='out'?'Позиция убрана из машины':'Позиция добавлена в машину')+
+    ` — инвойс v${invVer} и упаковочный лист v${plVer} больше не соответствуют составу (изменились вес, мест и сумма).`;
+}
+function flash(id, dir){
+  // подсветить строку/карточку, куда позиция приехала: out → в зал (in-стиль), in → в машину
+  const sel = dir==='out' ? `#poolBody [data-id="${id}"]` : `#inBody [data-id="${id}"]`;
+  const el = document.querySelector(sel);
+  if(el){ const cls='flash-in'; el.classList.add(cls); setTimeout(()=>el.classList.remove(cls),1100); }
+}
+
+// ── Разбить позицию: часть едет, часть задерживается (→ зал ожидания) ──
+let splitId = null, splitSeq = 0;
+function openSplit(id){
+  const r = inMachine.find(x=>x.id===id); if(!r) return;
+  splitId = id;
+  document.getElementById('splitName').textContent = `${r.name} · ${r.sup} · всего ${qtyText(r)}`;
+  document.getElementById('splitUnit').textContent = r.unit||'шт';
+  document.getElementById('splitOf').textContent = `из ${fmt(r.qty)}`;
+  const inp = document.getElementById('splitQty');
+  inp.max = r.qty - 1; inp.value = '';
+  document.getElementById('splitPreview').textContent = 'Укажите количество, которое задерживается.';
+  document.getElementById('splitModal').classList.remove('hidden');
+  inp.focus();
+}
+function closeSplit(){ document.getElementById('splitModal').classList.add('hidden'); splitId=null; }
+function splitVal(){
+  const r = inMachine.find(x=>x.id===splitId); if(!r) return null;
+  let d = parseInt(document.getElementById('splitQty').value, 10);
+  if(!Number.isFinite(d) || d<1 || d>=r.qty) return null;
+  return {r, d};
+}
+function splitPreview(){
+  const sv = splitVal();
+  const go = document.getElementById('splitGo'), box = document.getElementById('splitPreview');
+  if(!sv){ go.disabled=true; go.classList.add('opacity-40'); box.textContent='Введите 1…(всего−1).'; return; }
+  go.disabled=false; go.classList.remove('opacity-40');
+  const {r,d} = sv, stay = r.qty - d;
+  box.innerHTML = `Останется в машине: <b>${fmt(stay)} ${r.unit}</b> · ${fmtW(stay*r.wPer)} кг · ${fmt(stay*r.landedPer)} BYN<br>`+
+    `Уйдёт в зал ожидания (задержка): <b>${fmt(d)} ${r.unit}</b> · ${fmtW(d*r.wPer)} кг · ${fmt(d*r.landedPer)} BYN`;
+}
+function doSplit(){
+  const sv = splitVal(); if(!sv) return;
+  const {r,d} = sv;
+  const part = {...r, id:`${r.id}-s${++splitSeq}`, qty:d, status:'задержка',
+    warn:'разбита из-за задержки у поставщика', tag:null};
+  r.qty -= d;                       // остаток едет дальше
+  // часть «задержалась» → в зал ожидания (через takeOut: back-signal продавцу + нормализация статуса)
+  takeOut(part);
+  markStale('out');
+  closeSplit();
+  render();
+  flash(part.id, 'out');
+}
+
+// сигналы продавцу при изъятии позиции со сделкой
+function renderSignals(){
+  const box = document.getElementById('signalsBox'), list = document.getElementById('signalsList');
+  if(!dealSignals.length){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  list.innerHTML = dealSignals.map(s=>`
+    <div class="flex items-start justify-between gap-3 rounded-xl border border-amber-200 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10 p-2.5">
+      <div class="text-[12px] text-amber-800 dark:text-amber-200"><span class="font-semibold">${s.deal} · ${s.client}</span> — ${s.text}</div>
+      <span class="shrink-0 inline-flex items-center rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">→ продавцу</span>
+    </div>`).join('');
+}
+
+render();
+</script>
+</body>
+</html>

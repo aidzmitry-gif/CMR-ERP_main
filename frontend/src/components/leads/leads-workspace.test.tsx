@@ -7,11 +7,17 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+// next/navigation.useRouter — нужен для router.push в двойном клике по лиду (drawer-pattern).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock("@/lib/api", () => ({
   createLead: vi.fn(),
   qualifyLead: vi.fn(),
   routeLead: vi.fn(),
   convertLead: vi.fn(),
+  // call-popup использует createDealTask для постановки задачи из звонка
+  createDealTask: vi.fn().mockResolvedValue(true),
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";

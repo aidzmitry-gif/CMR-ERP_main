@@ -25,6 +25,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Windows-консоль = cp1251 → print() кириллицы/эмодзи (⛔/⚠) валит UnicodeEncodeError,
+# который наш top-level except глотает в exit(0) → блок-гард молча не срабатывает (поймано
+# при тесте amend-гарда). Принудительно UTF-8 с заменой, чтобы вывод НИКОГДА не падал.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # py3.7+
+    except Exception:
+        pass
+
 # Файлы-хотспоты из DEPENDENCY-MAP §5 — касание = вероятный конфликт/контракт.
 HOTSPOTS = {
     "config/settings.py",
@@ -71,6 +80,28 @@ def _git(*args: str) -> str:
         return out.stdout.strip() if out.returncode == 0 else ""
     except Exception:  # включая TimeoutExpired — хук остаётся неблокирующим
         return ""
+
+
+def _alembic_heads() -> list[str]:
+    """Головы alembic-цепочки = revision, на которые никто не ссылается down_revision'ом.
+    Чистый python, БЕЗ запуска alembic (медленно/нужна БД). Скан по ФАЙЛАМ НА ДИСКЕ
+    (linked-worktree-полосы пишут .py до stage — коллизия видна по диску). Каталог — от git toplevel."""
+    top = _git("rev-parse", "--show-toplevel")
+    migr = (Path(top) if top else Path.cwd()) / "migrations" / "versions"
+    if not migr.is_dir():
+        return []
+    revs: set[str] = set()
+    downs: set[str] = set()
+    for f in migr.glob("*.py"):
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if m := re.search(r'^revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            revs.add(m.group(1))
+        if d := re.search(r'^down_revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            downs.add(d.group(1))
+    return sorted(revs - downs)
 
 
 def _clean(s: str) -> str:
@@ -199,6 +230,66 @@ def _log_submodule_bumps(coord: Path, raw: str, ts: str) -> list[str]:
     return extra
 
 
+# Общие ветки флота: на них несколько сессий коммитят разом → HEAD дрейфует под тобой,
+# поэтому amend/reset/rebase бьют по ЧУЖОМУ коммиту (реальная авария 2026-06-27).
+SHARED_BRANCHES = {"main", "sales-2.0-redesign", "theme/dark-mode-cd"}
+
+
+def pre_commit(coord: Path) -> int:
+    """Гард ПЕРЕД коммитом. БЛОК (return 1) только на объективной аварии: staged-миграция при
+    >1 alembic head (dual-head → падёт `alembic upgrade` в проде, деньги/безопасность). Обход
+    (осознанно, напр. перед мержем-починкой цепочки): AIOS_ALLOW_MULTI_HEADS=1. Остальное —
+    advisory (return 0): предупреждения о хотспотах/shared-kernel/миграции на общей ветке.
+    """
+    norm = {f.replace("\\", "/")
+            for f in _git("diff", "--cached", "--name-only").splitlines() if f}
+    # БЛОК: staged-миграция при нескольких головах цепочки = два head (на любой ветке).
+    if any(MIGRATION_RE.search(f) for f in norm):
+        heads = _alembic_heads()
+        if len(heads) > 1 and os.environ.get("AIOS_ALLOW_MULTI_HEADS") != "1":
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            print(f"[coordination] ⛔ alembic multiple heads ({len(heads)}): {', '.join(heads)}. "
+                  "Коммит миграции заблокирован — два head ломают `alembic upgrade` в проде. "
+                  "Бери номер через scripts/next_migration.py (down_revision = ОДИН head), или "
+                  "почини цепочку. Обход (осознанно): AIOS_ALLOW_MULTI_HEADS=1 git commit …")
+            _append(coord, f"- {ts} · commit BLOCKED · migration guard: multiple heads ({', '.join(heads)})")
+            return 1
+    # ADVISORY: риски общей ветки (не блокируем — флага достаточно).
+    branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
+    if branch not in SHARED_BRANCHES:
+        return 0
+    hot = sorted(norm & HOTSPOTS)
+    if hot:
+        print(f"[coordination] ⚠ общая ветка '{branch}': тронуты хотспоты: {', '.join(hot)}. "
+              "Сверься с ACTIVE-SESSIONS «Хотспоты» — не держит ли их другая сессия.")
+    if SHARED_KERNEL in norm:
+        print("[coordination] ⚠ shared-kernel (core/domain/models.py) — ломает все модули "
+              "(DEPENDENCY-MAP §3).")
+    if any(MIGRATION_RE.search(f) for f in norm):
+        print("[coordination] ⚠ миграция — впиши номер в ACTIVE-SESSIONS «Счётчик миграций», "
+              "сверь единственный head (§5).")
+    return 0
+
+
+def prepare_commit_msg(coord: Path, source: str, sha: str) -> int:
+    """Гард ПЕРЕД редактированием сообщения. git зовёт с source='commit' и sha при ``--amend`` —
+    единственный надёжный сигнал amend в хуках. На ОБЩЕЙ ветке amend = блок (затрёт чужой коммит,
+    авария 2026-06-27). Обход (свой коммит, точно знаешь что делаешь): ``AIOS_ALLOW_AMEND=1``.
+    """
+    if source != "commit" or not sha:  # не amend (обычный/merge/squash/template коммит)
+        return 0
+    if os.environ.get("AIOS_ALLOW_AMEND") == "1":
+        return 0
+    branch = _clean(_git("rev-parse", "--abbrev-ref", "HEAD"))
+    if branch not in SHARED_BRANCHES:
+        return 0
+    print(f"[coordination] ⛔ amend на ОБЩЕЙ ветке '{branch}' заблокирован: HEAD мог сдвинуть "
+          "другая сессия — заамендишь ЧУЖОЙ коммит (так и случилось 2026-06-27). "
+          "Сделай НОВЫЙ коммит, или работай в своей ветке/worktree. "
+          "Если уверен (HEAD точно твой): AIOS_ALLOW_AMEND=1 git commit --amend …")
+    return 1
+
+
 def on_commit(coord: Path) -> None:
     sha = _git("rev-parse", "--short", "HEAD")
     subject = _clean(_git("log", "-1", "--pretty=%s"))
@@ -215,12 +306,16 @@ def on_commit(coord: Path) -> None:
     _report(flags)
 
 
-def on_push(coord: Path, remote: str) -> None:
+def on_push(coord: Path, remote: str) -> int:
+    """Лог пуша + БЛОК изоляции: прямой push в ОБЩУЮ ветку с >1 коммита утащит чужие
+    незапушенные коммиты. Блок (return 1), обход AIOS_ALLOW_PUSH=1. Lane-ветки (не общие) —
+    пушатся свободно. fail-open сохранён top-level except'ом в main."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     zero = "0" * 40
     all_files: set[str] = set()
     diffs: list[str] = []
     lines_logged = 0
+    blocked: list[str] = []  # общие ветки, куда летит >1 коммита
     for line in sys.stdin:
         parts = line.split()
         if len(parts) < 4:
@@ -245,9 +340,18 @@ def on_push(coord: Path, remote: str) -> None:
         _append(coord, f"- {ts} · push → {remote}/{dest} · {n} коммит(ов){warn}")
         print(f"[coordination] push → {remote}/{dest}: {n} коммит(ов)")
         lines_logged += 1
+        if dest in SHARED_BRANCHES and n > 1:
+            blocked.append(f"{dest} ({n} коммитов)")
     if not lines_logged:
-        return
+        return 0
     _report(_flags(sorted(all_files), "\n".join(diffs)))
+    if blocked and os.environ.get("AIOS_ALLOW_PUSH") != "1":
+        print(f"[coordination] ⛔ прямой push в общую ветку с >1 коммита: {', '.join(blocked)}. "
+              "Утащишь чужие незапушенные коммиты. Пушь ТОЛЬКО свой — cherry-pick на чистую ветку "
+              "от origin (scripts/lane_worktree.py). Обход (осознанно): AIOS_ALLOW_PUSH=1 git push …")
+        _append(coord, f"- {ts} · push BLOCKED · isolation: >1 коммита в общую ветку ({', '.join(blocked)})")
+        return 1
+    return 0
 
 
 def main() -> int:
@@ -255,10 +359,16 @@ def main() -> int:
     coord = _coord_dir()
     if coord is None:
         return 0
+    if mode == "pre-commit":
+        return pre_commit(coord)
+    if mode == "prepare-commit-msg":
+        # git зовёт: prepare-commit-msg <msg-file> [<source> [<sha>]]
+        return prepare_commit_msg(coord, sys.argv[3] if len(sys.argv) > 3 else "",
+                                  sys.argv[4] if len(sys.argv) > 4 else "")
     if mode == "post-commit":
         on_commit(coord)
     elif mode == "pre-push":
-        on_push(coord, sys.argv[2] if len(sys.argv) > 2 else "origin")
+        return on_push(coord, sys.argv[2] if len(sys.argv) > 2 else "origin")
     return 0
 
 

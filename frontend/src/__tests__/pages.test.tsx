@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Страницы App Router — тонкие обёртки: дочерние компоненты и API мокаем,
 // проверяем, что страница собирает данные и монтирует нужный компонент.
+// next/font/google → возвращает заглушку Inter(): без неё RootLayout падает
+//   на TypeError("Inter is not a function") при импорте под vitest.
+vi.mock("next/font/google", () => ({
+  Inter: () => ({ variable: "--font-inter", className: "font-inter" }),
+}));
 vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => <a>{children}</a> }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", className: "mock-font" }) }));
@@ -32,8 +37,25 @@ vi.mock("@/components/deal-contacts", () => ({ DealContacts: () => <div>contacts
 vi.mock("@/components/deal-documents", () => ({ DealDocuments: () => <div>documents</div> }));
 vi.mock("@/components/deal-edit-button", () => ({ DealEditButton: () => <div>edit</div> }));
 vi.mock("@/components/deal-items", () => ({ DealItems: () => <div>items</div> }));
+vi.mock("@/components/deal-metrics", () => ({ DealMetrics: () => <div>metrics</div> }));
 vi.mock("@/components/deal-messages", () => ({ DealMessages: () => <div>messages</div> }));
 vi.mock("@/components/priority-badge", () => ({ PriorityBadge: () => <div>priority</div> }));
+// Новые блоки карточки сделки (часть — async server components, ломают синхронный render).
+vi.mock("@/components/deal-client-360", () => ({ DealClient360: () => <div>client-360</div> }));
+vi.mock("@/components/deal-linked-deals", () => ({ DealLinkedDeals: () => <div>linked-deals</div> }));
+vi.mock("@/components/deal-handoff", () => ({ DealHandoffBlock: () => <div>handoff</div> }));
+vi.mock("@/components/deal-tasks", () => ({ DealTasks: () => <div>tasks</div> }));
+// ERP-обёртки/представления, ставшие bespoke (finance/wms) или обёрткой над доской (office).
+vi.mock("@/components/erp/office-view", () => ({
+  OfficeView: ({ board }: { board: React.ReactNode }) => <div>{board}</div>,
+}));
+vi.mock("@/components/erp/finance-view", () => ({ FinanceView: () => <div>finance-view</div> }));
+// MarketingPage рендерит ModuleBoard + отдельный async-board кампаний — мокаем последний.
+vi.mock("@/components/erp/marketing-campaign-board", () => ({
+  MarketingCampaignBoard: () => <div>campaign-board</div>,
+}));
+vi.mock("@/components/erp/wms-dashboard", () => ({ WmsDashboard: () => <div>wms-dashboard</div> }));
+vi.mock("@/lib/wms-warehouse", () => ({ fetchDashboardServer: vi.fn().mockResolvedValue({}) }));
 vi.mock("@/lib/api", () => ({
   fetchBoardStages: vi.fn().mockResolvedValue([{ id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] }]),
   fetchKpis: vi.fn().mockResolvedValue([]),
@@ -85,7 +107,7 @@ describe("страницы (src/app)", () => {
   });
 
   it("DealsPage монтирует канбан", async () => {
-    render(await DealsPage());
+    render(await DealsPage({ searchParams: Promise.resolve({}) }));
     expect(screen.getByText("deals-workspace")).toBeInTheDocument();
   });
 
@@ -134,7 +156,8 @@ describe("страницы (src/app)", () => {
   });
 
   it("ERP-воронки монтируют FunnelBoard", () => {
-    for (const Page of [ProcurementPage, ProductionPage, WmsPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
+    // WMS больше не воронка (bespoke-дашборд, async) — вынесен в отдельный тест ниже.
+    for (const Page of [ProcurementPage, ProductionPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^funnel:/)).toBeInTheDocument();
       unmount();
@@ -142,11 +165,22 @@ describe("страницы (src/app)", () => {
   });
 
   it("ERP-таблицы монтируют ModuleBoard", () => {
-    for (const Page of [FinancePage, MarketingPage, ServicePage]) {
+    // Finance стал bespoke (FinanceView) — вынесен в отдельный тест ниже.
+    for (const Page of [MarketingPage, ServicePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^board:/)).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("WmsPage монтирует дашборд склада (bespoke, async)", async () => {
+    render(await WmsPage());
+    expect(screen.getByText("wms-dashboard")).toBeInTheDocument();
+  });
+
+  it("FinancePage монтирует финансовый view (bespoke)", () => {
+    render(<FinancePage />);
+    expect(screen.getByText("finance-view")).toBeInTheDocument();
   });
 
   it("LogisticsPage монтирует вкладки логистики", () => {

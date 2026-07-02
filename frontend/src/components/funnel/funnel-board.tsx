@@ -33,7 +33,8 @@ import {
 import { FaTelegramPlane, FaWeixin, FaWhatsapp } from "react-icons/fa";
 import { useEffect, useMemo, useState } from "react";
 import { createFunnelCard, fetchFunnelBoard, moveFunnelCard } from "@/lib/funnel-api";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatNextStep } from "@/lib/format";
+import Gate1PickerModal from "./gate1-picker-modal";
 import type {
   FunnelCard,
   FunnelKpi,
@@ -466,10 +467,10 @@ function Column({
   );
 }
 
-function RightPanel({ panel }: { panel: FunnelPanel }) {
+// Строки оперативной панели (не-чат): тон-точка + заголовок + текст, всё всегда видно.
+function PanelRows({ panel }: { panel: FunnelPanel }) {
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-surface">
-      <div className="border-b border-line px-4 py-3.5 font-semibold text-ink">{panel.title}</div>
+    <>
       {panel.tabs && panel.tabs.length > 0 && (
         <div className="flex items-center gap-1 border-b border-line px-4 py-2">
           {panel.tabs.map((tab, i) => (
@@ -485,11 +486,11 @@ function RightPanel({ panel }: { panel: FunnelPanel }) {
           ))}
         </div>
       )}
-      <div className="flex-1 divide-y divide-line overflow-y-auto thin-scroll">
+      <div className="flex-1 divide-y divide-line overflow-y-auto overflow-x-hidden thin-scroll">
         {panel.items.map((it, i) => (
           <div key={i} className="px-4 py-3">
             <div className="flex items-center gap-2">
-              <span className={clsx("h-2 w-2 shrink-0 rounded-full", PANEL_TONE[it.tone ?? "info"])} />
+              <span className={clsx("h-2.5 w-2.5 shrink-0 rounded-full", PANEL_TONE[it.tone ?? "info"])} />
               <span className="flex-1 truncate text-sm font-medium text-ink">{it.title}</span>
               {it.badge ? (
                 <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
@@ -497,10 +498,77 @@ function RightPanel({ panel }: { panel: FunnelPanel }) {
                 </span>
               ) : null}
             </div>
-            <p className="mt-0.5 pl-4 text-xs text-muted">{it.text}</p>
+            <p className="mt-0.5 pl-5 text-xs text-muted">{it.text}</p>
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+// Градиент аватарки по тону собеседника — чаты различимы даже в свёрнутой рейке.
+const AVATAR_TONE: Record<string, string> = {
+  ai: "from-violet-500 to-purple-500",
+  alert: "from-red-500 to-orange-500",
+  ok: "from-emerald-500 to-teal-500",
+  info: "from-blue-500 to-indigo-500",
+};
+
+// Строки чат-рейки: аватарка с инициалами (общее правило чатов — как в глобальной ChatsPanel),
+// бейдж непрочитанных на углу аватарки; текст появляется при раскрытии по hover.
+function ChatRows({ panel }: { panel: FunnelPanel }) {
+  const hide = "opacity-0 transition-opacity duration-200 group-hover:opacity-100";
+  return (
+    <div className="flex-1 overflow-y-auto overflow-x-hidden thin-scroll">
+      {panel.items.map((it, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-2.5 hover:bg-sunken">
+          <span
+            className={clsx(
+              "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold text-white",
+              AVATAR_TONE[it.tone ?? "info"],
+            )}
+          >
+            {initials(it.title)}
+            {it.badge ? (
+              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-surface">
+                {it.badge}
+              </span>
+            ) : null}
+          </span>
+          <div className={clsx("min-w-0 flex-1", hide)}>
+            <div className="truncate text-sm font-medium text-ink">{it.title}</div>
+            <p className="mt-0.5 truncate text-xs text-muted">{it.text}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RightPanel({ panel }: { panel: FunnelPanel }) {
+  // Чат (`panel.chat`) — сворачивается в узкую рейку-аватарки, раскрывается по hover (общее
+  // правило чат-рейки; z-40 поверх глобального ChatsPanel). Оперативные ленты — AI-агенты,
+  // «Цех · сегодня», «Мои дедлайны» — НЕ чат: остаются полностью видимыми, ничего не прячем.
+  if (panel.chat) {
+    return (
+      <aside className="relative w-0 shrink-0">
+        <div className="group absolute inset-y-0 right-0 z-40 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
+          <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
+            <span className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+              {panel.title}
+            </span>
+          </div>
+          <ChatRows panel={panel} />
+        </div>
+      </aside>
+    );
+  }
+  // mr-[68px] освобождает место под глобальную чат-рейку (ChatsPanel, 68px, absolute right-0):
+  // оперативная панель стоит СЛЕВА от неё, а не под ней — иначе рейка перекрыла бы её правый край.
+  return (
+    <aside className="mr-[68px] flex w-[300px] shrink-0 flex-col overflow-hidden border-l border-line bg-surface">
+      <div className="border-b border-line px-4 py-3.5 font-semibold text-ink">{panel.title}</div>
+      <PanelRows panel={panel} />
     </aside>
   );
 }
@@ -606,7 +674,7 @@ function DetailDrawer({
           {card.next_step && (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Следующий шаг</div>
-              <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{card.next_step}</div>
+              <div className="rounded-lg bg-sunken p-3 text-sm text-muted">{formatNextStep(card.next_step)}</div>
             </div>
           )}
 
@@ -761,6 +829,7 @@ export function FunnelBoard({
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState<FunnelCard | null>(null);
   const [selected, setSelected] = useState<{ card: FunnelCard; stageId: string } | null>(null);
+  const [gate1DealId, setGate1DealId] = useState<number | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -787,6 +856,10 @@ export function FunnelBoard({
     if (!target) return;
     setStages((prev) => moveCard(prev, id, target));
     void moveFunnelCard(patchPath, id, target);
+    const targetStage = stages.find((s) => s.id === target);
+    if (targetStage?.title.includes("Gate 1")) {
+      setGate1DealId(id);
+    }
   }
 
   async function onCreate() {
@@ -1069,6 +1142,15 @@ export function FunnelBoard({
           stages={stages}
           extras={detailExtras}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {gate1DealId !== null && (
+        <Gate1PickerModal
+          dealId={gate1DealId}
+          dealTitle={stages.flatMap((s) => s.cards).find((c) => c.id === gate1DealId)?.title ?? ""}
+          onClose={() => setGate1DealId(null)}
+          onConfirm={() => setGate1DealId(null)}
         />
       )}
     </>

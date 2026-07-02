@@ -14,24 +14,28 @@ import {
 import clsx from "clsx";
 import { Clock, LayoutGrid, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
-import { ChatsPanel } from "@/components/chats-panel";
+import { useRouter } from "next/navigation";
+import { useEffect, useId, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
+import { CallWindow } from "@/components/calls/call-window";
+import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
-import { KpiCard } from "@/components/kpi-card";
 import {
   createDeal,
+  createDealTask,
   fetchLossReasons,
   getKpis,
   logActivity,
   loseDeal,
+  updateDeal,
   updateDealStage,
   type DealInput,
 } from "@/lib/api";
 import {
   daysInStage,
+  isOpenStage,
   isStuck,
   LOSS_REASONS,
   moveDealToStage,
@@ -40,7 +44,8 @@ import {
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
-import { formatMoney } from "@/lib/format";
+import { STAGE_BY_ID } from "@/lib/sales-stages";
+import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
 
@@ -71,11 +76,173 @@ function pluralDeals(n: number): string {
   return "сделок";
 }
 
-function DraggableDeal({ deal, extras }: { deal: Deal; extras: CardExtras }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: deal.id });
+function pluralWorkdays(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "рабочий день";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "рабочих дня";
+  return "рабочих дней";
+}
+
+const MONTH_GEN = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+const MONTH_NOM = [
+  "январь", "февраль", "март", "апрель", "май", "июнь",
+  "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
+
+/** Рабочих дней (пн–пт) с текущей даты до конца месяца включительно. */
+function workingDaysLeft(now: number): number {
+  const d = new Date(now);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  let count = 0;
+  for (let day = d.getDate(); day <= lastDay; day++) {
+    const wd = new Date(year, month, day).getDay();
+    if (wd !== 0 && wd !== 6) count++;
+  }
+  return count;
+}
+
+// ponytail: demo-ставка валовой маржи для прогноза. Реальная — из landed cost
+// (закупки); методика цены ещё разрабатывается ([[pricing-calculation-todo]]).
+const DEMO_MARGIN_RATE = 0.22;
+
+/** Баннер планирования: под конец месяца напоминает составить план на следующий и
+ *  согласовать с РОПом (порт sales-board-mockup.html). Считается от текущей даты;
+ *  `now` приходит после маунта (см. DealsWorkspace) — до него баннера нет. */
+function PlanBanner({ now }: { now: number | null }) {
+  if (now == null) return null;
+  const left = workingDaysLeft(now);
+  if (left > 7) return null; // нудж только в последнюю рабочую неделю месяца
+  const d = new Date(now);
+  const cur = MONTH_GEN[d.getMonth()];
+  const next = MONTH_NOM[(d.getMonth() + 1) % 12];
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? "opacity-40" : ""}>
-      <DealCard deal={deal} {...extras} />
+    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+      <span aria-hidden>📋</span>
+      <span>
+        До конца {cur} — <b>{left} {pluralWorkdays(left)}</b>. Пора составить личный план на{" "}
+        <b>{next}</b> и согласовать с РОПом.
+      </span>
+      <Link
+        href="/crm/rop/planning"
+        className="ml-auto rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:bg-accent-ink"
+      >
+        Составить план на {next}
+      </Link>
+    </div>
+  );
+}
+
+/** Pipeline-строка под скорбордом (порт макета): живые срезы открытого pipeline —
+ *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа — DEMO-ставка
+ *  22% (реальная — из landed cost закупок; методика цены ещё разрабатывается). */
+function PipelineRow({
+  stages,
+  now,
+  fmt,
+}: {
+  stages: Stage[];
+  now: number | null;
+  fmt: (value: number) => string;
+}) {
+  const open = stages.filter(isOpenStage);
+  const count = open.reduce((n, s) => n + s.deals.length, 0);
+  const sum = open.reduce((n, s) => n + s.deals.reduce((a, d) => a + d.amount, 0), 0);
+  const weighted = open.reduce((n, s) => n + stageWeightedSum(s), 0);
+  const margin = Math.round(weighted * DEMO_MARGIN_RATE);
+  const stuck =
+    now == null
+      ? null
+      : stages.reduce((n, s) => n + s.deals.filter((d) => isStuck(d, s.id, now)).length, 0);
+  const Sep = () => <span className="hidden h-4 w-px bg-line sm:block" aria-hidden />;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-surface px-4 py-3 text-[13px] shadow-card">
+      <span className="text-muted">
+        В работе: <b className="text-ink">{count}</b> {pluralDeals(count)}
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Сумма pipeline: <b className="text-ink">{fmt(sum)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Взвешенный прогноз <span className="text-faint">(выручка)</span>:{" "}
+        <b className="text-accent-ink">≈ {fmt(weighted)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Прогноз маржи{" "}
+        <span
+          className="text-faint"
+          title="Демо-ставка маржи 22%. Реальная маржа — из landed cost (закупки); методика цены ещё разрабатывается."
+        >
+          (вал. прибыль · демо 22%)
+        </span>
+        : <b className="text-money">≈ {fmt(margin)}</b>
+      </span>
+      <Sep />
+      <span className="text-muted">
+        Висяки: <b className="text-amber-600">{stuck ?? "—"}</b>
+      </span>
+    </div>
+  );
+}
+
+function DraggableDeal({
+  deal,
+  extras,
+  fmt,
+  onPreview,
+  onOpen,
+}: {
+  deal: Deal;
+  extras: CardExtras;
+  fmt: (value: number) => string;
+  onPreview: (d: Deal) => void;
+  onOpen: (d: Deal) => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: deal.id });
+  // Click vs double-click: первый клик → setTimeout(230ms) → onPreview;
+  // второй клик в окне таймера → clear + onOpen. Глушим встроенный <Link>
+  // у DealCard через preventDefault — навигация идёт через router.push в onOpen.
+  // Не мешаем клику по интерактивным дочерним (кнопка «Отказ», ChannelRow).
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+  }, []);
+
+  function handleClickCapture(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest("button")) return; // отказ-кнопка, иконки каналов — не глушим
+    e.preventDefault();
+    e.stopPropagation();
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onOpen(deal);
+      return;
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      onPreview(deal);
+    }, 230);
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid={`deal-card-${deal.id}`}
+      {...attributes}
+      {...listeners}
+      onClickCapture={handleClickCapture}
+      className={isDragging ? "opacity-40" : ""}
+    >
+      <DealCard deal={deal} fmt={fmt} {...extras} />
     </div>
   );
 }
@@ -83,15 +250,20 @@ function DraggableDeal({ deal, extras }: { deal: Deal; extras: CardExtras }) {
 function Column({
   stage,
   onAdd,
+  fmt,
   children,
 }: {
   stage: Stage;
   onAdd: () => void;
+  fmt: (value: number) => string;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
-  // Взвешенная сумма по колонке (SALES-44) — только для рабочих стадий с карточками.
-  const showWeighted = stage.id !== "won" && stage.id !== "lost" && stage.deals.length > 0;
+  // Взвешенная сумма по колонке (SALES-44) — только для открытого pipeline с карточками.
+  // Охват — тот же isOpenStage, что и в итоге PipelineRow: иначе cond_lost (5%) показал бы
+  // «взвешенно» в колонке, не входя в общий прогноз → Σ колонок ≠ итогу строки.
+  const showWeighted = isOpenStage(stage) && stage.deals.length > 0;
+  const weighted = stageWeightedSum(stage);
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
       <div className="overflow-hidden rounded-xl bg-surface shadow-card">
@@ -99,17 +271,26 @@ function Column({
         <div className="px-4 py-3">
           <div className="font-semibold text-ink">{stage.title}</div>
           <div className="mt-0.5 text-xs text-muted">
-            {stage.count} {pluralDeals(stage.count)} · {formatMoney(stage.sum)}
+            {stage.count} {pluralDeals(stage.count)} · {fmt(stage.sum)}
           </div>
           {showWeighted && (
-            <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
-              взвешенно: {formatMoney(stageWeightedSum(stage))}
-            </div>
+            <>
+              <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
+                взвешенно: {fmt(weighted)}
+              </div>
+              <div
+                className="text-[11px] font-semibold text-money"
+                title="Демо-ставка маржи 22%. Реальная — из landed cost (закупки); методика цены ещё разрабатывается."
+              >
+                прогноз маржи: ~{fmt(Math.round(weighted * DEMO_MARGIN_RATE))}
+              </div>
+            </>
           )}
         </div>
       </div>
       <div
         ref={setNodeRef}
+        data-testid={`stage-column-${stage.id}`}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
           isOver && "bg-accent-soft ring-2 ring-accent",
@@ -127,17 +308,131 @@ function Column({
   );
 }
 
+// ── План/Факт: компактный скорборд (перенос блока с sales-board-mockup.html) ────
+// Доля прошедшего времени периода (0..1) из реального `now` — база метки темпа и прогноза run-rate.
+function periodElapsed(now: number, period: string): number {
+  const d = new Date(now);
+  const clamp = (x: number) => Math.max(0.02, Math.min(1, x));
+  const dayFrac = (d.getHours() * 60 + d.getMinutes()) / (24 * 60);
+  if (period === "day") {
+    const cur = d.getHours() * 60 + d.getMinutes();
+    return clamp((cur - 9 * 60) / (18 * 60 - 9 * 60)); // рабочий день 9:00–18:00
+  }
+  if (period === "week") {
+    const dow = (d.getDay() + 6) % 7; // 0=Пн … 6=Вс
+    return clamp((Math.min(dow, 5) + (dow < 5 ? dayFrac : 0)) / 5); // Пн–Пт
+  }
+  if (period === "month") {
+    const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return clamp((d.getDate() - 1 + dayFrac) / dim);
+  }
+  if (period === "quarter") {
+    const qs = new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1).getTime();
+    const qe = new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3 + 3, 1).getTime();
+    return clamp((now - qs) / (qe - qs));
+  }
+  const ys = new Date(d.getFullYear(), 0, 1).getTime();
+  const ye = new Date(d.getFullYear() + 1, 0, 1).getTime();
+  return clamp((now - ys) / (ye - ys));
+}
+
+/** Светофор выполнения (Сделки 2.0): ≥100 зелёный · ≥70 янтарь · иначе красный. */
+function kpiTone(pct: number): { bar: string; text: string; dot: string } {
+  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" };
+  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" };
+  return { bar: "bg-red-500", text: "text-red-600 dark:text-red-400", dot: "bg-red-500" };
+}
+
+/** Цвет прогноза (продажи: больше — лучше). */
+function projClass(pct: number): string {
+  if (pct >= 100) return "text-emerald-600 dark:text-emerald-400";
+  if (pct >= 85) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+/** Ячейка План/Факт: разметка как в скорборде мокапа (плоская, без карточки-бокса). */
+function PlanFactCell({
+  kpi,
+  fmt,
+  elapsed,
+  onLog,
+}: {
+  kpi: Kpi;
+  fmt: (v: number) => string;
+  elapsed: number | null;
+  onLog?: () => void;
+}) {
+  const t = kpiTone(kpi.percent);
+  const value = kpi.money ? fmt(kpi.value) : kpi.value;
+  const target = kpi.money ? fmt(kpi.target) : kpi.target;
+  // прогноз run-rate — только когда прошло ≥10% периода (иначе оценка неустойчива).
+  const showProj = elapsed != null && elapsed >= 0.1 && kpi.target > 0;
+  const projVal = showProj ? Math.round(kpi.value / elapsed) : 0;
+  const projPct = showProj ? Math.round((projVal / kpi.target) * 100) : 0;
+  return (
+    <div className="bg-surface px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[11.5px] leading-tight text-muted">{kpi.label}</div>
+        {onLog && !kpi.money && (
+          <button
+            onClick={onLog}
+            title="Отметить (+1)"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-faint hover:bg-sunken hover:text-accent-ink"
+          >
+            <Plus size={14} />
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-ink">
+        {value}
+        <span className="text-[13px] font-normal text-faint"> / {target}</span>
+      </div>
+      <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
+        <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(kpi.percent, 100)}%` }} />
+        {elapsed != null && (
+          <span
+            className="absolute -top-px -bottom-px w-0.5 bg-ink/40"
+            style={{ left: `${Math.min(elapsed * 100, 100)}%` }}
+            title={`нужно к этому моменту: ${Math.round(elapsed * 100)}%`}
+          />
+        )}
+      </div>
+      <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+        {kpi.percent}% выполнено
+      </div>
+      {showProj && (
+        <div className="mt-1 truncate text-[10.5px] text-muted">
+          → идём на <span className="font-bold text-ink">{kpi.money ? fmt(projVal) : projVal}</span>{" "}
+          <span className={`font-bold ${projClass(projPct)}`}>({projPct}%)</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DealsWorkspace({
   initialStages,
   initialKpis,
+  switcher,
+  funnelTabs,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
+  switcher?: React.ReactNode;
+  funnelTabs?: React.ReactNode;
 }) {
+  const router = useRouter();
+  const { fmt } = useCurrency();
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [period, setPeriod] = useState("day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
+  // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
+  // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
+  const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
+  // callDeal = открыто окно звонка по этой сделке (тот же кокпит, что и у лида).
+  const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
   const [query, setQuery] = useState("");
@@ -278,7 +573,7 @@ export function DealsWorkspace({
     };
   }
   const flatDeals = filteredStages.flatMap((s) =>
-    s.deals.map((d) => ({ deal: d, stageTitle: s.title })),
+    s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })),
   );
   const PRIORITIES = ["Высокий", "Средний", "Низкий"];
 
@@ -287,6 +582,8 @@ export function DealsWorkspace({
       <main className="flex-1 overflow-auto p-6">
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
+          {funnelTabs}
+          {switcher}
           <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
@@ -317,6 +614,24 @@ export function DealsWorkspace({
           >
             <Clock size={16} /> Только висяки
           </button>
+          <Link
+            href="/crm/deals/stages"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            <SlidersHorizontal size={16} /> Стадии
+          </Link>
+          <Link
+            href="/crm/deals/analytics"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            Аналитика
+          </Link>
+          <Link
+            href="/crm/deals/planning"
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+          >
+            План
+          </Link>
           <button
             onClick={() => openModal(stages[0]?.id ?? "new")}
             className="ml-auto inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
@@ -346,6 +661,8 @@ export function DealsWorkspace({
           </div>
         )}
 
+        <PlanBanner now={now} />
+
         {/* План / Факт по периодам */}
         <section className="mt-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -374,12 +691,27 @@ export function DealsWorkspace({
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-            {kpis.map((kpi) => (
-              <KpiCard key={kpi.id} kpi={kpi} onLog={() => handleLog(kpi.id)} />
-            ))}
-          </div>
+          {(() => {
+            const elapsed = now != null ? periodElapsed(now, period) : null;
+            return (
+              <div className="overflow-hidden rounded-2xl bg-line shadow-card">
+                <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+                  {kpis.map((kpi) => (
+                    <PlanFactCell
+                      key={kpi.id}
+                      kpi={kpi}
+                      fmt={fmt}
+                      elapsed={elapsed}
+                      onLog={() => handleLog(kpi.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </section>
+
+        <PipelineRow stages={stages} now={now} fmt={fmt} />
 
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
@@ -412,9 +744,16 @@ export function DealsWorkspace({
           <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
               {filteredStages.map((stage) => (
-                <Column key={stage.id} stage={stage} onAdd={() => openModal(stage.id)}>
+                <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => openModal(stage.id)}>
                   {stage.deals.map((deal) => (
-                    <DraggableDeal key={deal.id} deal={deal} extras={cardExtras(deal, stage.id)} />
+                    <DraggableDeal
+                      key={deal.id}
+                      deal={deal}
+                      extras={cardExtras(deal, stage.id)}
+                      fmt={fmt}
+                      onPreview={setPreviewDeal}
+                      onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                    />
                   ))}
                 </Column>
               ))}
@@ -422,7 +761,7 @@ export function DealsWorkspace({
             <DragOverlay>
               {activeDeal ? (
                 <div className="w-[280px] rotate-2">
-                  <DealCard deal={activeDeal} />
+                  <DealCard deal={activeDeal} fmt={fmt} />
                 </div>
               ) : null}
             </DragOverlay>
@@ -437,18 +776,32 @@ export function DealsWorkspace({
                   <th className="px-4 py-2.5 font-medium">Контрагент</th>
                   <th className="px-4 py-2.5 font-medium">Описание</th>
                   <th className="px-4 py-2.5 font-medium">Стадия</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Вероятн.</th>
                   <th className="px-4 py-2.5 text-right font-medium">Сумма</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Взвешенно</th>
                 </tr>
               </thead>
               <tbody>
                 {flatDeals.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                    <td colSpan={7} className="px-4 py-6 text-center text-muted">
                       Сделок не найдено
                     </td>
                   </tr>
                 )}
-                {flatDeals.map(({ deal, stageTitle }) => (
+                {flatDeals.map(({ deal, stageTitle, stageId }) => {
+                  // Вероятность/взвешенно — те же probabilityFor/weightedAmount и то же правило
+                  // показа (prob > 0), что на карточке доски: won → ≈сумма, lost (0%) → «—».
+                  // (isOpenStage — критерий для АГРЕГАТОВ: итог строки и колонки, не для per-deal.)
+                  const prob = probabilityFor(deal, stageId);
+                  const weighted = weightedAmount(deal, stageId);
+                  // SALES-43/40: дни-в-стадии/висяк + причина отказа — те же значения, что cardExtras.
+                  const days = now != null ? daysInStage(deal.stageChangedAt, now) : null;
+                  const stuck = now != null && isStuck(deal, stageId, now);
+                  const lostTitle = deal.lostReasonCode
+                    ? (reasonByCode.get(deal.lostReasonCode) ?? deal.lostReasonCode)
+                    : undefined;
+                  return (
                   <tr key={deal.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-4 py-2.5">
                       <Link href={`/crm/deals/${deal.id}`} className="font-medium text-accent-ink">
@@ -457,21 +810,41 @@ export function DealsWorkspace({
                     </td>
                     <td className="px-4 py-2.5 text-ink">{deal.company}</td>
                     <td className="px-4 py-2.5 text-muted">{deal.description}</td>
-                    <td className="px-4 py-2.5 text-muted">{stageTitle}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-1.5 text-muted">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: STAGE_BY_ID[stageId]?.color ?? "#64748B" }}
+                          aria-hidden
+                        />
+                        {stageTitle}
+                        {days != null && (
+                          <span className={stuck ? "font-semibold text-amber-600" : "text-faint"}>
+                            · {days} дн{stuck ? " · висяк" : ""}
+                          </span>
+                        )}
+                      </span>
+                      {lostTitle && (
+                        <div className="mt-0.5 text-[11px] text-red-700">Причина: {lostTitle}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted">{prob}%</td>
                     <td className="px-4 py-2.5 text-right font-medium text-ink">
-                      {formatMoney(deal.amount)}
+                      {fmt(deal.amount)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-accent-ink">
+                      {prob > 0 ? `≈ ${fmt(weighted)}` : "—"}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
-        <FunnelTotals data={computeFunnel(filteredStages)} />
+        <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />
       </main>
-
-      <ChatsPanel />
 
       {modalOpen && (
         <CreateDealModal
@@ -490,6 +863,79 @@ export function DealsWorkspace({
           onConfirm={confirmLose}
         />
       )}
+
+      {/* Drawer-preview сделки: открывается single-click по карточке на доске.
+          Цель — работа из канбана без проваливания в полную карточку: stage-mover,
+          inline next-step, быстрая задача, ChannelButtons, Win/Lose. */}
+      <DealDrawerPreview
+        deal={previewDeal}
+        stages={stages}
+        onClose={() => setPreviewDeal(null)}
+        onMoveStage={(dealId, stageId) => {
+          if (stageId === "lost") {
+            // Drawer-Lose открывает модалку причины (как drag в колонку «отказ»).
+            openLose(dealId);
+            return;
+          }
+          setStages((prev) => moveDealToStage(prev, dealId, stageId));
+          // Поддерживаем превью консистентным: если перенесли активный deal, обновляем ссылку
+          setPreviewDeal((p) =>
+            p && p.id === dealId
+              ? (stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? p)
+              : p,
+          );
+          void updateDealStage(dealId, stageId);
+        }}
+        onUpdateFields={(dealId, fields) => {
+          // Оптимистично патчим во всех колонках; UI-маппинг snake→camel для starred/next_step.
+          const camel: Partial<Deal> = {};
+          if ("next_step" in fields) camel.nextStep = String(fields.next_step ?? "");
+          if ("starred" in fields) camel.starred = Boolean(fields.starred);
+          if ("priority" in fields)
+            camel.priority = fields.priority as Deal["priority"];
+          setStages((prev) =>
+            prev.map((s) => ({
+              ...s,
+              deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...camel } : d)),
+            })),
+          );
+          setPreviewDeal((p) => (p && p.id === dealId ? { ...p, ...camel } : p));
+          void updateDeal(dealId, fields);
+        }}
+        onAddTask={(dealId, title) => {
+          // Создаём fire-and-forget; в drawer'е список задач не показываем (он в полной карточке).
+          void createDealTask(dealId, { title });
+        }}
+        onWin={(dealId) => {
+          setStages((prev) => moveDealToStage(prev, dealId, "won"));
+          void updateDealStage(dealId, "won");
+          setPreviewDeal(null);
+        }}
+        onLose={(dealId) => {
+          // Просим причину через ту же модалку, что и при drag-в-отказ.
+          openLose(dealId);
+          setPreviewDeal(null);
+        }}
+        onCall={(d) => setCallDeal(d)}
+        now={now}
+        reasonByCode={reasonByCode}
+      />
+
+      {/* Окно звонка по сделке — единый кокпит (скрипт сделки + подбор товара →
+          позиции сделки реальным addDealItem). Тот же компонент, что и в лидах. */}
+      <CallWindow
+        context={
+          callDeal
+            ? {
+                kind: "deal",
+                dealId: callDeal.id,
+                number: callDeal.number,
+                company: callDeal.company,
+              }
+            : null
+        }
+        onClose={() => setCallDeal(null)}
+      />
     </>
   );
 }

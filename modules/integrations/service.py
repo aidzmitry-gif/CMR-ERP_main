@@ -51,6 +51,7 @@ async def sync_1c(session: AsyncSession, event_bus, client: OneCGateway) -> dict
         item.qty_reserved = Decimal(str(row["qty_reserved"]))
         item.qty_forecast = Decimal(str(row["qty_forecast"]))
         item.price = Decimal(str(row["price"]))
+        item.cost = Decimal(str(row["cost"])) if row.get("cost") is not None else None
         item.updated_at = _utcnow()
 
     await session.flush()

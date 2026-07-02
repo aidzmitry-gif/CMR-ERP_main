@@ -173,7 +173,8 @@
       <h1 class="text-xl font-bold text-ink">Закупки · воронка</h1>
       <p class="mt-1 text-sm text-muted">
         Канбан 9 стадий: от потребности до оприходования. Заявки под конкретные сделки и пополнение склада в одном потоке.
-        Двойной клик по карточке — полная карточка заявки (как сделка в CRM).
+        Двойной клик по карточке — полная карточка заявки (как сделка в CRM): оплаты поставщику (оплачено / к доплате / история), в какой машине едет позиция, статус оплаты.
+        Воронки можно переключать и редактировать (кнопка «✎ воронки»).
       </p>
     </div>
 
@@ -183,9 +184,11 @@
       <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
       <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Воронка</span>
       <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <a href="zak-claims-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Рекламации</a>
       <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
       <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
       <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
+      <a href="zak-cost-calc-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Калькулятор</a>
     </div>
 
     <!-- ════ ПЛАН / ФАКТ — цели отдела закупок (как в продажах) ════ -->
@@ -254,11 +257,9 @@
 
     <!-- Фильтр + сводка -->
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-wrap gap-1.5 text-[12px]">
-        <span class="rounded-full bg-accent px-3 py-1 font-semibold text-white shadow-card">Все · 23</span>
-        <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Под сделки · 14</span>
-        <span class="rounded-full bg-surface px-3 py-1 font-medium text-muted shadow-card">Пополнение · 9</span>
-        <span class="rounded-full bg-surface px-3 py-1 font-medium text-amber-600 dark:text-amber-300 shadow-card">Заморожены · 2</span>
+      <div class="flex flex-wrap items-center gap-1.5 text-[12px]">
+        <div id="funnels" class="flex flex-wrap items-center gap-1.5"></div>
+        <button id="funnelEdit" class="ml-1 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 font-medium text-muted shadow-card hover:text-accent hover:border-accent" title="Менять и редактировать воронки">✎ воронки</button>
       </div>
       <div class="relative">
         <input type="text" placeholder="Поиск заявки, товара, поставщика…" class="w-64 rounded-full border border-line bg-surface px-4 py-1.5 text-[12px] text-muted shadow-card" />
@@ -551,7 +552,7 @@
         <span class="text-[12px] text-muted" id="z-num">ZPR-2026-041</span>
         <div class="flex gap-1.5">
           <button class="flex h-7 items-center justify-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-muted hover:bg-sunken" title="Свернуть в превью" onclick="backToCompact()">← Превью</button>
-          <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Редактировать">✎</button>
+          <button id="z-edit" class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Редактировать карточку" onclick="toggleEdit()">✎</button>
           <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Закрыть" onclick="closeAll()">✕</button>
         </div>
       </div>
@@ -576,6 +577,14 @@
     const relColor = r => r==="Надёжный"||r==="Стратегич." ? "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                         : r==="Осторожно" ? "bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300"
                         : r==="Риск"||r==="Не проверен" ? "bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300" : "bg-sunken text-muted";
+
+    // статус оплаты поставщику
+    const PAYST = {
+      paid:    { lbl:"Оплачен",          short:"оплачен",   chip:"bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300", bar:"bg-emerald-500" },
+      partial: { lbl:"Частично оплачен",  short:"частично",  chip:"bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300",        bar:"bg-amber-500" },
+      unpaid:  { lbl:"Не оплачен",        short:"не оплачен",chip:"bg-sunken text-muted",                                                       bar:"bg-line" },
+    };
+    const fmtMoney = n => Number(n).toLocaleString('ru-RU');
 
     // ── Данные заявок (демо). Полные карточки: cap470, relay_srd, cap100, bc547, esp8266, stm32, trafo ──
     const Z = {
@@ -727,6 +736,33 @@
     Z.esp8266.contract={template:"Рамочный договор поставки 2026",status:"подписан",terms:{...baseTerms,moq:"800 шт",lead:"22 дня"}};
     Z.trafo.contract={template:"Договор поставки (критичная позиция, с инспекцией)",status:"подписан",terms:{...baseTerms,moq:"100 шт",lead:"30 дней",quality:"инспекция перед отгрузкой ОБЯЗАТЕЛЬНА · тест под нагрузкой · AQL 1.5",warranty:"24 мес"}};
 
+    // ── Оплаты поставщику (история: оплачено / к доплате) + в какой машине едет позиция (демо) ──
+    Z.stm32.machine="MO-2026-016"; Z.stm32.payment={status:"partial",cur:"¥",total:3850,paid:1155,schedule:[
+      {d:"10.06.2026",label:"Предоплата 30%",amt:1155,done:true},{d:"против B/L",label:"Остаток 70%",amt:2695,done:false}]};
+    Z.led.machine="MO-2026-016"; Z.led.payment={status:"paid",cur:"¥",total:1400,paid:1400,schedule:[
+      {d:"09.06.2026",label:"Оплата 100% (авто, 1688)",amt:1400,done:true}]};
+    Z.trafo.machine="MO-2026-014"; Z.trafo.payment={status:"partial",cur:"¥",total:3600,paid:1080,schedule:[
+      {d:"28.05.2026",label:"Предоплата 30%",amt:1080,done:true},{d:"против инспекции",label:"Остаток 70%",amt:2520,done:false}]};
+    Z.cap1000.machine="MO-2026-015"; Z.cap1000.payment={status:"partial",cur:"¥",total:3040,paid:912,schedule:[
+      {d:"02.06.2026",label:"Предоплата 30%",amt:912,done:true},{d:"против B/L",label:"Остаток 70%",amt:2128,done:false}]};
+    Z.relay24.machine="MO-2026-015"; Z.relay24.payment={status:"partial",cur:"¥",total:2880,paid:864,schedule:[
+      {d:"02.06.2026",label:"Предоплата 30%",amt:864,done:true},{d:"против B/L",label:"Остаток 70%",amt:2016,done:false}]};
+    Z.db9.machine="MO-2026-014"; Z.db9.payment={status:"paid",cur:"¥",total:750,paid:750,schedule:[
+      {d:"15.05.2026",label:"Предоплата 30%",amt:225,done:true},{d:"01.06.2026",label:"Остаток 70%",amt:525,done:true}]};
+    Z.photo.machine="MO-2026-013"; Z.photo.payment={status:"paid",cur:"¥",total:660,paid:660,schedule:[
+      {d:"05.05.2026",label:"Предоплата 30%",amt:198,done:true},{d:"20.05.2026",label:"Остаток 70%",amt:462,done:true}]};
+    Z.hdmi.machine="MO-2026-013"; Z.hdmi.payment={status:"paid",cur:"¥",total:1600,paid:1600,schedule:[
+      {d:"05.05.2026",label:"Оплата 100%",amt:1600,done:true}]};
+    Z.esp8266.machine="MO-2026-016 (план)"; Z.esp8266.payment={status:"unpaid",cur:"BYN",total:2040,paid:0,schedule:[
+      {d:"после согласования",label:"Предоплата 30%",amt:612,done:false},{d:"против B/L",label:"Остаток 70%",amt:1428,done:false}]};
+
+    // ── Претензии по поставке (брак/недопоставка/пересорт/срок), привязаны к позиции → экран «Рекламации» ──
+    Z.cap470.claims  =[{num:"CLM-2026-001",type:"Брак",         affected:"240 шт (4.8%)", stage:"У поставщика",        sla:"осталось 2 дня", bad:false}];
+    Z.relay_srd.claims=[{num:"CLM-2026-002",type:"Недопоставка", affected:"−100 шт",       stage:"Решение согласовано",sla:"в норме",        bad:false}];
+    Z.usbc.claims    =[{num:"CLM-2026-003",type:"Пересорт",     affected:"вся партия",    stage:"Заявлена",           sla:"ПРОСРОЧЕН",      bad:true}];
+    Z.trafo.claims   =[{num:"CLM-2026-004",type:"Срок",         affected:"задержка QC",   stage:"У поставщика",       sla:"в норме",        bad:false}];
+    Z.hdmi.claims    =[{num:"CLM-2026-005",type:"Брак",         affected:"2 шт (1%)",     stage:"Закрыта",            sla:"—",              bad:false}];
+
     function stepper(idx){
       let s='<div class="flex gap-1 mt-3">';
       for(let i=0;i<9;i++){ const c=i<idx?'bg-accent':i===idx?'bg-amber-400':'bg-line'; s+=`<div class="h-1.5 flex-1 rounded-full ${c}"></div>`; }
@@ -735,11 +771,28 @@
     }
     const sec = (title, inner, add) => `<div class="py-4 border-b border-line"><div class="flex items-center justify-between mb-2.5"><span class="text-[11px] font-semibold uppercase tracking-wide text-faint">${title}</span>${add?`<span class="text-[11px] font-semibold text-accent">${add}</span>`:''}</div>${inner}</div>`;
 
+    // секция «Оплаты поставщику» — сколько оплачено, сколько доплатить, история платежей
+    function paymentSection(p){
+      const st=PAYST[p.status], due=p.total-p.paid, w=p.total?Math.round(p.paid/p.total*100):0;
+      const rows=p.schedule.map(s=>`<div class="flex items-center justify-between py-1 text-[12px]">
+        <span class="flex items-center gap-2"><span class="${s.done?'text-emerald-500 dark:text-emerald-300':'text-faint'}">${s.done?'✓':'○'}</span><span class="text-ink">${s.label}</span><span class="text-faint">${s.d}</span></span>
+        <span class="font-medium ${s.done?'text-ink':'text-muted'}">${p.cur}${fmtMoney(s.amt)}</span></div>`).join('');
+      return sec("Оплаты поставщику",
+        `<div class="flex items-center justify-between mb-2">
+           <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.chip}">${st.lbl}</span>
+           <span class="text-[12px] text-muted">оплачено <b class="text-ink">${p.cur}${fmtMoney(p.paid)}</b> из ${p.cur}${fmtMoney(p.total)}</span>
+         </div>
+         <div class="h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full ${st.bar}" style="width:${w}%"></div></div>
+         <div class="mt-1 flex justify-between text-[11px]"><span class="text-muted">${w}% оплачено</span>${due>0?`<span class="font-semibold text-amber-600 dark:text-amber-300">к доплате ${p.cur}${fmtMoney(due)}</span>`:'<span class="font-semibold text-emerald-600 dark:text-emerald-300">оплачено полностью</span>'}</div>
+         <div class="mt-2.5 border-t border-line pt-1">${rows}</div>`,
+        '＋ платёж');
+    }
+
     function buildBody(d){
       let h='';
-      // сумма + степпер
+      // сумма + степпер (+ машина, если позиция уже привязана к машине)
       h+=sec("Стадия и объём",
-        `<div class="flex items-baseline gap-2"><span class="text-2xl font-bold text-ink">${d.qty}</span><span class="text-[13px] text-muted">· бюджет ${d.budget}</span></div>${stepper(d.stageIdx)}`);
+        `<div class="flex items-baseline gap-2"><span class="text-2xl font-bold text-ink">${d.qty}</span><span class="text-[13px] text-muted">· бюджет ${d.budget}</span></div>${stepper(d.stageIdx)}${d.machine?`<div class="mt-2.5 text-[12px] text-muted">Едет в машине: <a class="font-semibold text-accent" href="zak-shipment-preview.html">🚚 ${d.machine}</a></div>`:''}`);
 
       // сравнение поставщиков (TCO) — ключевой блок (↓себестоимость + ↑качество)
       if(d.suppliers){
@@ -763,7 +816,21 @@
             <div class="flex justify-between border-t border-line pt-1"><span class="text-muted">Себестоимость ед.</span><span class="font-bold text-ink">${d.landed.unit}</span></div>
             <div class="flex justify-between"><span class="text-muted">Партия</span><span class="font-medium">${d.landed.batch}</span></div>
             <div class="flex justify-between"><span class="text-muted">Рекоменд. цена продажи</span><span class="font-semibold text-emerald-600 dark:text-emerald-300">${d.landed.price}</span></div>
-          </div>`,'<a class="text-accent" href="zak-landed-cost-preview.html">расчёт →</a>');
+          </div>`,'<a class="text-accent" href="zak-cost-calc-preview.html">калькулятор →</a>');
+      }
+
+      // оплаты поставщику (оплачено / к доплате / история)
+      if(d.payment){ h+=paymentSection(d.payment); }
+
+      // претензии по поставке (контекстный блок → экран «Рекламации»)
+      if(d.claims){
+        const cc=d.claims.map(x=>{
+          const tCls = x.type==='Брак'?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':x.type==='Недопоставка'?'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300':x.type==='Пересорт'?'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300':'bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300';
+          return `<div class="flex items-center justify-between gap-2 py-1.5 text-[12px]">
+            <span class="flex items-center gap-2 min-w-0"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${tCls}">${x.type}</span><span class="text-ink truncate">${x.affected}</span><span class="text-faint">${x.num}</span></span>
+            <span class="flex items-center gap-1.5 shrink-0"><span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-muted">${x.stage}</span>${x.bad?'<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">SLA!</span>':''}</span></div>`;
+        }).join('');
+        h+=sec("Претензии по поставке",cc,'<a class="text-accent" href="zak-claims-preview.html">рекламации →</a>');
       }
 
       // качество (↑качество)
@@ -836,7 +903,9 @@
     function chipsFor(d){
       const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300':'bg-sunken text-muted';
       return `<span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">● ${STAGES[d.stageIdx]}</span>
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${srcColor}">${d.source}</span>`;
+        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${srcColor}">${d.source}</span>
+        ${d.machine?`<span class="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">🚚 ${d.machine}</span>`:''}
+        ${d.payment?`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${PAYST[d.payment.status].chip}">${PAYST[d.payment.status].lbl}</span>`:''}`;
     }
 
     // ── компактное превью (ОДИН клик) ──
@@ -858,7 +927,13 @@
         </div>`;
       }
       if(d.verdict){ h+=`<div class="mt-2.5 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-100 dark:border-violet-500/40 p-2.5 text-[12px] text-violet-700 dark:text-violet-300"><span class="font-semibold text-violet-600 dark:text-violet-300">✦ ИИ:</span> ${d.verdict}</div>`; }
-      h+=`<div class="mt-3 text-[11px] text-faint">Полное сравнение поставщиков, качество, отношения, переписка и документы — в полном виде.</div>`;
+      if(d.payment){ const p=d.payment,due=p.total-p.paid,st=PAYST[p.status];
+        h+=`<div class="mt-2.5 rounded-lg border border-line bg-sunken p-2.5 text-[12px]">
+          <div class="flex items-center justify-between"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${st.chip}">${st.lbl}</span><span class="text-muted">оплачено ${p.cur}${fmtMoney(p.paid)} / ${p.cur}${fmtMoney(p.total)}</span></div>
+          ${due>0?`<div class="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-300">к доплате ${p.cur}${fmtMoney(due)}</div>`:'<div class="mt-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">оплачено полностью</div>'}
+          ${d.machine?`<div class="mt-1 text-[11px] text-muted">машина 🚚 ${d.machine}</div>`:''}
+        </div>`; }
+      h+=`<div class="mt-3 text-[11px] text-faint">Полное сравнение поставщиков, качество, отношения, переписка, оплаты и документы — в полном виде.</div>`;
       return h;
     }
 
@@ -910,6 +985,63 @@
       c.addEventListener('dblclick',()=>{ if(_ct){ clearTimeout(_ct); _ct=null; } openFull(k); });
     });
     document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeAll(); });
+
+    // ── Бейджи на карточках канбана: машина + статус оплаты (data-driven из Z) ──
+    function decorateCards(){
+      document.querySelectorAll('.card[data-z]').forEach(c=>{
+        const d=Z[c.getAttribute('data-z')]; if(!d) return;
+        const chips=c.querySelector('.flex.flex-wrap'); if(!chips) return;
+        const mNum=d.machine?d.machine.replace(' (план)',''):'';
+        if(d.machine && !chips.textContent.includes(mNum)){
+          const m=document.createElement('span');
+          m.className='rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300';
+          m.textContent='🚚 '+mNum; chips.appendChild(m);
+        }
+        if(d.payment){
+          const st=PAYST[d.payment.status], p=document.createElement('span');
+          p.className='rounded-full px-2 py-0.5 text-[10px] font-semibold '+st.chip;
+          p.textContent=st.short; chips.appendChild(p);
+        }
+      });
+    }
+    decorateCards();
+
+    // ── Воронки: переключение + редактирование (добавить / переименовать / удалить) ──
+    const CARD_FROZEN=new Set(['usbc','choke']); // демо: 2 позиции заморожены
+    const cardFunnel=k=>{ if(CARD_FROZEN.has(k)) return 'frozen'; const d=Z[k]; return (d&&d.source&&d.source.indexOf('под сделку')===0)?'deal':'refill'; };
+    let funnels=[{id:'all',label:'Все',fixed:true},{id:'deal',label:'Под сделки'},{id:'refill',label:'Пополнение'},{id:'frozen',label:'Заморожены',warn:true}];
+    let activeFunnel='all', editFunnels=false;
+    const BUILTIN=new Set(['all','deal','refill','frozen']);
+    const countFunnel=id=>{ let n=0; document.querySelectorAll('.card[data-z]').forEach(c=>{ const k=c.getAttribute('data-z'); if(id==='all'||cardFunnel(k)===id) n++; }); return n; };
+    function applyFunnel(){ document.querySelectorAll('.card[data-z]').forEach(c=>{ const k=c.getAttribute('data-z'); const show=activeFunnel==='all'||cardFunnel(k)===activeFunnel; c.style.display=show?'':'none'; }); }
+    function renderFunnels(){
+      const host=document.getElementById('funnels');
+      host.innerHTML=funnels.map(f=>{
+        const on=f.id===activeFunnel;
+        const cnt=BUILTIN.has(f.id)?` · ${countFunnel(f.id)}`:'';
+        const base=on?'bg-accent text-white':(f.warn?'bg-surface text-amber-600 dark:text-amber-300':'bg-surface text-muted');
+        const edit=editFunnels&&!f.fixed?` <button class="fn-ren text-[11px] opacity-60 hover:opacity-100" data-fid="${f.id}" title="Переименовать">✎</button><button class="fn-del text-[11px] opacity-60 hover:opacity-100" data-fid="${f.id}" title="Удалить">✕</button>`:'';
+        return `<span class="funnel-chip inline-flex items-center gap-1 rounded-full ${base} px-3 py-1 font-medium shadow-card cursor-pointer" data-fid="${f.id}">${f.label}${cnt}${edit}</span>`;
+      }).join('') + (editFunnels?`<button id="fn-add" class="rounded-full border border-dashed border-accent px-3 py-1 font-medium text-accent">＋ воронка</button>`:'');
+    }
+    document.getElementById('funnels').addEventListener('click',e=>{
+      const ren=e.target.closest('.fn-ren'), del=e.target.closest('.fn-del'), add=e.target.closest('#fn-add'), chip=e.target.closest('.funnel-chip');
+      if(ren){ const f=funnels.find(x=>x.id===ren.dataset.fid); const v=prompt('Название воронки:',f.label); if(v){ f.label=v.trim()||f.label; renderFunnels(); } return; }
+      if(del){ const id=del.dataset.fid; funnels=funnels.filter(x=>x.id!==id); if(activeFunnel===id){ activeFunnel='all'; applyFunnel(); } renderFunnels(); return; }
+      if(add){ const v=prompt('Новая воронка — название:'); if(v&&v.trim()){ funnels.push({id:'f'+funnels.length, label:v.trim()}); renderFunnels(); } return; }
+      if(chip){ activeFunnel=chip.dataset.fid; applyFunnel(); renderFunnels(); }
+    });
+    document.getElementById('funnelEdit').addEventListener('click',()=>{ editFunnels=!editFunnels; document.getElementById('funnelEdit').classList.toggle('text-accent',editFunnels); document.getElementById('funnelEdit').classList.toggle('border-accent',editFunnels); renderFunnels(); });
+    renderFunnels();
+
+    // ── Редактирование карточки (✎ в полном виде): заголовок/подзаголовок становятся editable ──
+    function toggleEdit(){
+      const t=document.getElementById('z-title'), s=document.getElementById('z-sub'), b=document.getElementById('z-edit');
+      const on=t.isContentEditable;
+      [t,s].forEach(el=>{ el.contentEditable=!on; el.classList.toggle('rounded',true); el.classList.toggle('ring-1',!on); el.classList.toggle('ring-accent',!on); el.classList.toggle('px-1',!on); });
+      b.textContent=on?'✎':'✓'; b.title=on?'Редактировать карточку':'Сохранить';
+      if(!on) t.focus();
+    }
   </script>
 </body>
 </html>

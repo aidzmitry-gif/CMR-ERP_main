@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карточка машины (импорт Китай→Минск) — превью</title>
+<!-- ════════════════════════════════════════════════════════════════════════
+     Карточка МАШИНЫ (ImportShipment) — контейнер/фура Китай→Минск.
+     Таймлайн 7 вех · партии в машине · загрузка вес/объём · таможня/ГТД.
+     Создано Claude (Opus 4.8) автономно по /goal. Демо-данные BYN, 2 темы.
+     Связано: nomenclature-batch-card.html, nomenclature-card-preview.html,
+     модель modules/logistics/models.py (ImportShipment), zak-shipment-preview.html
+     ════════════════════════════════════════════════════════════════════════ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}</script>
+<style>
+  :root{
+    --font:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+    --brand:#1E5EFF; --brand-50:#EFF5FF; --brand-100:#EAF1FF; --brand-700:#1545CC;
+    --canvas:#F4F5F7; --surface:#FFFFFF; --sunken:#F4F6F9;
+    --ink:#1F2937; --muted:#6B7280; --faint:#93A1B5; --line:#E2E8F0;
+    --money:#0F9D58; --ok:#16A34A; --warn:#B45309; --bad:#DC2626; --violet:#6D28D9;
+    --ok-bg:#ECFDF3; --warn-bg:#FFF7ED; --bad-bg:#FEF2F2; --info-bg:#EFF5FF; --violet-bg:#F5F3FF;
+    --shadow-card:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-pop:0 8px 24px rgba(16,24,40,.10);
+  }
+  html.dark{
+    --canvas:#0B1220; --surface:#111A2E; --sunken:#0E1729;
+    --ink:#E5EAF3; --muted:#94A3B8; --faint:#64748B; --line:#1E293B;
+    --brand:#3B82F6; --brand-50:#16233F; --brand-100:#16233F; --brand-700:#9DBEFF;
+    --money:#34D399; --ok:#34D399; --warn:#FBBF24; --bad:#F87171; --violet:#A78BFA;
+    --ok-bg:#16271F; --warn-bg:#2A2114; --bad-bg:#2A1717; --info-bg:#16233F; --violet-bg:#1E1B33;
+    --shadow-card:0 1px 2px rgba(0,0,0,.30), 0 1px 3px rgba(0,0,0,.40);
+    --shadow-pop:0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 80px}
+  a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+  .mono,.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .crumb{font-size:12px;color:var(--muted)}
+  .theme-tgl{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer;box-shadow:var(--shadow-card)}
+  .theme-tgl:hover{color:var(--ink)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-card)}
+  .pad{padding:18px}
+  .eyebrow{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+  .grid2{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) 320px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .fgrid{display:grid;gap:14px 18px;grid-template-columns:1fr 1fr}
+  @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
+  .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap}
+  .b-ok{background:var(--ok-bg);color:var(--ok)} .b-warn{background:var(--warn-bg);color:var(--warn)}
+  .b-bad{background:var(--bad-bg);color:var(--bad)} .b-info{background:var(--info-bg);color:var(--brand-700)}
+  .b-violet{background:var(--violet-bg);color:var(--violet)} .b-mut{background:var(--sunken);color:var(--muted)}
+  .field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .field .val{font-size:14px;color:var(--ink);font-weight:500}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0} .row .k{color:var(--muted);font-size:13px} .row .v{font-weight:600;font-size:13.5px;text-align:right}
+  .hdr{display:flex;gap:18px;align-items:flex-start}
+  .h-title{font-size:19px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
+  .h-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px;align-items:center}
+  .h-sub{color:var(--muted);font-size:12.5px;margin-top:7px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px}
+  @media(max-width:680px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--surface);padding:12px 14px}
+  .kpi .lab{font-size:11px;color:var(--muted)} .kpi .big{font-size:18px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums} .kpi .sub{font-size:11px;color:var(--faint);margin-top:1px} .kpi.money .big{color:var(--money)}
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:600;padding:8px 10px;background:var(--sunken)}
+  table.rl td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:middle}
+  table.rl tr:hover td{background:var(--sunken)}
+  .grp-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+  .grp-title{font-size:13.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:7px}
+  .sect-lead{font-size:12px;color:var(--muted);margin:2px 0 12px}
+  .pill-src{font-size:11px;color:var(--faint)}
+  .btn{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:10px;padding:7px 12px;font:600 12.5px var(--font);cursor:pointer}
+  .btn:hover{color:var(--ink)} .btn-pri{background:var(--brand);color:#fff;border-color:var(--brand)} html.dark .btn-pri{color:#06101F}
+  .meter{height:10px;border-radius:99px;background:var(--sunken);overflow:hidden}
+  .meter>span{display:block;height:100%;border-radius:99px}
+  /* вертикальный таймлайн вех */
+  .steps{position:relative;margin-top:6px;padding-left:6px}
+  .step{display:flex;gap:12px;padding:9px 0;position:relative}
+  .step .marker{width:14px;height:14px;border-radius:50%;background:var(--line);flex-shrink:0;margin-top:2px;z-index:1}
+  .step.done .marker{background:var(--money)} .step.cur .marker{background:var(--brand);box-shadow:0 0 0 4px var(--brand-50)}
+  .step::before{content:'';position:absolute;left:6px;top:18px;bottom:-9px;width:2px;background:var(--line)}
+  .step:last-child::before{display:none}
+  .step.done::before{background:var(--money)}
+  .step .lbl{font-weight:600;font-size:13.5px} .step .dt{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+  .step.cur .lbl{color:var(--brand)}
+</style>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="crumb"><a href="spravochniki-preview-index.html">← Все экраны</a> · <a href="nomenclature-card-preview.html">Номенклатура</a> › <span style="color:var(--ink);font-weight:600">Машина MO-2026-007</span></div>
+    <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  </div>
+
+  <div class="card pad">
+    <div class="hdr">
+      <div class="photo" style="width:104px;height:104px;border-radius:14px;border:1px solid var(--line);background:linear-gradient(135deg,#1E5EFF22,#16A34A22);display:flex;align-items:center;justify-content:center;font-size:42px;flex-shrink:0">🚚</div>
+      <div style="flex:1;min-width:0">
+        <div class="h-title">Машина MO-2026-007 · Импорт Китай → Минск</div>
+        <div class="h-meta">
+          <span class="badge b-mut">🇨🇳 → 🇧🇾</span>
+          <span class="badge b-info">контейнер MSKU-784512-3</span>
+          <span class="badge b-mut">море + авто · FOB</span>
+          <span class="badge b-warn">этап: Склад Минск (приёмка)</span>
+          <span class="badge b-mut">ETA 14.06.2026 ✓</span>
+        </div>
+        <div class="h-sub">Маршрут: Шэньчжэнь → Гамбург → Минск · 5 партий · 3 поставщика · оформление: брокер «ВЭД-Сервис»</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn" data-demo="Документы машины">📄 Документы</button>
+        <button class="btn btn-pri" data-demo="Оприходовать на склад">Оприходовать</button>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lab">📦 Партий в машине</div><div class="big num">5</div><div class="sub">264 шт всего</div></div>
+      <div class="kpi"><div class="lab">⚖️ Загрузка по весу</div><div class="big num">82%</div><div class="sub">19,6 / 24 т</div></div>
+      <div class="kpi"><div class="lab">📐 Загрузка по объёму</div><div class="big num">76%</div><div class="sub">25,5 / 33,2 м³</div></div>
+      <div class="kpi money"><div class="lab">💰 Сумма машины</div><div class="big num">142 800 ₽</div><div class="sub">landed, по ГТД</div></div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <!-- ЛЕВО: партии в машине -->
+    <div class="card pad">
+      <div class="grp-h"><span class="grp-title">📦 Партии в машине</span><span class="pill-src">клик по партии → карточка</span></div>
+      <table class="rl">
+        <thead><tr><th>Партия</th><th>Товар</th><th>Поставщик</th><th>Кол-во</th><th>Вес</th><th>Под</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0418</a></td><td>АКБ LiFePO4 LF304</td><td>Shenzhen EVE</td><td class="num">96 шт</td><td class="num">566 кг</td><td><span class="badge b-mut">пополнение</span></td><td><span class="badge b-ok">Принята</span></td>
+          </tr>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0421</a></td><td>BMS-контроллер 8S</td><td>Shenzhen JBD</td><td class="num">40 шт</td><td class="num">28 кг</td><td><span class="badge b-info">под сделку</span></td><td><span class="badge b-ok">Принята</span></td>
+          </tr>
+          <tr style="cursor:pointer" onclick="location.href='nomenclature-batch-card.html'">
+            <td><a href="nomenclature-batch-card.html" class="mono">ЗАК-2026-0424</a></td><td>Шина медная 50мм²</td><td>Ningbo Cu</td><td class="num">120 шт</td><td class="num">96 кг</td><td><span class="badge b-mut">пополнение</span></td><td><span class="badge b-ok">Принята</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="sect-lead" style="margin-top:8px">Все товары машины собираются заранее под запросы продавцов и пополнение склада.</p>
+    </div>
+
+    <!-- ПРАВО: реквизиты + загрузка -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card pad">
+        <span class="eyebrow">Реквизиты рейса</span>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+          <div class="row"><span class="k">Контейнер</span><span class="v mono">MSKU-784512-3</span></div>
+          <div class="row"><span class="k">Тип</span><span class="v">40' HC</span></div>
+          <div class="row"><span class="k">Incoterms</span><span class="v">FOB Shenzhen</span></div>
+          <div class="row"><span class="k">Коносамент B/L</span><span class="v mono">MAEU-2206-7745</span></div>
+          <div class="row"><span class="k">ГТД</span><span class="v mono">06181/140626/0012345</span></div>
+        </div>
+      </div>
+      <div class="card pad">
+        <span class="eyebrow">Загрузка</span>
+        <div style="margin-top:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>По весу</span><span class="num">19,6 / 24 т</span></div>
+          <div class="meter"><span style="width:82%;background:var(--warn)"></span></div>
+        </div>
+        <div style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>По объёму</span><span class="num">25,5 / 33,2 м³</span></div>
+          <div class="meter"><span style="width:76%;background:var(--brand)"></span></div>
+        </div>
+        <p class="sect-lead" style="margin-top:12px">Ограничитель — вес (82%). Ещё ~4,4 т резерва.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Таймлайн 7 вех -->
+  <div class="card pad" style="margin-top:16px">
+    <div class="grp-h"><span class="grp-title">🛤 График сбора и доставки — 7 вех</span><span class="pill-src">план / факт</span></div>
+    <div class="steps">
+      <div class="step done"><div class="marker"></div><div><div class="lbl">① Выкуп у поставщиков</div><div class="dt">план 28.04 · факт 27.04 ✓</div></div></div>
+      <div class="step done"><div class="marker"></div><div><div class="lbl">② Производство</div><div class="dt">план 12.05 · факт 11.05 ✓</div></div></div>
+      <div class="step done"><div class="marker"></div><div><div class="lbl">③ Консолидация на складе Китая</div><div class="dt">план 18.05 · факт 18.05 ✓</div></div></div>
+      <div class="step done"><div class="marker"></div><div><div class="lbl">④ Проверка / тестирование (ОТК)</div><div class="dt">план 20.05 · факт 19.05 ✓</div></div></div>
+      <div class="step done"><div class="marker"></div><div><div class="lbl">⑤ Отправка (море + плечо)</div><div class="dt">план 22.05 · факт 22.05 ✓</div></div></div>
+      <div class="step done"><div class="marker"></div><div><div class="lbl">⑥ Таможня Минск (ГТД)</div><div class="dt">план 12.06 · факт 13.06 ✓</div></div></div>
+      <div class="step cur"><div class="marker"></div><div><div class="lbl">⑦ Склад Минск — приёмка</div><div class="dt">план 14.06 · идёт оприходование</div></div></div>
+    </div>
+  </div>
+
+  <p style="text-align:center;color:var(--faint);font-size:11.5px;margin-top:24px">
+    Карточка машины (ImportShipment) · импорт Китай→Минск · демо-данные (BYN) · 2 темы.
+    <br>Создано Claude автономно по /goal — черновик-каркас для доработки.
+  </p>
+</div>
+
+<script>
+  (function(){
+    function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-pop);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+    document.addEventListener('click',function(e){
+      var el=e.target.closest('button,.btn,a[href="#"],[data-demo]');
+      if(!el)return;
+      if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+      if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+      if(el.tagName==='A')e.preventDefault();
+      var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+      dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+    },true);
+  })();
+</script>
+</body>
+</html>

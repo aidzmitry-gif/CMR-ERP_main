@@ -10,10 +10,37 @@
 """
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import AuditLog, Contact, Counterparty, CounterpartyAlias
+from core.domain.models import (
+    AuditLog,
+    Contact,
+    Counterparty,
+    CounterpartyAlias,
+    SurvivorshipRule,
+)
+
+#: порог похожести имён по умолчанию для fuzzy-кандидатов (0..1); ниже — не предлагаем.
+FUZZY_THRESHOLD = 0.6
+
+#: орг-формы и шум, мешающие сравнению имён (убираем перед похожестью).
+_NAME_NOISE = re.compile(
+    r"\b(ооо|оао|зао|чуп|ип|уп|одо|общество|акционерное|открытое|закрытое|частное|"
+    r"unitarnoe|ltd|llc|inc|gmbh)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_name(name: str) -> str:
+    """Привести имя к виду для сравнения: lower, без орг-форм, кавычек и лишних пробелов."""
+    s = (name or "").lower().replace("«", " ").replace("»", " ").replace('"', " ")
+    s = _NAME_NOISE.sub(" ", s)
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", s).strip()
 
 #: поля контрагента, участвующие в survivorship при слиянии
 _SURVIVORSHIP_FIELDS = ("name", "unp")
@@ -46,6 +73,45 @@ async def duplicate_clusters(session: AsyncSession) -> list[dict]:
     return clusters
 
 
+async def import_preview(session: AsyncSession, onec) -> dict:
+    """Dry-run предпросмотр импорта контрагентов из кэша 1С в MDM — БЕЗ записи (REF3-9).
+
+    Читает кэш 1С через фасад (``onec.fetch_counterparties`` — только чтение) и считает, сколько
+    записей при реальном прогоне СОЗДАЛОСЬ БЫ / совпало по УНП с активным эталоном / без УНП
+    (нельзя детерминированно сматчить). Матч — по УНП (natural key), как ``match_candidates``.
+    НИЧЕГО не пишет: реальный upsert/дедуп — зона Синк (``reference_import``), здесь только метрика
+    готовности моста (мост ~4109 контрагентов сейчас откачен). Возврат:
+    ``{total, would_create, would_match_by_unp, without_unp}``.
+    """
+    cache = await onec.fetch_counterparties()
+    existing_unps = {
+        u
+        for (u,) in (
+            await session.execute(
+                select(Counterparty.unp).where(
+                    Counterparty.is_active.is_(True), Counterparty.unp.is_not(None)
+                )
+            )
+        ).all()
+    }
+    total = would_create = would_match = without_unp = 0
+    for rec in cache:
+        total += 1
+        unp = (rec.get("unp") or rec.get("УНП") or "").strip() if isinstance(rec, dict) else ""
+        if not unp:
+            without_unp += 1
+        elif unp in existing_unps:
+            would_match += 1
+        else:
+            would_create += 1
+    return {
+        "total": total,
+        "would_create": would_create,
+        "would_match_by_unp": would_match,
+        "without_unp": without_unp,
+    }
+
+
 async def match_candidates(
     session: AsyncSession, *, unp: str | None, exclude_id: int | None = None
 ) -> list[Counterparty]:
@@ -64,8 +130,66 @@ async def match_candidates(
     return list((await session.execute(query)).scalars().all())
 
 
+async def fuzzy_candidates(
+    session: AsyncSession,
+    *,
+    name: str,
+    exclude_id: int | None = None,
+    threshold: float = FUZZY_THRESHOLD,
+    limit: int = 10,
+) -> list[dict]:
+    """Похожие по имени активные контрагенты — кандидаты на дедуп (опечатки/регистр/орг-форма).
+
+    Ловит дубли БЕЗ совпадения УНП (пустой/кривой УНП), которые ``match_candidates`` пропускает.
+    Это **кандидаты на approval, не авто-merge** — человек-в-контуре решает (концепция §7.2).
+    На Postgres — ``pg_trgm`` (``similarity``, расширение в миграции 0046); на SQLite (dev/тесты)
+    — Python-фолбэк (``difflib`` над нормализованными именами). ``[{id, name, score}]`` по убыванию.
+
+    # ponytail: (1) ``threshold`` — общий для двух разных шкал (pg_trgm similarity vs
+    # SequenceMatcher.ratio), recall на SQLite и Postgres слегка расходится; калибровать порог
+    # отдельно по движку, если важна точность. (2) SQLite-фолбэк сканирует все активные имена
+    # в Python (O(n)) — ок на dev-объёмах; на проде работает Postgres-ветка с SQL-фильтром.
+    """
+    norm = _normalize_name(name)
+    if not norm:
+        return []
+    dialect = session.bind.dialect.name if session.bind is not None else "sqlite"
+
+    if dialect == "postgresql":
+        sim = func.similarity(func.lower(Counterparty.name), name.lower())
+        query = (
+            select(Counterparty.id, Counterparty.name, sim.label("score"))
+            .where(Counterparty.is_active.is_(True), sim >= threshold)
+            .order_by(sim.desc())
+            .limit(limit)
+        )
+        if exclude_id is not None:
+            query = query.where(Counterparty.id != exclude_id)
+        rows = (await session.execute(query)).all()
+        return [{"id": r.id, "name": r.name, "score": float(r.score)} for r in rows]
+
+    # SQLite-фолбэк: тянем активные имена и считаем похожесть в Python (dev-объёмы малы).
+    q = select(Counterparty.id, Counterparty.name).where(Counterparty.is_active.is_(True))
+    if exclude_id is not None:
+        q = q.where(Counterparty.id != exclude_id)
+    scored = [
+        {"id": cid, "name": cname,
+         "score": SequenceMatcher(None, norm, _normalize_name(cname)).ratio()}
+        for cid, cname in (await session.execute(q)).all()
+    ]
+    scored = [s for s in scored if s["score"] >= threshold]
+    scored.sort(key=lambda s: s["score"], reverse=True)
+    return scored[:limit]
+
+
 def _apply_survivorship(survivor: Counterparty, duplicate: Counterparty) -> None:
-    """Непустое значение выигрывает; эталон в приоритете при конфликте (заполняем пустое)."""
+    """Непустое значение выигрывает; эталон в приоритете при конфликте (заполняем пустое).
+
+    Дефолт при merge (стратегия ``non_empty_wins``). Правила-как-данные применяются на пути
+    импорта (``reference_import`` + ``survivorship``); при ручном merge дублей эталон в
+    приоритете — расширить до загрузки правил можно, когда появятся не-``non_empty_wins``
+    поля, конфликтующие именно при слиянии (YAGNI).
+    """
     for field in _SURVIVORSHIP_FIELDS:
         if not getattr(survivor, field) and getattr(duplicate, field):
             setattr(survivor, field, getattr(duplicate, field))
@@ -205,6 +329,8 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
         "unp": cp.unp,
         "is_active": cp.is_active,
         "merged_into_id": cp.merged_into_id,
+        # M2: происхождение по полям {field: {source, at}} — карточка рисует бейдж источника
+        "provenance": cp.provenance or {},
         "aliases": [
             {"source": a.source, "external_ref": a.external_ref, "created_at": str(a.created_at)}
             for a in alias_rows
@@ -220,3 +346,29 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
             for a in audit
         ],
     }
+
+
+async def survivorship_rules(session: AsyncSession, entity_type: str | None = None) -> list[dict]:
+    """Правила слияния (survivorship) — какое поле за каким источником закреплено (M2).
+
+    Витрина таблицы ``survivorship_rule``: для каждой пары (сущность, поле) — стратегия и,
+    для ``source_priority``, упорядоченный список источников. Поля без своей записи берут
+    дефолт ``non_empty_wins`` (его на витрине не показываем — правил для него нет в БД).
+    ``entity_type`` фильтрует (counterparty/sku); пусто — все. Только чтение.
+    """
+    query = select(SurvivorshipRule).order_by(
+        SurvivorshipRule.entity_type, SurvivorshipRule.field
+    )
+    if entity_type:
+        query = query.where(SurvivorshipRule.entity_type == entity_type)
+    rows = (await session.execute(query)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "entity_type": r.entity_type,
+            "field": r.field,
+            "strategy": r.strategy,
+            "source_priority": list(r.source_priority or []),
+        }
+        for r in rows
+    ]

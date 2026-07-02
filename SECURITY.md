@@ -119,13 +119,20 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
 
 ### P1 — Настоящий AuthN/AuthZ (недели). Это и есть «часть 5»
 
-- [ ] **P1-1. Keycloak OIDC/JWT.** Заменить header-trust на проверку подписи токена
-      (Keycloak уже в стеке, код к нему не подключён). Валидировать JWT **локально** через
-      кэш JWKS (`PyJWKClient`, TTL ~1ч) — не дёргать introspection на каждый запрос.
-      Библиотека — **PyJWT** (не `python-jose`: не поддерживается, FastAPI ушёл с него в
-      2024). **Обязательно проверять `iss` и `aud`** — без проверки issuer токен из другого
-      realm/OIDC молча принимается и ломает tenant-изоляцию (RFC 8725). Короткий TTL +
-      refresh-ротация, т.к. локальная валидация не видит отзыв токена до истечения.
+- [~] **P1-1. Keycloak OIDC/JWT — движок валидации ГОТОВ (2026-06-27), realm/флип прода — хвост.**
+      Реализован `OidcAuthenticator` (`core/services/auth.py`): локальная валидация JWT через
+      `PyJWKClient` (JWKS-кэш), **PyJWT**, обязательные `iss`/`aud`/`exp` (RFC 8725), алгоритм
+      жёстко `RS256` (alg=none и HS256-confusion отвергаются — проверено адверсариально), роли
+      из `realm_access.roles`, fail-closed → «Гость». За флагом `auth_mode` (`dev`=заголовок как
+      раньше / `oidc`=токен); единый резолвер identity для middleware и route-deps. **Прод-гард:**
+      `environment≠dev` НЕ загрузится без `auth_mode=oidc`+issuer+audience (SEC-002). 13 тестов,
+      ruff/полный прогон зелёные.
+      _Хвост (отдельные шаги):_ (1) завести realm/client в Keycloak (audience-mapper → `client_id`
+      в `aud`); (2) фронт шлёт `Authorization: Bearer` вместо cookie→`X-User-Roles`; (3) маппинг
+      Keycloak-ролей → наши (+ `resource_access` client-роли сейчас игнорируются); (4) флипнуть прод
+      в `oidc` ПОСЛЕ realm'а (иначе прод не стартует — by design); (5) короткий TTL + refresh-ротация
+      (локальная валидация не видит отзыв до истечения); (6) полноценный 401 на невалидном токене
+      (сейчас → «Гость»→403, fail-closed-консистентно). Библиотека — **PyJWT** (не `python-jose`).
       _Keycloak оставить (уже в стеке) — допилить, не мигрировать. Кандидат Zitadel ослаб:
       подтверждено, что с **v3.0 (март-2025) он перешёл на AGPL-3.0** — copyleft/network-use
       обязательства, **аргумент против** для будущего SaaS. Полное сравнение IdP (Authentik/
@@ -152,9 +159,21 @@ Caddy/Cloudflare. Зрелость процессов безопасности �
       превращает ABAC-условие в `WHERE`-клаузу SQLAlchemy → «видит сделки только своего региона
       и до суммы X» становится фильтром на уровне БД, не ручной проверкой в каждой ручке.
       ⚠️ AST→SQL делает адаптер-библиотека (отслеживает версии ORM), не ядро PDP.
+      _Конкретные остаточные точки (телефония SALES-50, помечены `# ponytail:` в
+      `modules/sales/routes.py`, 2026-06-27): **(#1)** `GET /sales/calls/stream` — `owner`
+      самоназначаемый → подписка на чужой SSE-поток звонков (HIGH); **(#3)** `POST
+      /sales/calls/{cid}/link-deal` — нет проверки `call.owner` → привязка/создание сделки по
+      чужому звонку (MED). Блокер один: нет аутентифицированной идентичности продавца (dev не
+      шлёт `X-User`, `user.username == "anonymous"`), сверять `owner`-ФИО не с чем. Чинятся
+      вместе с маппингом username↔Deal.owner после P1-1; гейт «свой поток / `sales.calls.read_all`
+      для РОП»._
 - [ ] **P1-4. Анти-mass-assignment.** Разделить write-схемы: серверные поля
       (`stage`/`status`/`owner`/audit) ставятся в коде, не из тела. Начать с `DealCreate`
       (`modules/sales/schemas.py:9`).
+      ✅ `POST /sales/telephony/incoming` закрыт (2026-06-27): принимал сырой `dict` без
+      валидации → недоверенное тело фабриковало `CallLog` произвольными полями (security-review
+      HIGH). Теперь — `TelephonyEventIn` (`extra='forbid'`, типизированные поля; только то, что
+      читают обработчики `calls.record_event`).
 - [ ] **P1-5. CORS + TrustedHost.** Явный allowlist origin'ов (никогда `*` с credentials),
       `TrustedHostMiddleware` с прод-доменом.
 - [ ] **P1-6. Аудит для безопасности.** `actor` инжектится автоматически из субъекта;

@@ -13,8 +13,9 @@ test("карточка сделки: формирование счёта → з�
   await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
   await form.getByRole("button", { name: "Создать" }).click();
 
-  // открыть карточку созданной сделки
-  await page.getByText("ООО E2E-Документ").first().click();
+  // открыть карточку созданной сделки (double-click: single-click открывает drawer-preview,
+  // double-click — router.push на полную карточку /crm/deals/[id] с вкладкой Документы)
+  await page.getByText("ООО E2E-Документ").first().dblclick();
   await expect(page.getByText("Документы")).toBeVisible();
 
   // счёт пишется в 1С сразу → статус «Записан в 1С»

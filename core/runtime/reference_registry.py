@@ -161,6 +161,38 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         description="Номенклатура (товарные позиции) + характеристики.",
     ),
     Reference(
+        key="core.sku_history",
+        title="История номенклатуры",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/sku-history",
+        columns=(
+            ReferenceColumn(
+                "sku_code", "Код товара", "string", editable=False,
+                semantic="natural key номенклатуры (core.skus)",
+            ),
+            _TITLE,
+            ReferenceColumn("unit", "Ед.", "string"),
+            ReferenceColumn(
+                "category_id", "Группа", "number",
+                semantic="группа номенклатуры на дату версии (core.nomenclature_groups)",
+            ),
+            ReferenceColumn("weight_kg", "Вес, кг", "number"),
+            ReferenceColumn("volume_m3", "Объём, м³", "number"),
+            ReferenceColumn("tnved_code", "ТН ВЭД", "string", semantic="код ТН ВЭД на дату версии"),
+            ReferenceColumn("vat_code", "НДС-код", "string", semantic="свой код НДС на дату версии"),
+            ReferenceColumn("shelf_life_days", "Срок годн., дн.", "number"),
+            ReferenceColumn("start_date", "Действует с", "date"),
+            ReferenceColumn("end_date", "По", "date", semantic="пусто = текущая версия"),
+        ),
+        permissions=("refs.view", "refs.edit"),
+        versioned=True,
+        ai_exposed=True,
+        description="Датированные версии мастер-характеристик номенклатуры (SCD2): документ "
+        "«на дату» видит характеристики, действовавшие тогда. Только мастер-данные "
+        "(цена/остаток = операционные, истина 1С — не здесь).",
+    ),
+    Reference(
         key="core.nomenclature_groups",
         title="Группы номенклатуры",
         department="Общие",
@@ -172,6 +204,10 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
             ReferenceColumn(
                 "parent_id", "Родитель", "number",
                 semantic="родительская группа (иерархия adjacency list); пусто = корень",
+            ),
+            ReferenceColumn(
+                "tnved_code", "ТН ВЭД по умолч.", "string",
+                semantic="код ТН ВЭД группы (core.tnved); товар без своего наследует его",
             ),
             _ACTIVE,
         ),
@@ -193,6 +229,92 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
         description="Сотрудники/пользователи (мастер-данные); кадровая карточка — в модуле hr.",
+    ),
+    # --- классификаторы (§3.1) ---
+    Reference(
+        key="core.tnved",
+        title="Коды ТН ВЭД (тарифы)",
+        department="Финансы",
+        owner_schema="public",
+        endpoint="/system/refs/tnved",
+        columns=(
+            _CODE,
+            ReferenceColumn("name", "Описание", "string"),
+            ReferenceColumn(
+                "duty_rate", "Пошлина, %", "number",
+                semantic="ввозная пошлина ЕТТ ЕАЭС, действует в периоде",
+            ),
+            ReferenceColumn(
+                "vat_code", "НДС", "string", semantic="ссылка на ставку НДС (core.vat_rates)",
+            ),
+            ReferenceColumn("excise", "Акциз", "string"),
+            ReferenceColumn("unit", "Ед. (там.)", "string"),
+            ReferenceColumn("start_date", "Действует с", "date"),
+            ReferenceColumn("end_date", "По", "date", semantic="пусто = текущая"),
+        ),
+        permissions=("refs.view", "refs.edit"),
+        versioned=True,
+        ai_exposed=True,
+        description="Коды ТН ВЭД ЕАЭС (ЕТТ) с ввозной пошлиной + акциз; НДС ссылкой на core.vat_rates. "
+        "Историчны (SCD2): расчёт landed cost берёт ставку на дату оформления.",
+    ),
+    Reference(
+        key="core.accounts",
+        title="План счетов",
+        department="Финансы",
+        owner_schema="public",
+        endpoint="/system/refs/accounts",
+        columns=(
+            _CODE,
+            _TITLE,
+            ReferenceColumn("kind", "Тип", "string", semantic="актив/пассив/активно-пассивный"),
+            ReferenceColumn(
+                "parent_id", "Синтетический счёт", "number",
+                semantic="родительский счёт (синтетика); пусто = корень",
+            ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода счёта в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
+            _ACTIVE,
+        ),
+        permissions=("refs.view", "refs.edit"),
+        ai_exposed=True,
+        description="План счетов бухучёта РБ (постановление Минфина №50): синтетика + субсчета "
+        "(иерархия parent_id), датированный ввод/вывод из оборота. Для проводок финмодуля.",
+    ),
+    Reference(
+        key="core.regions",
+        title="Регионы и города",
+        department="Общие",
+        owner_schema="public",
+        endpoint="/system/refs/regions",
+        columns=(
+            _CODE,
+            _TITLE,
+            ReferenceColumn("kind", "Уровень", "string", semantic="область/район/город"),
+            ReferenceColumn(
+                "parent_id", "Входит в", "number",
+                semantic="родительский регион (область→район→город); пусто = корень",
+            ),
+            ReferenceColumn(
+                "effective_from", "Введён с", "date",
+                semantic="дата ввода региона в оборот; пусто = бессрочно",
+            ),
+            ReferenceColumn(
+                "effective_to", "Выведен с", "date",
+                semantic="дата вывода из оборота (искл.); пусто = в силе",
+            ),
+            _ACTIVE,
+        ),
+        permissions=("refs.view", "refs.edit"),
+        ai_exposed=True,
+        description="Гео-справочник РБ (область→район→город, иерархия parent_id), датированный "
+        "ввод/вывод из оборота: адреса контрагентов и территориальная аналитика (territory).",
     ),
 )
 

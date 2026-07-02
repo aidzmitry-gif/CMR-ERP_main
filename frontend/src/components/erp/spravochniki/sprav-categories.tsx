@@ -1,15 +1,19 @@
 "use client";
 
 import { Archive, ChevronDown, ChevronRight, FolderPlus, GripVertical, Plus } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   archiveNomenclatureGroup,
   buildCategoryTree,
   createNomenclatureGroup,
+  fetchRefRowsByEndpoint,
+  fetchSkusByCategory,
   patchNomenclatureGroup,
   type CategoryTreeNode,
+  type GroupDefaultFields,
   type NomenclatureGroup,
+  type SkuRow,
 } from "@/lib/reference-data";
 import {
   buildBreadcrumb,
@@ -24,6 +28,7 @@ type Modal =
   | { kind: "add"; parentId: number | null; parentName: string | null }
   | { kind: "rename"; node: CategoryTreeNode }
   | { kind: "move"; node: CategoryTreeNode }
+  | { kind: "defaults"; node: CategoryTreeNode }
   | { kind: "archive"; node: CategoryTreeNode }
   | null;
 
@@ -89,6 +94,13 @@ function TreeNodeRow({
           size={14}
           className={isSelected ? "text-accent-ink/40" : "text-faint"}
         />
+        <span
+          className={`shrink-0 font-mono text-[11px] tabular-nums ${
+            isSelected ? "text-accent-ink/70" : "text-faint"
+          }`}
+        >
+          {node.code}
+        </span>
         <span className={isSelected ? "font-semibold" : node.parent_id === null ? "font-medium" : ""}>
           {node.name}
         </span>
@@ -313,6 +325,173 @@ function MoveForm({
   );
 }
 
+// ── Форма «общих данных группы» (наследуются товарами) ──────────────────────
+
+type RefRow = { code: string; title?: string };
+
+// Свободные «общие данные группы» (наследуются товаром, JSONB category.attributes; миграция 0055).
+// Ключи совпадают с backend _INHERITABLE_ATTR_KEYS / карточкой SKU (DEDICATED_ATTR_KEYS) — иначе
+// наследование «↑ из группы» не подхватится. Бренд опускаем (синоним Марки), чтобы не плодить дубль.
+const GROUP_ATTR_KEYS: { key: string; placeholder: string }[] = [
+  { key: "Производитель", placeholder: "напр. Omron" },
+  { key: "Марка", placeholder: "напр. G2R" },
+  { key: "Импортёр", placeholder: "кто ввозит" },
+  { key: "Кол-во в коробке", placeholder: "напр. 50" },
+  { key: "Габариты", placeholder: "Д×Ш×В, мм" },
+  { key: "Объём", placeholder: "напр. 0.5 л" },
+];
+
+/** Редактор полей по умолчанию группы: НДС/ед.изм/страна — select из справочников;
+ *  ТН ВЭД — ввод кода (кодов много); свободные атрибуты (Производитель/коробка/габариты) —
+ *  текст. Пустое значение = очистить (не наследовать). */
+function GroupDefaultsForm({
+  node,
+  units,
+  vats,
+  countries,
+  onSave,
+  onCancel,
+}: {
+  node: CategoryTreeNode;
+  units: RefRow[];
+  vats: RefRow[];
+  countries: RefRow[];
+  onSave: (fields: GroupDefaultFields) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [tnved, setTnved] = useState(node.tnved_code ?? "");
+  const [vat, setVat] = useState(node.vat_code ?? "");
+  const [unit, setUnit] = useState(node.unit ?? "");
+  const [country, setCountry] = useState(node.country ?? "");
+  // Свободные атрибуты группы — по известным ключам (значения из node.attributes как строки).
+  const [attrs, setAttrs] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      GROUP_ATTR_KEYS.map(({ key }) => [key, String(node.attributes?.[key] ?? "")]),
+    ),
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    // attributes перезаписывается бэком целиком → стартуем с существующего словаря (сохраняя
+    // неизвестные редактору ключи), known-ключи задаём/удаляем по введённому значению.
+    const merged: Record<string, unknown> = { ...(node.attributes ?? {}) };
+    for (const { key } of GROUP_ATTR_KEYS) {
+      const v = attrs[key].trim();
+      if (v) merged[key] = v;
+      else delete merged[key];
+    }
+    await onSave({
+      tnved_code: tnved.trim() || null,
+      vat_code: vat || null,
+      unit: unit || null,
+      country: country || null,
+      attributes: merged,
+    });
+    setBusy(false);
+  }
+
+  const sel =
+    "w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20";
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <p className="text-[12px] text-muted">
+        Значения по умолчанию для товаров группы — товар без своего наследует их (↑ из группы).
+      </p>
+      <div>
+        <label className="mb-1 block text-xs text-muted">Код ТН ВЭД по умолч.</label>
+        <input
+          value={tnved}
+          onChange={(e) => setTnved(e.target.value)}
+          placeholder="напр. 8506108000 (пусто — наследовать)"
+          className={`${sel} font-mono`}
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted">Ставка НДС по умолч.</label>
+        <select value={vat} onChange={(e) => setVat(e.target.value)} className={sel}>
+          <option value="">— не задано —</option>
+          {vats.map((v) => (
+            <option key={v.code} value={v.code}>
+              {v.title ?? v.code}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted">
+          Единица изм. — по умолч. для новых товаров
+        </label>
+        <select value={unit} onChange={(e) => setUnit(e.target.value)} className={sel}>
+          <option value="">— не задано —</option>
+          {units.map((u) => (
+            <option key={u.code} value={u.code}>
+              {u.title ?? u.code}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[10.5px] text-faint">
+          У товара ед.изм. задаётся всегда (по умолч. «шт») — это подсказка для НОВЫХ позиций группы,
+          не перезапись существующих.
+        </p>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted">Страна происхождения по умолч.</label>
+        <select value={country} onChange={(e) => setCountry(e.target.value)} className={sel}>
+          <option value="">— не задано —</option>
+          {countries.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.title ?? c.code}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Свободные атрибуты группы (Производитель/коробка/габариты) — наследуются товаром */}
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          Свободные характеристики
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {GROUP_ATTR_KEYS.map(({ key, placeholder }) => (
+            <div key={key}>
+              <label className="mb-1 block text-xs text-muted">{key}</label>
+              <input
+                value={attrs[key]}
+                onChange={(e) => setAttrs((p) => ({ ...p, [key]: e.target.value }))}
+                placeholder={placeholder}
+                className={sel}
+              />
+            </div>
+          ))}
+        </div>
+        <p className="mt-1 text-[10.5px] text-faint">
+          Товар без своего значения наследует от группы (↑ из группы). Пусто — не наследовать.
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-50"
+        >
+          {busy ? "Сохранение…" : "Сохранить"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-xl bg-surface px-3 py-2 text-sm font-medium text-muted shadow-card ring-1 ring-line"
+        >
+          Отмена
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ── Главный компонент ───────────────────────────────────────────────────────
 
 export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
@@ -322,6 +501,50 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [toast, setToast] = useState("");
+  // Справочники для select'ов «общих данных группы» (тянем один раз клиентом).
+  const [units, setUnits] = useState<RefRow[]>([]);
+  const [vats, setVats] = useState<RefRow[]>([]);
+  const [countries, setCountries] = useState<RefRow[]>([]);
+  // Товары выбранной группы (членство по category_id) — read-only вид «что в категории».
+  const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [skusLoading, setSkusLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [u, v, c] = await Promise.all([
+        fetchRefRowsByEndpoint("/system/refs/units"),
+        fetchRefRowsByEndpoint("/system/refs/vat-rates"),
+        fetchRefRowsByEndpoint("/system/refs/countries"),
+      ]);
+      setUnits(u as RefRow[]);
+      // НДС версионный — на код может быть несколько версий; берём по одной на код.
+      const seen = new Set<string>();
+      setVats(
+        (v as RefRow[]).filter((r) => (seen.has(r.code) ? false : (seen.add(r.code), true))),
+      );
+      setCountries(c as RefRow[]);
+    })();
+  }, []);
+
+  // Подгрузка товаров выбранной группы (членство по category_id). live-флаг гасит гонку.
+  useEffect(() => {
+    if (!selected) {
+      setSkus([]);
+      return;
+    }
+    let live = true;
+    setSkusLoading(true);
+    const id = selected.id;
+    void fetchSkusByCategory(id).then((rows) => {
+      if (live) {
+        setSkus(rows);
+        setSkusLoading(false);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [selected]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -340,6 +563,13 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
 
   const filtered = useMemo(() => filterFlatGroups(groups, search), [groups, search]);
   const tree = useMemo(() => buildCategoryTree(filtered), [filtered]);
+
+  // При активном поиске раскрываем весь отфильтрованный путь (иначе совпавшие дети
+  // свёрнутых групп невидимы); без поиска — обычное ручное раскрытие.
+  const effectiveExpanded = useMemo(
+    () => (search.trim() ? new Set(filtered.map((g) => g.id)) : expanded),
+    [search, filtered, expanded],
+  );
 
   const toggleExpand = useCallback((id: number) => {
     setExpanded((prev) => {
@@ -389,6 +619,18 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
       flash("Перемещено");
     } else {
       flash("Ошибка: не удалось переместить");
+    }
+  }
+
+  async function handleSaveDefaults(fields: GroupDefaultFields) {
+    if (!selected) return;
+    const ok = await patchNomenclatureGroup(selected.code, fields);
+    if (ok) {
+      await reload();
+      setModal(null);
+      flash("Общие данные группы сохранены");
+    } else {
+      flash("Ошибка: не удалось сохранить");
     }
   }
 
@@ -473,13 +715,13 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
               {search ? "Ничего не найдено" : "Нет данных. Добавьте первую категорию."}
             </p>
           ) : (
-            <div className="mt-3">
+            <div className="mt-3 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
               <ul className="space-y-0.5">
                 {tree.map((node) => (
                   <TreeNodeRow
                     key={node.id}
                     node={node}
-                    expanded={expanded}
+                    expanded={effectiveExpanded}
                     selectedId={selected?.id ?? null}
                     search={search}
                     onToggle={toggleExpand}
@@ -533,6 +775,22 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                   node={selected}
                   groups={groups}
                   onSave={handleMove}
+                  onCancel={() => setModal(null)}
+                />
+              </div>
+            </>
+          ) : modal?.kind === "defaults" && selected ? (
+            <>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                Общие данные группы
+              </div>
+              <div className="mt-3">
+                <GroupDefaultsForm
+                  node={selected}
+                  units={units}
+                  vats={vats}
+                  countries={countries}
+                  onSave={handleSaveDefaults}
                   onCancel={() => setModal(null)}
                 />
               </div>
@@ -608,6 +866,89 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                   <dd className="text-ink">{depth}</dd>
                 </div>
               </dl>
+
+              {/* Общие данные группы (наследуются товарами) */}
+              <div className="mt-4 border-t border-line pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Общие данные группы
+                  </p>
+                  <button
+                    onClick={() => setModal({ kind: "defaults", node: selected })}
+                    className="text-[12px] font-medium text-accent hover:underline"
+                  >
+                    Изменить
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-faint">
+                  По умолчанию для товаров группы — наследуются (↑ из группы).
+                </p>
+                <dl className="mt-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted">ТН ВЭД</dt>
+                    <dd className={selected.tnved_code ? "font-mono text-[13px] text-ink" : "text-faint"}>
+                      {selected.tnved_code ?? "не задано"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted">Ставка НДС</dt>
+                    <dd className={selected.vat_code ? "text-ink" : "text-faint"}>
+                      {selected.vat_code ?? "не задано"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted">Ед. изм.</dt>
+                    <dd className={selected.unit ? "text-ink" : "text-faint"}>
+                      {selected.unit ?? "не задано"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted">Страна</dt>
+                    <dd className={selected.country ? "text-ink" : "text-faint"}>
+                      {selected.country ?? "не задано"}
+                    </dd>
+                  </div>
+                  {GROUP_ATTR_KEYS.filter(({ key }) => selected.attributes?.[key]).map(({ key }) => (
+                    <div key={key} className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">{key}</dt>
+                      <dd className="text-ink">{String(selected.attributes?.[key])}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+
+              {/* Товары группы (членство по category_id) — read-only; привязка SKU→группа в карточке номенклатуры (CRM) */}
+              <div className="mt-4 border-t border-line pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Товары группы
+                  </p>
+                  {!skusLoading && (
+                    <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
+                      {skus.length}
+                      {skus.length === 50 ? "+" : ""}
+                    </span>
+                  )}
+                </div>
+                {skusLoading ? (
+                  <p className="mt-2 text-[12px] text-faint">Загрузка…</p>
+                ) : skus.length === 0 ? (
+                  <p className="mt-2 text-[12px] text-faint">
+                    Нет товаров в этой группе. Привязка товара к группе — в карточке номенклатуры.
+                  </p>
+                ) : (
+                  <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto pr-1">
+                    {skus.map((s) => (
+                      <li key={s.code} className="flex items-center justify-between gap-2 text-[13px]">
+                        <span className="truncate text-ink" title={s.title}>
+                          {s.title}
+                        </span>
+                        <span className="shrink-0 font-mono text-[11px] text-faint">{s.code}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               <div className="mt-5 flex flex-col gap-2 border-t border-line pt-4">
                 <button

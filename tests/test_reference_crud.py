@@ -37,6 +37,55 @@ async def test_simple_ref_crud_and_archive(api):
     assert (await api.patch("/system/refs/units/нет", json={"title": "x"})).status_code == 404
 
 
+async def test_ref_mutations_emit_audit_events(api, session):
+    """M1: create/patch/archive справочника пишут событие в outbox (concept §8 — аудит правок)."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    await api.post("/system/refs/units", json={"code": "кг", "title": "Килограмм"})
+    await api.patch("/system/refs/units/кг", json={"title": "Килограмм (масса)"})
+    await api.delete("/system/refs/units/кг")
+
+    rows = (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "reference.ref_unit.changed")
+        )
+    ).scalars().all()
+    actions = {r.payload["action"] for r in rows}
+    assert {"create", "update", "archive"} <= actions
+    assert all(r.payload["entity_ref"] == "ref_unit:кг" for r in rows)
+    # REF3-7: payload расширен ref_key (ключ реестра) + value_hint (что поменялось) — downstream
+    assert all(r.payload["ref_key"] == "core.units" for r in rows)
+    by_action = {r.payload["action"]: r.payload for r in rows}
+    assert by_action["update"]["value_hint"] == "title"  # подсказка «изменено поле title»
+
+
+async def test_version_add_emits_changed_for_downstream(api, session):
+    """REF3-7: новая версия ставки/курса эмитит reference.<table>.changed с ref_key — чтобы
+    Закупки/Финансы пересчитали landed при смене ставки."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+
+    await api.post(
+        "/system/refs/currency-rates/versions",
+        json={"currency_code": "USD", "rate": 3.2, "start_date": "2026-01-01"},
+    )
+    rows = (
+        await session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.event_type == "reference.ref_currency_rate.changed"
+            )
+        )
+    ).scalars().all()
+    assert rows, "версия курса должна эмитить changed-событие"
+    p = rows[0].payload
+    assert p["ref_key"] == "core.currency_rates"
+    assert p["entity_ref"] == "ref_currency_rate:USD"
+    assert p["action"] == "version" and p["value_hint"] == "rate"
+
+
 async def test_versioned_ref_scd2(api):
     base = "/system/refs/currency-rates"
 

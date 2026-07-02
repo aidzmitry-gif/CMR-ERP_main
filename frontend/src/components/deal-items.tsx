@@ -8,13 +8,24 @@ import {
   deleteDealItem,
   fetchDealItems,
   fetchSkus,
+  fetchStock,
   type SkuOption,
+  type StockRow,
   updateDealItem,
 } from "@/lib/api";
+import { useCurrency } from "@/components/kanban/currency-context";
+
+/** Маржа позиции «в наличии» из 1С (правило «в наличии → себес и цена из 1С»). */
+function itemMargin(st?: StockRow): { cost: number; pct: number } | null {
+  if (!st || st.cost == null || !st.price) return null;
+  return { cost: st.cost, pct: ((st.price - st.cost) / st.price) * 100 };
+}
 
 export function DealItems({ dealId }: { dealId: string }) {
+  const { fmt } = useCurrency(); // цены/себес в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
   const [items, setItems] = useState<DealItemFull[]>([]);
   const [skus, setSkus] = useState<SkuOption[]>([]);
+  const [stock, setStock] = useState<Record<string, StockRow>>({});
   const [skuId, setSkuId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -28,6 +39,11 @@ export function DealItems({ dealId }: { dealId: string }) {
     void fetchSkus().then((s) => {
       setSkus(s);
       if (s.length) setSkuId(s[0].id);
+    });
+    void fetchStock().then((rows) => {
+      const byCode: Record<string, StockRow> = {};
+      for (const r of rows) if (!byCode[r.sku_code]) byCode[r.sku_code] = r;
+      setStock(byCode);
     });
   }, [dealId]);
 
@@ -62,19 +78,28 @@ export function DealItems({ dealId }: { dealId: string }) {
 
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Позиций пока нет</li>}
-        {items.map((item) => (
+        {items.map((item) => {
+          const m = itemMargin(stock[item.code]);
+          return (
           <li key={item.id} className="flex items-center gap-2 rounded-lg bg-sunken px-3 py-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-line-strong" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm text-muted">{item.title}</div>
               {item.last_price != null && (
                 <span className="text-xs text-faint">
-                  {item.last_price.toLocaleString("ru-RU")} ₽
+                  {fmt(item.last_price)}
                   {item.min_price != null && item.min_price < item.last_price
-                    ? ` · мин ${item.min_price.toLocaleString("ru-RU")}`
+                    ? ` · мин ${fmt(item.min_price)}`
                     : ""}
                 </span>
               )}
+              {m ? (
+                <div className="text-[11px] font-semibold text-money">
+                  себес {fmt(m.cost)} · маржа {Math.round(m.pct)}%
+                </div>
+              ) : stock[item.code] ? (
+                <div className="text-[11px] text-faint">под заказ · себес из предрасчёта</div>
+              ) : null}
             </div>
             <input
               type="number"
@@ -93,13 +118,15 @@ export function DealItems({ dealId }: { dealId: string }) {
               <Trash2 size={15} />
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       <div className="mt-3 flex items-center gap-2">
         <select
           value={skuId ?? ""}
           onChange={(e) => setSkuId(Number(e.target.value))}
+          aria-label="Номенклатура (справочник из 1С через MDM)"
           className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {skus.map((s) => (
@@ -122,6 +149,10 @@ export function DealItems({ dealId }: { dealId: string }) {
         >
           <Plus size={16} /> Добавить
         </button>
+      </div>
+      {/* Провенанс справочника — пользователь должен видеть, что SKU = MDM-витрина из 1С. */}
+      <div className="mt-1.5 text-[10px] text-faint">
+        номенклатура · справочник из 1С (через MDM); цены last/min — из истории сделок CRM / Price Engine
       </div>
     </div>
   );

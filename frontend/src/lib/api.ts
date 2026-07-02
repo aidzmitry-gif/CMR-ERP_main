@@ -1,6 +1,8 @@
-import { ensureLostStage } from "@/lib/board";
+import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
+import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
+import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
 const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -32,6 +34,11 @@ interface ApiDeal {
   stage_changed_at?: string | null;
   lost_reason_code?: string | null;
   lost_comment?: string | null;
+  // Крайняя дата отгрузки + штраф за опоздание (дата уходит сигналом в закупки).
+  ship_deadline?: string | null;
+  penalty_rate_pct?: number | null;
+  penalty_cap_pct?: number | null;
+  penalty_terms?: string | null;
 }
 
 interface ApiStage {
@@ -49,8 +56,9 @@ function mapDeal(d: ApiDeal): Deal {
     number: d.number,
     company: d.counterparty,
     description: d.title,
-    amount: d.amount,
-    priority: d.priority as Priority,
+    // Number(d.amount ?? 0) — симметрично fetchDealDetail; страховка от null/NaN в борде.
+    amount: Number(d.amount ?? 0),
+    priority: toPriority(d.priority),
     owner: d.owner,
     date: d.deal_date ?? undefined,
     closedDate: d.closed_date ?? undefined,
@@ -67,9 +75,10 @@ function mapDeal(d: ApiDeal): Deal {
 
 /** Доска сделок из API; при недоступности бэкенда — fallback на mock.
  * В обоих случаях гарантируем колонку «отказ» (SALES-40) через {@link ensureLostStage}. */
-export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
+export async function fetchBoardStages(roles?: string, funnel?: string): Promise<Stage[]> {
   try {
-    const res = await fetch(`${BASE}/sales/board`, { cache: "no-store", headers: roleHeaders(roles) });
+    const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
+    const res = await fetch(`${BASE}/sales/board${qs}`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
     return ensureLostStage(
@@ -87,20 +96,224 @@ export async function fetchBoardStages(roles?: string): Promise<Stage[]> {
   }
 }
 
+/** Стадия воронки из редактора (бэк sales.stage) — полный ряд для CRUD. */
+export interface StageRow {
+  code: string;
+  title: string;
+  sort_order: number;
+  probability: number;
+  kind: "normal" | "won" | "cond_lost" | "lost";
+  color: string;
+  is_active: boolean;
+  funnel: string;
+}
+
+/** Воронка sales (мульти-воронки): код + титул + счётчик активных сделок. */
+export interface FunnelRow {
+  code: string;
+  title: string;
+  active_deals: number;
+}
+
+/** Сводка «передано в исполнение» по выигранной сделке (П10 ТЗ). */
+export interface DealHandoff {
+  deal_id: number;
+  number: string;
+  counterparty: string;
+  amount: number;
+  owner: string;
+  funnel: string;
+  items: { sku_code: string; title: string; qty: number }[];
+  gross_profit: number | null;
+  handed_off_at: string | null;
+}
+
+/** Прочитать handoff-сводку по сделке; null — событие ещё не эмитнуто. */
+export async function fetchDealHandoff(dealId: string): Promise<DealHandoff | null> {
+  try {
+    const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/handoff`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body as DealHandoff | null;
+  } catch {
+    return null;
+  }
+}
+
+export type PlanStatus = "draft" | "pending_approval" | "approved" | "rejected";
+
+/** Личный план показателя продавца (PlanTarget). */
+export interface PlanRow {
+  id: number;
+  owner_id: number;
+  metric: string;
+  period_type: "day" | "week" | "month" | "quarter" | "year";
+  period_key: string;
+  target: number;
+  status: PlanStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
+/** Прочитать планы по фильтрам (полная страница плана). */
+export async function fetchPlans(params: {
+  owner_id?: number;
+  period_type?: string;
+  period_key?: string;
+}): Promise<PlanRow[]> {
+  try {
+    const qs = new URLSearchParams();
+    if (params.owner_id != null) qs.set("owner_id", String(params.owner_id));
+    if (params.period_type) qs.set("period_type", params.period_type);
+    if (params.period_key) qs.set("period_key", params.period_key);
+    const res = await fetch(`/api/sales/plans?${qs.toString()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as PlanRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Поставить/изменить draft план по (owner, metric, period). */
+export async function upsertPlan(input: Omit<PlanRow, "id" | "status" | "approved_by" | "approved_at">): Promise<PlanRow | null> {
+  try {
+    const res = await fetch("/api/sales/plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as PlanRow;
+  } catch {
+    return null;
+  }
+}
+
+export async function submitPlan(planId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/plans/${planId}/submit`, { method: "POST" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function decidePlan(planId: number, approved: boolean, comment?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/plans/${planId}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved, comment }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Список воронок sales для переключателя на доске. */
+export async function fetchFunnels(): Promise<FunnelRow[]> {
+  try {
+    const res = await fetch("/api/sales/funnels", { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as FunnelRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Создать стадию (редактор стадий). */
+export async function createStage(input: StageRow): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/stages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Частично обновить стадию (имя/порядок/вероятность/тип/цвет/активность). */
+export async function updateStage(code: string, patch: Partial<StageRow>): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/stages/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Удалить стадию; 409 (с detail), если в стадии есть сделки. */
+export async function deleteStage(code: string): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const res = await fetch(`/api/sales/stages/${encodeURIComponent(code)}`, { method: "DELETE" });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    return { ok: false, detail: body.detail };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Детальная карточка сделки из API; fallback — mock по id. */
+/** Активная стадия сделки для DealDetail: idx прогрессии + заголовок (канон) +
+ *  «дней в стадии»/«протухает» (SALES-43, из stage_changed_at). undefined — нет канон-стадии. */
+function dealStage(stageId: string, stageChangedAt?: string | null): DealDetail["stage"] {
+  const s = STAGE_BY_ID[stageId];
+  if (!s) return undefined;
+  const days = daysInStage(stageChangedAt ?? undefined, Date.now());
+  return {
+    idx: progressionIndex(stageId),
+    id: stageId,
+    title: s.title,
+    daysInStage: days ?? undefined,
+    isStale: days != null && days >= STUCK_DAYS && !TERMINAL_STAGES.has(stageId),
+  };
+}
+
 export async function fetchDealDetail(id: string, roles?: string): Promise<DealDetail> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
       items?: { title: string; last_price: number | null; min_price: number | null }[];
+      counterparty_ref?: {
+        id: number;
+        name: string;
+        unp: string | null;
+        sources: string[];
+        is_active: boolean;
+        merged_into_id: number | null;
+      } | null;
     };
+    const cp = d.counterparty_ref;
     return {
       number: d.number,
       company: d.counterparty,
+      // Контрагент из MDM (резолв по имени на бэке): id/УНП/источники для <SourceTag> и
+      // связанных блоков. None с бэка → undefined → honest-empty (нет в витрине).
+      counterparty: cp
+        ? {
+            id: cp.id,
+            unp: cp.unp ?? undefined,
+            sourceSystem: (["erp", "1c", "bitrix"] as const).find((s) => cp.sources.includes(s)),
+            isGolden: cp.is_active && cp.merged_into_id == null,
+            mergedIntoId: cp.merged_into_id ?? undefined,
+          }
+        : undefined,
       description: d.title,
-      amount: d.amount,
-      priority: d.priority as Priority,
+      // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
+      amount: Number(d.amount ?? 0),
+      priority: toPriority(d.priority),
       nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
       contact: d.owner || DEAL_DETAIL.contact,
       datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,
@@ -115,6 +328,20 @@ export async function fetchDealDetail(id: string, roles?: string): Promise<DealD
       focus: d.focus,
       starred: d.starred,
       dealDate: d.deal_date ?? "",
+      // Активная стадия из бэка: idx прогрессии + заголовок (канон sales-stages.ts) +
+      // «дней в стадии»/«протухает» (SALES-43) из stage_changed_at.
+      stage: dealStage(d.stage, d.stage_changed_at),
+      // Вероятность/прогноз (SALES-44): явный override; нет — UI возьмёт дефолт по стадии.
+      probability: d.probability ?? undefined,
+      expectedCloseDate: d.expected_close_date ?? undefined,
+      // Причина отказа (SALES-40) — бэк отдаёт в DealRead, detail её раньше ронял.
+      lostReasonCode: d.lost_reason_code ?? undefined,
+      lostComment: d.lost_comment ?? undefined,
+      // Крайняя дата отгрузки + штраф за опоздание (дата уходит в закупки).
+      shipDeadline: d.ship_deadline ?? undefined,
+      penaltyRatePct: d.penalty_rate_pct ?? undefined,
+      penaltyCapPct: d.penalty_cap_pct ?? undefined,
+      penaltyTerms: d.penalty_terms ?? undefined,
     };
   } catch {
     return getDealDetail(id);
@@ -158,6 +385,50 @@ export async function fetchSkus(): Promise<SkuOption[]> {
     return (await res.json()) as SkuOption[];
   } catch {
     return [];
+  }
+}
+
+/** Строка остатка/цены по складу (demo-зеркало 1С, владелец — integrations). */
+export interface StockRow {
+  sku_code: string;
+  warehouse: string;
+  qty_available: number;
+  qty_reserved: number;
+  qty_forecast: number; // «в пути» / прогноз прихода
+  price: number;
+  cost?: number | null; // себестоимость из 1С (для маржи «в наличии»); null — не дана
+}
+
+/** Остатки и цены по складам (для подбора товара со склада в окне звонка). */
+export async function fetchStock(): Promise<StockRow[]> {
+  try {
+    const res = await fetch("/api/integrations/1c/stock", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as StockRow[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Зафиксировать котировку цены SKU клиенту (Price Engine, POST /prices).
+ * Нужна, чтобы позиция сделки знала цену: deal-items берёт last/min из PriceQuote
+ * по (sku_code, counterparty). Пишем цену со склада на контрагента сделки.
+ */
+export async function createPriceQuote(
+  skuCode: string,
+  counterparty: string,
+  price: number,
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku_code: skuCode, counterparty, price }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

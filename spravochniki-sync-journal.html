@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Журнал синхронизации с 1С (импорт ↔ выгрузка) — справочники</title>
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .ring-slate-100{--tw-ring-color:#172033 !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-red-50{background:#2A1717 !important} html.dark .text-red-700{color:#F87171 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-slate-200{background:#1E293B !important} html.dark .text-slate-200{color:#334155 !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .st{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 9px;font:600 11.5px ui-sans-serif,system-ui;white-space:nowrap}
+    .st-local{background:#f1f5f9;color:#475569}   html.dark .st-local{background:#16202F;color:#AEB9C9}
+    .st-pending{background:#fff7ed;color:#c2410c} html.dark .st-pending{background:#2A2114;color:#FBBF24}
+    .st-synced{background:#ecfdf5;color:#047857}  html.dark .st-synced{background:#16271F;color:#34D399}
+    .st-error{background:#fef2f2;color:#b91c1c}   html.dark .st-error{background:#2A1717;color:#F87171}
+    .seg{display:inline-flex;background:#eef2f7;border-radius:11px;padding:3px}
+    html.dark .seg{background:#0E1729}
+    .seg button{border:0;background:transparent;border-radius:8px;padding:7px 14px;font:600 13px ui-sans-serif,system-ui;color:#64748b;cursor:pointer}
+    .seg button.on{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.1)}
+    html.dark .seg button{color:#94A3B8} html.dark .seg button.on{background:#111A2E;color:#E5EAF3}
+    .theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+      background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+      border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+      box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+    .theme-tgl:hover{background:#1545CC !important}
+    html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+      box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+  <div class="mx-auto max-w-[1280px] space-y-4 p-6">
+
+    <a href="spravochniki-preview-index.html" class="text-[12px] text-muted hover:text-brand-600">← Все экраны «Справочники»</a>
+
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-bold text-ink">Синхронизация с 1С — журнал</h1>
+        <p class="mt-1 max-w-3xl text-sm text-muted">Два направления потока. <span class="font-medium text-ink">Импорт</span> (1С → ERP) работает сейчас. <span class="font-medium text-ink">Выгрузка</span> (ERP → 1С, веха M3) переворачивает поток: запись, рождённая в ERP, доезжает в 1С с подтверждением. Истина мастер-данных — ERP; конфликты разрешает <a href="spravochniki-merge-rules.html" class="text-brand-600">survivorship (M2)</a>.</p>
+      </div>
+      <div class="seg" id="dirSeg">
+        <button class="" data-dir="in">← Импорт из 1С</button>
+        <button class="on" data-dir="out">→ Выгрузка в 1С</button>
+      </div>
+    </div>
+
+    <!-- KPI очереди -->
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">В очереди</p>
+        <p class="mt-1 text-2xl font-bold text-amber-700">7</p>
+        <p class="text-[11px] text-slate-400">ждут выгрузки (pending)</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Выгружено</p>
+        <p class="mt-1 text-2xl font-bold text-emerald-700">214</p>
+        <p class="text-[11px] text-slate-400">подтверждено 1С (synced)</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Только в ERP</p>
+        <p class="mt-1 text-2xl font-bold text-ink">12</p>
+        <p class="text-[11px] text-slate-400">создано здесь (local)</p>
+      </div>
+      <div class="rounded-2xl bg-white p-4 shadow-card">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ошибки</p>
+        <p class="mt-1 text-2xl font-bold text-red-700">2</p>
+        <p class="text-[11px] text-slate-400">требуют повтора</p>
+      </div>
+    </div>
+
+    <!-- Действия -->
+    <div class="flex flex-wrap items-center gap-2 rounded-2xl bg-white p-4 shadow-card">
+      <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card">⬆ Выгрузить очередь сейчас</button>
+      <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200">↻ Повторить ошибки (2)</button>
+      <span class="ml-auto text-[12px] text-muted">Авто-выгрузка фоновым циклом каждые ~2с (<span class="font-mono">core.on_tick</span> → <span class="font-mono">flush_pending</span>). Шлюз: <span class="font-mono">core.services.onec.post_document</span>.</span>
+    </div>
+
+    <!-- Журнал -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Очередь и история выгрузки</p>
+        <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">таблица <span class="font-mono">sync_link</span> (entity_type · origin · state · external_ref)</span>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th class="px-3 py-2 font-semibold">Запись</th>
+              <th class="px-3 py-2 font-semibold">Тип</th>
+              <th class="px-3 py-2 font-semibold">Происхождение</th>
+              <th class="px-3 py-2 font-semibold">Статус</th>
+              <th class="px-3 py-2 font-semibold">Ref в 1С</th>
+              <th class="px-3 py-2 font-semibold">Когда</th>
+              <th class="px-3 py-2 font-semibold">Действие</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-50">
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">ООО «НовоТех»</td>
+              <td class="px-3 py-2.5 text-slate-500">контрагент</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">✦ создан в ERP</span></td>
+              <td class="px-3 py-2.5"><span class="st st-pending">⏳ в очереди</span></td>
+              <td class="px-3 py-2.5 text-slate-400">—</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">—</td>
+              <td class="px-3 py-2.5"><button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-brand-600 shadow-card ring-1 ring-slate-200">⬆ выгрузить</button></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">ОАО «БелАвтоТех»</td>
+              <td class="px-3 py-2.5 text-slate-500">контрагент</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">✦ создан в ERP</span></td>
+              <td class="px-3 py-2.5"><span class="st st-synced">✓ выгружено</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">1С-100045678</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">24.06 14:20</td>
+              <td class="px-3 py-2.5"><button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-slate-500 shadow-card ring-1 ring-slate-200">↻ переотправить</button></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">Аккумулятор LiFePO4 304Ah</td>
+              <td class="px-3 py-2.5 text-slate-500">номенклатура</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">✦ создан в ERP</span></td>
+              <td class="px-3 py-2.5"><span class="st st-pending">⏳ в очереди</span></td>
+              <td class="px-3 py-2.5 text-slate-400">—</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">—</td>
+              <td class="px-3 py-2.5"><button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-brand-600 shadow-card ring-1 ring-slate-200">⬆ выгрузить</button></td>
+            </tr>
+            <tr class="bg-red-50/40 hover:bg-red-50/70">
+              <td class="px-3 py-2.5 font-medium">ООО «МеталлПром»</td>
+              <td class="px-3 py-2.5 text-slate-500">контрагент</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">✦ создан в ERP</span></td>
+              <td class="px-3 py-2.5"><span class="st st-error">⚠ ошибка</span></td>
+              <td class="px-3 py-2.5 text-red-700 text-[12px]">УНП занят другой записью 1С</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">24.06 14:21</td>
+              <td class="px-3 py-2.5"><button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-brand-600 shadow-card ring-1 ring-slate-200">↻ повторить</button></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">ИП Сидоров А.В.</td>
+              <td class="px-3 py-2.5 text-slate-500">контрагент</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">✦ создан в ERP</span></td>
+              <td class="px-3 py-2.5"><span class="st st-local">• только в ERP</span></td>
+              <td class="px-3 py-2.5 text-slate-400">—</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">—</td>
+              <td class="px-3 py-2.5"><button class="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-brand-600 shadow-card ring-1 ring-slate-200">⬆ в очередь</button></td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-3 py-2.5 font-medium">ООО «Аккумулятор»</td>
+              <td class="px-3 py-2.5 text-slate-500">контрагент</td>
+              <td class="px-3 py-2.5"><span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">📥 из 1С</span></td>
+              <td class="px-3 py-2.5"><span class="st st-synced">✓ связан</span></td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">b7e3f1a0…0001</td>
+              <td class="px-3 py-2.5 font-mono text-[13px] text-slate-500">02.06 09:00</td>
+              <td class="px-3 py-2.5 text-slate-400 text-[12px]">истина 1С</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 border-t border-slate-100 pt-3 text-[11px] text-slate-400">Записи <span class="text-blue-700">✦ создан в ERP</span> идут на выгрузку в 1С; <span class="text-slate-500">📥 из 1С</span> — пришли извне (источник истины снаружи, повторно не выгружаются). Идемпотентность: один линк на (сущность, запись, система); повтор обновляет, не плодит.</p>
+    </div>
+
+    <!-- Предпросмотр направления -->
+    <div class="rounded-2xl bg-white p-5 shadow-card">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Как переворачивается поток (M3)</p>
+      <div class="mt-3 grid gap-3 sm:grid-cols-3">
+        <div class="rounded-xl bg-slate-50 p-3">
+          <p class="text-sm font-semibold text-ink">1 · Рождение в ERP</p>
+          <p class="mt-1 text-[12px] text-muted">Контрагент/номенклатура заводится в ERP (карточка справочника или CRM-сделка) → <span class="font-mono">origin=erp, state=local</span>.</p>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-3">
+          <p class="text-sm font-semibold text-ink">2 · Очередь</p>
+          <p class="mt-1 text-[12px] text-muted">«Создать здесь»/правка → <span class="font-mono">enqueue</span> → <span class="font-mono">state=pending</span>. Фоновый <span class="font-mono">on_tick</span> подбирает.</p>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-3">
+          <p class="text-sm font-semibold text-ink">3 · Доезд в 1С</p>
+          <p class="mt-1 text-[12px] text-muted"><span class="font-mono">post_document</span> → 1С возвращает Ref_Key → <span class="font-mono">external_ref, state=synced</span>. Ошибка → <span class="font-mono">error</span> + повтор.</p>
+        </div>
+      </div>
+      <p class="mt-3 text-[12px] text-muted">Отказ от 1С = выключить адаптер: данные уже в ERP, ссылки по УНП/коду, MDM в ядре. Структурно ничего не меняется.</p>
+    </div>
+
+    <p class="px-1 text-[11px] text-slate-400">Макет, демо-данные. Дорожная карта: coordination/reference-independence-roadmap.md (M3). План: onec-bidirectional-sync-plan.md. Бэкенд: core/services/sync_outbound.py + sync_link (миграция 0045) + on_tick; роуты /integrations/1c/sync-out · sync-journal · enqueue.</p>
+
+  </div>
+<script>
+/* направление: сегмент-переключатель (демо — переключает подпись) */
+document.getElementById('dirSeg').addEventListener('click',function(e){
+  var b=e.target.closest('button'); if(!b)return;
+  this.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});
+  b.classList.add('on');
+});
+/* демо-отклик */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,a[href="#"],[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.closest('#dirSeg'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

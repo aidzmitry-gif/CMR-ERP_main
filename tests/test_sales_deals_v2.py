@@ -210,3 +210,537 @@ async def test_chats_unread_and_mark_read(api):
     chats2 = (await api.get("/sales/chats")).json()
     chat2 = next(c for c in chats2 if c["deal_id"] == deal["id"])
     assert chat2["unread"] == 0
+
+
+# ── Сделки 2.0: редактор стадий (sales.stage CRUD) ──────────────────────────
+async def test_stage_editor_lazy_seed_and_crud(api):
+    # первый GET лениво материализует канон (11 new_clients + 5 repeat_clients = 16)
+    stages = (await api.get("/sales/stages")).json()
+    new_clients = [s for s in stages if s["funnel"] == "new_clients"]
+    repeat_clients = [s for s in stages if s["funnel"] == "repeat_clients"]
+    assert len(new_clients) == 11 and len(repeat_clients) == 5
+    assert new_clients[0]["code"] == "new"
+    won = next(s for s in stages if s["code"] == "won")
+    assert won["kind"] == "won" and won["probability"] == 100
+
+    created = await api.post(
+        "/sales/stages", json={"code": "nurture", "title": "Дожим", "probability": 40}
+    )
+    assert created.status_code == 201
+    # дубль кода → 409
+    assert (await api.post("/sales/stages", json={"code": "nurture", "title": "x"})).status_code == 409
+
+    upd = await api.patch("/sales/stages/nurture", json={"title": "Дожим клиента", "probability": 42})
+    assert upd.status_code == 200 and upd.json()["title"] == "Дожим клиента"
+
+    # удалить пустую стадию → 204
+    assert (await api.delete("/sales/stages/nurture")).status_code == 204
+
+
+async def test_stage_delete_blocked_when_deals_exist(api):
+    await api.get("/sales/stages")  # материализовать канон
+    await _new_deal(api, "ST-1", stage="qual")
+    # в стадии есть сделка → удаление запрещено (409, целостность Deal.stage)
+    assert (await api.delete("/sales/stages/qual")).status_code == 409
+
+
+# ── П1: факт-маржа через landed_cost ────────────────────────────────────────────
+class _FakeLanded:
+    """Стенд фасада landed_cost для тестов: SKU1 → unit_landed_cost_byn 10, остальные → None."""
+
+    async def last_landed_cost(self, session, sku_code):
+        return await self._one(sku_code)
+
+    async def last_landed_cost_batch(self, session, sku_codes):
+        return {c: await self._one(c) for c in sku_codes}
+
+    async def _one(self, code):
+        if code == "SKU1":
+            from decimal import Decimal as D
+            return {
+                "unit_landed_cost_byn": D("10.00"),
+                "shipment_id": 42,
+                "fixed_at": datetime(2026, 6, 1, 10, 0),
+                "stage": "closed",
+                "fx_rate": D("3.21"),
+                "fx_date": "2026-06-01",
+            }
+        return None
+
+
+async def _seed_sku(session, code, title="t", unit="шт"):
+    from core.domain.models import Sku
+
+    sku = Sku(code=code, title=title, unit=unit)
+    session.add(sku)
+    await session.flush()
+    return sku
+
+
+async def test_deal_margin_priced_no_price_no_cost(api, session):
+    """П1: margin отдаёт revenue/cogs/gross для priced; статусы no_price/no_cost для остальных."""
+    from modules.sales.models import DealItem, PriceQuote
+
+    # Заменим landed-фасад в core на стенд
+    sku1 = await _seed_sku(session, "SKU1", "A1")
+    sku2 = await _seed_sku(session, "SKU2", "A2")
+    sku3 = await _seed_sku(session, "SKU3", "A3")
+    deal = await _new_deal(api, "MGN-1", counterparty="ООО X")
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),
+        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),
+        DealItem(deal_id=deal["id"], sku_id=sku3.id, qty=2),
+        PriceQuote(sku_code="SKU1", counterparty="ООО X", price=15),
+        PriceQuote(sku_code="SKU2", counterparty="ООО X", price=20),
+    ])
+    await session.commit()
+    # подменяем фасад на стенд
+    app = api._transport.app  # type: ignore[attr-defined]
+
+    app.state.core.services.landed_cost = _FakeLanded()
+    try:
+        r = (await api.get(f"/sales/deals/{deal['id']}/margin")).json()
+    finally:
+        app.state.core.services.landed_cost = None
+    assert r["revenue"] == 75.0
+    assert r["cogs_landed"] == 50.0
+    assert r["gross_profit"] == 25.0
+    assert r["margin_pct"] == 33
+    assert r["priced_count"] == 1 and r["total_count"] == 3
+    statuses = {li["sku_code"]: li["status"] for li in r["lines"]}
+    assert statuses == {"SKU1": "priced", "SKU2": "no_cost", "SKU3": "no_price"}
+
+
+async def test_deal_margin_facade_missing(api, session):
+    """П1: фасад landed_cost None → cogs/gross_profit/margin_pct = None + reason."""
+    from modules.sales.models import DealItem, PriceQuote
+
+    sku = await _seed_sku(session, "SKU-X")
+    deal = await _new_deal(api, "MGN-2", counterparty="ООО Y")
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2),
+        PriceQuote(sku_code="SKU-X", counterparty="ООО Y", price=50),
+    ])
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+
+    app.state.core.services.landed_cost = None
+    r = (await api.get(f"/sales/deals/{deal['id']}/margin")).json()
+    assert r["cogs_landed"] is None and r["gross_profit"] is None and r["margin_pct"] is None
+    assert "procurement" in (r["reason"] or "")
+
+
+# ── П4: мульти-воронки в /board ────────────────────────────────────────────────
+async def test_board_funnel_filter(api):
+    await api.get("/sales/stages")  # материализовать канон обеих воронок
+    await _new_deal(api, "F-1", stage="new")  # default funnel = new_clients
+    await _new_deal(api, "F-2", stage="rp_request", funnel="repeat_clients")
+    b_new = (await api.get("/sales/board?funnel=new_clients")).json()
+    b_rep = (await api.get("/sales/board?funnel=repeat_clients")).json()
+    n_new = sum(st["count"] for st in b_new["stages"])
+    n_rep = sum(st["count"] for st in b_rep["stages"])
+    assert n_new == 1 and n_rep == 1
+    cols_new = [st["id"] for st in b_new["stages"]]
+    cols_rep = [st["id"] for st in b_rep["stages"]]
+    assert "qual" in cols_new and "rp_request" in cols_rep
+    assert "rp_request" not in cols_new
+
+
+# ── П6: pipeline-аналитика ─────────────────────────────────────────────────────
+async def test_pipeline_analytics(api, session):
+    from modules.sales.models import Deal, DealStageEvent
+
+    await api.get("/sales/stages")  # канон
+    # 3 сделки: 2 в qual, 1 в won; 2 события new->qual
+    for i, st in enumerate(("qual", "qual", "won"), start=1):
+        await _new_deal(api, f"PA-{i}", stage=st)
+    deals = (await session.execute(__import__("sqlalchemy").select(Deal))).scalars().all()
+    # У каждой сделки в истории: ?→new (была в new), затем new→текущая (ушла из new).
+    # Для won-сделки добавим ещё qual→won, чтобы проверить, что cycle/won считаются.
+    for d in deals:
+        session.add(DealStageEvent(deal_id=d.id, from_stage=None, to_stage="new"))
+        session.add(DealStageEvent(deal_id=d.id, from_stage="new", to_stage=d.stage))
+    await session.commit()
+    r = (await api.get("/sales/pipeline/analytics?funnel=new_clients")).json()
+    by_id = {st["id"]: st for st in r["stages"]}
+    assert by_id["qual"]["count"] == 2
+    assert by_id["won"]["count"] == 1
+    # 3 сделки были в стадии "new" (через события); 2 из них ушли в qual → 67%
+    # (3-я ушла в won через qual, поэтому new→qual = 3, но moved_to_next считает по парам
+    # (new, qual) и берёт уникальные deal_id, значит 3, denom=3 → 100%).
+    assert by_id["new"]["next_conv_pct"] is not None
+    assert r["won_count"] == 1
+
+
+# ── П8: цикл плана draft→submit→decide + права ────────────────────────────────
+async def test_plan_lifecycle_and_permissions(api):
+    # 1) Создать draft
+    plan = (await api.post(
+        "/sales/plans",
+        json={"owner_id": 1, "metric": "calls", "period_type": "month",
+              "period_key": "2026-06", "target": 100},
+    )).json()
+    assert plan["status"] == "draft"
+    # 2) Submit
+    sent = (await api.post(f"/sales/plans/{plan['id']}/submit")).json()
+    assert sent["status"] == "pending_approval"
+    # 3) Approve как РОП (фикстура api по умолчанию director — super-роль)
+    decided = (await api.post(
+        f"/sales/plans/{plan['id']}/decide", json={"approved": True, "comment": "ok"}
+    )).json()
+    assert decided["status"] == "approved"
+    # 4) Повторный decide на approved → 409
+    assert (await api.post(
+        f"/sales/plans/{plan['id']}/decide", json={"approved": False}
+    )).status_code == 409
+
+
+async def test_plan_decide_requires_approve_permission():
+    """sales.deal.approve есть только у РОП/super; Менеджер не может decide."""
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from config.modules import ENABLED_MODULES
+    from core.db.base import Base
+    from core.runtime.app import create_app
+    from core.runtime.deps import get_session
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True).execution_options(
+        schema_translate_map={m: None for m in ENABLED_MODULES}
+    )
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        app = create_app()
+
+        async def _ovr():
+            yield s
+
+        app.dependency_overrides[get_session] = _ovr
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t",
+                                headers={"X-User-Roles": "director"}) as c1:
+            # Создаём план под super → submit
+            p = (await c1.post(
+                "/sales/plans",
+                json={"owner_id": 1, "metric": "calls", "period_type": "month",
+                      "period_key": "2026-06", "target": 50},
+            )).json()
+            await c1.post(f"/sales/plans/{p['id']}/submit")
+        # Теперь под не-РОП ролью — decide должен быть 403. ASCII-роль "guest" не имеет
+        # sales.deal.approve (она не из ROLES sales) → 403, что и проверяем.
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t",
+                                headers={"X-User-Roles": "guest"}) as c2:
+            r = await c2.post(f"/sales/plans/{p['id']}/decide", json={"approved": True})
+        assert r.status_code == 403
+    await engine.dispose()
+
+
+# ── П10: handoff на win ────────────────────────────────────────────────────────
+async def test_handoff_on_won(api, session):
+    """sales.deal.handoff появляется в outbox после перевода сделки в won."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from core.services.eventbus import EventContext
+    app = api._transport.app  # type: ignore[attr-defined]
+    from modules.sales.events import on_deal_won_handoff
+
+    deal = await _new_deal(api, "HF-1", stage="invoice", counterparty="ООО Z")
+    # Прямой вызов обработчика — relay в тестах не крутится автоматически.
+    ctx = EventContext(session=session, services=app.state.core.services)
+    await on_deal_won_handoff({"deal_id": deal["id"], "number": deal["number"]}, ctx)
+    await session.commit()
+    # Идемпотентность: повторный вызов не плодит второй handoff.
+    await on_deal_won_handoff({"deal_id": deal["id"], "number": deal["number"]}, ctx)
+    await session.commit()
+    events = (
+        await session.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.handoff")
+        )
+    ).scalars().all()
+    handoffs = [e for e in events if e.payload.get("deal_id") == deal["id"]]
+    assert len(handoffs) == 1
+    payload = handoffs[0].payload
+    assert payload["counterparty"] == "ООО Z"
+    assert payload["funnel"] == "new_clients"
+
+    # GET /handoff отдаёт сводку
+    r = (await api.get(f"/sales/deals/{deal['id']}/handoff")).json()
+    assert r is not None and r["counterparty"] == "ООО Z"
+
+
+# ── S3-1: взвешенный прогноз ВАЛОВОЙ МАРЖИ воронки ──────────────────────────────
+async def test_margin_forecast_weighted_gross(api, session):
+    """S3-1: revenue/gross взвешены на вероятность; deals_priced=1/2 (priced + no_cost)."""
+    from modules.sales.models import DealItem, PriceQuote
+
+    sku1 = await _seed_sku(session, "SKU1", "A1")  # landed=10 в _FakeLanded
+    sku2 = await _seed_sku(session, "SKU2", "A2")  # landed=None → no_cost
+    a = await _new_deal(api, "MF-1", counterparty="ООО X", probability=40)
+    b = await _new_deal(api, "MF-2", counterparty="ООО X", probability=10)
+    session.add_all([
+        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=5),   # priced: выручка 75, gross 25
+        DealItem(deal_id=b["id"], sku_id=sku2.id, qty=3),   # no_cost: выручка 60, без gross
+        PriceQuote(sku_code="SKU1", counterparty="ООО X", price=15),
+        PriceQuote(sku_code="SKU2", counterparty="ООО X", price=20),
+    ])
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+    app.state.core.services.landed_cost = _FakeLanded()
+    try:
+        r = (await api.get("/sales/pipeline/margin-forecast?funnel=new_clients")).json()
+    finally:
+        app.state.core.services.landed_cost = None
+    # выручка взвеш = 75*0.40 + 60*0.10 = 36.0; gross взвеш = 25*0.40 = 10.0
+    assert r["revenue_weighted"] == 36.0
+    assert r["gross_weighted"] == 10.0
+    assert r["margin_pct_blended"] == 28  # round(10/36*100)
+    assert r["deals_priced"] == 1 and r["deals_total"] == 2
+    assert r["reason"] is None
+
+
+async def test_margin_forecast_facade_missing(api, session):
+    """S3-1: фасада landed нет → gross_weighted=null + reason, выручка остаётся числом."""
+    from modules.sales.models import DealItem, PriceQuote
+
+    sku1 = await _seed_sku(session, "SKU1", "A1")
+    a = await _new_deal(api, "MF-3", counterparty="ООО Y", probability=50)
+    session.add_all([
+        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=4),
+        PriceQuote(sku_code="SKU1", counterparty="ООО Y", price=10),
+    ])
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+    app.state.core.services.landed_cost = None
+    r = (await api.get("/sales/pipeline/margin-forecast?funnel=new_clients")).json()
+    assert r["gross_weighted"] is None          # НЕ 0
+    assert r["revenue_weighted"] == 20.0        # 10*4*0.50 — не зависит от landed
+    assert r["margin_pct_blended"] is None
+    assert r["deals_priced"] == 0
+    assert "procurement" in (r["reason"] or "")
+
+
+# ── S3-3: procurement.received → sales.supply.arrived ───────────────────────────
+async def test_procurement_received_signals_active_deals(api, session):
+    """S3-3: поставка по SKU активной сделки → sales.supply.arrived; payload без sku не валит."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from core.services.eventbus import EventContext
+    from modules.sales.events import on_procurement_received
+    from modules.sales.models import Deal, DealItem
+
+    app = api._transport.app  # type: ignore[attr-defined]
+    sku1 = await _seed_sku(session, "SKU1", "A1")
+    active = await _new_deal(api, "SUP-1", stage="qual")
+    closed = await _new_deal(api, "SUP-2", stage="qual")
+    session.add_all([
+        DealItem(deal_id=active["id"], sku_id=sku1.id, qty=2),
+        DealItem(deal_id=closed["id"], sku_id=sku1.id, qty=1),
+    ])
+    await session.commit()
+    cobj = await session.get(Deal, closed["id"])
+    cobj.stage = "won"  # терминал — не сигналим
+    await session.commit()
+
+    ctx = EventContext(session=session, services=app.state.core.services)
+    # payload без sku → ранний выход, ничего не эмитим, не падаем
+    await on_procurement_received({"qty": "5"}, ctx)
+    await session.commit()
+    # поставка SKU1 → сигнал только на активную сделку
+    await on_procurement_received(
+        {"sku_code": "SKU1", "qty": "5", "entity_ref": "purchase:7"}, ctx
+    )
+    await session.commit()
+
+    evs = (await session.execute(
+        select(OutboxEvent).where(OutboxEvent.event_type == "sales.supply.arrived")
+    )).scalars().all()
+    assert len(evs) == 1
+    p = evs[0].payload
+    assert p["sku_code"] == "SKU1" and p["qty"] == "5"
+    assert active["id"] in p["deal_ids"] and closed["id"] not in p["deal_ids"]
+
+
+# ── S3-4: сверка маржи sales ↔ finance (sku-агрегат) ────────────────────────────
+async def test_margin_reconcile_with_and_without_finance(api, session):
+    """S3-4: без landed-событий → no_finance; с аудитом → delta/converged; actual бьёт estimated."""
+    from core.domain.models import OutboxEvent
+    from modules.sales.models import DealItem, PriceQuote
+
+    sku1 = await _seed_sku(session, "SKU1", "A1")
+    deal = await _new_deal(api, "RC-1", counterparty="ООО R")
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),
+        PriceQuote(sku_code="SKU1", counterparty="ООО R", price=15),
+    ])
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+    app.state.core.services.landed_cost = _FakeLanded()  # SKU1 landed=10 → sales gross=(15-10)*5=25
+    try:
+        # 1) нет landed-событий → no_finance, sales-сторона посчитана
+        r0 = (await api.get(f"/sales/deals/{deal['id']}/margin/reconcile")).json()
+        assert r0["status"] == "no_finance"
+        assert r0["finance_actual_gross"] is None
+        assert r0["sales_forecast_gross"] == 25.0
+        assert r0["level"] == "sku_aggregate"
+        # 2) аудит landed=10 → finance gross=(15-10)*5=25 → converged
+        session.add(OutboxEvent(
+            event_type="procurement.landed_cost.calculated",
+            payload={"sku_code": "SKU1", "unit_landed_cost_byn": "10.00", "qty": "5",
+                     "stage": "estimated", "entity_ref": "purchase_order:1"},
+        ))
+        await session.commit()
+        r1 = (await api.get(f"/sales/deals/{deal['id']}/margin/reconcile")).json()
+        assert r1["finance_actual_gross"] == 25.0 and r1["delta"] == 0.0
+        assert r1["status"] == "converged"
+        # 3) более позднее actual=12 бьёт estimated → finance gross=(15-12)*5=15, delta=10 → diverged
+        session.add(OutboxEvent(
+            event_type="procurement.landed_cost.calculated",
+            payload={"sku_code": "SKU1", "unit_landed_cost_byn": "12.00", "qty": "5",
+                     "stage": "actual", "entity_ref": "purchase_order:1"},
+        ))
+        await session.commit()
+        r2 = (await api.get(f"/sales/deals/{deal['id']}/margin/reconcile")).json()
+        assert r2["finance_actual_gross"] == 15.0 and r2["delta"] == 10.0
+        assert r2["status"] == "diverged"
+    finally:
+        app.state.core.services.landed_cost = None
+
+
+# ── S3-5: согласованный план РОП → цель скорборда (KpiTarget) ───────────────────
+async def test_plan_approved_upserts_kpi_target(api, session):
+    """S3-5: approve по метрике скорборда → KpiTarget.target=план; метрика вне скорборда — игнор."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from core.services.eventbus import EventContext
+    from modules.sales.events import on_plan_approved
+    from modules.sales.models import KpiTarget
+
+    app = api._transport.app  # type: ignore[attr-defined]
+    session.add(KpiTarget(key="calls", title="Звонки", target=Decimal("20"),
+                          unit="count", icon="phone", tone="neutral", sort_order=1))
+    await session.commit()
+    ctx = EventContext(session=session, services=app.state.core.services)
+
+    await on_plan_approved({"metric": "calls", "target": 30.0, "period_type": "day",
+                            "period_key": "2026-06-12", "owner_id": 1}, ctx)
+    await session.commit()
+    kpi = (await session.execute(
+        select(KpiTarget).where(KpiTarget.key == "calls")
+    )).scalars().first()
+    assert float(kpi.target) == 30.0
+    rows = (await api.get("/sales/kpis?period=day")).json()
+    calls_row = next(r for r in rows if r["key"] == "calls")
+    assert calls_row["target"] == 30.0
+
+    # план МЕСЯЦА нормализуется в дневной seed (÷ рабочих дней), /kpis?period=month отдаёт итог
+    session.add(KpiTarget(key="leads", title="Лиды", target=Decimal("5"),
+                          unit="count", icon="user", tone="neutral", sort_order=2))
+    await session.commit()
+    await on_plan_approved({"metric": "leads", "target": 440.0, "period_type": "month",
+                            "period_key": "2026-06", "owner_id": 1}, ctx)
+    await session.commit()
+    leads_kpi = (await session.execute(
+        select(KpiTarget).where(KpiTarget.key == "leads")
+    )).scalars().first()
+    assert float(leads_kpi.target) == 20.0  # 440 / 22 рабочих дней месяца
+    rows_m = (await api.get("/sales/kpis?period=month")).json()
+    leads_row = next(r for r in rows_m if r["key"] == "leads")
+    assert leads_row["target"] == 440.0  # 20 × 22 — план месяца не раздут
+
+    # кривой target не валит обработчик и не меняет цель (poison-pill guard для шины)
+    await on_plan_approved({"metric": "calls", "target": "n/a", "period_type": "day",
+                            "period_key": "2026-06-12", "owner_id": 1}, ctx)
+    await session.commit()
+    calls_kpi = (await session.execute(
+        select(KpiTarget).where(KpiTarget.key == "calls")
+    )).scalars().first()
+    assert float(calls_kpi.target) == 30.0  # не изменилось
+
+    # метрика вне скорборда — строку не создаём, не падаем
+    await on_plan_approved({"metric": "tenders_count", "target": 5.0, "period_type": "day",
+                            "period_key": "2026-06-12", "owner_id": 1}, ctx)
+    await session.commit()
+    absent = (await session.execute(
+        select(KpiTarget).where(KpiTarget.key == "tenders_count")
+    )).scalars().first()
+    assert absent is None
+
+
+# ── Крайняя дата отгрузки + штраф за опоздание → сигнал в закупки ───────────────
+async def test_deal_ship_deadline_and_penalty_persist(api):
+    """Поля крайней даты и штрафа сохраняются при создании и обновлении сделки."""
+    deal = await _new_deal(
+        api, "SD-1", ship_deadline="2026-07-15",
+        penalty_rate_pct=0.1, penalty_cap_pct=10, penalty_terms="0.1%/день, макс 10%",
+    )
+    assert deal["ship_deadline"] == "2026-07-15"
+    assert deal["penalty_rate_pct"] == 0.1
+    assert deal["penalty_cap_pct"] == 10
+    assert deal["penalty_terms"] == "0.1%/день, макс 10%"
+
+    upd = (await api.patch(
+        f"/sales/deals/{deal['id']}", json={"ship_deadline": "2026-07-20"}
+    )).json()
+    assert upd["ship_deadline"] == "2026-07-20"
+    got = (await api.get(f"/sales/deals/{deal['id']}")).json()
+    assert got["ship_deadline"] == "2026-07-20"
+
+
+async def test_ship_deadline_emits_to_procurement(api, session):
+    """Выставление/смена крайней даты → sales.deal.ship_deadline.set (дата+штраф+позиции)."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
+    from modules.sales.models import DealItem
+
+    sku = await _seed_sku(session, "SKU-SD", "Товар к сроку")
+    deal = await _new_deal(api, "SD-2", counterparty="ООО Срок")
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
+    await session.commit()
+
+    await api.patch(f"/sales/deals/{deal['id']}", json={
+        "ship_deadline": "2026-08-01", "penalty_rate_pct": 0.5,
+        "penalty_cap_pct": 15, "penalty_terms": "0.5%/день",
+    })
+    evs = (await session.execute(
+        select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.ship_deadline.set")
+    )).scalars().all()
+    assert len(evs) == 1
+    p = evs[0].payload
+    assert p["deal_id"] == deal["id"]
+    assert p["ship_deadline"] == "2026-08-01"
+    assert p["penalty_rate_pct"] == 0.5 and p["penalty_cap_pct"] == 15
+    assert p["counterparty"] == "ООО Срок"
+    assert any(it["sku_code"] == "SKU-SD" and it["qty"] == 4 for it in p["items"])
+
+    # та же дата повторно → нового сигнала нет (эмит только на смену)
+    await api.patch(f"/sales/deals/{deal['id']}", json={"ship_deadline": "2026-08-01"})
+    # PATCH другого поля → тоже не эмитит
+    await api.patch(f"/sales/deals/{deal['id']}", json={"title": "Переименовал"})
+    evs2 = (await session.execute(
+        select(OutboxEvent).where(OutboxEvent.event_type == "sales.deal.ship_deadline.set")
+    )).scalars().all()
+    assert len(evs2) == 1
+
+
+async def test_penalty_out_of_range_rejected(api):
+    """Штраф вне диапазона режется в 422 на валидации, а не падает в 500 (overflow колонок БД)."""
+    # ставка > Numeric(6,2) предела (9999.99) → 422
+    r = await api.post("/sales/deals", json={
+        "number": "PN-1", "title": "t", "counterparty": "c", "penalty_rate_pct": 99999,
+    })
+    assert r.status_code == 422
+    # отрицательная ставка → 422
+    r2 = await api.post("/sales/deals", json={
+        "number": "PN-2", "title": "t", "counterparty": "c", "penalty_rate_pct": -1,
+    })
+    assert r2.status_code == 422
+    # примечание длиннее String(512) → 422
+    deal = await _new_deal(api, "PN-3")
+    r3 = await api.patch(f"/sales/deals/{deal['id']}", json={"penalty_terms": "x" * 513})
+    assert r3.status_code == 422

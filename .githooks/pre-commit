@@ -1,0 +1,11 @@
+#!/bin/sh
+# ПЕРЕД коммитом. БЛОКИРУЕТ только реальную аварию: staged-миграция при >1 alembic head
+# (dual-head → падёт upgrade в проде; обход AIOS_ALLOW_MULTI_HEADS=1). Остальное advisory.
+# fail-open сохранён ВНУТРИ python (любая ошибка → exit 0 через top-level except).
+root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+if [ -x "$root/.venv/Scripts/python.exe" ]; then py="$root/.venv/Scripts/python.exe"
+elif [ -x "$root/.venv/bin/python" ]; then py="$root/.venv/bin/python"
+elif command -v python >/dev/null 2>&1; then py=python
+else py=python3; fi
+"$py" "$root/scripts/coordination_hook.py" pre-commit
+exit $?

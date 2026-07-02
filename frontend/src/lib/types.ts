@@ -1,5 +1,17 @@
 export type Priority = "Высокий" | "Средний" | "Низкий";
 
+/**
+ * Защитный маппер для {@link Priority}: backend может прислать «high»/«medium»/«low»,
+ * null или мусор — приводим к ru-ключам, дефолт «Средний» (минимально шумит в UI).
+ * Живёт рядом с типом, чтобы при добавлении нового значения правка была в одном файле.
+ */
+export function toPriority(raw: unknown): Priority {
+  if (raw === "Высокий" || raw === "Средний" || raw === "Низкий") return raw;
+  if (raw === "high") return "Высокий";
+  if (raw === "low") return "Низкий";
+  return "Средний";
+}
+
 export type ChannelKey = "phone" | "whatsapp" | "viber" | "telegram" | "email";
 
 export interface Deal {
@@ -103,6 +115,112 @@ export interface DealDetail {
   focus: boolean;
   starred: boolean;
   dealDate: string;
+
+  // ── MDM / 1С расширение ────────────────────────────────────────────────────
+  // Все поля опциональны: backend заполняет по мере готовности интеграций,
+  // UI уже умеет различать «нет данных» vs «есть данные». Контекст —
+  // memory: mdm-1c-data-provenance-ui, spravochniki-mdm-decision,
+  //         invoice-1c-reserve-shipment, onec-odata-setup.
+
+  /** Контрагент в MDM-витрине (источник истины — 1С, alias по УНП). */
+  counterparty?: {
+    id: number;
+    unp?: string;
+    sourceSystem?: "erp" | "1c" | "bitrix";
+    externalRef?: string;
+    isGolden?: boolean;
+    mergedIntoId?: number;
+  };
+
+  /** Активная стадия + сколько в ней висим (для маркера «протух»). */
+  stage?: {
+    idx: number;
+    id: string;
+    title: string;
+    daysInStage?: number;
+    isStale?: boolean;
+  };
+
+  /** Вероятность закрытия 0..100 (SALES-44). Явный override; нет — UI берёт дефолт по стадии. */
+  probability?: number;
+  /** Ожидаемая дата закрытия (SALES-44). */
+  expectedCloseDate?: string;
+  /** Причина отказа (SALES-40) — код из справочника LOSS_REASONS + комментарий менеджера. */
+  lostReasonCode?: string;
+  lostComment?: string;
+
+  /** Крайняя дата отгрузки клиенту — уходит сигналом в закупки (sales.deal.ship_deadline.set). */
+  shipDeadline?: string;
+  /** Штраф за опоздание: ставка %/день просрочки, потолок % от суммы, свободное примечание. */
+  penaltyRatePct?: number;
+  penaltyCapPct?: number;
+  penaltyTerms?: string;
+
+  /** Себестоимость / прибыль / маржа для metrics-полосы (считается на клиенте по позициям). */
+  pricing?: {
+    cost?: number;
+    costSource?: "landed_zak" | "avg_1c" | "manual";
+    profit?: number;
+    margin?: number;
+  };
+
+  /** Оплата: invoiced — счёт ERP; paid — факт из 1С (банк/касса). */
+  pay?: {
+    invoiced: number;
+    paid: number;
+    vat?: number;
+    dueDate?: string;
+    lastPaymentAt?: string;
+    source1cDocId?: string;
+  };
+
+  /** Отгрузка: рейс/ETA из logistics, резерв/статус склада из 1С, сквозной груз из ZAK. */
+  ship?: {
+    tripId?: string;
+    eta?: string;
+    route?: string;
+    reserve1cDocId?: string;
+    warehouseStatus?: "none" | "reserved" | "picked" | "shipped";
+    cargoTripDealIds?: number[];
+  };
+
+  /** Доставка: метод/адрес/дата — CRM; склад — WMS-справочник 1С. */
+  delivery?: {
+    method?: "pickup" | "address" | "our_truck";
+    address?: string;
+    date?: string;
+    warehouseId?: number;
+    warehouse1cRef?: string;
+  };
+
+  /** Постоянный клиент: счётчики — CRM; LTV/средний чек — 1С. */
+  regular?: {
+    isRegular: boolean;
+    orderCount?: number;
+    lastOrderAt?: string;
+    nextExpectedAt?: string;
+    avgCheck?: number;
+    ltv?: number;
+    intervalDays?: number;
+    trendPct?: number;
+  };
+
+  /** Другие сделки этого counterparty (по counterparty.id). */
+  linkedDealIds?: number[];
+
+  /** Документы: source отделяет ERP-сторону от 1С (накладные/реализации). */
+  docs?: Array<{
+    id: number;
+    kind: "contract" | "invoice" | "waybill" | "act" | "other";
+    source: "erp" | "1c";
+    onecRef?: string;
+    title: string;
+    status: string;
+  }>;
+
+  /** Температура и тип воронки — для группировок. */
+  temperature?: "hot" | "warm" | "cold";
+  funnel?: "new" | "regular" | "tender" | "project";
 }
 
 export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";
@@ -183,6 +301,10 @@ export interface FunnelPanel {
   title: string;
   items: FunnelPanelItem[];
   tabs?: string[]; // под-вкладки панели (напр. «Лента · Поставщики · Задачи»)
+  /** Панель — переписка (чат): сворачивается в узкую рейку-аватарки, раскрывается по hover
+   * (общее правило чат-рейки). Оперативные ленты (AI-агенты, «Цех · сегодня», дедлайны) —
+   * НЕ чат: остаются полностью видимыми, ничего не прячем за hover. */
+  chat?: boolean;
 }
 
 /** Метрика нижних итогов с трендом-дельтой. */

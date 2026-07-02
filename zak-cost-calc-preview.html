@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Закупки · Калькулятор себестоимости (Китай)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Утверждённый дизайн (frontend/DESIGN.md, 2026-06-17): токены C+D, Inter, мягкие тени.
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: {
+        colors: {
+          canvas: "rgb(var(--canvas) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          sunken: "rgb(var(--sunken) / <alpha-value>)",
+          ink: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--muted) / <alpha-value>)",
+          faint: "rgb(var(--faint) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", soft: "rgb(var(--accent-soft) / <alpha-value>)" },
+          money: { DEFAULT: "rgb(var(--money) / <alpha-value>)", soft: "rgb(var(--money-soft) / <alpha-value>)" },
+        },
+        fontFamily: { sans: ["Inter","system-ui","-apple-system","Segoe UI","Roboto","Arial","sans-serif"] },
+        boxShadow: {
+          card: "0 1px 1px rgba(20,20,40,0.03), 0 2px 4px rgba(20,20,40,0.04), 0 6px 16px rgba(20,20,40,0.04), inset 0 1px 0 rgba(255,255,255,0.6)",
+          pop: "0 1px 2px rgba(20,20,40,0.06), 0 12px 28px rgba(20,20,40,0.12)",
+        },
+        borderRadius: { lg: "10px", xl: "12px", "2xl": "14px" },
+      } },
+    };
+  </script>
+  <style>
+    :root{ --canvas:238 241 245; --surface:255 255 255; --sunken:244 246 249; --ink:15 23 42; --muted:91 107 130; --faint:147 161 181; --line:226 232 240; --accent:30 94 255; --accent-soft:227 236 255; --money:14 124 74; --money-soft:226 243 234; }
+    .dark{ --canvas:14 17 22; --surface:23 27 34; --sunken:31 36 44; --ink:232 234 237; --muted:155 163 174; --faint:107 114 128; --line:42 48 56; --accent:110 139 255; --accent-soft:35 42 61; --money:52 211 153; --money-soft:22 39 31; }
+    body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-feature-settings:"cv05","ss01";-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+    .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:60;height:40px;padding:0 14px;border-radius:9999px;background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);display:flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;font-weight:600;color:rgb(var(--ink))}
+    .theme-toggle:hover{border-color:rgb(var(--accent))}
+    .cell-in{background:transparent;border:1px solid transparent;border-radius:8px;padding:3px 6px;color:rgb(var(--ink));font-weight:600;width:100%}
+    .cell-in:hover{border-color:rgb(var(--line))}
+    .cell-in:focus{outline:none;border-color:rgb(var(--accent));background:rgb(var(--surface))}
+    .rate-in{background:rgb(var(--sunken));border:1px solid rgb(var(--line));border-radius:8px;padding:5px 8px;color:rgb(var(--ink));font-weight:700;width:100%;text-align:right}
+    .rate-in:focus{outline:none;border-color:rgb(var(--accent));background:rgb(var(--surface))}
+    select.cell-in{font-weight:600;cursor:pointer}
+    tr.row-sel{box-shadow:inset 3px 0 0 rgb(var(--accent))}
+    .num{font-variant-numeric:tabular-nums}
+  </style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-toggle" onclick="toggleTheme()" title="Светлая / тёмная тема"><span id="themeIcon">🌙</span><span class="theme-lbl">Тёмная</span></button>
+  <script>
+    function applyTheme(d){ document.documentElement.classList.toggle('dark', d); const i=document.getElementById('themeIcon'), l=document.querySelector('.theme-lbl'); if(i) i.textContent=d?'☀️':'🌙'; if(l) l.textContent=d?'Светлая':'Тёмная'; }
+    function toggleTheme(){ const d=!document.documentElement.classList.contains('dark'); applyTheme(d); try{localStorage.setItem('zak-theme', d?'dark':'light')}catch(e){} }
+    (function(){ const p=new URLSearchParams(location.search).get('theme'); let s; try{s=localStorage.getItem('zak-theme')}catch(e){} applyTheme(p ? p==='dark' : s==='dark'); })();
+  </script>
+
+  <div class="mx-auto max-w-[1320px] p-6">
+    <!-- Шапка -->
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <div class="flex items-center gap-2">
+          <a href="zak-preview-index.html" class="text-sm text-muted hover:text-accent">← Закупки</a>
+          <span class="text-faint">/</span>
+          <span class="text-sm font-semibold">Калькулятор себестоимости</span>
+        </div>
+        <h1 class="mt-1 text-2xl font-bold">Предварительная себестоимость (Китай) → цена реализации</h1>
+        <p class="mt-1 text-[13px] text-muted max-w-[760px]">
+          Сквозной расчёт: цена поставщика + комиссия + страховка + доставка + пошлина → <b>landed cost</b> за штуку →
+          наценка и НДС → цена продажи → прибыль и рентабельность. Все ставки и курсы редактируемые (поля настроек ниже),
+          таблица пересчитывается на лету. Демо-позиции взяты из «Расчёт&nbsp;Китай.xlsx».
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="addRow" class="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-card hover:opacity-90">+ Позиция</button>
+        <button id="resetBtn" class="rounded-xl bg-surface px-3 py-2 text-sm font-semibold text-ink border border-line hover:border-accent">Сбросить</button>
+      </div>
+    </div>
+
+    <!-- Вкладки закупок (Калькулятор активен) -->
+    <div class="mt-4 flex flex-wrap gap-1.5 text-[13px]">
+      <a href="zak-cockpit-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Обзор</a>
+      <a href="zak-price-inquiry-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Запросы цены</a>
+      <a href="zak-board-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Воронка</a>
+      <a href="zak-shipment-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Машины</a>
+      <a href="zak-claims-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Рекламации</a>
+      <a href="zak-ai-comms-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">AI-переписка</a>
+      <a href="zak-price-monitor-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Мониторинг цен</a>
+      <a href="zak-landed-cost-preview.html" class="rounded-full bg-surface px-3 py-1.5 font-medium text-muted shadow-card hover:text-accent">Себестоимость</a>
+      <span class="rounded-full bg-accent px-3 py-1.5 font-semibold text-white shadow-card">Калькулятор</span>
+    </div>
+
+    <!-- Назначение + куда идёт цена + источник фактической себестоимости -->
+    <div class="mt-4 rounded-2xl bg-accent-soft/50 border border-accent/20 px-4 py-3 text-[13px] text-ink space-y-1">
+      <div><b>Назначение:</b> предварительная (плановая, не точная) себестоимость → <b>цена реализации</b>. Эта цена <b>согласуется с клиентом</b> и идёт в <b>прайс</b> и в <b>цену продажи клиентам</b>.</div>
+      <div class="text-muted"><b class="text-ink">Фактическая себестоимость</b> сюда не вводится: сейчас она <b class="text-ink">из 1С</b>, после ухода с 1С — <b class="text-ink">через план счетов ERP</b>; служит для маржи факта и согласованную цену не меняет.</div>
+      <div class="text-muted">🛡 <b class="text-ink">Безопасность прибыли:</b> в себестоимость заложен <b class="text-ink">буфер курса +10%</b> (курс. колебания); рентабельность ниже минимума и наценка ниже стандартной <b class="text-red-600 dark:text-red-400">подсвечиваются красным</b> — чтобы цена не ушла в занижение.</div>
+    </div>
+
+    <!-- НАСТРОЙКИ: курсы + ставки -->
+    <div class="mt-5 grid gap-4 lg:grid-cols-2">
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold">Курсы валют <span class="text-faint font-normal">· задаются вручную</span></div>
+          <span class="text-[11px] text-faint">обновить перед расчётом партии</span>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <label class="block"><span class="text-[11px] text-muted">USD → BYN</span><input id="usdByn" class="rate-in mt-1 num" type="number" step="0.0001" value="3.0"></label>
+          <label class="block"><span class="text-[11px] text-muted">CNY → RUB</span><input id="cnyRub" class="rate-in mt-1 num" type="number" step="0.01" value="12.8"></label>
+          <label class="block"><span class="text-[11px] text-muted">RUB → BYN</span><input id="rubByn" class="rate-in mt-1 num" type="number" step="0.0001" value="0.0368"></label>
+          <label class="block"><span class="text-[11px] text-muted">USD → RUB <span class="text-faint">(фрахт)</span></span><input id="usdRub" class="rate-in mt-1 num" type="number" step="0.1" value="94"></label>
+          <label class="block"><span class="text-[11px] text-muted">Буфер курса, % <span class="text-faint">курс. колебания, мин 10</span></span><input id="fxBuf" class="rate-in mt-1 num" type="number" step="1" min="10" value="10"></label>
+        </div>
+        <p class="mt-2 text-[11px] text-faint">Расчёт предварительный → закладываем буфер на курсовые колебания (мин. <b>+10%</b> сверх курса НБ РБ). Применяется к валютной части себестоимости.</p>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-sm font-semibold">Ставки и коэффициенты</div>
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <label class="block"><span class="text-[11px] text-muted">Комиссия посредника, %</span><input id="comm" class="rate-in mt-1 num" type="number" step="0.1" value="18"></label>
+          <label class="block"><span class="text-[11px] text-muted">Страховка, %</span><input id="ins" class="rate-in mt-1 num" type="number" step="0.01" value="0.2"></label>
+          <label class="block"><span class="text-[11px] text-muted">Доставка (фрахт)</span>
+            <select id="freight" class="rate-in mt-1 num">
+              <option value="1.5">1.5 $/кг</option>
+              <option value="2">2 $/кг</option>
+              <option value="5">5 $/кг</option>
+              <option value="10">10 $/кг</option>
+            </select></label>
+          <label class="block"><span class="text-[11px] text-muted">Пошлина по умолч., % <span class="text-faint">нет ТН ВЭД</span></span><input id="duty" class="rate-in mt-1 num" type="number" step="0.5" value="5"></label>
+          <label class="block"><span class="text-[11px] text-muted">Утильсбор АКБ, % <span class="text-faint">от цены</span></span><input id="utilRate" class="rate-in mt-1 num" type="number" step="0.5" value="3"></label>
+          <label class="block"><span class="text-[11px] text-muted">НДС, %</span><input id="vat" class="rate-in mt-1 num" type="number" step="1" value="20"></label>
+          <label class="block"><span class="text-[11px] text-muted">Мин. рентабельность, % <span class="text-faint">ниже = красный</span></span><input id="minRent" class="rate-in mt-1 num" type="number" step="1" value="15"></label>
+        </div>
+        <p class="mt-2 text-[11px] text-faint"><b>Пошлина берётся по коду ТН ВЭД из справочника номенклатуры</b> (поле выше — запасная ставка для позиций без кода). Вес, тара, коробка и утильсбор техники — тоже из справочника.</p>
+      </div>
+    </div>
+
+    <!-- ИТОГИ -->
+    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] text-muted">Себестоимость партии <span class="text-faint">· план</span></div>
+        <div id="tCost" class="mt-1 text-xl font-bold num">—</div>
+        <div class="text-[11px] text-faint">предварит. landed cost, BYN · факт — из 1С</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] text-muted">Выручка с НДС</div>
+        <div id="tRev" class="mt-1 text-xl font-bold num">—</div>
+        <div class="text-[11px] text-faint">сумма продажи, BYN</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] text-muted">Прибыль</div>
+        <div id="tProfit" class="mt-1 text-xl font-bold num text-money">—</div>
+        <div class="text-[11px] text-faint">валовая, BYN</div>
+      </div>
+      <div class="rounded-2xl bg-surface p-4 shadow-card">
+        <div class="text-[11px] text-muted">Рентабельность</div>
+        <div id="tMargin" class="mt-1 text-xl font-bold num">—</div>
+        <div class="text-[11px] text-faint">прибыль / выручка</div>
+      </div>
+    </div>
+
+    <!-- ПОТОК: назначение таблицы -->
+    <div class="mt-4 rounded-2xl bg-accent-soft/50 border border-accent/20 px-4 py-3 text-[13px] text-ink">
+      <b>Как используется расчёт:</b> это <b>предварительная себестоимость позиции для сделки продаж</b>.
+      Выкупаем позицию → она <b>формирует машину</b> (партию Китай→Минск); не выкупаем → расчёт уходит в <b>историю</b>.
+      По номенклатуре виден журнал: дата расчёта и в какой машине поехала позиция. <span class="text-muted">(статусы — в столбце справа)</span>
+    </div>
+
+    <datalist id="skuList">
+      <!-- справочник номенклатуры (демо) -->
+      <option value="Аккумулятор Li INR18650-35E 3500mah"></option>
+      <option value="Lifepo4 battery pack 25.6V/200Ah"></option>
+      <option value="Электроштабелер HILIFT PT16"></option>
+      <option value="Погрузчик CPD15 48V/450ah"></option>
+      <option value="Электропогрузчик CPD35 15·24kw"></option>
+    </datalist>
+
+    <!-- ТАБЛИЦА -->
+    <div class="mt-3 rounded-2xl bg-surface shadow-card overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-[13px]">
+          <thead>
+            <tr class="bg-sunken text-muted text-left">
+              <th class="px-3 py-2 font-semibold min-w-[210px]">Номенклатура</th>
+              <th class="px-2 py-2 font-semibold">ТН ВЭД</th>
+              <th class="px-2 py-2 font-semibold">Путь</th>
+              <th class="px-2 py-2 font-semibold text-right">Цена за ед.</th>
+              <th class="px-2 py-2 font-semibold text-right">Кол-во</th>
+              <th class="px-2 py-2 font-semibold text-right">Вес/шт, кг</th>
+              <th class="px-2 py-2 font-semibold text-right">Наценка ×</th>
+              <th class="px-2 py-2 font-semibold text-right bg-accent-soft/60">Себес/шт, BYN</th>
+              <th class="px-2 py-2 font-semibold text-right">Цена без НДС</th>
+              <th class="px-2 py-2 font-semibold text-right">Цена с НДС <span class="block text-[9px] font-medium text-accent">→ прайс / клиенту</span></th>
+              <th class="px-2 py-2 font-semibold text-right text-money">Прибыль/шт</th>
+              <th class="px-2 py-2 font-semibold text-right">Рентаб.</th>
+              <th class="px-2 py-2 font-semibold">Статус / машина</th>
+              <th class="px-2 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- РАСШИФРОВКА ФОРМУЛЫ для выбранной строки -->
+    <div class="mt-4 rounded-2xl bg-surface p-5 shadow-card">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold">Расшифровка расчёта <span id="brkName" class="text-muted font-normal"></span></div>
+        <span class="text-[11px] text-faint">клик по строке таблицы — показать её разбор</span>
+      </div>
+      <div id="brk" class="mt-3 grid gap-4 md:grid-cols-3"></div>
+    </div>
+
+    <p class="mt-5 text-xs text-faint">Демо-калькулятор для согласования методики. После согласования логика переносится в модуль закупок (расчёт по позиции сделки/машины, landed cost наружу для маржи и плана прибыли).</p>
+  </div>
+
+<script>
+// Справочник ставок пошлины по коду ТН ВЭД (единственный источник ставки — код).
+// ⚠️ ДЕМО-ФОЛЛБЭК. ИСТОЧНИК ИСТИНЫ по ставке пошлины — справочник ref_tnved (бэкенд,
+// SCD2, резолв на дату оформления через /system/tnved/lookup?code=&on=). Эта локальная
+// таблица — только чтобы статичный HTML работал без бэка. При порте в Next.js брать
+// ставку из ref_tnved (fetchTnvedRates в reference-data.ts), а не отсюда.
+const TNVED = {
+  "8507 60 000 0": 0,   // литий-ионные аккумуляторы
+  "8504 40 900 0": 0,   // зарядные устройства / источники питания
+  "8427 20 110 0": 5,   // погрузчики самоходные
+  "8427 20 190 0": 5,   // штабелёры/погрузчики прочие
+};
+const dutyByHs = hs => (hs && TNVED[hs] != null) ? TNVED[hs] : null; // ставка % по коду ТН ВЭД, иначе null → запасная
+
+// Справочник номенклатуры (MDM, синк с 1С — источник истины ref_nomenclature_category/sku).
+// Вес/тара/коробка/ТН ВЭД отсюда; пошлина — по коду ТН ВЭД из ref_tnved (демо: TNVED выше).
+const SKU = [
+  { name:"Аккумулятор Li INR18650-35E 3500mah", hs:"8507 60 000 0", path:"cny", w:0.05,   tara:"коробка 44×28×6 см", perBox:70, util:0 },
+  { name:"Lifepo4 battery pack 25.6V/200Ah",     hs:"8507 60 000 0", path:"cny", w:57.667, tara:"паллета",            perBox:1,  util:0 },
+  { name:"Электроштабелер HILIFT PT16",          hs:"8427 20 190 0", path:"usd", w:1500,   tara:"без упаковки",       perBox:1,  util:0 },
+  { name:"Погрузчик CPD15 48V/450ah",            hs:"8427 20 110 0", path:"usd", w:2800,   tara:"без упаковки",       perBox:1,  util:6800 },
+  { name:"Электропогрузчик CPD35 15·24kw",       hs:"8427 20 190 0", path:"usd", w:3900,   tara:"без упаковки",       perBox:1,  util:28100 },
+];
+const skuByName = Object.fromEntries(SKU.map(s => [s.name, s]));
+// Коммерческие поля расчёта + связь со сделкой/машиной. status: deal=предварит.для сделки, machine=выкуплен→в машине, history=в истории.
+const DEAL_ROWS = [
+  { sku:0, price:17,   qty:1200, markup:2.0,  date:"20.06.2026", status:"machine", machine:"MO-2026-016", deal:"S-1182" },
+  { sku:1, price:5350, qty:6,    markup:2.0,  date:"24.06.2026", status:"deal",    machine:"",            deal:"S-1187" },
+  { sku:2, price:4423, qty:1,    markup:1.8,  date:"12.06.2026", status:"history", machine:"MO-2026-013", deal:"S-1099" },
+  { sku:3, price:6800, qty:3,    markup:1.65, date:"22.06.2026", status:"machine", machine:"MO-2026-017", deal:"S-1185" },
+  { sku:4, price:9400, qty:1,    markup:1.2,  date:"25.06.2026", status:"deal",    machine:"",            deal:"S-1190" },
+];
+// markup0 = стандартная (исходная) наценка; ручное снижение ниже неё подсвечиваем красным.
+const buildRows = () => DEAL_ROWS.map(d => ({ ...JSON.parse(JSON.stringify(SKU[d.sku])), ...d, duty:dutyByHs(SKU[d.sku].hs), markup0:d.markup }));
+let rows = buildRows();
+let sel = 0;
+
+const $ = id => document.getElementById(id);
+const num = id => parseFloat($(id).value) || 0;
+
+function settings(){
+  return {
+    usdByn:num('usdByn'), cnyRub:num('cnyRub'), rubByn:num('rubByn'), usdRub:num('usdRub'),
+    comm:num('comm')/100, ins:num('ins')/100, freight:num('freight'),
+    duty:num('duty')/100, utilRate:num('utilRate')/100, vat:num('vat')/100,
+    fxBuf:Math.max(num('fxBuf'),0)/100,           // буфер на курсовые колебания (мин 10%)
+    minRent:num('minRent')/100,                   // мин. безопасная рентабельность
+  };
+}
+
+// Цепочка себестоимости (как в Расчёт Китай.xlsx + пошлина).
+function calc(r, S){
+  const isCny = r.path === 'cny';
+  // рабочая валюта: CNY-путь → считаем в RUB; USD-путь → сразу в BYN
+  const goodsUnitWC = isCny ? r.price * S.cnyRub : r.price * S.usdByn; // цена ед. в раб. валюте
+  const wcToByn     = isCny ? S.rubByn : 1;                            // раб. валюта → BYN
+  const fxFreight   = isCny ? S.usdRub : S.usdByn;                     // фрахт USD/кг → раб. валюта
+  const goods   = goodsUnitWC * r.qty;          // стоимость партии (AB)
+  const comm    = goods * S.comm;               // комиссия (AC)
+  const ins     = goods * S.ins;                // страховка (AF)
+  const freight = r.w * r.qty * S.freight * fxFreight; // доставка (AG)
+  const customs = goods + freight;              // таможенная стоимость
+  const dutyRate= (r.duty!=null) ? r.duty/100 : S.duty; // ставка из ТН ВЭД (справочник), иначе — по умолчанию
+  const duty    = customs * dutyRate;           // пошлина (AD, новое)
+  const total   = goods + comm + ins + freight + duty; // итого партия (AH)
+  const landedUnitWC = r.qty ? total / r.qty : 0;      // себес/шт раб.вал. (AI)
+  const fxPart  = landedUnitWC * wcToByn * (1 + S.fxBuf); // валютная часть + буфер на курс. колебания
+  const landed  = fxPart + (r.util||0);                // себес/шт BYN + утиль техн. (AK)
+  const priceEx = landed * r.markup;            // цена без НДС (AO)
+  const priceVat= priceEx * (1 + S.vat);        // цена с НДС (AQ)
+  const sumVat  = priceVat * r.qty;             // выручка (AS)
+  const utilOnPrice = priceEx * S.utilRate;     // утильсбор АКБ (AT)
+  const profitU = priceEx - landed - utilOnPrice; // прибыль/шт (AU)
+  const profit  = profitU * r.qty;              // прибыль итого (AV)
+  const margin  = sumVat ? profit / sumVat : 0; // рентаб. (AW)
+  return { isCny, goodsUnitWC, wcToByn, fxFreight, goods, comm, ins, freight, customs, duty, dutyRate,
+           total, landedUnitWC, fxPart, landed, priceEx, priceVat, sumVat, utilOnPrice, profitU, profit, margin };
+}
+
+const f2 = n => (n||0).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const f0 = n => Math.round(n||0).toLocaleString('ru-RU');
+const pct = n => (n*100).toLocaleString('ru-RU',{minimumFractionDigits:1,maximumFractionDigits:1}) + '%';
+const cur = r => r.path === 'cny' ? '¥' : '$';
+const wcName = r => r.path === 'cny' ? 'RUB' : 'BYN';
+const STATUS = {
+  machine: { lbl:'🚚 в машине', cls:'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
+  deal:    { lbl:'📋 предварит.', cls:'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  history: { lbl:'🗄 история',   cls:'bg-sunken text-faint' },
+  draft:   { lbl:'● черновик',   cls:'bg-accent-soft text-accent' },
+};
+function statusCell(r){
+  const s = STATUS[r.status] || STATUS.draft;
+  const ref = r.status==='machine' ? `машина ${r.machine}` : (r.status==='history' ? `→ ${r.machine||'—'}` : (r.deal?`сделка ${r.deal}`:''));
+  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${s.cls}">${s.lbl}</span>
+          <div class="mt-0.5 text-[10px] text-faint leading-tight">${ref}<br>${r.date||''}</div>`;
+}
+
+function render(){
+  const S = settings();
+  const tb = $('tbody'); tb.innerHTML = '';
+  let tCost=0, tRev=0, tProfit=0;
+  rows.forEach((r,i)=>{
+    const c = calc(r,S);
+    tCost += c.landed * r.qty; tRev += c.sumVat; tProfit += c.profit;
+    const lowRent  = c.margin < S.minRent;                         // рентабельность ниже минимума
+    const lowMarkup= (r.markup0!=null) && (r.markup < r.markup0);  // наценку вручную снизили
+    const marginColor = lowRent ? 'text-red-600 dark:text-red-400 font-bold' : (c.margin < 0.18 ? 'text-amber-600 dark:text-amber-300' : 'text-money');
+    const markupCls = lowMarkup ? 'cell-in num w-[58px] text-right text-red-600 dark:text-red-400 ring-1 ring-red-400' : 'cell-in num w-[58px] text-right';
+    const tr = document.createElement('tr');
+    tr.className = 'border-t border-line align-middle ' + (i===sel ? 'row-sel bg-accent-soft/30' : 'hover:bg-sunken/60') + (lowRent ? ' bg-red-50/50 dark:bg-red-500/10' : '');
+    tr.dataset.idx = i;
+    tr.innerHTML = `
+      <td class="px-2 py-1"><input class="cell-in" list="skuList" data-f="name" value="${r.name.replace(/"/g,'&quot;')}"></td>
+      <td class="px-1 py-1 whitespace-nowrap"><span class="text-[11px] text-muted num">${r.hs||'—'}</span></td>
+      <td class="px-1 py-1">
+        <select class="cell-in" data-f="path">
+          <option value="cny" ${r.path==='cny'?'selected':''}>CNY→RUB→BYN</option>
+          <option value="usd" ${r.path==='usd'?'selected':''}>USD→BYN</option>
+        </select>
+      </td>
+      <td class="px-1 py-1 text-right whitespace-nowrap"><span class="text-faint">${cur(r)}</span> <input class="cell-in num inline-block w-[78px] text-right" data-f="price" type="number" step="0.01" value="${r.price}"></td>
+      <td class="px-1 py-1 text-right"><input class="cell-in num w-[64px] text-right" data-f="qty" type="number" step="1" value="${r.qty}"></td>
+      <td class="px-1 py-1 text-right whitespace-nowrap" title="из справочника номенклатуры"><input class="cell-in num inline-block w-[64px] text-right" data-f="w" type="number" step="0.001" value="${r.w}"><span class="text-faint text-[10px]"> 🔗</span></td>
+      <td class="px-1 py-1 text-right" title="${lowMarkup?'наценка снижена ниже стандартной '+r.markup0:'стандартная наценка'}"><input class="${markupCls}" data-f="markup" type="number" step="0.05" value="${r.markup}">${lowMarkup?'<span class="text-red-500 text-[10px]" title="ниже стандарта '+r.markup0+'">▼</span>':''}</td>
+      <td class="px-2 py-1 text-right font-bold num bg-accent-soft/30">${f2(c.landed)}</td>
+      <td class="px-2 py-1 text-right num">${f2(c.priceEx)}</td>
+      <td class="px-2 py-1 text-right num">${f2(c.priceVat)}</td>
+      <td class="px-2 py-1 text-right font-semibold num text-money">${f2(c.profitU)}</td>
+      <td class="px-2 py-1 text-right font-semibold num ${marginColor}">${pct(c.margin)}${lowRent?' <span title="ниже минимума">⚠</span>':''}</td>
+      <td class="px-2 py-1 text-left whitespace-nowrap">${statusCell(r)}</td>
+      <td class="px-1 py-1 text-right"><button class="del text-faint hover:text-red-500" title="Удалить">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+  $('tCost').textContent = f0(tCost);
+  $('tRev').textContent = f0(tRev);
+  $('tProfit').textContent = f0(tProfit);
+  $('tMargin').textContent = tRev ? pct(tProfit/tRev) : '—';
+  renderBreakdown(S);
+}
+
+function row(label, val, hint){
+  return `<div class="flex items-baseline justify-between gap-3 py-1 border-b border-line/60">
+    <span class="text-[12px] text-muted">${label}${hint?` <span class="text-faint">${hint}</span>`:''}</span>
+    <span class="text-[13px] font-semibold num">${val}</span></div>`;
+}
+
+function renderBreakdown(S){
+  const r = rows[sel]; if(!r){ $('brk').innerHTML=''; return; }
+  const c = calc(r,S);
+  const wc = wcName(r);
+  $('brkName').textContent = '· ' + r.name;
+  const st = STATUS[r.status] || STATUS.draft;
+  const stRef = r.status==='machine' ? `машина ${r.machine}` : (r.status==='history' ? `архив, ездила в ${r.machine||'—'}` : (r.deal?`сделка ${r.deal}`:'—'));
+  const infoBar = `
+    <div class="md:col-span-3 rounded-xl bg-accent-soft/40 p-3 flex flex-wrap gap-x-6 gap-y-2 items-center text-[12px]">
+      <span class="font-semibold text-ink">Из справочника номенклатуры 🔗</span>
+      <span class="text-muted">ТН ВЭД: <b class="text-ink num">${r.hs||'—'}</b></span>
+      <span class="text-muted">Пошлина по коду ТН ВЭД: <b class="text-ink num">${(c.dutyRate*100).toFixed(1)}%</b>${(r.hs&&TNVED[r.hs]!=null)?'':' <span class="text-faint">(запасная)</span>'}</span>
+      <span class="text-muted">Вес/шт: <b class="text-ink num">${r.w} кг</b></span>
+      <span class="text-muted">Тара/коробка: <b class="text-ink">${r.tara||'—'}</b></span>
+      <span class="text-muted">В коробке: <b class="text-ink num">${r.perBox||'—'} шт</b></span>
+      <span class="ml-auto inline-flex items-center gap-2">
+        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${st.cls}">${st.lbl}</span>
+        <span class="text-muted">${stRef}</span><span class="text-faint">· расчёт ${r.date||''}</span>
+      </span>
+    </div>`;
+  const colCost = `
+    <div class="rounded-xl bg-sunken p-3">
+      <div class="text-[12px] font-semibold text-ink mb-1">1 · Landed cost <span class="text-faint">(${wc})</span></div>
+      ${row('Цена ед. × курс', f2(c.goodsUnitWC)+' '+wc, c.isCny?`${cur(r)}${r.price}×${S.cnyRub}`:`$${r.price}×${S.usdByn}`)}
+      ${row('Стоимость партии', f2(c.goods)+' '+wc, `× ${r.qty} шт`)}
+      ${row('Комиссия', f2(c.comm)+' '+wc, `${(S.comm*100).toFixed(1)}%`)}
+      ${row('Страховка', f2(c.ins)+' '+wc, `${(S.ins*100).toFixed(2)}%`)}
+      ${row('Доставка', f2(c.freight)+' '+wc, `${(r.w*r.qty).toLocaleString('ru-RU')} кг × $${S.freight}`)}
+      ${row('Пошлина', f2(c.duty)+' '+wc, `${(c.dutyRate*100).toFixed(1)}% · ТН ВЭД`)}
+      ${row('<b>Итого партия</b>', '<b>'+f2(c.total)+' '+wc+'</b>')}
+    </div>`;
+  const colUnit = `
+    <div class="rounded-xl bg-sunken p-3">
+      <div class="text-[12px] font-semibold text-ink mb-1">2 · Себестоимость за штуку</div>
+      ${row('Итого ÷ кол-во', f2(c.landedUnitWC)+' '+wc, `÷ ${r.qty}`)}
+      ${c.isCny ? row('× курс RUB→BYN', f2(c.landedUnitWC*c.wcToByn)+' BYN', `× ${S.rubByn}`) : ''}
+      ${S.fxBuf>0 ? row('× буфер курса', f2(c.fxPart)+' BYN', `+${(S.fxBuf*100).toFixed(0)}% курс. колебания`) : ''}
+      ${r.util ? row('+ утильсбор техники', f2(r.util)+' BYN', 'фикс.') : ''}
+      ${row('<b>Себес/шт, BYN</b>', '<b class="text-accent">'+f2(c.landed)+'</b>')}
+      <div class="mt-2 text-[12px] font-semibold text-ink mb-1">3 · Цена продажи</div>
+      ${row('× наценка'+((r.markup0!=null&&r.markup<r.markup0)?' <span class="text-red-500">▼ ниже стандарта</span>':''), f2(c.priceEx)+' BYN', `× ${r.markup}${(r.markup0!=null&&r.markup<r.markup0)?' (станд. '+r.markup0+')':''}`)}
+      ${row('+ НДС', f2(c.priceVat)+' BYN', `${(S.vat*100).toFixed(0)}%`)}
+      <div class="mt-2 rounded-lg bg-accent-soft/60 px-2.5 py-1.5 text-[11px] text-accent">→ согласуется с клиентом → в прайс и цену продажи</div>
+    </div>`;
+  const colProfit = `
+    <div class="rounded-xl bg-sunken p-3">
+      <div class="text-[12px] font-semibold text-ink mb-1">4 · Прибыль и рентабельность</div>
+      ${row('Цена без НДС', f2(c.priceEx)+' BYN')}
+      ${row('− себестоимость', '−'+f2(c.landed)+' BYN')}
+      ${row('− утильсбор АКБ', '−'+f2(c.utilOnPrice)+' BYN', `${(S.utilRate*100).toFixed(1)}%`)}
+      ${row('<b>Прибыль / шт</b>', '<b class="text-money">'+f2(c.profitU)+' BYN</b>')}
+      ${row('Прибыль партии', f2(c.profit)+' BYN', `× ${r.qty}`)}
+      ${row('Выручка с НДС', f2(c.sumVat)+' BYN')}
+      ${row('<b>Рентабельность</b>', '<b class="text-money">'+pct(c.margin)+'</b>')}
+    </div>`;
+  $('brk').innerHTML = infoBar + colCost + colUnit + colProfit;
+}
+
+// события
+document.querySelectorAll('.rate-in').forEach(el => el.addEventListener('input', render));
+$('tbody').addEventListener('input', e=>{
+  const tr = e.target.closest('tr'); if(!tr) return;
+  const i = +tr.dataset.idx, f = e.target.dataset.f; if(f==null) return;
+  rows[i][f] = (f==='name'||f==='path') ? e.target.value : (parseFloat(e.target.value)||0);
+  if(f!=='name') render(); // имя не влияет на расчёт — не перерисовываем (не сбивая курсор)
+});
+$('tbody').addEventListener('change', e=>{
+  const tr = e.target.closest('tr'); if(!tr) return;
+  const i = +tr.dataset.idx, f = e.target.dataset.f;
+  if(f==='path'){ render(); return; }
+  // выбор позиции из справочника → подтянуть вес/тару/коробку, ТН ВЭД и ставку пошлины, путь
+  if(f==='name'){
+    const s = skuByName[e.target.value];
+    if(s){ Object.assign(rows[i], { name:s.name, hs:s.hs, duty:dutyByHs(s.hs), path:s.path, w:s.w, tara:s.tara, perBox:s.perBox, util:s.util }); }
+    render();
+  }
+});
+$('tbody').addEventListener('click', e=>{
+  const tr = e.target.closest('tr'); if(!tr) return;
+  const i = +tr.dataset.idx;
+  if(e.target.classList.contains('del')){ rows.splice(i,1); if(sel>=rows.length) sel=Math.max(0,rows.length-1); render(); return; }
+  sel = i; render();
+});
+$('addRow').addEventListener('click', ()=>{ rows.push({name:"",hs:"",duty:null,path:"cny",price:0,qty:1,w:0,tara:"—",perBox:1,util:0,markup:1.5,markup0:1.5,status:"draft",machine:"",deal:"",date:"25.06.2026"}); sel=rows.length-1; render(); });
+$('resetBtn').addEventListener('click', ()=>{ rows = buildRows(); sel=0;
+  // вернуть дефолтные ставки/курсы
+  const def={usdByn:3.0,cnyRub:12.8,rubByn:0.0368,usdRub:94,fxBuf:10,comm:18,ins:0.2,freight:1.5,duty:5,utilRate:3,vat:20,minRent:15};
+  Object.entries(def).forEach(([k,v])=> $(k) && ($(k).value=v));
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

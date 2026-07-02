@@ -94,6 +94,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Цикл: поступление → приёмка → контроль → размещение → отгрузка · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты и дела",
+      chat: true,
       items: [
         { title: "Отдел закупок", text: "Поставка по CRM-0156 завтра к 14:00, готовьте зону A", tone: "info", badge: 2 },
         { title: "Производство", text: "Партия №П-441 готова к приёмке на склад", tone: "info", badge: 1 },
@@ -125,6 +126,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Воронка подбора — от создания вакансии до прохождения испытательного срока",
     panel: {
       title: "Чаты и контакты",
+      chat: true,
       items: [
         { title: "Соколова А. (рекрутер)", text: "Смирнова А. подтвердила скрининг на 15:00", tone: "info", badge: 2 },
         { title: "Ковалёв Сергей", text: "Готов прийти на интервью в четверг", tone: "ok" },
@@ -161,6 +163,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Документооборот после продажи · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты",
+      chat: true,
       items: [
         { title: "ООО МеталлПром", text: "Когда планируете отгрузку по 0156?", tone: "info", badge: 1 },
         { title: "Склад", text: "Заказ 0156 собран, готов к отгрузке", tone: "ok" },
@@ -190,6 +193,7 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
     statusNote: "Контроль документов и взыскание · 01.05 – 31.05.2024",
     panel: {
       title: "Чаты и дела",
+      chat: true,
       items: [
         { title: "Бухгалтерия", text: "Подтвердите сумму долга по ООО АльфаМеталл", tone: "info", badge: 1 },
         { title: "ФССП", text: "Исполнительное производство по ИП Сидоров возбуждено", tone: "info" },
@@ -234,6 +238,31 @@ export const FUNNEL_EXTRAS: Record<string, FunnelExtras> = {
       { label: "Средний балл тестов", value: "87%", delta: "+3%" },
       { label: "Сертификатов выдано", value: "24", delta: "+12%" },
       { label: "Завершаемость", value: "76%", delta: "+4%" },
+    ],
+  },
+
+  service: {
+    createLabel: "Создать заявку",
+    kpis: [
+      { label: "Заявок в работе", value: "12", target: "20", note: "60% от плана", percent: 60, tone: "blue" },
+      { label: "Закрыто сегодня", value: "4", target: "8", note: "50% плана", percent: 50, tone: "green" },
+      { label: "SLA выполнен", value: "87%", note: "цель ≥ 90%", percent: 87, tone: "amber" },
+    ],
+    statusNote: "12 заявок в работе · 3 просрочены · 2 ждут ответа",
+    panel: {
+      title: "Активные обращения",
+      tabs: ["Лента", "Клиенты", "Задачи"],
+      items: [
+        { title: "Онбординг: сделка CRM-042", text: "Клиент подключён, ждёт инструкций", tone: "info" },
+        { title: "Рекламация #SR-007", text: "Ожидает ответа клиента 2 дня", tone: "alert", badge: 1 },
+        { title: "Техподдержка #SR-011", text: "Решено, ожидает закрытия", tone: "ok" },
+      ],
+    },
+    summary: [
+      { label: "Всего заявок", value: "38", delta: "+5%" },
+      { label: "Закрыто", value: "26", delta: "+8%" },
+      { label: "SLA", value: "87%", delta: "-2%" },
+      { label: "Среднее время", value: "4.2 ч", delta: "-0.3" },
     ],
   },
 };

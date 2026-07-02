@@ -1,0 +1,12 @@
+#!/bin/sh
+# Блок amend на ОБЩЕЙ ветке: единственный надёжный сигнал amend в git-хуках — здесь
+# source='commit' + sha (см. coordination_hook.prepare_commit_msg). Этот хук МОЖЕТ
+# заблокировать (return!=0) — иначе amend затрёт чужой коммит (авария 2026-06-27).
+# git зовёт: prepare-commit-msg <msg-file> [<source> [<sha>]]
+root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+if [ -x "$root/.venv/Scripts/python.exe" ]; then py="$root/.venv/Scripts/python.exe"
+elif [ -x "$root/.venv/bin/python" ]; then py="$root/.venv/bin/python"
+elif command -v python >/dev/null 2>&1; then py=python
+else py=python3; fi
+"$py" "$root/scripts/coordination_hook.py" prepare-commit-msg "$@"
+exit $?

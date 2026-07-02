@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allowedDeliveryTransitions,
   auditSummary,
   auditVariance,
   bestBid,
+  bidRisk,
   bidSavings,
+  canTransitionDelivery,
   computeScorecardScore,
+  deliveryStatusLabel,
+  importStageLabel,
+  nextImportStage,
   nextRfqStatus,
   quoteTariff,
   rankBids,
@@ -13,9 +19,12 @@ import {
   scoreGrade,
   summarizeShipments,
   tariffWeightPrice,
+  totalFreightByn,
   vehicleFits,
   type AuditItem,
   type Bid,
+  type FreightImport,
+  type FreightShipment,
   type ShipmentLike,
   type TariffRates,
 } from "@/lib/logistics-domain";
@@ -97,6 +106,33 @@ describe("logistics-domain · ставки тендера", () => {
     expect(bidSavings(bids)).toBe(500); // 1200 − 700
     expect(bidSavings([bid({ price: 500 })])).toBe(0);
     expect(bidSavings([])).toBe(0);
+  });
+
+  it("bidRisk: ≥25% ниже медианы при ≥3 ставках → флаг демпинга", () => {
+    const all: Bid[] = [70, 95, 100, 105, 120].map((p, i) =>
+      bid({ carrier_code: String(i), price: p }),
+    );
+    const r = bidRisk(all[0], all);
+    expect(r.median).toBe(100);
+    expect(r.deviationPct).toBe(30);
+    expect(r.isSuspiciouslyCheap).toBe(true);
+  });
+
+  it("bidRisk: 2 ставки — мало для флага даже при сильном отклонении", () => {
+    const all: Bid[] = [bid({ price: 50 }), bid({ price: 100 })];
+    expect(bidRisk(all[0], all).isSuspiciouslyCheap).toBe(false);
+  });
+
+  it("bidRisk: близко к медиане → не демпинг", () => {
+    const all: Bid[] = [90, 95, 105, 110].map((p) => bid({ price: p }));
+    const r = bidRisk(all[0], all);
+    expect(r.deviationPct).toBe(10);
+    expect(r.isSuspiciouslyCheap).toBe(false);
+  });
+
+  it("bidRisk: одна ставка — нет медианы, нет сигналов", () => {
+    const one = bid({ price: 100 });
+    expect(bidRisk(one, [one]).isSuspiciouslyCheap).toBe(false);
   });
 });
 
@@ -191,5 +227,94 @@ describe("logistics-domain · статусы тендера", () => {
     expect(rfqStatusLabel("collecting")).toBe("Сбор ставок");
     expect(rfqStatusLabel("awarded")).toBe("Победитель выбран");
     expect(rfqStatusLabel("weird")).toBe("weird");
+  });
+});
+
+describe("logistics-domain · статусы доставки", () => {
+  it("canTransitionDelivery: разрешённые переходы", () => {
+    expect(canTransitionDelivery("planned", "assigned")).toBe(true);
+    expect(canTransitionDelivery("assigned", "in_transit")).toBe(true);
+    expect(canTransitionDelivery("in_transit", "at_customs")).toBe(true);
+    expect(canTransitionDelivery("at_customs", "delivered")).toBe(true);
+    expect(canTransitionDelivery("in_transit", "delivered")).toBe(true);   // прямой
+    expect(canTransitionDelivery("at_customs", "in_transit")).toBe(true);  // возврат с таможни
+  });
+
+  it("canTransitionDelivery: запрет регресса и из конечного состояния", () => {
+    expect(canTransitionDelivery("delivered", "in_transit")).toBe(false);
+    expect(canTransitionDelivery("delivered", "delivered")).toBe(false);
+    expect(canTransitionDelivery("in_transit", "planned")).toBe(false);
+    expect(canTransitionDelivery("planned", "delivered")).toBe(false);     // через assigned
+    expect(canTransitionDelivery("unknown", "delivered")).toBe(false);
+  });
+
+  it("allowedDeliveryTransitions: список разрешённых следующих", () => {
+    expect(allowedDeliveryTransitions("planned")).toEqual(["assigned"]);
+    expect(allowedDeliveryTransitions("in_transit")).toEqual(["at_customs", "delivered"]);
+    expect(allowedDeliveryTransitions("delivered")).toEqual([]);
+    expect(allowedDeliveryTransitions("unknown")).toEqual([]);
+  });
+
+  it("deliveryStatusLabel: русские подписи", () => {
+    expect(deliveryStatusLabel("in_transit")).toBe("В пути");
+    expect(deliveryStatusLabel("delivered")).toBe("Доставлено");
+    expect(deliveryStatusLabel("alien")).toBe("alien");
+  });
+});
+
+describe("logistics-domain · стадии импорта", () => {
+  it("nextImportStage: продвижение по цепочке, финал стоит на месте", () => {
+    expect(nextImportStage("factory")).toBe("consolidation");
+    expect(nextImportStage("customs")).toBe("warehouse");
+    expect(nextImportStage("warehouse")).toBe("warehouse");
+    expect(nextImportStage("alien")).toBe("alien");
+  });
+
+  it("importStageLabel: русские подписи", () => {
+    expect(importStageLabel("customs")).toBe("Таможня");
+    expect(importStageLabel("warehouse")).toBe("Приёмка на склад");
+    expect(importStageLabel("???")).toBe("???");
+  });
+});
+
+describe("logistics-domain · totalFreightByn (LOG3-8)", () => {
+  // Зеркало сервера: ровно эти суммы летят на finance как freight.cost
+  // (domestic при delivered + amount>0, import при warehouse + amount>0).
+  it("пусто → 0", () => {
+    expect(totalFreightByn([], [])).toBe(0);
+  });
+
+  it("только domestic delivered: суммирует, игнорирует не-delivered и amount≤0", () => {
+    const dom: FreightShipment[] = [
+      { status: "delivered", amount: 100 },
+      { status: "delivered", amount: 250.5 },
+      { status: "in_transit", amount: 1000 }, // не в финансах
+      { status: "delivered", amount: 0 },     // amount=0 — не эмитим
+      { status: "delivered", amount: -5 },    // защита от мусора
+    ];
+    expect(totalFreightByn(dom, [])).toBe(350.5);
+  });
+
+  it("только import warehouse: суммирует, игнорирует не-warehouse и amount≤0", () => {
+    const imp: FreightImport[] = [
+      { stage: "warehouse", amount: 8000 },
+      { stage: "warehouse", amount: 1200.75 },
+      { stage: "in_transit", amount: 5000 },  // ещё в пути — не в финансах
+      { stage: "customs", amount: 9999 },     // на таможне — не в финансах
+      { stage: "warehouse", amount: 0 },      // не эмитим
+    ];
+    expect(totalFreightByn([], imp)).toBe(9200.75);
+  });
+
+  it("оба плеча: domestic + import, ровно сходится с сервером", () => {
+    const dom: FreightShipment[] = [
+      { status: "delivered", amount: 300 },
+      { status: "planned", amount: 1000 },     // не учитываем
+    ];
+    const imp: FreightImport[] = [
+      { stage: "warehouse", amount: 8000 },
+      { stage: "factory", amount: 2000 },      // ещё не дошло
+    ];
+    expect(totalFreightByn(dom, imp)).toBe(8300);
   });
 });

@@ -1,9 +1,19 @@
 "use client";
 
-import { Mail, Phone, Star, User } from "lucide-react";
+import { Mail, Phone, Shield, Star, User } from "lucide-react";
 
+import { SourceTag } from "@/components/source-tag";
 import type { CounterpartyCard } from "@/lib/reference-data";
-import { formatAuditDate } from "@/lib/spravochniki-card";
+import { formatAuditDate, formatTouchTs, provenanceCounts, touchKindMeta } from "@/lib/spravochniki-card";
+
+import { Field } from "./provenance-badge";
+
+/** Происхождение эталона по алиасам: синк из 1С → mdm/1c, из Bitrix → bitrix, иначе MDM/ERP. */
+function counterpartyOrigin(aliases: { source: string }[]): string {
+  if (aliases.some((a) => a.source === "1c")) return "mdm/1c";
+  if (aliases.some((a) => a.source === "bitrix")) return "bitrix";
+  return "mdm";
+}
 
 /** Русское склонение существительного по числу: [1, 2-4, 5+]. */
 function plural(n: number, forms: [string, string, string]): string {
@@ -16,6 +26,10 @@ function plural(n: number, forms: [string, string, string]): string {
 
 export function SpravCard({ card }: { card: CounterpartyCard }) {
   const sourceCount = card.aliases.length;
+  const prov = card.provenance ?? {};
+  const counts = provenanceCounts(prov);
+  const hasProvenance = counts.length > 0;
+  const summary = card.touch_summary;
 
   return (
     <div className="flex-1 overflow-y-auto bg-canvas p-6">
@@ -41,6 +55,9 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
             <span className="mt-0.5 rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               #{card.id}
             </span>
+            <span className="mt-0.5">
+              <SourceTag entity="Контрагент" source={counterpartyOrigin(card.aliases)} unp={card.unp} />
+            </span>
           </div>
         </div>
 
@@ -51,32 +68,33 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
           <div className="space-y-4">
 
             <div className="rounded-2xl bg-surface p-5 shadow-card">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                Реквизиты
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  Реквизиты
+                </p>
+                {hasProvenance && (
+                  <p className="text-[11px] text-faint">справа от поля — источник значения</p>
+                )}
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <p className="text-[12px] text-muted">Наименование</p>
-                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 text-sm text-ink">
-                    {card.name}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[12px] text-muted">УНП</p>
-                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 font-mono text-sm text-ink">
-                    {card.unp ?? "—"}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[12px] text-muted">Статус</p>
-                  <div className="mt-1 rounded-xl bg-sunken px-3 py-2 text-sm">
-                    {card.is_active ? (
+                <Field
+                  className="sm:col-span-2"
+                  label="Наименование"
+                  value={card.name}
+                  prov={prov.name}
+                />
+                <Field label="УНП" value={card.unp ?? "—"} prov={prov.unp} mono />
+                <Field
+                  label="Статус"
+                  prov={prov.is_active}
+                  value={
+                    card.is_active ? (
                       <span className="text-emerald-700">Активен</span>
                     ) : (
                       <span className="text-muted">В архиве</span>
-                    )}
-                  </div>
-                </div>
+                    )
+                  }
+                />
               </div>
             </div>
 
@@ -122,8 +140,37 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
             </div>
           </div>
 
-          {/* Right — Golden record + Слитые дубли */}
+          {/* Right — Доверие к данным + Golden record + Слитые дубли */}
           <div className="space-y-4">
+
+            {hasProvenance && (
+              <div className="rounded-2xl bg-surface p-5 shadow-card">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  Доверие к данным
+                </p>
+                <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
+                  <Shield className="h-4 w-4" />
+                  Источник известен по каждому полю
+                </p>
+                <div className="mt-3 space-y-1.5 text-[12px]">
+                  {counts.map(({ source, meta, count }) => (
+                    <div key={source} className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-muted">
+                        <span aria-hidden>{meta.icon}</span>
+                        {meta.label}
+                      </span>
+                      <span className="font-semibold text-ink">
+                        {count} {plural(count, ["поле", "поля", "полей"])}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 border-t border-line pt-3 text-[11px] text-faint">
+                  Синк из 1С обновляет только незакреплённые поля; правки и реквизиты ЕГР защищены
+                  правилами слияния.
+                </p>
+              </div>
+            )}
 
             <div className="rounded-2xl bg-surface p-5 shadow-card">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -178,6 +225,71 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
             )}
           </div>
         </div>
+
+        {/* 360° — история касаний (M5): рисуется, только если sales-фасад отдал данные.
+            `?.` — старая форма карточки (фронт впереди бэка) без поля touches не роняет SSR. */}
+        {(card.touches?.length ?? 0) > 0 && (
+          <div className="rounded-2xl bg-surface p-5 shadow-card">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                Досье 360° — история касаний
+              </p>
+              {summary && (
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  <span className="rounded-full bg-sunken px-2 py-0.5 text-muted">
+                    📞 {summary.calls} {plural(summary.calls, ["звонок", "звонка", "звонков"])}
+                  </span>
+                  <span className="rounded-full bg-sunken px-2 py-0.5 text-muted">
+                    🤝 {summary.deals} {plural(summary.deals, ["сделка", "сделки", "сделок"])}
+                  </span>
+                  <span className="rounded-full bg-sunken px-2 py-0.5 text-muted">
+                    💬 {summary.messages} {plural(summary.messages, ["сообщение", "сообщения", "сообщений"])}
+                  </span>
+                  {summary.last_contact && (
+                    <span className="rounded-full bg-accent-soft px-2 py-0.5 text-accent-ink">
+                      последний контакт {formatTouchTs(summary.last_contact)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mt-3 space-y-2">
+              {card.touches.map((t) => {
+                const meta = touchKindMeta(t.kind);
+                return (
+                  <div key={t.ref} className="flex items-start gap-3 rounded-xl bg-sunken px-3 py-2">
+                    <span className="mt-0.5 shrink-0 text-[13px]" aria-hidden>
+                      {meta.icon}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-ink">{t.title}</span>
+                        <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">
+                          {meta.label}
+                        </span>
+                        {t.direction && (
+                          <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">
+                            {t.direction === "in" ? "входящий" : t.direction === "out" ? "исходящий" : t.direction}
+                          </span>
+                        )}
+                        {t.channel && (
+                          <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-faint">
+                            {t.channel}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="shrink-0 font-mono text-[12px] text-muted">{formatTouchTs(t.ts)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-[11px] text-faint">
+              Единая картина общения собирается из модуля продаж; источник истины касаний —
+              соответствующий модуль (звонки, сделки, переписка).
+            </p>
+          </div>
+        )}
 
         {/* Audit */}
         <div className="rounded-2xl bg-surface p-5 shadow-card">

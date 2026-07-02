@@ -29,6 +29,10 @@ class Counterparty(Base):
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
     # ссылка дубля на эталон, в который он слит (NULL — самостоятельная запись)
     merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"))
+    # происхождение по полям (field-level provenance): {поле: {"source": ..., "at": ...}}.
+    # Источник КАЖДОГО поля, а не записи целиком → survivorship-движок знает, что синк
+    # вправе перезаписать, а что закреплено за ЕГР/ERP/ручным вводом (M2 дорожной карты).
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class CounterpartyAlias(Base):
@@ -47,6 +51,51 @@ class CounterpartyAlias(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class SurvivorshipRule(Base):
+    """Правило слияния по полю — «кто побеждает» при конфликте источников (M2).
+
+    Survivorship как **данные, а не код**: для пары (сущность, поле) задаётся стратегия и,
+    для ``source_priority``, упорядоченный список источников. Применяется при импорте из
+    внешних систем и при merge дублей. Поля без своего правила берут дефолт ``non_empty_wins``.
+    Так синк из 1С не затирает то, что закреплено за ЕГР/ERP/ручным вводом.
+    """
+
+    __tablename__ = "survivorship_rule"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(32))  # "counterparty" | "sku" | ...
+    field: Mapped[str] = mapped_column(String(64))
+    # стратегия: source_priority | manual_only | most_recent | non_empty_wins
+    strategy: Mapped[str] = mapped_column(String(32))
+    # для source_priority — упорядоченный список источников ["egr","erp","manual","1c","bitrix"]
+    source_priority: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+
+
+class SyncLink(Base):
+    """Связь записи ERP с внешней системой + статус выгрузки (M3, опция B плана).
+
+    Одна таблица на любую сущность (``entity_type``) и любую внешнюю систему (``system``):
+    хранит внешний id (``external_ref``, NULL пока не выгружено), происхождение (``origin``),
+    направление и состояние очереди. ``CounterpartyAlias`` остаётся для MDM-провенанса/дедупа,
+    а роль «ссылка в 1С + статус выгрузки» — здесь. ERP — система-истина: запись, рождённая
+    в ERP (``origin="erp"``), ставится в очередь на выгрузку и доезжает в 1С с подтверждением.
+    """
+
+    __tablename__ = "sync_link"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(32))  # "counterparty" | "sku"
+    entity_id: Mapped[int] = mapped_column()
+    system: Mapped[str] = mapped_column(String(32), default="1c", server_default="1c")
+    external_ref: Mapped[str | None] = mapped_column(String(128))  # Ref_Key в 1С, NULL до выгрузки
+    origin: Mapped[str] = mapped_column(String(16))  # "erp" | "1c" | "bitrix"
+    direction: Mapped[str] = mapped_column(String(8), default="out", server_default="out")  # in|out
+    # local — только в ERP; pending — в очереди; synced — выгружено; error — ошибка
+    state: Mapped[str] = mapped_column(String(16), default="local", server_default="local")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    error_text: Mapped[str | None] = mapped_column(String(255))
+
+
 class Contact(Base):
     """Контактное лицо контрагента."""
 
@@ -61,7 +110,13 @@ class Contact(Base):
 
 
 class Sku(Base):
-    """Единица номенклатуры (товарная позиция)."""
+    """Единица номенклатуры (товарная позиция) — мастер-данные (golden record).
+
+    ERP — система-источник номенклатуры; код — natural key (не зависит от 1С). «Горячие»
+    поля, нужные продавцу/расчёту в момент сделки (вес, ТН ВЭД, срок годности) — типизированные
+    колонки; длинный хвост характеристик — в ``attributes`` JSONB (концепция §4.3). Транзакционные
+    данные (партии, landed cost, остатки) НЕ здесь — читаются через фасады ядра (CQRS, §6).
+    """
 
     __tablename__ = "sku"
 
@@ -71,10 +126,20 @@ class Sku(Base):
     unit: Mapped[str] = mapped_column(String(16), default="шт", server_default="шт")
     # группа (категория) номенклатуры — ссылка на иерархический справочник (public)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id"))
-    # переменные характеристики (цвет/размер/тех.параметры) — JSONB, не EAV.
-    # На масштабе каталога: «горячие» атрибуты выносятся в типизированные колонки,
-    # хвост остаётся здесь; фасетный поиск млн+ SKU — через внешний search-движок.
+    # «горячие» поля (M4): вес/объём для распределения фрахта, ТН ВЭД для пошлины (→ landed cost),
+    # НДС-код (свой ∨ наследуется от группы), срок годности в днях для FEFO-алерта (<1 года).
+    # Nullable — заполняются по мере данных.
+    weight_kg: Mapped[float | None] = mapped_column()
+    volume_m3: Mapped[float | None] = mapped_column()  # объём, м³ — разнесение фрахта по объёму
+    tnved_code: Mapped[str | None] = mapped_column(String(16))  # код ТН ВЭД (пошлина из справочника)
+    vat_code: Mapped[str | None] = mapped_column(String(16))  # свой код НДС (→ ref_vat_rate); None → от группы
+    shelf_life_days: Mapped[int | None] = mapped_column()  # срок годности; None — бессрочно
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")  # архив, не удаление
+    # переменные характеристики (цвет/размер упаковки/палета/тех.параметры) — JSONB, не EAV;
+    # фасетный поиск млн+ SKU — через внешний search-движок.
     attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # происхождение по полям (field-level provenance, M2) — единый слой с Counterparty.
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class User(Base):

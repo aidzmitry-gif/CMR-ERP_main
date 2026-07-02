@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Справочник — таблица записей (превью)</title>
+  <!-- ════════════════════════════════════════════════════════════════════
+       Единый ШАБЛОН экрана справочника: spravochniki-table.html?ref=КЛЮЧ
+       Рисует ЛЮБОЙ справочник по конфигу REFS (колонки + демо-строки).
+       Так у каждого пункта дерева есть свой экран без 42 копий кода.
+       Особые (иерархия/версионные/карточки) ведут на свои экраны.
+       Создано Claude (Opus 4.8) автономно. Демо-данные BYN, 2 темы.
+       ════════════════════════════════════════════════════════════════════ -->
+  <script>(function(){try{if(localStorage.getItem('sprav-theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode:'class', theme:{ extend:{
+      colors:{ canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+      boxShadow:{ card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+    } } };
+  </script>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    html.dark{color-scheme:dark}
+    html.dark body{background:#0B1220;color:#E5EAF3}
+    html.dark .bg-canvas{background:#0B1220 !important}
+    html.dark .bg-white{background:#111A2E !important}
+    html.dark .bg-slate-50{background:#0E1729 !important}
+    html.dark .bg-slate-100{background:#16202F !important}
+    html.dark .text-ink{color:#E5EAF3 !important}
+    html.dark .text-muted{color:#94A3B8 !important}
+    html.dark .text-slate-700{color:#CBD5E1 !important}
+    html.dark .text-slate-600{color:#AEB9C9 !important}
+    html.dark .text-slate-500{color:#94A3B8 !important}
+    html.dark .text-slate-400{color:#64748B !important}
+    html.dark .text-slate-300{color:#475569 !important}
+    html.dark .ring-slate-200{--tw-ring-color:#1E293B !important}
+    html.dark .border-slate-100,html.dark .border-slate-200{border-color:#1E293B !important}
+    html.dark .divide-slate-50>*+*,html.dark .divide-slate-100>*+*{border-color:#1E293B !important}
+    html.dark .bg-emerald-50{background:#16271F !important} html.dark .text-emerald-700{color:#34D399 !important}
+    html.dark .bg-amber-50{background:#2A2114 !important} html.dark .text-amber-700{color:#FBBF24 !important}
+    html.dark .bg-blue-50{background:#16233F !important} html.dark .text-blue-700{color:#7FA8FF !important}
+    html.dark .bg-brand-100{background:#16233F !important} html.dark .text-brand-600{color:#9DBEFF !important}
+    .theme-tgl{position:fixed;top:14px;right:16px;z-index:50;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #e2e8f0;color:#64748b;border-radius:10px;padding:7px 12px;font:600 12.5px ui-sans-serif,system-ui;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+    html.dark .theme-tgl{background:#111A2E;border-color:#1E293B;color:#94A3B8}
+  </style>
+  <script>
+    function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('sprav-theme',t);}catch(e){}}
+    function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+    window.addEventListener('DOMContentLoaded',function(){try{if(localStorage.getItem('sprav-theme')==='dark')applyTheme('dark');}catch(e){}});
+  </script>
+<style>/* THEMEBTN-V2 — заметная кнопка темы */
+.theme-tgl{position:fixed !important;top:16px;right:18px;z-index:9999;
+  background:#1E5EFF !important;border:1px solid #1E5EFF !important;color:#fff !important;
+  border-radius:11px;padding:9px 15px;font:700 13px ui-sans-serif,system-ui;cursor:pointer;
+  box-shadow:0 6px 18px rgba(30,94,255,.35) !important}
+.theme-tgl:hover{background:#1545CC !important}
+html.dark .theme-tgl{background:#3B82F6 !important;border-color:#3B82F6 !important;color:#06101F !important;
+  box-shadow:0 6px 18px rgba(59,130,246,.4) !important}
+</style>
+</head>
+<body class="bg-canvas text-ink">
+  <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+
+  <div class="mx-auto max-w-[1100px] space-y-4 p-6">
+    <a href="spravochniki-preview.html" class="text-[12px] text-muted hover:text-brand-600">← Все справочники (реестр)</a>
+
+    <div>
+      <h1 id="ttl" class="text-xl font-bold text-ink">Справочник</h1>
+      <p id="sub" class="mt-1 text-sm text-muted"></p>
+    </div>
+
+    <div class="rounded-2xl bg-white p-0 shadow-card overflow-hidden">
+      <!-- шапка справочника -->
+      <div class="border-b border-slate-100 px-5 py-4">
+        <div class="flex flex-wrap items-center gap-2" id="meta"></div>
+      </div>
+      <!-- тулбар -->
+      <div class="flex flex-wrap items-center gap-2 px-5 py-3">
+        <div class="flex min-w-[260px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+          <span class="text-slate-400">🔎</span>
+          <input id="q" class="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Поиск по коду или наименованию…" />
+        </div>
+        <button class="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white shadow-card" data-demo="Добавить запись">+ Добавить</button>
+        <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-card ring-1 ring-slate-200" data-demo="Показать архив">Показать архив</button>
+        <button class="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-400 shadow-card ring-1 ring-slate-200" onclick="location.href='spravochniki-import-1c-preview.html'">↧ Импорт из 1С</button>
+      </div>
+      <!-- таблица -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr id="thead" class="border-y border-slate-100 bg-slate-50/60 text-left text-[11px] uppercase tracking-wide text-slate-400"></tr></thead>
+          <tbody id="tbody" class="divide-y divide-slate-50"></tbody>
+        </table>
+      </div>
+      <div class="border-t border-slate-100 px-5 py-3 text-[12px] text-muted" id="foot"></div>
+    </div>
+
+    <p class="text-xs text-slate-400">Витрина-таблица справочника (registry pattern): данные у владельца, архив вместо удаления, правки — в аудит. Демо-данные. Создано Claude.</p>
+  </div>
+
+<script>
+/* ── Конфиг всех справочников: колонки + демо-строки. Ключи = data-ref из дерева. ── */
+var REFS = {
+  units:{t:"Единицы измерения",d:"Система · ядро · схема public",cols:["Код","Наименование","Краткое","Статус"],rows:[["796","Штука","шт","Активен"],["166","Килограмм","кг","Активен"],["006","Метр","м","Активен"],["112","Литр","л","Активен"]]},
+  currencies:{t:"Валюты",d:"Система · ISO 4217",cols:["Код","Наименование","Символ","Статус"],rows:[["BYN","Бел. рубль","Br","Активен"],["USD","Доллар США","$","Активен"],["EUR","Евро","€","Активен"],["CNY","Юань","¥","Активен"],["RUB","Рос. рубль","₽","Активен"]]},
+  countries:{t:"Страны",d:"Система · ISO 3166",cols:["Код","Наименование","Альфа-3","Статус"],rows:[["BY","Беларусь","BLR","Активен"],["RU","Россия","RUS","Активен"],["CN","Китай","CHN","Активен"],["DE","Германия","DEU","Активен"]]},
+  banks:{t:"Банки",d:"Система · БИК/SWIFT",cols:["БИК","Наименование","SWIFT","Статус"],rows:[["153001795","АСБ Беларусбанк","AKBBBY2X","Активен"],["153001749","Приорбанк","PJCBBY2X","Активен"],["153001369","БПС-Сбербанк","BPSBBY2X","Активен"],["153001270","Белагропромбанк","BAPBBY2X","Активен"]]},
+  languages:{t:"Языки",d:"Система",cols:["Код","Наименование","Статус"],rows:[["ru","Русский","Активен"],["be","Белорусский","Активен"],["en","Английский","Активен"]]},
+  timezones:{t:"Часовые пояса",d:"Система",cols:["Код","Наименование","Смещение","Статус"],rows:[["Europe/Minsk","Минск","UTC+3","Активен"],["Europe/Moscow","Москва","UTC+3","Активен"],["Asia/Shanghai","Шанхай","UTC+8","Активен"]]},
+  contacts:{t:"Контакты",d:"Общие · мастер-данные",cols:["Код","ФИО","Телефон","E-mail","Статус"],rows:[["CT-0012","Петров А.И.","+375 29 111-22-33","petrov@x.by","Активен"],["CT-0034","Сидорова М.К.","+375 33 444-55-66","sid@x.by","Активен"]]},
+  bank_accounts:{t:"Банковские счета",d:"Общие · реквизиты",cols:["Счёт (IBAN)","Владелец","Банк","Валюта","Статус"],rows:[["BY12 AKBB 3012...","ООО «Ромашка»","Беларусбанк","BYN","Активен"],["BY30 PJCB 3012...","ОАО «БелАвтоТех»","Приорбанк","USD","Активен"]]},
+  contracts:{t:"Договоры (рамочные)",d:"Общие · документы",cols:["№ договора","Контрагент","Тип","Действует до","Статус"],rows:[["Д-2026-014","ОАО «БелАвтоТех»","Поставка","31.12.2026","Активен"],["Д-2025-220","ООО «ЭнергоСбыт»","Дилерский","30.06.2026","Активен"]]},
+  funnel_stages:{t:"Стадии воронки",d:"Продажи · классификатор",cols:["Код","Наименование","Порядок","Вероятность","Статус"],rows:[["new","Новый лид","1","10%","Активен"],["qual","Квалификация","2","25%","Активен"],["offer","КП отправлено","3","50%","Активен"],["won","Успех","9","100%","Активен"]]},
+  loss_reasons:{t:"Причины отказа",d:"Продажи · классификатор",cols:["Код","Наименование","Группа","Статус"],rows:[["price","Дорого","Цена","Активен"],["term","Долгий срок","Логистика","Активен"],["comp","Ушёл к конкуренту","Конкуренция","Активен"]]},
+  deal_types:{t:"Типы сделок",d:"Продажи · классификатор",cols:["Код","Наименование","Статус"],rows:[["new","Новый клиент","Активен"],["repeat","Повторная","Активен"],["project","Проектная","Активен"]]},
+  lead_sources:{t:"Источники лидов",d:"Продажи · классификатор",cols:["Код","Наименование","Канал","Статус"],rows:[["site","Сайт","Онлайн","Активен"],["call","Входящий звонок","Телефон","Активен"],["ref","Рекомендация","Сарафан","Активен"]]},
+  warehouses:{t:"Склады",d:"Склад · истина остатка — 1С",cols:["Код","Наименование","Адрес","Тип","Статус"],rows:[["WH-01","Главный (Минск)","ул. Промышленная, 7","Хранение","Активен"],["WH-02","Транзит","—","Виртуальный","Активен"],["WH-03","Брак/возврат","ул. Промышленная, 7","Изолятор","Активен"]]},
+  zones:{t:"Зоны",d:"Склад · топология",cols:["Код","Наименование","Склад","Назначение","Статус"],rows:[["A","Хранение A","Главный","Палетное","Активен"],["B","Подбор B","Главный","Штучный отбор","Активен"],["QC","Контроль","Главный","Приёмка/ОТК","Активен"]]},
+  cells:{t:"Ячейки",d:"Склад · адресное хранение",cols:["Адрес","Зона","Тип","Занятость","Статус"],rows:[["A-12-03","A","Палетоместо","занята","Активен"],["B-04-11","B","Полка","занята","Активен"],["A-12-04","A","Палетоместо","свободна","Активен"]]},
+  op_types:{t:"Типы операций",d:"Склад · классификатор",cols:["Код","Наименование","Влияние на остаток","Статус"],rows:[["in","Приход","+","Активен"],["out","Расход","−","Активен"],["move","Перемещение","0","Активен"],["inv","Инвентаризация","±","Активен"]]},
+  batch_statuses:{t:"Статусы партий",d:"Склад/Закупки · классификатор",cols:["Код","Наименование","Группа","Статус"],rows:[["transit","В пути","Логистика","Активен"],["customs","Таможня","Логистика","Активен"],["accepted","Принята","Склад","Активен"],["quarantine","Карантин ОТК","Качество","Активен"]]},
+  accounts:{t:"План счетов",d:"Финансы · иерархия (см. отдельный экран дерева)",cols:["Счёт","Наименование","Тип","Статус"],rows:[["10","Материалы","Актив","Активен"],["41","Товары","Актив","Активен"],["60","Расчёты с поставщиками","Активно-пассивный","Активен"],["90","Доходы и расходы","Результат","Активен"]]},
+  cost_items:{t:"Статьи затрат/доходов",d:"Финансы · классификатор",cols:["Код","Наименование","Тип","Статус"],rows:[["frt","Фрахт","Затраты","Активен"],["duty","Пошлина","Затраты","Активен"],["rev","Выручка","Доходы","Активен"]]},
+  cfo:{t:"ЦФО",d:"Финансы · иерархия",cols:["Код","Наименование","Родитель","Статус"],rows:[["00","Компания","—","Активен"],["10","Отдел продаж","00","Активен"],["20","Закупки","00","Активен"]]},
+  projects:{t:"Проекты / направления",d:"Финансы · аналитика",cols:["Код","Наименование","Ответственный","Статус"],rows:[["P-АКБ","Аккумуляторы","Петров А.","Активен"],["P-СЭС","Солнечные станции","Сидорова М.","Активен"]]},
+  doc_types:{t:"Типы документов",d:"Общие · классификатор",cols:["Код","Наименование","Модуль","Статус"],rows:[["inv","Счёт","Продажи","Активен"],["wb","Накладная","Склад","Активен"],["gtd","ГТД","Закупки","Активен"]]},
+  supplier_types:{t:"Типы поставщиков",d:"Закупки · классификатор",cols:["Код","Наименование","Статус"],rows:[["factory","Завод (Китай)","Активен"],["trader","Трейдер","Активен"],["local","Локальный","Активен"]]},
+  payment_terms:{t:"Условия оплаты",d:"Закупки/Продажи · классификатор",cols:["Код","Наименование","Дней отсрочки","Предоплата %","Статус"],rows:[["prepay","100% предоплата","0","100","Активен"],["net30","Net 30","30","0","Активен"],["net60","Net 60","60","0","Активен"],["3070","30% предоплата + 70% по факту","0","30","Активен"]]},
+  lead_times:{t:"Сроки поставки (lead time)",d:"Закупки · справочник",cols:["Код","Наименование","Дней","Способ","Статус"],rows:[["sea","Море (Китай)","45","Контейнер","Активен"],["air","Авиа","12","Самолёт","Активен"],["local","Локально","3","Авто","Активен"]]},
+  certifications:{t:"Сертификации",d:"Закупки/Качество · справочник",cols:["Код","Наименование","Орган","Действует","Статус"],rows:[["un383","UN38.3","Транспорт ЛИА","да","Активен"],["iec62619","IEC 62619","Безопасность","да","Активен"],["eac","ЕАС / ТР ТС","Таможенный союз","да","Активен"]]},
+  incoterms:{t:"Инкотермс",d:"Закупки/Логистика · ICC 2020",cols:["Код","Наименование","Переход рисков","Статус"],rows:[["FOB","Free On Board","Порт отгрузки","Активен"],["CIF","Cost Insurance Freight","Порт отгрузки (риск); фрахт до назначения","Активен"],["EXW","Ex Works","Склад продавца","Активен"],["DAP","Delivered At Place","Место назначения","Активен"]]},
+  bom:{t:"BOM / спецификации",d:"Производство · иерархия (см. экран дерева)",cols:["Код","Изделие","Версия","Позиций","Статус"],rows:[["BOM-АКБ48","Батарея 48V 304Ah","v3","16","Активен"],["BOM-BMS","BMS-сборка 16S","v2","8","Активен"]]},
+  routings:{t:"Маршруты и операции",d:"Производство · техпроцесс",cols:["Код","Наименование","Операций","Центр","Статус"],rows:[["RT-сборка","Сборка батареи","6","Сборочный","Активен"],["RT-тест","Тестирование","3","ОТК","Активен"]]},
+  norms:{t:"Нормы",d:"Производство · нормо-часы",cols:["Код","Операция","Норма","Ед.","Статус"],rows:[["N-весовая","Сварка шин","0,8","н-час","Активен"],["N-тест","Прогон ёмкости","2,5","н-час","Активен"]]},
+  work_centers:{t:"Центры обработки",d:"Производство · ресурсы",cols:["Код","Наименование","Тип","Смен","Статус"],rows:[["WC-01","Сборочный участок","Ручной","2","Активен"],["WC-02","Стенд тестирования","Автомат","1","Активен"]]},
+  positions:{t:"Должности",d:"HR · классификатор",cols:["Код","Наименование","Подразделение","Статус"],rows:[["sales-mgr","Менеджер по продажам","Отдел продаж","Активен"],["rop","РОП","Отдел продаж","Активен"],["buyer","Закупщик","Закупки","Активен"]]},
+  orgstructure:{t:"Оргструктура",d:"HR · иерархия (см. экран дерева)",cols:["Код","Подразделение","Родитель","Руководитель","Статус"],rows:[["00","Компания","—","Харькович Д.С.","Активен"],["10","Отдел продаж","00","Петров А.","Активен"],["20","Закупки","00","Иванова Е.","Активен"]]},
+  accrual_types:{t:"Типы начислений",d:"HR · ЗП",cols:["Код","Наименование","Тип","Статус"],rows:[["salary","Оклад","Постоянное","Активен"],["bonus","Премия (% от ВП)","Переменное","Активен"],["kpi","KPI-бонус","Переменное","Активен"]]},
+  dismissal_reasons:{t:"Причины увольнения",d:"HR · классификатор",cols:["Код","Наименование","Группа","Статус"],rows:[["own","По собственному","Добровольно","Активен"],["agree","По соглашению","Соглашение","Активен"]]},
+  carriers:{t:"Перевозчики",d:"Логистика · контрагенты",cols:["Код","Наименование","Вид","Рейтинг","Статус"],rows:[["maersk","Maersk","Море","A","Активен"],["dhl","DHL","Авиа/курьер","A","Активен"],["local-auto","Минск-Авто","Авто РБ","B","Активен"]]},
+  tariffs:{t:"Тарифы",d:"Логистика · версионный (см. экран версий)",cols:["Код","Направление","Ставка","Ед.","Действует с","Статус"],rows:[["sea-40hc","Шэньчжэнь→Минск","2 800 $","40'HC","01.06.2026","Активен"],["air-kg","Авиа Китай→Минск","6,5 $","кг","01.06.2026","Активен"]]},
+  vehicle_types:{t:"Типы ТС",d:"Логистика · классификатор",cols:["Код","Наименование","Грузоп.","Объём","Статус"],rows:[["40hc","Контейнер 40' HC","26 т","76 м³","Активен"],["20dv","Контейнер 20'","21 т","33 м³","Активен"],["truck","Фура","20 т","82 м³","Активен"]]},
+  delivery_routes:{t:"Маршруты доставки",d:"Логистика · маршруты",cols:["Код","Наименование","Плечо","Срок","Статус"],rows:[["cn-by-sea","Шэньчжэнь→Гамбург→Минск","море+авто","45 дн","Активен"],["cn-by-rail","Китай→Минск (ж/д)","ж/д","22 дн","Активен"]]},
+  case_types:{t:"Типы обращений",d:"Сервис · классификатор",cols:["Код","Наименование","Приоритет","Статус"],rows:[["warranty","Гарантия","Высокий","Активен"],["consult","Консультация","Низкий","Активен"],["return","Возврат","Средний","Активен"]]},
+  sla:{t:"SLA",d:"Сервис · регламенты",cols:["Код","Наименование","Реакция","Решение","Статус"],rows:[["std","Стандарт","4 ч","2 дн","Активен"],["vip","VIP-клиент","1 ч","8 ч","Активен"]]},
+  defect_categories:{t:"Категории неисправностей",d:"Сервис · иерархия (см. экран дерева)",cols:["Код","Наименование","Группа","Статус"],rows:[["cell","Деградация ячейки","Аппаратные","Активен"],["bms","Сбой BMS","Электроника","Активен"],["mech","Механическое повреждение","Корпус","Активен"]]},
+  channels:{t:"Каналы",d:"Маркетинг · классификатор",cols:["Код","Наименование","Тип","Статус"],rows:[["seo","Органика (SEO)","Онлайн","Активен"],["ppc","Контекст","Платный","Активен"],["tg","Telegram","Соцсети","Активен"]]},
+  campaigns:{t:"Кампании",d:"Маркетинг · кампании",cols:["Код","Наименование","Канал","Бюджет","Статус"],rows:[["q2-akb","Q2 Аккумуляторы","Контекст","8 000 Br","Активен"],["spring-ses","Весна СЭС","SEO","0 Br","Активен"]]},
+  segments:{t:"Сегменты",d:"Маркетинг · аудитории",cols:["Код","Наименование","Размер","Статус"],rows:[["b2b-energy","B2B энергетика","142","Активен"],["installers","Монтажники","87","Активен"]]},
+  utm_sources:{t:"UTM-источники",d:"Маркетинг · трекинг",cols:["Код","Source","Medium","Статус"],rows:[["google-cpc","google","cpc","Активен"],["yandex-cpc","yandex","cpc","Активен"],["tg-smm","telegram","social","Активен"]]}
+};
+
+function statusBadge(v){
+  var s=(''+v).toLowerCase();
+  if(s.indexOf('актив')>=0) return '<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">'+v+'</span>';
+  if(s.indexOf('архив')>=0) return '<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">'+v+'</span>';
+  return v;
+}
+function getParam(n){return new URLSearchParams(location.search).get(n);}
+
+(function(){
+  var key=getParam('ref')||'units';
+  var r=REFS[key];
+  if(!r){ document.getElementById('ttl').textContent='Справочник не найден'; document.getElementById('sub').textContent='Ключ «'+key+'» отсутствует в конфиге.'; return; }
+  document.title=r.t+' — справочник';
+  document.getElementById('ttl').textContent=r.t;
+  document.getElementById('sub').textContent=r.d;
+  document.getElementById('meta').innerHTML=
+    '<span class="text-base font-bold text-ink">'+r.t+'</span>'+
+    '<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">/refs/'+key+'</span>'+
+    '<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">🤖 в каталоге AI</span>'+
+    '<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">права: refs.view · refs.edit</span>';
+  // заголовки
+  var th=r.cols.map(function(c){return '<th class="px-5 py-2 font-semibold">'+c+'</th>';}).join('')+'<th class="px-3 py-2"></th>';
+  document.getElementById('thead').innerHTML=th;
+  // строки
+  var lastCol=r.cols.length-1;
+  var body=r.rows.map(function(row){
+    var tds=row.map(function(cell,i){
+      var cls='px-5 py-2.5 '+(i===0?'font-mono text-[13px] text-slate-500':'text-slate-600');
+      var val=(i===lastCol)?statusBadge(cell):cell;
+      return '<td class="'+cls+'">'+val+'</td>';
+    }).join('');
+    return '<tr class="hover:bg-slate-50/60 cursor-pointer" data-demo="Открыть запись">'+tds+'<td class="px-3 py-2.5 text-right text-slate-300">⋯</td></tr>';
+  }).join('');
+  document.getElementById('tbody').innerHTML=body;
+  document.getElementById('foot').textContent='Записей: '+r.rows.length+' · архив вместо удаления · правки пишутся в аудит. Демо-данные.';
+})();
+
+/* демо-тост */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);background:#0f172a;color:#f1f5f9;font:600 13px ui-sans-serif,system-ui;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-demo],button,a[href="#"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(el.tagName==='A')e.preventDefault();
+    var label=(el.getAttribute('data-demo')||el.textContent||'').trim().slice(0,40)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+</body>
+</html>

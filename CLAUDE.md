@@ -97,6 +97,19 @@ ruff check .                      # линт (line-length 100, py312, isort)
   Поэтому локальный `main` обгоняет `origin/main` на чужие незапушенные коммиты. **Правило пуша:**
   пушить ТОЛЬКО свой коммит — cherry-pick его на чистую ветку от `origin/main` (через временный
   worktree), не утаскивая чужие коммиты. Push/коммит — только по явной просьбе пользователя.
+- **🔴 НИКАКОГО `git commit --amend` / `reset` / `rebase` на ОБЩЕЙ ветке** (`main`,
+  `sales-2.0-redesign`, `theme/dark-mode-cd`). Несколько сессий коммитят в неё разом → HEAD
+  дрейфует под тобой → amend затрёт ЧУЖОЙ коммит (так и случилось 2026-06-27: аменд снёс коммит
+  CRM-сессии, чинил через `reset --soft` + reflog). Всегда делай **НОВЫЙ** коммит. Гард в
+  `prepare-commit-msg`-хуке блокирует amend на общей ветке (обход, если HEAD точно твой:
+  `AIOS_ALLOW_AMEND=1 git commit --amend`). **Лучше — своя ветка/worktree на сессию**
+  (`git worktree add ../_wt_<полоса> -b sales-2.0-<полоса>`): HEAD не дрейфует, amend безопасен,
+  пуш — cherry-pick своего на чистую ветку от origin (правило выше).
+- **Git-хуки координации** (`.githooks/`, `core.hooksPath` уже настроен): `pre-commit`/`post-commit`/
+  `pre-push` (advisory: журнал `coordination/.activity.local.md` + флаги хотспот/миграция/событие
+  шины/субмодуль) и `prepare-commit-msg` (блок amend на общей ветке). Логика — `scripts/coordination_hook.py`.
+  ПЕРЕД коммитом в общую ветку: `git status` — staged ТОЛЬКО свои файлы (`git add` по именам, НЕ `add .`);
+  `git log -1` — HEAD твой? Сверься с `coordination/ACTIVE-SESSIONS.md` (полосы/хотспоты/счётчик миграций).
 - **🗺️ Карта связей — [coordination/DEPENDENCY-MAP.md](coordination/DEPENDENCY-MAP.md).** Сверяться
   ПЕРЕД параллельной работой: граф межмодульных событий, shared-kernel данные, 4 файла-хотспота
   (`config/settings.py`, `config/modules.py`, `core/services/__init__.py`, `core/db/base.py`),
@@ -117,71 +130,3 @@ ruff check .                      # линт (line-length 100, py312, isort)
 - Путь проекта содержит пробелы и кириллическую «С» в «Сlaude» — **всегда заключать в кавычки**.
 - Coverage гоняется с `concurrency = ["thread","greenlet"]` (async-мост SQLAlchemy) — не трогать.
 - Тест-маркеры: `unit` (без I/O), `api` (httpx ASGI на SQLite), `integration` (Postgres через testcontainers).
-
-
-<!-- cloude-code-toolbox:mcp-skills-awareness-begin -->
-
-### MCP & Skills awareness (Cloude Code ToolBox)
-
-_Last synced: 2026-06-11T17:06:06.355Z._
-
-- **Full report:** `.claude/cloude-code-toolbox-mcp-skills-awareness.md` in this workspace (auto-overwritten on each scan). Use it as ground truth for configured servers and skill folders.
-- **MCP:** For **live tools** in Claude Code, enable the matching server via `/mcp`. Servers are configured in `~/.claude.json` (user) and `.mcp.json` (project).
-- **When the user’s task matches a server** (e.g. Confluence work and a **Confluence** / **Atlassian** MCP is listed), **prefer that server id** and plan on tool use—not only file search.
-- **Skills:** Folders below contain `SKILL.md`; attach or cite paths in chat when relevant.
-
-#### Workspace MCP
-
-- `d:\6 Проекты\CRM ERP\Сlaude CRM - проект\.mcp.json` _(workspace: Сlaude CRM - проект)_ — _file missing_
-
-_No active workspace servers in mcp.json._
-
-#### User MCP
-
-- `C:\Users\aidzm\.claude.json` — _no servers defined_
-
-_No active user-scoped servers in mcp.json._
-
-#### Project skills
-
-- **orkestrator-lead** — `d:\6 Проекты\CRM ERP\Сlaude CRM - проект\.claude\skills\orkestrator-lead` — OrkestratorLEAD — оркестратор параллельных Claude-воркеров для этого проекта (CRM ERP, Windows). Используй, когда пользователь хочет распараллелить большую задачу, разбить её на подзадачи и гонять несколько воркеров; зап
-
-#### User skills
-
-- **algorithmic-art** — `C:\Users\aidzm\.claude\skills\algorithmic-art` — Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. C
-
-- **brand-guidelines** — `C:\Users\aidzm\.claude\skills\brand-guidelines` — Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design 
-
-- **canvas-design** — `C:\Users\aidzm\.claude\skills\canvas-design` — Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs
-
-- **claude-api** — `C:\Users\aidzm\.claude\skills\claude-api` — |-
-
-- **doc-coauthoring** — `C:\Users\aidzm\.claude\skills\doc-coauthoring` — Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users ef
-
-- **docx** — `C:\Users\aidzm\.claude\skills\docx` — Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', or requests to produce professional documen
-
-- **frontend-design** — `C:\Users\aidzm\.claude\skills\frontend-design` — Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.
-
-- **internal-comms** — `C:\Users\aidzm\.claude\skills\internal-comms` — A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status 
-
-- **karpathy-guidelines** — `C:\Users\aidzm\.claude\skills\karpathy-guidelines` — Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
-
-- **mcp-builder** — `C:\Users\aidzm\.claude\skills\mcp-builder` — Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, 
-
-- **pdf** — `C:\Users\aidzm\.claude\skills\pdf` — Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding w
-
-- **pptx** — `C:\Users\aidzm\.claude\skills\pptx` — Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even 
-
-- **skill-creator** — `C:\Users\aidzm\.claude\skills\skill-creator` — Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill pe
-
-- **slack-gif-creator** — `C:\Users\aidzm\.claude\skills\slack-gif-creator` — Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like "make me a GIF of X doing Y for 
-
-- **theme-factory** — `C:\Users\aidzm\.claude\skills\theme-factory` — Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creatin
-
-- **web-artifacts-builder** — `C:\Users\aidzm\.claude\skills\web-artifacts-builder` — Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or s
-
-- **webapp-testing** — `C:\Users\aidzm\.claude\skills\webapp-testing` — Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.
-
-- **xlsx** — `C:\Users\aidzm\.claude\skills\xlsx` — Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computi
-
-<!-- cloude-code-toolbox:mcp-skills-awareness-end -->

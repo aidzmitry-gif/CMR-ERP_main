@@ -4,7 +4,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qs, parse_qsl, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
+from core.services import sync_outbound
 from core.services.auth import require_permission
 from modules.integrations import telephony
 from modules.integrations.models import StockItem
@@ -85,6 +86,30 @@ def _check_intake_token(core: Core, params: dict) -> None:
         logger.warning("intake: приём без AIOS_INTAKE_WEBHOOK_TOKEN — открыт")
 
 
+def _extract_utm(params: dict) -> dict[str, str]:
+    """UTM из явных полей формы или из landing_url / referrer."""
+    out = {
+        "utm_source": str(params.get("utm_source") or params.get("utmSource") or "").strip(),
+        "utm_medium": str(params.get("utm_medium") or params.get("utmMedium") or "").strip(),
+        "utm_campaign": str(params.get("utm_campaign") or params.get("utmCampaign") or "").strip(),
+        "landing_url": str(params.get("landing_url") or params.get("landingUrl") or params.get("page_url") or "").strip(),
+    }
+    if out["utm_source"] and out["utm_campaign"]:
+        return out
+    for key in ("landing_url", "page_url", "referrer", "url"):
+        raw = str(params.get(key) or "").strip()
+        if not raw:
+            continue
+        qs = parse_qs(urlparse(raw).query)
+        out["landing_url"] = out["landing_url"] or raw
+        out["utm_source"] = out["utm_source"] or (qs.get("utm_source", [""])[0] or "")
+        out["utm_medium"] = out["utm_medium"] or (qs.get("utm_medium", [""])[0] or "")
+        out["utm_campaign"] = out["utm_campaign"] or (qs.get("utm_campaign", [""])[0] or "")
+        if out["utm_source"]:
+            break
+    return out
+
+
 def _parse_sender(s: str) -> tuple[str, str]:
     """«Имя <addr@dom>» → (имя, адрес); просто адрес → ('', адрес)."""
     m = re.match(r"^\s*(.*?)\s*<([^>]+)>\s*$", s)
@@ -106,6 +131,7 @@ async def web_lead_intake(
     """
     params = await _collect_params(request)
     _check_intake_token(core, params)
+    utm = _extract_utm(params)
     core.event_bus.emit(
         session,
         "intake.lead.received",
@@ -118,6 +144,7 @@ async def web_lead_intake(
             "region": str(params.get("region", "") or "").strip(),
             "product": str(params.get("product", "") or "").strip(),
             "message": str(params.get("message", "") or "").strip(),
+            **utm,
         },
     )
     await session.commit()
@@ -176,6 +203,50 @@ async def sync(core: Core = Depends(get_core), session: AsyncSession = Depends(g
     summary = await sync_1c(session, core.event_bus, core.services.onec)
     await session.commit()
     return {"ok": True, **summary}
+
+
+@router.post("/1c/sync-out")
+async def sync_out(
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Выгрузить очередь pending-записей ERP → 1С (исходящий синк, M3).
+
+    Каркас на шлюзе ``core.services.onec.post_document``: успех → external_ref + synced,
+    ошибка → error с текстом (виден в журнале, ручной повтор). Реальный OData-POST подключается
+    в OneCClient без правки этого роута.
+    """
+    summary = await sync_outbound.flush_pending(session, core.services.onec)
+    await session.commit()
+    return {"ok": True, **summary}
+
+
+@router.get("/1c/sync-journal")
+async def sync_journal(
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Журнал выгрузки: что/куда/статус/когда/ошибка (зеркало журнала импорта)."""
+    return {"entries": await sync_outbound.journal(session)}
+
+
+@router.post("/1c/enqueue/{entity_type}/{entity_id}")
+async def enqueue_out(
+    entity_type: str,
+    entity_id: int,
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
+    """Поставить запись ERP в очередь на выгрузку в 1С («Создать здесь» / ручная переотправка)."""
+    if entity_type not in ("counterparty", "sku"):
+        raise HTTPException(status_code=400, detail="entity_type: counterparty|sku")
+    link = await sync_outbound.enqueue(
+        session, entity_type=entity_type, entity_id=entity_id, origin="erp"
+    )
+    await session.commit()
+    return {"ok": True, "state": link.state, "entity_type": entity_type, "entity_id": entity_id}
 
 
 @router.get("/1c/stock", response_model=list[StockOut])

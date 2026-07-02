@@ -4,6 +4,7 @@
 // Деньги в ответах — BYN (форматируются в компонентах через `formatByn`).
 
 import type { Bid as DomainBid, ScoreMetrics } from "@/lib/logistics-domain";
+import type { FunnelStage } from "@/lib/types";
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
@@ -21,6 +22,20 @@ async function postJson<T>(path: string, body: unknown, fallback: T): Promise<T>
       method: "POST",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) return fallback;
+    return (await res.json()) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function patchJson<T>(path: string, body: unknown, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`/api${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
     if (!res.ok) return fallback;
     return (await res.json()) as T;
@@ -80,6 +95,60 @@ export const fetchShipments = () => getJson<Shipment[]>("/logistics/shipments", 
 export const fetchDashboard = () => getJson<Dashboard | null>("/logistics/dashboard", null);
 export const fetchCosts = () => getJson<Costs | null>("/logistics/costs", null);
 
+/** Сменить главный статус доставки (planned/assigned/in_transit/delivered). */
+export const patchShipmentStatus = (id: number, status: string) =>
+  patchJson<Shipment | null>(`/logistics/shipments/${id}`, { status }, null);
+
+/** Обновить tracking_status (текст) + ETA + трек-номер от перевозчика. */
+export interface TrackingPatch {
+  tracking_status: string;
+  eta?: string | null;
+  tracking_no?: string | null;
+}
+export const patchShipmentTracking = (id: number, patch: TrackingPatch) =>
+  patchJson<Shipment | null>(`/logistics/shipments/${id}/tracking`, patch, null);
+
+// ─────────────────────────────── Импорт из Китая (информационный) ───────────────────────────────
+// Только наблюдение цепочки (события import.*); приёмка на склад/остатки — НЕ здесь
+// (это procurement→wms, двойной учёт запрещён).
+
+export interface ImportShipment {
+  id: number;
+  number: string;
+  supplier: string;
+  flag: string;
+  container_no: string;
+  route: string;
+  incoterms: string;
+  mode: string;
+  cargo: string;
+  qty: number;
+  amount: number;
+  priority: string;
+  owner: string;
+  stage: string;
+  customs_status: string;
+  eta?: string | null;
+  po_ref: string;
+}
+
+// Доска импорта = универсальная воронка ядра (FunnelBoardOut: стадии-колонки с карточками).
+export interface ImportBoard {
+  stages: FunnelStage[];
+}
+
+export const fetchImports = () => getJson<ImportShipment[]>("/logistics/imports", []);
+export const fetchImportBoard = () => getJson<ImportBoard | null>("/logistics/imports/board", null);
+
+export interface ImportStagePatch {
+  stage: string;
+  customs_status?: string | null;
+}
+/** ИНФО-смена стадии импорта. Склад (warehouse) — это лишь отметка для дашборда;
+ *  оприходование делает wms на procurement.received. Двойного учёта НЕТ. */
+export const patchImportStage = (id: number, patch: ImportStagePatch) =>
+  patchJson<ImportShipment | null>(`/logistics/imports/${id}`, patch, null);
+
 // ─────────────────────────────── Тарифы / зоны ───────────────────────────────
 
 export interface Zone {
@@ -111,6 +180,23 @@ export const fetchTariffs = (zone: string) =>
   getJson<CarrierTariff[]>(`/logistics/carrier-tariffs?zone=${encodeURIComponent(zone)}`, []);
 export const seedTariffs = () =>
   postJson<CarrierTariff[]>("/logistics/carrier-tariffs/seed", undefined, []);
+
+export interface TariffPatch {
+  price_w5?: number;
+  price_w10?: number;
+  price_w30?: number;
+  over30_per_kg?: number;
+  pickup_fee?: number;
+  cod_pct?: number;
+  insurance_pct?: number;
+}
+/** Изменить тариф перевозчик×зона (создание — через /seed). */
+export const patchTariff = (carrierCode: string, zoneCode: string, patch: TariffPatch) =>
+  patchJson<CarrierTariff | null>(
+    `/logistics/carrier-tariffs/${encodeURIComponent(carrierCode)}/${encodeURIComponent(zoneCode)}`,
+    patch,
+    null,
+  );
 
 // ─────────────────────────────── Перевозчики / парк ───────────────────────────────
 
@@ -151,6 +237,17 @@ export interface EligibleCarrier {
 
 export const fetchCarriers = () => getJson<Carrier[]>("/logistics/carriers", []);
 export const seedCarriers = () => postJson<Carrier[]>("/logistics/carriers/seed", undefined, []);
+
+export interface CarrierCreate {
+  name: string;
+  code?: string;
+  kind?: string;
+  mode?: string;
+  contact?: string;
+  integration?: string;
+}
+export const createCarrier = (payload: CarrierCreate) =>
+  postJson<Carrier | null>("/logistics/carriers", payload, null);
 export const seedFleet = () => postJson<unknown>("/logistics/fleet/seed", undefined, null);
 export const fetchVehicles = (code: string) =>
   getJson<Vehicle[]>(`/logistics/carriers/${encodeURIComponent(code)}/vehicles`, []);
@@ -190,6 +287,28 @@ export const fetchScorecard = (period: string) =>
   getJson<Scorecard[]>(`/logistics/carriers/scorecard?period=${encodeURIComponent(period)}`, []);
 export const seedScorecard = () =>
   postJson<Scorecard[]>("/logistics/carriers/scorecard/seed", undefined, []);
+export const recomputeScorecard = () =>
+  postJson<Scorecard[]>("/logistics/carriers/scorecard/recompute", undefined, []);
+
+export interface ScorecardMetricsPatch {
+  otd_pct?: number;
+  otif_pct?: number;
+  damage_free_pct?: number;
+  billing_accuracy_pct?: number;
+  claims_ratio_pct?: number;
+  shipments?: number;
+  cost_per_delivery?: number;
+}
+export const patchScorecardMetrics = (
+  carrierCode: string,
+  period: string,
+  patch: ScorecardMetricsPatch,
+) =>
+  patchJson<Scorecard | null>(
+    `/logistics/carriers/scorecard/${encodeURIComponent(carrierCode)}?period=${encodeURIComponent(period)}`,
+    patch,
+    null,
+  );
 
 // ─────────────────────────────── Аудит счетов ───────────────────────────────
 
@@ -216,6 +335,19 @@ export const fetchAudit = (period: string) =>
   getJson<AuditReport | null>(`/logistics/costs/audit?period=${encodeURIComponent(period)}`, null);
 export const seedAudit = () =>
   postJson<AuditEntry[]>("/logistics/costs/audit/seed", undefined, []);
+
+export interface AuditEntryCreate {
+  shipment_code: string;
+  carrier_code: string;
+  invoice_amount: number;
+  expected_amount?: number | null;   // если не задан — считается из тарифа (zone_code+weight_kg)
+  zone_code?: string;
+  weight_kg?: number;
+  reason?: string;
+}
+/** Зарегистрировать счёт перевозчика. На variance>0 бэк эмитит freight.audit_refund → finance. */
+export const createAuditEntry = (payload: AuditEntryCreate) =>
+  postJson<AuditEntry | null>("/logistics/costs/audit", payload, null);
 
 // ─────────────────────────────── Тендер (RFQ) ───────────────────────────────
 
@@ -256,6 +388,19 @@ export interface Bid extends DomainBid {
   comment?: string;
   round: number;
   is_best: boolean;
+  value_score?: number;     // best-fit: компромисс цена↔качество ∈ [0, 1] (из /bids/ranked)
+  is_best_value?: boolean;   // лучший по соотношению цена/качество (не только по цене)
+}
+
+export interface TenderRecommendation {
+  cheapest: Bid;
+  best_value: Bid;
+  reliability_premium: number;   // доплата best_value к самому дешёвому (цена надёжности)
+  same_carrier: boolean;
+  rationale: string;
+  median_price?: number;             // медиана ставок (опорная цена тендера)
+  cheapest_deviation_pct?: number;    // на сколько % дешевле медианы самая дешёвая (≥ 0)
+  dumping_risk?: boolean;             // флаг: подозрительно дёшево (риск срыва/демпинга)
 }
 
 export interface AwardResult {
@@ -273,6 +418,10 @@ export const fetchRfq = (id: number) => getJson<Rfq | null>(`/logistics/rfqs/${i
 export const fetchInvites = (id: number) =>
   getJson<Invite[]>(`/logistics/rfqs/${id}/invites`, []);
 export const fetchBids = (id: number) => getJson<Bid[]>(`/logistics/rfqs/${id}/bids`, []);
+export const fetchRankedBids = (id: number) =>
+  getJson<Bid[]>(`/logistics/rfqs/${id}/bids/ranked`, []);
+export const fetchRecommendation = (id: number) =>
+  getJson<TenderRecommendation | null>(`/logistics/rfqs/${id}/recommendation`, null);
 export const seedRfq = () => postJson<Rfq | null>("/logistics/rfqs/seed", undefined, null);
 
 export interface BroadcastResult {
@@ -285,10 +434,19 @@ export interface BroadcastResult {
 
 export const broadcastRfq = (id: number) =>
   postJson<BroadcastResult | null>(`/logistics/rfqs/${id}/broadcast`, undefined, null);
-export const awardRfq = (id: number, carrierCode?: string) =>
+/** Контр-ставка перевозчика: новый (сниженный) прайс → ставка следующего раунда. */
+export const negotiateBid = (id: number, carrierCode: string, newPrice: number, comment = "") =>
+  postJson<Bid | null>(
+    `/logistics/rfqs/${id}/negotiate`,
+    { carrier_code: carrierCode, new_price: newPrice, comment },
+    null,
+  );
+export type AwardStrategy = "cheapest" | "best_value";
+
+export const awardRfq = (id: number, carrierCode?: string, strategy: AwardStrategy = "cheapest") =>
   postJson<AwardResult | null>(
     `/logistics/rfqs/${id}/award`,
-    carrierCode ? { carrier_code: carrierCode } : {},
+    carrierCode ? { carrier_code: carrierCode } : { strategy },
     null,
   );
 
@@ -324,8 +482,27 @@ export interface CostInsights {
   tender_savings_total: number;
   tenders: TenderSaving[];
   audit_to_recover: number;
+  // LOG3-6: китайский импорт-фрахт — раньше выпадал из KPI «сколько мы тратим на логистику».
+  import_freight_total: number;
+  import_freight_avg: number;
+  import_freight_count: number;
   recommendations: string[];
 }
 
 export const fetchCostInsights = (weightKg = 30) =>
   getJson<CostInsights | null>(`/logistics/cost-insights?weight_kg=${weightKg}`, null);
+
+// ─────────────────────────────── Импорт в движении (LOG3-5) ───────────────────────────────
+
+/** Импорт-поставка в движении (pull-провайдер для нетто-пополнения).
+ *  Видна, пока stage ∈ {factory, consolidation, in_transit, customs}. */
+export interface ImportInTransit {
+  po_ref: string;
+  cargo: string;
+  qty: number;
+  eta?: string | null;
+  stage: string;
+}
+
+export const fetchImportsInTransit = () =>
+  getJson<ImportInTransit[]>("/logistics/imports/in-transit", []);

@@ -2,14 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCategoryTree,
+  changedFields,
   flattenCatalog,
   isCurrentVersion,
+  parseRefCsv,
+  qualityTone,
   sortVersionsDesc,
   totalDuplicates,
   type NomenclatureGroup,
   type ReferenceCatalog,
   type ReferenceMeta,
+  type SkuVersionRow,
 } from "./reference-data";
+
+function version(over: Partial<SkuVersionRow> = {}): SkuVersionRow {
+  return {
+    start_date: "2026-01-01",
+    end_date: null,
+    title: "Реле 12В",
+    unit: "шт",
+    category_id: 1,
+    weight_kg: 0.2,
+    tnved_code: "8536490000",
+    shelf_life_days: null,
+    attributes: {},
+    ...over,
+  };
+}
 
 function meta(key: string): ReferenceMeta {
   return {
@@ -80,6 +99,36 @@ describe("totalDuplicates", () => {
   });
 });
 
+describe("parseRefCsv", () => {
+  it("парсит по колонкам, отбрасывает строку-заголовок", () => {
+    const out = parseRefCsv("code,title\nPCS,штука\nKG,килограмм", ["code", "title"]);
+    expect(out).toEqual([
+      { code: "PCS", title: "штука" },
+      { code: "KG", title: "килограмм" },
+    ]);
+  });
+
+  it("пустая ячейка опускается, parent_id приводится к числу", () => {
+    const out = parseRefCsv("C1,Группа,\nC2,Под,1", ["code", "name", "parent_id"]);
+    expect(out[0]).toEqual({ code: "C1", name: "Группа" });
+    expect(out[1]).toEqual({ code: "C2", name: "Под", parent_id: 1 });
+  });
+
+  it("поддерживает таб как разделитель", () => {
+    expect(parseRefCsv("X\tикс", ["code", "title"])).toEqual([{ code: "X", title: "икс" }]);
+  });
+});
+
+describe("qualityTone", () => {
+  it("пороги: ≥0.95 ок · ≥0.8 warn · иначе bad", () => {
+    expect(qualityTone(1)).toBe("ok");
+    expect(qualityTone(0.95)).toBe("ok");
+    expect(qualityTone(0.9)).toBe("warn");
+    expect(qualityTone(0.8)).toBe("warn");
+    expect(qualityTone(0.5)).toBe("bad");
+  });
+});
+
 describe("buildCategoryTree", () => {
   const groups: NomenclatureGroup[] = [
     { id: 1, code: "CAT-0100", name: "Электронные компоненты", parent_id: null, is_active: true },
@@ -105,5 +154,27 @@ describe("buildCategoryTree", () => {
 
   it("пустой список → пустое дерево", () => {
     expect(buildCategoryTree([])).toEqual([]);
+  });
+});
+
+describe("changedFields", () => {
+  it("самая ранняя версия (older=null) → пусто", () => {
+    expect(changedFields(version(), null)).toEqual([]);
+  });
+
+  it("изменения типизированных полей помечаются подписями", () => {
+    const older = version({ title: "Реле 12В", weight_kg: 0.2 });
+    const newer = version({ title: "Реле 12В (2 шт)", weight_kg: 0.25 });
+    expect(changedFields(newer, older)).toEqual(["Наименование", "Вес, кг"]);
+  });
+
+  it("без изменений → пусто", () => {
+    expect(changedFields(version(), version())).toEqual([]);
+  });
+
+  it("изменения в свободных attributes — по ключу", () => {
+    const older = version({ attributes: { Производитель: "Omron" } });
+    const newer = version({ attributes: { Производитель: "TE", Корпус: "DIP" } });
+    expect(changedFields(newer, older).sort()).toEqual(["Корпус", "Производитель"]);
   });
 });
