@@ -38,6 +38,9 @@ export interface Deal {
   stageChangedAt?: string; // ISO-дата входа в текущую стадию — для «дней в стадии» (SALES-43)
   lostReasonCode?: string; // код причины отказа из справочника (SALES-40)
   lostComment?: string; // комментарий менеджера при отказе (SALES-40)
+  // Бейдж «🚚 под приход» (П6 UI ТЗ) — живой, из аудита sales.supply.arrived.
+  supplyArrivedAt?: string;
+  supplyArrivedSku?: string;
 }
 
 /** Причина отказа (SALES-40): код + человекочитаемый заголовок для выпадашки. */

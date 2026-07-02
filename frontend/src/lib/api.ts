@@ -39,6 +39,9 @@ interface ApiDeal {
   penalty_rate_pct?: number | null;
   penalty_cap_pct?: number | null;
   penalty_terms?: string | null;
+  // Живой бейдж «🚚 под приход» (П6 UI ТЗ) — из аудита событий, не колонка БД.
+  supply_arrived_at?: string | null;
+  supply_arrived_sku?: string | null;
 }
 
 interface ApiStage {
@@ -70,6 +73,8 @@ function mapDeal(d: ApiDeal): Deal {
     stageChangedAt: d.stage_changed_at ?? undefined,
     lostReasonCode: d.lost_reason_code ?? undefined,
     lostComment: d.lost_comment ?? undefined,
+    supplyArrivedAt: d.supply_arrived_at ?? undefined,
+    supplyArrivedSku: d.supply_arrived_sku ?? undefined,
   };
 }
 

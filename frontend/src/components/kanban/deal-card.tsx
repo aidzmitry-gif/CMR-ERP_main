@@ -6,6 +6,12 @@ import { PriorityBadge } from "@/components/priority-badge";
 import { formatMoney } from "@/lib/format";
 import type { Deal } from "@/lib/types";
 
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
 /** Карточка сделки на канбане. Бейджи/плашки Сделки 2.0 (дни в стадии SALES-43,
  * вероятность·взвешенно SALES-44, причина отказа SALES-40) рендерятся только когда
  * вызывающий передал соответствующий проп — иначе карточка ведёт себя как раньше. */
@@ -49,6 +55,14 @@ export function DealCard({
               )}
             >
               🕒 {days} дн.
+            </span>
+          )}
+          {deal.supplyArrivedAt && (
+            <span
+              title={`Под приход: ${deal.supplyArrivedSku ?? "товар"} · пришёл ${formatShortDate(deal.supplyArrivedAt)}`}
+              className="inline-flex items-center gap-1 rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"
+            >
+              🚚 {formatShortDate(deal.supplyArrivedAt)}
             </span>
           )}
           <Star
