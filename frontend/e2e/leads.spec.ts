@@ -5,6 +5,9 @@ import { expect, test } from "@playwright/test";
 test("лид: приём → AI-квалификация → распределение → конвертация в сделку", async ({ page }) => {
   await page.goto("/crm/leads");
   await expect(page.getByRole("heading", { name: "Приём лидов" })).toBeVisible();
+  // Закрываем preview-drawer если он автоматически открылся для существующего лида
+  // (e2e.db может содержать ЛИД-1 из seed, его preview перекрывает кнопку «Принять лид»)
+  await page.keyboard.press("Escape");
 
   // 1) приём нового лида через форму
   await page.getByRole("button", { name: /Принять лид/ }).click();

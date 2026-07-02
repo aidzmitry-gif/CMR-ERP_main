@@ -237,6 +237,7 @@ function DraggableDeal({
   return (
     <div
       ref={setNodeRef}
+      data-testid={`deal-card-${deal.id}`}
       {...attributes}
       {...listeners}
       onClickCapture={handleClickCapture}
@@ -290,6 +291,7 @@ function Column({
       </div>
       <div
         ref={setNodeRef}
+        data-testid={`stage-column-${stage.id}`}
         className={clsx(
           "flex min-h-20 flex-col gap-3 rounded-xl p-1 transition-colors",
           isOver && "bg-accent-soft ring-2 ring-accent",

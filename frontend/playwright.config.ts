@@ -11,7 +11,8 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: "http://localhost:3000",
+    // Порт 4000: 3000/3001 заняты SEO-проектом на этой машине.
+    baseURL: "http://localhost:4000",
     trace: "on-first-retry",
   },
   projects: [
@@ -28,7 +29,8 @@ export default defineConfig({
   webServer: [
     {
       // бэкенд: SQLite dev + AI-слой включён (как в документированном запуске)
-      command: process.env.E2E_BACKEND_CMD ?? "python -m uvicorn main:app --port 8000",
+      command: process.env.E2E_BACKEND_CMD ??
+        `${process.platform === "win32" ? ".venv\\Scripts\\python.exe" : ".venv/bin/python"} -m uvicorn main:app --port 8000`,
       cwd: "..",
       url: "http://localhost:8000/health",
       reuseExistingServer: !process.env.CI,
@@ -36,12 +38,13 @@ export default defineConfig({
       env: {
         AIOS_DATABASE_URL: "sqlite+aiosqlite:///./e2e.db",
         AIOS_AI_ENABLED: "true",
+        AIOS_ENVIRONMENT: "dev",
         PYTHONPATH: ".",
       },
     },
     {
-      command: "npm run dev",
-      url: "http://localhost:3000",
+      command: "npm run dev -- -p 4000",
+      url: "http://localhost:4000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
