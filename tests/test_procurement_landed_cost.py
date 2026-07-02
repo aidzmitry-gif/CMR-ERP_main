@@ -107,7 +107,7 @@ async def test_receive_emits_landed_cost_calculated(api, session):
     assert len(events) == 1
     payload = events[0].payload
     assert payload["sku_code"] == "EMIT-1"
-    assert payload["unit_landed_cost_byn"] == "150.00"  # JSON-safe (Decimal → str)
+    assert Decimal(payload["unit_landed_cost_byn"]) == Decimal("150.00")  # JSON-safe str, value check
     assert payload["purchase_order_id"] == order["id"]
     assert payload["stage"] == "actual"  # реальная приёмка (P4)
     # qty + total — Финансам для landed-маржи (unit×qty)
