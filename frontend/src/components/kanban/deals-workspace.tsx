@@ -26,6 +26,7 @@ import {
   createDeal,
   createDealTask,
   fetchLossReasons,
+  fetchPlans,
   getKpis,
   logActivity,
   loseDeal,
@@ -67,6 +68,41 @@ const PERIODS = [
   { key: "quarter", label: "Квартал" },
   { key: "year", label: "Год" },
 ];
+
+/** П1 (решение оператора по сайту вариантов): первичный ряд скорборда — 8 метрик эталонного
+ *  макета в его порядке, подписи макетные. Ключи без данных в бэке (расчётные: оплаты, валовая,
+ *  новые сделки, конверсия, чек) — честный placeholder «нет данных», НЕ 0, до бэк-расчёта.
+ *  Остальные KPI из /sales/kpis — вторым рядом под кнопкой-стрелкой «Ещё N показателей». */
+const PRIMARY_CELLS: { key: string; label: string; headline?: boolean }[] = [
+  { key: "ship_plan", label: "Выручка (отгрузки)", headline: true },
+  { key: "payments_vat", label: "Оплаты с НДС" },
+  { key: "gross_profit", label: "Прибыль валовая" },
+  { key: "new_deals_count", label: "Новые сделки" },
+  { key: "won_count", label: "Успешные" },
+  { key: "invoice_payment_conv", label: "Конв. счёт→оплата" },
+  { key: "calls_all", label: "Звонки (хол.)" },
+  { key: "avg_deal", label: "Средний чек" },
+];
+
+/** Период в винительном падеже для chip-прогноза («Закроем месяц на ~X% плана»). */
+const PERIOD_ACC: Record<string, string> = {
+  day: "день", week: "неделю", month: "месяц", quarter: "квартал", year: "год",
+};
+
+/** Подзаголовок шапки скорборда: контекст периода (как sb-sub макета). */
+function periodSubLabel(period: string, now: number | null): string {
+  if (now == null) return "";
+  const d = new Date(now);
+  const y = d.getFullYear();
+  if (period === "day") return `${d.getDate()} ${MONTH_GEN[d.getMonth()]} ${y} · сегодня`;
+  if (period === "week") return "текущая неделя";
+  if (period === "month") {
+    const m = MONTH_NOM[d.getMonth()];
+    return `${m[0].toUpperCase()}${m.slice(1)} ${y}`;
+  }
+  if (period === "quarter") return `${Math.floor(d.getMonth() / 3) + 1} квартал ${y}`;
+  return `${y} год`;
+}
 
 function pluralDeals(n: number): string {
   const d10 = n % 10;
@@ -145,10 +181,13 @@ function PipelineRow({
   stages,
   now,
   fmt,
+  chip,
 }: {
   stages: Stage[];
   now: number | null;
   fmt: (value: number) => string;
+  /** П3 (макет): chip-прогноз закрытия периода («Закроем месяц на ~X% плана»). */
+  chip?: string | null;
 }) {
   const open = stages.filter(isOpenStage);
   const count = open.reduce((n, s) => n + s.deals.length, 0);
@@ -189,6 +228,11 @@ function PipelineRow({
       <span className="text-muted">
         Висяки: <b className="text-amber-600">{stuck ?? "—"}</b>
       </span>
+      {chip && (
+        <span className="ml-auto rounded-lg bg-accent-soft px-2.5 py-1 text-[12.5px] font-semibold text-accent-ink">
+          {chip}
+        </span>
+      )}
     </div>
   );
 }
@@ -350,17 +394,38 @@ function projClass(pct: number): string {
   return "text-red-600 dark:text-red-400";
 }
 
+/** Ячейка-заглушка для метрик макета без данных в бэке: честное «нет данных», НЕ 0. */
+function PlanFactPlaceholder({ label }: { label: string }) {
+  return (
+    <div className="bg-surface px-4 py-3">
+      <div className="text-[11.5px] leading-tight text-muted">{label}</div>
+      <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-faint">—</div>
+      <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken" />
+      <div className="mt-1.5 text-[11px] text-faint">нет данных · появится с бэк-расчётом</div>
+    </div>
+  );
+}
+
 /** Ячейка План/Факт: разметка как в скорборде мокапа (плоская, без карточки-бокса). */
 function PlanFactCell({
   kpi,
   fmt,
   elapsed,
   onLog,
+  label,
+  headline = false,
+  subnote,
 }: {
   kpi: Kpi;
   fmt: (v: number) => string;
   elapsed: number | null;
   onLog?: () => void;
+  /** Переопределение подписи (первичный ряд использует подписи макета). */
+  label?: string;
+  /** Первая метрика макета — крупнее (cell.headline). */
+  headline?: boolean;
+  /** Доп. строка под значением (напр. «из них N хол.»). */
+  subnote?: string;
 }) {
   const t = kpiTone(kpi.percent);
   const value = kpi.money ? fmt(kpi.value) : kpi.value;
@@ -372,7 +437,7 @@ function PlanFactCell({
   return (
     <div className="bg-surface px-4 py-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[11.5px] leading-tight text-muted">{kpi.label}</div>
+        <div className="text-[11.5px] leading-tight text-muted">{label ?? kpi.label}</div>
         {onLog && !kpi.money && (
           <button
             onClick={onLog}
@@ -383,10 +448,16 @@ function PlanFactCell({
           </button>
         )}
       </div>
-      <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-ink">
+      <div
+        className={clsx(
+          "mt-1.5 font-bold leading-none tracking-tight text-ink",
+          headline ? "text-[26px]" : "text-[22px]",
+        )}
+      >
         {value}
-        <span className="text-[13px] font-normal text-faint"> / {target}</span>
+        <span className="whitespace-nowrap text-[13px] font-normal text-faint"> / {target}</span>
       </div>
+      {subnote && <div className="mt-0.5 text-[11px] text-faint">{subnote}</div>}
       <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
         <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(kpi.percent, 100)}%` }} />
         {elapsed != null && (
@@ -443,6 +514,10 @@ export function DealsWorkspace({
   const [now, setNow] = useState<number | null>(null);
   const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
   const [losing, setLosing] = useState<{ dealId: string; label: string } | null>(null);
+  // П1: второй ряд метрик под стрелкой «Ещё N показателей» (состояние переживает перезагрузку).
+  const [moreKpis, setMoreKpis] = useState(false);
+  // П2: «план продаж согласован РОПом» в подзаголовке — если на текущий месяц есть approved-план.
+  const [planApproved, setPlanApproved] = useState(false);
 
   // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
@@ -452,7 +527,26 @@ export function DealsWorkspace({
     void fetchLossReasons().then((reasons) => {
       if (reasons.length) setLossReasons(reasons);
     });
+    // П1: восстановить состояние стрелки «Ещё показатели».
+    try {
+      if (localStorage.getItem("deals_kpis_more") === "1") setMoreKpis(true);
+    } catch {}
+    // П2: согласован ли план текущего месяца (для подзаголовка шапки скорборда).
+    const d = new Date();
+    const periodKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    void fetchPlans({ period_type: "month", period_key: periodKey }).then((plans) => {
+      if (plans.some((p) => p.status === "approved")) setPlanApproved(true);
+    });
   }, []);
+
+  function toggleMoreKpis() {
+    // Запись вне updater-а: side-effect внутри setState под StrictMode дёргается дважды.
+    const next = !moreKpis;
+    setMoreKpis(next);
+    try {
+      localStorage.setItem("deals_kpis_more", next ? "1" : "0");
+    } catch {}
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   // Стабильный id для DndContext: dnd-kit иначе сидит aria-describedby модульным
@@ -663,55 +757,132 @@ export function DealsWorkspace({
 
         <PlanBanner now={now} />
 
-        {/* План / Факт по периодам */}
-        <section className="mt-5">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-ink">План / Факт</h2>
-              <span className="hidden items-center gap-1.5 text-[11px] text-muted sm:flex">
-                <span className="text-emerald-500">●</span>≥100%
-                <span className="text-amber-500">●</span>70–99%
-                <span className="text-red-500">●</span>&lt;70%
-              </span>
-            </div>
-            <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
-              {PERIODS.map((p) => (
-                <button
-                  key={p.key}
-                  onClick={() => handlePeriod(p.key)}
-                  className={clsx(
-                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                    period === p.key
-                      ? "bg-accent-soft text-accent-ink"
-                      : "text-muted hover:text-ink",
-                  )}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {(() => {
-            const elapsed = now != null ? periodElapsed(now, period) : null;
-            return (
-              <div className="overflow-hidden rounded-2xl bg-line shadow-card">
-                <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-                  {kpis.map((kpi) => (
-                    <PlanFactCell
-                      key={kpi.id}
-                      kpi={kpi}
-                      fmt={fmt}
-                      elapsed={elapsed}
-                      onLog={() => handleLog(kpi.id)}
+        {/* План / Факт по периодам: первичный ряд = 8 метрик макета (П1), бейдж темпа +
+            подзаголовок + pulse + sticky (П2), остальные метрики — под стрелкой «Ещё N». */}
+        {(() => {
+          const elapsed = now != null ? periodElapsed(now, period) : null;
+          const kpiByKey = new Map(kpis.map((k) => [k.id, k]));
+          const secondary = kpis.filter((k) => !PRIMARY_CELLS.some((c) => c.key === k.id));
+          // Бейдж темпа (П2): выполнение headline-метрики против прошедшего времени периода.
+          const ship = kpiByKey.get("ship_plan");
+          const elapsedPct = elapsed != null ? Math.round(elapsed * 100) : null;
+          let pace: { cls: string; text: string } | null = null;
+          if (ship && ship.target > 0 && elapsedPct != null && elapsed! >= 0.05) {
+            const diff = ship.percent - elapsedPct;
+            pace =
+              diff >= 5
+                ? { cls: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300", text: `🟢 Опережаем график на ${diff} п.п.` }
+                : diff <= -5
+                  ? { cls: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300", text: `🔴 Отстаём на ${-diff} п.п.` }
+                  : { cls: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300", text: "🟡 Идём в графике" };
+          }
+          // Chip прогноза закрытия (П3) — run-rate по headline.
+          let chip: string | null = null;
+          if (ship && ship.target > 0 && elapsed != null && elapsed >= 0.1) {
+            const projPct = Math.round((ship.value / elapsed / ship.target) * 100);
+            chip = `Закроем ${PERIOD_ACC[period] ?? period} на ~${projPct}% плана`;
+          }
+          const sub = periodSubLabel(period, now);
+          return (
+            <>
+              <section className="z-20 mt-5 bg-canvas pb-1 lg:sticky lg:top-0">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(34,197,94,.15)]"
+                      aria-hidden
                     />
-                  ))}
+                    <h2 className="font-semibold text-ink">План / Факт</h2>
+                    {sub && (
+                      <span className="text-[12px] text-muted">
+                        — {sub}
+                        {planApproved && " · план продаж согласован РОПом"}
+                      </span>
+                    )}
+                    {pace && (
+                      <span
+                        className={clsx(
+                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold",
+                          pace.cls,
+                        )}
+                      >
+                        {pace.text}
+                        {elapsedPct != null && (
+                          <span className="font-normal opacity-75">· прошло {elapsedPct}% периода</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {secondary.length > 0 && (
+                      <button
+                        onClick={toggleMoreKpis}
+                        className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-muted hover:text-ink"
+                      >
+                        {moreKpis ? "Свернуть ▴" : `Ещё ${secondary.length} показателей ▾`}
+                      </button>
+                    )}
+                    <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+                      {PERIODS.map((p) => (
+                        <button
+                          key={p.key}
+                          onClick={() => handlePeriod(p.key)}
+                          className={clsx(
+                            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                            period === p.key
+                              ? "bg-accent-soft text-accent-ink"
+                              : "text-muted hover:text-ink",
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })()}
-        </section>
+                <div className="overflow-hidden rounded-2xl bg-line shadow-card">
+                  {/* Первичный ряд — 8 метрик макета в его порядке; на xl одна строка,
+                      первая колонка (headline) шире, как sb-row эталона. */}
+                  <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[1.5fr_repeat(7,1fr)]">
+                    {PRIMARY_CELLS.map((cell) => {
+                      const kpi = kpiByKey.get(cell.key);
+                      if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
+                      const coldCalls = cell.key === "calls_all" ? kpiByKey.get("calls_cold") : undefined;
+                      return (
+                        <PlanFactCell
+                          key={cell.key}
+                          kpi={kpi}
+                          fmt={fmt}
+                          elapsed={elapsed}
+                          onLog={() => handleLog(kpi.id)}
+                          label={cell.label}
+                          headline={cell.headline}
+                          subnote={coldCalls ? `из них ${coldCalls.value} хол.` : undefined}
+                        />
+                      );
+                    })}
+                  </div>
+                  {/* Второй ряд (П1): тот же вид ячеек, раскрывается стрелкой. */}
+                  {moreKpis && secondary.length > 0 && (
+                    <div className="grid gap-px border-t border-dashed border-line sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                      {secondary.map((kpi) => (
+                        <PlanFactCell
+                          key={kpi.id}
+                          kpi={kpi}
+                          fmt={fmt}
+                          elapsed={elapsed}
+                          onLog={() => handleLog(kpi.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
 
-        <PipelineRow stages={stages} now={now} fmt={fmt} />
+              <PipelineRow stages={stages} now={now} fmt={fmt} chip={chip} />
+            </>
+          );
+        })()}
 
         {/* Переключатель вида */}
         <div className="mt-5 flex items-center justify-end gap-2">
