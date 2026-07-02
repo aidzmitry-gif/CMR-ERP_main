@@ -70,14 +70,6 @@ def prefix_map(app):
     return build_prefix_map(app.state.core)
 
 
-def _package_for_path(prefix_map, path: str) -> str | None:
-    """Пакет-модуль по самому длинному подходящему префиксу (только слаггнутые)."""
-    for prefix, package in prefix_map:  # уже отсортировано: длинные первыми
-        if path == prefix or path.startswith(prefix + "/"):
-            return package
-    return None
-
-
 def _denying_role(package: str) -> str:
     """Роль, которой пакет НЕ доступен. Реальная (напр. warehouse), иначе синтетический «никто»."""
     for role in _REAL_ROLES:
@@ -92,29 +84,39 @@ def _concrete_url(path: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def write_routes(app, prefix_map) -> list[tuple[str, str, str, str]]:
+def write_routes(app) -> list[tuple[str, str, str, str]]:
     """(method, concrete_url, package, denying_role) по write-роутам слаггнутых модулей.
 
-    Пропускаем ``OPEN_PREFIXES`` (health/system/webhook — открыты намеренно) и роуты вне
-    слаггнутых модулей (инфра/системные — гейт их не ограничивает; см. coverage-guard).
+    Перечисляем из РЕЕСТРА ``core.routers`` (``reg.prefix`` + ``reg.router.routes``), а НЕ из
+    ``app.routes``: в CI модульные роутеры не всегда смонтированы на конкретный инстанс app
+    (наблюдалось ``app.routes=24`` = только системные), хотя реестр populated — тот же источник,
+    что у middleware (``build_prefix_map``). ``package`` = ``reg.module``.
+    Пропускаем ``OPEN_PREFIXES`` (health/system/webhook — открыты намеренно) и неслаггнутые
+    модули (инфра/системные — гейт их не ограничивает; см. coverage-guard).
     """
+    from config.access import PACKAGE_TO_SLUG
+
     seen: set[tuple[str, str]] = set()
     routes: list[tuple[str, str, str, str]] = []
-    for route in app.routes:
-        methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
-        if not methods or not path or path.startswith(OPEN_PREFIXES):
-            continue
-        package = _package_for_path(prefix_map, path)
-        if package is None:
+    for reg in app.state.core.routers:
+        package = reg.module
+        if package not in PACKAGE_TO_SLUG:
             continue
         denier = _denying_role(package)
-        for method in sorted(methods & WRITE_METHODS):
-            key = (method, path)
-            if key in seen:
+        for route in getattr(reg.router, "routes", ()):
+            methods = getattr(route, "methods", None)
+            rpath = getattr(route, "path", None)
+            if not methods or rpath is None:
                 continue
-            seen.add(key)
-            routes.append((method, _concrete_url(path), package, denier))
+            full = (reg.prefix or "") + rpath
+            if full.startswith(OPEN_PREFIXES):
+                continue
+            for method in sorted(methods & WRITE_METHODS):
+                key = (method, full)
+                if key in seen:
+                    continue
+                seen.add(key)
+                routes.append((method, _concrete_url(full), package, denier))
     return routes
 
 
@@ -145,12 +147,16 @@ def test_sweep_discovered_module_write_routes(app, prefix_map, write_routes):
 
         core = app.state.core
         registry = [(getattr(r, "prefix", None), getattr(r, "module", None)) for r in core.routers]
+        # Сколько роутов НЕСУТ сами роутеры реестра (если 0 — роутеры пустые, проблема глубже enumeration).
+        per_router = [(getattr(r, "module", None), len(list(getattr(r.router, "routes", ()))))
+                      for r in core.routers]
         n_routes = sum(1 for _ in app.routes)
         raise AssertionError(
             "свип не нашёл ни одного write-роута — enumeration сломан. DIAG: "
             f"app.routes={n_routes}; core.routers={len(core.routers)}; "
             f"prefix_map({len(prefix_map)})={prefix_map[:4]}; "
             f"registry(prefix,module)[:8]={registry[:8]}; "
+            f"per_router_route_counts={per_router}; "
             f"PACKAGE_TO_SLUG_keys={sorted(PACKAGE_TO_SLUG)}"
         )
     found_packages = {pkg for _, _, pkg, _ in write_routes}
