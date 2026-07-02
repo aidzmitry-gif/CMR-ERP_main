@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Calendar, Flag, MoreHorizontal, Pencil, Star, Target, User } from "lucide-react";
+import { Calendar, Flag, MoreHorizontal, Pencil, Phone, Star, Target, User } from "lucide-react";
 import Link from "next/link";
 import { ChannelRow } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
@@ -24,6 +24,7 @@ export function DealCard({
   lostReasonTitle,
   wonResult = false,
   onLose,
+  onCall,
   fmt = formatMoney,
 }: {
   deal: Deal;
@@ -34,6 +35,8 @@ export function DealCard({
   lostReasonTitle?: string;
   wonResult?: boolean;
   onLose?: () => void;
+  /** Открыть окно звонка прямо с карточки (без захода в drawer-preview). */
+  onCall?: () => void;
   fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
@@ -136,6 +139,21 @@ export function DealCard({
             <span className="inline-flex items-center gap-1">
               <Calendar size={12} /> {sideDate}
             </span>
+          )}
+          {onCall && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCall();
+              }}
+              title="Позвонить — окно звонка"
+              aria-label="Позвонить"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-money opacity-0 transition-opacity hover:bg-money-soft group-hover:opacity-100"
+            >
+              <Phone size={13} />
+            </button>
           )}
           {onLose && (
             <button

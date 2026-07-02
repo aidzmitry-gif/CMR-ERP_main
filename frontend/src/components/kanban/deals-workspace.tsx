@@ -60,6 +60,8 @@ type CardExtras = {
   lostReasonTitle?: string;
   wonResult: boolean;
   onLose?: () => void;
+  /** Открыть окно звонка прямо с карточки канбана (тот же кокпит, что у drawer-preview). */
+  onCall?: () => void;
 };
 
 const PERIODS = [
@@ -90,11 +92,20 @@ const PERIOD_ACC: Record<string, string> = {
   day: "день", week: "неделю", month: "месяц", quarter: "квартал", year: "год",
 };
 
+/** period=«YYYY-MM» — произвольный месяц (input type=month), не relative-ключ. */
+const MONTH_PERIOD_RE = /^(\d{4})-(\d{2})$/;
+
 /** Подзаголовок шапки скорборда: контекст периода (как sb-sub макета). */
 function periodSubLabel(period: string, now: number | null): string {
   if (now == null) return "";
   const d = new Date(now);
   const y = d.getFullYear();
+  const monthMatch = MONTH_PERIOD_RE.exec(period);
+  if (monthMatch) {
+    const mi = Number(monthMatch[2]) - 1;
+    const m = MONTH_NOM[mi] ?? "";
+    return `${m[0]?.toUpperCase() ?? ""}${m.slice(1)} ${monthMatch[1]} · выбранный месяц`;
+  }
   if (period === "day") return `${d.getDate()} ${MONTH_GEN[d.getMonth()]} ${y} · сегодня`;
   if (period === "week") return "текущая неделя";
   if (period === "month") {
@@ -860,6 +871,7 @@ export function DealsWorkspace({
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
       wonResult: stageId === "won",
       onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
+      onCall: () => setCallDeal(deal),
     };
   }
   const flatDeals = filteredStages.flatMap((s) =>
@@ -882,6 +894,7 @@ export function DealsWorkspace({
       weighted: weightedAmount(deal, stageId),
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
       wonResult: stageId === wonId,
+      onCall: () => setCallDeal(deal),
     };
   }
 
@@ -1052,6 +1065,20 @@ export function DealsWorkspace({
                         </button>
                       ))}
                     </div>
+                    {/* Произвольный месяц+год (period=YYYY-MM — GET /sales/kpis его понимает). */}
+                    <input
+                      type="month"
+                      value={MONTH_PERIOD_RE.test(period) ? period : ""}
+                      onChange={(e) => e.target.value && handlePeriod(e.target.value)}
+                      title="Показатели за выбранный месяц"
+                      aria-label="Выбрать месяц и год"
+                      className={clsx(
+                        "rounded-lg border px-2 py-1 text-xs font-medium outline-none",
+                        MONTH_PERIOD_RE.test(period)
+                          ? "border-accent bg-accent-soft text-accent-ink"
+                          : "border-line bg-surface text-muted",
+                      )}
+                    />
                   </div>
                 </div>
                 <div className="overflow-hidden rounded-2xl bg-line shadow-card">

@@ -170,8 +170,8 @@ describe("api client — документы/сообщения/согласов�
   it("fetchDocuments / createDocument", async () => {
     stubFetch([{ id: 1, kind: "invoice", number: "СЧ-1", status: "posted", onec_ref: "1С-СЧ-1", amount: 5000 }]);
     expect((await fetchDocuments("1"))[0].onec_ref).toBe("1С-СЧ-1");
-    stubFetch({}, true);
-    expect(await createDocument("1", "invoice")).toBe(true);
+    stubFetch({ id: 2, kind: "invoice", number: "СЧ-2", status: "posted", onec_ref: null, amount: 5000, valid_until: null, reserve_status: "none" });
+    expect((await createDocument("1", "invoice"))?.number).toBe("СЧ-2");
   });
 
   it("fetchMessages / sendMessage / AI", async () => {
@@ -275,7 +275,7 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await addDealItem("1", 1, 1)).toBe(false);
     expect(await updateDealItem(1, 1)).toBe(false);
     expect(await deleteDealItem(1)).toBe(false);
-    expect(await createDocument("1", "invoice")).toBe(false);
+    expect(await createDocument("1", "invoice")).toBeNull();
     expect(await decideDocument(1, true, "x")).toBe(false);
     expect(await sendMessage("1", "email", "x")).toBe(false);
     expect(await requestApproval("1", "deal.contract")).toBe(false);

@@ -12,7 +12,6 @@ import {
   Plus,
   Receipt,
   RefreshCw,
-  Search,
   ShoppingCart,
   X,
   Zap,
@@ -21,18 +20,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  addDealItem,
   createDeal,
   createDealTask,
-  createPriceQuote,
-  fetchSkus,
-  fetchStock,
+  createDocument,
   lookupCounterparty,
   updateDeal,
-  type SkuOption,
-  type StockRow,
 } from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
+import { ProductPicker, ProductPickerTotals, useProductPicker } from "@/components/kanban/product-picker";
 import { scriptFor } from "./call-scripts";
 
 /**
@@ -79,54 +74,6 @@ export type CallContext =
       phone?: string;
       callId?: number;
     };
-
-interface OrderRow {
-  skuId: number;
-  code: string;
-  title: string;
-  unit: string;
-  qty: number;
-  picked: boolean;
-}
-
-/** Агрегированный остаток SKU по всем складам (подбор товара со склада в окне звонка). */
-interface SkuStock {
-  price: number;
-  cost: number | null; // себестоимость из 1С — для маржи «в наличии»
-  free: number; // ATP = Σ(available − reserved), не ниже 0
-  forecast: number; // «в пути» (приход)
-  warehouses: { name: string; free: number; forecast: number }[];
-}
-
-/** Свернуть строки /1c/stock в карту sku_code → агрегат (несколько складов на SKU). */
-function aggregateStock(rows: StockRow[]): Record<string, SkuStock> {
-  const map: Record<string, SkuStock> = {};
-  for (const r of rows) {
-    const free = Math.max(0, (r.qty_available || 0) - (r.qty_reserved || 0));
-    const m = (map[r.sku_code] ??= { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] });
-    m.free += free;
-    m.forecast += r.qty_forecast || 0;
-    if (!m.price && r.price) m.price = r.price; // цена едина по складам
-    if (m.cost == null && r.cost != null) m.cost = r.cost; // себес едина по складам
-    if (free > 0 || r.qty_forecast > 0)
-      m.warehouses.push({ name: r.warehouse, free, forecast: r.qty_forecast || 0 });
-  }
-  return map;
-}
-
-/** Срок поставки из остатка: свободное → в наличии; только в пути → в пути; иначе под заказ. */
-function srokOf(s?: SkuStock): { label: string; cls: string } {
-  if (!s || (s.free === 0 && s.forecast === 0)) return { label: "под заказ", cls: "text-faint" };
-  if (s.free > 0) return { label: "в наличии", cls: "text-money" };
-  return { label: "в пути", cls: "text-amber-600" };
-}
-
-/** Маржа позиции «в наличии» из 1С: (цена − себес)/цена. null — нет себес/цены. */
-function marginOf(s?: SkuStock): { pct: number; gp: number } | null {
-  if (!s || !s.price || s.cost == null) return null;
-  const gp = s.price - s.cost;
-  return { pct: (gp / s.price) * 100, gp };
-}
 
 // Условия оплаты — типовой B2B-набор CRM (предоплата/отсрочка/по факту) + свой вариант.
 const TERMS = [
@@ -181,10 +128,7 @@ export function CallWindow({
   const [phase, setPhase] = useState<"dialing" | "live" | "done">("dialing");
   const [seconds, setSeconds] = useState(0);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [skus, setSkus] = useState<SkuOption[]>([]);
-  const [stock, setStock] = useState<Record<string, SkuStock>>({}); // остатки/цены по складам
-  const [rows, setRows] = useState<OrderRow[]>([]);
-  const [query, setQuery] = useState("");
+  const picker = useProductPicker(!!context); // справочник+остатки+корзина — общий с drawer-preview
   const [reserve, setReserve] = useState(true);
   const [unp, setUnp] = useState(""); // УНП контрагента — резолв реквизитов (ЕГР/MDM) пока заглушка
   const [req, setReq] = useState<{
@@ -213,8 +157,7 @@ export function CallWindow({
     if (!context) return;
     setPhase("dialing");
     setSeconds(0);
-    setRows([]);
-    setQuery("");
+    picker.reset();
     setReserve(true);
     setUnp("");
     setReq(null);
@@ -247,22 +190,6 @@ export function CallWindow({
     return () => document.removeEventListener("keydown", onKey);
   }, [context, onClose]);
 
-  // Номенклатура справочника — для колонки «Товар со склада».
-  useEffect(() => {
-    if (!context) return;
-    let alive = true;
-    void fetchSkus().then((list) => {
-      if (alive) setSkus(list);
-    });
-    // Остатки/цены/срок по складам (несколько складов на SKU) — demo-зеркало 1С.
-    void fetchStock().then((rows) => {
-      if (alive) setStock(aggregateStock(rows));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [context]);
-
   function flash(msg: string) {
     setToast(msg);
     window.clearTimeout((flash as { _t?: number })._t);
@@ -284,34 +211,6 @@ export function CallWindow({
         ? `${ctx.person ? `${ctx.person} · ` : ""}лид${ctx.phone ? ` · ${ctx.phone}` : ""}`
         : `${ctx.phone ?? "новый номер"} · не в базе`;
 
-  // Кандидаты для подбора: справочник минус уже добавленные, с фильтром поиска.
-  const inOrder = new Set(rows.map((r) => r.skuId));
-  const candidates = skus
-    .filter((s) => !inOrder.has(s.id))
-    .filter((s) =>
-      query.trim()
-        ? `${s.title} ${s.code}`.toLowerCase().includes(query.trim().toLowerCase())
-        : true,
-    )
-    .slice(0, 6);
-
-  function addSku(s: SkuOption) {
-    setRows((r) => [
-      ...r,
-      { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
-    ]);
-    setQuery("");
-  }
-  function setRowQty(skuId: number, qty: number) {
-    setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, qty: Math.max(1, qty) } : x)));
-  }
-  function toggleRow(skuId: number) {
-    setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, picked: !x.picked } : x)));
-  }
-  function removeRow(skuId: number) {
-    setRows((r) => r.filter((x) => x.skuId !== skuId));
-  }
-
   // Подтянуть реквизиты по УНП через существующий резолвер ЕГР (РБ): lookupCounterparty
   // → /integrations/egr. Бэкенд сам отдаёт demo-данные, если ЕГР не сконфигурирован
   // (base_url пуст) — контракт RegistryInfo один и тот же, спец-обработки demo тут нет.
@@ -326,35 +225,13 @@ export function CallWindow({
     flash("✅ Реквизиты подтянуты из ЕГР");
   }
 
-  const pickedRows = rows.filter((r) => r.picked);
-  // Итог заказа по ценам со склада (для счёта); НДС 20%.
-  const orderTotal = pickedRows.reduce((sum, r) => sum + (stock[r.code]?.price ?? 0) * r.qty, 0);
-  // Себес/маржа — ТОЛЬКО по позициям «в наличии» (себес из 1С). Под-заказ (нет себес)
-  // в маржу не идёт — она появится с предрасчётом ([[pricing-calculation-todo]]).
-  const costedRows = pickedRows.filter((r) => stock[r.code]?.cost != null);
-  const costedRevenue = costedRows.reduce((s, r) => s + (stock[r.code]?.price ?? 0) * r.qty, 0);
-  const orderCost = costedRows.reduce((s, r) => s + (stock[r.code]?.cost ?? 0) * r.qty, 0);
-  const orderMargin = costedRevenue - orderCost;
-  const hasUnderOrder = pickedRows.some((r) => stock[r.code]?.cost == null);
-
   // Колонка «Заказ» — главное действие зависит от контекста.
   async function commitOrder() {
-    if (!pickedRows.length) return flash("Отметьте хотя бы одну позицию");
+    if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
     setBusy(true);
-    // Зафиксировать цену со склада клиенту (Price Engine) → позиция сделки покажет цену.
-    const quotePrices = (cp: string) => {
-      for (const r of pickedRows) {
-        const p = stock[r.code]?.price;
-        if (p) void createPriceQuote(r.code, cp, p);
-      }
-    };
     if (ctx.kind === "deal") {
-      let ok = 0;
-      for (const r of pickedRows) {
-        if (await addDealItem(ctx.dealId, r.skuId, r.qty)) ok++;
-      }
-      quotePrices(ctx.company);
-      flash(`✅ В сделку добавлено позиций: ${ok}/${pickedRows.length}`);
+      const { ok, total } = await picker.commitToDeal(ctx.dealId, ctx.company);
+      flash(`✅ В сделку добавлено позиций: ${ok}/${total}`);
       setBusy(false);
       return;
     }
@@ -372,7 +249,7 @@ export function CallWindow({
       number,
       title: `Заявка со звонка${ctx.company ? ` · ${ctx.company}` : ""}`,
       counterparty,
-      amount: orderTotal, // сумма сделки = итог заказа по ценам со склада
+      amount: picker.orderTotal, // сумма сделки = итог заказа по ценам со склада
       priority: "Средний",
       stage: "new",
       owner: "",
@@ -382,20 +259,48 @@ export function CallWindow({
       setBusy(false);
       return;
     }
-    let ok = 0;
-    for (const r of pickedRows) {
-      if (await addDealItem(deal.id, r.skuId, r.qty)) ok++;
-    }
-    quotePrices(counterparty);
+    const pickedForTask = picker.pickedRows;
+    const { ok, total } = await picker.commitToDeal(deal.id, counterparty);
     if (ctx.kind === "lead") {
       // Пометить лиду намерение конвертации (списком позиций) — пока заметкой.
       void createDealTask(`lead:${ctx.leadId}`, {
-        title: `Быстрая сделка ${deal.number} из звонка: ${pickedRows.map((r) => `${r.title}×${r.qty}`).join(", ")}`,
+        title: `Быстрая сделка ${deal.number} из звонка: ${pickedForTask.map((r) => `${r.title}×${r.qty}`).join(", ")}`,
       });
     }
     setCreated({ id: deal.id, number: deal.number });
-    flash(`✅ Сделка ${deal.number} создана · позиций: ${ok}/${pickedRows.length}`);
+    flash(`✅ Сделка ${deal.number} создана · позиций: ${ok}/${total}`);
     setBusy(false);
+  }
+
+  /** Повторить прошлый заказ контрагента (только для существующей сделки — есть dealId). */
+  async function repeatOrder() {
+    if (ctx.kind !== "deal") return;
+    setBusy(true);
+    const n = await picker.repeatLastOrder(ctx.dealId);
+    setBusy(false);
+    flash(n ? `✅ Подтянуто позиций из прошлого заказа: ${n}` : "Прошлых заказов этого контрагента не найдено");
+  }
+
+  /** Выставить счёт: создать документ в 1С + открыть печатную форму (шаблон
+   * sales-invoice-template.html, backend-рендер GET /documents/{id}/render). */
+  async function issueInvoice() {
+    if (ctx.kind !== "deal") return flash("Счёт доступен только для существующей сделки");
+    setBusy(true);
+    const doc = await createDocument(ctx.dealId, "invoice");
+    setBusy(false);
+    if (!doc) return flash("⚠️ Не удалось выставить счёт");
+    flash(`✅ Счёт ${doc.number} выставлен`);
+    window.open(`/api/sales/documents/${doc.id}/render`, "_blank", "noopener");
+  }
+
+  /** Договор — уходит на согласование юристу (та же ветка, что и «Товар» в drawer-preview). */
+  async function issueContract() {
+    if (ctx.kind !== "deal") return flash("Договор доступен только для существующей сделки");
+    setBusy(true);
+    const doc = await createDocument(ctx.dealId, "contract");
+    setBusy(false);
+    if (!doc) return flash("⚠️ Не удалось создать договор");
+    flash(`✅ Договор ${doc.number} отправлен на согласование`);
   }
 
   async function addTask() {
@@ -587,124 +492,25 @@ export function CallWindow({
                 </div>
               )}
 
-              {/* Товар со склада — реальная номенклатура */}
+              {/* Товар со склада — реальная номенклатура (общий пикер — product-picker.tsx) */}
               <div>
-                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
-                  {ctx.kind !== "deal" && <StepNum n={2} />}
-                  Товар со склада
+                <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                  <span className="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
+                    {ctx.kind !== "deal" && <StepNum n={2} />}
+                    Товар со склада
+                  </span>
+                  {ctx.kind === "deal" && (
+                    <button
+                      type="button"
+                      onClick={repeatOrder}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-ink hover:text-accent"
+                    >
+                      <RefreshCw size={11} /> Повторить прошлый заказ
+                    </button>
+                  )}
                 </div>
-                {rows.length > 0 && (
-                  <div className="mb-2 space-y-1.5">
-                    {rows.map((r) => {
-                      const st = stock[r.code];
-                      const s = srokOf(st);
-                      const m = marginOf(st);
-                      return (
-                        <div
-                          key={r.skuId}
-                          className="flex items-center gap-2 rounded-lg border border-line bg-sunken px-2.5 py-1.5"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={r.picked}
-                            onChange={() => toggleRow(r.skuId)}
-                            className="h-4 w-4 accent-money"
-                            aria-label={`Включить ${r.title}`}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12.5px] font-semibold text-ink">
-                              {r.title}
-                            </div>
-                            <div className="truncate text-[11px] text-faint">
-                              {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
-                              {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
-                              <span className={s.cls}>{s.label}</span>
-                              {m ? (
-                                <span className="text-money"> · маржа {Math.round(m.pct)}%</span>
-                              ) : st?.free === 0 ? (
-                                <span className="text-faint"> · себес из предрасчёта</span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <input
-                            value={r.qty}
-                            onChange={(e) =>
-                              setRowQty(r.skuId, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1)
-                            }
-                            inputMode="numeric"
-                            className="w-12 rounded-md border border-line bg-surface px-1.5 py-1 text-center text-[12.5px] tabular-nums text-ink outline-none focus:border-accent"
-                            aria-label={`Количество ${r.title}`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeRow(r.skuId)}
-                            aria-label="Убрать позицию"
-                            className="text-faint hover:text-danger"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Поиск/подбор из справочника */}
-                <div className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5">
-                  <Search size={13} className="text-faint" />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Подобрать товар по названию / коду…"
-                    className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none"
-                  />
-                </div>
-                {(query.trim() || rows.length === 0) && (
-                  <div className="mt-1 space-y-1">
-                    {candidates.map((s) => {
-                      const st = stock[s.code];
-                      const sk = srokOf(st);
-                      const m = marginOf(st);
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => addSku(s)}
-                          className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-sunken"
-                        >
-                          <Plus size={13} className="mt-0.5 shrink-0 text-accent-ink" />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-2">
-                              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
-                                {s.title}
-                              </span>
-                              <span className="shrink-0 text-[11px] text-faint">{s.code}</span>
-                            </span>
-                            <span className="mt-0.5 block truncate text-[11px] text-faint">
-                              {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
-                              {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
-                              <span className={sk.cls}>{sk.label}</span>
-                              {m ? (
-                                <span className="text-money"> · маржа {Math.round(m.pct)}%</span>
-                              ) : st?.free === 0 ? (
-                                <span className="text-faint"> · предрасчёт</span>
-                              ) : null}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {candidates.length === 0 && (
-                      <div className="px-2 py-1.5 text-[12px] text-faint">
-                        {skus.length ? "Ничего не найдено" : "Загрузка номенклатуры…"}
-                      </div>
-                    )}
-                    <div className="px-2 pt-0.5 text-[11px] text-faint">
-                      номенклатура · 1С (через MDM); остатки по складам, цена и срок — из 1С
-                      (demo); резерв под счёт — SALES-51
-                    </div>
-                  </div>
-                )}
+                <ProductPicker state={picker} fmt={fmt} />
               </div>
 
               {/* Резерв + условия оплаты */}
@@ -755,35 +561,7 @@ export function CallWindow({
                 </div>
               </div>
 
-              {orderTotal > 0 && (
-                <div className="flex items-center justify-between rounded-lg bg-sunken px-3 py-2 text-[12.5px]">
-                  <span className="text-muted">Итого{reserve ? " · резерв" : ""}</span>
-                  <span className="font-bold text-ink">
-                    {fmt(orderTotal)}
-                    <span className="ml-1 font-normal text-faint">
-                      · с НДС {fmt(orderTotal * 1.2)}
-                    </span>
-                  </span>
-                </div>
-              )}
-
-              {/* Маржа по позициям «в наличии» (себес из 1С); под-заказ — отдельно (предрасчёт) */}
-              {costedRows.length > 0 && costedRevenue > 0 && (
-                <div className="flex items-center justify-between rounded-lg bg-money-soft px-3 py-2 text-[12px]">
-                  <span className="font-semibold text-money">
-                    Маржа{hasUnderOrder ? " · в наличии" : ""}
-                  </span>
-                  <span className="font-bold text-money">
-                    {fmt(orderMargin)} ({Math.round((orderMargin / costedRevenue) * 100)}%)
-                    <span className="ml-1 font-normal text-faint">· себес {fmt(orderCost)}</span>
-                  </span>
-                </div>
-              )}
-              {hasUnderOrder && (
-                <p className="text-[11px] text-faint">
-                  Под-заказ позиции — себестоимость из предварительного расчёта (скоро); пока в марже не учтены.
-                </p>
-              )}
+              <ProductPickerTotals state={picker} fmt={fmt} />
 
               {/* CTA по контексту */}
               <div className="space-y-2 pt-1">
@@ -791,12 +569,12 @@ export function CallWindow({
                   variant="money"
                   block
                   onClick={commitOrder}
-                  disabled={busy || !pickedRows.length}
+                  disabled={busy || !picker.pickedRows.length}
                   icon={<ShoppingCart size={14} />}
                 >
                   {context.kind === "deal"
-                    ? `Добавить в сделку${pickedRows.length ? ` (${pickedRows.length})` : ""}`
-                    : `Создать сделку с товаром${pickedRows.length ? ` (${pickedRows.length})` : ""}`}
+                    ? `Добавить в сделку${picker.pickedRows.length ? ` (${picker.pickedRows.length})` : ""}`
+                    : `Создать сделку с товаром${picker.pickedRows.length ? ` (${picker.pickedRows.length})` : ""}`}
                 </Button>
                 {created && (
                   <div className="rounded-lg border border-money/40 bg-money-soft px-3 py-2 text-[12.5px] text-money">
@@ -807,27 +585,20 @@ export function CallWindow({
                     с позициями — откройте, чтобы продолжить.
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => flash("🧾 Предпросмотр счёта — подключим к 1С (SALES)")}
-                    icon={<Receipt size={13} />}
-                  >
-                    Счёт
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => flash("📄 Предпросмотр договора — по УНП (SALES-53)")}
-                    icon={<FileText size={13} />}
-                  >
-                    Договор
-                  </Button>
-                </div>
+                {ctx.kind === "deal" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="secondary" size="sm" onClick={issueInvoice} disabled={busy} icon={<Receipt size={13} />}>
+                      Счёт
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={issueContract} disabled={busy} icon={<FileText size={13} />}>
+                      Договор
+                    </Button>
+                  </div>
+                )}
                 <p className="text-[11px] text-faint">
-                  Счёт/договор и резерв подключим к 1С отдельным шагом — сейчас подбор и позиции
-                  сделки работают вживую.
+                  {ctx.kind === "deal"
+                    ? "Счёт выставляется по уже добавленным в сделку позициям и открывается печатной формой в новой вкладке."
+                    : "Счёт/договор доступны после того, как заказ станет сделкой."}
                 </p>
               </div>
             </section>

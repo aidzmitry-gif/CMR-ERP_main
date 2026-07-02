@@ -450,6 +450,18 @@ export async function fetchDealItems(dealId: string): Promise<DealItemFull[]> {
   }
 }
 
+/** Позиции последней сделки того же контрагента — «повторить прошлый заказ»
+ * (honest empty [], если предыдущих заказов нет — не 404). */
+export async function fetchLastOrder(dealId: string): Promise<DealItemFull[]> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/repeat-last-order`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as DealItemFull[];
+  } catch {
+    return [];
+  }
+}
+
 /** Добавить позицию в сделку. */
 export async function addDealItem(dealId: string, skuId: number, qty: number): Promise<boolean> {
   try {
@@ -856,16 +868,17 @@ export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
 }
 
 /** Сформировать документ сделки (счёт/договор/заказ). Договор уходит на согласование. */
-export async function createDocument(dealId: string, kind: string): Promise<boolean> {
+export async function createDocument(dealId: string, kind: string): Promise<DealDoc | null> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, requested_by: "Менеджер" }),
     });
-    return res.ok;
+    if (!res.ok) return null;
+    return (await res.json()) as DealDoc;
   } catch {
-    return false;
+    return null;
   }
 }
 

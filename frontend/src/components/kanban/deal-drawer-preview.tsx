@@ -5,9 +5,12 @@ import {
   Calendar,
   Check,
   ChevronRight,
+  FileText,
   Flag,
   Phone,
   Plus,
+  Receipt,
+  ShoppingCart,
   Star,
   User,
   X,
@@ -17,8 +20,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
+import { ProductPickerModal } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
+import { createDocument } from "@/lib/api";
 import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
 import { formatNextStep } from "@/lib/format";
@@ -73,12 +78,17 @@ export function DealDrawerPreview({
   const [stepDraft, setStepDraft] = useState("");
   const [stepEditing, setStepEditing] = useState(false);
   const [taskDraft, setTaskDraft] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [docBusy, setDocBusy] = useState(false);
+  const [docMsg, setDocMsg] = useState<string | null>(null);
   // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setStepDraft(deal?.nextStep ?? "");
     setStepEditing(false);
     setTaskDraft("");
+    setPickerOpen(false);
+    setDocMsg(null);
   }, [deal?.id]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -120,6 +130,27 @@ export function DealDrawerPreview({
     if (!deal || !taskDraft.trim()) return;
     onAddTask(deal.id, taskDraft.trim());
     setTaskDraft("");
+  }
+
+  /** Счёт по уже добавленным в сделку позициям (без похода в подбор товара). */
+  async function issueInvoice() {
+    if (!deal) return;
+    setDocBusy(true);
+    const doc = await createDocument(deal.id, "invoice");
+    setDocBusy(false);
+    if (!doc) return setDocMsg("⚠️ Не удалось выставить счёт");
+    setDocMsg(`✅ Счёт ${doc.number} выставлен`);
+    window.open(`/api/sales/documents/${doc.id}/render`, "_blank", "noopener");
+  }
+
+  /** Договор — уходит на согласование юристу (та же ветка, что и POST /documents kind=contract). */
+  async function issueContract() {
+    if (!deal) return;
+    setDocBusy(true);
+    const doc = await createDocument(deal.id, "contract");
+    setDocBusy(false);
+    if (!doc) return setDocMsg("⚠️ Не удалось создать договор");
+    setDocMsg(`✅ Договор ${doc.number} отправлен на согласование`);
   }
 
   function toggleStar() {
@@ -362,6 +393,37 @@ export function DealDrawerPreview({
                 </Button>
               )}
 
+              {/* === ДОКУМЕНТЫ: подбор товара + счёт + договор === */}
+              <section className="mt-4 grid grid-cols-3 gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPickerOpen(true)}
+                  icon={<ShoppingCart size={13} />}
+                >
+                  Товар
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void issueInvoice()}
+                  disabled={docBusy}
+                  icon={<Receipt size={13} />}
+                >
+                  Счёт
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void issueContract()}
+                  disabled={docBusy}
+                  icon={<FileText size={13} />}
+                >
+                  Договор
+                </Button>
+              </section>
+              {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
+
               {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
               <div className="mt-4 rounded-xl border border-line p-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -409,6 +471,15 @@ export function DealDrawerPreview({
           </>
         )}
       </aside>
+
+      {deal && pickerOpen && (
+        <ProductPickerModal
+          dealId={deal.id}
+          counterparty={deal.company || "Контрагент не указан"}
+          onClose={() => setPickerOpen(false)}
+          onCommitted={() => setPickerOpen(false)}
+        />
+      )}
     </>
   );
 }
