@@ -352,6 +352,97 @@ function Column({
   );
 }
 
+/** «Все вместе» (мокап sales-board-mockup.html, COMBINED, ~1912-1915): доска одной
+ *  воронки — заголовок секции + канбан с горизонтальным скроллом колонок. Своя
+ *  DndContext на секцию (перенос сделки внутри своей же воронки), reuse Column/DraggableDeal —
+ *  логика канбана не дублируется. */
+function FunnelSection({
+  title,
+  color,
+  initialStages,
+  fmt,
+  cardExtras,
+  onPreview,
+  onOpen,
+  onAddDeal,
+}: {
+  title: string;
+  color: string;
+  initialStages: Stage[];
+  fmt: (value: number) => string;
+  cardExtras: (deal: Deal, stageId: string, stages: Stage[]) => CardExtras;
+  onPreview: (d: Deal) => void;
+  onOpen: (d: Deal) => void;
+  onAddDeal: (stageId: string, sectionStages: Stage[]) => void;
+}) {
+  const [stages, setStages] = useState<Stage[]>(initialStages);
+  const [active, setActive] = useState<Deal | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const dndId = useId();
+
+  // Родитель SSR-рефрешит (router.refresh()) после создания сделки в секции — синхронизируем
+  // локальный стейт с новым `initialStages`, иначе секция не увидит новую карточку.
+  useEffect(() => {
+    setStages(initialStages);
+  }, [initialStages]);
+
+  function handleDragStart(e: DragStartEvent) {
+    const id = String(e.active.id);
+    setActive(stages.flatMap((s) => s.deals).find((d) => d.id === id) ?? null);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    setActive(null);
+    const dealId = String(e.active.id);
+    const targetStage = e.over ? String(e.over.id) : null;
+    if (!targetStage) return;
+    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
+    void updateDealStage(dealId, targetStage);
+  }
+
+  const total = stages.reduce((n, s) => n + s.count, 0);
+
+  return (
+    <div className="mt-5">
+      <div
+        className="mb-2.5 flex items-center gap-2 border-l-[3px] pl-2.5 text-sm font-bold text-ink"
+        style={{ borderColor: color }}
+      >
+        <span aria-hidden>▦</span>
+        {title}
+        <span className="text-xs font-normal text-faint">
+          · {total} {pluralDeals(total)}
+        </span>
+      </div>
+      <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="flex gap-4 overflow-x-auto pb-2 thin-scroll">
+          {stages.map((stage) => (
+            <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => onAddDeal(stage.id, stages)}>
+              {stage.deals.map((deal) => (
+                <DraggableDeal
+                  key={deal.id}
+                  deal={deal}
+                  extras={cardExtras(deal, stage.id, stages)}
+                  fmt={fmt}
+                  onPreview={onPreview}
+                  onOpen={onOpen}
+                />
+              ))}
+            </Column>
+          ))}
+        </div>
+        <DragOverlay>
+          {active ? (
+            <div className="w-[280px] rotate-2">
+              <DealCard deal={active} fmt={fmt} />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
+  );
+}
+
 // ── План/Факт: компактный скорборд (перенос блока с sales-board-mockup.html) ────
 // Доля прошедшего времени периода (0..1) из реального `now` — база метки темпа и прогноза run-rate.
 function periodElapsed(now: number, period: string): number {
@@ -482,16 +573,27 @@ function PlanFactCell({
   );
 }
 
+/** Цвет заголовка секции в «Все вместе» (мокап sales-board-mockup.html, COMBINED) по
+ *  коду воронки; неизвестный код (созданный через редактор стадий) — акцентный дефолт. */
+const FUNNEL_SECTION_COLOR: Record<string, string> = {
+  new_clients: "#2563EB",
+  repeat_clients: "#FB923C",
+  tenders: "#14B8A6",
+};
+
 export function DealsWorkspace({
   initialStages,
   initialKpis,
   switcher,
   funnelTabs,
+  combinedStages,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
   switcher?: React.ReactNode;
   funnelTabs?: React.ReactNode;
+  /** «Все вместе» (funnel=all): доска каждой воронки своей секцией, одна под другой. */
+  combinedStages?: { code: string; title: string; stages: Stage[] }[];
 }) {
   const router = useRouter();
   const { fmt } = useCurrency();
@@ -506,6 +608,9 @@ export function DealsWorkspace({
   const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStage, setModalStage] = useState<string>(initialStages[0]?.id ?? "new");
+  // «Все вместе»: клик «Добавить сделку» в секции воронки должен предложить стадии ЭТОЙ
+  // воронки в модалке, а не дефолтные new_clients (`stages`) — храним стадии секции-источника.
+  const [modalStages, setModalStages] = useState<Stage[] | null>(null);
   const [query, setQuery] = useState("");
   const [priority, setPriority] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -613,9 +718,15 @@ export function DealsWorkspace({
   async function handleCreate(input: DealInput): Promise<boolean> {
     const created = await createDeal(input);
     if (!created) return false;
-    setStages((prev) =>
-      recomputeStages(prev.map((s) => (s.id === input.stage ? { ...s, deals: [...s.deals, created] } : s))),
-    );
+    if (modalStages) {
+      // Создано из секции «Все вместе» — её доска живёт в локальном стейте FunnelSection
+      // (не в `stages`), оптимистично туда не дотянуться отсюда; SSR-рефреш подтянет секцию.
+      router.refresh();
+    } else {
+      setStages((prev) =>
+        recomputeStages(prev.map((s) => (s.id === input.stage ? { ...s, deals: [...s.deals, created] } : s))),
+      );
+    }
     setModalOpen(false);
     return true;
   }
@@ -632,8 +743,9 @@ export function DealsWorkspace({
     if (fresh.length) setKpis(fresh);
   }
 
-  function openModal(stageId: string) {
+  function openModal(stageId: string, sectionStages?: Stage[]) {
     setModalStage(stageId);
+    setModalStages(sectionStages ?? null);
     setModalOpen(true);
   }
 
@@ -670,6 +782,24 @@ export function DealsWorkspace({
     s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })),
   );
   const PRIORITIES = ["Высокий", "Средний", "Низкий"];
+
+  /** Бейджи карточки для секций «Все вместе»: та же формула, без «Отказ»-кнопки —
+   *  причина отказа собирается через ту же модалку только на основной (не-комбинированной)
+   *  доске; в комбинированном виде drag в терминальную колонку двигает сделку напрямую
+   *  (ponytail: единый confirmLose-гейт для комбинированного вида — если понадобится). */
+  function combinedCardExtras(deal: Deal, stageId: string, sectionStages: Stage[]): CardExtras {
+    const code = deal.lostReasonCode;
+    const wonId = sectionStages.find((s) => s.id.endsWith("won"))?.id;
+    const lostId = sectionStages.find((s) => s.id.endsWith("lost"))?.id;
+    return {
+      days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
+      stuck: now != null && stageId !== wonId && stageId !== lostId && isStuck(deal, stageId, now),
+      probability: probabilityFor(deal, stageId),
+      weighted: weightedAmount(deal, stageId),
+      lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
+      wonResult: stageId === wonId,
+    };
+  }
 
   return (
     <>
@@ -884,33 +1014,54 @@ export function DealsWorkspace({
           );
         })()}
 
-        {/* Переключатель вида */}
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
-            <button
-              onClick={() => setView("board")}
-              title="Канбан"
-              className={clsx(
-                "rounded-md p-1.5",
-                view === "board" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
-              )}
-            >
-              <LayoutGrid size={16} />
-            </button>
-            <button
-              onClick={() => setView("list")}
-              title="Список"
-              className={clsx(
-                "rounded-md p-1.5",
-                view === "list" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
-              )}
-            >
-              <List size={16} />
-            </button>
+        {/* Переключатель вида — не показываем в «Все вместе» (комбинированный вид — только канбан) */}
+        {!combinedStages && (
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+              <button
+                onClick={() => setView("board")}
+                title="Канбан"
+                className={clsx(
+                  "rounded-md p-1.5",
+                  view === "board" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
+                )}
+              >
+                <LayoutGrid size={16} />
+              </button>
+              <button
+                onClick={() => setView("list")}
+                title="Список"
+                className={clsx(
+                  "rounded-md p-1.5",
+                  view === "list" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
+                )}
+              >
+                <List size={16} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        {view === "board" ? (
+        {combinedStages ? (
+          /* «Все вместе» (мокап COMBINED): доска каждой воронки — своя секция, drag&drop
+           * работает внутри секции (см. FunnelSection). Не дублирует канбан-логику —
+           * переиспользует Column/DraggableDeal. */
+          <>
+            {combinedStages.map((section) => (
+              <FunnelSection
+                key={section.code}
+                title={section.title}
+                color={FUNNEL_SECTION_COLOR[section.code] ?? "var(--accent)"}
+                initialStages={section.stages}
+                fmt={fmt}
+                cardExtras={combinedCardExtras}
+                onPreview={setPreviewDeal}
+                onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                onAddDeal={openModal}
+              />
+            ))}
+          </>
+        ) : view === "board" ? (
           /* Канбан с drag&drop */
           <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
@@ -1014,12 +1165,14 @@ export function DealsWorkspace({
           </div>
         )}
 
-        <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />
+        {/* Итоги — по выбранной воронке; в «Все вместе» единой суммы по разнородным
+            воронкам нет (won/lost — разные коды на секцию), поэтому блок скрыт. */}
+        {!combinedStages && <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />}
       </main>
 
       {modalOpen && (
         <CreateDealModal
-          stages={stages}
+          stages={modalStages ?? stages}
           defaultStage={modalStage}
           onClose={() => setModalOpen(false)}
           onCreate={handleCreate}

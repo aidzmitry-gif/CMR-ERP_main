@@ -214,11 +214,12 @@ async def test_chats_unread_and_mark_read(api):
 
 # ── Сделки 2.0: редактор стадий (sales.stage CRUD) ──────────────────────────
 async def test_stage_editor_lazy_seed_and_crud(api):
-    # первый GET лениво материализует канон (11 new_clients + 5 repeat_clients = 16)
+    # первый GET лениво материализует канон (11 new_clients + 5 repeat_clients + 5 tenders = 21)
     stages = (await api.get("/sales/stages")).json()
     new_clients = [s for s in stages if s["funnel"] == "new_clients"]
     repeat_clients = [s for s in stages if s["funnel"] == "repeat_clients"]
-    assert len(new_clients) == 11 and len(repeat_clients) == 5
+    tenders = [s for s in stages if s["funnel"] == "tenders"]
+    assert len(new_clients) == 11 and len(repeat_clients) == 5 and len(tenders) == 5
     assert new_clients[0]["code"] == "new"
     won = next(s for s in stages if s["code"] == "won")
     assert won["kind"] == "won" and won["probability"] == 100
@@ -332,7 +333,7 @@ async def test_deal_margin_facade_missing(api, session):
 
 # ── П4: мульти-воронки в /board ────────────────────────────────────────────────
 async def test_board_funnel_filter(api):
-    await api.get("/sales/stages")  # материализовать канон обеих воронок
+    await api.get("/sales/stages")  # материализовать канон всех воронок
     await _new_deal(api, "F-1", stage="new")  # default funnel = new_clients
     await _new_deal(api, "F-2", stage="rp_request", funnel="repeat_clients")
     b_new = (await api.get("/sales/board?funnel=new_clients")).json()
@@ -344,6 +345,21 @@ async def test_board_funnel_filter(api):
     cols_rep = [st["id"] for st in b_rep["stages"]]
     assert "qual" in cols_new and "rp_request" in cols_rep
     assert "rp_request" not in cols_new
+
+
+# ── Слайс 3: воронка «Тендеры» ──────────────────────────────────────────────────
+async def test_board_funnel_tenders(api):
+    await api.get("/sales/stages")  # материализовать канон всех воронок
+    await _new_deal(api, "T-1", stage="tn_bidding", funnel="tenders")
+    b_tn = (await api.get("/sales/board?funnel=tenders")).json()
+    cols_tn = [st["id"] for st in b_tn["stages"]]
+    assert cols_tn == ["tn_announced", "tn_submitted", "tn_bidding", "tn_won", "tn_lost"]
+    n_tn = sum(st["count"] for st in b_tn["stages"])
+    assert n_tn == 1
+
+    funnels = (await api.get("/sales/funnels")).json()
+    codes = {f["code"] for f in funnels}
+    assert {"new_clients", "repeat_clients", "tenders"} <= codes
 
 
 # ── П6: pipeline-аналитика ─────────────────────────────────────────────────────

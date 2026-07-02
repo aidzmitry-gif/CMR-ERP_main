@@ -19,6 +19,7 @@ vi.mock("@/lib/api", () => ({
   lookupCounterparty: vi.fn().mockResolvedValue(null),
   loseDeal: vi.fn().mockResolvedValue(true),
   fetchLossReasons: vi.fn().mockResolvedValue([]),
+  fetchPlans: vi.fn().mockResolvedValue([]),
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
@@ -165,5 +166,40 @@ describe("DealsWorkspace (канбан)", () => {
     await waitFor(() => expect(api.loseDeal).toHaveBeenCalledWith("1", "price", undefined));
     expect(screen.queryByText("Закрыть сделку в отказ")).toBeNull(); // модалка закрылась
     expect(screen.getByText(/Причина: Дорого/)).toBeInTheDocument(); // плашка причины на карточке
+  });
+
+  // --- Слайс 3: «Все вместе» (мульти-воронки, П5 ТЗ) ---
+
+  it("«Все вместе»: рендерит секцию на каждую воронку с заголовком и её колонками", () => {
+    const tenderStages: Stage[] = [
+      {
+        id: "tn_announced",
+        title: "Объявлен",
+        color: "#3B82F6",
+        count: 1,
+        sum: 500,
+        deals: [
+          { id: "9", number: "T-1", company: "Госзакупки РБ", description: "Тендер", amount: 500, priority: "Средний", owner: "И" },
+        ],
+      },
+    ];
+    render(
+      <DealsWorkspace
+        initialStages={stages}
+        initialKpis={[]}
+        combinedStages={[
+          { code: "new_clients", title: "Новые клиенты", stages },
+          { code: "tenders", title: "Тендеры", stages: tenderStages },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Новые клиенты")).toBeInTheDocument();
+    expect(screen.getByText("Тендеры")).toBeInTheDocument();
+    // колонки обеих воронок на странице разом (не переключение, а стек)
+    expect(screen.getByText("Новая заявка")).toBeInTheDocument();
+    expect(screen.getByText("Объявлен")).toBeInTheDocument();
+    expect(screen.getByText("Госзакупки РБ")).toBeInTheDocument();
+    // переключатель вида (канбан/список) скрыт в комбинированном режиме
+    expect(screen.queryByTitle("Список")).toBeNull();
   });
 });
