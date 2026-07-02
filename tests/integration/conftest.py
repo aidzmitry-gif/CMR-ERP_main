@@ -62,12 +62,10 @@ async def pg_app(postgres_url, monkeypatch):
     app = create_app()
     await app.state.core.services.db.connect()  # реальное подключение к Postgres
     transport = ASGITransport(app=app)
-    # fail-closed RBAC (SECURITY.md P0-1): запрос без роли — «Гость» (403). Шлём супер-роль
-    # по умолчанию, как SQLite-фикстура `api` (tests/conftest.py::AUTHED_HEADERS).
     try:
         async with AsyncClient(
             transport=transport, base_url="http://test", headers={"X-User-Roles": "director"}
-        ) as client:
+        ) as client:  # fail-closed (P0-1): без супер-роли все /sales/* отдают 403
             yield client
     finally:
         await app.state.core.services.db.disconnect()

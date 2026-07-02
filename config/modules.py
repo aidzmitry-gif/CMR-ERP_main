@@ -7,6 +7,7 @@
 """
 ENABLED_MODULES: list[str] = [
     "sales",
+    "leads",
     "integrations",
     "procurement",
     "production",

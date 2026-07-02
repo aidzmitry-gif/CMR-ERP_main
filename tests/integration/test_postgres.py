@@ -40,17 +40,24 @@ async def test_deal_crud_on_postgres(pg_app):
 async def test_lead_lifecycle_on_postgres(pg_app):
     lead = (
         await pg_app.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО ПГ-Лид", "region": "Минск", "product": "лист"},
         )
     ).json()
-    await pg_app.post(f"/sales/leads/{lead['id']}/qualify")
-    routed = (await pg_app.post(f"/sales/leads/{lead['id']}/route")).json()
+    await pg_app.post(f"/leads/{lead['id']}/qualify")
+    routed = (await pg_app.post(f"/leads/{lead['id']}/route")).json()
     assert routed["assigned_to"]
 
-    conv = await pg_app.post(f"/sales/leads/{lead['id']}/convert")
+    conv = await pg_app.post(f"/leads/{lead['id']}/convert")
     assert conv.status_code == 201
-    assert conv.json()["number"] == f"CRM-LEAD-{lead['id']}"
+    assert conv.json()["status"] == "converted"
+
+    # convert лишь публикует leads.lead.converted; сделку sales создаёт по подписке через
+    # фоновый relay, а pg_app (ASGITransport) lifespan не крутит. Полный поток лид→сделка
+    # проверяет SQLite-тест test_lead_convert_creates_deal (ручной relay). Здесь — что
+    # событие реально записано в outbox реальной БД.
+    events = (await pg_app.get("/system/events")).json()
+    assert any(e["event_type"] == "leads.lead.converted" for e in events)
 
 
 async def test_lifespan_background_relay_on_postgres(postgres_url, monkeypatch):

@@ -50,11 +50,11 @@ async def test_ai_assist_enabled_both_kinds(session, ai_api):
 async def test_ai_lead_qualify_with_rationale(session, ai_api):
     lead = (
         await ai_api.post(
-            "/sales/leads",
+            "/leads",
             json={"source": "site", "company": "ООО AI", "product": "лист", "phone": "+375290000000"},
         )
     ).json()
-    r = await ai_api.post(f"/sales/leads/{lead['id']}/qualify")
+    r = await ai_api.post(f"/leads/{lead['id']}/qualify")
     assert r.status_code == 200
     body = r.json()
     assert body["ai_rationale"] and body["model"] == "qwen2.5"

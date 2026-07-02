@@ -69,6 +69,10 @@ services:
       AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://redis:6379/0}
       AIOS_KEYCLOAK_ISSUER: ${AIOS_KEYCLOAK_ISSUER:-}
       AIOS_KEYCLOAK_AUDIENCE: ${AIOS_KEYCLOAK_AUDIENCE:-}
+      # Телефония zruchna — задаётся на хосте через /opt/cmr-erp/.env (compose автозагрузка).
+      # Пустые → коннектор отключён (graceful). См. coordination/belakb-golive-plan.md §Фаза-2.
+      AIOS_TELEPHONY_WEBHOOK_TOKEN: ${AIOS_TELEPHONY_WEBHOOK_TOKEN:-}
+      AIOS_TELEPHONY_ORIGINATE_URL: ${AIOS_TELEPHONY_ORIGINATE_URL:-}
     # SECURITY.md P0-7: в проде забиндить на loopback ("127.0.0.1:8000:8000") и пускать
     # только через TLS-прокси. Не делаю по умолчанию: если прокси/Tailscale ходит к app не
     # через хостовой loopback — bind на 127.0.0.1 оборвёт доступ. См. ops-вопрос в STATUS.

@@ -142,11 +142,11 @@ async def test_create_activity_with_explicit_date(api):
 
 
 async def test_lead_requalify_keeps_routed_status(api):
-    lead = (await api.post("/sales/leads", json={"source": "site", "company": "ООО Реквал"})).json()
-    await api.post(f"/sales/leads/{lead['id']}/qualify")  # new → qualified
-    await api.post(f"/sales/leads/{lead['id']}/route")  # → routed
+    lead = (await api.post("/leads", json={"source": "site", "company": "ООО Реквал"})).json()
+    await api.post(f"/leads/{lead['id']}/qualify")  # new → qualified
+    await api.post(f"/leads/{lead['id']}/route")  # → routed
     # повторная квалификация: статус не «new» → не откатывается на qualified
-    r = await api.post(f"/sales/leads/{lead['id']}/qualify")
+    r = await api.post(f"/leads/{lead['id']}/qualify")
     assert r.status_code == 200 and r.json()["status"] == "routed"
 
 
