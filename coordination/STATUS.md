@@ -48,24 +48,23 @@
 - **ModuleBoard** — простая generic-таблица (CRUD-каркас).
 
 <!-- READINESS:AUTO — авто-блок scripts/readiness.py --write, не редактируй вручную -->
-### Объективные метрики + готовность (авто, обновлено 2026-06-29)
+### Объективные метрики (авто, обновлено 2026-07-02)
 
-loc · роуты · миграции · тип фронта — из кода; **%** — курируемая готовность из `coordination/readiness.json` (ведётся ИНКРЕМЕНТАЛЬНО — лейн в `КООРД: DONE` даёт `[%: NN]`, координатор правит одну строку json; не пере-замер).
+Свежие цифры из кода: loc (без миграций) · роуты · миграции модуля · тип фронта.
+Таблица с **%** выше — курируемая вручную; сверяй её с этими числами.
 
-| пакет | loc | роуты | мигр | ui | % |
-|---|---:|---:|---:|---|---:|
-| `sales` | 5364 | 63 | 19 | bespoke (33 loc) | **88** |
-| `procurement` | 2547 | 32 | 6 | FunnelBoard | **76** |
-| `production` | 1223 | 30 | 5 | FunnelBoard | **72** |
-| `wms` | 2479 | 42 | 6 | bespoke (15 loc) | **75** |
-| `logistics` | 3340 | 51 | 5 | bespoke (10 loc) | **72** |
-| `finance` | 2443 | 19 | 5 | bespoke (10 loc) | **97** |
-| `marketing` | 121 | 3 | 0 | ModuleBoard | **15** |
-| `service` | 92 | 2 | 0 | ModuleBoard | **15** |
-| `hr` | 459 | 13 | 3 | FunnelBoard | **55** |
-| **всего миграций** | | | **80** | | |
-
-**Общая готовность платформы: ~60%** (курируемые % из `coordination/readiness.json`, обновлены 2026-06-30). Не-модульные юниты (core, reference/MDM, office-bundle) — в курируемой таблице выше и в json.
+| пакет | loc | роуты | мигр | ui |
+|---|---:|---:|---:|---|
+| `sales` | 5500 | 64 | 21 | bespoke (57 loc) |
+| `procurement` | 2564 | 32 | 6 | FunnelBoard |
+| `production` | 1303 | 30 | 5 | FunnelBoard |
+| `wms` | 2479 | 42 | 6 | bespoke (15 loc) |
+| `logistics` | 3340 | 51 | 5 | bespoke (10 loc) |
+| `finance` | 2485 | 19 | 5 | bespoke (10 loc) |
+| `marketing` | 1134 | 14 | 2 | ModuleBoard |
+| `service` | 218 | 6 | 1 | ModuleBoard |
+| `hr` | 488 | 14 | 3 | FunnelBoard |
+| **всего миграций** | | | **89** | |
 
 <!-- /READINESS:AUTO -->
 
