@@ -1,0 +1,194 @@
+"""Свип-доказательство write-RBAC инварианта (PLATFORM.md #2, security).
+
+**Инвариант:** write-эндпоинт (POST/PUT/PATCH/DELETE) бизнес-модуля, к которому у роли
+НЕТ доступа по ``config.access.ACCESS_MATRIX``, обязан вернуть **403 ДО выполнения роута**
+(режет ``core.runtime.access.AccessControlMiddleware`` по префиксу модуля).
+
+Тест САМ находит write-роуты из ``app.routes`` (не хардкод-список) → новый незащищённый
+write-роут слаггнутого модуля уронит негативный свип, а новый *неслаггнутый* модуль с
+write-роутами уронит coverage-guard. Гейт закрывается на уровне ЯДРА, не по-модульно.
+
+Разбор реальности (аудит на 2026-07-02): 12 бизнес-модулей (sales/procurement/production/
+wms/logistics/finance/marketing/service/hr/office/legal/knowledge) слаггнуты и гейтятся.
+``integrations`` — инфраструктура без UI-слага (вебхуки телефонии/веб-лидов/почты + синк 1С):
+внешние вызыватели не шлют ``X-User-Roles`` и аутентифицируются подписью (как открытый
+``/marketing/seo/webhook``); гейтить его = ломать интеграции. Поэтому он — задокументированное
+исключение, зафиксированное coverage-guard'ом (``_UNGATED_INFRA``), а не дыра.
+"""
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from config.access import (
+    ROLE_ORDER,
+    SUPER_ROLES,
+    is_package_allowed,
+)
+from core.runtime.access import OPEN_PREFIXES, build_prefix_map
+from core.runtime.app import create_app
+from core.runtime.deps import get_session
+
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+# Синтетическая роль-«никто»: не super и НЕ в матрице → гарантированно лишена доступа к
+# любому пакету. Нужна для модулей, доступных ВСЕМ реальным ролям (напр. ``knowledge``),
+# где реального «отказника» подобрать нельзя. ASCII/HTTP-safe (кириллица в заголовке — mojibake).
+_SYNTHETIC_DENIER = "__no_access__"
+
+# Реальные не-super роли — для осмысленного «отказника» (напр. warehouse для crm).
+_REAL_ROLES = [r for r in ROLE_ORDER if r not in SUPER_ROLES]
+
+# Позитивный sanity: super-роль (полный доступ) → гейт всегда пропускает.
+_OWNER_ROLE = "director"
+assert _OWNER_ROLE in SUPER_ROLES  # инвариант выбора: владелец обязан быть super
+
+# Неслаггнутые пакеты, для которых открытость write-роутов — осознанное решение (инфра).
+# Coverage-guard падает, если появится НОВЫЙ неслаггнутый модуль с write-роутами вне списка.
+_UNGATED_INFRA = frozenset({"integrations"})
+
+# Единожды строим приложение на импорте — параметризация нужна на этапе сбора тестов.
+_APP = create_app()
+_CORE = _APP.state.core
+# [(prefix, package)] слаггнутых модулей, длинные префиксы первыми (как в middleware).
+_PREFIX_MAP = build_prefix_map(_CORE)
+_PARAM_RE = re.compile(r"\{[^}]+\}")
+
+
+def _package_for_path(path: str) -> str | None:
+    """Пакет-модуль по самому длинному подходящему префиксу (только слаггнутые)."""
+    for prefix, package in _PREFIX_MAP:  # уже отсортировано: длинные первыми
+        if path == prefix or path.startswith(prefix + "/"):
+            return package
+    return None
+
+
+def _denying_role(package: str) -> str:
+    """Роль, которой пакет НЕ доступен. Реальная (напр. warehouse), иначе синтетический «никто»."""
+    for role in _REAL_ROLES:
+        if not is_package_allowed(package, [role]):
+            return role
+    return _SYNTHETIC_DENIER
+
+
+def _concrete_url(path: str) -> str:
+    """Подставить фиктивные значения в path-параметры (тело роута не важно — важен 403 гейта)."""
+    return _PARAM_RE.sub("1", path)
+
+
+def _collect_write_routes() -> list[tuple[str, str, str, str]]:
+    """(method, concrete_url, package, denying_role) по write-роутам слаггнутых модулей.
+
+    Пропускаем ``OPEN_PREFIXES`` (health/system/webhook — открыты намеренно) и роуты вне
+    слаггнутых модулей (инфра/системные — гейт их не ограничивает; см. coverage-guard).
+    """
+    seen: set[tuple[str, str]] = set()
+    routes: list[tuple[str, str, str, str]] = []
+    for route in _APP.routes:
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path or path.startswith(OPEN_PREFIXES):
+            continue
+        package = _package_for_path(path)
+        if package is None:
+            continue
+        denier = _denying_role(package)
+        for method in sorted(methods & WRITE_METHODS):
+            key = (method, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            routes.append((method, _concrete_url(path), package, denier))
+    return routes
+
+
+WRITE_ROUTES = _collect_write_routes()
+_ROUTE_IDS = [f"{m}:{url}[{pkg}!{denier}]" for m, url, pkg, denier in WRITE_ROUTES]
+
+
+@pytest.fixture
+async def client(session):
+    """ASGI-клиент БЕЗ дефолтной роли — роль каждый запрос задаёт явно (X-User-Roles)."""
+
+    async def _override():
+        yield session
+
+    _APP.dependency_overrides[get_session] = _override
+    try:
+        transport = ASGITransport(app=_APP)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    finally:
+        _APP.dependency_overrides.pop(get_session, None)
+
+
+def test_sweep_discovered_module_write_routes():
+    """Свип реально что-то нашёл (пустая параметризация = ложно-зелёный).
+
+    Заодно закрепляет: ключевые бизнес-модули присутствуют в наборе (защита от того, что
+    ``create_app``/enumeration тихо сломались и routes исчезли)."""
+    assert WRITE_ROUTES, "свип не нашёл ни одного write-роута — enumeration сломан"
+    found_packages = {pkg for _, _, pkg, _ in WRITE_ROUTES}
+    for expected in ("sales", "procurement", "wms", "finance"):
+        assert expected in found_packages, f"нет write-роутов модуля {expected} — свип неполон"
+
+
+def test_no_ungated_module_write_route():
+    """Coverage-guard: у каждого неслаггнутого модуля с не-open write-роутами есть алиби.
+
+    Модуль без UI-слага НЕ гейтится матрицей доступа. Для инфры (``integrations``) это
+    осознанно (``_UNGATED_INFRA``). Появился НОВЫЙ такой модуль — тест падает: реши явно
+    (дать слаг в ``config/access.py`` ИЛИ признать инфрой в ``_UNGATED_INFRA``)."""
+    slugged = {pkg for _, pkg in _PREFIX_MAP}
+    # Пакет-владелец каждого роута из реестра модулей (не только слаггнутые), длинные префиксы первыми.
+    owner_pairs = sorted(
+        ((reg.prefix, reg.module) for reg in _CORE.routers if reg.prefix),
+        key=lambda kv: len(kv[0]),
+        reverse=True,
+    )
+
+    def owner_of(path: str) -> str | None:
+        for prefix, module in owner_pairs:
+            if path == prefix or path.startswith(prefix + "/"):
+                return module
+        return None
+
+    ungated: dict[str, list[str]] = defaultdict(list)
+    for route in _APP.routes:
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path or path.startswith(OPEN_PREFIXES):
+            continue
+        if not (methods & WRITE_METHODS):
+            continue
+        module = owner_of(path)
+        if module and module not in slugged:
+            ungated[module].append(path)
+
+    unexpected = {m: paths for m, paths in ungated.items() if m not in _UNGATED_INFRA}
+    assert not unexpected, (
+        "Неслаггнутые модули с write-роутами вне allow-list инфры — гейт их НЕ ловит. "
+        f"Реши явно (слаг в config/access.py ИЛИ _UNGATED_INFRA): {dict(unexpected)}"
+    )
+
+
+@pytest.mark.parametrize("method,url,package,denier", WRITE_ROUTES, ids=_ROUTE_IDS)
+async def test_write_route_denied_for_unauthorized_role(client, method, url, package, denier):
+    """Негатив: роль без доступа к модулю → 403 (гейт режет до тела роута)."""
+    resp = await client.request(method, url, headers={"X-User-Roles": denier})
+    assert resp.status_code == 403, (
+        f"{method} {url}: роль '{denier}' НЕ имеет доступа к модулю '{package}', "
+        f"ожидали 403 от гейта, получили {resp.status_code} — write-RBAC дыра"
+    )
+
+
+@pytest.mark.parametrize("method,url,package,denier", WRITE_ROUTES, ids=_ROUTE_IDS)
+async def test_write_route_allowed_for_owner_role(client, method, url, package, denier):
+    """Позитив (sanity): super-роль (director) → НЕ 403 (гейт пропускает; тело может дать 4xx/5xx)."""
+    resp = await client.request(method, url, headers={"X-User-Roles": _OWNER_ROLE})
+    assert resp.status_code != 403, (
+        f"{method} {url}: super-роль '{_OWNER_ROLE}' получила 403 — гейт ложно режет владельца"
+    )
