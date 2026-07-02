@@ -585,8 +585,17 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
         f"--add-dir {psq(str(REPO_ROOT))}\n"
         "Write-Host ''\n"
-        f"Write-Host '=== worker:{name} — claude finished (window kept open) ===' "
-        "-ForegroundColor Yellow\n",
+        f"Write-Host '=== worker:{name} — claude finished ===' -ForegroundColor Yellow\n"
+        # Окно воркера больше НЕ нужно после завершения claude → закрываем СРАЗУ (просьба оператора
+        # 2026-07-02). Транскрипт .jsonl + worktree остаются на диске → tail/status/интеграция работают
+        # после закрытия. Оставить окно открытым для отладки: env WORKER_KEEP_WINDOW=1 перед spawn.
+        "if ($env:WORKER_KEEP_WINDOW -eq '1') {\n"
+        "  Write-Host '(WORKER_KEEP_WINDOW=1 — окно оставлено открытым)' -ForegroundColor DarkGray\n"
+        "} else {\n"
+        "  Write-Host '(окно закрывается — worktree и транскрипт сохранены) ...' -ForegroundColor DarkGray\n"
+        "  Start-Sleep -Seconds 2\n"
+        "  Stop-Process -Id $PID -Force\n"
+        "}\n",
         encoding="utf-8-sig",
     )
     return launcher
