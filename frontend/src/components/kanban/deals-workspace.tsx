@@ -397,7 +397,7 @@ function projClass(pct: number): string {
 /** Ячейка-заглушка для метрик макета без данных в бэке: честное «нет данных», НЕ 0. */
 function PlanFactPlaceholder({ label }: { label: string }) {
   return (
-    <div className="bg-surface px-4 py-3">
+    <div className="min-w-0 bg-surface px-4 py-3">
       <div className="text-[11.5px] leading-tight text-muted">{label}</div>
       <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-faint">—</div>
       <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken" />
@@ -435,9 +435,9 @@ function PlanFactCell({
   const projVal = showProj ? Math.round(kpi.value / elapsed) : 0;
   const projPct = showProj ? Math.round((projVal / kpi.target) * 100) : 0;
   return (
-    <div className="bg-surface px-4 py-3">
+    <div className="min-w-0 bg-surface px-4 py-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[11.5px] leading-tight text-muted">{label ?? kpi.label}</div>
+        <div className="truncate text-[11.5px] leading-tight text-muted">{label ?? kpi.label}</div>
         {onLog && !kpi.money && (
           <button
             onClick={onLog}
@@ -450,7 +450,7 @@ function PlanFactCell({
       </div>
       <div
         className={clsx(
-          "mt-1.5 font-bold leading-none tracking-tight text-ink",
+          "mt-1.5 truncate font-bold leading-none tracking-tight text-ink",
           headline ? "text-[26px]" : "text-[22px]",
         )}
       >
@@ -843,7 +843,7 @@ export function DealsWorkspace({
                 <div className="overflow-hidden rounded-2xl bg-line shadow-card">
                   {/* Первичный ряд — 8 метрик макета в его порядке; на xl одна строка,
                       первая колонка (headline) шире, как sb-row эталона. */}
-                  <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[1.5fr_repeat(7,1fr)]">
+                  <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(0,1.5fr)_repeat(7,minmax(0,1fr))]">
                     {PRIMARY_CELLS.map((cell) => {
                       const kpi = kpiByKey.get(cell.key);
                       if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
