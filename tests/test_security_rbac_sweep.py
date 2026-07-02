@@ -14,6 +14,11 @@ wms/logistics/finance/marketing/service/hr/office/legal/knowledge) слаггн�
 внешние вызыватели не шлют ``X-User-Roles`` и аутентифицируются подписью (как открытый
 ``/marketing/seo/webhook``); гейтить его = ломать интеграции. Поэтому он — задокументированное
 исключение, зафиксированное coverage-guard'ом (``_UNGATED_INFRA``), а не дыра.
+
+⚠ Приложение и перечень роутов строятся в **runtime**-фикстурах (module-scope), НЕ на импорте
+модуля: сборка на этапе collection была хрупкой в CI (пустой enumeration → свип тихо не гонялся).
+Runtime-путь идентичен рабочей фикстуре ``api`` в conftest. Перечисление — циклом в тесте (не
+parametrize), чтобы список роутов брался в runtime и один фейл отчитывался по ВСЕМ плохим роутам.
 """
 from __future__ import annotations
 
@@ -50,17 +55,24 @@ assert _OWNER_ROLE in SUPER_ROLES  # инвариант выбора: владе
 # Coverage-guard падает, если появится НОВЫЙ неслаггнутый модуль с write-роутами вне списка.
 _UNGATED_INFRA = frozenset({"integrations"})
 
-# Единожды строим приложение на импорте — параметризация нужна на этапе сбора тестов.
-_APP = create_app()
-_CORE = _APP.state.core
-# [(prefix, package)] слаггнутых модулей, длинные префиксы первыми (как в middleware).
-_PREFIX_MAP = build_prefix_map(_CORE)
 _PARAM_RE = re.compile(r"\{[^}]+\}")
 
 
-def _package_for_path(path: str) -> str | None:
+@pytest.fixture(scope="module")
+def app():
+    """FastAPI-приложение, собранное в RUNTIME (как conftest.api) — не на импорте модуля."""
+    return create_app()
+
+
+@pytest.fixture(scope="module")
+def prefix_map(app):
+    """[(prefix, package)] слаггнутых модулей, длинные префиксы первыми (как в middleware)."""
+    return build_prefix_map(app.state.core)
+
+
+def _package_for_path(prefix_map, path: str) -> str | None:
     """Пакет-модуль по самому длинному подходящему префиксу (только слаггнутые)."""
-    for prefix, package in _PREFIX_MAP:  # уже отсортировано: длинные первыми
+    for prefix, package in prefix_map:  # уже отсортировано: длинные первыми
         if path == prefix or path.startswith(prefix + "/"):
             return package
     return None
@@ -79,7 +91,8 @@ def _concrete_url(path: str) -> str:
     return _PARAM_RE.sub("1", path)
 
 
-def _collect_write_routes() -> list[tuple[str, str, str, str]]:
+@pytest.fixture(scope="module")
+def write_routes(app, prefix_map) -> list[tuple[str, str, str, str]]:
     """(method, concrete_url, package, denying_role) по write-роутам слаггнутых модулей.
 
     Пропускаем ``OPEN_PREFIXES`` (health/system/webhook — открыты намеренно) и роуты вне
@@ -87,12 +100,12 @@ def _collect_write_routes() -> list[tuple[str, str, str, str]]:
     """
     seen: set[tuple[str, str]] = set()
     routes: list[tuple[str, str, str, str]] = []
-    for route in _APP.routes:
+    for route in app.routes:
         methods = getattr(route, "methods", None)
         path = getattr(route, "path", None)
         if not methods or not path or path.startswith(OPEN_PREFIXES):
             continue
-        package = _package_for_path(path)
+        package = _package_for_path(prefix_map, path)
         if package is None:
             continue
         denier = _denying_role(package)
@@ -105,47 +118,43 @@ def _collect_write_routes() -> list[tuple[str, str, str, str]]:
     return routes
 
 
-WRITE_ROUTES = _collect_write_routes()
-_ROUTE_IDS = [f"{m}:{url}[{pkg}!{denier}]" for m, url, pkg, denier in WRITE_ROUTES]
-
-
 @pytest.fixture
-async def client(session):
+async def client(app, session):
     """ASGI-клиент БЕЗ дефолтной роли — роль каждый запрос задаёт явно (X-User-Roles)."""
 
     async def _override():
         yield session
 
-    _APP.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_session] = _override
     try:
-        transport = ASGITransport(app=_APP)
+        transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
     finally:
-        _APP.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_session, None)
 
 
-def test_sweep_discovered_module_write_routes():
-    """Свип реально что-то нашёл (пустая параметризация = ложно-зелёный).
+def test_sweep_discovered_module_write_routes(write_routes):
+    """Свип реально что-то нашёл (пустой enumeration = ложно-зелёный).
 
     Заодно закрепляет: ключевые бизнес-модули присутствуют в наборе (защита от того, что
     ``create_app``/enumeration тихо сломались и routes исчезли)."""
-    assert WRITE_ROUTES, "свип не нашёл ни одного write-роута — enumeration сломан"
-    found_packages = {pkg for _, _, pkg, _ in WRITE_ROUTES}
+    assert write_routes, "свип не нашёл ни одного write-роута — enumeration сломан"
+    found_packages = {pkg for _, _, pkg, _ in write_routes}
     for expected in ("sales", "procurement", "wms", "finance"):
         assert expected in found_packages, f"нет write-роутов модуля {expected} — свип неполон"
 
 
-def test_no_ungated_module_write_route():
+def test_no_ungated_module_write_route(app, prefix_map):
     """Coverage-guard: у каждого неслаггнутого модуля с не-open write-роутами есть алиби.
 
     Модуль без UI-слага НЕ гейтится матрицей доступа. Для инфры (``integrations``) это
     осознанно (``_UNGATED_INFRA``). Появился НОВЫЙ такой модуль — тест падает: реши явно
     (дать слаг в ``config/access.py`` ИЛИ признать инфрой в ``_UNGATED_INFRA``)."""
-    slugged = {pkg for _, pkg in _PREFIX_MAP}
+    slugged = {pkg for _, pkg in prefix_map}
     # Пакет-владелец каждого роута из реестра модулей (не только слаггнутые), длинные префиксы первыми.
     owner_pairs = sorted(
-        ((reg.prefix, reg.module) for reg in _CORE.routers if reg.prefix),
+        ((reg.prefix, reg.module) for reg in app.state.core.routers if reg.prefix),
         key=lambda kv: len(kv[0]),
         reverse=True,
     )
@@ -157,7 +166,7 @@ def test_no_ungated_module_write_route():
         return None
 
     ungated: dict[str, list[str]] = defaultdict(list)
-    for route in _APP.routes:
+    for route in app.routes:
         methods = getattr(route, "methods", None)
         path = getattr(route, "path", None)
         if not methods or not path or path.startswith(OPEN_PREFIXES):
@@ -175,20 +184,25 @@ def test_no_ungated_module_write_route():
     )
 
 
-@pytest.mark.parametrize("method,url,package,denier", WRITE_ROUTES, ids=_ROUTE_IDS)
-async def test_write_route_denied_for_unauthorized_role(client, method, url, package, denier):
-    """Негатив: роль без доступа к модулю → 403 (гейт режет до тела роута)."""
-    resp = await client.request(method, url, headers={"X-User-Roles": denier})
-    assert resp.status_code == 403, (
-        f"{method} {url}: роль '{denier}' НЕ имеет доступа к модулю '{package}', "
-        f"ожидали 403 от гейта, получили {resp.status_code} — write-RBAC дыра"
+async def test_write_routes_denied_for_unauthorized_role(client, write_routes):
+    """Негатив: роль без доступа к модулю → 403 (гейт режет до тела роута). Цикл по ВСЕМ роутам."""
+    holes: list[str] = []
+    for method, url, package, denier in write_routes:
+        resp = await client.request(method, url, headers={"X-User-Roles": denier})
+        if resp.status_code != 403:
+            holes.append(f"{method} {url} [{package}!{denier}] → {resp.status_code}")
+    assert not holes, (
+        "write-RBAC дыры (роль без доступа к модулю получила НЕ 403 от гейта):\n" + "\n".join(holes)
     )
 
 
-@pytest.mark.parametrize("method,url,package,denier", WRITE_ROUTES, ids=_ROUTE_IDS)
-async def test_write_route_allowed_for_owner_role(client, method, url, package, denier):
+async def test_write_routes_allowed_for_owner_role(client, write_routes):
     """Позитив (sanity): super-роль (director) → НЕ 403 (гейт пропускает; тело может дать 4xx/5xx)."""
-    resp = await client.request(method, url, headers={"X-User-Roles": _OWNER_ROLE})
-    assert resp.status_code != 403, (
-        f"{method} {url}: super-роль '{_OWNER_ROLE}' получила 403 — гейт ложно режет владельца"
+    false_blocks: list[str] = []
+    for method, url, package, _denier in write_routes:
+        resp = await client.request(method, url, headers={"X-User-Roles": _OWNER_ROLE})
+        if resp.status_code == 403:
+            false_blocks.append(f"{method} {url} [{package}]")
+    assert not false_blocks, (
+        f"гейт ложно режет владельца '{_OWNER_ROLE}' (403) на роутах:\n" + "\n".join(false_blocks)
     )
