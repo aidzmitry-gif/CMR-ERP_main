@@ -157,6 +157,50 @@ function OvertimeModal({ data, onClose, onApprove, onReject }: OvertimeModalProp
 
 // ── Tab: Мой день ─────────────────────────────────────────────────────────────
 
+/** Светофор выполнения (как KpiCard, Сделки 2.0): ≥100 зелёный · ≥70 янтарь · иначе красный. */
+function perfTone(pct: number): { bar: string; text: string } {
+  if (pct >= 100) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" };
+  if (pct >= 70) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" };
+  return { bar: "bg-red-500", text: "text-red-600 dark:text-red-400" };
+}
+
+/** Компактная КПЭ-карточка: число / цель + прогресс-бар + % (визуал как KpiCard). */
+function StatCard({ label, value, target, unit, pct }: {
+  label: string; value: string; target: string; unit?: string; pct: number;
+}) {
+  const t = perfTone(pct);
+  return (
+    <div className="rounded-xl bg-surface p-4 shadow-card">
+      <div className="text-xs leading-tight text-muted">{label}</div>
+      <div className="mt-2 text-lg font-semibold text-ink">
+        {value}
+        <span className="text-sm font-normal text-muted"> / {target}{unit ? ` ${unit}` : ""}</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
+        <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      <div className={`mt-1.5 flex items-center gap-1 text-xs ${t.text}`}>
+        <span className="text-[9px] leading-none">●</span>{pct}% выполнено
+      </div>
+    </div>
+  );
+}
+
+/** Элемент вторичной полосы-сводки (как второй ряд План/Факт). */
+function SummaryItem({ label, value, sub, accent }: {
+  label: string; value: string; sub?: string; accent?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-muted">{label}</div>
+      <div className={`text-base font-semibold ${accent ? "text-amber-600 dark:text-amber-400" : "text-ink"}`}>
+        {value}
+        {sub && <span className="ml-1.5 text-xs font-normal text-muted">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
 function MyDayTab() {
   const [elapsed, setElapsed] = useState(0);
   const [active, setActive] = useState(true);
@@ -178,62 +222,72 @@ function MyDayTab() {
   const monthHours = 142;
   const monthNorm = 168;
   const overtimeHours = 3;
+  const daysWorked = 15;
+  const daysNorm = 21;
+  const onlineNow = EMPLOYEES.filter((e) => e.online).length;
+
+  const stats = [
+    { label: "Отработано сегодня", value: hoursElapsed.toFixed(1), target: "8", unit: "ч", pct: Math.round(progress) },
+    { label: "Норма месяца", value: String(monthHours), target: String(monthNorm), unit: "ч", pct: Math.round((monthHours / monthNorm) * 100) },
+    { label: "Дней отработано", value: String(daysWorked), target: String(daysNorm), unit: "дн", pct: Math.round((daysWorked / daysNorm) * 100) },
+    { label: "Онлайн сейчас", value: String(onlineNow), target: String(EMPLOYEES.length), pct: Math.round((onlineNow / EMPLOYEES.length) * 100) },
+  ];
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Таймер смены */}
-      <div className="rounded-xl border border-line bg-surface p-5 shadow-sm">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
-          Текущая смена
-        </div>
-        <div className="mb-3 font-mono text-4xl font-bold text-ink tabular-nums">
-          {fmtHMS(elapsed)}
-        </div>
-        <div className="mb-3 h-2 overflow-hidden rounded-full bg-sunken">
-          <div
-            className="h-full rounded-full bg-accent transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <div className="mb-4 flex items-center justify-between text-xs text-muted">
-          <span>Начало: 08:30</span>
-          <span>{hoursElapsed.toFixed(1)} / 8 ч</span>
-        </div>
-        {active ? (
-          <button
-            onClick={() => setActive(false)}
-            className="rounded-lg bg-red-100 px-5 py-2 text-sm font-medium text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300"
-          >
-            Завершить день
-          </button>
-        ) : (
-          <div className="rounded-lg bg-emerald-100 px-4 py-2 text-sm font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-            Рабочий день завершён
+    <div className="flex flex-col gap-4">
+      {/* Верх: смена (компактно) + КПЭ-сетка */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
+        {/* Таймер смены */}
+        <div className="rounded-xl bg-surface p-4 shadow-card">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted">Текущая смена</div>
+              <div className="mt-1 font-mono text-3xl font-bold text-ink tabular-nums">{fmtHMS(elapsed)}</div>
+            </div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${active ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-sunken text-muted"}`}>
+              ● {active ? "идёт" : "завершена"}
+            </span>
           </div>
-        )}
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-sunken">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-xs text-muted">
+            <span>Начало 08:30</span>
+            <span>{hoursElapsed.toFixed(1)} / 8 ч · план 16:30</span>
+          </div>
+          {active ? (
+            <button
+              onClick={() => setActive(false)}
+              className="mt-3 w-full rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300"
+            >
+              Завершить день
+            </button>
+          ) : (
+            <div className="mt-3 rounded-lg bg-emerald-100 px-4 py-2 text-center text-sm font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+              Рабочий день завершён
+            </div>
+          )}
+        </div>
+        {/* КПЭ-сетка (компактные карточки со светофор-баром) */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {stats.map((s) => (
+            <StatCard key={s.label} {...s} />
+          ))}
+        </div>
+      </div>
+
+      {/* Вторичная полоса-сводка (как второй ряд План/Факт) */}
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl bg-surface px-5 py-3.5 shadow-card">
+        <SummaryItem label="Переработки" value={`+${overtimeHours} ч`} sub="на согласовании" accent />
+        <SummaryItem label="Средняя смена" value="7.4 ч" />
+        <SummaryItem label="Опозданий (мес.)" value="0" />
+        <SummaryItem label="Отпуск / больничный" value="2 дн" sub="июнь" />
+        <SummaryItem label="Статус" value="Рабочий день" sub="без командировок" />
       </div>
 
       {/* Напоминание */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300">
         Не забудьте завершить смену до 18:00 — иначе система зафиксирует max 10 ч.
-      </div>
-
-      {/* Статистика */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: "Сегодня онлайн", value: `${EMPLOYEES.filter((e) => e.online).length} / ${EMPLOYEES.length}`, accent: false },
-          { label: "Месяц", value: `${monthHours} / ${monthNorm} ч`, accent: false },
-          { label: "Переработки", value: `+${overtimeHours} ч`, sub: "на согласовании", accent: true },
-          { label: "Статус", value: "Рабочий день", sub: "без командировок", accent: false },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-            <div className="mb-1 text-xs text-muted">{s.label}</div>
-            <div className={`text-lg font-bold ${s.accent ? "text-amber-600 dark:text-amber-400" : "text-ink"}`}>
-              {s.value}
-            </div>
-            {s.sub && <div className="mt-0.5 text-xs text-muted">{s.sub}</div>}
-          </div>
-        ))}
       </div>
     </div>
   );
