@@ -29,8 +29,11 @@ export default defineConfig({
   webServer: [
     {
       // бэкенд: SQLite dev + AI-слой включён (как в документированном запуске)
+      // CI (Linux) ставит зависимости в СИСТЕМНЫЙ python (venv нет) → на не-Windows зовём `python`,
+      // иначе `.venv/bin/python` не найден и webServer падает exit 127. Windows-локаль — .venv для удобства.
+      // Особый случай (свой интерпретатор) — через E2E_BACKEND_CMD.
       command: process.env.E2E_BACKEND_CMD ??
-        `${process.platform === "win32" ? ".venv\\Scripts\\python.exe" : ".venv/bin/python"} -m uvicorn main:app --port 8000`,
+        `${process.platform === "win32" ? ".venv\\Scripts\\python.exe" : "python"} -m uvicorn main:app --port 8000`,
       cwd: "..",
       url: "http://localhost:8000/health",
       reuseExistingServer: !process.env.CI,
