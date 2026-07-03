@@ -765,10 +765,20 @@ export function DealsWorkspace({
     setActiveDeal(stages.flatMap((s) => s.deals).find((d) => d.id === id) ?? null);
   }
 
-  function findDeal(id: string): { deal: Deal; stageId: string } | null {
+  function findDeal(id: string): { deal: Deal; stageId: string; combined?: boolean } | null {
     for (const s of stages) {
       const deal = s.deals.find((d) => d.id === id);
       if (deal) return { deal, stageId: s.id };
+    }
+    // «Все вместе» + группировка «По датам»/«Список» (см. рендер ниже) сплющивают все секции
+    // в один список — сделка может жить только в combinedStages, не в основном `stages`.
+    if (combinedStages) {
+      for (const sec of combinedStages) {
+        for (const s of sec.stages) {
+          const deal = s.deals.find((d) => d.id === id);
+          if (deal) return { deal, stageId: s.id, combined: true };
+        }
+      }
     }
     return null;
   }
@@ -895,9 +905,17 @@ export function DealsWorkspace({
       onCall: () => setCallDeal(deal),
     };
   }
-  const flatDeals = filteredStages.flatMap((s) =>
-    s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })),
-  );
+  // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
+  // не только текущую `stages` (первая секция из SSR) — иначе список/бакеты дат теряли бы
+  // сделки остальных воронок. Id стадий канонические и общие для всех воронок (sales-stages.ts),
+  // поэтому probabilityFor/weightedAmount/STAGE_BY_ID работают одинаково в обоих случаях.
+  const flatDeals = filteredCombined
+    ? filteredCombined.flatMap((sec) =>
+        sec.stages.flatMap((s) =>
+          s.deals.map((d) => ({ deal: d, stageTitle: `${sec.title} · ${s.title}`, stageId: s.id })),
+        ),
+      )
+    : filteredStages.flatMap((s) => s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })));
 
   /** Бейджи карточки для секций «Все вместе»: та же формула, без «Отказ»-кнопки —
    *  причина отказа собирается через ту же модалку только на основной (не-комбинированной)
@@ -1153,9 +1171,10 @@ export function DealsWorkspace({
               </button>
             ))}
           </div>
-          {/* Переключатель вида — не показываем в «Все вместе» (комбинированный вид — только канбан) */}
-          {!combinedStages && (
-            <div className="ml-auto flex items-center gap-2">
+          {/* Группировка/вид — видны и в «Все вместе» (эталон sales-board-mockup.html держит
+              их всегда): «По датам»/«Список» там выходят из стопки секций в плоский список
+              (см. ветки рендера ниже), «По стадиям»+«Канбан» — обратно в стопку воронок. */}
+          <div className="ml-auto flex items-center gap-2">
               {/* П4: группировка канбана — по стадиям / по датам следующего действия. */}
               {view === "board" && (
                 <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
@@ -1206,76 +1225,39 @@ export function DealsWorkspace({
               </button>
             </div>
           </div>
-          )}
         </div>
 
-        {filteredCombined ? (
-          /* «Все вместе» (мокап COMBINED): доска каждой воронки — своя секция, drag&drop
-           * работает внутри секции (см. FunnelSection). Не дублирует канбан-логику —
-           * переиспользует Column/DraggableDeal. */
-          <>
-            {filteredCombined.map((section) => (
-              <FunnelSection
-                key={section.code}
-                title={section.title}
-                color={FUNNEL_SECTION_COLOR[section.code] ?? "var(--accent)"}
-                initialStages={section.stages}
-                fmt={fmt}
-                cardExtras={combinedCardExtras}
-                onPreview={setPreviewDeal}
-                onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
-                onAddDeal={openModal}
-              />
-            ))}
-          </>
-        ) : view === "board" && groupBy === "dates" ? (
+        {view === "board" && groupBy === "dates" ? (
           /* П4: группировка по датам действий (next_step_at) — честные бакеты, без drag&drop
-           * (перенос между бакетами = смена next_step_at, не текущее действие карточки). */
+           * (перенос между бакетами = смена next_step_at, не текущее действие карточки).
+           * Как в эталоне (sales-board-mockup.html): группировка выходит из стопки секций
+           * «Все вместе» в один плоский срез — flatDeals уже учитывает combinedStages. */
           <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
             {groupByDateBucket(flatDeals.map((f) => f.deal), now ?? Date.now()).map((bucket) => (
               <DateColumn key={bucket.id} bucket={bucket} fmt={fmt}>
-                {bucket.deals.map((deal) => (
-                  <StaticDealCard
-                    key={deal.id}
-                    deal={deal}
-                    extras={cardExtras(deal, findDeal(deal.id)?.stageId ?? "new")}
-                    fmt={fmt}
-                    onPreview={setPreviewDeal}
-                    onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
-                  />
-                ))}
-              </DateColumn>
-            ))}
-          </div>
-        ) : view === "board" ? (
-          /* Канбан с drag&drop */
-          <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
-              {filteredStages.map((stage) => (
-                <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => openModal(stage.id)}>
-                  {stage.deals.map((deal) => (
-                    <DraggableDeal
+                {bucket.deals.map((deal) => {
+                  const found = findDeal(deal.id);
+                  const extras = cardExtras(deal, found?.stageId ?? "new");
+                  // Сделка из секции «Все вместе» живёт не в `stages` — Lose-модалка (openLose)
+                  // двигает только `stages`, локально не отразит перенос для combined-сделки.
+                  if (found?.combined) extras.onLose = undefined;
+                  return (
+                    <StaticDealCard
                       key={deal.id}
                       deal={deal}
-                      extras={cardExtras(deal, stage.id)}
+                      extras={extras}
                       fmt={fmt}
                       onPreview={setPreviewDeal}
                       onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
                     />
-                  ))}
-                </Column>
-              ))}
-            </div>
-            <DragOverlay>
-              {activeDeal ? (
-                <div className="w-[280px] rotate-2">
-                  <DealCard deal={activeDeal} fmt={fmt} />
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
-        ) : (
-          /* Список */
+                  );
+                })}
+              </DateColumn>
+            ))}
+          </div>
+        ) : view === "list" ? (
+          /* Список — плоский срез (работает и для «Все вместе»: flatDeals уже включает
+             combinedStages при необходимости, см. вычисление выше). */
           <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-card">
             <table className="w-full text-sm">
               <thead className="border-b border-line text-left text-xs text-muted">
@@ -1349,6 +1331,52 @@ export function DealsWorkspace({
               </tbody>
             </table>
           </div>
+        ) : filteredCombined ? (
+          /* «Все вместе» (мокап COMBINED): доска каждой воронки — своя секция, drag&drop
+           * работает внутри секции (см. FunnelSection). Не дублирует канбан-логику —
+           * переиспользует Column/DraggableDeal. */
+          <>
+            {filteredCombined.map((section) => (
+              <FunnelSection
+                key={section.code}
+                title={section.title}
+                color={FUNNEL_SECTION_COLOR[section.code] ?? "var(--accent)"}
+                initialStages={section.stages}
+                fmt={fmt}
+                cardExtras={combinedCardExtras}
+                onPreview={setPreviewDeal}
+                onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                onAddDeal={openModal}
+              />
+            ))}
+          </>
+        ) : (
+          /* Канбан с drag&drop */
+          <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
+              {filteredStages.map((stage) => (
+                <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => openModal(stage.id)}>
+                  {stage.deals.map((deal) => (
+                    <DraggableDeal
+                      key={deal.id}
+                      deal={deal}
+                      extras={cardExtras(deal, stage.id)}
+                      fmt={fmt}
+                      onPreview={setPreviewDeal}
+                      onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
+                    />
+                  ))}
+                </Column>
+              ))}
+            </div>
+            <DragOverlay>
+              {activeDeal ? (
+                <div className="w-[280px] rotate-2">
+                  <DealCard deal={activeDeal} fmt={fmt} />
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         )}
 
         {/* Итоги — по выбранной воронке; в «Все вместе» единой суммы по разнородным

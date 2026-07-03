@@ -211,8 +211,41 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.getByText("Новая заявка")).toBeInTheDocument();
     expect(screen.getByText("Объявлен")).toBeInTheDocument();
     expect(screen.getByText("Госзакупки РБ")).toBeInTheDocument();
-    // переключатель вида (канбан/список) скрыт в комбинированном режиме
-    expect(screen.queryByTitle("Список")).toBeNull();
+    // переключатель вида/группировки виден и в комбинированном режиме (эталон
+    // sales-board-mockup.html держит его всегда — «По датам»/«Список» выходят из стопки
+    // секций в плоский срез, см. deals-workspace.tsx).
+    expect(screen.getByTitle("Список")).toBeInTheDocument();
+  });
+
+  it("«Все вместе» + «Список»: сплющивает сделки ВСЕХ секций в таблицу (не только первой)", () => {
+    const tenderStages: Stage[] = [
+      {
+        id: "tn_announced",
+        title: "Объявлен",
+        color: "#3B82F6",
+        count: 1,
+        sum: 500,
+        deals: [
+          { id: "9", number: "T-1", company: "Госзакупки РБ", description: "Тендер", amount: 500, priority: "Средний", owner: "И" },
+        ],
+      },
+    ];
+    render(
+      <DealsWorkspace
+        initialStages={stages}
+        initialKpis={[]}
+        combinedStages={[
+          { code: "new_clients", title: "Новые клиенты", stages },
+          { code: "tenders", title: "Тендеры", stages: tenderStages },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Список"));
+    // сделка из ПЕРВОЙ секции (stages, тоже переданной как initialStages)
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+    // сделка из ВТОРОЙ секции (tenderStages) — раньше flatDeals читал только initialStages
+    // и терял сделки остальных воронок «Все вместе»
+    expect(screen.getByText("Госзакупки РБ")).toBeInTheDocument();
   });
 
   // --- П4 (слайс 4): группировка «По датам действий» ---
