@@ -2,7 +2,7 @@
 // поверх backend-API `/wms`. 🔴 1С = истина остатка; WMS дублирует движения и читает 1С
 // через шлюз. Чистые функции (лейблы/severity) тестируются без React.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 // ---- Типы ----
 export interface ReceiptLine {

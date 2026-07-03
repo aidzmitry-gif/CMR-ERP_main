@@ -3,7 +3,7 @@
 // Чистые функции (фильтр/группировка/итоги) тестируются без React; SSR-загрузка
 // ходит на BACKEND_URL, клиентское обновление — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface StockMirrorRow {
   sku_code: string;

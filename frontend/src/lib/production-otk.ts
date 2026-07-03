@@ -1,7 +1,7 @@
 // Домен «ОТК · контроль качества» поверх backend-API `/production/qc/*`.
 // Решения accept|rework|scrap; брак на бэке публикует production.scrap (претензия в закупки).
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export type QcDecision = "accept" | "rework" | "scrap";
 

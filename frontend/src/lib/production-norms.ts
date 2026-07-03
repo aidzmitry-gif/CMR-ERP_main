@@ -2,7 +2,7 @@
 // Чистые функции (формат н.ч, статусы, фильтр, счётчики) тестируются без React;
 // SSR-загрузка ходит на BACKEND_URL, клиентские мутации — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export type NormKind = "product" | "operation";
 export type NormStatus = "none" | "pending" | "approved";

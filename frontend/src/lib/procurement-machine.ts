@@ -2,7 +2,7 @@
 // Позиции (sku/qty/стоимость/вес/объём) + фрахт партии; live-распределение landed cost
 // считает БЭКЕНД (`/landed-preview`, тот же движок, что на приёмке) — фронт не считает сам.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface MachineLine {
   id: number;

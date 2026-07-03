@@ -3,7 +3,7 @@
 // нетто-доступности. Чистые функции (статус/ETA/итоги) тестируются без React; SSR-загрузка
 // ходит на BACKEND_URL, клиентское обновление — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface OpenOrderLine {
   sku_code: string;

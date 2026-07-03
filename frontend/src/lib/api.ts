@@ -5,7 +5,7 @@ import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossRea
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 // SSR-фетчи ходят на BASE напрямую, минуя /api-прокси, поэтому роль надо пробросить
 // заголовком вручную (роль читает серверный хелпер `role-server.ts` из cookie). На клиенте

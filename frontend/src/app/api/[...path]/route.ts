@@ -8,7 +8,7 @@ import type { NextRequest } from "next/server";
 
 import { ROLE_COOKIE } from "@/lib/access";
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const role = (await cookies()).get(ROLE_COOKIE)?.value;

@@ -6,7 +6,7 @@
 import { type Bom, fetchBomsServer } from "@/lib/production-bom";
 import { fetchNormsServer, formatNh, type Norm } from "@/lib/production-norms";
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export { formatNh, fetchBomsServer, fetchNormsServer };
 export type { Bom, Norm };

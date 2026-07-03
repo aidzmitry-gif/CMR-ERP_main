@@ -15,7 +15,7 @@
 // тестируется отдельно (`reference-data.test.ts`).
 
 // Базовый URL бэкенда для SSR-фетчей (как в api.ts).
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;

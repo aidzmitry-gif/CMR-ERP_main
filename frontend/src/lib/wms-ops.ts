@@ -2,7 +2,7 @@
 // 🔴 WMS НЕ источник истины остатка: 1С — истина, журнал ДУБЛИРУЕТ движения; оперативный
 // остаток = знаковая сумма (in − out), его СВЕРЯЮТ с 1С. Чистые функции тестируются без React.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface StockMovement {
   id: number;

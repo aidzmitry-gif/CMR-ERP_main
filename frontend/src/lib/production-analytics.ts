@@ -2,7 +2,7 @@
 // Чистые функции (fmtNh, fmtPct, fmtByn, kpiTone) тестируются без React;
 // SSR-загрузка ходит на BACKEND_URL, клиентские запросы — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface MonthPlanFact {
   month: number;

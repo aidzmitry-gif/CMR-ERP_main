@@ -2,7 +2,7 @@
 // Supplier — профиль закупок (условия/срок/incoterms/статус); `unp` — soft-ref на MDM-контрагента
 // (провенанс через <SourceTag>). SSR-загрузка ходит на BACKEND_URL, мутации — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface Supplier {
   id: number;

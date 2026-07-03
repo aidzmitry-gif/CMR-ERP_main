@@ -86,7 +86,9 @@ export function ChatsPanel() {
           })}
         </div>
 
-        <div className="border-t border-line px-4 py-3 text-right opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+        {/* pointer-events-none: opacity-0 не отключает клики — невидимый футер перехватывал
+            клики по тулбару доски под рейкой (находка ui-crawl). Кликабелен только по ховеру. */}
+        <div className="pointer-events-none border-t border-line px-4 py-3 text-right opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
           <Link href="/crm/deals" className="text-sm font-medium text-accent-ink">
             Все сделки →
           </Link>

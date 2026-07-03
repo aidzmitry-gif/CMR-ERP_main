@@ -3,7 +3,7 @@
 // закупщик назначает поставщика и закрывает их. Чистые функции тестируются без React;
 // SSR — на BACKEND_URL, клиентские мутации — через прокси `/api`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export type ClaimStatus = "open" | "resolved" | "rejected";
 

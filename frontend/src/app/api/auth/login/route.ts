@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 
 import { ROLE_COOKIE, USER_COOKIE, type UserInfo } from "@/lib/access";
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 const YEAR = 60 * 60 * 24 * 365;
 
 export async function POST(req: Request): Promise<Response> {

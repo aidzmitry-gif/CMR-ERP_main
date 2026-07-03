@@ -3,7 +3,7 @@
 // Реального логина пока нет: текущая роль хранится в cookie `aios_role` (dev-переключатель),
 // прокси `/api/[...path]` пробрасывает её в backend заголовком `X-User-Roles`.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 /** Имя cookie с текущей dev-ролью. */
 export const ROLE_COOKIE = "aios_role";

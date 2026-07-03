@@ -3,7 +3,7 @@
 // WMS НЕ источник истины остатка (1С — истина, фаза 1): в 1С не пишем.
 // Чистые функции (статусы, тон расхождения) тестируются без React.
 
-const BASE = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export type InventoryStatus = "open" | "done" | "canceled";
 

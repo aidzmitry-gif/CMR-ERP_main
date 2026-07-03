@@ -11,7 +11,7 @@ interface CampaignAttribution {
 }
 
 export async function MarketingCampaignBoard() {
-  const base = process.env.BACKEND_URL ?? "http://localhost:8000";
+  const base = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
   let items: CampaignAttribution[] = [];
   try {
     const res = await fetch(`${base}/marketing/campaigns/attribution`, {
