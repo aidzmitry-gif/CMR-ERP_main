@@ -23,7 +23,7 @@ import { PriorityBadge } from "@/components/priority-badge";
 import { ProductPickerModal } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
-import { createDocument } from "@/lib/api";
+import { issueDocument } from "@/lib/api";
 import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
 import { formatNextStep } from "@/lib/format";
@@ -135,22 +135,23 @@ export function DealDrawerPreview({
   /** Счёт по уже добавленным в сделку позициям (без похода в подбор товара). */
   async function issueInvoice() {
     if (!deal) return;
+    // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
+    const win = window.open("about:blank", "_blank");
     setDocBusy(true);
-    const doc = await createDocument(deal.id, "invoice");
+    const { ok, message, renderUrl } = await issueDocument(deal.id, "invoice");
     setDocBusy(false);
-    if (!doc) return setDocMsg("⚠️ Не удалось выставить счёт");
-    setDocMsg(`✅ Счёт ${doc.number} выставлен`);
-    window.open(`/api/sales/documents/${doc.id}/render`, "_blank", "noopener");
+    if (win && ok && renderUrl) win.location.href = renderUrl;
+    else win?.close();
+    setDocMsg(message);
   }
 
   /** Договор — уходит на согласование юристу (та же ветка, что и POST /documents kind=contract). */
   async function issueContract() {
     if (!deal) return;
     setDocBusy(true);
-    const doc = await createDocument(deal.id, "contract");
+    const { message } = await issueDocument(deal.id, "contract");
     setDocBusy(false);
-    if (!doc) return setDocMsg("⚠️ Не удалось создать договор");
-    setDocMsg(`✅ Договор ${doc.number} отправлен на согласование`);
+    setDocMsg(message);
   }
 
   function toggleStar() {
@@ -475,7 +476,7 @@ export function DealDrawerPreview({
       {deal && pickerOpen && (
         <ProductPickerModal
           dealId={deal.id}
-          counterparty={deal.company || "Контрагент не указан"}
+          counterparty={deal.company}
           onClose={() => setPickerOpen(false)}
           onCommitted={() => setPickerOpen(false)}
         />

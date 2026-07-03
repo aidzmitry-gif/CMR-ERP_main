@@ -197,3 +197,25 @@ async def test_render_order_kind_still_400(api):
     assert order.status_code == 201, order.text
     r = await api.get(f"/sales/documents/{order.json()['id']}/render")
     assert r.status_code == 400
+
+
+async def test_render_invoice_escapes_html_in_sku_title(api, session):
+    """XSS: наименование SKU с HTML-тегами экранируется в печатной форме счёта.
+
+    Регрессия из code-review: title/реквизиты подставлялись в HTML f-строкой без
+    html.escape → stored XSS у любого носителя sales.deal.read, открывшего рендер.
+    """
+    deal = await _make_deal(api, counterparty="ООО «Инъекция»")
+    session.add(Sku(code="XSS-1", title='<script>alert(1)</script>', unit="шт"))
+    await session.flush()
+    sku = (await session.execute(select(Sku).where(Sku.code == "XSS-1"))).scalars().first()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    await session.flush()
+    await session.commit()
+
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    assert r.status_code == 200, r.text
+    # сырой <script> не должен попасть в разметку — только экранированный
+    assert "<script>alert(1)</script>" not in r.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text

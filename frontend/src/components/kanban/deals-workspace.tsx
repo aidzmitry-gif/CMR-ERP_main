@@ -15,7 +15,7 @@ import clsx from "clsx";
 import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard } from "@/components/kanban/deal-card";
@@ -854,24 +854,31 @@ export function DealsWorkspace({
   // Поиск (номер/контрагент/описание) + приоритет + «только висяки» (SALES-43) +
   // «действие сегодня/завтра». Общая функция — те же фильтры действуют и на секции
   // «Все вместе» (иначе тулбар в комбинированном виде был бы декорацией).
+  // useMemo обязателен: FunnelSection ресетит свой локальный drag&drop-стейт по ссылке
+  // initialStages — без мемоизации любой ре-рендер (клик по карточке, открытие звонка)
+  // пересоздавал бы filteredCombined и «отбрасывал» перетащенную карточку в старую колонку.
   const q = query.trim().toLowerCase();
-  function applyDealFilters(s: Stage): Stage {
-    let deals = s.deals;
-    if (q) {
-      deals = deals.filter((d) =>
-        `${d.number} ${d.company} ${d.description ?? ""}`.toLowerCase().includes(q),
-      );
-    }
-    if (priority) deals = deals.filter((d) => d.priority === priority);
-    if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
-    if (actFilter) deals = deals.filter((d) => now != null && dateBucketId(d, now) === actFilter);
-    return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
-  }
-  const filteredStages = stages.map(applyDealFilters);
-  const filteredCombined = combinedStages?.map((sec) => ({
-    ...sec,
-    stages: sec.stages.map(applyDealFilters),
-  }));
+  const { filteredStages, filteredCombined } = useMemo(() => {
+    const applyDealFilters = (s: Stage): Stage => {
+      let deals = s.deals;
+      if (q) {
+        deals = deals.filter((d) =>
+          `${d.number} ${d.company} ${d.description ?? ""}`.toLowerCase().includes(q),
+        );
+      }
+      if (priority) deals = deals.filter((d) => d.priority === priority);
+      if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
+      if (actFilter) deals = deals.filter((d) => now != null && dateBucketId(d, now) === actFilter);
+      return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
+    };
+    return {
+      filteredStages: stages.map(applyDealFilters),
+      filteredCombined: combinedStages?.map((sec) => ({
+        ...sec,
+        stages: sec.stages.map(applyDealFilters),
+      })),
+    };
+  }, [stages, combinedStages, q, priority, stuckOnly, now, actFilter]);
 
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
 

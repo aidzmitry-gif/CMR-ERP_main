@@ -910,6 +910,26 @@ export async function createDocument(dealId: string, kind: string): Promise<Deal
   }
 }
 
+/** Итог выставления документа: сообщение для тоста + URL печатной формы (у счёта).
+ * Единый источник текста/URL для трёх мест (окно звонка, drawer-preview, модалка подбора)
+ * — чтобы контракт createDocument/рендера не расходился по копиям. Само окно печати
+ * вызывающий открывает СИНХРОННО (до await), иначе popup-блокировщик съест вкладку. */
+export interface DocIssueResult {
+  ok: boolean;
+  message: string;
+  renderUrl?: string;
+}
+
+export async function issueDocument(dealId: string, kind: "invoice" | "contract"): Promise<DocIssueResult> {
+  const doc = await createDocument(dealId, kind);
+  if (!doc) {
+    return { ok: false, message: kind === "invoice" ? "⚠️ Не удалось выставить счёт" : "⚠️ Не удалось создать договор" };
+  }
+  return kind === "invoice"
+    ? { ok: true, message: `✅ Счёт ${doc.number} выставлен`, renderUrl: `/api/sales/documents/${doc.id}/render` }
+    : { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
+}
+
 /** Решение по документу на согласовании (договор): провести в 1С или отклонить. */
 export async function decideDocument(docId: number, approved: boolean, by: string): Promise<boolean> {
   try {

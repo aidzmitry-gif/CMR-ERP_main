@@ -18,14 +18,13 @@ export default async function DealsPage({
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
     const [funnels, kpis] = await Promise.all([fetchFunnelsServer(role), fetchKpis(role)]);
-    const results = await Promise.all(
+    const sections = await Promise.all(
       funnels.map(async (f) => ({
         code: f.code,
         title: f.title,
         ...(await fetchBoardResult(role, f.code)),
       })),
     );
-    const sections = results.map(({ code, title, stages }) => ({ code, title, stages }));
     return (
       <AppShell crumbs={["CRM", "Сделки"]}>
         <DealsWorkspace
@@ -33,7 +32,7 @@ export default async function DealsPage({
           initialStages={sections[0]?.stages ?? []}
           initialKpis={kpis}
           combinedStages={sections}
-          demoData={results.some((r) => r.demo)}
+          demoData={sections.some((r) => r.demo)}
           funnelTabs={<FunnelTabs active={activeFunnel} />}
           switcher={<CompanySwitcher />}
         />

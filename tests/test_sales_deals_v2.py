@@ -711,7 +711,8 @@ async def test_kpis_arbitrary_month_aggregates_only_that_month(session, api):
 
 async def test_kpis_invalid_period_does_not_crash(api):
     """Невалидный period (не relative-ключ и не YYYY-MM) — честный фоллбэк, не 500."""
-    for bad_period in ("2026-13", "foo", "2026-5"):
+    # "0000-01" — год < 1 (date() кинул бы ValueError, если год не валидировать) — тоже фоллбэк.
+    for bad_period in ("2026-13", "foo", "2026-5", "0000-01", "0000-13"):
         r = await api.get(f"/sales/kpis?period={bad_period}")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
@@ -826,3 +827,27 @@ async def test_repeat_last_order_404_for_missing_deal(api):
     """Несуществующая сделка → 404."""
     r = await api.get("/sales/deals/999999/repeat-last-order")
     assert r.status_code == 404
+
+
+async def test_repeat_last_order_ignores_newer_parallel_deal(api, session):
+    """Повтор берёт ПРЕДЫДУЩУЮ сделку (id меньше), а не более новую параллельную.
+
+    Регрессия из code-review: раньше выбиралась «последняя другая» по created_at без
+    условия «раньше текущей» → черновик более новой параллельной сделки подменял
+    реально заказанное из прошлой.
+    """
+    from modules.sales.models import DealItem
+
+    old_sku = await _seed_sku(session, "RLO-OLD", "Старый заказ")
+    new_sku = await _seed_sku(session, "RLO-NEW", "Черновик новее")
+    first = await _new_deal(api, "RLO-P1", counterparty="ООО Параллель")  # прошлый заказ
+    session.add(DealItem(deal_id=first["id"], sku_id=old_sku.id, qty=2))
+    await session.commit()
+    middle = await _new_deal(api, "RLO-P2", counterparty="ООО Параллель")  # текущая (звоним по ней)
+    newer = await _new_deal(api, "RLO-P3", counterparty="ООО Параллель")  # созданная ПОЗЖЕ
+    session.add(DealItem(deal_id=newer["id"], sku_id=new_sku.id, qty=9))
+    await session.commit()
+
+    items = (await api.get(f"/sales/deals/{middle['id']}/repeat-last-order")).json()
+    # только позиции ПРЕДЫДУЩЕЙ сделки (first), не черновик более новой (newer)
+    assert {i["code"] for i in items} == {"RLO-OLD"}

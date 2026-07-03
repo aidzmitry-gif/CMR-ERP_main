@@ -13,7 +13,9 @@ Next.js (App Router) + TypeScript + Tailwind. UI для CRM/ERP поверх bac
 
 ## Backend wiring
 
-- Базовый URL backend — `process.env.BACKEND_URL ?? "http://localhost:8000"` ([src/lib/api.ts](src/lib/api.ts)).
+- Базовый URL backend — `process.env.BACKEND_URL ?? "http://127.0.0.1:8000"` ([src/lib/api.ts](src/lib/api.ts)).
+  Дефолт именно `127.0.0.1` (не `localhost`) — Node резолвит `localhost` в IPv6 `::1`, а uvicorn
+  слушает IPv4 → иначе SSR-фетчи молча уходят в mock-fallback (см. ниже).
 - SSR-компоненты обращаются к API сервера; данные сериализуемы (Server→Client) —
   следить, чтобы в пропсы клиентских компонентов не утекали несериализуемые поля.
 - **Локально вне Docker** запускать с `BACKEND_URL=http://127.0.0.1:8000`: Node (SSR-fetch)

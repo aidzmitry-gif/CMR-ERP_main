@@ -1,18 +1,20 @@
 "use client";
 
 import { Plus, Receipt, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   addDealItem,
-  createDocument,
   createPriceQuote,
   fetchLastOrder,
   fetchSkus,
   fetchStock,
+  issueDocument,
   type SkuOption,
-  type StockRow,
 } from "@/lib/api";
+// Чистая доменная логика подбора (агрегация остатков/срок/маржа) живёт в src/lib/stock.ts
+// с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
+import { aggregateStock, marginOf, srokOf, type SkuStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
 
 /**
@@ -31,56 +33,25 @@ export interface PickerRow {
   picked: boolean;
 }
 
-/** Агрегированный остаток SKU по всем складам (подбор товара со склада). */
-export interface SkuStock {
-  price: number;
-  cost: number | null; // себестоимость из 1С — для маржи «в наличии»
-  free: number; // ATP = Σ(available − reserved), не ниже 0
-  forecast: number; // «в пути» (приход)
-  warehouses: { name: string; free: number; forecast: number }[];
-}
-
-/** Свернуть строки /1c/stock в карту sku_code → агрегат (несколько складов на SKU). */
-export function aggregateStock(rows: StockRow[]): Record<string, SkuStock> {
-  const map: Record<string, SkuStock> = {};
-  for (const r of rows) {
-    const free = Math.max(0, (r.qty_available || 0) - (r.qty_reserved || 0));
-    const m = (map[r.sku_code] ??= { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] });
-    m.free += free;
-    m.forecast += r.qty_forecast || 0;
-    if (!m.price && r.price) m.price = r.price; // цена едина по складам
-    if (m.cost == null && r.cost != null) m.cost = r.cost; // себес едина по складам
-    if (free > 0 || r.qty_forecast > 0)
-      m.warehouses.push({ name: r.warehouse, free, forecast: r.qty_forecast || 0 });
-  }
-  return map;
-}
-
-/** Срок поставки из остатка: свободное → в наличии; только в пути → в пути; иначе под заказ. */
-export function srokOf(s?: SkuStock): { label: string; cls: string } {
-  if (!s || (s.free === 0 && s.forecast === 0)) return { label: "под заказ", cls: "text-faint" };
-  if (s.free > 0) return { label: "в наличии", cls: "text-money" };
-  return { label: "в пути", cls: "text-amber-600" };
-}
-
-/** Маржа позиции «в наличии» из 1С: (цена − себес)/цена. null — нет себес/цены. */
-export function marginOf(s?: SkuStock): { pct: number; gp: number } | null {
-  if (!s || !s.price || s.cost == null) return null;
-  const gp = s.price - s.cost;
-  return { pct: (gp / s.price) * 100, gp };
-}
-
 /**
  * Стейт подбора: справочник+остатки (грузятся при `active`), строки корзины, поиск,
  * повтор прошлого заказа, добавление в сделку. `active` — грузить данные только когда
  * пикер реально открыт (окно звонка/модалка), а не всегда в фоне.
  */
-export function useProductPicker(active: boolean) {
+export function useProductPicker(active: boolean, refetchKey?: string) {
   const [skus, setSkus] = useState<SkuOption[]>([]);
   const [stock, setStock] = useState<Record<string, SkuStock>>({});
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [query, setQuery] = useState("");
+  // rowsRef — свежий снимок корзины для repeatLastOrder (дедуп по актуальным строкам);
+  // genRef — «поколение» контекста: reset() его двигает, поздний async сверяет и не всыпает
+  // позиции чужого контрагента, если окно звонка успело переключиться на другую сделку.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const genRef = useRef(0);
 
+  // refetchKey (id открытой сделки/лида) в deps: остатки/цены перезагружаются и при прямой
+  // смене контекста звонка (сделка→сделка без промежуточного закрытия), а не только по active.
   useEffect(() => {
     if (!active) return;
     let alive = true;
@@ -93,7 +64,7 @@ export function useProductPicker(active: boolean) {
     return () => {
       alive = false;
     };
-  }, [active]);
+  }, [active, refetchKey]);
 
   const inOrder = new Set(rows.map((r) => r.skuId));
   const candidates = skus
@@ -122,20 +93,25 @@ export function useProductPicker(active: boolean) {
     setRows((r) => r.filter((x) => x.skuId !== skuId));
   }
   function reset() {
+    genRef.current++;
     setRows([]);
     setQuery("");
   }
 
   /** Повторить прошлый заказ: подтянуть позиции последней сделки того же контрагента
    * (backend резолвит «последнюю» сам — GET /deals/{id}/repeat-last-order). Не дублирует
-   * уже добавленные строки. Возвращает число подтянутых позиций (0 — заказов не было). */
+   * уже добавленные строки. Возвращает число РЕАЛЬНО добавленных позиций (не подтянутых:
+   * если часть уже в корзине — они не считаются, чтобы тост не завышал). */
   async function repeatLastOrder(dealId: string): Promise<number> {
+    const gen = genRef.current;
     const items = await fetchLastOrder(dealId);
-    if (!items.length) return 0;
-    setRows((r) => {
-      const existing = new Set(r.map((x) => x.skuId));
-      const added = items.filter((it) => !existing.has(it.sku_id));
-      return [
+    // Контекст сменился, пока грузили (reset двинул поколение) — не всыпать позиции чужого
+    // контрагента в корзину уже другого звонка.
+    if (genRef.current !== gen || !items.length) return 0;
+    const existing = new Set(rowsRef.current.map((x) => x.skuId));
+    const added = items.filter((it) => !existing.has(it.sku_id));
+    if (added.length) {
+      setRows((r) => [
         ...r,
         ...added.map((it) => ({
           skuId: it.sku_id,
@@ -145,9 +121,9 @@ export function useProductPicker(active: boolean) {
           qty: Math.max(1, Math.round(it.qty)),
           picked: true,
         })),
-      ];
-    });
-    return items.length;
+      ]);
+    }
+    return added.length;
   }
 
   const pickedRows = rows.filter((r) => r.picked);
@@ -160,17 +136,19 @@ export function useProductPicker(active: boolean) {
   const orderMargin = costedRevenue - orderCost;
   const hasUnderOrder = pickedRows.some((r) => stock[r.code]?.cost == null);
 
-  /** Добавить отмеченные позиции в РЕАЛЬНУЮ сделку + зафиксировать цену со склада клиенту. */
+  /** Добавить отмеченные позиции в РЕАЛЬНУЮ сделку + зафиксировать цену со склада клиенту.
+   * Позиции и котировки независимы между собой — шлём параллельно; котировки ДОЖИДАЕМСЯ
+   * (await, не fire-and-forget), иначе следом за commitToDeal рендер счёта прочитает ещё
+   * не записанные PriceQuote и напечатает цены 0.00. */
   async function commitToDeal(dealId: string, counterparty: string): Promise<{ ok: number; total: number }> {
-    let ok = 0;
-    for (const r of pickedRows) {
-      if (await addDealItem(dealId, r.skuId, r.qty)) ok++;
-    }
-    for (const r of pickedRows) {
-      const p = stock[r.code]?.price;
-      if (p) void createPriceQuote(r.code, counterparty, p);
-    }
-    return { ok, total: pickedRows.length };
+    const results = await Promise.all(pickedRows.map((r) => addDealItem(dealId, r.skuId, r.qty)));
+    await Promise.all(
+      pickedRows.map((r) => {
+        const p = stock[r.code]?.price;
+        return p ? createPriceQuote(r.code, counterparty, p) : Promise.resolve(true);
+      }),
+    );
+    return { ok: results.filter(Boolean).length, total: pickedRows.length };
   }
 
   return {
@@ -208,12 +186,9 @@ export type ProductPickerState = ReturnType<typeof useProductPicker>;
 export function ProductPicker({
   state,
   fmt,
-  stepOffset = 0,
 }: {
   state: ProductPickerState;
   fmt: (value: number) => string;
-  /** Смещение номера шага (① Реквизиты по УНП уже занимает ①, тогда тут будет ②). */
-  stepOffset?: number;
 }) {
   const { rows, stock, query, setQuery, candidates, skus, addSku, setRowQty, toggleRow, removeRow } = state;
 
@@ -328,21 +303,37 @@ export function ProductPicker({
               {skus.length ? "Ничего не найдено" : "Загрузка номенклатуры…"}
             </div>
           )}
+          {/* Провенанс данных (mdm-1c-data-provenance-ui): подчёркиваем, что остатки/цены —
+              demo-зеркало 1С, а не боевые числа. */}
+          <div className="px-2 pt-0.5 text-[11px] text-faint">
+            номенклатура · 1С (через MDM); остатки по складам, цена и срок — из 1С (demo); резерв
+            под счёт — SALES-51
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/** Итог + маржа заказа (общий футер под ProductPicker, используется звонком и модалкой). */
-export function ProductPickerTotals({ state, fmt }: { state: ProductPickerState; fmt: (v: number) => string }) {
+/** Итог + маржа заказа (общий футер под ProductPicker, используется звонком и модалкой).
+ * `reserve` — помечает итог как резервируемый (чекбокс «Зарезервировать под счёт» живёт
+ * в окне звонка; в модалке подбора его нет — по умолчанию не показываем). */
+export function ProductPickerTotals({
+  state,
+  fmt,
+  reserve = false,
+}: {
+  state: ProductPickerState;
+  fmt: (v: number) => string;
+  reserve?: boolean;
+}) {
   const { pickedRows, orderTotal, costedRows, costedRevenue, orderCost, orderMargin, hasUnderOrder } = state;
   if (!pickedRows.length) return null;
   return (
     <>
       {orderTotal > 0 && (
         <div className="flex items-center justify-between rounded-lg bg-sunken px-3 py-2 text-[12.5px]">
-          <span className="text-muted">Итого</span>
+          <span className="text-muted">Итого{reserve ? " · резерв" : ""}</span>
           <span className="font-bold text-ink">
             {fmt(orderTotal)}
             <span className="ml-1 font-normal text-faint">· с НДС {fmt(orderTotal * 1.2)}</span>
@@ -386,7 +377,7 @@ export function ProductPickerModal({
   onClose: () => void;
   onCommitted?: () => void;
 }) {
-  const picker = useProductPicker(true);
+  const picker = useProductPicker(true, dealId);
   const { fmt } = useCurrency();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -400,7 +391,7 @@ export function ProductPickerModal({
     setBusy(true);
     const n = await picker.repeatLastOrder(dealId);
     setBusy(false);
-    flash(n ? `✅ Подтянуто позиций из прошлого заказа: ${n}` : "Прошлых заказов этого контрагента не найдено");
+    flash(n ? `✅ Добавлено из прошлого заказа: ${n}` : "Прошлых заказов этого контрагента не найдено");
   }
 
   async function addToDeal() {
@@ -414,14 +405,16 @@ export function ProductPickerModal({
 
   async function issueInvoice() {
     if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
+    // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
+    const win = window.open("about:blank", "_blank");
     setBusy(true);
-    const { ok, total } = await picker.commitToDeal(dealId, counterparty);
-    const doc = await createDocument(dealId, "invoice");
+    await picker.commitToDeal(dealId, counterparty); // позиции+котировки записаны ДО рендера
+    const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
     setBusy(false);
-    if (!doc) return flash("⚠️ Не удалось выставить счёт");
-    flash(`✅ Счёт ${doc.number} выставлен · позиций ${ok}/${total}`);
-    window.open(`/api/sales/documents/${doc.id}/render`, "_blank", "noopener");
-    onCommitted?.();
+    if (win && ok && renderUrl) win.location.href = renderUrl;
+    else win?.close();
+    flash(message);
+    if (ok) onCommitted?.();
   }
 
   return (
@@ -438,7 +431,7 @@ export function ProductPickerModal({
       >
         <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <div className="min-w-0 truncate text-[14px] font-bold text-ink">
-            Подбор товара · {counterparty}
+            Подбор товара · {counterparty || "Контрагент не указан"}
           </div>
           <button
             type="button"

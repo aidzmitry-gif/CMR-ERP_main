@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   createDeal,
   createDealTask,
-  createDocument,
+  issueDocument,
   lookupCounterparty,
   updateDeal,
 } from "@/lib/api";
@@ -128,7 +128,16 @@ export function CallWindow({
   const [phase, setPhase] = useState<"dialing" | "live" | "done">("dialing");
   const [seconds, setSeconds] = useState(0);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const picker = useProductPicker(!!context); // справочник+остатки+корзина — общий с drawer-preview
+  // Ключ открытого контакта — чтобы остатки/цены перезагрузились и при ПРЯМОЙ смене контекста
+  // звонка (принять входящий поверх открытого кокпита), а не только при закрытии/открытии.
+  const ctxKey = context
+    ? context.kind === "deal"
+      ? `deal:${context.dealId}`
+      : context.kind === "lead"
+        ? `lead:${context.leadId}`
+        : `new:${context.phone ?? context.callId ?? ""}`
+    : undefined;
+  const picker = useProductPicker(!!context, ctxKey); // справочник+остатки+корзина — общий с drawer-preview
   const [reserve, setReserve] = useState(true);
   const [unp, setUnp] = useState(""); // УНП контрагента — резолв реквизитов (ЕГР/MDM) пока заглушка
   const [req, setReq] = useState<{
@@ -278,29 +287,30 @@ export function CallWindow({
     setBusy(true);
     const n = await picker.repeatLastOrder(ctx.dealId);
     setBusy(false);
-    flash(n ? `✅ Подтянуто позиций из прошлого заказа: ${n}` : "Прошлых заказов этого контрагента не найдено");
+    flash(n ? `✅ Добавлено из прошлого заказа: ${n}` : "Прошлых заказов этого контрагента не найдено");
   }
 
   /** Выставить счёт: создать документ в 1С + открыть печатную форму (шаблон
    * sales-invoice-template.html, backend-рендер GET /documents/{id}/render). */
   async function issueInvoice() {
     if (ctx.kind !== "deal") return flash("Счёт доступен только для существующей сделки");
+    // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
+    const win = window.open("about:blank", "_blank");
     setBusy(true);
-    const doc = await createDocument(ctx.dealId, "invoice");
+    const { ok, message, renderUrl } = await issueDocument(ctx.dealId, "invoice");
     setBusy(false);
-    if (!doc) return flash("⚠️ Не удалось выставить счёт");
-    flash(`✅ Счёт ${doc.number} выставлен`);
-    window.open(`/api/sales/documents/${doc.id}/render`, "_blank", "noopener");
+    if (win && ok && renderUrl) win.location.href = renderUrl;
+    else win?.close();
+    flash(message);
   }
 
   /** Договор — уходит на согласование юристу (та же ветка, что и «Товар» в drawer-preview). */
   async function issueContract() {
     if (ctx.kind !== "deal") return flash("Договор доступен только для существующей сделки");
     setBusy(true);
-    const doc = await createDocument(ctx.dealId, "contract");
+    const { message } = await issueDocument(ctx.dealId, "contract");
     setBusy(false);
-    if (!doc) return flash("⚠️ Не удалось создать договор");
-    flash(`✅ Договор ${doc.number} отправлен на согласование`);
+    flash(message);
   }
 
   async function addTask() {
@@ -561,7 +571,7 @@ export function CallWindow({
                 </div>
               </div>
 
-              <ProductPickerTotals state={picker} fmt={fmt} />
+              <ProductPickerTotals state={picker} fmt={fmt} reserve={reserve} />
 
               {/* CTA по контексту */}
               <div className="space-y-2 pt-1">

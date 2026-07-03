@@ -8,6 +8,7 @@ import {
   convertLead,
   createDeal,
   createDocument,
+  issueDocument,
   createLead,
   decideApproval,
   decideDocument,
@@ -180,6 +181,25 @@ describe("api client — документы/сообщения/согласов�
     expect((await fetchDocuments("1"))[0].onec_ref).toBe("1С-СЧ-1");
     stubFetch({ id: 2, kind: "invoice", number: "СЧ-2", status: "posted", onec_ref: null, amount: 5000, valid_until: null, reserve_status: "none" });
     expect((await createDocument("1", "invoice"))?.number).toBe("СЧ-2");
+  });
+
+  it("issueDocument: счёт даёт renderUrl, договор — только сообщение, null → ok=false", async () => {
+    stubFetch({ id: 7, kind: "invoice", number: "СЧ-7", status: "posted", onec_ref: null, amount: 100, valid_until: null, reserve_status: "none" });
+    const inv = await issueDocument("1", "invoice");
+    expect(inv.ok).toBe(true);
+    expect(inv.renderUrl).toBe("/api/sales/documents/7/render");
+    expect(inv.message).toContain("СЧ-7");
+
+    stubFetch({ id: 8, kind: "contract", number: "ДГ-8", status: "pending_approval", onec_ref: null, amount: 100, valid_until: null, reserve_status: "none" });
+    const con = await issueDocument("1", "contract");
+    expect(con.ok).toBe(true);
+    expect(con.renderUrl).toBeUndefined(); // договор рендерится отдельно после согласования
+    expect(con.message).toContain("согласование");
+
+    stubFetch(null, false);
+    const fail = await issueDocument("1", "invoice");
+    expect(fail.ok).toBe(false);
+    expect(fail.renderUrl).toBeUndefined();
   });
 
   it("fetchMessages / sendMessage / AI", async () => {
