@@ -677,14 +677,12 @@ const FUNNEL_SECTION_COLOR: Record<string, string> = {
 export function DealsWorkspace({
   initialStages,
   initialKpis,
-  switcher,
   funnelTabs,
   combinedStages,
   demoData = false,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
-  switcher?: React.ReactNode;
   funnelTabs?: React.ReactNode;
   /** «Все вместе» (funnel=all): доска каждой воронки своей секцией, одна под другой. */
   combinedStages?: { code: string; title: string; stages: Stage[] }[];
@@ -931,18 +929,9 @@ export function DealsWorkspace({
             ⚠️ Демо-данные: backend недоступен, показана демонстрационная доска — изменения не сохранятся.
           </div>
         )}
-        {/* Тулбар */}
+        {/* Тулбар: поиск/переключатель ЮЛ/«Стадии»/«План» переехали в шапку страницы и в
+            строки скорборда/воронок (решение оператора) — тут остался только сам фильтр. */}
         <div className="flex flex-wrap items-center gap-3">
-          {switcher}
-          <div className="relative min-w-[220px] max-w-sm flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Поиск сделок..."
-              className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
-            />
-          </div>
           <button
             onClick={() => setFilterOpen((v) => !v)}
             className={clsx(
@@ -955,18 +944,6 @@ export function DealsWorkspace({
             <SlidersHorizontal size={16} /> Фильтры
             {priority && <span className="rounded bg-accent-soft px-1.5 text-xs text-accent-ink">{priority}</span>}
           </button>
-          <Link
-            href="/crm/deals/stages"
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
-          >
-            <SlidersHorizontal size={16} /> Стадии
-          </Link>
-          <Link
-            href="/crm/deals/planning"
-            className="ml-auto inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
-          >
-            План
-          </Link>
         </div>
 
         {/* Фильтр по приоритету */}
@@ -1029,6 +1006,14 @@ export function DealsWorkspace({
                       aria-hidden
                     />
                     <h2 className="font-semibold text-ink">План / Факт</h2>
+                    {/* «План» (планирование продавца/РОП) — в одну линию правее заголовка
+                        (решение оператора; раньше жил в верхнем тулбаре). */}
+                    <Link
+                      href="/crm/deals/planning"
+                      className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+                    >
+                      План
+                    </Link>
                     {sub && (
                       <span className="text-[12px] text-muted">
                         — {sub}
@@ -1058,22 +1043,19 @@ export function DealsWorkspace({
                         {moreKpis ? "Свернуть ▴" : `Ещё ${secondary.length} показателей ▾`}
                       </button>
                     )}
-                    <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+                    {/* Период — выпадающий список (решение оператора: раньше группа кнопок). */}
+                    <select
+                      aria-label="Период"
+                      value={PERIODS.some((p) => p.key === period) ? period : ""}
+                      onChange={(e) => handlePeriod(e.target.value)}
+                      className="rounded-lg border border-line bg-surface px-2 py-1 text-xs font-medium text-ink outline-none"
+                    >
                       {PERIODS.map((p) => (
-                        <button
-                          key={p.key}
-                          onClick={() => handlePeriod(p.key)}
-                          className={clsx(
-                            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                            period === p.key
-                              ? "bg-accent-soft text-accent-ink"
-                              : "text-muted hover:text-ink",
-                          )}
-                        >
+                        <option key={p.key} value={p.key}>
                           {p.label}
-                        </button>
+                        </option>
                       ))}
-                    </div>
+                    </select>
                     {/* Произвольный месяц+год (period=YYYY-MM — GET /sales/kpis его понимает). */}
                     <input
                       type="month"
@@ -1097,7 +1079,7 @@ export function DealsWorkspace({
                         stuckOnly ? "border-amber-400 text-amber-700" : "border-line text-muted",
                       )}
                     >
-                      <Clock size={16} /> Только висяки
+                      <Clock size={16} /> Висяки
                     </button>
                     <Link
                       href="/crm/deals/analytics"
@@ -1159,11 +1141,21 @@ export function DealsWorkspace({
           );
         })()}
 
-        {/* Ряд над канбаном (мокап): слева — воронки + быстрые фильтры дат «в одну линию по
-            стадиям»; справа — группировка/вид. Воронки и чипы жили в верхнем тулбаре, но по
-            решению оператора вынесены сюда, вплотную к колонкам. */}
+        {/* Ряд над канбаном (мокап): слева — поиск + воронки + быстрые фильтры дат «в одну
+            линию по стадиям»; справа — группировка/вид. Поиск/воронки/чипы жили в верхнем
+            тулбаре, но по решению оператора вынесены сюда, вплотную к колонкам. */}
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
+            {/* Поиск сделок — левее «Все вместе», в одну строку (решение оператора). */}
+            <div className="relative w-64 shrink-0">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Поиск сделок..."
+                className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
+              />
+            </div>
             {funnelTabs}
             {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
             {(["today", "tomorrow"] as const).map((k) => (
@@ -1193,22 +1185,24 @@ export function DealsWorkspace({
                 <button
                   onClick={() => setGroupBy("stage")}
                   title="По стадиям"
+                  aria-label="По стадиям"
                   className={clsx(
-                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                    "rounded-md p-1.5",
                     groupBy === "stage" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
                   )}
                 >
-                  <LayoutList size={14} /> По стадиям
+                  <LayoutList size={14} />
                 </button>
                 <button
                   onClick={() => setGroupBy("dates")}
                   title="По датам действий"
+                  aria-label="По датам действий"
                   className={clsx(
-                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                    "rounded-md p-1.5",
                     groupBy === "dates" ? "bg-accent-soft text-accent-ink" : "text-faint hover:text-muted",
                   )}
                 >
-                  <Calendar size={14} /> По датам действий
+                  <Calendar size={14} />
                 </button>
               </div>
             )}

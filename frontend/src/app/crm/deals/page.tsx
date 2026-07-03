@@ -1,9 +1,28 @@
+import { SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { CompanySwitcher } from "@/components/kanban/company-switcher";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
 import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
+
+/** Переключатель ЮЛ + «Стадии» (иконка) — правее хлебных крошек «CRM / Сделки», в одну
+ *  строку (решение оператора: раньше жили в тулбаре доски, теперь — в шапке страницы). */
+function DealsHeaderActions() {
+  return (
+    <div className="flex items-center gap-2">
+      <CompanySwitcher />
+      <Link
+        href="/crm/deals/stages"
+        title="Стадии"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-muted hover:bg-sunken hover:text-ink"
+      >
+        <SlidersHorizontal size={16} />
+      </Link>
+    </div>
+  );
+}
 
 export default async function DealsPage({
   searchParams,
@@ -26,7 +45,7 @@ export default async function DealsPage({
       })),
     );
     return (
-      <AppShell crumbs={["CRM", "Сделки"]}>
+      <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
         <DealsWorkspace
           key="all"
           initialStages={sections[0]?.stages ?? []}
@@ -34,7 +53,6 @@ export default async function DealsPage({
           combinedStages={sections}
           demoData={sections.some((r) => r.demo)}
           funnelTabs={<FunnelTabs active={activeFunnel} />}
-          switcher={<CompanySwitcher />}
         />
       </AppShell>
     );
@@ -44,7 +62,7 @@ export default async function DealsPage({
   // чтобы клиентский стейт колонок сбрасывался при переключении воронки.
   const [board, kpis] = await Promise.all([fetchBoardResult(role, activeFunnel), fetchKpis(role)]);
   return (
-    <AppShell crumbs={["CRM", "Сделки"]}>
+    <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
       {/* CurrencyProvider поднят в app/crm/layout.tsx — общий на весь CRM */}
       <DealsWorkspace
         key={activeFunnel}
@@ -52,7 +70,6 @@ export default async function DealsPage({
         initialKpis={kpis}
         demoData={board.demo}
         funnelTabs={<FunnelTabs active={activeFunnel} />}
-        switcher={<CompanySwitcher />}
       />
     </AppShell>
   );

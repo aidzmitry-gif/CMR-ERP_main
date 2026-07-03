@@ -10,9 +10,12 @@ import { currentRole, currentUserName } from "@/lib/role-server";
 
 export async function AppShell({
   crumbs,
+  headerActions,
   children,
 }: {
   crumbs: string[];
+  /** Доп. контент правее хлебных крошек в шапке (напр. переключатель ЮЛ, «Стадии»). */
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   // гейт: без dev-логина уводим на /login
@@ -37,7 +40,7 @@ export async function AppShell({
         <div className="flex h-screen overflow-hidden">
           <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
           <div className="flex flex-1 flex-col overflow-hidden">
-            <Topbar crumbs={crumbs} />
+            <Topbar crumbs={crumbs} headerActions={headerActions} />
             {/* Вертикальный скролл на уровне оболочки: страницы без своего overflow-контейнера
                 (справочники и т.п.) прокручиваются здесь; страницы со своим <main overflow-auto>
                 (доска сделок) скроллят сами — вложенный скролл корректен. min-h-0 нужен, чтобы

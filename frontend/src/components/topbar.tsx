@@ -58,7 +58,14 @@ function IconButton({
   );
 }
 
-export function Topbar({ crumbs }: { crumbs: string[] }) {
+export function Topbar({
+  crumbs,
+  headerActions,
+}: {
+  crumbs: string[];
+  /** Доп. контент правее хлебных крошек, в одну строку (напр. переключатель ЮЛ, «Стадии»). */
+  headerActions?: React.ReactNode;
+}) {
   const [open, setOpen] = useState<null | "bell" | "help">(null);
   const [events, setEvents] = useState<SystemEvent[]>([]);
 
@@ -68,11 +75,14 @@ export function Topbar({ crumbs }: { crumbs: string[] }) {
 
   return (
     <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
-      <h1 className="text-xl font-bold">
-        <span className="font-semibold text-muted">{crumbs[0]}</span>
-        {crumbs[1] && <span className="px-1.5 text-faint">/</span>}
-        {crumbs[1] && <span className="text-ink">{crumbs[1]}</span>}
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-bold">
+          <span className="font-semibold text-muted">{crumbs[0]}</span>
+          {crumbs[1] && <span className="px-1.5 text-faint">/</span>}
+          {crumbs[1] && <span className="text-ink">{crumbs[1]}</span>}
+        </h1>
+        {headerActions}
+      </div>
       <div className="flex items-center gap-2">
         <ThemeToggle />
         <IconButton

@@ -122,10 +122,12 @@ describe("DealsWorkspace (канбан)", () => {
     expect(api.getKpis).toHaveBeenCalled();
   });
 
-  it("смена периода перечитывает KPI", async () => {
+  it("смена периода (выпадающий список) перечитывает KPI", async () => {
     mock(api.getKpis).mockResolvedValue([]);
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Месяц" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Период" }), {
+      target: { value: "month" },
+    });
     await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("month"));
   });
 
@@ -144,9 +146,9 @@ describe("DealsWorkspace (канбан)", () => {
 
   // --- Сделки 2.0 ---
 
-  it("тулбар содержит фильтр «Только висяки» (SALES-43)", () => {
+  it("тулбар содержит фильтр «Висяки» (SALES-43)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
-    expect(screen.getByRole("button", { name: /Только висяки/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Висяки/ })).toBeInTheDocument();
   });
 
   it("шапка рабочей колонки показывает взвешенную сумму (SALES-44)", () => {
