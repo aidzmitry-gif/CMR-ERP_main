@@ -62,6 +62,7 @@ vi.mock("@/lib/api", () => ({
     demo: false,
     stages: [{ id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] }],
   }),
+  fetchFunnelsServer: vi.fn().mockResolvedValue([]),
   fetchKpis: vi.fn().mockResolvedValue([]),
   fetchLeads: vi.fn().mockResolvedValue([]),
   fetchDealDetail: vi.fn().mockResolvedValue({

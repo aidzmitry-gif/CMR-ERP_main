@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { CompanySwitcher } from "@/components/kanban/company-switcher";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
-import { fetchBoardResult, fetchFunnels, fetchKpis } from "@/lib/api";
+import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
 
 export default async function DealsPage({
@@ -17,7 +17,7 @@ export default async function DealsPage({
   if (activeFunnel === "all") {
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
-    const [funnels, kpis] = await Promise.all([fetchFunnels(), fetchKpis(role)]);
+    const [funnels, kpis] = await Promise.all([fetchFunnelsServer(role), fetchKpis(role)]);
     const results = await Promise.all(
       funnels.map(async (f) => ({
         code: f.code,

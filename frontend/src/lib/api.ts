@@ -233,10 +233,25 @@ export async function decidePlan(planId: number, approved: boolean, comment?: st
   }
 }
 
-/** Список воронок sales для переключателя на доске. */
+/** Список воронок sales для переключателя на доске (клиент, через /api-прокси). */
 export async function fetchFunnels(): Promise<FunnelRow[]> {
   try {
     const res = await fetch("/api/sales/funnels", { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as FunnelRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** То же для SSR (page.tsx «Все вместе»): относительный `/api/...` на сервере не работает —
+ * ходим на BASE напрямую с ручным пробросом роли (как fetchBoardResult/fetchKpis). */
+export async function fetchFunnelsServer(roles?: string): Promise<FunnelRow[]> {
+  try {
+    const res = await fetch(`${BASE}/sales/funnels`, {
+      cache: "no-store",
+      headers: roleHeaders(roles),
+    });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as FunnelRow[];
   } catch {

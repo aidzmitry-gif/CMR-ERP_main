@@ -35,6 +35,7 @@ import {
   type DealInput,
 } from "@/lib/api";
 import {
+  dateBucketId,
   daysInStage,
   groupByDateBucket,
   isOpenStage,
@@ -714,6 +715,9 @@ export function DealsWorkspace({
   // следующего действия (next_step_at). Действует только для view="board".
   const [groupBy, setGroupBy] = useState<"stage" | "dates">("stage");
   const [stuckOnly, setStuckOnly] = useState(false);
+  // Быстрый фильтр «действие сегодня/завтра» (мокап: actSeg «🔴 На сегодня / 🟠 На завтра»,
+  // повторный клик снимает). Дата — next_step_at через канон dateBucketId (board.ts).
+  const [actFilter, setActFilter] = useState<"today" | "tomorrow" | null>(null);
   const [now, setNow] = useState<number | null>(null);
   const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
   const [losing, setLosing] = useState<{ dealId: string; label: string } | null>(null);
@@ -847,9 +851,11 @@ export function DealsWorkspace({
     setModalOpen(true);
   }
 
-  // Поиск (номер/контрагент/описание) + фильтр по приоритету + «только висяки» (SALES-43)
+  // Поиск (номер/контрагент/описание) + приоритет + «только висяки» (SALES-43) +
+  // «действие сегодня/завтра». Общая функция — те же фильтры действуют и на секции
+  // «Все вместе» (иначе тулбар в комбинированном виде был бы декорацией).
   const q = query.trim().toLowerCase();
-  const filteredStages = stages.map((s) => {
+  function applyDealFilters(s: Stage): Stage {
     let deals = s.deals;
     if (q) {
       deals = deals.filter((d) =>
@@ -858,8 +864,14 @@ export function DealsWorkspace({
     }
     if (priority) deals = deals.filter((d) => d.priority === priority);
     if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
+    if (actFilter) deals = deals.filter((d) => now != null && dateBucketId(d, now) === actFilter);
     return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
-  });
+  }
+  const filteredStages = stages.map(applyDealFilters);
+  const filteredCombined = combinedStages?.map((sec) => ({
+    ...sec,
+    stages: sec.stages.map(applyDealFilters),
+  }));
 
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
 
@@ -946,6 +958,24 @@ export function DealsWorkspace({
           >
             <Clock size={16} /> Только висяки
           </button>
+          {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
+          {(["today", "tomorrow"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setActFilter((v) => (v === k ? null : k))}
+              title="Показать сделки, по которым действие сегодня/завтра"
+              className={clsx(
+                "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+                actFilter === k
+                  ? k === "today"
+                    ? "border-red-400 text-red-700 dark:text-red-300"
+                    : "border-orange-400 text-orange-700 dark:text-orange-300"
+                  : "border-line text-muted",
+              )}
+            >
+              {k === "today" ? "🔴 На сегодня" : "🟠 На завтра"}
+            </button>
+          ))}
           <Link
             href="/crm/deals/stages"
             className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
@@ -1189,12 +1219,12 @@ export function DealsWorkspace({
           </div>
         )}
 
-        {combinedStages ? (
+        {filteredCombined ? (
           /* «Все вместе» (мокап COMBINED): доска каждой воронки — своя секция, drag&drop
            * работает внутри секции (см. FunnelSection). Не дублирует канбан-логику —
            * переиспользует Column/DraggableDeal. */
           <>
-            {combinedStages.map((section) => (
+            {filteredCombined.map((section) => (
               <FunnelSection
                 key={section.code}
                 title={section.title}

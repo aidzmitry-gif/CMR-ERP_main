@@ -233,6 +233,30 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByText("Без даты")).toBeNull();
   });
 
+  it("чип «На сегодня» фильтрует по дате действия; повторный клик снимает фильтр", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    // у сделки нет next_step_at → бакет «Без даты» → «На сегодня» её скрывает
+    fireEvent.click(screen.getByRole("button", { name: /На сегодня/ }));
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /На сегодня/ })); // повторный клик — снять
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+  });
+
+  it("фильтры действуют и в «Все вместе»: поиск скрывает карточки секций", () => {
+    render(
+      <DealsWorkspace
+        initialStages={stages}
+        initialKpis={[]}
+        combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages }]}
+      />,
+    );
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Поиск сделок..."), {
+      target: { value: "несуществующий" },
+    });
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+  });
+
   it("demoData показывает плашку «демо-данные»; без него плашки нет", () => {
     const { unmount } = render(
       <DealsWorkspace initialStages={stages} initialKpis={[]} demoData />,
