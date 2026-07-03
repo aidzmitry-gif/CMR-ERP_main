@@ -1,4 +1,4 @@
-import { SlidersHorizontal } from "lucide-react";
+import { Image as ImageIcon, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { CompanySwitcher } from "@/components/kanban/company-switcher";
@@ -7,8 +7,8 @@ import { FunnelTabs } from "@/components/kanban/funnel-tabs";
 import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
 
-/** Переключатель ЮЛ + «Стадии» (иконка) — правее хлебных крошек «CRM / Сделки», в одну
- *  строку (решение оператора: раньше жили в тулбаре доски, теперь — в шапке страницы). */
+/** Переключатель ЮЛ + «Стадии»/«Лого» (иконки) — правее хлебных крошек «CRM / Сделки»,
+ *  в одну строку (решение оператора: раньше жили в тулбаре доски, теперь — в шапке). */
 function DealsHeaderActions() {
   return (
     <div className="flex items-center gap-2">
@@ -19,6 +19,13 @@ function DealsHeaderActions() {
         className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-muted hover:bg-sunken hover:text-ink"
       >
         <SlidersHorizontal size={16} />
+      </Link>
+      <Link
+        href="/crm/deals/branding"
+        title="Лого компании (для счетов)"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-muted hover:bg-sunken hover:text-ink"
+      >
+        <ImageIcon size={16} />
       </Link>
     </div>
   );

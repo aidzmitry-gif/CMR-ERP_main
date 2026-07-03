@@ -1331,3 +1331,28 @@ export async function fetchOwnerDashboard(roles?: string): Promise<OwnerDashboar
     return null;
   }
 }
+
+/** Лого продавца для печатных форм (счёт/договор) — honest null, если не загружено. */
+export async function fetchBranding(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/sales/branding", { cache: "no-store" });
+    if (!res.ok) return null;
+    return ((await res.json()) as { logo_data_url: string | null }).logo_data_url;
+  } catch {
+    return null;
+  }
+}
+
+/** Загрузить/заменить лого. ``logoDataUrl`` — data-URI, собирается на клиенте (FileReader). */
+export async function updateBranding(logoDataUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/sales/branding", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ logo_data_url: logoDataUrl }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

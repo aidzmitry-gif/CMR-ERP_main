@@ -219,3 +219,80 @@ async def test_render_invoice_escapes_html_in_sku_title(api, session):
     # сырой <script> не должен попасть в разметку — только экранированный
     assert "<script>alert(1)</script>" not in r.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
+
+
+# ── Лого продавца (company_branding) ────────────────────────────────────────────
+_TINY_PNG_DATA_URL = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+
+
+async def test_branding_honest_empty_before_upload(api):
+    """Нет загруженного лого — {"logo_data_url": null}, не 404."""
+    r = await api.get("/sales/branding")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"logo_data_url": None}
+
+
+async def test_branding_upload_rejects_non_image(api):
+    r = await api.put("/sales/branding", json={"logo_data_url": "not-a-data-uri"})
+    assert r.status_code == 422
+
+
+async def test_branding_upload_rejects_oversized(api):
+    huge = "data:image/png;base64," + ("A" * 1_500_000)
+    r = await api.put("/sales/branding", json={"logo_data_url": huge})
+    assert r.status_code == 422
+
+
+async def test_branding_upload_then_get_roundtrip(api):
+    put = await api.put("/sales/branding", json={"logo_data_url": _TINY_PNG_DATA_URL})
+    assert put.status_code == 200, put.text
+    assert put.json()["logo_data_url"] == _TINY_PNG_DATA_URL
+
+    got = await api.get("/sales/branding")
+    assert got.json()["logo_data_url"] == _TINY_PNG_DATA_URL
+
+    # повторная загрузка заменяет прежнюю (singleton, не растит таблицу)
+    other = _TINY_PNG_DATA_URL.replace("png", "jpeg", 1)
+    put2 = await api.put("/sales/branding", json={"logo_data_url": other})
+    assert put2.status_code == 200
+    got2 = await api.get("/sales/branding")
+    assert got2.json()["logo_data_url"] == other
+
+
+async def test_render_invoice_includes_uploaded_logo(api, session):
+    """Загруженное лого попадает в шапку печатной формы счёта."""
+    assert (
+        await api.put("/sales/branding", json={"logo_data_url": _TINY_PNG_DATA_URL})
+    ).status_code == 200
+
+    deal = await _make_deal(api, counterparty="ООО «СЛого»")
+    session.add(Sku(code="AKB-99", title="АКБ 6СТ-99", unit="шт"))
+    await session.flush()
+    sku = (await session.execute(select(Sku).where(Sku.code == "AKB-99"))).scalars().first()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    await session.flush()
+    await session.commit()
+
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    assert r.status_code == 200, r.text
+    assert f'<img src="{_TINY_PNG_DATA_URL}"' in r.text
+
+
+async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
+    """Лого не загружено — честно нет <div class="logo"> (не битая картинка)."""
+    deal = await _make_deal(api, counterparty="ООО «БезЛого»")
+    session.add(Sku(code="AKB-100", title="АКБ 6СТ-100", unit="шт"))
+    await session.flush()
+    sku = (await session.execute(select(Sku).where(Sku.code == "AKB-100"))).scalars().first()
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    await session.flush()
+    await session.commit()
+
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    assert r.status_code == 200, r.text
+    assert '<div class="logo">' not in r.text
