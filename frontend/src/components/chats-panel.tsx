@@ -35,7 +35,7 @@ export function ChatsPanel() {
       <div className="group absolute inset-y-0 right-0 z-30 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
           <h3 className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            Чаты и дела
+            Лента
           </h3>
           <Link
             href="/crm/deals"

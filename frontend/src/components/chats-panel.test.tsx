@@ -15,7 +15,7 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("ChatsPanel (Чаты и дела)", () => {
+describe("ChatsPanel (Лента)", () => {
   it("рендерит список диалогов из API", async () => {
     mock(api.fetchChats).mockResolvedValue([
       { deal_id: 5, number: "CRM-5", company: "ООО Чат", last_text: "Уточните сроки", channel: "whatsapp", direction: "in" },
