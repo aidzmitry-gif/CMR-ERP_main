@@ -955,26 +955,11 @@ export function DealsWorkspace({
             <SlidersHorizontal size={16} /> Фильтры
             {priority && <span className="rounded bg-accent-soft px-1.5 text-xs text-accent-ink">{priority}</span>}
           </button>
-          <button
-            onClick={() => setStuckOnly((v) => !v)}
-            className={clsx(
-              "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-              stuckOnly ? "border-amber-400 text-amber-700" : "border-line text-muted",
-            )}
-          >
-            <Clock size={16} /> Только висяки
-          </button>
           <Link
             href="/crm/deals/stages"
             className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
           >
             <SlidersHorizontal size={16} /> Стадии
-          </Link>
-          <Link
-            href="/crm/deals/analytics"
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
-          >
-            Аналитика
           </Link>
           <Link
             href="/crm/deals/planning"
@@ -1103,6 +1088,23 @@ export function DealsWorkspace({
                           : "border-line bg-surface text-muted",
                       )}
                     />
+                    {/* «Только висяки» + «Аналитика» перенесены из тулбара на строку заголовка
+                        скорборда — левее CTA «Создать сделку», в одну линию (решение оператора). */}
+                    <button
+                      onClick={() => setStuckOnly((v) => !v)}
+                      className={clsx(
+                        "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+                        stuckOnly ? "border-amber-400 text-amber-700" : "border-line text-muted",
+                      )}
+                    >
+                      <Clock size={16} /> Только висяки
+                    </button>
+                    <Link
+                      href="/crm/deals/analytics"
+                      className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+                    >
+                      Аналитика
+                    </Link>
                     {/* Первичный CTA доски перенесён из тулбара на строку заголовка скорборда
                         (решение оператора «в одну строку» — эффективнее по вертикали). */}
                     <button

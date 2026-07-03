@@ -76,6 +76,9 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
   const [funnels, setFunnels] = useState<FunnelRow[]>([]);
   const [funnel, setFunnel] = useState(initialFunnel);
   const [owner, setOwner] = useState("");
+  // Продавцы для фильтра — реальные значения Deal.owner (не выдуманный справочник):
+  // тянем плоский список сделок один раз и берём непустые уникальные имена.
+  const [owners, setOwners] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [data, setData] = useState<Analytics | null>(null);
   const [margin, setMargin] = useState<MarginForecast | null>(null);
@@ -93,6 +96,13 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
 
   useEffect(() => {
     void fetchFunnels().then(setFunnels);
+    void fetch("/api/sales/deals", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: { owner?: string }[]) => {
+        const names = Array.from(new Set(rows.map((d) => d.owner).filter(Boolean))) as string[];
+        setOwners(names.sort((a, b) => a.localeCompare(b, "ru")));
+      })
+      .catch(() => setOwners([]));
   }, []);
 
   const loadMetrics = useCallback(
@@ -191,13 +201,19 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
           </select>
         </label>
         <label className="text-[11px] text-muted">
-          Владелец (ФИО)
-          <input
+          Продавец
+          <select
             value={owner}
             onChange={(e) => setOwner(e.target.value)}
-            placeholder="все"
             className="mt-0.5 block w-44 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
-          />
+          >
+            <option value="">Все</option>
+            {owners.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
 
