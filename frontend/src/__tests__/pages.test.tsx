@@ -58,6 +58,10 @@ vi.mock("@/components/erp/wms-dashboard", () => ({ WmsDashboard: () => <div>wms-
 vi.mock("@/lib/wms-warehouse", () => ({ fetchDashboardServer: vi.fn().mockResolvedValue({}) }));
 vi.mock("@/lib/api", () => ({
   fetchBoardStages: vi.fn().mockResolvedValue([{ id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] }]),
+  fetchBoardResult: vi.fn().mockResolvedValue({
+    demo: false,
+    stages: [{ id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] }],
+  }),
   fetchKpis: vi.fn().mockResolvedValue([]),
   fetchLeads: vi.fn().mockResolvedValue([]),
   fetchDealDetail: vi.fn().mockResolvedValue({

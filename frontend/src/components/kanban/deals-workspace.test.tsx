@@ -232,4 +232,14 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.getByText("Новая заявка")).toBeInTheDocument();
     expect(screen.queryByText("Без даты")).toBeNull();
   });
+
+  it("demoData показывает плашку «демо-данные»; без него плашки нет", () => {
+    const { unmount } = render(
+      <DealsWorkspace initialStages={stages} initialKpis={[]} demoData />,
+    );
+    expect(screen.getByText(/Демо-данные: backend недоступен/)).toBeInTheDocument();
+    unmount();
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.queryByText(/Демо-данные: backend недоступен/)).toBeNull();
+  });
 });

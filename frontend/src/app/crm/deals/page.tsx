@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { CompanySwitcher } from "@/components/kanban/company-switcher";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
-import { fetchBoardStages, fetchFunnels, fetchKpis } from "@/lib/api";
+import { fetchBoardResult, fetchFunnels, fetchKpis } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
 
 export default async function DealsPage({
@@ -18,13 +18,14 @@ export default async function DealsPage({
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
     const [funnels, kpis] = await Promise.all([fetchFunnels(), fetchKpis(role)]);
-    const sections = await Promise.all(
+    const results = await Promise.all(
       funnels.map(async (f) => ({
         code: f.code,
         title: f.title,
-        stages: await fetchBoardStages(role, f.code),
+        ...(await fetchBoardResult(role, f.code)),
       })),
     );
+    const sections = results.map(({ code, title, stages }) => ({ code, title, stages }));
     return (
       <AppShell crumbs={["CRM", "Сделки"]}>
         <DealsWorkspace
@@ -32,6 +33,7 @@ export default async function DealsPage({
           initialStages={sections[0]?.stages ?? []}
           initialKpis={kpis}
           combinedStages={sections}
+          demoData={results.some((r) => r.demo)}
           funnelTabs={<FunnelTabs active={activeFunnel} />}
           switcher={<CompanySwitcher />}
         />
@@ -41,14 +43,15 @@ export default async function DealsPage({
 
   // SSR: стадии для выбранной воронки + KPI; key прокидывает funnel в DealsWorkspace,
   // чтобы клиентский стейт колонок сбрасывался при переключении воронки.
-  const [stages, kpis] = await Promise.all([fetchBoardStages(role, activeFunnel), fetchKpis(role)]);
+  const [board, kpis] = await Promise.all([fetchBoardResult(role, activeFunnel), fetchKpis(role)]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]}>
       {/* CurrencyProvider поднят в app/crm/layout.tsx — общий на весь CRM */}
       <DealsWorkspace
         key={activeFunnel}
-        initialStages={stages}
+        initialStages={board.stages}
         initialKpis={kpis}
+        demoData={board.demo}
         funnelTabs={<FunnelTabs active={activeFunnel} />}
         switcher={<CompanySwitcher />}
       />

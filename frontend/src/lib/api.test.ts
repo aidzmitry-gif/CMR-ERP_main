@@ -13,6 +13,7 @@ import {
   decideDocument,
   deleteDealItem,
   fetchApprovals,
+  fetchBoardResult,
   fetchBoardStages,
   fetchChats,
   fetchContacts,
@@ -119,6 +120,13 @@ describe("api client — сделки/доска/KPI", () => {
   it("fetchBoardStages → mock-fallback при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     expect((await fetchBoardStages()).length).toBeGreaterThan(0);
+  });
+
+  it("fetchBoardResult честно помечает mock-fallback как demo", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    expect((await fetchBoardResult()).demo).toBe(true);
+    stubFetch({ stages: [] });
+    expect((await fetchBoardResult()).demo).toBe(false);
   });
 
   it("mapDeal переносит closed_date в closedDate (закрытая сделка)", async () => {

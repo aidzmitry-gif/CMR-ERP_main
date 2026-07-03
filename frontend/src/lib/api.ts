@@ -83,23 +83,36 @@ function mapDeal(d: ApiDeal): Deal {
 /** Доска сделок из API; при недоступности бэкенда — fallback на mock.
  * В обоих случаях гарантируем колонку «отказ» (SALES-40) через {@link ensureLostStage}. */
 export async function fetchBoardStages(roles?: string, funnel?: string): Promise<Stage[]> {
+  return (await fetchBoardResult(roles, funnel)).stages;
+}
+
+/** Доска + признак фоллбэка: `demo=true` — backend недоступен, отданы мок-стадии
+ * (STAGES из mock-data). Страница доски показывает по нему плашку «демо-данные»,
+ * чтобы фоллбэк не выглядел как реальная воронка. */
+export async function fetchBoardResult(
+  roles?: string,
+  funnel?: string,
+): Promise<{ stages: Stage[]; demo: boolean }> {
   try {
     const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
     const res = await fetch(`${BASE}/sales/board${qs}`, { cache: "no-store", headers: roleHeaders(roles) });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
-    return ensureLostStage(
-      data.stages.map((s) => ({
-        id: s.id,
-        title: s.title,
-        color: s.color,
-        count: s.count,
-        sum: s.sum,
-        deals: s.deals.map(mapDeal),
-      })),
-    );
+    return {
+      demo: false,
+      stages: ensureLostStage(
+        data.stages.map((s) => ({
+          id: s.id,
+          title: s.title,
+          color: s.color,
+          count: s.count,
+          sum: s.sum,
+          deals: s.deals.map(mapDeal),
+        })),
+      ),
+    };
   } catch {
-    return ensureLostStage(STAGES);
+    return { stages: ensureLostStage(STAGES), demo: true };
   }
 }
 

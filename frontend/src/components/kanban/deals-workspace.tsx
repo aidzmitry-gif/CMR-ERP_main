@@ -679,6 +679,7 @@ export function DealsWorkspace({
   switcher,
   funnelTabs,
   combinedStages,
+  demoData = false,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
@@ -686,6 +687,8 @@ export function DealsWorkspace({
   funnelTabs?: React.ReactNode;
   /** «Все вместе» (funnel=all): доска каждой воронки своей секцией, одна под другой. */
   combinedStages?: { code: string; title: string; stages: Stage[] }[];
+  /** SSR-фетч доски упал в mock-fallback (backend недоступен) — показать плашку «демо». */
+  demoData?: boolean;
 }) {
   const router = useRouter();
   const { fmt } = useCurrency();
@@ -901,6 +904,14 @@ export function DealsWorkspace({
   return (
     <>
       <main className="flex-1 overflow-auto p-6">
+        {demoData && (
+          <div
+            role="status"
+            className="mb-3 flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            ⚠️ Демо-данные: backend недоступен, показана демонстрационная доска — изменения не сохранятся.
+          </div>
+        )}
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
           {funnelTabs}
