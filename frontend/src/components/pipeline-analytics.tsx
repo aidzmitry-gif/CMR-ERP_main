@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import { useCallback, useEffect, useState } from "react";
 import { fetchFunnels, type FunnelRow } from "@/lib/api";
 import { formatByn } from "@/lib/format";
@@ -45,6 +46,32 @@ type MarginForecast = {
 
 type Status = "loading" | "error" | "ready";
 
+// Период-срез конверсии/времени на стадии (`/sales/pipeline/stage-metrics`) — отдельный
+// от снимка доски выше: считается по истории DealStageEvent за окно [date_from, date_to].
+type StageMetric = {
+  id: string;
+  title: string;
+  color: string;
+  entered_count: number;
+  conv_next_pct: number | null;
+  avg_time_days: number | null;
+  completed_count: number;
+};
+
+type StageMetrics = {
+  funnel: string;
+  date_from: string;
+  date_to: string;
+  stages: StageMetric[];
+};
+
+const METRIC_PERIODS = [
+  { key: "week", label: "Неделя" },
+  { key: "month", label: "Месяц" },
+  { key: "quarter", label: "Квартал" },
+] as const;
+type MetricPeriod = (typeof METRIC_PERIODS)[number]["key"] | "range";
+
 export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFunnel?: string }) {
   const [funnels, setFunnels] = useState<FunnelRow[]>([]);
   const [funnel, setFunnel] = useState(initialFunnel);
@@ -54,9 +81,53 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
   const [margin, setMargin] = useState<MarginForecast | null>(null);
   const [stuck, setStuck] = useState<number | null>(null);
 
+  // Период-переключатель для графиков конверсии/времени на стадии.
+  const [metricPeriod, setMetricPeriod] = useState<MetricPeriod>("month");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  // Счётчик кликов «Применить» — force-триггер эффекта, когда metricPeriod уже "range"
+  // (простое setMetricPeriod("range") тогда не меняет state → React не переисполнит эффект).
+  const [rangeApplyToken, setRangeApplyToken] = useState(0);
+  const [metricsStatus, setMetricsStatus] = useState<Status>("loading");
+  const [metrics, setMetrics] = useState<StageMetrics | null>(null);
+
   useEffect(() => {
     void fetchFunnels().then(setFunnels);
   }, []);
+
+  const loadMetrics = useCallback(
+    async (f: string, o: string, p: MetricPeriod, from: string, to: string) => {
+      if (p === "range" && (!from || !to)) return; // диапазон выбран не полностью — ждём
+      setMetricsStatus("loading");
+      try {
+        const qs = new URLSearchParams({ funnel: f });
+        if (o) qs.set("owner", o);
+        if (p === "range") {
+          qs.set("date_from", from);
+          qs.set("date_to", to);
+        } else {
+          qs.set("period", p);
+        }
+        const res = await fetch(`/api/sales/pipeline/stage-metrics?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        setMetrics((await res.json()) as StageMetrics);
+        setMetricsStatus("ready");
+      } catch {
+        setMetricsStatus("error");
+      }
+    },
+    [],
+  );
+
+  // rangeFrom/rangeTo намеренно не в зависимостях: набор дат в input не должен слать
+  // запрос на каждый keystroke — диапазон применяется явно кнопкой «Применить»
+  // (rangeApplyToken форсирует повторный фетч, даже если metricPeriod уже был "range").
+  useEffect(() => {
+    void loadMetrics(funnel, owner, metricPeriod, rangeFrom, rangeTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [funnel, owner, metricPeriod, rangeApplyToken, loadMetrics]);
 
   const load = useCallback(async (f: string, o: string) => {
     setStatus("loading");
@@ -178,6 +249,159 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
               </div>
               <div className="text-[11px] text-faint">сделки в стадии дольше 14 дней (?stuck_days=14)</div>
             </div>
+          </div>
+
+          {/* Конверсия переход→переход + время на этапе (история DealStageEvent за окно
+              периода) — видно сразу при входе, без прокрутки к воронке ниже. */}
+          <div className="rounded-xl border border-line p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-[13px] font-bold text-ink">Конверсия и время на этапах</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-0.5 rounded-lg border border-line bg-canvas p-0.5">
+                  {METRIC_PERIODS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => {
+                        setMetricPeriod(p.key);
+                        setRangeFrom("");
+                        setRangeTo("");
+                      }}
+                      className={clsx(
+                        "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                        metricPeriod === p.key
+                          ? "bg-accent-soft text-accent-ink"
+                          : "text-muted hover:text-ink",
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="date"
+                    value={rangeFrom}
+                    onChange={(e) => setRangeFrom(e.target.value)}
+                    aria-label="Начало диапазона"
+                    className="rounded-md border border-line bg-canvas px-1.5 py-1 text-xs text-muted"
+                  />
+                  <span className="text-xs text-faint">—</span>
+                  <input
+                    type="date"
+                    value={rangeTo}
+                    onChange={(e) => setRangeTo(e.target.value)}
+                    aria-label="Конец диапазона"
+                    className="rounded-md border border-line bg-canvas px-1.5 py-1 text-xs text-muted"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!rangeFrom || !rangeTo) return;
+                      setMetricPeriod("range");
+                      setRangeApplyToken((n) => n + 1);
+                    }}
+                    disabled={!rangeFrom || !rangeTo}
+                    className="rounded-md border border-line px-2 py-1 text-xs font-medium text-muted hover:bg-sunken disabled:opacity-40"
+                  >
+                    Применить
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {metricsStatus === "loading" && (
+              <div className="text-[12px] text-faint">Загрузка…</div>
+            )}
+            {metricsStatus === "error" && (
+              <div className="flex items-center justify-between gap-3 text-[12px] text-muted">
+                <span>Не удалось загрузить график.</span>
+                <button
+                  onClick={() => void loadMetrics(funnel, owner, metricPeriod, rangeFrom, rangeTo)}
+                  className="rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white"
+                >
+                  Повторить
+                </button>
+              </div>
+            )}
+            {metricsStatus === "ready" && metrics && (
+              <>
+                <div className="mb-3 text-[11px] text-faint">
+                  {metrics.date_from} — {metrics.date_to}
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  {/* Конверсия переход→переход */}
+                  <div>
+                    <div className="mb-2 text-[11px] uppercase tracking-wide text-muted">
+                      Конверсия перехода
+                    </div>
+                    <div className="space-y-2">
+                      {metrics.stages.slice(0, -1).map((s, idx) => {
+                        const next = metrics.stages[idx + 1];
+                        return (
+                          <div key={s.id} className="flex items-center gap-2 text-[11px]">
+                            <span className="w-32 shrink-0 truncate text-muted" title={`${s.title} → ${next.title}`}>
+                              {s.title} →
+                            </span>
+                            <div className="h-2.5 flex-1 overflow-hidden rounded bg-sunken">
+                              {s.conv_next_pct != null && (
+                                <div
+                                  className="h-full bg-emerald-500"
+                                  style={{ width: `${s.conv_next_pct}%` }}
+                                />
+                              )}
+                            </div>
+                            <span className="w-16 shrink-0 text-right font-semibold tabular-nums">
+                              {s.conv_next_pct != null ? (
+                                <span className="text-emerald-600">{s.conv_next_pct}%</span>
+                              ) : (
+                                <span className="text-faint">нет данных</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Время на этапе */}
+                  <div>
+                    <div className="mb-2 text-[11px] uppercase tracking-wide text-muted">
+                      Среднее время на этапе
+                    </div>
+                    <div className="space-y-2">
+                      {(() => {
+                        const maxDays = Math.max(
+                          1,
+                          ...metrics.stages.map((s) => s.avg_time_days ?? 0),
+                        );
+                        return metrics.stages.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 text-[11px]">
+                            <span className="w-32 shrink-0 truncate text-muted" title={s.title}>
+                              {s.title}
+                            </span>
+                            <div className="h-2.5 flex-1 overflow-hidden rounded bg-sunken">
+                              {s.avg_time_days != null && (
+                                <div
+                                  className="h-full"
+                                  style={{
+                                    width: `${(s.avg_time_days / maxDays) * 100}%`,
+                                    background: s.color,
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-ink">
+                              {s.avg_time_days != null ? `${s.avg_time_days} дн` : (
+                                <span className="font-normal text-faint">нет данных</span>
+                              )}
+                            </span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* S3-6: Маржа воронки — взвеш. валовая прибыль и маржа% (BYN), honest-баннер при null */}

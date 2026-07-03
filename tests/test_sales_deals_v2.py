@@ -1,6 +1,6 @@
 """БД-тесты «Сделки 2.0»: отказ+причины (SALES-40), история стадий (SALES-43),
 прогноз (SALES-44), счётчик непрочитанных (SALES-49). SQLite в памяти."""
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 
 async def _new_deal(api, number, **extra):
@@ -386,6 +386,63 @@ async def test_pipeline_analytics(api, session):
     # (new, qual) и берёт уникальные deal_id, значит 3, denom=3 → 100%).
     assert by_id["new"]["next_conv_pct"] is not None
     assert r["won_count"] == 1
+
+
+# ── Период-срез конверсии/времени на стадии (pipeline/stage-metrics) ───────────
+async def test_pipeline_stage_metrics_period_window(api, session):
+    """entered_count/avg_time_days/conv_next_pct считаются только по сегментам,
+    попавшим в окно periода — переход вне окна (SM-OLD) не портит статистику."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from modules.sales.models import Deal, DealStageEvent
+
+    deal_in = await _new_deal(api, "SM-1", stage="new")
+    deal_old = await _new_deal(api, "SM-OLD", stage="new")
+
+    d_in = (
+        await session.execute(select(Deal).where(Deal.id == deal_in["id"]))
+    ).scalar_one()
+    d_old = (
+        await session.execute(select(Deal).where(Deal.id == deal_old["id"]))
+    ).scalar_one()
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # SM-1: вошла в "new" 10 дней назад, ушла в "qual" 3 дня назад (5 дн длительность
+    # была бы неверной — реально 7 дн) — внутри окна «месяц» (30 дн).
+    d_in.created_at = now - timedelta(days=10)
+    d_in.stage = "qual"
+    session.add(DealStageEvent(deal_id=d_in.id, from_stage="new", to_stage="qual",
+                                changed_at=now - timedelta(days=3)))
+    # SM-OLD: переход был 90 дней назад — целиком вне окна «месяц», не должен всплыть.
+    d_old.created_at = now - timedelta(days=120)
+    d_old.stage = "qual"
+    session.add(DealStageEvent(deal_id=d_old.id, from_stage="new", to_stage="qual",
+                                changed_at=now - timedelta(days=90)))
+    await session.commit()
+
+    r = (await api.get("/sales/pipeline/stage-metrics?funnel=new_clients&period=month")).json()
+    by_id = {st["id"]: st for st in r["stages"]}
+    assert by_id["new"]["entered_count"] == 1  # только SM-1 (created_at в окне)
+    assert by_id["new"]["completed_count"] == 1
+    assert by_id["new"]["avg_time_days"] == 7.0
+    assert by_id["new"]["conv_next_pct"] == 100
+
+    # honest-empty: стадия без истории за период — None, не 0
+    assert by_id["price_req"]["entered_count"] == 0
+    assert by_id["price_req"]["avg_time_days"] is None
+    assert by_id["price_req"]["conv_next_pct"] is None
+
+    # Явный диапазон дат перекрывает period — окно расширили, SM-OLD теперь виден.
+    d_from = (now - timedelta(days=200)).date().isoformat()
+    d_to = now.date().isoformat()
+    r2 = (
+        await api.get(
+            f"/sales/pipeline/stage-metrics?funnel=new_clients&date_from={d_from}&date_to={d_to}"
+        )
+    ).json()
+    assert {st["id"]: st for st in r2["stages"]}["new"]["entered_count"] == 2
 
 
 # ── П8: цикл плана draft→submit→decide + права ────────────────────────────────
