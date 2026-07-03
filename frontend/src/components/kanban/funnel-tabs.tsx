@@ -74,7 +74,10 @@ export function FunnelTabs({ active }: { active?: string }) {
                 : "border-line bg-surface text-muted hover:bg-sunken"
             }`}
           >
-            {f.title}
+            {/* Короткая подпись (решение оператора): «Новые клиенты» → «Новые», чтобы ряд
+                воронок+фильтров помещался в одну строку. Режем «клиент(ы)» с хвоста —
+                кириллицу \w не ловит, поэтому явный класс. */}
+            {f.title.replace(/\s*клиенты?$/i, "")}
             <span className="rounded px-1 py-0.5 text-[10px] tabular-nums text-muted">
               {f.active_deals}
             </span>

@@ -978,16 +978,10 @@ export function DealsWorkspace({
           </Link>
           <Link
             href="/crm/deals/planning"
-            className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
+            className="ml-auto inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
           >
             План
           </Link>
-          <button
-            onClick={() => openModal(stages[0]?.id ?? "new")}
-            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
-          >
-            <Plus size={16} /> Создать сделку
-          </button>
         </div>
 
         {/* Фильтр по приоритету */}
@@ -1109,6 +1103,14 @@ export function DealsWorkspace({
                           : "border-line bg-surface text-muted",
                       )}
                     />
+                    {/* Первичный CTA доски перенесён из тулбара на строку заголовка скорборда
+                        (решение оператора «в одну строку» — эффективнее по вертикали). */}
+                    <button
+                      onClick={() => openModal(stages[0]?.id ?? "new")}
+                      className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-ink"
+                    >
+                      <Plus size={16} /> Создать сделку
+                    </button>
                   </div>
                 </div>
                 <div className="overflow-hidden rounded-2xl bg-line shadow-card">
