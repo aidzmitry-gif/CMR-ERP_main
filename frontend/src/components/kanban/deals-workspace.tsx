@@ -1039,7 +1039,7 @@ export function DealsWorkspace({
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {secondary.length > 0 && (
                       <button
                         onClick={toggleMoreKpis}
