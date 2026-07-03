@@ -1,7 +1,8 @@
 "use client";
 
+import clsx from "clsx";
 import { Plus, Receipt, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   addDealItem,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/api";
 // Чистая доменная логика подбора (агрегация остатков/срок/маржа) живёт в src/lib/stock.ts
 // с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
-import { aggregateStock, marginOf, srokOf, type SkuStock } from "@/lib/stock";
+import { aggregateStock, groupStockBySku, marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
 
 /**
@@ -41,6 +42,9 @@ export interface PickerRow {
 export function useProductPicker(active: boolean, refetchKey?: string) {
   const [skus, setSkus] = useState<SkuOption[]>([]);
   const [stock, setStock] = useState<Record<string, SkuStock>>({});
+  // Per-warehouse разбивка (не агрегат) — форма «🏬 Подбор товара со склада»
+  // (WarehousePickerModal): Остаток/Резерв/Свободно по каждому складу отдельно.
+  const [warehouseStock, setWarehouseStock] = useState<Record<string, SkuWarehouseStock>>({});
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [query, setQuery] = useState("");
   // rowsRef — свежий снимок корзины для repeatLastOrder (дедуп по актуальным строкам);
@@ -59,7 +63,10 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
       if (alive) setSkus(list);
     });
     void fetchStock().then((rows) => {
-      if (alive) setStock(aggregateStock(rows));
+      if (alive) {
+        setStock(aggregateStock(rows));
+        setWarehouseStock(groupStockBySku(rows));
+      }
     });
     return () => {
       alive = false;
@@ -82,6 +89,17 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
       { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
     ]);
     setQuery("");
+  }
+  /** Добавить с явным кол-вом (WarehousePickerModal — подбор со склада на заданный остаток);
+   *  повторный подбор уже добавленной позиции суммирует количество, не дублирует строку. */
+  function addSkuWithQty(s: SkuOption, qty: number) {
+    setRows((r) => {
+      const existing = r.find((x) => x.skuId === s.id);
+      if (existing) {
+        return r.map((x) => (x.skuId === s.id ? { ...x, qty: x.qty + qty, picked: true } : x));
+      }
+      return [...r, { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true }];
+    });
   }
   function setRowQty(skuId: number, qty: number) {
     setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, qty: Math.max(1, qty) } : x)));
@@ -154,11 +172,13 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   return {
     skus,
     stock,
+    warehouseStock,
     rows,
     query,
     setQuery,
     candidates,
     addSku,
+    addSkuWithQty,
     setRowQty,
     toggleRow,
     removeRow,
@@ -485,6 +505,240 @@ export function ProductPickerModal({
             {toast}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * «🏬 Подбор товара со склада» — модалка per-warehouse разбивки (порт sales-call-popup.html,
+ * stockMoreOv): Остаток/Резерв/Свободно по КАЖДОМУ складу отдельно (не суммой, как в основном
+ * ProductPicker) — менеджер видит, с какого склада реально есть товар, прежде чем обещать
+ * клиенту. Количество — одно на SKU (не по складам): заказ/addDealItem не различают склад
+ * отгрузки, разбивка тут только помогает решить, сколько реально можно продать.
+ */
+export function WarehousePickerModal({
+  state,
+  fmt,
+  onClose,
+}: {
+  state: ProductPickerState;
+  fmt: (value: number) => string;
+  onClose: () => void;
+}) {
+  const { skus, warehouseStock, addSkuWithQty } = state;
+  const [search, setSearch] = useState("");
+  const [warehouse, setWarehouse] = useState("Все склады");
+  const [qtyBySku, setQtyBySku] = useState<Record<number, number>>({});
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+
+  const allWarehouses = useMemo(() => {
+    const set = new Set<string>();
+    Object.values(warehouseStock).forEach((s) => s.rows.forEach((r) => set.add(r.warehouse)));
+    return Array.from(set).sort();
+  }, [warehouseStock]);
+
+  const q = search.trim().toLowerCase();
+  // Без остатков (по выбранному складу) не показываем — это форма «подбор со склада»,
+  // общий безостаточный поиск уже есть в ProductPicker.
+  const items = skus
+    .filter((s) => !q || `${s.title} ${s.code}`.toLowerCase().includes(q))
+    .map((s) => {
+      const st = warehouseStock[s.code];
+      const rows = (st?.rows ?? []).filter((r) => warehouse === "Все склады" || r.warehouse === warehouse);
+      return { sku: s, stock: st, rows };
+    })
+    .filter((it) => it.rows.length > 0);
+
+  function toggle(skuId: number) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(skuId)) {
+        next.delete(skuId);
+      } else {
+        next.add(skuId);
+        setQtyBySku((prevQty) => (prevQty[skuId] ? prevQty : { ...prevQty, [skuId]: 1 }));
+      }
+      return next;
+    });
+  }
+
+  function setQty(skuId: number, qty: number) {
+    setQtyBySku((prev) => ({ ...prev, [skuId]: Math.max(0, qty) }));
+    if (qty > 0) setChecked((prev) => new Set(prev).add(skuId));
+  }
+
+  function confirm() {
+    items.forEach(({ sku }) => {
+      if (checked.has(sku.id)) addSkuWithQty(sku, qtyBySku[sku.id] || 1);
+    });
+    onClose();
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal
+      aria-label="Подбор товара со склада"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[88vh] w-[820px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-surface shadow-pop"
+      >
+        <header className="flex items-center justify-between gap-2 border-b border-line px-5 py-3.5">
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-bold text-ink">🏬 Подбор товара со склада</div>
+            <div className="text-[11px] font-medium text-faint">
+              остаток · резерв · свободно по каждому складу
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken"
+          >
+            <X size={16} />
+          </button>
+        </header>
+
+        <div className="flex items-center gap-2 border-b border-line px-5 py-3">
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Поиск по номенклатуре…"
+              className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-3 text-[12.5px] text-ink outline-none focus:border-accent"
+            />
+          </div>
+          <select
+            value={warehouse}
+            onChange={(e) => setWarehouse(e.target.value)}
+            aria-label="Склад"
+            className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink outline-none"
+          >
+            <option>Все склады</option>
+            {allWarehouses.map((w) => (
+              <option key={w}>{w}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          <table className="w-full text-[12px]">
+            <thead className="border-b border-line text-left text-[11px] text-muted">
+              <tr>
+                <th className="w-8 py-1.5" />
+                <th className="py-1.5 font-medium">Товар</th>
+                <th className="py-1.5 font-medium">Склад</th>
+                <th className="py-1.5 text-right font-medium">Остаток</th>
+                <th className="py-1.5 text-right font-medium">Резерв</th>
+                <th className="py-1.5 text-right font-medium">Свободно</th>
+                <th className="py-1.5 text-right font-medium">Цена</th>
+                <th className="py-1.5 text-right font-medium">Кол-во</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-6 text-center text-faint">
+                    {skus.length ? "Ничего не найдено на этом складе" : "Загрузка номенклатуры…"}
+                  </td>
+                </tr>
+              )}
+              {items.map(({ sku, stock, rows }) => {
+                const totFree = rows.reduce((s, r) => s + r.free, 0);
+                return rows.map((r, i) => (
+                  <tr key={`${sku.id}-${r.warehouse}`} className="border-b border-line last:border-0">
+                    {i === 0 && (
+                      <>
+                        <td rowSpan={rows.length} className="align-top py-2">
+                          <input
+                            type="checkbox"
+                            checked={checked.has(sku.id)}
+                            onChange={() => toggle(sku.id)}
+                            className="h-4 w-4 accent-money"
+                            aria-label={`Выбрать ${sku.title}`}
+                          />
+                        </td>
+                        <td rowSpan={rows.length} className="align-top py-2 pr-2">
+                          <div className="font-semibold text-ink">{sku.title}</div>
+                          <div className="text-[11px] text-faint">
+                            {sku.code} · Σ свободно {totFree} ·{" "}
+                            {rows.length > 1 ? `${rows.length} склада` : "1 склад"}
+                          </div>
+                        </td>
+                      </>
+                    )}
+                    <td className="py-2 text-muted">🏬 {r.warehouse}</td>
+                    <td className="py-2 text-right tabular-nums text-ink">{r.on}</td>
+                    <td className="py-2 text-right tabular-nums text-amber-600">{r.reserved || "—"}</td>
+                    <td
+                      className={clsx(
+                        "py-2 text-right tabular-nums font-semibold",
+                        r.free > 0 && r.free <= 3 ? "text-amber-600" : "text-money",
+                      )}
+                    >
+                      {r.free}
+                      {r.free > 0 && r.free <= 3 ? " ⚠" : ""}
+                    </td>
+                    {i === 0 && (
+                      <td rowSpan={rows.length} className="align-top py-2 text-right tabular-nums text-ink">
+                        {stock?.price ? fmt(stock.price) : "—"}
+                      </td>
+                    )}
+                    {i === 0 && (
+                      <td rowSpan={rows.length} className="align-top py-2 text-right">
+                        <input
+                          value={qtyBySku[sku.id] ?? (checked.has(sku.id) ? 1 : 0)}
+                          onChange={(e) =>
+                            setQty(sku.id, parseInt(e.target.value.replace(/\D/g, ""), 10) || 0)
+                          }
+                          inputMode="numeric"
+                          className="w-14 rounded-md border border-line bg-surface px-1.5 py-1 text-center text-[12px] tabular-nums text-ink outline-none focus:border-accent"
+                          aria-label={`Количество ${sku.title}`}
+                        />
+                      </td>
+                    )}
+                  </tr>
+                ));
+              })}
+            </tbody>
+          </table>
+          <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted">
+            <span>
+              <b className="text-ink">Остаток</b> — всего на складе
+            </span>
+            <span>
+              · <b className="text-amber-600">Резерв</b> — под другие заказы
+            </span>
+            <span>
+              · <b className="text-money">Свободно</b> — доступно к продаже (ATP)
+            </span>
+          </div>
+        </div>
+
+        <footer className="flex items-center justify-between gap-2 border-t border-line px-5 py-3.5">
+          <span className="text-[12px] text-muted">
+            Выбрано: {checked.size} {checked.size === 1 ? "позиция" : "позиций"}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Отмена
+            </Button>
+            <Button
+              variant="money"
+              onClick={confirm}
+              disabled={checked.size === 0}
+              icon={<Plus size={14} />}
+            >
+              Добавить в заказ
+            </Button>
+          </div>
+        </footer>
       </div>
     </div>
   );

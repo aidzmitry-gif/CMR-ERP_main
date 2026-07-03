@@ -13,6 +13,7 @@ import {
   Receipt,
   RefreshCw,
   ShoppingCart,
+  Warehouse,
   X,
   Zap,
 } from "lucide-react";
@@ -27,7 +28,12 @@ import {
   updateDeal,
 } from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
-import { ProductPicker, ProductPickerTotals, useProductPicker } from "@/components/kanban/product-picker";
+import {
+  ProductPicker,
+  ProductPickerTotals,
+  useProductPicker,
+  WarehousePickerModal,
+} from "@/components/kanban/product-picker";
 import { scriptFor } from "./call-scripts";
 
 /**
@@ -138,6 +144,10 @@ export function CallWindow({
         : `new:${context.phone ?? context.callId ?? ""}`
     : undefined;
   const picker = useProductPicker(!!context, ctxKey); // справочник+остатки+корзина — общий с drawer-preview
+  // «🏬 Подбор товара со склада» (sales-call-popup.html) — per-warehouse таблица поверх
+  // инлайн-поиска ProductPicker; отдельная модалка, чтобы не грузить остатки по складам
+  // до явного запроса менеджера.
+  const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
   const [reserve, setReserve] = useState(true);
   const [unp, setUnp] = useState(""); // УНП контрагента — резолв реквизитов (ЕГР/MDM) пока заглушка
   const [req, setReq] = useState<{
@@ -340,6 +350,7 @@ export function CallWindow({
         : "/crm/leads";
 
   return (
+    <>
     <div
       aria-modal
       role="dialog"
@@ -521,6 +532,13 @@ export function CallWindow({
                   )}
                 </div>
                 <ProductPicker state={picker} fmt={fmt} />
+                <button
+                  type="button"
+                  onClick={() => setWarehousePickerOpen(true)}
+                  className="mt-2 inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-accent-ink hover:text-accent"
+                >
+                  <Warehouse size={12} /> Подобрать ещё товар
+                </button>
               </div>
 
               {/* Резерв + условия оплаты */}
@@ -704,6 +722,14 @@ export function CallWindow({
         )}
       </div>
     </div>
+    {warehousePickerOpen && (
+      <WarehousePickerModal
+        state={picker}
+        fmt={fmt}
+        onClose={() => setWarehousePickerOpen(false)}
+      />
+    )}
+    </>
   );
 }
 

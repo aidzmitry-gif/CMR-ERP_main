@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStock, marginOf, srokOf, type SkuStock } from "@/lib/stock";
+import { aggregateStock, groupStockBySku, marginOf, srokOf, type SkuStock } from "@/lib/stock";
 import type { StockRow } from "@/lib/api";
 
 const row = (o: Partial<StockRow>): StockRow => ({
@@ -41,6 +41,43 @@ describe("aggregateStock", () => {
   it("склад без остатка и без прихода не попадает в разбивку", () => {
     const m = aggregateStock([row({ qty_available: 0, qty_reserved: 0, qty_forecast: 0 })]);
     expect(m.A.warehouses).toHaveLength(0);
+  });
+});
+
+describe("groupStockBySku", () => {
+  it("НЕ суммирует склады — по строке на каждый склад с остаток/резерв/свободно", () => {
+    const m = groupStockBySku([
+      row({ warehouse: "Минск", qty_available: 10, qty_reserved: 2, qty_forecast: 4 }),
+      row({ warehouse: "Гомель", qty_available: 3, qty_reserved: 0, qty_forecast: 1 }),
+    ]);
+    expect(m.A.rows).toHaveLength(2);
+    expect(m.A.rows[0]).toEqual({ warehouse: "Минск", on: 10, reserved: 2, free: 8, forecast: 4 });
+    expect(m.A.rows[1]).toEqual({ warehouse: "Гомель", on: 3, reserved: 0, free: 3, forecast: 1 });
+  });
+
+  it("свободно не уходит в минус (резерв > остатка)", () => {
+    const m = groupStockBySku([row({ qty_available: 5, qty_reserved: 8 })]);
+    expect(m.A.rows[0].free).toBe(0);
+  });
+
+  it("полностью зарезервированный склад (free=0) остаётся в разбивке — остаток/резерв видны", () => {
+    const m = groupStockBySku([row({ qty_available: 5, qty_reserved: 5 })]);
+    expect(m.A.rows).toHaveLength(1);
+    expect(m.A.rows[0]).toMatchObject({ on: 5, reserved: 5, free: 0 });
+  });
+
+  it("склад без остатка/резерва/прихода не попадает в разбивку", () => {
+    const m = groupStockBySku([row({ qty_available: 0, qty_reserved: 0, qty_forecast: 0 })]);
+    expect(m.A.rows).toHaveLength(0);
+  });
+
+  it("цена и себес — первые ненулевые (едины по складам)", () => {
+    const m = groupStockBySku([
+      row({ price: 0, cost: null, qty_available: 1 }),
+      row({ warehouse: "Гомель", price: 100, cost: 70, qty_available: 1 }),
+    ]);
+    expect(m.A.price).toBe(100);
+    expect(m.A.cost).toBe(70);
   });
 });
 
