@@ -133,7 +133,7 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
           <select
             value={owner}
             onChange={(e) => setOwner(e.target.value)}
-            className="mt-0.5 block w-44 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+            className="mt-0.5 block w-56 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
           >
             <option value="">Все</option>
             {owners.map((o) => (
@@ -343,7 +343,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <input
                     type="date"
                     value={rangeFrom}
@@ -393,9 +393,9 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                 <div className="mb-3 text-[11px] text-faint">
                   {metrics.date_from} — {metrics.date_to}
                 </div>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   {/* Конверсия переход→переход */}
-                  <div>
+                  <div className="min-w-0">
                     <div className="mb-2 text-[11px] uppercase tracking-wide text-muted">
                       Конверсия перехода
                     </div>
@@ -404,10 +404,10 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                         const next = metrics.stages[idx + 1];
                         return (
                           <div key={s.id} className="flex items-center gap-2 text-[11px]">
-                            <span className="w-32 shrink-0 truncate text-muted" title={`${s.title} → ${next.title}`}>
+                            <span className="w-28 shrink-0 truncate text-muted" title={`${s.title} → ${next.title}`}>
                               {s.title} →
                             </span>
-                            <div className="h-2.5 flex-1 overflow-hidden rounded bg-sunken">
+                            <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded bg-sunken">
                               {s.conv_next_pct != null && (
                                 <div
                                   className="h-full bg-emerald-500"
@@ -415,7 +415,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                                 />
                               )}
                             </div>
-                            <span className="w-16 shrink-0 text-right font-semibold tabular-nums">
+                            <span className="w-20 shrink-0 whitespace-nowrap text-right font-semibold tabular-nums">
                               {s.conv_next_pct != null ? (
                                 <span className="text-emerald-600">{s.conv_next_pct}%</span>
                               ) : (
@@ -429,7 +429,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                   </div>
 
                   {/* Время на этапе */}
-                  <div>
+                  <div className="min-w-0">
                     <div className="mb-2 text-[11px] uppercase tracking-wide text-muted">
                       Среднее время на этапе
                     </div>
@@ -441,10 +441,10 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                         );
                         return metrics.stages.map((s) => (
                           <div key={s.id} className="flex items-center gap-2 text-[11px]">
-                            <span className="w-32 shrink-0 truncate text-muted" title={s.title}>
+                            <span className="w-28 shrink-0 truncate text-muted" title={s.title}>
                               {s.title}
                             </span>
-                            <div className="h-2.5 flex-1 overflow-hidden rounded bg-sunken">
+                            <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded bg-sunken">
                               {s.avg_time_days != null && (
                                 <div
                                   className="h-full"
@@ -455,7 +455,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                                 />
                               )}
                             </div>
-                            <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-ink">
+                            <span className="w-20 shrink-0 whitespace-nowrap text-right font-semibold tabular-nums text-ink">
                               {s.avg_time_days != null ? `${s.avg_time_days} дн` : (
                                 <span className="font-normal text-faint">нет данных</span>
                               )}

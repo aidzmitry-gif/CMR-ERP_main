@@ -13,7 +13,11 @@ export default async function DealsAnalyticsPage({
   return (
     <AppShell crumbs={["CRM", "Сделки", "Аналитика"]}>
       <main className="flex-1 overflow-y-auto bg-canvas text-ink">
-        <div className="mx-auto max-w-[1200px] px-[22px] pb-10 pt-[18px]">
+        {/* pr увеличен против стандартных 22px: плавающая рейка чатов/уведомлений (AppShell,
+            absolute right-0, не резервирует место в layout) перекрывает крайние ~68px контента
+            на узких viewport — двухколоночный график конверсии/времени тянется до края шире,
+            чем доска (та не задевает рейку из-за horizontal-scroll колонок канбана). */}
+        <div className="mx-auto max-w-[1200px] pb-10 pl-[22px] pr-24 pt-[18px]">
           <Link
             href="/crm/deals"
             className="mb-3 inline-flex items-center gap-1 text-[12.5px] font-semibold text-muted hover:text-ink"
