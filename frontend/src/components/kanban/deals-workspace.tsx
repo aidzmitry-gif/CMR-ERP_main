@@ -1068,41 +1068,48 @@ export function DealsWorkspace({
                   </div>
                 </div>
                 <div className="overflow-hidden rounded-2xl bg-line shadow-card">
-                  {/* Первичный ряд — 8 метрик макета в его порядке; на xl одна строка,
-                      первая колонка (headline) шире, как sb-row эталона. */}
-                  <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(0,1.5fr)_repeat(7,minmax(0,1fr))]">
-                    {PRIMARY_CELLS.map((cell) => {
-                      const kpi = kpiByKey.get(cell.key);
-                      if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
-                      const coldCalls = cell.key === "calls_all" ? kpiByKey.get("calls_cold") : undefined;
-                      return (
-                        <PlanFactCell
-                          key={cell.key}
-                          kpi={kpi}
-                          fmt={fmt}
-                          elapsed={elapsed}
-                          onLog={() => handleLog(kpi.id)}
-                          label={cell.label}
-                          headline={cell.headline}
-                          subnote={coldCalls ? `из них ${coldCalls.value} хол.` : undefined}
-                        />
-                      );
-                    })}
-                  </div>
-                  {/* Второй ряд (П1): тот же вид ячеек, раскрывается стрелкой. */}
-                  {moreKpis && secondary.length > 0 && (
-                    <div className="grid gap-px border-t border-dashed border-line sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-                      {secondary.map((kpi) => (
-                        <PlanFactCell
-                          key={kpi.id}
-                          kpi={kpi}
-                          fmt={fmt}
-                          elapsed={elapsed}
-                          onLog={() => handleLog(kpi.id)}
-                        />
-                      ))}
+                  {/* overflow-x-auto + min-w — страховка: при недостаточной реальной ширине
+                      (DPI-масштаб браузера/встроенные панели съедают больше px, чем кажется
+                      по разрешению) колонки не сжимаются до нечитаемости и не «пропадают» —
+                      появляется горизонтальный скролл, ничего не теряется молча. В обычном
+                      случае (места хватает) скролл не активируется, выглядит как раньше. */}
+                  <div className="overflow-x-auto thin-scroll">
+                    {/* Первичный ряд — 8 метрик макета в его порядке; на xl одна строка,
+                        первая колонка (headline) шире, как sb-row эталона. */}
+                    <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[880px] xl:grid-cols-[minmax(0,1.5fr)_repeat(7,minmax(0,1fr))]">
+                      {PRIMARY_CELLS.map((cell) => {
+                        const kpi = kpiByKey.get(cell.key);
+                        if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
+                        const coldCalls = cell.key === "calls_all" ? kpiByKey.get("calls_cold") : undefined;
+                        return (
+                          <PlanFactCell
+                            key={cell.key}
+                            kpi={kpi}
+                            fmt={fmt}
+                            elapsed={elapsed}
+                            onLog={() => handleLog(kpi.id)}
+                            label={cell.label}
+                            headline={cell.headline}
+                            subnote={coldCalls ? `из них ${coldCalls.value} хол.` : undefined}
+                          />
+                        );
+                      })}
                     </div>
-                  )}
+                    {/* Второй ряд (П1): тот же вид ячеек, раскрывается стрелкой. */}
+                    {moreKpis && secondary.length > 0 && (
+                      <div className="grid gap-px border-t border-dashed border-line sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[880px] xl:grid-cols-8">
+                        {secondary.map((kpi) => (
+                          <PlanFactCell
+                            key={kpi.id}
+                            kpi={kpi}
+                            fmt={fmt}
+                            elapsed={elapsed}
+                            onLog={() => handleLog(kpi.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </section>
 
