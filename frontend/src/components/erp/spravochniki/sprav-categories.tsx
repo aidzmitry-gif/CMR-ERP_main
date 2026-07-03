@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Archive, ChevronDown, ChevronRight, FolderPlus, GripVertical, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -681,6 +682,12 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
             <span className="rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
               parent_id
             </span>
+            <Link
+              href="/erp/spravochniki/sku"
+              className="text-[12px] font-medium text-accent hover:underline"
+            >
+              📦 каталог SKU
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-56 rounded-xl bg-sunken px-3 py-2">
@@ -939,11 +946,16 @@ export function SpravCategories({ initial }: { initial: NomenclatureGroup[] }) {
                 ) : (
                   <ul className="mt-2 max-h-44 space-y-1 overflow-y-auto pr-1">
                     {skus.map((s) => (
-                      <li key={s.code} className="flex items-center justify-between gap-2 text-[13px]">
-                        <span className="truncate text-ink" title={s.title}>
-                          {s.title}
-                        </span>
-                        <span className="shrink-0 font-mono text-[11px] text-faint">{s.code}</span>
+                      <li key={s.code}>
+                        <Link
+                          href={`/erp/spravochniki/sku/${encodeURIComponent(s.code)}`}
+                          className="flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-[13px] hover:bg-sunken/60"
+                        >
+                          <span className="truncate text-ink" title={s.title}>
+                            {s.title}
+                          </span>
+                          <span className="shrink-0 font-mono text-[11px] text-faint">{s.code}</span>
+                        </Link>
                       </li>
                     ))}
                   </ul>

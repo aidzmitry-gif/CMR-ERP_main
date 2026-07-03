@@ -108,18 +108,37 @@ export interface ReferenceQueryInput {
   limit?: number;
 }
 
-/** Товар группы (членство по category_id) — строка списка «товары категории». */
+/** Товар группы (членство по category_id) — строка списка «товары категории»/каталога SKU. */
 export interface SkuRow {
   code: string;
   title: string;
   unit: string | null;
   category_id: number | null;
+  vat_code: string | null;
 }
 
 /** Товары группы по category_id (клиент, через reference.query). Не-200/ошибка → пусто. */
 export async function fetchSkusByCategory(categoryId: number, limit = 50): Promise<SkuRow[]> {
   const res = await runReferenceQuery({ ref: "core.skus", category_id: categoryId, limit });
   return rowsFromResult(res) as unknown as SkuRow[];
+}
+
+/** Все товары номенклатуры (SSR) — каталог SKU (REF-showcase). Сервер отдаёт активные,
+ * до `_QUERY_LIMIT_MAX` (see core/runtime/system_routes.py) за один запрос — не пагинация,
+ * а защита от DoS большим limit; каталогу проекта (232 позиции) хватает одним запросом. */
+export async function fetchAllSkus(roles?: string, limit = CATALOG_ROW_LIMIT): Promise<SkuRow[]> {
+  try {
+    const res = await fetch(`${BASE}/system/references/query`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", ...roleHeaders(roles) },
+      body: JSON.stringify({ ref: "core.skus", limit }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return rowsFromResult(await res.json()) as unknown as SkuRow[];
+  } catch {
+    return [];
+  }
 }
 
 /** Ответ reference.query: result зависит от ref (запись | список | null) — сужает экран. */
@@ -381,8 +400,9 @@ export async function fetchRefRowsByEndpoint(
 }
 
 // ponytail: каталог тянет строки витрины одной страницей без пагинации — потолок
-// строк; если выйдет за него (напр. >200 SKU), нужна пагинация/счётчик «N из M».
-export const CATALOG_ROW_LIMIT = 200;
+// строк = серверный _QUERY_LIMIT_MAX (core/runtime/system_routes.py). 250 — с запасом над
+// реальными 232 SKU (нояб.2024); дальше рост каталога потребует пагинацию/счётчик «N из M».
+export const CATALOG_ROW_LIMIT = 250;
 
 /** Развернуть конверт reference.query (`{result: [...]}`) в массив строк; иначе — пусто. */
 export function rowsFromResult(payload: { result?: unknown } | null): Record<string, unknown>[] {

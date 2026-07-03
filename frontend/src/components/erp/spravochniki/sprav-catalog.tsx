@@ -13,8 +13,14 @@ import {
 } from "@/lib/reference-data";
 import { rowsSource, sortedDepartments } from "@/lib/spravochniki-catalog";
 
-// Hub cards — shortcuts to the other 6 reference screens.
+// Hub cards — shortcuts to the other reference screens.
 const HUB_LINKS = [
+  {
+    href: "/erp/spravochniki/sku",
+    label: "Номенклатура (SKU)",
+    badge: "📦",
+    desc: "Каталог товаров: поиск, фильтр по категории, карточка позиции",
+  },
   {
     href: "/erp/spravochniki/counterparty",
     label: "Карточка контрагента",

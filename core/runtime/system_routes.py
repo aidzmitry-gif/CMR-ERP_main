@@ -174,7 +174,8 @@ async def system_references_ai_catalog(request: Request) -> dict:
 
 
 #: верхний предел строк одного structural-query (защита от data-volume через большой limit).
-_QUERY_LIMIT_MAX = 100
+# 250 — с запасом над реальными 232 SKU (backfill 1С, нояб.2024); растёт вместе с каталогом.
+_QUERY_LIMIT_MAX = 250
 
 
 @router.post("/system/references/query")
