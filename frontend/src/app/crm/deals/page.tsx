@@ -12,7 +12,7 @@ import { currentRole } from "@/lib/role-server";
  *  «CRM / Сделки», в одну строку (решение оператора: раньше жили в тулбаре доски). */
 function DealsHeaderActions() {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <CompanySwitcher />
       <FiltersMenu />
       <Link

@@ -74,8 +74,12 @@ export function Topbar({
   }, [open]);
 
   return (
-    <header className="relative flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
-      <div className="flex items-center gap-3">
+    // flex-wrap + min-h (не фикс. h-16): при насыщенном headerActions (доска сделок:
+    // ЮЛ+Фильтры+Стадии+Лого) на недостаточной ширине окна содержимое переносится на
+    // вторую строку внутри шапки, а не выталкивает иконки справа за край экрана —
+    // тот же класс бага, что уже чинили в строках доски (не резать, а переносить).
+    <header className="relative flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-y-2 border-b border-line bg-surface px-6 py-3">
+      <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold">
           <span className="font-semibold text-muted">{crumbs[0]}</span>
           {crumbs[1] && <span className="px-1.5 text-faint">/</span>}
