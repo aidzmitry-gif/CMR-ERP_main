@@ -920,7 +920,12 @@ export function DealsWorkspace({
 
   return (
     <>
-      <main className="flex-1 overflow-auto p-6">
+      {/* pr увеличен против стандартных p-6: плавающая рейка чатов/уведомлений (AppShell,
+          absolute right-0, w-[68px], во ВСЮ высоту экрана, не резервирует место в layout)
+          перекрывает крайние ~44px контента на ЛЮБОЙ ширине окна (main всегда тянется до
+          истинного правого края) — метрики П1 (8 ячеек) упирались в неё последней ячейкой
+          «Средний чек». Тот же приём уже применён на /crm/deals/analytics. */}
+      <main className="flex-1 overflow-auto p-6 pr-20">
         {demoData && (
           <div
             role="status"
