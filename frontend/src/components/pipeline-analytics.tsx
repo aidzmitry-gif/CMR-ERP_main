@@ -12,6 +12,8 @@ import { formatByn } from "@/lib/format";
  * полоса колонки = доля count от max; полоска конверсии — % шириной. Все состояния.
  *
  * «Висяки» — из существующего отчёта `?stuck_days=N` (бэк уже умеет, переиспользуем).
+ * Воронка «Все» — не серверная агрегация (разные воронки → разные стадии, суммировать
+ * их некорректно), а стек секций по каждой реальной воронке, как «Все вместе» на доске.
  */
 type StageAnalytics = {
   id: string;
@@ -72,13 +74,106 @@ const METRIC_PERIODS = [
 ] as const;
 type MetricPeriod = (typeof METRIC_PERIODS)[number]["key"] | "range";
 
+// Роли dev-справочника сотрудников (config/access.py `USERS`), относящиеся к продажам —
+// единый источник «кто у нас продавец» (не выдумываем отдельный справочник).
+const SALES_ROLES = new Set(["sales_head", "sales", "sales_cli"]);
+
 export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFunnel?: string }) {
   const [funnels, setFunnels] = useState<FunnelRow[]>([]);
   const [funnel, setFunnel] = useState(initialFunnel);
   const [owner, setOwner] = useState("");
-  // Продавцы для фильтра — реальные значения Deal.owner (не выдуманный справочник):
-  // тянем плоский список сделок один раз и берём непустые уникальные имена.
+  // Продавцы для фильтра — реальные значения Deal.owner, ОТФИЛЬТРОВАННЫЕ до действующих
+  // сотрудников: берём фамилии из справочника сотрудников (роли sales_head/sales/sales_cli,
+  // config/access.py USERS через /system/users) и оставляем только те Deal.owner, что
+  // содержат такую фамилию — так отсекаются артефакты вроде "Заявки" и чужие/старые записи.
   const [owners, setOwners] = useState<string[]>([]);
+
+  useEffect(() => {
+    void fetchFunnels().then(setFunnels);
+    void fetch("/api/system/users", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { users: [] }))
+      .then(async (data: { users: { full_name: string; role: string }[] }) => {
+        const activeSurnames = data.users
+          .filter((u) => SALES_ROLES.has(u.role))
+          .map((u) => u.full_name.split(" ")[0].toLowerCase())
+          .filter(Boolean);
+        const res = await fetch("/api/sales/deals", { cache: "no-store" });
+        const rows = res.ok ? ((await res.json()) as { owner?: string }[]) : [];
+        const names = Array.from(new Set(rows.map((d) => d.owner).filter(Boolean))) as string[];
+        const active = names.filter((n) =>
+          activeSurnames.some((s) => n.toLowerCase().includes(s)),
+        );
+        setOwners(active.sort((a, b) => a.localeCompare(b, "ru")));
+      })
+      .catch(() => setOwners([]));
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      {/* Фильтры */}
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-[11px] text-muted">
+          Воронка
+          <select
+            value={funnel}
+            onChange={(e) => setFunnel(e.target.value)}
+            className="mt-0.5 block rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+          >
+            <option value="all">Все</option>
+            {funnels.length === 0 && funnel !== "all" && <option value={funnel}>{funnel}</option>}
+            {funnels.map((f) => (
+              <option key={f.code} value={f.code}>
+                {f.title} · {f.active_deals}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-[11px] text-muted">
+          Продавец
+          <select
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            className="mt-0.5 block w-44 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+          >
+            <option value="">Все</option>
+            {owners.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {funnel === "all" ? (
+        funnels.length === 0 ? (
+          <div className="rounded-xl border border-line p-6 text-sm text-muted">
+            Воронки не настроены — аналитика пуста (honest-empty).
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {funnels.map((f) => (
+              <div key={f.code}>
+                <h2 className="mb-2.5 flex items-center gap-2 text-sm font-bold text-ink">
+                  {f.title}
+                  <span className="text-xs font-normal text-faint">· {f.active_deals}</span>
+                </h2>
+                <FunnelAnalyticsPanel funnel={f.code} owner={owner} />
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <FunnelAnalyticsPanel funnel={funnel} owner={owner} />
+      )}
+    </div>
+  );
+}
+
+/** Аналитика ОДНОЙ воронки: снимок доски + конверсия/время на этапах + маржа. Выделен из
+ * {@link PipelineAnalytics}, чтобы «Все» могло отрендерить несколько таких панелей подряд
+ * (разные воронки = разные наборы стадий, честно смешивать их в один набор нельзя). */
+function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string }) {
   const [status, setStatus] = useState<Status>("loading");
   const [data, setData] = useState<Analytics | null>(null);
   const [margin, setMargin] = useState<MarginForecast | null>(null);
@@ -93,17 +188,6 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
   const [rangeApplyToken, setRangeApplyToken] = useState(0);
   const [metricsStatus, setMetricsStatus] = useState<Status>("loading");
   const [metrics, setMetrics] = useState<StageMetrics | null>(null);
-
-  useEffect(() => {
-    void fetchFunnels().then(setFunnels);
-    void fetch("/api/sales/deals", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: { owner?: string }[]) => {
-        const names = Array.from(new Set(rows.map((d) => d.owner).filter(Boolean))) as string[];
-        setOwners(names.sort((a, b) => a.localeCompare(b, "ru")));
-      })
-      .catch(() => setOwners([]));
-  }, []);
 
   const loadMetrics = useCallback(
     async (f: string, o: string, p: MetricPeriod, from: string, to: string) => {
@@ -183,40 +267,6 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
 
   return (
     <div className="space-y-4">
-      {/* Фильтры */}
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="text-[11px] text-muted">
-          Воронка
-          <select
-            value={funnel}
-            onChange={(e) => setFunnel(e.target.value)}
-            className="mt-0.5 block rounded-md border border-line bg-canvas px-2 py-1 text-sm"
-          >
-            {funnels.length === 0 && <option value={funnel}>{funnel}</option>}
-            {funnels.map((f) => (
-              <option key={f.code} value={f.code}>
-                {f.title} · {f.active_deals}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-[11px] text-muted">
-          Продавец
-          <select
-            value={owner}
-            onChange={(e) => setOwner(e.target.value)}
-            className="mt-0.5 block w-44 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
-          >
-            <option value="">Все</option>
-            {owners.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       {status === "loading" && (
         <div className="rounded-xl border border-line bg-sunken p-6 text-sm text-muted">Загрузка…</div>
       )}
