@@ -933,7 +933,6 @@ export function DealsWorkspace({
         )}
         {/* Тулбар */}
         <div className="flex flex-wrap items-center gap-3">
-          {funnelTabs}
           {switcher}
           <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
@@ -965,24 +964,6 @@ export function DealsWorkspace({
           >
             <Clock size={16} /> Только висяки
           </button>
-          {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
-          {(["today", "tomorrow"] as const).map((k) => (
-            <button
-              key={k}
-              onClick={() => setActFilter((v) => (v === k ? null : k))}
-              title="Показать сделки, по которым действие сегодня/завтра"
-              className={clsx(
-                "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-                actFilter === k
-                  ? k === "today"
-                    ? "border-red-400 text-red-700 dark:text-red-300"
-                    : "border-orange-400 text-orange-700 dark:text-orange-300"
-                  : "border-line text-muted",
-              )}
-            >
-              {k === "today" ? "🔴 На сегодня" : "🟠 На завтра"}
-            </button>
-          ))}
           <Link
             href="/crm/deals/stages"
             className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken hover:text-ink"
@@ -1033,7 +1014,8 @@ export function DealsWorkspace({
         <PlanBanner now={now} />
 
         {/* План / Факт по периодам: первичный ряд = 8 метрик макета (П1), бейдж темпа +
-            подзаголовок + pulse + sticky (П2), остальные метрики — под стрелкой «Ещё N». */}
+            подзаголовок + pulse (П2), остальные метрики — под стрелкой «Ещё N». Не sticky
+            (решение оператора): скорборд прокручивается вместе с доской, не «ездит». */}
         {(() => {
           const elapsed = now != null ? periodElapsed(now, period) : null;
           const kpiByKey = new Map(kpis.map((k) => [k.id, k]));
@@ -1060,7 +1042,7 @@ export function DealsWorkspace({
           const sub = periodSubLabel(period, now);
           return (
             <>
-              <section className="z-20 mt-5 bg-canvas pb-1 lg:sticky lg:top-0">
+              <section className="mt-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 pt-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span
@@ -1173,12 +1155,37 @@ export function DealsWorkspace({
           );
         })()}
 
-        {/* Переключатель вида — не показываем в «Все вместе» (комбинированный вид — только канбан) */}
-        {!combinedStages && (
-          <div className="mt-5 flex items-center justify-end gap-2">
-            {/* П4: группировка канбана — по стадиям / по датам следующего действия. */}
-            {view === "board" && (
-              <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+        {/* Ряд над канбаном (мокап): слева — воронки + быстрые фильтры дат «в одну линию по
+            стадиям»; справа — группировка/вид. Воронки и чипы жили в верхнем тулбаре, но по
+            решению оператора вынесены сюда, вплотную к колонкам. */}
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {funnelTabs}
+            {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
+            {(["today", "tomorrow"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => setActFilter((v) => (v === k ? null : k))}
+                title="Показать сделки, по которым действие сегодня/завтра"
+                className={clsx(
+                  "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+                  actFilter === k
+                    ? k === "today"
+                      ? "border-red-400 text-red-700 dark:text-red-300"
+                      : "border-orange-400 text-orange-700 dark:text-orange-300"
+                    : "border-line text-muted",
+                )}
+              >
+                {k === "today" ? "🔴 На сегодня" : "🟠 На завтра"}
+              </button>
+            ))}
+          </div>
+          {/* Переключатель вида — не показываем в «Все вместе» (комбинированный вид — только канбан) */}
+          {!combinedStages && (
+            <div className="ml-auto flex items-center gap-2">
+              {/* П4: группировка канбана — по стадиям / по датам следующего действия. */}
+              {view === "board" && (
+                <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
                 <button
                   onClick={() => setGroupBy("stage")}
                   title="По стадиям"
@@ -1224,7 +1231,8 @@ export function DealsWorkspace({
               </button>
             </div>
           </div>
-        )}
+          )}
+        </div>
 
         {filteredCombined ? (
           /* «Все вместе» (мокап COMBINED): доска каждой воронки — своя секция, drag&drop
