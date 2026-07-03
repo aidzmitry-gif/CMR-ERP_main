@@ -3,16 +3,18 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { CompanySwitcher } from "@/components/kanban/company-switcher";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
+import { FiltersMenu } from "@/components/kanban/filters-menu";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
 import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
 
-/** Переключатель ЮЛ + «Стадии»/«Лого» (иконки) — правее хлебных крошек «CRM / Сделки»,
- *  в одну строку (решение оператора: раньше жили в тулбаре доски, теперь — в шапке). */
+/** Переключатель ЮЛ + «Фильтры» + «Стадии»/«Лого» (иконки) — правее хлебных крошек
+ *  «CRM / Сделки», в одну строку (решение оператора: раньше жили в тулбаре доски). */
 function DealsHeaderActions() {
   return (
     <div className="flex items-center gap-2">
       <CompanySwitcher />
+      <FiltersMenu />
       <Link
         href="/crm/deals/stages"
         title="Стадии"

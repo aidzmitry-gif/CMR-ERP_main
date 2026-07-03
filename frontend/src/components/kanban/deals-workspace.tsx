@@ -12,9 +12,9 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import clsx from "clsx";
-import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
@@ -706,8 +706,9 @@ export function DealsWorkspace({
   // воронки в модалке, а не дефолтные new_clients (`stages`) — храним стадии секции-источника.
   const [modalStages, setModalStages] = useState<Stage[] | null>(null);
   const [query, setQuery] = useState("");
-  const [priority, setPriority] = useState<string | null>(null);
-  const [filterOpen, setFilterOpen] = useState(false);
+  // Приоритет — не локальный state: кнопка «Фильтры» переехала в шапку страницы (FiltersMenu,
+  // решение оператора), отдельное поддерево React от доски. Тот же URL-паттерн, что у `funnel`.
+  const priority = useSearchParams().get("priority");
   const [view, setView] = useState<"board" | "list">("board");
   // П4 (слайс 4): переключатель группировки канбана — по стадиям (умолчание) / по датам
   // следующего действия (next_step_at). Действует только для view="board".
@@ -897,7 +898,6 @@ export function DealsWorkspace({
   const flatDeals = filteredStages.flatMap((s) =>
     s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })),
   );
-  const PRIORITIES = ["Высокий", "Средний", "Низкий"];
 
   /** Бейджи карточки для секций «Все вместе»: та же формула, без «Отказ»-кнопки —
    *  причина отказа собирается через ту же модалку только на основной (не-комбинированной)
@@ -934,43 +934,8 @@ export function DealsWorkspace({
             ⚠️ Демо-данные: backend недоступен, показана демонстрационная доска — изменения не сохранятся.
           </div>
         )}
-        {/* Тулбар: поиск/переключатель ЮЛ/«Стадии»/«План» переехали в шапку страницы и в
-            строки скорборда/воронок (решение оператора) — тут остался только сам фильтр. */}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setFilterOpen((v) => !v)}
-            className={clsx(
-              "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-              priority || filterOpen
-                ? "border-accent text-accent-ink"
-                : "border-line text-muted",
-            )}
-          >
-            <SlidersHorizontal size={16} /> Фильтры
-            {priority && <span className="rounded bg-accent-soft px-1.5 text-xs text-accent-ink">{priority}</span>}
-          </button>
-        </div>
-
-        {/* Фильтр по приоритету */}
-        {filterOpen && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-sm text-muted">Приоритет:</span>
-            {[null, ...PRIORITIES].map((p) => (
-              <button
-                key={p ?? "all"}
-                onClick={() => setPriority(p)}
-                className={clsx(
-                  "rounded-lg px-3 py-1 text-sm font-medium",
-                  priority === p
-                    ? "bg-accent-soft text-accent-ink"
-                    : "bg-surface text-muted ring-1 ring-line hover:bg-sunken",
-                )}
-              >
-                {p ?? "Все"}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Тулбар (поиск/переключатель ЮЛ/«Стадии»/«План»/«Фильтры») переехал в шапку
+            страницы и в строки скорборда/воронок (решение оператора) — тут пусто. */}
 
         <PlanBanner now={now} />
 

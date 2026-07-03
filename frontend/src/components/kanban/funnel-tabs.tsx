@@ -46,44 +46,27 @@ export function FunnelTabs({ active }: { active?: string }) {
 
   // Скрываем все «технические» состояния — пока воронки не пришли, доска работает на
   // дефолтной (new_clients из канона). Шум типа «Воронки не настроены» больше не лезет
-  // в макет, только когда бэк уверенно прислал ≥2 воронки — рисуем таб (и «Все вместе»).
+  // в макет, только когда бэк уверенно прислал ≥2 воронки — рисуем выбор (и «Все вместе»).
   if (status === "loading" || status === "error") return null;
   if (funnels.length <= 1) return null;
   const current = active ?? funnels[0].code;
   return (
-    <div className="flex items-center gap-1">
-      <button
-        onClick={() => switchTo("all")}
-        className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
-          current === "all"
-            ? "border-accent bg-accent-soft text-accent-ink"
-            : "border-line bg-surface text-muted hover:bg-sunken"
-        }`}
-      >
-        ▦ Все вместе
-      </button>
-      {funnels.map((f) => {
-        const isActive = f.code === current;
-        return (
-          <button
-            key={f.code}
-            onClick={() => switchTo(f.code)}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
-              isActive
-                ? "border-accent bg-accent-soft text-accent-ink"
-                : "border-line bg-surface text-muted hover:bg-sunken"
-            }`}
-          >
-            {/* Короткая подпись (решение оператора): «Новые клиенты» → «Новые», чтобы ряд
-                воронок+фильтров помещался в одну строку. Режем «клиент(ы)» с хвоста —
-                кириллицу \w не ловит, поэтому явный класс. */}
-            {f.title.replace(/\s*клиенты?$/i, "")}
-            <span className="rounded px-1 py-0.5 text-[10px] tabular-nums text-muted">
-              {f.active_deals}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <select
+      aria-label="Воронка"
+      value={current}
+      onChange={(e) => switchTo(e.target.value)}
+      className={`rounded-lg border px-3 py-2 text-sm font-medium outline-none ${
+        current === "all"
+          ? "border-accent bg-accent-soft text-accent-ink"
+          : "border-line bg-surface text-ink"
+      }`}
+    >
+      <option value="all">▦ Все вместе</option>
+      {funnels.map((f) => (
+        <option key={f.code} value={f.code}>
+          {f.title} · {f.active_deals}
+        </option>
+      ))}
+    </select>
   );
 }

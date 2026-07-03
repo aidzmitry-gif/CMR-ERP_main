@@ -6,9 +6,13 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
-// next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id]
+// next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id].
+// useSearchParams — приоритет теперь читается из URL (кнопка «Фильтры» переехала в шапку
+// страницы, FiltersMenu, отдельное поддерево React); mockSearchParams меняем per-test.
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => mockSearchParams,
 }));
 vi.mock("@/lib/api", () => ({
   createDeal: vi.fn(),
@@ -71,7 +75,10 @@ const stages: Stage[] = [
   { id: "lost", title: "Закрыто: Отказ", color: "#EF4444", count: 0, sum: 0, deals: [] },
 ];
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockSearchParams = new URLSearchParams();
+});
 
 describe("DealsWorkspace (канбан)", () => {
   it("рендерит колонки стадий и карточку сделки", () => {
@@ -102,10 +109,9 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.getByText("CRM-1")).toBeInTheDocument();
   });
 
-  it("фильтр по приоритету скрывает несоответствующие сделки", () => {
+  it("фильтр по приоритету (?priority= из шапки FiltersMenu) скрывает несоответствующие сделки", () => {
+    mockSearchParams = new URLSearchParams({ priority: "Высокий" });
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Высокий" }));
     expect(screen.queryByText("ООО Доска")).toBeNull(); // сделка «Средний» отфильтрована
   });
 
