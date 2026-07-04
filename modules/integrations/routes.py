@@ -127,7 +127,7 @@ async def web_lead_intake(
     """Заявка с сайта (контакт-форма) → лид в приём CRM. Публично, токен ?token= (если задан).
 
     Принимает JSON или form-поля (name/company/phone/email/region/product/message). Сам лид
-    создаёт sales-подписчик события ``intake.lead.received`` (границы §2.4).
+    создаёт leads-подписчик (``on_intake_lead``) события ``intake.lead.received`` (границы §2.4).
     """
     params = await _collect_params(request)
     _check_intake_token(core, params)
