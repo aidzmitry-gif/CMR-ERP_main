@@ -469,9 +469,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(null);
   }
 
-  async function onRoute(id: number) {
+  async function onRoute(id: number, assignedTo?: string) {
     setBusyId(id);
-    const res = await routeLead(id);
+    const res = await routeLead(id, assignedTo);
     if (res) patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
     setBusyId(null);
   }

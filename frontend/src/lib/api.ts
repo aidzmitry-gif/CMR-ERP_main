@@ -1,7 +1,7 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadStatus, LossReason, Manager, Priority, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
@@ -1238,14 +1238,32 @@ export interface LeadRouteResult {
   funnel: string;
 }
 
-/** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка). */
-export async function routeLead(id: number): Promise<LeadRouteResult | null> {
+/** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка).
+ *  Если передан `assignedTo` — лид уходит именно этому менеджеру (ручной выбор),
+ *  без него — прежнее авто-распределение по правилам. */
+export async function routeLead(id: number, assignedTo?: string): Promise<LeadRouteResult | null> {
   try {
-    const res = await fetch(`/api/leads/${id}/route`, { method: "POST" });
+    const init: RequestInit = { method: "POST" };
+    if (assignedTo) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify({ assigned_to: assignedTo });
+    }
+    const res = await fetch(`/api/leads/${id}/route`, init);
     if (!res.ok) return null;
     return (await res.json()) as LeadRouteResult;
   } catch {
     return null;
+  }
+}
+
+/** Список менеджеров для ручного выбора при раздаче лида (регионы/продукты/текущая загрузка). */
+export async function fetchLeadManagers(): Promise<Manager[]> {
+  try {
+    const res = await fetch(`/api/leads/managers`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as Manager[];
+  } catch {
+    return [];
   }
 }
 

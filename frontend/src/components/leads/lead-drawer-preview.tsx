@@ -2,10 +2,11 @@
 
 import { ArrowRight, Mail, Phone, Star, User, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
-import type { Lead } from "@/lib/types";
+import { fetchLeadManagers } from "@/lib/api";
+import type { Lead, Manager } from "@/lib/types";
 
 const SOURCE_LABELS: Record<string, string> = {
   site: "Сайт",
@@ -37,7 +38,7 @@ export function LeadDrawerPreview({
   busy: boolean;
   onClose: () => void;
   onQualify: (id: number) => void;
-  onRoute: (id: number) => void;
+  onRoute: (id: number, assignedTo?: string) => void;
   onConvert: (id: number) => void;
   onCall: (lead: Lead) => void;
 }) {
@@ -49,6 +50,24 @@ export function LeadDrawerPreview({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [lead, onClose]);
+
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [selectedManager, setSelectedManager] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedManager(null);
+    if (lead == null) {
+      setManagers([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchLeadManagers().then((list) => {
+      if (!cancelled) setManagers(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead?.id]);
 
   const open = lead != null;
   const qualified = lead && lead.status !== "new";
@@ -175,6 +194,37 @@ export function LeadDrawerPreview({
                 </section>
               )}
 
+              {qualified && !routed && managers.length > 0 && (
+                <section className="mt-4">
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Кому передать
+                  </div>
+                  <div className="space-y-1.5">
+                    {managers.map((m) => {
+                      const isSelected = selectedManager === m.name;
+                      return (
+                        <button
+                          key={m.name}
+                          type="button"
+                          onClick={() => setSelectedManager(isSelected ? null : m.name)}
+                          className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-[13px] transition ${
+                            isSelected
+                              ? "border-accent bg-accent-soft text-accent-ink"
+                              : "border-line text-ink hover:bg-sunken"
+                          }`}
+                        >
+                          <span className="font-medium">{m.name}</span>
+                          <span className="text-[12px] text-muted">{m.load} лидов</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-faint">
+                    Не выбрано — система распределит по правилам (гео/продукт/загрузка).
+                  </p>
+                </section>
+              )}
+
               <div className="mt-4 text-center text-[11px] text-faint">
                 💡 Двойной клик по лиду открывает полную карточку
               </div>
@@ -203,9 +253,13 @@ export function LeadDrawerPreview({
                 variant="primary"
                 block
                 disabled={busy || !!routed || !qualified}
-                onClick={() => onRoute(lead.id)}
+                onClick={() => onRoute(lead.id, selectedManager ?? undefined)}
               >
-                {routed ? "✓ Распределён" : "Распределить"}
+                {routed
+                  ? "✓ Распределён"
+                  : selectedManager
+                    ? `Распределить → ${selectedManager}`
+                    : "Распределить"}
               </Button>
               {converted && lead.dealId ? (
                 <Link href={`/crm/deals/${lead.dealId}`} className="block">

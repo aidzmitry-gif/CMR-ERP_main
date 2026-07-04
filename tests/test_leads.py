@@ -200,6 +200,46 @@ async def test_lead_route_assigns_manager(session, api):
     assert body["assigned_to"] == "Иванов И.И."  # Минск + прокат
     assert body["funnel"] in {"new", "regular", "project", "tender"}
 
+
+async def test_lead_route_manual_override(session, api):
+    """Ручной выбор менеджера (Слайс 3): assigned_to из тела перебивает авто-правила."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Минский", "region": "Минск", "product": "лист"},
+        )
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+
+    # без ручного выбора авто-правила отдали бы Иванова (Минск+лист) — переопределяем на Петрова
+    r = await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Петров П.П."})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["assigned_to"] == "Петров П.П."
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.routed" in types
+
+
+async def test_lead_route_manual_rejects_unknown_manager(session, api):
+    lead = (await api.post("/leads", json={"source": "site"})).json()
+    r = await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Неизвестный Ф.И.О."})
+    assert r.status_code == 422
+
+
+async def test_lead_managers_list_with_load(session, api):
+    lead = (
+        await api.post("/leads", json={"source": "site", "region": "Гомель", "product": "станок"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/route")  # авто → Петров (Гомель+станок), load=1
+
+    r = await api.get("/leads/managers")
+    assert r.status_code == 200
+    managers = {m["name"]: m for m in r.json()}
+    assert "Иванов И.И." in managers and "Петров П.П." in managers and "Сидоров С.С." in managers
+    assert managers["Петров П.П."]["load"] == 1
+    assert managers["Иванов И.И."]["load"] == 0
+
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "leads.lead.routed" in types
 

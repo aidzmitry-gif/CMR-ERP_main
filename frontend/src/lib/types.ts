@@ -229,6 +229,13 @@ export interface DealDetail {
 
 export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";
 
+export interface Manager {
+  name: string;
+  regions: string[];
+  products: string[];
+  load: number;
+}
+
 export interface Lead {
   id: number;
   source: string; // site|telegram|whatsapp|email|phone|tender

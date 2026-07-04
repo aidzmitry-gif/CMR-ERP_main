@@ -23,6 +23,12 @@ vi.mock("@/lib/api", () => ({
   uploadLeadAttachment: vi.fn(),
   leadAttachmentDownloadUrl: (leadId: number, attachmentId: number) =>
     `/api/leads/${leadId}/attachments/${attachmentId}/download`,
+  // Пикер менеджера в drawer (ручная раздача лида) — список для «Кому передать».
+  fetchLeadManagers: vi.fn().mockResolvedValue([
+    { name: "Иванов И.И.", regions: ["минск"], products: ["лист"], load: 2 },
+    { name: "Петрова А.С.", regions: ["брест"], products: ["арматура"], load: 0 },
+    { name: "Сидоров С.С.", regions: ["минск", "минская"], products: ["прокат"], load: 5 },
+  ]),
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";
@@ -84,11 +90,29 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Распределить" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Распределить" }));
 
-    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1, undefined));
     expect(await screen.findByText(/Иванов И\.И\./)).toBeInTheDocument();
     expect(screen.getByText(/Новые клиенты/)).toBeInTheDocument();
+  });
+
+  it("пикер менеджера в drawer — выбор и «Распределить → <имя>» уходят ручным выбором", async () => {
+    (api.routeLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1,
+      status: "routed",
+      assigned_to: "Петрова А.С.",
+      funnel: "new",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
+
+    // список менеджеров подгружается асинхронно (fetchLeadManagers)
+    expect(await screen.findByText("Кому передать")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Петрова А\.С\./ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Распределить → Петрова А\.С\./ }));
+
+    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1, "Петрова А.С."));
   });
 
   it("кнопка «Принять лид» открывает форму приёма", () => {
