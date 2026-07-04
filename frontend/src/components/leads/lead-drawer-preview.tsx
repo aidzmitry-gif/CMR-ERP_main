@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
 import { fetchLeadManagers } from "@/lib/api";
+import { REJECT_REASONS } from "@/lib/types";
 import type { Lead, Manager } from "@/lib/types";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -33,14 +34,19 @@ export function LeadDrawerPreview({
   onRoute,
   onConvert,
   onCall,
+  onReject,
 }: {
   lead: Lead | null;
   busy: boolean;
   onClose: () => void;
   onQualify: (id: number) => void;
-  onRoute: (id: number, assignedTo?: string) => void;
+  onRoute: (
+    id: number,
+    opts?: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+  ) => void;
   onConvert: (id: number) => void;
   onCall: (lead: Lead) => void;
+  onReject: (id: number, reason: string) => void;
 }) {
   useEffect(() => {
     if (!lead) return;
@@ -53,9 +59,15 @@ export function LeadDrawerPreview({
 
   const [managers, setManagers] = useState<Manager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [nextStepAt, setNextStepAt] = useState("");
+  const [nextStepNote, setNextStepNote] = useState("");
 
   useEffect(() => {
     setSelectedManager(null);
+    setRejectReason("");
+    setNextStepAt("");
+    setNextStepNote("");
     if (lead == null) {
       setManagers([]);
       return;
@@ -71,7 +83,8 @@ export function LeadDrawerPreview({
 
   const open = lead != null;
   const qualified = lead && lead.status !== "new";
-  const routed = lead && (lead.status === "routed" || lead.status === "converted");
+  const rejected = lead && lead.status === "rejected";
+  const routed = lead && (lead.status === "routed" || lead.status === "converted" || rejected);
   const converted = lead && lead.status === "converted";
 
   return (
@@ -171,6 +184,15 @@ export function LeadDrawerPreview({
                 </section>
               )}
 
+              {rejected && (
+                <section className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Отклонён
+                  </div>
+                  <div className="mt-1 text-[13px] text-red-700">{lead.rejectReason}</div>
+                </section>
+              )}
+
               {lead.aiRationale && (
                 <section className="mt-4">
                   <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -194,7 +216,7 @@ export function LeadDrawerPreview({
                 </section>
               )}
 
-              {qualified && !routed && managers.length > 0 && (
+              {qualified && !routed && !rejected && managers.length > 0 && (
                 <section className="mt-4">
                   <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Кому передать
@@ -222,6 +244,52 @@ export function LeadDrawerPreview({
                   <p className="mt-1.5 text-[11px] text-faint">
                     Не выбрано — система распределит по правилам (гео/продукт/загрузка).
                   </p>
+
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      Следующий шаг продавцу
+                    </div>
+                    <input
+                      type="datetime-local"
+                      value={nextStepAt}
+                      onChange={(e) => setNextStepAt(e.target.value)}
+                      className="w-full rounded-lg border border-line px-3 py-2 text-[13px]"
+                    />
+                    <textarea
+                      placeholder="Заметка..."
+                      value={nextStepNote}
+                      onChange={(e) => setNextStepNote(e.target.value)}
+                      rows={2}
+                      className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-[13px]"
+                    />
+                  </div>
+                </section>
+              )}
+
+              {!routed && !rejected && (
+                <section className="mt-4">
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Отклонить лид
+                  </div>
+                  <select
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    className="w-full rounded-lg border border-line px-3 py-2 text-[13px]"
+                  >
+                    {REJECT_REASONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onReject(lead.id, rejectReason || REJECT_REASONS[0])}
+                    className="mt-1.5 w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+                  >
+                    Отклонить
+                  </button>
                 </section>
               )}
 
@@ -253,7 +321,13 @@ export function LeadDrawerPreview({
                 variant="primary"
                 block
                 disabled={busy || !!routed || !qualified}
-                onClick={() => onRoute(lead.id, selectedManager ?? undefined)}
+                onClick={() =>
+                  onRoute(lead.id, {
+                    assignedTo: selectedManager ?? undefined,
+                    nextStepAt: nextStepAt || undefined,
+                    nextStepNote: nextStepNote || undefined,
+                  })
+                }
               >
                 {routed
                   ? "✓ Распределён"
@@ -271,7 +345,7 @@ export function LeadDrawerPreview({
                 <Button
                   variant="money"
                   block
-                  disabled={busy || !routed}
+                  disabled={busy || !routed || !!rejected}
                   onClick={() => onConvert(lead.id)}
                 >
                   В сделку

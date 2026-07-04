@@ -13,6 +13,7 @@ import {
   fetchLeadsClient,
   type LeadInput,
   qualifyLead,
+  rejectLead,
   routeLead,
   submitEmailLead,
   submitWebLead,
@@ -469,9 +470,12 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(null);
   }
 
-  async function onRoute(id: number, assignedTo?: string) {
+  async function onRoute(
+    id: number,
+    opts?: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+  ) {
     setBusyId(id);
-    const res = await routeLead(id, assignedTo);
+    const res = await routeLead(id, opts);
     if (res) patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
     setBusyId(null);
   }
@@ -480,6 +484,13 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(id);
     const res = await convertLead(id);
     if (res) patch(id, { status: "converted", dealId: res.deal_id });
+    setBusyId(null);
+  }
+
+  async function onReject(id: number, reason: string) {
+    setBusyId(id);
+    const res = await rejectLead(id, reason);
+    if (res) patch(id, { status: "rejected", rejectReason: res.reject_reason });
     setBusyId(null);
   }
 
@@ -653,6 +664,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         onQualify={onQualify}
         onRoute={onRoute}
         onConvert={onConvert}
+        onReject={onReject}
         onCall={(l) => setCallPopupLead(l)}
       />
 

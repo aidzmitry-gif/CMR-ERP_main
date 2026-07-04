@@ -244,6 +244,66 @@ async def test_lead_managers_list_with_load(session, api):
     assert "leads.lead.routed" in types
 
 
+async def test_lead_reject(session, api):
+    """Слайс 4: отклонение лида — терминальный статус + причина."""
+    lead = (await api.post("/leads", json={"source": "site", "company": "ЧП Стройинструмент"})).json()
+
+    r = await api.post(f"/leads/{lead['id']}/reject", json={"reason": "не наш профиль"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "rejected"
+    assert body["reject_reason"] == "не наш профиль"
+
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["status"] == "rejected"
+    assert got["reject_reason"] == "не наш профиль"
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.rejected" in types
+
+
+async def test_lead_reject_rejects_unknown_reason(session, api):
+    lead = (await api.post("/leads", json={"source": "site"})).json()
+    r = await api.post(f"/leads/{lead['id']}/reject", json={"reason": "просто не понравился"})
+    assert r.status_code == 422
+
+
+async def test_lead_reject_rejects_terminal_status(session, api):
+    """Уже сконвертированный/отклонённый лид — 409, а не повторный отказ."""
+    lead = (await api.post("/leads", json={"source": "site"})).json()
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "дубль"})
+
+    r = await api.post(f"/leads/{lead['id']}/reject", json={"reason": "конкурент"})
+    assert r.status_code == 409
+
+
+async def test_lead_route_rejects_terminal_status(session, api):
+    """Отклонённый лид нельзя распределить (409) — иначе drawer открыл бы раздачу мёртвому лиду."""
+    lead = (await api.post("/leads", json={"source": "site"})).json()
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "дубль"})
+
+    r = await api.post(f"/leads/{lead['id']}/route")
+    assert r.status_code == 409
+
+
+async def test_lead_route_sets_next_step(session, api):
+    """Слайс 4: срок+заметка продавцу выставляются вместе с раздачей."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "region": "Минск", "product": "лист"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+
+    r = await api.post(
+        f"/leads/{lead['id']}/route",
+        json={"next_step_at": "2026-07-05T10:00:00", "next_step_note": "прозвонить, уточнить марку"},
+    )
+    assert r.status_code == 200
+
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["next_step_at"].startswith("2026-07-05T10:00:00")
+    assert got["next_step_note"] == "прозвонить, уточнить марку"
+
+
 async def test_lead_convert_creates_deal(session, api, services):
     from core.services.eventbus import EventContext
 

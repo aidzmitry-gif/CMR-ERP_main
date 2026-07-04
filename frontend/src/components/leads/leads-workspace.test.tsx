@@ -15,6 +15,7 @@ vi.mock("@/lib/api", () => ({
   createLead: vi.fn(),
   qualifyLead: vi.fn(),
   routeLead: vi.fn(),
+  rejectLead: vi.fn(),
   convertLead: vi.fn(),
   // call-popup использует createDealTask для постановки задачи из звонка
   createDealTask: vi.fn().mockResolvedValue(true),
@@ -49,6 +50,9 @@ const lead: Lead = {
   reason: "",
   assignedTo: "",
   funnel: "",
+  rejectReason: "",
+  nextStepAt: null,
+  nextStepNote: "",
 };
 
 beforeEach(() => vi.clearAllMocks());
@@ -92,7 +96,12 @@ describe("LeadsWorkspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Распределить" }));
 
-    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1, undefined));
+    await waitFor(() =>
+      expect(api.routeLead).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ assignedTo: undefined }),
+      ),
+    );
     expect(await screen.findByText(/Иванов И\.И\./)).toBeInTheDocument();
     expect(screen.getByText(/Новые клиенты/)).toBeInTheDocument();
   });
@@ -112,7 +121,12 @@ describe("LeadsWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Распределить → Петрова А\.С\./ }));
 
-    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1, "Петрова А.С."));
+    await waitFor(() =>
+      expect(api.routeLead).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ assignedTo: "Петрова А.С." }),
+      ),
+    );
   });
 
   it("кнопка «Принять лид» открывает форму приёма", () => {
@@ -232,5 +246,52 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByText(/Сидоров С\.С\./)).toBeInTheDocument();
     expect(screen.getByText("AI-пояснение по лиду")).toBeInTheDocument();
     expect(screen.getByText(/Постоянные/)).toBeInTheDocument(); // воронка regular
+  });
+
+  it("отказ — выбор причины и клик «Отклонить» зовёт rejectLead", async () => {
+    (api.rejectLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1,
+      status: "rejected",
+      reject_reason: "дубль",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
+
+    expect(await screen.findByText("Отклонить лид")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "дубль" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Отклонить" }));
+
+    await waitFor(() => expect(api.rejectLead).toHaveBeenCalledWith(1, "дубль"));
+    expect(await screen.findByText("дубль", { selector: "div" })).toBeInTheDocument();
+    expect(screen.getAllByText("Отклонён").length).toBeGreaterThan(0);
+  });
+
+  it("раздача со следующим шагом передаёт nextStepAt/nextStepNote в routeLead", async () => {
+    (api.routeLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1,
+      status: "routed",
+      assigned_to: "Иванов И.И.",
+      funnel: "new",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
+
+    expect(await screen.findByText("Кому передать")).toBeInTheDocument();
+    const datetimeInput = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
+    fireEvent.change(datetimeInput, { target: { value: "2026-07-05T10:00" } });
+    fireEvent.change(screen.getByPlaceholderText("Заметка..."), {
+      target: { value: "Перезвонить после обеда" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Распределить" }));
+
+    await waitFor(() =>
+      expect(api.routeLead).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          nextStepAt: "2026-07-05T10:00",
+          nextStepNote: "Перезвонить после обеда",
+        }),
+      ),
+    );
   });
 });

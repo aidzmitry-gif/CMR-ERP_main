@@ -229,6 +229,10 @@ export interface DealDetail {
 
 export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";
 
+/** Фиксированный список причин отказа лида — зеркалит бэкендовый REJECT_REASONS
+ *  (modules/leads/leads.py). POST /leads/{id}/reject вернёт 422 на значение вне списка. */
+export const REJECT_REASONS = ["не наш профиль", "нет бюджета", "дубль", "конкурент"] as const;
+
 export interface Manager {
   name: string;
   regions: string[];
@@ -254,6 +258,9 @@ export interface Lead {
   funnel: string; // "" | new | regular | tender | project
   dealId?: number;
   aiRationale?: string; // обоснование AI-квалификатора (если AI включён)
+  rejectReason: string; // "" | одна из REJECT_REASONS — причина отказа (терминальный статус)
+  nextStepAt: string | null; // ISO datetime следующего шага продавцу, или null
+  nextStepNote: string; // заметка к следующему шагу
 }
 
 export interface LeadAttachment {

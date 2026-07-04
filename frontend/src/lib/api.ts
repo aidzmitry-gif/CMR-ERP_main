@@ -1129,6 +1129,9 @@ interface ApiLead {
   assigned_to: string;
   funnel: string;
   deal_id: number | null;
+  reject_reason: string;
+  next_step_at: string | null;
+  next_step_note: string;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1149,6 +1152,9 @@ function mapLead(l: ApiLead): Lead {
     assignedTo: l.assigned_to,
     funnel: l.funnel,
     dealId: l.deal_id ?? undefined,
+    rejectReason: l.reject_reason,
+    nextStepAt: l.next_step_at,
+    nextStepNote: l.next_step_note,
   };
 }
 
@@ -1239,18 +1245,45 @@ export interface LeadRouteResult {
 }
 
 /** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка).
- *  Если передан `assignedTo` — лид уходит именно этому менеджеру (ручной выбор),
- *  без него — прежнее авто-распределение по правилам. */
-export async function routeLead(id: number, assignedTo?: string): Promise<LeadRouteResult | null> {
+ *  `opts.assignedTo` — лид уходит именно этому менеджеру (ручной выбор), без него —
+ *  прежнее авто-распределение по правилам. `opts.nextStepAt`/`opts.nextStepNote` —
+ *  опционально сохраняются на лиде вместе с раздачей (работает и в авто-, и в ручном режиме). */
+export async function routeLead(
+  id: number,
+  opts?: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+): Promise<LeadRouteResult | null> {
   try {
     const init: RequestInit = { method: "POST" };
-    if (assignedTo) {
+    const body: Record<string, string> = {};
+    if (opts?.assignedTo) body.assigned_to = opts.assignedTo;
+    if (opts?.nextStepAt) body.next_step_at = opts.nextStepAt;
+    if (opts?.nextStepNote) body.next_step_note = opts.nextStepNote;
+    if (Object.keys(body).length > 0) {
       init.headers = { "Content-Type": "application/json" };
-      init.body = JSON.stringify({ assigned_to: assignedTo });
+      init.body = JSON.stringify(body);
     }
     const res = await fetch(`/api/leads/${id}/route`, init);
     if (!res.ok) return null;
     return (await res.json()) as LeadRouteResult;
+  } catch {
+    return null;
+  }
+}
+
+/** Отклонить лид (терминальный статус, как converted). Причина — одна из REJECT_REASONS
+ *  (иначе бэк вернёт 422). 409, если лид уже converted/rejected. */
+export async function rejectLead(
+  id: number,
+  reason: string,
+): Promise<{ id: number; status: LeadStatus; reject_reason: string } | null> {
+  try {
+    const res = await fetch(`/api/leads/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { id: number; status: LeadStatus; reject_reason: string };
   } catch {
     return null;
   }
