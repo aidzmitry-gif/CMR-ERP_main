@@ -65,6 +65,76 @@ def test_choose_funnel():
 # --- API: приём и жизненный цикл лида ---
 
 
+async def test_lead_attachment_upload_list_download(session, api, monkeypatch, tmp_path):
+    """Вложение лида: загрузка (data-URI) → список → скачивание байт назад."""
+    import base64
+
+    import modules.leads.storage as storage
+
+    monkeypatch.setattr(storage, "_DATA_DIR", tmp_path / "leads-attachments")
+
+    lead = (await api.post("/leads", json={"source": "tender", "company": "РУП Тест"})).json()
+    lead_id = lead["id"]
+
+    pdf_bytes = b"%PDF-1.4 fake content for test\n%%EOF"
+    data_url = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode()
+
+    r = await api.post(
+        f"/leads/{lead_id}/attachments",
+        json={"filename": "Спецификация.pdf", "data_url": data_url, "source": "tender"},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["filename"] == "Спецификация.pdf"
+    assert body["content_type"] == "application/pdf"
+    assert body["size_bytes"] == len(pdf_bytes)
+    assert body["source"] == "tender"
+    attachment_id = body["id"]
+
+    listed = (await api.get(f"/leads/{lead_id}/attachments")).json()
+    assert any(a["id"] == attachment_id for a in listed)
+
+    dl = await api.get(f"/leads/{lead_id}/attachments/{attachment_id}/download")
+    assert dl.status_code == 200
+    assert dl.content == pdf_bytes
+    assert dl.headers["content-type"] == "application/pdf"
+
+    # чужой lead_id к тому же attachment_id — не найдено (нельзя скачать по чужому лиду)
+    other_lead = (await api.post("/leads", json={"source": "site"})).json()
+    assert (
+        await api.get(f"/leads/{other_lead['id']}/attachments/{attachment_id}/download")
+    ).status_code == 404
+
+
+async def test_lead_attachment_rejects_bad_type_and_oversize(session, api, monkeypatch, tmp_path):
+    """Граница доверия: неразрешённый тип и превышение размера — 422, файл не пишется."""
+    import base64
+
+    import modules.leads.storage as storage
+
+    monkeypatch.setattr(storage, "_DATA_DIR", tmp_path / "leads-attachments")
+    monkeypatch.setattr(storage, "MAX_SIZE_BYTES", 10)  # маленький лимит, чтобы не гонять 10 МБ в тесте
+
+    lead = (await api.post("/leads", json={"source": "email"})).json()
+    lead_id = lead["id"]
+
+    bad_type_url = "data:application/x-msdownload;base64," + base64.b64encode(b"MZ...").decode()
+    r1 = await api.post(
+        f"/leads/{lead_id}/attachments",
+        json={"filename": "virus.exe", "data_url": bad_type_url},
+    )
+    assert r1.status_code == 422
+
+    oversize_url = "data:application/pdf;base64," + base64.b64encode(b"x" * 100).decode()
+    r2 = await api.post(
+        f"/leads/{lead_id}/attachments",
+        json={"filename": "big.pdf", "data_url": oversize_url},
+    )
+    assert r2.status_code == 422
+
+    assert (await api.get(f"/leads/{lead_id}/attachments")).json() == []
+
+
 async def test_lead_intake_emits_event(session, api):
     r = await api.post(
         "/leads",

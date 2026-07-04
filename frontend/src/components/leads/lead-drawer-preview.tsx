@@ -3,6 +3,7 @@
 import { ArrowRight, Mail, Phone, Star, User, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect } from "react";
+import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
 import type { Lead } from "@/lib/types";
 
@@ -129,6 +130,13 @@ export function LeadDrawerPreview({
                   </div>
                 </section>
               )}
+
+              <section className="mt-4">
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  Документы
+                </div>
+                <LeadAttachments leadId={lead.id} />
+              </section>
 
               {lead.qualification && (
                 <section className="mt-4 rounded-lg border border-line p-3">

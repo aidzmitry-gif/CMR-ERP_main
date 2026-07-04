@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Mail, Phone, Star, User } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchLeads } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
@@ -119,11 +120,7 @@ export default async function LeadDetailPage({
                       <span>Прикреплённые документы</span>
                     </CardHeader>
                     <CardBody>
-                      <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-muted">
-                        <span className="font-semibold text-faint">нет данных · </span>
-                        вложения (PDF/изображения/файлы) подтянем, когда форма сайта/почты начнёт
-                        отдавать <code>attachments[]</code>.
-                      </div>
+                      <LeadAttachments leadId={lead.id} />
                     </CardBody>
                   </Card>
 

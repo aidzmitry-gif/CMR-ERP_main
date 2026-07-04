@@ -249,6 +249,16 @@ export interface Lead {
   aiRationale?: string; // обоснование AI-квалификатора (если AI включён)
 }
 
+export interface LeadAttachment {
+  id: number;
+  leadId: number;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  source: string; // manual|email|tender
+  createdAt: string;
+}
+
 // --- Универсальная воронка ERP-модулей (закупки, производство, склад, HR и др.) ---
 
 export interface FunnelCard {

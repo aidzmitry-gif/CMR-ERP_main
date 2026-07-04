@@ -18,6 +18,11 @@ vi.mock("@/lib/api", () => ({
   convertLead: vi.fn(),
   // call-popup использует createDealTask для постановки задачи из звонка
   createDealTask: vi.fn().mockResolvedValue(true),
+  // LeadDrawerPreview рендерит <LeadAttachments> — полоска вложений лида
+  fetchLeadAttachments: vi.fn().mockResolvedValue([]),
+  uploadLeadAttachment: vi.fn(),
+  leadAttachmentDownloadUrl: (leadId: number, attachmentId: number) =>
+    `/api/leads/${leadId}/attachments/${attachmentId}/download`,
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";

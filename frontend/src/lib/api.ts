@@ -1,7 +1,7 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadStatus, LossReason, Priority, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
@@ -1286,6 +1286,76 @@ export async function convertLead(id: number): Promise<LeadConvertResult | null>
   } catch {
     return null;
   }
+}
+
+function mapAttachment(raw: {
+  id: number;
+  lead_id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  source: string;
+  created_at: string;
+}): LeadAttachment {
+  return {
+    id: raw.id,
+    leadId: raw.lead_id,
+    filename: raw.filename,
+    contentType: raw.content_type,
+    sizeBytes: raw.size_bytes,
+    source: raw.source,
+    createdAt: raw.created_at,
+  };
+}
+
+/** Вложения лида (сканы тендерных заявок/писем/ручная загрузка). */
+export async function fetchLeadAttachments(leadId: number): Promise<LeadAttachment[]> {
+  try {
+    const res = await fetch(`/api/leads/${leadId}/attachments`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return ((await res.json()) as Parameters<typeof mapAttachment>[0][]).map(mapAttachment);
+  } catch {
+    return [];
+  }
+}
+
+export interface UploadAttachmentResult {
+  attachment?: LeadAttachment;
+  error?: string; // detail из 422 или общая ошибка сети
+}
+
+/** Загрузить файл вложения: читаем как data-URI на клиенте (сервер multipart не парсит —
+ *  тот же паттерн, что у логотипа продавца в sales), шлём JSON. */
+export async function uploadLeadAttachment(
+  leadId: number,
+  file: File,
+  source: string = "manual",
+): Promise<UploadAttachmentResult> {
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch(`/api/leads/${leadId}/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, data_url: dataUrl, source }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      return { error: body?.detail ?? "Не удалось загрузить файл" };
+    }
+    return { attachment: mapAttachment(await res.json()) };
+  } catch {
+    return { error: "Не удалось загрузить файл" };
+  }
+}
+
+/** Прямая ссылка на скачивание/просмотр вложения — content-type решает браузер. */
+export function leadAttachmentDownloadUrl(leadId: number, attachmentId: number): string {
+  return `/api/leads/${leadId}/attachments/${attachmentId}/download`;
 }
 
 export interface OwnerMetrics {
