@@ -42,6 +42,13 @@ export default async function DealsPage({
   const activeFunnel = funnel ?? "new_clients";
   const role = await currentRole();
 
+  // key на FunnelTabs обязателен: элемент создаётся в server-компоненте DealsPage и уезжает
+  // пропом в client-компонент DealsWorkspace через RSC-границу. При клиентском рендере React
+  // (dev) заново валидирует десериализованный элемент и без key ложно ругается «child in a
+  // list should have a unique key» (флаг validated с сервера не сериализуется). Fires только
+  // на клиенте — на SSR элемент уже помечен валидным. Одна константа на обе ветки заодно.
+  const funnelTabs = <FunnelTabs key="funnel-tabs" active={activeFunnel} />;
+
   if (activeFunnel === "all") {
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
@@ -61,7 +68,7 @@ export default async function DealsPage({
           initialKpis={kpis}
           combinedStages={sections}
           demoData={sections.some((r) => r.demo)}
-          funnelTabs={<FunnelTabs active={activeFunnel} />}
+          funnelTabs={funnelTabs}
         />
       </AppShell>
     );
@@ -78,7 +85,7 @@ export default async function DealsPage({
         initialStages={board.stages}
         initialKpis={kpis}
         demoData={board.demo}
-        funnelTabs={<FunnelTabs active={activeFunnel} />}
+        funnelTabs={funnelTabs}
       />
     </AppShell>
   );
