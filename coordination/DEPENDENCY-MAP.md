@@ -67,7 +67,7 @@
 | sales | `sales.message.sent` | sales (AI) | AI-агент на входящее |
 | sales | `sales.plan.approved` | sales | (круг 3) план РОП → `KpiTarget` скорборда (on_plan_approved) |
 | sales | `sales.deal.ship_deadline.set` | procurement | **(круг 4)** крайняя дата отгрузки + штраф → `on_ship_deadline_set` складывает `ShipRequirement` (сделка,sku) → план сбора машины к самому раннему сроку − буфер (мигр.0073 sales / 0074 procurement) |
-| marketing | `marketing.campaign.launched` | sales | создаёт лиды ⚠ origin/main вынес лиды в отд. репо — рефактор НЕ принят в супер |
+| marketing | `marketing.campaign.launched` | leads | создаёт лиды (on_campaign_launched, до 10 шт/кампания) |
 | finance | `finance.payment.paid` | sales | помечает счёт оплаченным |
 | finance | `finance.payment.received` | office | **(круг 3)** поступление денег вкл. частичное → офис; ✅ закрыта мёртвая подписка |
 | logistics | `logistics.shipment.delivered` | sales | сделка → won |
@@ -88,7 +88,7 @@
 | hr | `hr.payroll.accrued` | finance | **(круг 5/Р5)** начисление ФОТ → `Payment(kind=payroll, status=pending)`; payload: `{employee_id, employee_name, period:"YYYY-MM", amount_byn:str, entity_ref:"payroll:<id>"}` |
 | hr | `hr.payroll.paid` | finance | **(круг 5/Р5)** выплата ФОТ → settle Payment по `entity_ref` → `status=paid` |
 | sales | `sales.deal.handoff` | finance | **(Р5 accrual)** признание выручки → `Payment(kind=receivable, status=recognized, amount=Decimal(str(payload.amount)))`; идемпотентно по deal_id |
-| intake | `intake.lead.received` | sales | лид с сайта/email → воронка (on_intake_lead) |
+| intake | `intake.lead.received` | leads | лид с сайта/email → воронка (`on_intake_lead`, `modules/leads/events.py`; чинено 2026-07-04 — до этого emit был без подписчика, xfail) |
 | telephony | `telephony.call.*` | sales | screen-pop звонка (logged/answered/ended/transfer) |
 
 **Центральные узлы графа:** `finance` — крупнейший приёмник (**6 подписок**: document.posted, freight.cost, freight.audit_refund, landed_cost.calculated, claim.resolved, po.drafted); `sales` (источник+приёмник); `office` (deal.won, delivery.delivered/tracking, shipment.completed, payment.received); `wms` (приёмник 4 + теперь **ЭМИТТЕР**: stock.low, shipment.completed). Менять контракт этих событий (поля/имя) = ломать цепочку — согласовывать.
@@ -97,6 +97,7 @@
 - **emit без подписчиков** (только аудит, by design): `sales.deal.handoff` (⚠ office реагирует через `sales.deal.won`, НЕ через handoff — handoff висячий), `sales.supply.arrived` (круг 3, INFO), `sales.plan.rejected`, большинство `sales.*` (lost/document.created/rejected/task.*/item.changed/price.quoted/lead.*/invoice.*/call.*), все `ai.*`, `finance.payment.created`, `procurement.order.status_changed`, `procurement.rfq.awarded`, `logistics.import.received`(INFO)/shipment.created/carrier_order/import.customs_cleared/import.arrived/rfq.*/contract.signed, исходящие `office.*`, `approval.*`, `counterparty.merged/unmerged`, `integration.1c.synced`.
 - ~~**`reference.*.changed`** — подписчиков пока нет~~ → **✅ ЗАКРЫТО (круг 4 B2): finance И procurement подписаны** — перенесено в рабочую таблицу выше. Finance эмитит `finance.landed.recompute_requested` (внутр. outbox, дедуп sku).
 - ~~**`sales.deal.ship_deadline.set`** — sales→procurement, подписчика нет~~ → **✅ ЗАМКНУТО в круге 4** (`76a293c`): procurement подписан (`on_ship_deadline_set`→`ShipRequirement`→план машины), ребро перенесено в таблицу выше как РАБОЧЕЕ.
+- **⚠ РАЗРЫВ КОНТРАКТА (найдено 2026-07-04, не чинено):** `modules/marketing/module.py` подписан на `sales.lead.received` (`on_lead_received`, UTM-атрибуция лида к SEO-кампании), но модуль `leads` эмиттит `leads.lead.received`/`intake.lead.received` — других имён нет нигде. Атрибуция новых лидов к кампаниям НЕ срабатывает. Простое переименование строки подписки НЕ починит: `utm_campaign`/`utm_source`/`landing_url` из payload `intake.lead.received` (единственное место, где они реально есть — `_extract_utm` в `modules/integrations/routes.py`) никуда не долетают дальше — у `Lead` нет колонок под UTM, и `on_intake_lead`/`leads.lead.received` их не пробрасывает. Нужна миграция (UTM-поля на `Lead`) + решение, кто их передаёт дальше в `leads.lead.received`. Не в скоупе слайса intake-fix (`6a16ac0`/`0e400f6`).
 - **подписка без emit: НЕТ ✅** — обе бывшие мёртвые подписки office (`wms.shipment.completed`, `finance.payment.received`) закрыты эмиттерами в круге 3.
 
 ### 2c. Планируемые связи ЗАКУПОК (S&OP / планирование спроса — ДИЗАЙН, в коде ещё НЕТ)
