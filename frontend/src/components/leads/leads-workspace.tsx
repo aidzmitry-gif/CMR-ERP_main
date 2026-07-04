@@ -185,18 +185,37 @@ function Pin() {
   );
 }
 
+// Контекстная кнопка следующего шага прямо на карточке (Слайс 1 кокпита лидов):
+// одна кнопка под текущий статус вместо захода в drawer — new→qualify, qualified→route,
+// routed→convert. converted/rejected — терминальные, кнопки нет.
+const NEXT_ACTION: Record<LeadStatus, { label: string; key: "qualify" | "route" | "convert" } | null> = {
+  new: { label: "✅ Квалифицировать", key: "qualify" },
+  qualified: { label: "🤝 Распределить", key: "route" },
+  routed: { label: "⚡ В сделку", key: "convert" },
+  converted: null,
+  rejected: null,
+};
+
 function LeadCard({
   lead,
   selected,
+  busy,
   onPreview,
   onOpen,
   onCall,
+  onQualify,
+  onRoute,
+  onConvert,
 }: {
   lead: Lead;
   selected: boolean;
+  busy: boolean;
   onPreview: () => void;
   onOpen: () => void;
   onCall: () => void;
+  onQualify: () => void;
+  onRoute: () => void;
+  onConvert: () => void;
 }) {
   // Click vs double-click split: 1 клик → drawer-preview справа,
   // 2 клика → полная страница /crm/leads/[id]. Кнопка «📞» — отдельная,
@@ -268,6 +287,24 @@ function LeadCard({
           )}
         </div>
       </div>
+      {NEXT_ACTION[lead.status] && (
+        <button
+          type="button"
+          data-card-action
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            const action = NEXT_ACTION[lead.status];
+            if (!action) return;
+            if (action.key === "qualify") onQualify();
+            else if (action.key === "route") onRoute();
+            else onConvert();
+          }}
+          className="mt-2 w-full rounded-lg bg-accent-soft py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent hover:text-white disabled:opacity-60"
+        >
+          {busy ? "..." : NEXT_ACTION[lead.status]?.label}
+        </button>
+      )}
     </div>
   );
 }
@@ -707,9 +744,13 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         key={l.id}
                         lead={l}
                         selected={l.id === selectedId}
+                        busy={busyId === l.id}
                         onPreview={() => setSelectedId(l.id)}
                         onOpen={() => router.push(`/crm/leads/${l.id}`)}
                         onCall={() => setCallPopupLead(l)}
+                        onQualify={() => onQualify(l.id)}
+                        onRoute={() => onRoute(l.id)}
+                        onConvert={() => onConvert(l.id)}
                       />
                     ))}
                     {items.length === 0 && (

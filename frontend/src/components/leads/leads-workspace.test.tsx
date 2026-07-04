@@ -151,6 +151,30 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/5");
   });
 
+  it("квалификация — прямо с карточки канбана, без захода в drawer (Слайс 1 кокпита)", async () => {
+    (api.qualifyLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1,
+      status: "qualified",
+      score: 90,
+      qualification: "target",
+      reason: "полный профиль",
+    });
+    // второй лид НЕ выбран по умолчанию (drawer открыт на первом) — клик по его
+    // карточной кнопке не должен зависеть от состояния drawer/preview.
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1 },
+          { ...lead, id: 2, company: "ООО Второй" },
+        ]}
+      />,
+    );
+    const buttons = screen.getAllByRole("button", { name: "✅ Квалифицировать" });
+    expect(buttons).toHaveLength(2); // по одной на карточку — не зависит от drawer
+    fireEvent.click(buttons[1]); // карточка ЛИД-2 (не выбран в drawer по умолчанию)
+    await waitFor(() => expect(api.qualifyLead).toHaveBeenCalledWith(2));
+  });
+
   it("панель показывает контакты, нецелевой вердикт, распределение и AI-обоснование", () => {
     render(
       <LeadsWorkspace
