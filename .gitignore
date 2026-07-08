@@ -14,6 +14,7 @@ env/
 
 # Локальная dev-БД (SQLite)
 dev.db
+dev_calls.db
 *.sqlite3
 
 # Коннекторы: вывод (inbox/media) и состояние, ключ сервисного аккаунта Google
@@ -26,11 +27,23 @@ connectors/data/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.tmp_pytest/
+.tmp_ruff_cache/
 
 # Покрытие тестами
 .coverage
 coverage.xml
 htmlcov/
+
+# Runtime logs / local process output
+*.log
+*.err
+_backend.log
+_backend.err
+_frontend.log
+_frontend.err
+_uvicorn.out.log
+_uvicorn.err.log
 
 # IDE / ОС
 .idea/

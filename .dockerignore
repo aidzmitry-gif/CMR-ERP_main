@@ -18,6 +18,7 @@
 
 # --- Локальная dev-БД и данные ---
 dev.db
+dev_calls.db
 *.sqlite3
 /data/
 connectors/data/
@@ -41,6 +42,18 @@ tests/
 .coverage
 coverage.xml
 htmlcov/
+.tmp_pytest/
+.tmp_ruff_cache/
+
+# --- Runtime logs / local process output ---
+*.log
+*.err
+_backend.log
+_backend.err
+_frontend.log
+_frontend.err
+_uvicorn.out.log
+_uvicorn.err.log
 
 # --- Фронтенд (собирается отдельно, не часть backend-образа) ---
 frontend/node_modules/
