@@ -12,9 +12,9 @@ import json
 
 import pytest
 
-from connectors import config, run
+from connectors import run
 from connectors.models import RawRecord
-from connectors.state import StateStore
+from connectors.state import NullStateStore, StateStore
 
 pytestmark = pytest.mark.unit
 
@@ -58,7 +58,7 @@ def test_filename_differs_for_different_unit_ids():
 
 def test_persist_writes_record_and_is_idempotent(tmp_path, monkeypatch):
     inbox = tmp_path / "inbox"
-    monkeypatch.setattr(config, "INBOX_DIR", str(inbox))
+    monkeypatch.setattr(run, "_inbox_dir", str(inbox))
 
     run.persist(_rec())
     files = list(inbox.glob("*.json"))
@@ -93,6 +93,12 @@ def test_statestore_persists_and_reloads_from_disk(tmp_path):
     reloaded = StateStore(path)
     assert reloaded.get("bitrix_calls_last_id") == 42
     assert reloaded.get("onec_cursor") == "2026-06-10T00:00:00"
+
+
+def test_null_statestore_never_persists():
+    store = NullStateStore()
+    store.set("k", 1)
+    assert store.get("k") is None
 
 
 def test_statestore_flush_is_atomic_no_tmp_left(tmp_path):
