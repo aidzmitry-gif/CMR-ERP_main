@@ -20,7 +20,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
-import { ProductPickerModal } from "@/components/kanban/product-picker";
+import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
+import { useProductPicker } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import { issueDocument } from "@/lib/api";
@@ -81,6 +82,8 @@ export function DealDrawerPreview({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
   const [docMsg, setDocMsg] = useState<string | null>(null);
+  // Справочник/остатки грузятся только пока модалка подбора реально открыта.
+  const picker = useProductPicker(pickerOpen, deal?.id);
   // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -474,9 +477,10 @@ export function DealDrawerPreview({
       </aside>
 
       {deal && pickerOpen && (
-        <ProductPickerModal
+        <CatalogPickerModal
           dealId={deal.id}
           counterparty={deal.company}
+          state={picker}
           onClose={() => setPickerOpen(false)}
           onCommitted={() => setPickerOpen(false)}
         />
