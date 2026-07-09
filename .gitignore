@@ -54,6 +54,14 @@ Thumbs.db
 
 # Локальные настройки Claude Code
 .claude/settings.local.json
+.claude/settings.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Локальные browser/review/runtime артефакты
+.playwright-mcp/
+.review/
+_docs_out/node_modules/
 
 # Локальные референсы из архива (не часть проекта)
 .refs_voronki/
