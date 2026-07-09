@@ -34,6 +34,7 @@
 - В `.gitignore` добавлены локальные временные директории `.tmp_pytest/` и `.tmp_ruff_cache/`.
 - В `.gitignore` и `.dockerignore` добавлены runtime logs и локальная `dev_calls.db`, чтобы они не попадали в коммиты и Docker build context.
 - В ignore добавлены `pytest-cache-files-*/`, чтобы `git status` не пытался обходить временные каталоги pytest с ограниченными правами.
+- В `.dockerignore` добавлены frontend build/test artifacts (`coverage`, `test-results`, Playwright report, tsbuildinfo), чтобы backend image context не раздувался локальными проверками.
 
 ## Проверка
 
