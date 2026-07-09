@@ -18,6 +18,13 @@ describe("channels", () => {
     expect(container.querySelectorAll("span").length).toBeGreaterThanOrEqual(5);
   });
 
+  it("ChannelRow onPhone вызывает колбэк по иконке телефона", () => {
+    const onPhone = vi.fn();
+    render(<ChannelRow onPhone={onPhone} />);
+    fireEvent.click(screen.getByRole("button", { name: "Позвонить" }));
+    expect(onPhone).toHaveBeenCalledTimes(1);
+  });
+
   it("ChannelButtons по каждому каналу строит ссылку и пишет в историю", async () => {
     mock(api.fetchContacts).mockResolvedValue([
       { id: 1, full_name: "Анна", phone: "+375290000000", email: "a@b.by", is_primary: true },
