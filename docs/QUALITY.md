@@ -3,6 +3,9 @@
 This project has three practical local check levels. Use the smallest one that
 matches the risk of the change.
 
+For the surrounding inspect/change/verify/commit rhythm, see
+[ENGINEERING_LOOP.md](ENGINEERING_LOOP.md).
+
 ## Fast backend smoke
 
 ```powershell
