@@ -18,10 +18,13 @@ Use this after infrastructure, connector, or core test-fixture changes.
 ## Frontend unit suite
 
 ```powershell
+npm --prefix frontend run typecheck
+npm --prefix frontend run lint
 npm --prefix frontend run test:run -- --pool=forks
 ```
 
-This runs the Vitest suite. In restricted sandboxes it can fail with
+This runs TypeScript, ESLint, and the Vitest suite. In restricted sandboxes
+Vitest can fail with
 `spawn EPERM` while Vite loads the config; run it in a normal shell or CI when
 that happens.
 
