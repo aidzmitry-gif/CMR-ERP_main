@@ -25,6 +25,7 @@ connectors/data/
 
 # Инструменты
 .pytest_cache/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
 .tmp_pytest/

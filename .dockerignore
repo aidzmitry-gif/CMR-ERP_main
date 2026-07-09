@@ -37,6 +37,7 @@ env/
 # --- Тесты и покрытие (не нужны в рантайме) ---
 tests/
 .pytest_cache/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
 .coverage
