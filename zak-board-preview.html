@@ -66,12 +66,28 @@
       box-shadow:-12px 0 40px rgba(8,10,16,.30);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
       z-index:60;display:flex;flex-direction:column}
     .drw2.show{transform:translateX(0)}
-    .card{cursor:pointer}
+    .card{cursor:pointer;position:relative}
     .card:hover{box-shadow:0 12px 28px rgba(20,20,40,.12)}
     .card:active{transform:scale(.995)}
+    .card-picked{outline:2px solid rgb(var(--accent));outline-offset:-2px}
+    /* чекбокс массового выбора — угол карточки, тускло виден всегда, ярче на hover/выборе */
+    .card-select{position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:5px;
+      border:1.5px solid rgb(var(--line-strong));background:rgb(var(--surface));opacity:.45;
+      transition:opacity .15s,background .15s,border-color .15s;display:flex;align-items:center;
+      justify-content:center;font-size:10px;line-height:1;color:#fff}
+    .card:hover .card-select,.card-select.on{opacity:1}
+    .card-select.on{background:rgb(var(--accent));border-color:rgb(var(--accent))}
+    .bulkbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:65;
+      display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:9999px;
+      background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 8px 24px rgba(20,20,40,.18)}
     /* переключатель поставщиков в переписке */
     .zth-pill{font-size:11px;font-weight:600;padding:4px 9px;border-radius:9999px;border:1px solid rgb(var(--line));background:rgb(var(--surface));color:rgb(var(--muted));cursor:pointer}
     .zth-pill.zth-on{background:rgb(var(--accent));color:#fff;border-color:rgb(var(--accent))}
+    /* быстрое назначение машины прямо на карточке канбана — попап у бейджа */
+    .mchip-menu{position:fixed;z-index:80;min-width:128px;padding:4px;display:flex;flex-direction:column;
+      background:rgb(var(--surface));border:1px solid rgb(var(--line));border-radius:10px;box-shadow:0 8px 24px rgba(20,20,40,.16)}
+    .mchip-menu button{padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;text-align:left;color:rgb(var(--ink))}
+    .mchip-menu button:hover{background:rgb(var(--sunken))}
     /* тоггл светлая/тёмная */
     .theme-toggle{position:fixed;bottom:16px;left:16px;z-index:70;height:40px;padding:0 14px;border-radius:9999px;
       background:rgb(var(--surface));border:1px solid rgb(var(--line));box-shadow:0 2px 10px rgba(20,20,40,.14);
@@ -91,14 +107,14 @@
   <!-- ⚠️ Статичный снимок будущего Next.js-экрана /crm/procurement/board. 9 стадий из stages.py.
        План/факт целей отдела + карточка заявки по клику (как сделка в CRM). Демо-данные, BYN/¥. -->
 
-  <!-- ============ ПАНЕЛЬ ЧАТОВ ПОСТАВЩИКОВ (right rail) ============ -->
+  <!-- ============ ПАНЕЛЬ ПЕРЕПИСКИ (right rail) — поставщики (ИИ) + коллеги (внутр.) ============ -->
   <aside class="chatrail">
     <div class="head">
       <span class="text-lg">💬</span>
-      <span class="lbl text-sm font-semibold text-ink">Переписка с поставщиками</span>
+      <span class="lbl text-sm font-semibold text-ink">Переписка</span>
     </div>
     <div class="lbl px-3.5 py-2 text-[11px] text-violet-600 dark:text-violet-300 bg-violet-50/60 dark:bg-violet-500/15 border-b border-violet-100 dark:border-violet-500/40">
-      ✦ ИИ ведёт 7 диалогов · 3 черновика ответа ждут отправки
+      ✦ ИИ ведёт 5 диалогов с поставщиками · 3 черновика ждут отправки · 3 внутр. чата с коллегами
     </div>
     <div class="chatrow">
       <span class="av" style="background:#0ea5e9">深<span class="badge">2</span></span>
@@ -108,6 +124,16 @@
           <span class="ch-flag bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">WeChat</span>
         </span>
         <span class="block truncate text-[12px] text-muted">价格已更新到 ¥3.85/шт · обновил цену по чипам</span>
+      </span>
+    </div>
+    <div class="chatrow">
+      <span class="av" style="background:#f59e0b">РК<span class="badge">1</span></span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Ковалёв Р. · рук. закупок</span>
+          <span class="ch-flag bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">внутр.</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">Одобришь ESP8266-12F? 2-й день ждёт, сумма BYN 2 400</span>
       </span>
     </div>
     <div class="chatrow">
@@ -151,6 +177,16 @@
       </span>
     </div>
     <div class="chatrow">
+      <span class="av" style="background:#f59e0b">СК<span class="badge">2</span></span>
+      <span class="lbl min-w-0">
+        <span class="flex items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold text-ink">Соколова Н. · склад</span>
+          <span class="ch-flag bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">внутр.</span>
+        </span>
+        <span class="block truncate text-[12px] text-muted">ТП-20 готов у поставщика — назначь QC, MO-014 на таможне через 2 дня</span>
+      </span>
+    </div>
+    <div class="chatrow">
       <span class="av" style="background:#8b5cf6">SZ</span>
       <span class="lbl min-w-0">
         <span class="flex items-center gap-1.5">
@@ -161,7 +197,8 @@
       </span>
     </div>
     <div class="lbl px-3.5 py-2.5 mt-1 text-[11px] text-faint">
-      ИИ переводит, отвечает по шаблону и поднимает важное наверх. Канал, тон и история — в карточке диалога.
+      Поставщики (внешние каналы) — ИИ переводит, отвечает по шаблону и поднимает важное наверх.
+      Коллеги («внутр.») — обычный внутренний чат, без ИИ-перевода. Тон и история — в карточке диалога.
     </div>
   </aside>
 
@@ -173,7 +210,12 @@
       <h1 class="text-xl font-bold text-ink">Закупки · воронка</h1>
       <p class="mt-1 text-sm text-muted">
         Канбан 9 стадий: от потребности до оприходования. Заявки под конкретные сделки и пополнение склада в одном потоке.
-        Двойной клик по карточке — полная карточка заявки (как сделка в CRM): оплаты поставщику (оплачено / к доплате / история), в какой машине едет позиция, статус оплаты.
+        <b>Один клик</b> — сокращённая карточка-кокпит: закупщик ведёт отсюда всю рутину, не проваливаясь в полную сделку —
+        главное действие по стадии, ответ поставщику в WeChat (черновик ИИ), назначение машины, документы одним кликом,
+        сравнение поставщиков по TCO. Каждое ИИ-действие помечено моделью (◆ Haiku / Sonnet / Opus) — дёшево на механике,
+        дорого только там, где решаются деньги.
+        <b>Двойной клик</b> (или кнопка «Открыть полную карточку →» из сокращённой) — полный вид для глубокого анализа:
+        все поставщики, вся переписка, контроль качества, отношения, оплаты (оплачено/к доплате/история), в какой машине едет позиция, претензии.
         Воронки можно переключать и редактировать (кнопка «✎ воронки»).
       </p>
     </div>
@@ -201,7 +243,7 @@
         <span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">demo · BYN</span>
       </div>
 
-      <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <!-- 1 · Экономия (↓ себестоимость) -->
         <div class="rounded-xl border border-line bg-sunken p-3">
           <div class="flex items-center justify-between">
@@ -252,6 +294,17 @@
           <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-emerald-500" style="width:80%"></div></div>
           <div class="mt-1 text-[11px] text-muted">доставка в график · 1 риск</div>
         </div>
+        <!-- 6 · Ближайшая машина — название следующего шага комплектации + дней и дата -->
+        <div class="rounded-xl border border-line bg-sunken p-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-semibold uppercase tracking-wide text-faint">Ближайшая машина · след. шаг</span>
+            <span class="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-600 dark:text-indigo-300">🚚 MO-2026-016</span>
+          </div>
+          <div class="mt-1 text-lg font-bold text-ink">Оплата / выкуп</div>
+          <div class="mt-1 text-[12px] text-muted">через 8 дн · 20.06 <span class="text-faint">(сейчас: Сбор заказов)</span></div>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-line"><div class="h-full rounded-full bg-indigo-500" style="width:60%"></div></div>
+          <div class="mt-1 text-[11px] text-muted">сбор закрывается 20.06 — успеть добавить заявки</div>
+        </div>
       </div>
     </section>
 
@@ -262,7 +315,7 @@
         <button id="funnelEdit" class="ml-1 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 font-medium text-muted shadow-card hover:text-accent hover:border-accent" title="Менять и редактировать воронки">✎ воронки</button>
       </div>
       <div class="relative">
-        <input type="text" placeholder="Поиск заявки, товара, поставщика…" class="w-64 rounded-full border border-line bg-surface px-4 py-1.5 text-[12px] text-muted shadow-card" />
+        <input type="text" id="zSearch" placeholder="Поиск заявки, товара, поставщика…" class="w-64 rounded-full border border-line bg-surface px-4 py-1.5 text-[12px] text-muted shadow-card" />
       </div>
     </div>
 
@@ -306,14 +359,14 @@
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200 dark:ring-violet-500/40" data-z="relay_srd" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Реле SRD-05VDC 10A</div>
             <div class="mt-1 text-[11px] text-muted">1 200 шт · BYN ~1 440</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2290</span></div>
-            <div class="mt-1 text-[10px] text-faint">Петрова А. · ZPR-2026-042</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2287</span></div>
+            <div class="mt-1 text-[10px] text-faint">Иванов П. · ZPR-2026-042</div>
           </div>
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200 dark:ring-violet-500/40" data-z="usbc" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Разъём USB-C 24pin SMD</div>
             <div class="mt-1 text-[11px] text-muted">20 000 шт · BYN ~4 800</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2291</span></div>
-            <div class="mt-1 text-[10px] text-faint">Сидоров К. · ZPR-2026-043</div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2287</span></div>
+            <div class="mt-1 text-[10px] text-faint">Иванов П. · ZPR-2026-043</div>
           </div>
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-violet-200 dark:ring-violet-500/40" data-z="res10k" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Резистор 10кОм 1% 0.25W</div>
@@ -401,7 +454,7 @@
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-teal-200 dark:ring-teal-500/40" data-z="stm32" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">STM32F103C8T6</div>
             <div class="mt-1 text-[11px] text-muted">1 000 шт · Hangxin ¥3.85</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2278</span></div>
+            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">под сделку СД-2287</span></div>
             <div class="mt-1 text-[10px] text-faint">PO отправлен · 10 июн</div>
           </div>
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-teal-200 dark:ring-teal-500/40" data-z="led" title="Двойной клик — открыть карточку">
@@ -424,20 +477,19 @@
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200 dark:ring-indigo-500/40" data-z="cap1000" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Конд. алюм. 1000мкФ 35В</div>
             <div class="mt-1 text-[11px] text-muted">8 000 шт · ¥0.38/шт</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300">MO-2026-015</span></div>
+            <div class="mt-1.5 flex flex-wrap gap-1"></div>
             <div class="mt-1 text-[10px] text-faint">ETA склад Китай 20 июн</div>
           </div>
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200 dark:ring-indigo-500/40" data-z="relay24" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Реле 24VDC SPDT 10A</div>
             <div class="mt-1 text-[11px] text-muted">600 шт · ¥4.80/шт</div>
-            <div class="mt-1.5 flex flex-wrap gap-1"><span class="rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300">MO-2026-015</span></div>
+            <div class="mt-1.5 flex flex-wrap gap-1"></div>
             <div class="mt-1 text-[10px] text-faint">ETA склад Китай 20 июн</div>
           </div>
           <div class="card rounded-xl bg-surface p-3 shadow-card hover:ring-1 hover:ring-indigo-200 dark:ring-indigo-500/40 ring-1 ring-emerald-300 dark:ring-emerald-500/40" data-z="trafo" title="Двойной клик — открыть карточку">
             <div class="text-[12px] font-semibold text-ink leading-tight">Трансформатор ТП-20</div>
             <div class="mt-1 text-[11px] text-muted">100 шт · ¥36/шт</div>
             <div class="mt-1.5 flex flex-wrap gap-1">
-              <span class="rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300">MO-2026-014</span>
               <span class="rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">готов → QC</span>
             </div>
             <div class="mt-1 text-[10px] text-faint">поставщик уведомил ИИ</div>
@@ -517,7 +569,17 @@
       </div>
     </div>
 
-    <p class="text-xs text-faint">Превью-снимок. Стадии — из stages.py (9 стадий). Демо-данные (BYN/¥). Двойной клик по карточке — полная карточка заявки.</p>
+    <p class="text-xs text-faint">🟡 ПРОТОТИП · Превью-снимок. Стадии — из stages.py (9 стадий). Все данные demo (BYN/¥), включая уже боевые
+      блоки (поставщики/переписка/договор/документы/оплаты — сейчас нет в модели PurchaseRequest, только для UX-решения).
+      ⚠️ «Даты по этапам» (в карточке заявки) — принципиально НОВОЕ: заявка сегодня хранит только текущую стадию, без
+      истории переходов (нужен аналог purchase_order_milestone для заявок) — блокер/объём Gate 2, не Gate 1.
+      ✅ «Ближайшая машина · след. шаг» (плитка плана/факта вверху) — ДЕШЕВЛЕ: этапы машины (Сбор/Оплата/Производство/…)
+      и их плановые даты УЖЕ есть в бэке (`purchase_order_milestone`, круг 3-4) — нужен только новый агрегирующий запрос
+      «ближайший непройденный этап среди открытых машин», без миграции. Один клик по карточке — сокращённая
+      карточка (кнопка/двойной клик — полная).
+      ⚠️ Бейдж «🚚 машина» на карточках (и попап MO-016/MO-017/убрать) — demo-интерактив: меняет данные только
+      в памяти браузера, ничего не сохраняется и сбросится при обновлении страницы; для боевого назначения
+      нужен эндпоинт закрепления машины за заявкой.</p>
   </div>
 
   <!-- ============ ОВЕРЛЕЙ (общий) ============ -->
@@ -570,8 +632,26 @@
     </div>
   </aside>
 
+  <!-- ============ ВИД СДЕЛКИ (корзина позиций: разные товары/поставщики/машины) ============ -->
+  <aside class="drw" id="drw3">
+    <div class="border-b border-line p-5">
+      <div class="flex items-center justify-between">
+        <span class="flex items-center gap-2">
+          <span class="text-[12px] text-muted" id="deal-num">СД-0000</span>
+          <span class="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">🛒 закупочный срез</span>
+        </span>
+        <button class="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-faint hover:bg-sunken" title="Закрыть" onclick="closeAll()">✕</button>
+      </div>
+      <h2 class="mt-2 text-lg font-bold text-ink" id="deal-title">Сделка</h2>
+      <div class="mt-0.5 text-[13px] text-muted" id="deal-sub">—</div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5" id="deal-body"></div>
+  </aside>
+
   <script>
     const STAGES = ["Потребность","Поиск","Переговоры","Анализ","Согласование","PO","Производство","Приёмка","Готово"];
+    // единый список открытых машин — источник для попапа на канбане И для мини-секции в дровере (не дублировать)
+    const OPEN_MACHINES = ["MO-2026-016","MO-2026-017"];
 
     // helper-бейдж качества/надёжности
     const relColor = r => r==="Надёжный"||r==="Стратегич." ? "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
@@ -604,8 +684,8 @@
         ai:[{t:"Объединить с заявкой Диод 1N4007 (тот же Hangxin) в один PO → −7% за объём",b:"−7%"},{t:"Зафиксировать цену в рамочном соглашении до роста сырья в Q3",b:"риск цены"}]
       },
       relay_srd: {
-        num:"ZPR-2026-042", title:"Реле SRD-05VDC 10A", sub:"1 200 шт · клиент «ЭлектроМир» · Петрова А.",
-        stageIdx:1, source:"под сделку СД-2290", qty:"1 200 шт", budget:"BYN ~1 440",
+        num:"ZPR-2026-042", title:"Реле SRD-05VDC 10A", sub:"1 200 шт · клиент «РадиоДеталь» · Иванов П.",
+        stageIdx:1, source:"под сделку СД-2287", qty:"1 200 шт", budget:"BYN ~1 440", machine:"MO-2026-016 (план)",
         suppliers:[
           {n:"Shenzhen Hangxin 深圳航芯", price:"¥0.78", lead:"22 дн", defect:"0.5%", rel:"Надёжный", landed:"BYN 0.96", best:true},
           {n:"Yuxin Electronics", price:"¥0.74", lead:"26 дн", defect:"1.8%", rel:"Осторожно", landed:"BYN 0.98"},
@@ -653,10 +733,10 @@
         ai:[{t:"Превышен лимит закупщика — ждёт руководителя 2-й день, напомнить",b:"согласование"},{t:"Войдёт в машину MO-016 (сбор до 20 июн)",b:"→ MO-016"}]
       },
       stm32: {
-        num:"ZPR-2026-031", title:"STM32F103C8T6", sub:"1 000 шт · клиент по СД-2278 · PO отправлен",
-        stageIdx:5, source:"под сделку СД-2278", qty:"1 000 шт", budget:"¥3 850",
+        num:"ZPR-2026-031", title:"STM32F103C8T6", sub:"1 000 шт · клиент «РадиоДеталь» · Иванов П. · PO отправлен",
+        stageIdx:5, source:"под сделку СД-2287", qty:"1 000 шт", budget:"¥3 850",
         suppliers:[
-          {n:"Shenzhen Hangxin", price:"¥3.85", lead:"22 дн", defect:"0.4%", rel:"Надёжный", landed:"BYN 5.95", best:true},
+          {n:"Shenzhen Hangxin 深圳航芯", price:"¥3.85", lead:"22 дн", defect:"0.4%", rel:"Надёжный", landed:"BYN 5.95", best:true},
           {n:"Yuxin (аналог GD32)", price:"¥3.55", lead:"26 дн", defect:"1.2%", rel:"Осторожно", landed:"BYN 5.60"},
         ],
         verdict:"PO отправлен Hangxin 10 июн. ВНИМАНИЕ: мониторинг цен зафиксировал рост STM32 +12% на 1688 — закупка по старой цене вовремя.",
@@ -678,7 +758,7 @@
       },
       // ── лёгкие карточки (демо, краткий вид) ──
       esp32:{num:"ZPR-2026-044",title:"Чип ESP32-C3-WROOM-02",sub:"1 000 шт · пополнение · автозаявка",stageIdx:0,source:"пополнение",qty:"1 000 шт",budget:"BYN ~1 440",suppliers:[{n:"Shenzhen Hangxin",price:"¥9.80",lead:"22 дн",defect:"0.5%",rel:"Надёжный",landed:"BYN 1.50",best:true}],verdict:"Автозаявка по минимальному остатку. ИИ подобрал проверенного поставщика.",quality:{spec:"ESP32-C3, RISC-V, WiFi+BLE",checks:["Образец","Фото партии"],defectHist:"Hangxin 0.5%",warranty:"гарантия"},rel:{status:"Стратегич.",years:"8 лет",vol:"¥420к / год",otd:"97%",trend:"стабильно",frame:"рамочное"},ai:[{t:"Добавить в MO-016 для консолидации доставки",b:"→ MO-016"}]},
-      usbc:{num:"ZPR-2026-043",title:"Разъём USB-C 24pin SMD",sub:"20 000 шт · клиент «ТехноПром» · СД-2291",stageIdx:1,source:"под сделку СД-2291",qty:"20 000 шт",budget:"BYN ~4 800",suppliers:[{n:"Taobao 店铺",price:"¥1.00",lead:"20 дн",defect:"1.0%",rel:"Осторожно",landed:"BYN 1.30",best:true},{n:"1688 商家",price:"¥1.10",lead:"25 дн",defect:"—",rel:"Не проверен",landed:"BYN 1.42"}],verdict:"Мониторинг цен: USB-C подешевел −9% на Alibaba — удачный момент. ИИ проверяет поставщиков.",quality:{spec:"USB-C 2.0, 24pin, SMD",checks:["Образец на циклы вставки","Фото партии"],defectHist:"новая позиция",warranty:"гарантия"},rel:{status:"Новый",years:"—",vol:"—",otd:"—",trend:"подешевел −9%",frame:"проверка до PO"},ai:[{t:"Цена упала −9% — закупить под пополнение тоже",b:"момент цены"}]},
+      usbc:{num:"ZPR-2026-043",title:"Разъём USB-C 24pin SMD",sub:"20 000 шт · клиент «РадиоДеталь» · Иванов П.",stageIdx:1,source:"под сделку СД-2287",qty:"20 000 шт",budget:"BYN ~4 800",suppliers:[{n:"Taobao 店铺",price:"¥1.00",lead:"20 дн",defect:"1.0%",rel:"Осторожно",landed:"BYN 1.30",best:true},{n:"1688 商家",price:"¥1.10",lead:"25 дн",defect:"—",rel:"Не проверен",landed:"BYN 1.42"}],verdict:"Мониторинг цен: USB-C подешевел −9% на Alibaba — удачный момент. ИИ проверяет поставщиков.",quality:{spec:"USB-C 2.0, 24pin, SMD",checks:["Образец на циклы вставки","Фото партии"],defectHist:"новая позиция",warranty:"гарантия"},rel:{status:"Новый",years:"—",vol:"—",otd:"—",trend:"подешевел −9%",frame:"проверка до PO"},ai:[{t:"Цена упала −9% — закупить под пополнение тоже",b:"момент цены"}]},
       res10k:{num:"ZPR-2026-040",title:"Резистор 10кОм 1% 0.25W",sub:"100 000 шт · пополнение · Ковалёв А.",stageIdx:1,source:"пополнение",qty:"100 000 шт",budget:"BYN ~2 000",suppliers:[{n:"Shenzhen Hangxin",price:"¥0.012",lead:"22 дн",defect:"0.2%",rel:"Надёжный",landed:"BYN 0.022",best:true}],verdict:"Массовая позиция, автозаявка. Берём у стратегического поставщика по рамочной цене.",quality:{spec:"10кОм ±1%, 0.25Вт, 0805",checks:["Выборочный тест номинала"],defectHist:"Hangxin 0.2%",warranty:"гарантия"},rel:{status:"Стратегич.",years:"8 лет",vol:"¥420к / год",otd:"97%",trend:"стабильно",frame:"рамочное, фикс-цена"},ai:[{t:"Консолидировать с другими SMD в один PO Hangxin",b:"−объём"}]},
       diode:{num:"ZPR-2026-038",title:"Диод 1N4007",sub:"50 000 шт · пополнение · ведёт ИИ",stageIdx:2,source:"пополнение",qty:"50 000 шт",budget:"¥3 000",suppliers:[{n:"Shenzhen Hangxin",price:"¥0.060",lead:"22 дн",defect:"0.3%",rel:"Надёжный",landed:"BYN 0.095",best:true}],verdict:"ИИ просит скидку 5% за объём 50к. Поставщик рассматривает.",quality:{spec:"1000В 1А, DO-41",checks:["Выборочный тест"],defectHist:"Hangxin 0.3%",warranty:"гарантия"},rel:{status:"Стратегич.",years:"8 лет",vol:"¥420к / год",otd:"97%",trend:"стабильно",frame:"рамочное"},ai:[{t:"Объединить с Конденсатором 470мкФ (тот же Hangxin) → −7% PO",b:"−7%"}]},
       choke:{num:"ZPR-2026-036",title:"Дроссель 100мкГн SMD",sub:"2 000 шт · пополнение · сравнение 2 поставщиков",stageIdx:3,source:"пополнение",qty:"2 000 шт",budget:"BYN ~700",suppliers:[{n:"Suzhou Precision",price:"¥0.31",lead:"24 дн",defect:"0.4%",rel:"Надёжный",landed:"BYN 0.41",best:true},{n:"Taobao 店铺",price:"¥0.29",lead:"22 дн",defect:"1.2%",rel:"Осторожно",landed:"BYN 0.40"}],verdict:"Почти равная себестоимость, но у Suzhou брак втрое ниже — берём Suzhou.",quality:{spec:"100мкГн, SMD 1210",checks:["Тест индуктивности","Фото"],defectHist:"Suzhou 0.4%",warranty:"гарантия"},rel:{status:"Надёжный",years:"6 лет",vol:"¥160к / год",otd:"95%",trend:"стабильно",frame:"одобренный"},ai:[{t:"Цена равная — решает качество. Suzhou.",b:"качество"}]},
@@ -736,9 +816,19 @@
     Z.esp8266.contract={template:"Рамочный договор поставки 2026",status:"подписан",terms:{...baseTerms,moq:"800 шт",lead:"22 дня"}};
     Z.trafo.contract={template:"Договор поставки (критичная позиция, с инспекцией)",status:"подписан",terms:{...baseTerms,moq:"100 шт",lead:"30 дней",quality:"инспекция перед отгрузкой ОБЯЗАТЕЛЬНА · тест под нагрузкой · AQL 1.5",warranty:"24 мес"}};
 
+    // ── ⚠ Даты план/факт по этапам (НОВОЕ, нет в модели заявки сегодня — demo для Gate 2) ──
+    Z.cap470.dates=[{plan:"08.06",fact:"08.06"},{plan:"12.06",fact:null},{plan:"16.06",fact:null},{plan:"20.06",fact:null},{plan:"23.06",fact:null},{plan:"26.06",fact:null},{plan:"05.07",fact:null},{plan:"12.07",fact:null},{plan:"16.07",fact:null}];
+    Z.relay_srd.dates=[{plan:"26.05",fact:"26.05"},{plan:"30.05",fact:null},{plan:"04.06",fact:null},{plan:"07.06",fact:null},{plan:"10.06",fact:null},{plan:"14.06",fact:null},{plan:"22.06",fact:null},{plan:"27.06",fact:null},{plan:"02.07",fact:null}];
+    Z.cap100.dates=[{plan:"20.05",fact:"20.05"},{plan:"23.05",fact:"23.05"},{plan:"27.05",fact:null},{plan:"30.05",fact:null},{plan:"03.06",fact:null},{plan:"07.06",fact:null},{plan:"15.06",fact:null},{plan:"20.06",fact:null},{plan:"25.06",fact:null}];
+    Z.bc547.dates=[{plan:"15.05",fact:"15.05"},{plan:"18.05",fact:"18.05"},{plan:"22.05",fact:"22.05"},{plan:"26.05",fact:null},{plan:"30.05",fact:null},{plan:"03.06",fact:null},{plan:"12.06",fact:null},{plan:"17.06",fact:null},{plan:"22.06",fact:null}];
+    Z.esp8266.dates=[{plan:"05.05",fact:"05.05"},{plan:"08.05",fact:"08.05"},{plan:"12.05",fact:"12.05"},{plan:"16.05",fact:"16.05"},{plan:"06.06",fact:null},{plan:"10.06",fact:null},{plan:"18.06",fact:null},{plan:"23.06",fact:null},{plan:"28.06",fact:null}];
+    Z.stm32.dates=[{plan:"01.05",fact:"01.05"},{plan:"04.05",fact:"04.05"},{plan:"08.05",fact:"08.05"},{plan:"12.05",fact:"12.05"},{plan:"16.05",fact:"16.05"},{plan:"10.06",fact:"10.06"},{plan:"20.06",fact:null},{plan:"28.06",fact:null},{plan:"03.07",fact:null}];
+    Z.trafo.dates=[{plan:"20.04",fact:"20.04"},{plan:"23.04",fact:"23.04"},{plan:"27.04",fact:"27.04"},{plan:"01.05",fact:"01.05"},{plan:"05.05",fact:"05.05"},{plan:"12.05",fact:"12.05"},{plan:"20.05",fact:"02.06"},{plan:"04.06",fact:null},{plan:"10.06",fact:null}];
+
     // ── Оплаты поставщику (история: оплачено / к доплате) + в какой машине едет позиция (демо) ──
     Z.stm32.machine="MO-2026-016"; Z.stm32.payment={status:"partial",cur:"¥",total:3850,paid:1155,schedule:[
       {d:"10.06.2026",label:"Предоплата 30%",amt:1155,done:true},{d:"против B/L",label:"Остаток 70%",amt:2695,done:false}]};
+    Z.usbc.machine="MO-2026-017 (план)"; // та же сделка СД-2287, но другая машина (по срокам) — показывает распределение позиций сделки по машинам
     Z.led.machine="MO-2026-016"; Z.led.payment={status:"paid",cur:"¥",total:1400,paid:1400,schedule:[
       {d:"09.06.2026",label:"Оплата 100% (авто, 1688)",amt:1400,done:true}]};
     Z.trafo.machine="MO-2026-014"; Z.trafo.payment={status:"partial",cur:"¥",total:3600,paid:1080,schedule:[
@@ -756,6 +846,18 @@
     Z.esp8266.machine="MO-2026-016 (план)"; Z.esp8266.payment={status:"unpaid",cur:"BYN",total:2040,paid:0,schedule:[
       {d:"после согласования",label:"Предоплата 30%",amt:612,done:false},{d:"против B/L",label:"Остаток 70%",amt:1428,done:false}]};
 
+    // ── ⚠ Происхождение номенклатуры (SKU): сопоставлена с 1С (обычный путь) ∨ новая — заведена
+    // закупщиком ПРЯМО В 1С, ждёт очередной синхронизации ∨ ошибка сверки при синхронизации (несоответствие,
+    // нужно исправить в 1С). НОВОЕ, для Gate 2 (Reference/MDM) ──
+    Z.cap470.skuSource={matched:true, code:"00-004523"};
+    Z.relay_srd.skuSource={matched:true, code:"00-004871"};
+    Z.cap100.skuSource={matched:true, code:"00-003390"};
+    Z.bc547.skuSource={matched:false, syncStatus:"pending", note:"заведена закупщиком в 1С 24.05 — очередная синхронизация ещё не проходила"};
+    Z.usbc.skuSource={matched:false, syncStatus:"error", note:"наименование в 1С не совпадает с группой «Разъёмы» — ошибка сверки при синхронизации 02.06, закупщик поправит в 1С"};
+    Z.esp8266.skuSource={matched:true, code:"00-005102"};
+    Z.stm32.skuSource={matched:true, code:"00-002214"};
+    Z.trafo.skuSource={matched:true, code:"00-001765"};
+
     // ── Претензии по поставке (брак/недопоставка/пересорт/срок), привязаны к позиции → экран «Рекламации» ──
     Z.cap470.claims  =[{num:"CLM-2026-001",type:"Брак",         affected:"240 шт (4.8%)", stage:"У поставщика",        sla:"осталось 2 дня", bad:false}];
     Z.relay_srd.claims=[{num:"CLM-2026-002",type:"Недопоставка", affected:"−100 шт",       stage:"Решение согласовано",sla:"в норме",        bad:false}];
@@ -769,7 +871,334 @@
       s+='</div><div class="flex justify-between mt-1.5 text-[10px] text-faint"><span>'+STAGES[0]+'</span><span class="font-semibold text-amber-600 dark:text-amber-300">'+STAGES[idx]+'</span><span>'+STAGES[8]+'</span></div>';
       return s;
     }
+
+    // ── ⚠ НОВОЕ (нет в модели заявки сегодня — demo для Gate 2): даты план/факт по каждому
+    // этапу воронки. PurchaseRequest сейчас плоская (только текущая stage), без истории переходов —
+    // потребует таблицу-аналог purchase_order_milestone для заявок. Здесь — только для решения по UX. ──
+    function parseDM(s){ if(!s||s==='—') return null; const [d,m]=s.split('.').map(Number); return m*100+d; }
+    // «Сегодня» демо-доски = тот же якорь, что и в плашке плана/факта вверху («июнь · день 12 из 30»).
+    // Считаем дни на текущей стадии ТОЛЬКО там, где есть d.dates (реальная история план/факт по этапам) —
+    // для остальных заявок честно не показываем (не выдумываем факт-дату входа в стадию).
+    const TODAY_2026 = new Date(2026,5,12);
+    function toDate2026(s){ if(!s||s==='—') return null; const [d,m]=s.split('.').map(Number); return new Date(2026,m-1,d); }
+    function daysOnCurrentStage(d){
+      if(!d.dates) return null;
+      const idx=d.stageIdx;
+      const enteredStr = idx>0 ? (d.dates[idx-1].fact || d.dates[idx].plan) : d.dates[0].plan;
+      const entered = toDate2026(enteredStr);
+      if(!entered) return null;
+      return Math.max(0, Math.round((TODAY_2026-entered)/86400000));
+    }
+    // цветовая эскалация «висит на стадии» — демо-пороги: 0-2 нейтрально, 3-5 амбер, 6+ красный
+    const daysTone = n => n>=6 ? 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300'
+                        : n>=3 ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                        : 'bg-sunken text-muted';
+    function stageRow(i, idx, dt){
+      const name = STAGES[i], done = i < idx, current = i === idx;
+      const plan = dt?.plan || '—', fact = dt?.fact || null;
+      const late = fact && parseDM(fact) != null && parseDM(plan) != null && parseDM(fact) > parseDM(plan);
+      let right;
+      if (fact) right = `<span class="${late?'text-amber-600 dark:text-amber-300 font-semibold':'text-emerald-600 dark:text-emerald-300'}">✓ ${fact}${late?` <span class="text-[9px]">(план ${plan})</span>`:''}</span>`;
+      else if (current) right = `<span class="text-amber-600 dark:text-amber-300 font-semibold">идёт · план ${plan}</span>`;
+      else right = `<span class="text-faint">план ${plan}</span>`;
+      return `<div class="flex items-center justify-between py-1 text-[12px]"><span class="${current?'font-semibold text-ink':done?'text-ink':'text-muted'}">${done?'✓ ':current?'● ':''}${name}</span>${right}</div>`;
+    }
+    function stageDatesFull(d){
+      if(!d.dates) return `<div class="text-[12px] text-muted">План/факт по этапам пока не ведутся <span class="text-[10px] text-faint">(нет данных — новая модель, см. Gate 2)</span></div>`;
+      return `<div class="divide-y divide-line">${d.dates.map((dt,i)=>stageRow(i,d.stageIdx,dt)).join('')}</div>`;
+    }
+    function stageDatesCompact(d){
+      if(!d.dates) return `<div class="text-[11px] text-faint">Даты по этапам — нет данных (новая модель, см. Gate 2)</div>`;
+      const doneN = d.dates.filter((dt,i)=>i<d.stageIdx || (i===d.stageIdx && dt.fact)).length;
+      const cur = d.dates[d.stageIdx], next = d.dates[d.stageIdx+1];
+      const curLate = cur?.fact && parseDM(cur.fact) > parseDM(cur.plan);
+      return `<div class="text-[12px] space-y-1">
+        <div class="flex justify-between"><span class="text-muted">Пройдено этапов</span><span class="font-medium text-ink">${doneN} / 9</span></div>
+        <div class="flex justify-between"><span class="text-muted">Текущий: ${STAGES[d.stageIdx]}</span><span class="font-medium ${curLate?'text-amber-600 dark:text-amber-300':'text-ink'}">${cur?.fact?`✓ ${cur.fact}`:`с ${cur?.plan||'—'}`}</span></div>
+        ${next?`<div class="flex justify-between"><span class="text-muted">Следующий: ${STAGES[d.stageIdx+1]}</span><span class="text-faint">план ${next.plan}</span></div>`:''}
+        ${(()=>{ const n=daysOnCurrentStage(d); return n===null?'':`<div class="flex justify-between"><span class="text-muted">На стадии</span><span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${daysTone(n)}">${n} дн.</span></div>`; })()}
+      </div>`;
+    }
+
+    // ── ⚠ НОВОЕ (для Gate 2, домен Reference/MDM, не Procurement): откуда берётся номенклатура заявки
+    // и откуда считается сумма. Обычный путь — SKU уже есть в 1С (менеджер выбирает из справочника при
+    // создании потребности). Исключение — SKU новый: закупщик заводит его САМ, ПРЯМО В 1С (по правилам
+    // наименования/группировки компании) — ERP номенклатуру не создаёт (интеграция с 1С — только чтение).
+    // На очередной синхронизации 1С → ERP запись проверяется на соответствие (наименование/ед.изм./группа/
+    // ТН ВЭД/дубли); при несоответствии — ошибка сверки, которую человек исправляет (в 1С), запись
+    // переимпортируется. Тот же код SKU потом переносится в позицию PO → счёт/инвойс и упаковочный лист
+    // при сборке машины на складе в Китае. ──
+    function nomenclatureSection(d){
+      const src = d.skuSource;
+      const badge = !src
+        ? `<span class="inline-flex items-center rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-muted">статус сверки не определён (demo)</span>`
+        : src.matched
+          ? `<span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">✓ сопоставлено с 1С · ${src.code}</span>`
+          : src.syncStatus==='error'
+            ? `<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[11px] font-semibold text-red-600 dark:text-red-300">✗ ошибка сверки при синхронизации — исправить в 1С</span>`
+            : `<span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">⏳ создано в 1С закупщиком — ждёт синхронизации в ERP</span>`;
+      return `<div class="mb-2.5">${badge}</div>
+        ${src?.note?`<div class="mb-2.5 rounded-lg ${src.syncStatus==='error'?'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300':'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'} px-2.5 py-1.5 text-[11px]">${src.note}</div>`:''}
+        <div class="space-y-2 text-[12px] text-muted">
+          <div><b class="text-ink">Откуда номенклатура:</b> менеджер выбирает позицию из справочника 1С при создании
+          потребности. Если кода нет — закупщик заводит номенклатуру САМ, ПРЯМО В 1С (по правилам наименования и
+          группировки компании) — ERP номенклатуру не создаёт (интеграция с 1С у нас — только чтение).</div>
+          <div class="rounded-lg bg-sunken px-2.5 py-1.5 text-[11px] text-muted">
+            На очередной синхронизации 1С → ERP запись проверяется на соответствие (наименование · ед. изм. · группа ·
+            ТН ВЭД · дубли). При несоответствии — ошибка сверки, её видит человек и исправляет в 1С; после этого
+            запись переимпортируется корректно.
+          </div>
+          <div><b class="text-ink">Откуда сумма (${d.budget}):</b> количество × референсная цена номенклатуры
+          или последняя цена поставщика — оценка ДО переговоров; после согласования сумма фиксируется в валюте
+          сделки (см. «Условия сделки» / «Себестоимость» ниже).</div>
+          <div><b class="text-ink">Куда идёт дальше:</b> тот же код SKU переносится в позицию заказа (PO) → счёт/инвойс
+          и упаковочный лист при сборке машины на складе в Китае (см. «Документы по сделке»).</div>
+        </div>`;
+    }
+
+    // ── компактные блоки «связь с поставщиком / условия / документы» (реюз данных полного вида) ──
+    const miniSec = (title, inner) => `<div class="mt-2"><div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">${title}</div>${inner}</div>`;
+    function contactCompact(d){
+      const t = d.threads?.[0];
+      if(t){ const last=t.msgs[t.msgs.length-1];
+        const chCls = t.ch==='WeChat'?'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300':t.ch==='email'?'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300':'bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300';
+        return `<div class="text-[12px]"><div class="flex items-center justify-between gap-2"><span class="truncate font-semibold text-ink">${t.sup}</span><span class="ch-flag shrink-0 ${chCls}">${t.ch}</span></div><div class="mt-1 truncate text-muted">${last.m}</div></div>`;
+      }
+      if(d.msgs){ const last=d.msgs[d.msgs.length-1]; return `<div class="text-[12px] text-muted truncate">${last.m}</div>`; }
+      return `<div class="text-[11px] text-faint">Переписка не ведётся — нет данных</div>`;
+    }
+    function termsCompact(d){
+      if(d.contract){ const t=d.contract.terms;
+        return `<div class="grid grid-cols-2 gap-y-1 gap-x-3 text-[12px]">
+          <span class="text-muted">Оплата</span><span class="text-right font-medium">${t.pay}</span>
+          <span class="text-muted">MOQ</span><span class="text-right font-medium">${t.moq}</span>
+          <span class="text-muted">Срок</span><span class="text-right font-medium">${t.lead}</span>
+          <span class="text-muted">Валюта</span><span class="text-right font-medium">${t.currency.split('·')[0].trim()}</span>
+        </div><div class="mt-1.5 text-[11px] text-faint">${d.contract.status}</div>`;
+      }
+      return `<div class="text-[11px] text-faint">Условия ещё не согласованы</div>`;
+    }
+    function docsCompact(d){
+      if(d.docs){ const done=d.docs.filter(x=>x.st==='posted').length;
+        return `<div class="text-[12px]"><div class="flex justify-between"><span class="text-muted">Готово</span><span class="font-medium text-ink">${done} / ${d.docs.length}</span></div>${d.docs.map(x=>`<div class="mt-1 flex items-center justify-between gap-2 text-[11px]"><span class="truncate text-ink">📄 ${x.n}</span><span class="shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${x.st==='posted'?'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300':'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'}">${x.lbl}</span></div>`).join('')}</div>`;
+      }
+      return `<div class="text-[11px] text-faint">Документы ещё не создавались</div>`;
+    }
     const sec = (title, inner, add) => `<div class="py-4 border-b border-line"><div class="flex items-center justify-between mb-2.5"><span class="text-[11px] font-semibold uppercase tracking-wide text-faint">${title}</span>${add?`<span class="text-[11px] font-semibold text-accent">${add}</span>`:''}</div>${inner}</div>`;
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // COCKPIT: закупщик выполняет рутину прямо из СОКРАЩЁННОЙ карточки (не проваливаясь в полную).
+    // Каждое ИИ-действие помечено моделью (роутинг litellm-слоя, грунт — coordination/MODEL-TIERING.md):
+    //   Haiku  — перевод входящих / черновик рутинного ответа / сводки (дёшево, высокий объём)
+    //   Sonnet — торг / анализ поставщика 企信宝 / генерация PI-контракта-упаковочного / подбор машины
+    //   Opus   — вердикт выбора при крупной сумме / оплата выше лимита / риск предоплаты (деньги — дорого ошибиться)
+    //   без ИИ — landed cost / суммы / курсы (детерминированный расчёт, LLM не нужен — самое дешёвое)
+    // ⚠ Fable в роутинг НЕ закладываем: модель Fable 5 выводится 2026-07-07; где был бы уместен — Haiku.
+    // ⚠ Все действия ниже — demo-интерактив (пишут в память браузера), для проверки UX на Gate 1.
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    const TIER = {
+      haiku: {lbl:'Haiku',  cls:'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'},
+      sonnet:{lbl:'Sonnet', cls:'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300'},
+      opus:  {lbl:'Opus',   cls:'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300'},
+      calc:  {lbl:'без ИИ', cls:'bg-sunken text-muted'},
+    };
+    const TIER_WHY = {haiku:'дёшево · высокий объём (перевод, черновик, сводки)', sonnet:'баланс цена/качество (торг, анализ, документы)', opus:'деньги/риск — дорого ошибиться', calc:'детерминированный расчёт — LLM не нужен'};
+    const tierBadge = t => `<span class="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold ${TIER[t].cls}" title="Модель ${TIER[t].lbl}: ${TIER_WHY[t]}">◆ ${TIER[t].lbl}</span>`;
+
+    // главное действие закупщика по текущей стадии — кнопка прямо в компакте
+    function stageAction(d){
+      const map={
+        0:{lbl:'Запросить цену у поставщиков', ai:'haiku', fn:"demoStageAct('Запрос цены разослан выбранным поставщикам — ИИ перевёл и оформил (Haiku)')"},
+        1:{lbl:'Разослать запрос цены',        ai:'haiku', fn:"demoStageAct('Запрос цены разослан — ИИ ведёт переписку по каналам (Haiku)')"},
+        2:{lbl:'Ответить в WeChat',            ai:'haiku', fn:"scrollToWechat()"},
+        3:{lbl:'Проверить поставщика 企信宝',    ai:'sonnet', fn:"demoStageAct('Проверка поставщика 企信宝 запущена — ИИ анализирует капитал, возраст, жалобы (Sonnet)')"},
+        4:{lbl:'Напомнить руководителю',        ai:'haiku', fn:"demoStageAct('Напоминание руководителю отправлено — сумма выше лимита закупщика, ждёт согласования')"},
+        5:{lbl:'Сформировать PO',               ai:'sonnet', fn:"demoGenDoc('PO (заказ поставщику)')"},
+        6:{lbl:'Запросить статус партии',       ai:'haiku', fn:"scrollToWechat()"},
+        7:{lbl:'Назначить QC-инспекцию',        ai:'sonnet', fn:"demoStageAct('QC-инспекция назначена агенту в Шэньчжэне — ИИ подготовил чек-лист AQL (Sonnet)')"},
+      };
+      return map[d.stageIdx]||null;
+    }
+    function primaryAction(d){
+      const a=stageAction(d);
+      if(!a) return `<div class="mt-3 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 py-2 text-center text-[12px] font-semibold text-emerald-700 dark:text-emerald-300">✓ Оприходовано — landed cost записан</div>`;
+      return `<button class="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-semibold text-white hover:opacity-95" onclick="${a.fn}">
+        <span>${a.lbl}</span>${a.ai?`<span class="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-bold">◆ ${TIER[a.ai].lbl}</span>`:''}
+      </button>
+      <div class="mt-1 text-center text-[9px] text-faint">Главное действие по стадии «${STAGES[d.stageIdx]}» — прямо отсюда, без полной карточки</div>
+      <button class="mt-2 w-full rounded-lg border border-line py-1.5 text-[12px] font-semibold text-muted hover:bg-sunken" onclick="demoNextStage()">→ Перевести на стадию «${STAGES[d.stageIdx+1]}»</button>`;
+    }
+    // demo: перевод заявки на следующую стадию — двигаем карточку в соседнюю колонку канбана И обновляем
+    // дравер (чтобы стадия в карточке и колонка не разъехались — честность мокапа).
+    function demoNextStage(){
+      if(!_lastKey) return;
+      const d=Z[_lastKey]; if(d.stageIdx>=8) return;
+      d.stageIdx++;
+      const cols=document.querySelectorAll('.overflow-x-auto .space-y-2');
+      const card=document.querySelector('.card[data-z="'+_lastKey+'"]');
+      if(cols[d.stageIdx] && card) cols[d.stageIdx].appendChild(card);
+      decorateCards();
+      refreshOpenDrawer(_lastKey);
+      demoToast('Заявка переведена на стадию «'+STAGES[d.stageIdx]+'» (демо)');
+    }
+
+    // переписка с поставщиком как рабочий инструмент: последнее сообщение + компоновка ответа
+    // (ИИ-черновик — Haiku, стратегия торга — Sonnet). demo: отправка пишет в память карточки.
+    function wechatCockpit(d){
+      const t=d.threads?.[0];
+      const last=t?t.msgs[t.msgs.length-1]:(d.msgs?d.msgs[d.msgs.length-1]:null);
+      const sup=t?t.sup:(d.suppliers?.[0]?.n||'Поставщик');
+      const ch=t?t.ch:null;
+      if(!last && !(d._demoSent&&d._demoSent.length)){
+        return `<div class="text-[11px] text-faint">Переписка ещё не начата. Кнопка «Запросить цену» выше разошлёт запрос выбранным поставщикам — ИИ переведёт и оформит.</div>`;
+      }
+      const chCls = ch==='WeChat'?'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300':ch==='email'?'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300':'bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300';
+      const sent=(d._demoSent||[]).map(m=>`<div class="ml-auto max-w-[90%] rounded-lg bg-accent px-2 py-1 text-[11px] text-white">${m}<div class="text-[9px] text-blue-100">отправлено · демо (перевод → 中文, Haiku)</div></div>`).join('');
+      return `<div id="wechatSection" class="rounded-lg border border-line bg-sunken p-2.5">
+        <div class="flex items-center justify-between gap-2"><span class="truncate text-[12px] font-semibold text-ink">${sup}</span>${ch?`<span class="ch-flag shrink-0 ${chCls}">${ch}</span>`:''}</div>
+        ${last?`<div class="mt-1 rounded bg-surface px-2 py-1 text-[11px] text-muted">${last.m}</div>`:''}
+        <div class="mt-1.5 flex flex-col gap-1">${sent}</div>
+        <div class="mt-2 flex items-center gap-1.5">
+          <input id="wechatInput" class="flex-1 rounded-lg border border-line bg-surface px-2 py-1 text-[11px] text-ink" placeholder="Ответ поставщику…" onkeydown="if(event.key==='Enter')demoSendWechat()" />
+          <button class="rounded-lg bg-accent px-2.5 py-1 text-[12px] font-semibold text-white" title="Отправить" onclick="demoSendWechat()">➤</button>
+        </div>
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <button class="zth-pill" onclick="demoAiDraft()">✦ ИИ-черновик</button>${tierBadge('haiku')}
+          <button class="zth-pill" onclick="demoStageAct('Стратегия торга (Sonnet): держим ¥0.115 — аргумент объём 10к + предоплата 30%; альтернатива — Hangxin как запасной')">✦ Стратегия торга</button>${tierBadge('sonnet')}
+        </div>
+        <div class="mt-1 text-[9px] text-faint leading-snug">Перевод входящих и черновик рутинного ответа — Haiku. Стратегия торга (деньги) — Sonnet.</div>
+      </div>`;
+    }
+
+    // Документы. ВАЖНО (правило оператора): по ОДНОЙ позиции формируется только договор с поставщиком
+    // (на подпись). Инвойс, упаковочный лист и внешнеторговый договор — на ВСЮ машину (агрегируют все её
+    // позиции разом, для растаможки), поэтому здесь — только пометка/ссылка на экран «Машины».
+    function docsCockpit(d){
+      const mo = d.machine ? d.machine.replace(' (план)','') : null;
+      const machineKit = mo
+        ? `<div class="mt-2 rounded-lg border border-indigo-100 dark:border-indigo-500/40 bg-indigo-50/60 dark:bg-indigo-500/15 p-2 text-[11px] text-indigo-700 dark:text-indigo-300 leading-snug">
+             📦 Инвойс · упаковочный лист · внешнеторговый договор — <b>на всю машину ${mo}</b> (все позиции разом, не на эту одну). Позиция войдёт в комплект автоматически.
+             <a class="mt-1 inline-block font-semibold text-accent" href="zak-shipment-preview.html">собрать комплект на «Машинах» →</a>
+           </div>`
+        : `<div class="mt-2 rounded-lg bg-sunken p-2 text-[11px] text-muted leading-snug">📦 Инвойс · упаковочный лист · внешнеторговый договор формируются <b>на всю машину</b> при её сборке — назначь машину выше, и позиция войдёт в комплект.</div>`;
+      return `${docsCompact(d)}
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          <button class="zth-pill" onclick="demoGenDoc('Договор с поставщиком (на подпись)')">✦ Договор с поставщиком</button>${tierBadge('sonnet')}
+        </div>
+        <div id="docGenLog" class="mt-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300"></div>
+        ${machineKit}
+        <div class="mt-1 text-[9px] text-faint leading-snug">Договор с поставщиком (на подпись) — один на поставщика, покрывает все его позиции. Комплект на машину (инвойс/упаковочный/внешнеторговый) — на все её позиции от разных поставщиков и сделок. Sonnet; суммы/вес — по формуле, без ИИ.</div>`;
+    }
+
+    // demo-обработчики действий (пишут в память/показывают тост — без бэка, для UX на Gate 1)
+    function demoStageAct(msg){ demoToast(msg); }
+    function demoAiDraft(){
+      const inp=document.getElementById('wechatInput'); if(!inp||!_lastKey) return;
+      const d=Z[_lastKey];
+      inp.value = d.stageIdx<=3
+        ? 'Подтвердите цену и срок. Нужен образец на тест перед заказом + фото партии.'
+        : 'Уточните статус готовности партии и планируемую дату отгрузки.';
+      inp.focus();
+    }
+    function demoSendWechat(){
+      const inp=document.getElementById('wechatInput'), sec=document.getElementById('wechatSection');
+      if(!inp||!sec||!inp.value.trim()||!_lastKey) return;
+      const d=Z[_lastKey]; (d._demoSent=d._demoSent||[]).push(inp.value.trim());
+      const log=sec.querySelector('.flex.flex-col');
+      const b=document.createElement('div');
+      b.className='ml-auto max-w-[90%] rounded-lg bg-accent px-2 py-1 text-[11px] text-white';
+      b.innerHTML=inp.value.trim()+'<div class="text-[9px] text-blue-100">отправлено · демо (перевод → 中文, Haiku)</div>';
+      log.appendChild(b); inp.value='';
+    }
+    function scrollToWechat(){ const el=document.getElementById('wechatSection'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+    function demoGenDoc(kind){
+      const log=document.getElementById('docGenLog');
+      if(log) log.textContent='✓ '+kind+' сформирован ИИ (Sonnet) из условий сделки — демо, черновик добавлен';
+      else demoToast(kind+' сформирован ИИ (Sonnet) — демо');
+    }
+    function demoToast(msg){
+      let t=document.getElementById('zToast');
+      if(!t){ t=document.createElement('div'); t.id='zToast';
+        t.className='fixed left-1/2 bottom-24 z-[90] -translate-x-1/2 rounded-full bg-accent px-4 py-2 text-[12px] font-semibold text-white shadow-pop text-center max-w-[340px]';
+        t.style.transition='opacity .3s'; document.body.appendChild(t); }
+      t.textContent=msg; t.style.opacity='1';
+      clearTimeout(t._h); t._h=setTimeout(()=>{ t.style.opacity='0'; },2600);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // ВИД СДЕЛКИ. Сделка (СД-NNNN) — корзина: несколько товаров, возможно от РАЗНЫХ поставщиков,
+    // позиции могут ехать в РАЗНЫХ машинах (по срокам). Источник — запрос продавца от клиента ∨
+    // пополнение склада ∨ алгоритм. Позиции сделки собираем из Z по d.source == "под сделку СД".
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    const DEAL_META = {
+      'СД-2287': {client:'ООО «РадиоДеталь»', mgr:'Иванов П.', origin:'Запрос продавца (заказ клиента)'},
+    };
+    const bestSup = d => (d.suppliers && (d.suppliers.find(s=>s.best)||d.suppliers[0])||{}).n || '—';
+    const dealOf = d => (d.source && d.source.indexOf('под сделку ')===0) ? d.source.replace('под сделку ','') : null;
+    function dealPositions(sd){ return Object.keys(Z).filter(k=>Z[k].source==='под сделку '+sd).map(k=>({k,d:Z[k]})); }
+    function dealStats(pos){
+      const sups=new Set(pos.map(p=>bestSup(p.d)));
+      const machs=new Set(pos.map(p=>p.d.machine?p.d.machine.replace(' (план)',''):null).filter(Boolean));
+      return {n:pos.length, sups:sups.size, machs:machs.size, machList:[...machs]};
+    }
+    // мини-блок «Сделка» в карточке позиции — с переходом в полный вид сделки
+    function dealLink(d){
+      const sd=dealOf(d);
+      if(!sd) return `<div class="text-[11px] text-faint">Пополнение склада — без клиентской сделки (автозаявка по алгоритму мин. остатка).</div>`;
+      const pos=dealPositions(sd), meta=DEAL_META[sd], st=dealStats(pos);
+      const multi=st.n>1;
+      return `<div class="rounded-lg border border-line bg-sunken p-2.5 text-[12px]">
+        <div class="flex items-center justify-between gap-2"><span class="font-semibold text-ink">${sd}</span><button class="text-[11px] font-semibold text-accent" onclick="openDeal('${sd}')">открыть сделку →</button></div>
+        <div class="mt-0.5 text-[11px] text-muted">${meta?meta.client+' · '+meta.mgr:'клиентская сделка'}</div>
+        <div class="mt-1 text-[11px] ${multi?'text-muted':'text-faint'}">${multi?`${st.n} позиций · ${st.sups} поставщик(а/ов) · ${st.machs||'—'} машин(ы) — эта позиция одна из них`:'1 позиция в этой сделке'}</div>
+      </div>`;
+    }
+    function buildDeal(sd){
+      const pos=dealPositions(sd), st=dealStats(pos);
+      const rows=pos.map(p=>{
+        const d=p.d, mo=d.machine?d.machine.replace(' (план)',''):null, tent=d.machine&&d.machine.includes('(план)');
+        return `<tr class="border-t border-line cursor-pointer hover:bg-sunken" onclick="openCompact('${p.k}')">
+          <td class="py-2 pr-2"><div class="text-[12px] font-medium text-ink">${d.title}</div><div class="text-[10px] text-faint">${d.qty} · ${d.num}</div></td>
+          <td class="py-2 px-1 text-[11px] text-muted">${bestSup(d)}</td>
+          <td class="py-2 px-1"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">${STAGES[d.stageIdx]}</span></td>
+          <td class="py-2 pl-1 text-right text-[11px] ${mo?'font-semibold text-indigo-600 dark:text-indigo-300':'text-faint'}">${mo?'🚚 '+mo+(tent?' · план':''):'—'}</td>
+        </tr>`;
+      }).join('');
+      const machineSummary = st.machList.length
+        ? st.machList.map(m=>`<span class="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300">🚚 ${m}</span>`).join(' ')
+        : '<span class="text-[11px] text-faint">машины ещё не назначены</span>';
+      return `<div class="mb-4 rounded-lg border border-blue-100 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/15 p-2.5 text-[11px] text-blue-700 dark:text-blue-300 leading-snug">
+          🛒 Это <b>закупочный срез</b> сделки: позиции, поставщики, машины и документы закупки. Полная карточка сделки (клиент, продавец, маржа, условия продажи) — в <b>CRM продаж</b> (отдельный модуль).
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          <div class="rounded-xl border border-line bg-sunken p-2.5 text-center"><div class="text-lg font-bold text-ink">${st.n}</div><div class="text-[10px] text-faint">позиций</div></div>
+          <div class="rounded-xl border border-line bg-sunken p-2.5 text-center"><div class="text-lg font-bold text-ink">${st.sups}</div><div class="text-[10px] text-faint">поставщиков</div></div>
+          <div class="rounded-xl border border-line bg-sunken p-2.5 text-center"><div class="text-lg font-bold text-ink">${st.machs||'—'}</div><div class="text-[10px] text-faint">машин</div></div>
+        </div>
+        <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Позиции сделки (клик — открыть)</div>
+        <table class="w-full text-[11px]"><thead><tr class="text-[10px] uppercase tracking-wide text-faint"><th class="pb-1 text-left font-semibold">Товар</th><th class="pb-1 text-left font-semibold px-1">поставщик</th><th class="pb-1 text-left font-semibold px-1">стадия</th><th class="pb-1 text-right font-semibold pl-1">машина</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">Машины сделки</div>
+        <div class="flex flex-wrap gap-1.5">${machineSummary}</div>
+        <div class="mt-1.5 text-[11px] text-muted">Позиции одной сделки распределяются по разным машинам — по срокам готовности (см. «Машины»).</div>
+        <div class="mt-4 rounded-lg bg-sunken p-3 text-[11px] text-muted leading-snug">
+          <div class="mb-1 font-semibold text-ink">Документы</div>
+          <b class="text-ink">По поставщику:</b> договор с поставщиком (на подпись) — один на поставщика (${st.sups} шт.), + PO.<br>
+          <b class="text-ink">По машине:</b> инвойс + упаковочный лист + внешнеторговый договор — комплект на каждую машину (${st.machs||0}), агрегирует все её позиции от разных поставщиков и сделок.
+        </div>
+        <div class="mt-3 text-[10px] text-faint">⚠️ demo: сделка собрана из позиций доски по тегу «под сделку ${sd}». Реальная модель — сделка-корзина в CRM (продажи) со ссылками на заявки-позиции закупки.</div>`;
+    }
+    function openDeal(sd){
+      const meta=DEAL_META[sd]||{};
+      document.getElementById('deal-num').textContent=sd;
+      document.getElementById('deal-title').textContent=meta.client||'Клиентская сделка';
+      document.getElementById('deal-sub').textContent=(meta.mgr?meta.mgr+' · ':'')+(meta.origin||'сделка');
+      document.getElementById('deal-body').innerHTML=buildDeal(sd);
+      document.getElementById('deal-body').scrollTop=0;
+      document.getElementById('drw').classList.remove('show');
+      document.getElementById('drw2').classList.remove('show');
+      document.getElementById('ovl').classList.add('show');
+      document.getElementById('drw3').classList.add('show');
+    }
 
     // секция «Оплаты поставщику» — сколько оплачено, сколько доплатить, история платежей
     function paymentSection(p){
@@ -792,7 +1221,11 @@
       let h='';
       // сумма + степпер (+ машина, если позиция уже привязана к машине)
       h+=sec("Стадия и объём",
-        `<div class="flex items-baseline gap-2"><span class="text-2xl font-bold text-ink">${d.qty}</span><span class="text-[13px] text-muted">· бюджет ${d.budget}</span></div>${stepper(d.stageIdx)}${d.machine?`<div class="mt-2.5 text-[12px] text-muted">Едет в машине: <a class="font-semibold text-accent" href="zak-shipment-preview.html">🚚 ${d.machine}</a></div>`:''}`);
+        `<div class="flex items-baseline gap-2"><span class="text-2xl font-bold text-ink">${d.qty}</span><span class="text-[13px] text-muted">· бюджет ${d.budget}</span></div>${stepper(d.stageIdx)}`);
+      h+=sec("Маршрут / этапы · план-факт", stageDatesFull(d));
+      h+=sec("Номенклатура и суммы · источник данных", nomenclatureSection(d));
+      h+=sec("Машина", machineCompact(d), d.machine?'<a class="text-accent" href="zak-shipment-preview.html">открыть машину →</a>':'');
+      h+=sec("Сделка · корзина позиций", dealLink(d));
 
       // сравнение поставщиков (TCO) — ключевой блок (↓себестоимость + ↑качество)
       if(d.suppliers){
@@ -900,6 +1333,41 @@
 
     let _lastKey=null;
 
+    // ── ⚡ Быстрое назначение машины прямо из карточки (не уходя на экран «Машины»).
+    // Правило (см. zak-shipment-preview.html): по умолчанию — ближайшая открытая машина (план,
+    // авто-подсказка); закрепляется, когда выкуп подтверждён. Пока demo-интерактив (пишет в Z на
+    // клиенте, без бэка) — для проверки самого UX на Gate 1. ──
+    function pickMachine(mo){
+      if(!_lastKey) return;
+      Z[_lastKey].machine = mo;
+      decorateCards();
+      refreshOpenDrawer(_lastKey);
+    }
+    // «Завершено» (stageIdx===8) — машина уже зафиксирована в приходе, дальше не меняется нигде
+    // (ни в дровере, ни на канбане — decorateCards рисует там неактивный span). Раньше дровер
+    // разрешал «убрать»/«закрепить» и для завершённых заявок — несогласованность с канбаном.
+    function machineCompact(d){
+      const done = d.stageIdx===8;
+      if(!d.machine){
+        if(done) return `<div class="text-[11px] text-faint">нет данных</div>`;
+        return `<div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[11px] text-faint" title="Появится, когда сложится ориентир по срокам">не назначена</span>
+          ${OPEN_MACHINES.map(mo=>`<button class="zth-pill" onclick="pickMachine('${mo}')">+ ${mo.replace('MO-2026-','MO-')}</button>`).join('')}
+        </div>`;
+      }
+      const tentative = d.machine.includes('(план)');
+      const clean = d.machine.replace(' (план)','');
+      const badge = `<span class="inline-flex items-center gap-1 rounded-full ${tentative?'bg-sunken text-muted':'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'} px-2 py-0.5 text-[11px] font-semibold" ${tentative?'title="Авто-подсказка (ближайшая открытая машина) — закрепится после подтверждения выкупа"':''}>🚚 ${clean}${tentative?' · план':''}</span>`;
+      if(done) return `<div class="flex items-center gap-2 text-[12px]">${badge}<span class="text-[10px] text-faint">зафиксировано при приёмке</span></div>`;
+      return `<div class="flex items-center justify-between gap-2 text-[12px]">
+        ${badge}
+        <span class="flex shrink-0 gap-2">
+          ${tentative?`<button class="text-[11px] font-semibold text-accent" onclick="pickMachine('${clean}')">закрепить</button>`:''}
+          <button class="text-[11px] font-semibold text-muted" onclick="pickMachine(null)">убрать</button>
+        </span>
+      </div>`;
+    }
+
     function chipsFor(d){
       const srcColor = d.source.startsWith('под сделку')?'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300':'bg-sunken text-muted';
       return `<span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">● ${STAGES[d.stageIdx]}</span>
@@ -908,32 +1376,44 @@
         ${d.payment?`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${PAYST[d.payment.status].chip}">${PAYST[d.payment.status].lbl}</span>`:''}`;
     }
 
+    // ── краткое табличное сравнение топ-3 поставщиков (компактный вид, тот же стиль, что в полном) ──
+    function suppliersCompactTable(d){
+      if(!d.suppliers || !d.suppliers.length) return `<div class="text-[11px] text-faint">Поставщики ещё не подобраны</div>`;
+      const rows = d.suppliers.slice(0,3).map(s=>`<tr class="border-t border-line ${s.best?'bg-emerald-50/40 dark:bg-emerald-500/15':''}">
+        <td class="py-1.5 pr-1.5"><div class="max-w-[104px] truncate text-[11px] font-medium text-ink">${s.n}</div><span class="inline-flex items-center rounded-full px-1 py-0.5 text-[8px] font-semibold ${relColor(s.rel)}">${s.rel}</span></td>
+        <td class="py-1.5 px-1 text-right text-[11px]">${s.price}</td>
+        <td class="py-1.5 px-1 text-right text-[11px] text-muted">${s.lead}</td>
+        <td class="py-1.5 pl-1 text-right text-[11px] font-semibold text-ink">${s.landed}</td>
+      </tr>`).join('');
+      return `<table class="w-full text-[11px]"><thead><tr class="text-[9px] uppercase tracking-wide text-faint text-right"><th class="pb-1 text-left font-semibold">Поставщик</th><th class="px-1 pb-1 font-semibold">цена</th><th class="px-1 pb-1 font-semibold">срок</th><th class="pl-1 pb-1 font-semibold">landed</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
     // ── компактное превью (ОДИН клик) ──
     function buildCompact(d){
-      const best=(d.suppliers||[]).find(s=>s.best)||(d.suppliers||[])[0];
       let h='';
       h+=`<div class="flex items-baseline gap-2 mb-1"><span class="text-xl font-bold text-ink">${d.qty}</span><span class="text-[12px] text-muted">· ${d.budget}</span></div>`;
       h+=stepper(d.stageIdx);
-      if(best){
+      h+=primaryAction(d);
+      if(d.suppliers && d.suppliers.length){
         h+=`<div class="mt-4 rounded-xl border border-line bg-sunken p-3">
-          <div class="text-[10px] font-semibold uppercase tracking-wide text-faint">Лучший поставщик (по TCO)</div>
-          <div class="mt-1 text-[13px] font-semibold text-ink">${best.n}</div>
-          <div class="mt-1.5 grid grid-cols-2 gap-y-1 text-[12px]">
-            <span class="text-muted">Цена</span><span class="text-right font-medium">${best.price}</span>
-            <span class="text-muted">Срок</span><span class="text-right font-medium">${best.lead}</span>
-            <span class="text-muted">Брак</span><span class="text-right font-medium">${best.defect}</span>
-            <span class="text-muted">Себестоимость</span><span class="text-right font-bold text-ink">${best.landed}</span>
-          </div>
+          <div class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-faint">Сравнение поставщиков (по TCO)</div>
+          ${suppliersCompactTable(d)}
         </div>`;
       }
-      if(d.verdict){ h+=`<div class="mt-2.5 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-100 dark:border-violet-500/40 p-2.5 text-[12px] text-violet-700 dark:text-violet-300"><span class="font-semibold text-violet-600 dark:text-violet-300">✦ ИИ:</span> ${d.verdict}</div>`; }
+      if(d.verdict){ h+=`<div class="mt-2.5 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-100 dark:border-violet-500/40 p-2.5 text-[12px] text-violet-700 dark:text-violet-300"><span class="font-semibold text-violet-600 dark:text-violet-300">✦ ИИ:</span> ${d.verdict}<div class="mt-1 text-[9px] text-violet-500/80 dark:text-violet-300/70">Вердикт выбора поставщика по TCO — денежное решение, модель Opus; сам landed cost считается формулой (без ИИ).</div></div>`; }
       if(d.payment){ const p=d.payment,due=p.total-p.paid,st=PAYST[p.status];
         h+=`<div class="mt-2.5 rounded-lg border border-line bg-sunken p-2.5 text-[12px]">
           <div class="flex items-center justify-between"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${st.chip}">${st.lbl}</span><span class="text-muted">оплачено ${p.cur}${fmtMoney(p.paid)} / ${p.cur}${fmtMoney(p.total)}</span></div>
           ${due>0?`<div class="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-300">к доплате ${p.cur}${fmtMoney(due)}</div>`:'<div class="mt-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">оплачено полностью</div>'}
           ${d.machine?`<div class="mt-1 text-[11px] text-muted">машина 🚚 ${d.machine}</div>`:''}
         </div>`; }
-      h+=`<div class="mt-3 text-[11px] text-faint">Полное сравнение поставщиков, качество, отношения, переписка, оплаты и документы — в полном виде.</div>`;
+      h+=miniSec('Сделка (корзина позиций)', dealLink(d));
+      h+=miniSec('Переписка с поставщиком (WeChat / канал)', wechatCockpit(d));
+      h+=miniSec('Даты по этапам', stageDatesCompact(d));
+      h+=miniSec('Машина', machineCompact(d));
+      h+=miniSec('Условия сделки', termsCompact(d));
+      h+=miniSec('Документы — договор с поставщиком + комплект на машину', docsCockpit(d));
+      h+=`<div class="mt-3 text-[11px] text-faint">Отсюда закупщик ведёт рутину: связь с поставщиком, машина, документы, действие по стадии. Полная карточка — только для глубокого анализа (сравнение ВСЕХ поставщиков, вся переписка, контроль качества, претензии, полный договор).</div>`;
       return h;
     }
 
@@ -945,6 +1425,7 @@
       document.getElementById('c-body').innerHTML=buildCompact(d);
       document.getElementById('c-body').scrollTop=0;
       document.getElementById('drw').classList.remove('show');
+      document.getElementById('drw3').classList.remove('show');
       document.getElementById('ovl').classList.add('show');
       document.getElementById('drw2').classList.add('show');
     }
@@ -959,6 +1440,7 @@
       document.getElementById('z-body').innerHTML=buildBody(d);
       document.getElementById('z-body').scrollTop=0;
       document.getElementById('drw2').classList.remove('show');
+      document.getElementById('drw3').classList.remove('show');
       document.getElementById('ovl').classList.add('show');
       document.getElementById('drw').classList.add('show');
     }
@@ -975,6 +1457,7 @@
       document.getElementById('ovl').classList.remove('show');
       document.getElementById('drw').classList.remove('show');
       document.getElementById('drw2').classList.remove('show');
+      document.getElementById('drw3').classList.remove('show');
     }
 
     // 1 клик → превью, 2 клика → полный вид (как в отделе продаж)
@@ -983,26 +1466,134 @@
       const k=c.getAttribute('data-z');
       c.addEventListener('click',()=>{ if(_ct) return; _ct=setTimeout(()=>{ _ct=null; openCompact(k); },230); });
       c.addEventListener('dblclick',()=>{ if(_ct){ clearTimeout(_ct); _ct=null; } openFull(k); });
+      // чекбокс массового выбора (угол карточки) — не открывает карточку, копит выделение для bulk-панели
+      const cb=document.createElement('button');
+      cb.type='button'; cb.className='card-select'; cb.title='Выбрать для массового действия';
+      cb.addEventListener('click', ev=>toggleSelect(k, cb, ev));
+      c.appendChild(cb);
     });
     document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeAll(); });
 
-    // ── Бейджи на карточках канбана: машина + статус оплаты (data-driven из Z) ──
+    // ── Массовые действия: выбрать несколько заявок → отправить разом в одну машину ──
+    const selected=new Set();
+    function toggleSelect(key, cb, ev){
+      ev.stopPropagation();
+      const card=cb.closest('.card');
+      if(selected.has(key)){ selected.delete(key); cb.classList.remove('on'); cb.textContent=''; card.classList.remove('card-picked'); }
+      else { selected.add(key); cb.classList.add('on'); cb.textContent='✓'; card.classList.add('card-picked'); }
+      renderBulkBar();
+    }
+    function clearSelection(){
+      selected.forEach(key=>{
+        const card=document.querySelector('.card[data-z="'+key+'"]'); if(!card) return;
+        card.classList.remove('card-picked');
+        const cb=card.querySelector('.card-select'); if(cb){ cb.classList.remove('on'); cb.textContent=''; }
+      });
+      selected.clear();
+      renderBulkBar();
+    }
+    function bulkAssignMachine(mo){
+      const keys=[...selected];
+      keys.forEach(key=>{ Z[key].machine=mo; });
+      clearSelection();
+      decorateCards();
+      if(_lastKey && keys.includes(_lastKey)) refreshOpenDrawer(_lastKey);
+    }
+    function renderBulkBar(){
+      let bar=document.getElementById('bulkbar');
+      if(selected.size===0){ if(bar) bar.remove(); return; }
+      if(!bar){ bar=document.createElement('div'); bar.id='bulkbar'; bar.className='bulkbar'; document.body.appendChild(bar); }
+      bar.innerHTML = `<span class="text-[12px] font-semibold text-ink">${selected.size} выбрано</span>
+        <span class="text-[11px] text-faint">→ машина:</span>
+        ${OPEN_MACHINES.map(mo=>`<button class="zth-pill" data-bulk-mo="${mo}">${mo.replace('MO-2026-','MO-')}</button>`).join('')}
+        <button class="text-[11px] font-semibold text-muted" id="bulkClear">отменить</button>`;
+      bar.querySelectorAll('[data-bulk-mo]').forEach(b=>b.addEventListener('click',()=>bulkAssignMachine(b.dataset.bulkMo)));
+      document.getElementById('bulkClear').addEventListener('click', clearSelection);
+    }
+
+    // ── Бейджи на карточках канбана: машина (кликабельно — назначить/сменить/убрать, не уходя
+    // с доски) + статус оплаты. Перерисовывается заново при каждом вызове (data-auto-badge —
+    // чтобы не плодить дубли), поэтому safe вызывать повторно после смены машины из карточки/дравера. ──
     function decorateCards(){
       document.querySelectorAll('.card[data-z]').forEach(c=>{
-        const d=Z[c.getAttribute('data-z')]; if(!d) return;
+        const key=c.getAttribute('data-z'), d=Z[key]; if(!d) return;
         const chips=c.querySelector('.flex.flex-wrap'); if(!chips) return;
-        const mNum=d.machine?d.machine.replace(' (план)',''):'';
-        if(d.machine && !chips.textContent.includes(mNum)){
-          const m=document.createElement('span');
-          m.className='rounded-full bg-indigo-50 dark:bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300';
-          m.textContent='🚚 '+mNum; chips.appendChild(m);
+        chips.querySelectorAll('[data-auto-badge]').forEach(el=>el.remove());
+
+        const done=d.stageIdx===8; // «Завершено» — машина зафиксирована, менять поздно
+        if(d.machine || !done){
+          const tentative=d.machine&&d.machine.includes('(план)');
+          const clean=d.machine?d.machine.replace(' (план)',''):'';
+          const b=document.createElement(done?'span':'button');
+          b.setAttribute('data-auto-badge','machine');
+          if(!d.machine){
+            b.className='zth-pill'; b.textContent='+ 🚚'; b.title='Назначить машину';
+          } else {
+            b.className='inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold '+(tentative?'bg-sunken text-muted':'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-300');
+            b.textContent='🚚 '+clean+(tentative?' · план':'');
+            if(!done) b.title=tentative?'План (авто) — нажми, чтобы закрепить или сменить':'Нажми, чтобы сменить машину';
+          }
+          if(!done) b.addEventListener('click', ev=>{ ev.stopPropagation(); toggleMachineMenu(ev, key); });
+          chips.appendChild(b);
         }
+
         if(d.payment){
           const st=PAYST[d.payment.status], p=document.createElement('span');
+          p.setAttribute('data-auto-badge','pay');
           p.className='rounded-full px-2 py-0.5 text-[10px] font-semibold '+st.chip;
           p.textContent=st.short; chips.appendChild(p);
         }
+
+        // «висит на стадии N дней» — на канбане показываем ТОЛЬКО когда уже есть повод насторожиться
+        // (3+ дня), чтобы не плодить пятый бейдж на и без того тесной карточке; полностью — в дровере.
+        const days=daysOnCurrentStage(d);
+        if(days!==null && days>=3){
+          const dEl=document.createElement('span');
+          dEl.setAttribute('data-auto-badge','days');
+          dEl.className='rounded-full px-2 py-0.5 text-[10px] font-semibold '+daysTone(days);
+          dEl.title='На стадии «'+STAGES[d.stageIdx]+'» '+days+' дн. (демо: от даты входа в стадию)';
+          dEl.textContent='⏱ '+days+'д';
+          chips.appendChild(dEl);
+        }
       });
+    }
+    // маленькое меню у бейджа: MO-016 / MO-017 / убрать — без захода в карточку.
+    // Координаты фиксируются один раз при открытии — при скролле доски/resize окна меню бы «оторвалось»
+    // от бейджа, поэтому вместо пересчёта позиции на каждый скролл просто закрываем меню (ниже).
+    function toggleMachineMenu(ev, key){
+      closeMachineMenu();
+      const d=Z[key], btn=ev.currentTarget, curClean=d.machine?d.machine.replace(' (план)',''):null;
+      const menu=document.createElement('div');
+      menu.id='mchip-menu'; menu.className='mchip-menu';
+      menu.innerHTML=OPEN_MACHINES.map(mo=>
+          `<button type="button" data-mo="${mo}">${mo}${curClean===mo?' ✓':''}</button>`).join('')
+        + (d.machine?`<button type="button" data-mo="">убрать</button>`:'');
+      document.body.appendChild(menu);
+      menu.querySelectorAll('button').forEach(b=>b.addEventListener('click', e=>{
+        e.stopPropagation();
+        assignMachineFromCard(key, b.dataset.mo || null);
+      }));
+      const r=btn.getBoundingClientRect();
+      menu.style.top=(r.bottom+4)+'px';
+      menu.style.left=Math.min(r.left, window.innerWidth-140)+'px';
+      setTimeout(()=>document.addEventListener('click',closeMachineMenu,{once:true}),0);
+    }
+    function closeMachineMenu(){ const m=document.getElementById('mchip-menu'); if(m) m.remove(); }
+    window.addEventListener('resize', closeMachineMenu);
+    document.addEventListener('scroll', closeMachineMenu, true);
+    // если в открытом полном виде сейчас идёт правка заголовка (✎), полный перерендер её затирал бы —
+    // пропускаем обновление дровера, пока не сохранят (канбан всё равно обновится через decorateCards)
+    function refreshOpenDrawer(key){
+      const t=document.getElementById('z-title');
+      if(t && t.isContentEditable) return;
+      if(document.getElementById('drw2').classList.contains('show')) openCompact(key);
+      else if(document.getElementById('drw').classList.contains('show')) openFull(key);
+    }
+    function assignMachineFromCard(key, mo){
+      Z[key].machine=mo;
+      closeMachineMenu();
+      decorateCards();
+      if(_lastKey===key) refreshOpenDrawer(key);
     }
     decorateCards();
 
@@ -1013,7 +1604,15 @@
     let activeFunnel='all', editFunnels=false;
     const BUILTIN=new Set(['all','deal','refill','frozen']);
     const countFunnel=id=>{ let n=0; document.querySelectorAll('.card[data-z]').forEach(c=>{ const k=c.getAttribute('data-z'); if(id==='all'||cardFunnel(k)===id) n++; }); return n; };
-    function applyFunnel(){ document.querySelectorAll('.card[data-z]').forEach(c=>{ const k=c.getAttribute('data-z'); const show=activeFunnel==='all'||cardFunnel(k)===activeFunnel; c.style.display=show?'':'none'; }); }
+    // строка поиска (шапка) — фильтрует по названию/номеру заявки/поставщику, вместе с активной воронкой
+    let searchQuery='';
+    const matchesSearch=k=>{
+      if(!searchQuery) return true;
+      const d=Z[k]; if(!d) return false;
+      const hay=[d.title,d.num,d.sub,...(d.suppliers||[]).map(s=>s.n)].join(' ').toLowerCase();
+      return hay.includes(searchQuery);
+    };
+    function applyFilters(){ document.querySelectorAll('.card[data-z]').forEach(c=>{ const k=c.getAttribute('data-z'); const show=(activeFunnel==='all'||cardFunnel(k)===activeFunnel)&&matchesSearch(k); c.style.display=show?'':'none'; }); }
     function renderFunnels(){
       const host=document.getElementById('funnels');
       host.innerHTML=funnels.map(f=>{
@@ -1027,11 +1626,12 @@
     document.getElementById('funnels').addEventListener('click',e=>{
       const ren=e.target.closest('.fn-ren'), del=e.target.closest('.fn-del'), add=e.target.closest('#fn-add'), chip=e.target.closest('.funnel-chip');
       if(ren){ const f=funnels.find(x=>x.id===ren.dataset.fid); const v=prompt('Название воронки:',f.label); if(v){ f.label=v.trim()||f.label; renderFunnels(); } return; }
-      if(del){ const id=del.dataset.fid; funnels=funnels.filter(x=>x.id!==id); if(activeFunnel===id){ activeFunnel='all'; applyFunnel(); } renderFunnels(); return; }
+      if(del){ const id=del.dataset.fid; funnels=funnels.filter(x=>x.id!==id); if(activeFunnel===id){ activeFunnel='all'; applyFilters(); } renderFunnels(); return; }
       if(add){ const v=prompt('Новая воронка — название:'); if(v&&v.trim()){ funnels.push({id:'f'+funnels.length, label:v.trim()}); renderFunnels(); } return; }
-      if(chip){ activeFunnel=chip.dataset.fid; applyFunnel(); renderFunnels(); }
+      if(chip){ activeFunnel=chip.dataset.fid; applyFilters(); renderFunnels(); }
     });
     document.getElementById('funnelEdit').addEventListener('click',()=>{ editFunnels=!editFunnels; document.getElementById('funnelEdit').classList.toggle('text-accent',editFunnels); document.getElementById('funnelEdit').classList.toggle('border-accent',editFunnels); renderFunnels(); });
+    document.getElementById('zSearch').addEventListener('input', e=>{ searchQuery=e.target.value.trim().toLowerCase(); applyFilters(); });
     renderFunnels();
 
     // ── Редактирование карточки (✎ в полном виде): заголовок/подзаголовок становятся editable ──
