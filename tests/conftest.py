@@ -7,10 +7,16 @@ async-драйвер sqlite не ругался на «другой loop».
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
+
+# psycopg async cannot run on Windows' default ProactorEventLoop.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Тесты — не прод: dev-режим, чтобы прод-guard (SECURITY.md P0-5) не падал на
 # dev-кредах БД из .env. Выставить ДО импорта core.runtime.app (тянет настройки).
