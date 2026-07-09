@@ -18,8 +18,10 @@ def _split(env: str, sep: str = ",") -> list[str]:
 # --- куда складывать результат ---
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 INBOX_DIR = os.path.join(DATA_DIR, "inbox")     # очередь сырых записей (по файлу на запись)
+TEST_INBOX_DIR = os.path.join(INBOX_DIR, "test")
 MEDIA_DIR = os.path.join(DATA_DIR, "media")     # скачанные записи звонков
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
+TEST_STATE_FILE = os.path.join(DATA_DIR, "state.test.json")
 
 # --- Bitrix24 (облако) ---
 # Входящий вебхук: https://ВАШ-ПОРТАЛ.bitrix24.ru/rest/<user_id>/<код>/
@@ -58,6 +60,14 @@ ONEC_ENTITY_SETS: list[dict] = [
 
     # --- ЭТАП 5. Цены ---
     # {"name": "InformationRegister_ЦеныНоменклатуры", "key_field": "Период"},
+]
+
+# Тестовая выгрузка: несколько сущностей с малыми лимитами (не все есть в каждой базе).
+ONEC_TEST_ENTITY_SETS: list[dict] = [
+    {"name": "Catalog_Контрагенты", "key_field": "Ref_Key", "limit": 20},
+    {"name": "Catalog_ДоговорыКонтрагентов", "key_field": "Ref_Key", "limit": 10},
+    {"name": "Document_РеализацияТоваровУслуг", "key_field": "Ref_Key", "date_field": "Date", "limit": 5},
+    {"name": "Document_РеализацияТоваровУслуг_Товары", "key_field": "Ref_Key", "limit": 10},
 ]
 
 # --- Google ---

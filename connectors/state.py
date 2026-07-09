@@ -14,6 +14,16 @@ import threading
 from typing import Any
 
 
+class NullStateStore:
+    """Хранилище без записи на диск — для smoke/test, курсоры не двигаются."""
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return default
+
+    def set(self, key: str, value: Any) -> None:
+        pass
+
+
 class StateStore:
     def __init__(self, path: str) -> None:
         self.path = path
