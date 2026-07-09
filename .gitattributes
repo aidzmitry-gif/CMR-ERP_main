@@ -1,6 +1,21 @@
 # Скрипты для Linux-контейнеров всегда с LF (иначе entrypoint ломается на Windows).
 *.sh text eol=lf
 
+# Код, конфиги и документация тоже хранятся с LF, чтобы Windows checkout не создавал CRLF-шум.
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+
 # Git-хуки без расширения — тоже LF (Windows-bash спотыкается о CRLF в #!/bin/sh).
 .githooks/* text eol=lf
 
