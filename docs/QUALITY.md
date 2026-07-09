@@ -35,6 +35,12 @@ Postgres-capable environment depending on the selected markers.
 
 - Windows/sandbox environments may leave `.git/index.lock` after failed Git
   writes. Remove it only after checking that no Git operation is active.
+- Submodules can also keep stale locks under `.git/modules/modules/*/index.lock`.
+  Before removing them, check for active `git.exe` processes and confirm the
+  lock files are old and zero bytes.
+- In restricted Windows shells, `git submodule status` can fail before it reads
+  the repository because Git Bash cannot create its signal pipe. Retry in a
+  normal shell or CI before treating it as a repository failure.
 - File-operation tests use atomic writes and SQLite. In restricted sandboxes,
   `os.replace` or SQLite file databases can fail with permission or disk I/O
   errors even when the same tests pass in a normal shell.
