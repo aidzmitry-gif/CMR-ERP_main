@@ -33,6 +33,7 @@
 - Добавлена sandbox-friendly фикстура `tmp_path` в `tests/conftest.py`: тесты получают уникальную папку без teardown cleanup, что совместимо со средами без delete permissions.
 - В `.gitignore` добавлены локальные временные директории `.tmp_pytest/` и `.tmp_ruff_cache/`.
 - В `.gitignore` и `.dockerignore` добавлены runtime logs и локальная `dev_calls.db`, чтобы они не попадали в коммиты и Docker build context.
+- В ignore добавлены `pytest-cache-files-*/`, чтобы `git status` не пытался обходить временные каталоги pytest с ограниченными правами.
 
 ## Проверка
 
