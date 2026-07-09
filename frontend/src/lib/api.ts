@@ -413,9 +413,10 @@ export interface DealItemFull {
 }
 
 /** Справочник номенклатуры для подбора (клиент, через /api). */
-export async function fetchSkus(): Promise<SkuOption[]> {
+export async function fetchSkus(forPicker = true): Promise<SkuOption[]> {
   try {
-    const res = await fetch("/api/sales/skus", { cache: "no-store" });
+    const qs = forPicker ? "?for_picker=1" : "";
+    const res = await fetch(`/api/sales/skus${qs}`, { cache: "no-store" });
     if (!res.ok) return [];
     return (await res.json()) as SkuOption[];
   } catch {
