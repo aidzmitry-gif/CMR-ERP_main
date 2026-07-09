@@ -62,11 +62,12 @@ class OneCConnector:
         resp.raise_for_status()
         return resp.json()
 
-    def fetch(self) -> Iterator[RawRecord]:
+    def fetch(self, max_rows: int | None = None) -> Iterator[RawRecord]:
         for entity in self.entity_sets:
-            yield from self._fetch_entity(entity)
+            entity_limit = entity.get("limit", max_rows)
+            yield from self._fetch_entity(entity, max_rows=entity_limit)
 
-    def _fetch_entity(self, entity: dict) -> Iterator[RawRecord]:
+    def _fetch_entity(self, entity: dict, max_rows: int | None = None) -> Iterator[RawRecord]:
         name: str = entity["name"]                       # напр. "Catalog_Контрагенты"
         key_field: str = entity.get("key_field", "Ref_Key")
         date_field: Optional[str] = entity.get("date_field")  # напр. "Date" / "DataVersion"
@@ -87,15 +88,22 @@ class OneCConnector:
             # синтаксис литерала даты в фильтре может зависеть от версии платформы 1С
             base_params["$filter"] = f"{date_field} gt datetime'{last_cursor}'"
 
+        yielded = 0
         skip = 0
         while True:
+            if max_rows is not None and yielded >= max_rows:
+                break
             params = dict(base_params)
             params["$skip"] = skip
+            if max_rows is not None:
+                params["$top"] = min(self.page_size, max_rows - yielded)
             data = self._get(url, params)
             rows = data.get("value", []) or []
             if not rows:
                 break
             for row in rows:
+                if max_rows is not None and yielded >= max_rows:
+                    return
                 row_id = str(row.get(key_field))
                 yield RawRecord(
                     source="onec",
@@ -103,6 +111,7 @@ class OneCConnector:
                     record_type="1c_entity",
                     payload={"entity": name, **row},
                 )
+                yielded += 1
                 if date_field and row.get(date_field):
                     self.state.set(cursor_key, row[date_field])
             skip += len(rows)

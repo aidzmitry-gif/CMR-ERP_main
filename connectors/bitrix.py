@@ -92,11 +92,14 @@ class BitrixConnector:
 
     # --- звонки ---
 
-    def fetch_calls(self) -> Iterator[RawRecord]:
+    def fetch_calls(self, max_rows: int | None = None) -> Iterator[RawRecord]:
         cursor_key = "bitrix_calls_last_id"
         last_id = int(self.state.get(cursor_key, 0))
         params = {"order": {"ID": "ASC"}, "filter": {">ID": last_id}}
+        yielded = 0
         for call in self._list("voximplant.statistic.get", params):
+            if max_rows is not None and yielded >= max_rows:
+                return
             call_id = call.get("ID")
             media_path = self._download_record(call)
             yield RawRecord(
@@ -107,6 +110,7 @@ class BitrixConnector:
                 media_path=media_path,
                 source_url=call.get("CALL_RECORD_URL"),
             )
+            yielded += 1
             # сюда управление возвращается ТОЛЬКО когда потребитель уже сохранил запись
             self.state.set(cursor_key, int(call_id))
 
@@ -153,13 +157,17 @@ class BitrixConnector:
         method: str,
         record_type: str,
         select: Optional[list[str]] = None,
+        max_rows: int | None = None,
     ) -> Iterator[RawRecord]:
         cursor_key = f"{method}_last_id"
         last_id = int(self.state.get(cursor_key, 0))
         params: dict[str, Any] = {"order": {"ID": "ASC"}, "filter": {">ID": last_id}}
         if select:
             params["select"] = select
+        yielded = 0
         for row in self._list(method, params):
+            if max_rows is not None and yielded >= max_rows:
+                return
             row_id = row.get("ID")
             yield RawRecord(
                 source=f"bitrix_{record_type}",
@@ -167,4 +175,17 @@ class BitrixConnector:
                 record_type=record_type,
                 payload=row,
             )
+            yielded += 1
             self.state.set(cursor_key, int(row_id))
+
+    def fetch_productrows(self, deal_ids: list[int]) -> Iterator[RawRecord]:
+        """Строки товаров по списку ID сделок (crm.deal.productrows.get)."""
+        for deal_id in deal_ids:
+            data = self.call("crm.deal.productrows.get", {"id": deal_id})
+            rows = data.get("result", []) or []
+            yield RawRecord(
+                source="bitrix_productrow",
+                source_id=str(deal_id),
+                record_type="deal_productrows",
+                payload={"deal_id": deal_id, "rows": rows},
+            )

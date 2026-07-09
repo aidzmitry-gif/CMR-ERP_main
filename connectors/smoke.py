@@ -1,4 +1,4 @@
-"""Smoke-тест живого подключения к Bitrix24 — без скачивания mp3 и без сдвига курсора.
+"""Smoke-тест живого подключения к Bitrix24 и 1С — без сдвига прод-курсора.
 
 Зачем отдельный модуль: штатный `run.py` гонит ВСЮ историю и качает записи звонков
 прямо внутри генератора. Для первой проверки доступа это лишнее. Здесь мы дёргаем
@@ -6,12 +6,14 @@
 (ни inbox, ни media, ни state.json) — портал не нагружаем, повторный прогон безопасен.
 
 Запуск из корня проекта (где лежит пакет connectors/):
-    python -m connectors.smoke            # звонки + сделки/контакты/компании
+    python -m connectors.smoke            # Bitrix: звонки + CRM
     python -m connectors.smoke calls      # только звонки
     python -m connectors.smoke crm        # только CRM
+    python -m connectors.smoke onec       # только 1С OData
+    python -m connectors.smoke all        # Bitrix + 1С
     python -m connectors.smoke download 5 # РЕАЛЬНО скачать 5 звонков (mp3 + inbox), курсор не двигаем
 
-Требует заполненный BITRIX_WEBHOOK в connectors/.env.
+Требует заполненный BITRIX_WEBHOOK / ONEC_* в connectors/.env.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ from . import config
 from .bitrix import BitrixConnector
 from .models import RawRecord
 from .run import persist
-from .state import StateStore
+from .state import NullStateStore, StateStore
 
 PAGE = 50  # размер страницы voximplant.statistic.get / *.list
 
@@ -101,46 +103,93 @@ def _check_crm(bx: BitrixConnector, method: str, label: str) -> None:
         print(f"  пример: ID={rows[0].get('ID')}; полей в записи: {len(keys)}")
 
 
-def main() -> None:
+def _check_onec() -> None:
+    if not config.ONEC_BASE_URL:
+        print("\n[X] ONEC_BASE_URL не задан — пропуск 1С")
+        return
+    from .onec import OneCConnector
+
+    print(f"\n=== 1С OData ({config.ONEC_BASE_URL}) ===")
+    entities = config.ONEC_ENTITY_SETS or [{"name": "Catalog_Контрагенты", "key_field": "Ref_Key"}]
+    oc = OneCConnector(
+        config.ONEC_BASE_URL,
+        config.ONEC_USER,
+        config.ONEC_PASSWORD,
+        entities,
+        NullStateStore(),
+        page_size=5,
+    )
+    for entity in entities:
+        name = entity["name"]
+        print(f"\n  --- {name} ---")
+        try:
+            rows = list(oc._fetch_entity(entity, max_rows=3))  # noqa: SLF001 — smoke
+            print(f"  получено: {len(rows)} (проба до 3)")
+            if rows:
+                payload = rows[0].payload
+                keys = [k for k in payload.keys() if k != "entity"]
+                print(f"  пример ключ={rows[0].source_id}; полей: {len(keys)}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [!] ошибка: {exc}")
+
+
+def _run_bitrix(args: list[str]) -> None:
     if not config.BITRIX_WEBHOOK:
         print("[X] BITRIX_WEBHOOK не задан. Заполни connectors/.env (см. .env.example).")
         sys.exit(1)
 
-    args = [a.lower() for a in sys.argv[1:]]
-    # state нужен конструктору, но в режиме проверки/теста мы его не трогаем — путь временный.
     bx = BitrixConnector(config.BITRIX_WEBHOOK, StateStore(config.STATE_FILE), config.MEDIA_DIR)
-
     portal = config.BITRIX_WEBHOOK.split("/rest/")[0]
     print(f"Портал: {portal}")
 
+    if args and args[0] == "download":
+        limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 5
+        print(f"Режим: DOWNLOAD — реально качаем {limit} звонков и пишем в inbox. "
+              "Курсор НЕ двигаем.")
+        _download(bx, limit)
+        return
+
+    which = args or ["calls", "crm"]
+    print("Режим: SMOKE — без скачивания mp3, без записи в inbox/state. Только проверка доступа.")
+    if "calls" in which:
+        _check_calls(bx)
+    if "crm" in which:
+        for method, label in (
+            ("crm.deal.list", "Сделки"),
+            ("crm.contact.list", "Контакты"),
+            ("crm.company.list", "Компании"),
+        ):
+            _check_crm(bx, method, label)
+
+
+def main() -> None:
+    args = [a.lower() for a in sys.argv[1:]]
+    if not args:
+        args = ["calls", "crm"]
+
     try:
-        # Режим реального теста скачивания: `download [N]` (по умолчанию 5).
-        if args and args[0] == "download":
-            limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 5
-            print(f"Режим: DOWNLOAD — реально качаем {limit} звонков и пишем в inbox. "
-                  "Курсор НЕ двигаем.")
-            _download(bx, limit)
+        if args[0] == "onec":
+            _check_onec()
+            print("\n[OK] Smoke 1С завершён.")
             return
-
-        which = args or ["calls", "crm"]
-        print("Режим: SMOKE — без скачивания mp3, без записи в inbox/state. Только проверка доступа.")
-        if "calls" in which:
-            _check_calls(bx)
-        if "crm" in which:
-            for method, label in (
-                ("crm.deal.list", "Сделки"),
-                ("crm.contact.list", "Контакты"),
-                ("crm.company.list", "Компании"),
-            ):
-                _check_crm(bx, method, label)
-    except Exception as exc:  # noqa: BLE001 — для smoke важно показать причину целиком
-        print(f"\n[X] Ошибка обращения к Bitrix24: {exc}")
-        print("  Частые причины: неверный URL вебхука, не хватает прав scope "
-              "(telephony/crm/user/disk), или нет права «Статистика звонков — Просмотр».")
+        if args[0] == "all":
+            _run_bitrix(["calls", "crm"])
+            _check_onec()
+            print("\n[OK] Smoke Bitrix + 1С завершён.")
+            return
+        if args[0] in ("bitrix", "calls", "crm", "download") or (args and args[0] == "download"):
+            _run_bitrix(args if args[0] != "bitrix" else ["calls", "crm"])
+            print("\n[OK] Smoke-тест Bitrix прошёл. Связь и права в порядке — "
+                  "можно делать тестовую выгрузку (python -m connectors.run --test bitrix).")
+            return
+        print(f"[X] Неизвестный аргумент: {args[0]}. Используй: calls | crm | onec | all | download [N]")
         sys.exit(1)
-
-    print("\n[OK] Smoke-тест прошёл. Связь и права в порядке — можно делать полный прогон "
-          "(python -m connectors.run bitrix).")
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n[X] Ошибка: {exc}")
+        print("  Bitrix: неверный URL вебхука, не хватает прав scope "
+              "(telephony/crm/user/disk), или нет права «Статистика звонков — Просмотр».")
+        print("  1С: проверь ONEC_BASE_URL, логин/пароль и публикацию OData.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
