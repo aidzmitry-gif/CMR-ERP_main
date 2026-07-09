@@ -145,6 +145,70 @@ async def test_kpis(session, api):
     assert item["percent"] == 3
 
 
+async def test_kpis_operational_facts_from_db(session, api):
+    """Факт KPI за YYYY-MM берётся из CallLog/Payment/Deal, не только Activity."""
+    from datetime import datetime
+    from decimal import Decimal
+
+    from modules.finance.models import Payment
+    from modules.sales.models import CallLog, Deal, KpiTarget
+
+    session.add(KpiTarget(key="calls_all", title="Всего звонков", target=100, unit="count", icon="phone", tone="indigo", sort_order=1))
+    session.add(KpiTarget(key="ship_plan", title="Отгрузки", target=Decimal("1000"), unit="money", icon="ruble", tone="green", sort_order=2))
+    session.add(KpiTarget(key="won_count", title="Выигрыши", target=4, unit="count", icon="doc", tone="green", sort_order=3))
+    session.add(KpiTarget(key="won_sum", title="Сумма выигрышей", target=Decimal("1000"), unit="money", icon="ruble", tone="green", sort_order=4))
+    session.add(
+        CallLog(
+            call_id="c1",
+            direction="in",
+            status="ended",
+            started_at=datetime(2025, 12, 5, 10, 0, 0),
+            duration_sec=60,
+        )
+    )
+    session.add(
+        Payment(
+            ref="p1",
+            amount=Decimal("1500.50"),
+            status="paid",
+            kind="receivable",
+            paid_at=datetime(2025, 12, 10, 12, 0, 0),
+        )
+    )
+    session.add(
+        Deal(
+            number="T-1",
+            title="t",
+            counterparty="X",
+            amount=Decimal("200"),
+            stage="won",
+            created_at=datetime(2025, 12, 15, 9, 0, 0),
+            stage_changed_at=datetime(2025, 12, 15, 9, 0, 0),
+        )
+    )
+    session.add(
+        Deal(
+            number="T-2",
+            title="t2",
+            counterparty="Y",
+            amount=Decimal("300"),
+            stage="won",
+            created_at=datetime(2025, 11, 15, 9, 0, 0),
+            stage_changed_at=datetime(2025, 12, 18, 9, 0, 0),
+        )
+    )
+    await session.commit()
+
+    rows = (await api.get("/sales/kpis?period=2025-12")).json()
+    by_key = {r["key"]: r for r in rows}
+    assert by_key["calls_all"]["actual"] == 1.0
+    assert by_key["ship_plan"]["actual"] == 1500.5
+    assert by_key["payments_vat"]["actual"] == 1500.5
+    assert by_key["won_count"]["actual"] == 2.0
+    assert by_key["won_sum"]["actual"] == 500.0
+    assert by_key["new_deals_count"]["actual"] == 1.0
+
+
 async def test_kpis_period_scaling(session, api):
     from datetime import date
 
@@ -231,6 +295,21 @@ async def test_deal_contacts(api):
     contacts = (await api.get(f"/sales/deals/{deal['id']}/contacts")).json()
     primary = [c for c in contacts if c["is_primary"]]
     assert len(primary) == 1 and primary[0]["id"] == c2["id"]
+
+
+async def test_skus_for_picker_excludes_demo(session, api):
+    from core.domain.models import Sku
+
+    session.add(Sku(code="DEMO-1", title="Щелочная (демо)", unit="шт"))
+    session.add(Sku(code="REAL-1", title="Батарейка RADIAN AA", unit="шт"))
+    await session.commit()
+
+    all_skus = (await api.get("/sales/skus")).json()
+    picker = (await api.get("/sales/skus", params={"for_picker": "1"})).json()
+    assert any(s["code"] == "DEMO-1" for s in all_skus)
+    assert any(s["code"] == "REAL-1" for s in all_skus)
+    assert not any(s["code"] == "DEMO-1" for s in picker)
+    assert any(s["code"] == "REAL-1" for s in picker)
 
 
 async def test_deal_items_crud(session, api):
