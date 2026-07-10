@@ -59,11 +59,22 @@ def _run(args: list[str]) -> str:
         return f"(ошибка {' '.join(args)}: {e})"
 
 
+def _review_status() -> str:
+    """Строка о ночном ревью 23:59 из last-run.log (провал должен быть виден утром)."""
+    log = ROOT / "coordination" / ".daily-review-data" / "last-run.log"
+    try:
+        line = log.read_text(encoding="utf-8").strip().splitlines()[0]
+    except (OSError, IndexError):
+        return "⚠️ ночное ревью: лога нет (не запускалось или упало до записи)"
+    return ("🌙 " if " OK " in line else "⚠️ ") + f"ночное ревью: {line}"
+
+
 def _compose() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     fleet = _run(["fleet_dashboard.py"])
     readi = _run(["scripts/readiness.py"])
     body = (f"\U0001F4CA Дайджест {stamp}\n\n"
+            f"{_review_status()}\n\n"
             f"— Флот + CI —\n{fleet}\n\n"
             f"— Готовность модулей —\n{readi}")
     if len(body) > MAXLEN:

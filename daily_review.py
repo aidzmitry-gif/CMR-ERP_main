@@ -98,14 +98,19 @@ def main(argv: list[str] | None = None) -> int:
         f"$log = Join-Path {_psq(str(DATA_DIR))} 'last-run.log'\n"
         "Write-Host '=== ретроспектива дня (read-only): claude стартует ===' -ForegroundColor Cyan\n"
         f"{claude_call}\n"
-        # отчёт должен быть записан ЭТОЙ сессией: существующий вчерашний/ручной не считается
-        "if ((Test-Path $report) -and ((Get-Item $report).LastWriteTime -ge $started)) {\n"
-        "  \"$date OK - отчёт записан $(Get-Date -Format HH:mm)\" | Out-File $log -Encoding utf8\n"
+        # успех = сессия записала КАКОЙ-ЛИБО отчёт после старта (не только $date.md:
+        # сессия может пересечь полночь и назвать файл завтрашней датой)
+        f"$dir = Join-Path {_psq(str(ROOT))} 'coordination/daily-review'\n"
+        "$fresh = @(Get-ChildItem $dir -Filter '*.md' | Where-Object { $_.LastWriteTime -ge $started })\n"
+        "if ($fresh.Count -gt 0) {\n"
+        "  \"$date OK - отчёт записан: $($fresh[0].Name) $(Get-Date -Format HH:mm)\" | Out-File $log -Encoding utf8\n"
         "  Write-Host '=== готово: отчёт в coordination/daily-review/ ===' -ForegroundColor Yellow\n"
         "} else {\n"
         "  \"$date FAIL - claude завершился без отчёта (частая причина: headless-auth; проверь вручную: claude --print -- 'ping')\" | Out-File $log -Encoding utf8\n"
-        "  Write-Host 'FAIL: отчёт НЕ записан — смотри вывод выше; лог: coordination/.daily-review-data/last-run.log' -ForegroundColor Red\n"
-        "  Read-Host 'Enter — закрыть окно'\n"
+        "  Write-Host 'FAIL: отчёт НЕ записан — лог: coordination/.daily-review-data/last-run.log (утренний дайджест продублирует)' -ForegroundColor Red\n"
+        # НЕ Read-Host: задача unattended (23:59), блокировка копила бы окна ночь за ночью.
+        # Видимость провала — last-run.log + строка в утреннем tg-дайджесте; окно живёт 5 мин.
+        "  Start-Sleep -Seconds 300\n"
         "}\n",
         encoding="utf-8-sig",
     )
