@@ -72,14 +72,16 @@ test.describe("deals board", () => {
 
     // Выбираем «Высокий» → кнопка получает bg-accent-soft
     await highBtn.click();
-    await expect(highBtn).toHaveClass(/bg-accent-soft/);
+    await expect(page).toHaveURL(/priority=/);
+    expect(new URL(page.url()).searchParams.get("priority")).toBe("Высокий");
 
     // Сбрасываем в «Все» → кнопка «Высокий» теряет активный класс
+    await page.getByRole("button", { name: "Фильтры" }).click();
     await page.getByRole("button", { name: "Все", exact: true }).click();
-    await expect(highBtn).not.toHaveClass(/bg-accent-soft/);
+    await expect(page).not.toHaveURL(/priority=/);
 
     // Тогл «Только висяки»: неактивен (border-line) → активен (border-amber-400) → неактивен
-    const stuckBtn = page.getByRole("button", { name: "Только висяки" });
+    const stuckBtn = page.getByRole("button", { name: "Висяки" });
     await expect(stuckBtn).not.toHaveClass(/border-amber-400/);
     await stuckBtn.click();
     await expect(stuckBtn).toHaveClass(/border-amber-400/);
@@ -106,12 +108,13 @@ test.describe("deals board", () => {
 
     // Находим кнопку второй воронки (FunnelTabs рендерит их как <button> с title)
     const second = funnels[1];
-    const tabBtn = page.getByRole("button", { name: second.title });
-    await expect(tabBtn).toBeVisible();
-    await tabBtn.click();
+    const funnelSelect = page.getByRole("combobox", { name: "Воронка" });
+    await expect(funnelSelect).toBeVisible();
+    await funnelSelect.selectOption(second.code);
 
     // URL обновляется с параметром funnel= (router.replace в FunnelTabs)
-    await page.waitForURL(`**?funnel=${second.code}`);
+    await expect(page).toHaveURL(/funnel=/);
+    expect(new URL(page.url()).searchParams.get("funnel")).toBe(second.code);
     // SSR-страница перезагружает доску (key={activeFunnel} в page.tsx меняет стейт)
     await expect(page.locator('[data-testid^="stage-column-"]').first()).toBeVisible();
   });
