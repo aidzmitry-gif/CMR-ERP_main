@@ -13,6 +13,7 @@ import {
   expressLead,
   fetchLeadManagers,
   fetchLeadsClient,
+  fetchLeadSourceStats,
   LeadDuplicateError,
   type LeadInput,
   qualifyLead,
@@ -23,7 +24,7 @@ import {
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
-import type { Lead, LeadStatus, Manager } from "@/lib/types";
+import type { Lead, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
 
 // Порог балла для кнопки «⚡ Экспресс» на карточке «Новые» — совпадает с QUALIFY_THRESHOLD
 // бэка (modules/leads/leads.py): показываем экспресс только для уже явно целевых лидов,
@@ -343,6 +344,73 @@ function ExpressPopover({
   );
 }
 
+// Отчёт качества источников (Цикл 4): источник/кампания → лиды, %целевых, %в сделку,
+// ср. балл. Лучшая строка по конверсии — позитивный токен; худшая (при >=5 лидах, чтобы
+// не подсвечивать единичный отклонённый лид как «мусорный источник») — негативный.
+function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl bg-surface p-4 text-center text-xs text-muted shadow-card">Загрузка…</div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl bg-surface p-4 text-center text-xs text-muted shadow-card">
+        Нет данных за последние 30 дней
+      </div>
+    );
+  }
+  const best = rows.reduce((b, r) => (r.conversionPct > b.conversionPct ? r : b), rows[0]);
+  const eligible = rows.filter((r) => r.total >= 5);
+  const worst = eligible.length
+    ? eligible.reduce((w, r) => (r.conversionPct < w.conversionPct ? r : w), eligible[0])
+    : null;
+
+  return (
+    <div className="overflow-x-auto rounded-xl bg-surface p-3 shadow-card">
+      <table className="w-full min-w-[520px] text-left text-xs">
+        <thead>
+          <tr className="text-muted">
+            <th className="px-2 py-1 font-semibold">Источник / кампания</th>
+            <th className="px-2 py-1 text-right font-semibold">Лиды</th>
+            <th className="px-2 py-1 text-right font-semibold">% целевых</th>
+            <th className="px-2 py-1 text-right font-semibold">% в сделку</th>
+            <th className="px-2 py-1 text-right font-semibold">Ср. балл</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const isBest = r === best;
+            const isWorst = worst != null && r === worst && !isBest;
+            return (
+              <tr
+                key={`${r.source}·${r.utmCampaign}`}
+                className={clsx("border-t border-line", isBest && "bg-green-50", isWorst && "bg-red-50")}
+              >
+                <td className="px-2 py-1.5 font-medium text-ink">
+                  {SOURCE_LABELS[r.source] ?? r.source}
+                  {r.utmCampaign && <span className="ml-1 font-normal text-faint">· {r.utmCampaign}</span>}
+                </td>
+                <td className="px-2 py-1.5 text-right text-ink">{r.total}</td>
+                <td className="px-2 py-1.5 text-right text-ink">{r.targetPct}%</td>
+                <td
+                  className={clsx(
+                    "px-2 py-1.5 text-right font-semibold",
+                    isBest ? "text-green-700" : isWorst ? "text-red-700" : "text-ink",
+                  )}
+                >
+                  {r.conversionPct}%
+                </td>
+                <td className="px-2 py-1.5 text-right text-muted">{r.avgScore}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function LeadCard({
   lead,
   selected,
@@ -424,6 +492,14 @@ function LeadCard({
         {lead.company || lead.name || "Лид без имени"}
       </div>
       {lead.product && <div className="mt-0.5 text-xs text-muted">{lead.product}</div>}
+      {lead.utmCampaign && (
+        <div
+          title={`Кампания: ${lead.utmCampaign}`}
+          className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted"
+        >
+          📣 {lead.utmCampaign}
+        </div>
+      )}
       {(lead.itemsCount ?? 0) > 0 && (
         <div
           className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-money-soft px-1.5 py-0.5 text-[11px] font-semibold text-money"
@@ -595,6 +671,21 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   // callPopupLead = открыт screen-pop звонка по этому лиду
   //   (см. memory sales-call-window-reserve: real telephony — SALES-50-out, тут MVP UI).
   const [callPopupLead, setCallPopupLead] = useState<Lead | null>(null);
+  // Панель «Качество источников» (Цикл 4): данные грузятся лениво при первом открытии,
+  // не на маунте воркспейса — отчёт нужен не всегда, лишний запрос на каждый заход не нужен.
+  const [sourceStatsOpen, setSourceStatsOpen] = useState(false);
+  const [sourceStats, setSourceStats] = useState<LeadSourceStat[]>([]);
+  const [sourceStatsLoading, setSourceStatsLoading] = useState(false);
+  const [sourceStatsLoaded, setSourceStatsLoaded] = useState(false);
+
+  async function toggleSourceStats() {
+    setSourceStatsOpen((prev) => !prev);
+    if (sourceStatsLoaded) return;
+    setSourceStatsLoading(true);
+    setSourceStats(await fetchLeadSourceStats());
+    setSourceStatsLoading(false);
+    setSourceStatsLoaded(true);
+  }
 
   const selected = leads.find((l) => l.id === selectedId) ?? null;
 
@@ -829,7 +920,20 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               <span className="ml-auto text-xs font-semibold text-muted">
                 Всего <b className="text-ink">{total}</b>
               </span>
+              <button
+                type="button"
+                onClick={toggleSourceStats}
+                className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-muted hover:bg-sunken"
+              >
+                {sourceStatsOpen ? "Скрыть" : "📊 Качество источников"}
+              </button>
             </div>
+
+            {sourceStatsOpen && (
+              <div className="mb-5">
+                <SourceStatsPanel rows={sourceStats} loading={sourceStatsLoading} />
+              </div>
+            )}
           </>
         )}
 

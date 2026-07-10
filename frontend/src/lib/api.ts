@@ -1,7 +1,7 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
@@ -1137,6 +1137,8 @@ interface ApiLead {
   first_action_at: string | null;
   items_count?: number;
   items_total?: number;
+  utm_source?: string;
+  utm_campaign?: string;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1164,6 +1166,8 @@ function mapLead(l: ApiLead): Lead {
     firstActionAt: l.first_action_at,
     itemsCount: l.items_count ?? 0,
     itemsTotal: l.items_total ?? 0,
+    utmSource: l.utm_source,
+    utmCampaign: l.utm_campaign,
   };
 }
 
@@ -1346,6 +1350,40 @@ export async function fetchLeadManagers(): Promise<Manager[]> {
     const res = await fetch(`/api/leads/managers`, { cache: "no-store" });
     if (!res.ok) return [];
     return (await res.json()) as Manager[];
+  } catch {
+    return [];
+  }
+}
+
+interface ApiLeadSourceStat {
+  source: string;
+  utm_campaign: string;
+  total: number;
+  target: number;
+  converted: number;
+  rejected: number;
+  avg_score: number;
+  target_pct: number;
+  conversion_pct: number;
+}
+
+/** Отчёт качества источников/кампаний (Цикл 4): GET /leads/stats/sources — лениво, при открытии панели. */
+export async function fetchLeadSourceStats(days?: number): Promise<LeadSourceStat[]> {
+  try {
+    const qs = days ? `?days=${days}` : "";
+    const res = await fetch(`/api/leads/stats/sources${qs}`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return ((await res.json()) as ApiLeadSourceStat[]).map((s) => ({
+      source: s.source,
+      utmCampaign: s.utm_campaign,
+      total: s.total,
+      target: s.target,
+      converted: s.converted,
+      rejected: s.rejected,
+      avgScore: s.avg_score,
+      targetPct: s.target_pct,
+      conversionPct: s.conversion_pct,
+    }));
   } catch {
     return [];
   }

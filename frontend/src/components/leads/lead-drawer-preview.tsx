@@ -150,6 +150,13 @@ export function LeadDrawerPreview({
   // Закрытие каталога = сохранить корзину (отмеченные позиции) на лид (replace-all).
   async function closePickerAndSave() {
     if (lead == null) return setCatalogOpen(false);
+    // Каталог закрыли ДО того, как гидрация успела восстановить сохранённое КП
+    // (справочник ещё грузился) — replace-all пустой корзиной затёр бы КП. Просто закрыть.
+    if (savedItems.length > 0 && !hydratedRef.current) {
+      setCatalogOpen(false);
+      picker.reset();
+      return;
+    }
     const items: LeadCartItem[] = picker.pickedRows.map((r) => {
       const base = picker.stock[r.code]?.price;
       const price = r.priceOverride ?? base ?? 0;
@@ -181,8 +188,12 @@ export function LeadDrawerPreview({
     setChain({ deal: "ok", items: "run", invoice: "pending", dealId: conv.deal_id });
 
     const { ok, total } = await commitLeadItemsToDeal(dealId, counterparty, savedItems);
-    if (total > 0 && ok === 0) {
-      setChain({ deal: "ok", items: "err", invoice: "pending", dealId: conv.deal_id, error: "Позиции не перенеслись в сделку (сделка создана)" });
+    if (total > 0 && ok < total) {
+      // Любая непереехавшая позиция — стоп: счёт по неполной сделке хуже, чем нет счёта.
+      setChain({
+        deal: "ok", items: "err", invoice: "pending", dealId: conv.deal_id,
+        error: `Перенеслись ${ok} из ${total} позиций — счёт не выставлен, проверь сделку`,
+      });
       return;
     }
     setChain({ deal: "ok", items: "ok", invoice: "run", dealId: conv.deal_id });

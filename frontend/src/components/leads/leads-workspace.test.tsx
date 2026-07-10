@@ -36,6 +36,8 @@ vi.mock("@/lib/api", () => ({
     { name: "Петрова А.С.", regions: ["брест"], products: ["арматура"], load: 0 },
     { name: "Сидоров С.С.", regions: ["минск", "минская"], products: ["прокат"], load: 5 },
   ]),
+  // Панель «Качество источников» (Цикл 4) — грузится лениво при открытии.
+  fetchLeadSourceStats: vi.fn().mockResolvedValue([]),
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";
@@ -466,5 +468,31 @@ describe("LeadsWorkspace", () => {
     );
     const tile = screen.getByText("Ждут реакции >15м").closest("div")?.parentElement;
     expect(tile).toHaveTextContent("1");
+  });
+
+  it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {
+    (api.fetchLeadSourceStats as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        source: "site", utmCampaign: "leto-2026", total: 10, target: 8, converted: 5,
+        rejected: 1, avgScore: 72, targetPct: 80, conversionPct: 50,
+      },
+      {
+        source: "phone", utmCampaign: "", total: 6, target: 1, converted: 0,
+        rejected: 4, avgScore: 20, targetPct: 16.7, conversionPct: 0,
+      },
+    ]);
+
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    expect(api.fetchLeadSourceStats).not.toHaveBeenCalled(); // не на маунте
+
+    fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
+    expect(await screen.findByText(/leto-2026/)).toBeInTheDocument();
+    expect(api.fetchLeadSourceStats).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("16.7%")).toBeInTheDocument(); // targetPct строки «Телефон»
+
+    // повторное открытие не дёргает API заново (данные уже загружены)
+    fireEvent.click(screen.getByRole("button", { name: /Скрыть/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
+    expect(api.fetchLeadSourceStats).toHaveBeenCalledTimes(1);
   });
 });

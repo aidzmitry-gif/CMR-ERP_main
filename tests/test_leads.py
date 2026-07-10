@@ -650,6 +650,141 @@ async def test_lead_converted_event_carries_items(session, api):
     assert items[0]["qty"] == 2 and items[0]["price"] == 300 and items[0]["discount_pct"] == 5
 
 
+# --- Цикл 4: UTM-атрибуция лида → отчёт качества источников + маркетинг ---
+
+
+async def test_web_intake_utm_lands_on_lead_and_event(session, api, services):
+    """Веб-интейк с UTM → лид несёт utm_*, событие leads.lead.received тоже (для marketing)."""
+    from core.services.eventbus import EventContext
+    from modules.leads.models import Lead
+
+    await api.post(
+        "/integrations/web/lead",
+        json={
+            "company": "ООО ЮТМ", "phone": "+375291110000",
+            "utm_source": "google", "utm_medium": "cpc", "utm_campaign": "leto-2026",
+        },
+    )
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    lead = (await session.execute(select(Lead).where(Lead.company == "ООО ЮТМ"))).scalars().first()
+    assert lead is not None
+    assert lead.utm_source == "google" and lead.utm_medium == "cpc" and lead.utm_campaign == "leto-2026"
+
+    ev = next(
+        e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+        if e.event_type == "leads.lead.received" and e.payload.get("lead_id") == lead.id
+    )
+    assert ev.payload["utm_source"] == "google"
+    assert ev.payload["utm_campaign"] == "leto-2026"
+
+
+async def test_lead_create_accepts_utm_fields(session, api):
+    """POST /leads с utm-полями — сохраняются на лиде и отдаются в LeadOut."""
+    r = await api.post(
+        "/leads",
+        json={
+            "source": "site", "company": "ООО Прямой",
+            "utm_source": "facebook", "utm_medium": "social", "utm_campaign": "fb-promo",
+        },
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["utm_source"] == "facebook"
+    assert body["utm_campaign"] == "fb-promo"
+
+
+async def test_source_stats_aggregates_by_source_and_campaign(session, api):
+    """GET /leads/stats/sources — агрегат (source, utm_campaign): total/target/converted/rejected/%."""
+    # 2 лида кампании A (site): один целевой+отклонён, другой целевой+в работе
+    lead1 = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Стат1", "phone": "+375291230001",
+                "email": "s1@stat.by", "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 10 т, пришлите цену и сроки.",
+                "utm_campaign": "camp-a",
+            },
+        )
+    ).json()
+    await api.post(f"/leads/{lead1['id']}/qualify")
+    await api.post(f"/leads/{lead1['id']}/reject", json={"reason": "нет бюджета"})
+
+    lead2 = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Стат2", "phone": "+375291230002",
+                "email": "s2@stat.by", "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 12 т, пришлите цену и сроки.",
+                "utm_campaign": "camp-a",
+            },
+        )
+    ).json()
+    await api.post(f"/leads/{lead2['id']}/qualify")
+
+    # 1 лид без кампании (нецелевой, phone) — отдельная группа (source=phone, utm_campaign="")
+    await api.post("/leads", json={"source": "phone"})
+
+    r = await api.get("/leads/stats/sources")
+    assert r.status_code == 200
+    rows = r.json()
+
+    site_a = next(row for row in rows if row["source"] == "site" and row["utm_campaign"] == "camp-a")
+    assert site_a["total"] == 2
+    assert site_a["target"] == 2  # оба лида с телефоном+email+объёмом — целевые
+    assert site_a["converted"] == 0
+    assert site_a["rejected"] == 1
+    assert site_a["target_pct"] == 100.0
+    assert site_a["conversion_pct"] == 0.0
+
+    phone_none = next(row for row in rows if row["source"] == "phone" and row["utm_campaign"] == "")
+    assert phone_none["total"] == 1
+
+    # сортировка по total desc
+    assert rows[0]["total"] >= rows[-1]["total"]
+
+
+async def test_marketing_attribution_end_to_end_via_web_intake(session, api, services):
+    """Веб-интейк с utm_campaign существующей кампании → relay → маркетинг атрибутирует лид.
+
+    Чинили разрыв контракта: marketing подписан на leads.lead.received (было легаси
+    sales.lead.received) — событие теперь долетает, on_lead_received инкрементирует
+    Campaign.leads по совпадению utm_campaign.
+    """
+    from core.services.eventbus import EventContext
+
+    campaign = (
+        await api.post(
+            "/marketing/campaigns",
+            json={
+                "name": "E2E кампания", "channel": "seo", "budget": 100.0, "leads": 0,
+                "utm_source": "google", "utm_medium": "cpc", "utm_campaign": "e2e-camp",
+                "goal": "лиды",
+            },
+        )
+    ).json()
+
+    await api.post(
+        "/integrations/web/lead",
+        json={
+            "company": "ООО Атрибуция", "phone": "+375291230099",
+            "utm_source": "google", "utm_medium": "cpc", "utm_campaign": "e2e-camp",
+        },
+    )
+    # 2 прогона relay: intake.lead.received → leads создаёт лид (+эмитит leads.lead.received),
+    # затем leads.lead.received → marketing атрибутирует (тот же паттерн, что в test_lead_convert_creates_deal).
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    attr = (await api.get("/marketing/campaigns/attribution")).json()
+    found = next(c for c in attr if c["id"] == campaign["id"])
+    assert found["leads"] == 1
+
+
 # --- Юнит: AI-обоснование квалификации (AI включён, mock-режим) ---
 
 

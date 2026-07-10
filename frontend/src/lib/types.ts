@@ -265,6 +265,21 @@ export interface Lead {
   firstActionAt?: string | null; // ISO datetime первого действия лидоруба (qualify/route/reject), или null пока не тронут
   itemsCount?: number; // Цикл 3: число позиций подобранного КП на лиде
   itemsTotal?: number; // Цикл 3: сумма КП (qty*price), BYN
+  utmSource?: string; // Цикл 4: UTM-источник рекламы, приведшей лид
+  utmCampaign?: string; // Цикл 4: UTM-кампания — чип на карточке лида
+}
+
+/** Отчёт качества источника/кампании (Цикл 4) — GET /leads/stats/sources. */
+export interface LeadSourceStat {
+  source: string;
+  utmCampaign: string;
+  total: number;
+  target: number;
+  converted: number;
+  rejected: number;
+  avgScore: number;
+  targetPct: number;
+  conversionPct: number;
 }
 
 export interface LeadAttachment {
