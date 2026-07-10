@@ -55,6 +55,11 @@ const lead: Lead = {
   nextStepNote: "",
 };
 
+// naive UTC ISO (как отдаёт бэкенд, без "Z") — N минут назад, для чипа ожидания SLA.
+function isoMinutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60000).toISOString().replace("Z", "");
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("LeadsWorkspace", () => {
@@ -293,5 +298,37 @@ describe("LeadsWorkspace", () => {
         }),
       ),
     );
+  });
+
+  it("чип ожидания на карточке «Новые» подсвечивается при задержке дольше 15 минут", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, createdAt: isoMinutesAgo(20) },
+          { ...lead, id: 2, createdAt: isoMinutesAgo(5) },
+        ]}
+      />,
+    );
+    const chips = screen.getAllByTitle("Ожидает реакции с момента приёма");
+    const overdue = chips.find((c) => c.textContent?.includes("20"));
+    const fresh = chips.find((c) => c.textContent?.includes("5"));
+    expect(overdue).toBeDefined();
+    expect(overdue?.className).toMatch(/red/);
+    expect(fresh).toBeDefined();
+    expect(fresh?.className).not.toMatch(/red/);
+  });
+
+  it("KPI «Ждут реакции >15м» считает только новые лиды старше 15 минут", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, createdAt: isoMinutesAgo(20) }, // new, просрочен
+          { ...lead, id: 2, createdAt: isoMinutesAgo(5) }, // new, свежий
+          { ...lead, id: 3, status: "qualified", createdAt: isoMinutesAgo(30) }, // не new — не считается
+        ]}
+      />,
+    );
+    const tile = screen.getByText("Ждут реакции >15м").closest("div")?.parentElement;
+    expect(tile).toHaveTextContent("1");
   });
 });

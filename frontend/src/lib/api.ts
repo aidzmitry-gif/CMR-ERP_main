@@ -1133,6 +1133,8 @@ interface ApiLead {
   reject_reason: string;
   next_step_at: string | null;
   next_step_note: string;
+  created_at: string;
+  first_action_at: string | null;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1156,6 +1158,8 @@ function mapLead(l: ApiLead): Lead {
     rejectReason: l.reject_reason,
     nextStepAt: l.next_step_at,
     nextStepNote: l.next_step_note,
+    createdAt: l.created_at,
+    firstActionAt: l.first_action_at,
   };
 }
 
@@ -1202,19 +1206,31 @@ export interface LeadInput {
   message?: string;
 }
 
-/** Принять лид из канала (клиент, через /api). */
+/** Дубль по телефону/e-mail (409 от POST /leads) — уже есть открытый лид с этим контактом. */
+export class LeadDuplicateError extends Error {
+  constructor(public duplicateOf: number) {
+    super(`Дубль лида #${duplicateOf}`);
+  }
+}
+
+/** Принять лид из канала (клиент, через /api). Кидает LeadDuplicateError на 409-дубль. */
 export async function createLead(input: LeadInput): Promise<Lead | null> {
+  let res: Response;
   try {
-    const res = await fetch("/api/leads", {
+    res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    if (!res.ok) return null;
-    return mapLead((await res.json()) as ApiLead);
   } catch {
     return null;
   }
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: { duplicate_of?: number } };
+    throw new LeadDuplicateError(body.detail?.duplicate_of ?? 0);
+  }
+  if (!res.ok) return null;
+  return mapLead((await res.json()) as ApiLead);
 }
 
 export interface LeadQualifyResult {

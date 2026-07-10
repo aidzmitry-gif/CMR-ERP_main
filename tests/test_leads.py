@@ -347,6 +347,91 @@ async def test_lead_convert_creates_deal(session, api, services):
     assert "leads.lead.converted" in types and "sales.deal.created" in types
 
 
+async def test_lead_auto_scored_on_intake(session, api):
+    """Цикл 1: авто-скоринг на входе — балл проставлен сразу, статус остаётся new."""
+    r = await api.post(
+        "/leads",
+        json={
+            "source": "site", "company": "ООО АвтоСкор", "phone": "+375291112200",
+            "email": "auto@score.by", "product": "лист",
+        },
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["status"] == "new"
+    assert body["score"] > 0
+    assert body["qualification"] in {"target", "non-target"}
+    assert body["reason"]
+
+
+async def test_lead_create_rejects_phone_duplicate(session, api):
+    """Цикл 1: дедуп на ручном интейке — открытый дубль по телефону → 409 с id."""
+    first = (
+        await api.post("/leads", json={"source": "phone", "phone": "+375291112233"})
+    ).json()
+
+    r = await api.post("/leads", json={"source": "site", "phone": "375 (29) 111-22-33"})
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["duplicate_of"] == first["id"]
+
+    # терминальный (rejected) дубль больше не мешает
+    await api.post(f"/leads/{first['id']}/reject", json={"reason": "дубль"})
+    r2 = await api.post("/leads", json={"source": "site", "phone": "375 (29) 111-22-33"})
+    assert r2.status_code == 201
+
+
+async def test_lead_intake_dedup_appends_message_instead_of_new_lead(session, api, services):
+    """Повторное обращение (веб-форма) с тем же телефоном дописывается к открытому лиду."""
+    from sqlalchemy import select
+
+    from core.services.eventbus import EventContext
+    from modules.leads.models import Lead
+
+    await api.post(
+        "/integrations/web/lead",
+        json={"phone": "+375297778811", "message": "Первое обращение"},
+    )
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    leads_after_first = (await session.execute(select(Lead))).scalars().all()
+    assert len(leads_after_first) == 1
+    lead_id = leads_after_first[0].id
+
+    await api.post(
+        "/integrations/web/lead",
+        json={"phone": "+375297778811", "message": "Второе обращение, уже срочно"},
+    )
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    leads_after_second = (await session.execute(select(Lead))).scalars().all()
+    assert len(leads_after_second) == 1  # дубль не создан
+    dup = leads_after_second[0]
+    assert dup.id == lead_id
+    assert "Первое обращение" in dup.message
+    assert "Второе обращение, уже срочно" in dup.message
+
+
+async def test_lead_first_action_at_set_once(session, api):
+    """SLA первой реакции: NULL после создания, проставлен по первому действию, не перезаписан вторым."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "region": "Минск", "product": "лист"})
+    ).json()
+    assert lead["first_action_at"] is None
+
+    qualified = (await api.post(f"/leads/{lead['id']}/qualify")).json()
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["first_action_at"] is not None
+    first_stamp = got["first_action_at"]
+    assert qualified["status"] == "qualified"
+
+    await api.post(f"/leads/{lead['id']}/route")
+    got2 = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got2["first_action_at"] == first_stamp  # второе действие не переставляет метку
+
+
 async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
     from core.domain.models import Counterparty
 

@@ -11,6 +11,7 @@ import {
   convertLead,
   createLead,
   fetchLeadsClient,
+  LeadDuplicateError,
   type LeadInput,
   qualifyLead,
   rejectLead,
@@ -152,6 +153,36 @@ function ScoreBadge({ lead }: { lead: Lead }) {
   );
 }
 
+// Чип ожидания реакции (SLA первой реакции, Цикл 1): минуты с приёма лида,
+// часы — когда ожидание затянулось (>90 мин); >15 мин подсвечивается как задержка.
+function waitingMinutes(createdAt?: string): number | null {
+  if (!createdAt) return null;
+  const created = new Date(createdAt.endsWith("Z") ? createdAt : `${createdAt}Z`).getTime();
+  if (Number.isNaN(created)) return null;
+  return Math.max(0, Math.round((Date.now() - created) / 60000));
+}
+
+function formatWait(minutes: number): string {
+  return minutes > 90 ? `${Math.round(minutes / 60)} ч` : `${minutes} мин`;
+}
+
+function WaitChip({ createdAt }: { createdAt?: string }) {
+  const minutes = waitingMinutes(createdAt);
+  if (minutes == null) return null;
+  const overdue = minutes > 15;
+  return (
+    <span
+      title="Ожидает реакции с момента приёма"
+      className={clsx(
+        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+        overdue ? "bg-red-100 text-red-700" : "bg-sunken text-muted",
+      )}
+    >
+      ⏱ {formatWait(minutes)}
+    </span>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -247,7 +278,10 @@ function LeadCard({
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold tracking-wide text-faint">№ ЛИД-{lead.id}</span>
-        <StatusBadge status={lead.status} />
+        <div className="flex items-center gap-1.5">
+          {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
+          <StatusBadge status={lead.status} />
+        </div>
       </div>
       <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted">
         <ChannelIcon source={lead.source} size={18} />
@@ -489,12 +523,24 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   }
 
   async function onCreate(input: LeadInput): Promise<boolean> {
-    const created = await createLead(input);
-    if (!created) return false;
-    setLeads((prev) => [created, ...prev]);
-    setSelectedId(created.id);
-    setModalOpen(false);
-    return true;
+    try {
+      const created = await createLead(input);
+      if (!created) return false;
+      setLeads((prev) => [created, ...prev]);
+      setSelectedId(created.id);
+      setModalOpen(false);
+      return true;
+    } catch (e) {
+      if (e instanceof LeadDuplicateError) {
+        // дубль по телефону/e-mail — не плодим новый, открываем существующий лид
+        setModalOpen(false);
+        setSelectedId(e.duplicateOf);
+        setNote(`Дубль лида #${e.duplicateOf} — уже есть в работе, открыт в панели`);
+        window.setTimeout(() => setNote(""), 4000);
+        return true;
+      }
+      return false;
+    }
   }
 
   const pending = leads.filter((l) => l.status === "new").length;
@@ -517,6 +563,22 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
   const channelCounts: Record<string, number> = {};
   for (const l of leads) channelCounts[l.source] = (channelCounts[l.source] ?? 0) + 1;
+
+  // SLA первой реакции (Цикл 1): сколько новых лидов ждут дольше 15 мин + средняя
+  // скорость реакции лидоруба сегодня (по лидам с уже проставленным first_action_at).
+  const waitingOver15 = byStatus.new.filter((l) => (waitingMinutes(l.createdAt) ?? 0) > 15).length;
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const reactionTimesToday = leads
+    .filter((l) => l.createdAt && l.firstActionAt?.startsWith(todayUtc))
+    .map((l) =>
+      Math.round(
+        (new Date(`${l.firstActionAt}Z`).getTime() - new Date(`${l.createdAt}Z`).getTime()) / 60000,
+      ),
+    )
+    .filter((m) => m >= 0);
+  const avgReactionToday = reactionTimesToday.length
+    ? Math.round(reactionTimesToday.reduce((a, b) => a + b, 0) / reactionTimesToday.length)
+    : null;
 
   return (
     <>
@@ -563,6 +625,10 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               <KpiTile label="Новых" value={byStatus.new.length} />
               <KpiTile label="Целевых (скоринг)" value={targetCount} />
               <KpiTile label="Конверсия в сделку" value={`${conversion}%`} />
+              <KpiTile label="Ждут реакции >15м" value={waitingOver15} />
+              {avgReactionToday != null && (
+                <KpiTile label="Реакция сегодня" value={`~${avgReactionToday} мин`} />
+              )}
             </div>
 
             {/* Каналы — распределение текущих лидов */}

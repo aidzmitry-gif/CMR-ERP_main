@@ -261,6 +261,8 @@ export interface Lead {
   rejectReason: string; // "" | одна из REJECT_REASONS — причина отказа (терминальный статус)
   nextStepAt: string | null; // ISO datetime следующего шага продавцу, или null
   nextStepNote: string; // заметка к следующему шагу
+  createdAt?: string; // ISO datetime приёма лида — для чипа ожидания реакции
+  firstActionAt?: string | null; // ISO datetime первого действия лидоруба (qualify/route/reject), или null пока не тронут
 }
 
 export interface LeadAttachment {
