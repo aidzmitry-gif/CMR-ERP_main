@@ -83,6 +83,10 @@ jobs:
           node-version: "20"
       - name: Install deps
         run: npm install
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+      - name: Lint (eslint, храповик — потолок не поднимать, только опускать)
+        run: npm run lint -- --max-warnings 47
       - name: Tests with coverage (Vitest + RTL)
         run: npm run test:coverage
       - name: Coverage summary
