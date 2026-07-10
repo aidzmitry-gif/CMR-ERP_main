@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
 import { fetchLeadManagers } from "@/lib/api";
+import { NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
 import { REJECT_REASONS } from "@/lib/types";
 import type { Lead, Manager } from "@/lib/types";
 
@@ -248,6 +249,21 @@ export function LeadDrawerPreview({
                   <div className="mt-3">
                     <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                       Следующий шаг продавцу
+                    </div>
+                    <div className="mb-1.5 flex flex-wrap gap-1">
+                      {NEXT_STEP_PRESETS.map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => {
+                            setNextStepAt(p.at());
+                            setNextStepNote(p.note);
+                          }}
+                          className="rounded-full border border-line px-2 py-1 text-[11px] font-medium text-muted hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
                     </div>
                     <input
                       type="datetime-local"

@@ -1287,6 +1287,36 @@ export async function routeLead(
   }
 }
 
+/** Экспресс-передача лида (Цикл 2): квалификация + раздача + следующий шаг одним вызовом.
+ *  `opts` — как у routeLead (assignedTo/nextStepAt/nextStepNote), все опциональны.
+ *  Бэк вернёт 422, если пересчитанный балл оказался нецелевым (detail — текст для UI),
+ *  409 — если лид не в new/qualified. */
+export async function expressLead(
+  id: number,
+  opts?: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+): Promise<Lead | { error: string } | null> {
+  try {
+    const init: RequestInit = { method: "POST" };
+    const body: Record<string, string> = {};
+    if (opts?.assignedTo) body.assigned_to = opts.assignedTo;
+    if (opts?.nextStepAt) body.next_step_at = opts.nextStepAt;
+    if (opts?.nextStepNote) body.next_step_note = opts.nextStepNote;
+    if (Object.keys(body).length > 0) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(body);
+    }
+    const res = await fetch(`/api/leads/${id}/express`, init);
+    if (res.status === 422) {
+      const err = (await res.json().catch(() => ({}))) as { detail?: string };
+      return { error: err.detail ?? "Экспресс недоступен" };
+    }
+    if (!res.ok) return null;
+    return mapLead((await res.json()) as ApiLead);
+  } catch {
+    return null;
+  }
+}
+
 /** Отклонить лид (терминальный статус, как converted). Причина — одна из REJECT_REASONS
  *  (иначе бэк вернёт 422). 409, если лид уже converted/rejected. */
 export async function rejectLead(

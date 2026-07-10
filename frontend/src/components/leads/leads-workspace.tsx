@@ -10,6 +10,8 @@ import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import {
   convertLead,
   createLead,
+  expressLead,
+  fetchLeadManagers,
   fetchLeadsClient,
   LeadDuplicateError,
   type LeadInput,
@@ -19,7 +21,13 @@ import {
   submitEmailLead,
   submitWebLead,
 } from "@/lib/api";
-import type { Lead, LeadStatus } from "@/lib/types";
+import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
+import type { Lead, LeadStatus, Manager } from "@/lib/types";
+
+// Порог балла для кнопки «⚡ Экспресс» на карточке «Новые» — совпадает с QUALIFY_THRESHOLD
+// бэка (modules/leads/leads.py): показываем экспресс только для уже явно целевых лидов,
+// чтобы не ловить 422 «не целевой» на кнопке.
+const EXPRESS_SCORE_THRESHOLD = 50;
 
 const SOURCES = ["site", "telegram", "whatsapp", "email", "phone", "tender"];
 const SOURCE_LABELS: Record<string, string> = {
@@ -221,26 +229,148 @@ const NEXT_ACTION: Record<LeadStatus, { label: string; key: "qualify" | "route" 
   rejected: null,
 };
 
+// Поповер экспресс-передачи (Цикл 2): менеджер (авто/выбор) + пресет следующего шага +
+// «Передать» — 2 клика с карточки вместо qualify→route по отдельности. Открывается
+// прямо у карточки «Новые» (score >= EXPRESS_SCORE_THRESHOLD), без захода в drawer.
+function ExpressPopover({
+  leadId,
+  onClose,
+  onExpress,
+}: {
+  leadId: number;
+  onClose: () => void;
+  onExpress: (
+    id: number,
+    opts: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+  ) => Promise<string | null>;
+}) {
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [managersLoading, setManagersLoading] = useState(true);
+  const [selectedManager, setSelectedManager] = useState("");
+  const [presetKey, setPresetKey] = useState(DEFAULT_NEXT_STEP_PRESET_KEY);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLeadManagers().then((list) => {
+      if (!cancelled) {
+        setManagers(list);
+        setManagersLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const preset = NEXT_STEP_PRESETS.find((p) => p.key === presetKey) ?? NEXT_STEP_PRESETS[0];
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    const at = preset.at();
+    const err = await onExpress(leadId, {
+      assignedTo: selectedManager || undefined,
+      nextStepAt: at || undefined,
+      nextStepNote: at ? preset.note : undefined,
+    });
+    setBusy(false);
+    if (err) setError(err);
+  }
+
+  return (
+    <div
+      data-card-action
+      onClick={(e) => e.stopPropagation()}
+      className="absolute inset-x-0 top-full z-30 mt-1.5 rounded-xl border border-line bg-surface p-3 shadow-pop"
+    >
+      <div className="mb-2">
+        <div className="mb-1 text-[11px] font-semibold text-muted">Кому</div>
+        <select
+          value={selectedManager}
+          onChange={(e) => setSelectedManager(e.target.value)}
+          disabled={managersLoading}
+          className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-ink outline-none focus:border-accent disabled:opacity-60"
+        >
+          <option value="">Авто (по правилам)</option>
+          {managers.map((m) => (
+            <option key={m.name} value={m.name}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {NEXT_STEP_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => setPresetKey(p.key)}
+            className={clsx(
+              "rounded-full border px-2 py-1 text-[11px] font-medium",
+              presetKey === p.key
+                ? "border-accent bg-accent-soft text-accent-ink"
+                : "border-line text-muted hover:bg-sunken",
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {error && (
+        <div className="mb-2 rounded-lg bg-red-100 px-2 py-1.5 text-[11px] text-red-700">{error}</div>
+      )}
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 rounded-lg border border-line py-1.5 text-xs font-medium text-muted hover:bg-sunken"
+        >
+          Отмена
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={submit}
+          className="flex-1 rounded-lg bg-accent py-1.5 text-xs font-semibold text-white hover:bg-accent-ink disabled:opacity-60"
+        >
+          {busy ? "..." : "Передать"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LeadCard({
   lead,
   selected,
   busy,
+  expressOpen,
   onPreview,
   onOpen,
   onCall,
   onQualify,
   onRoute,
   onConvert,
+  onToggleExpress,
+  onExpress,
 }: {
   lead: Lead;
   selected: boolean;
   busy: boolean;
+  expressOpen: boolean;
   onPreview: () => void;
   onOpen: () => void;
   onCall: () => void;
   onQualify: () => void;
   onRoute: () => void;
   onConvert: () => void;
+  onToggleExpress: () => void;
+  onExpress: (
+    id: number,
+    opts: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+  ) => Promise<string | null>;
 }) {
   // Click vs double-click split: 1 клик → drawer-preview справа,
   // 2 клика → полная страница /crm/leads/[id]. Кнопка «📞» — отдельная,
@@ -268,11 +398,13 @@ function LeadCard({
     }, 230);
   }
 
+  const canExpress = lead.status === "new" && lead.score >= EXPRESS_SCORE_THRESHOLD;
+
   return (
     <div
       onClick={handleClick}
       className={clsx(
-        "cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop",
+        "relative cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop",
         selected ? "border-accent ring-1 ring-accent" : "border-line",
       )}
     >
@@ -315,24 +447,43 @@ function LeadCard({
           )}
         </div>
       </div>
-      {NEXT_ACTION[lead.status] && (
-        <button
-          type="button"
-          data-card-action
-          disabled={busy}
-          onClick={(e) => {
-            e.stopPropagation();
-            const action = NEXT_ACTION[lead.status];
-            if (!action) return;
-            if (action.key === "qualify") onQualify();
-            else if (action.key === "route") onRoute();
-            else onConvert();
-          }}
-          className="mt-2 w-full rounded-lg bg-accent-soft py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent hover:text-white disabled:opacity-60"
-        >
-          {busy ? "..." : NEXT_ACTION[lead.status]?.label}
-        </button>
+      {(NEXT_ACTION[lead.status] || canExpress) && (
+        <div className="mt-2 flex gap-1.5">
+          {NEXT_ACTION[lead.status] && (
+            <button
+              type="button"
+              data-card-action
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                const action = NEXT_ACTION[lead.status];
+                if (!action) return;
+                if (action.key === "qualify") onQualify();
+                else if (action.key === "route") onRoute();
+                else onConvert();
+              }}
+              className="flex-1 rounded-lg bg-accent-soft py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent hover:text-white disabled:opacity-60"
+            >
+              {busy ? "..." : NEXT_ACTION[lead.status]?.label}
+            </button>
+          )}
+          {canExpress && (
+            <button
+              type="button"
+              data-card-action
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpress();
+              }}
+              className="flex-1 rounded-lg border border-accent bg-surface py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent-soft disabled:opacity-60"
+            >
+              ⚡ Экспресс
+            </button>
+          )}
+        </div>
       )}
+      {expressOpen && <ExpressPopover leadId={lead.id} onClose={onToggleExpress} onExpress={onExpress} />}
     </div>
   );
 }
@@ -430,6 +581,8 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   const [selectedId, setSelectedId] = useState<number | null>(initialLeads[0]?.id ?? null);
   const [modalOpen, setModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // expressOpenId = у какой карточки открыт поповер экспресс-передачи (Цикл 2)
+  const [expressOpenId, setExpressOpenId] = useState<number | null>(null);
   // callPopupLead = открыт screen-pop звонка по этому лиду
   //   (см. memory sales-call-window-reserve: real telephony — SALES-50-out, тут MVP UI).
   const [callPopupLead, setCallPopupLead] = useState<Lead | null>(null);
@@ -506,6 +659,24 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     const res = await routeLead(id, opts);
     if (res) patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
     setBusyId(null);
+  }
+
+  // Экспресс-передача (Цикл 2): квалификация + раздача + следующий шаг одним вызовом.
+  // Возвращает текст ошибки (для поповера) или null при успехе — лид уезжает в «Распределение».
+  async function onExpress(
+    id: number,
+    opts: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
+  ): Promise<string | null> {
+    setBusyId(id);
+    const res = await expressLead(id, opts);
+    setBusyId(null);
+    if (res == null) return "Не удалось выполнить экспресс-передачу — попробуйте ещё раз";
+    if ("error" in res) return res.error;
+    setLeads((prev) => prev.map((l) => (l.id === id ? res : l)));
+    setExpressOpenId(null);
+    setNote(`Лид ЛИД-${id} передан ${res.assignedTo || "менеджеру"} — экспресс`);
+    window.setTimeout(() => setNote(""), 3000);
+    return null;
   }
 
   async function onConvert(id: number) {
@@ -683,12 +854,15 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         lead={l}
                         selected={l.id === selectedId}
                         busy={busyId === l.id}
+                        expressOpen={expressOpenId === l.id}
                         onPreview={() => setSelectedId(l.id)}
                         onOpen={() => router.push(`/crm/leads/${l.id}`)}
                         onCall={() => setCallPopupLead(l)}
                         onQualify={() => onQualify(l.id)}
                         onRoute={() => onRoute(l.id)}
                         onConvert={() => onConvert(l.id)}
+                        onToggleExpress={() => setExpressOpenId((prev) => (prev === l.id ? null : l.id))}
+                        onExpress={onExpress}
                       />
                     ))}
                     {items.length === 0 && (

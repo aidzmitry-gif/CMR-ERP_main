@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
   routeLead: vi.fn(),
   rejectLead: vi.fn(),
   convertLead: vi.fn(),
+  expressLead: vi.fn(),
   // call-popup использует createDealTask для постановки задачи из звонка
   createDealTask: vi.fn().mockResolvedValue(true),
   // LeadDrawerPreview рендерит <LeadAttachments> — полоска вложений лида
@@ -316,6 +317,85 @@ describe("LeadsWorkspace", () => {
     expect(overdue?.className).toMatch(/red/);
     expect(fresh).toBeDefined();
     expect(fresh?.className).not.toMatch(/red/);
+  });
+
+  it("кнопка «⚡ Экспресс» показана на карточке нового лида с высоким баллом и скрыта при низком", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, score: 70, qualification: "target" },
+          { ...lead, id: 2, score: 20, qualification: "non-target", company: "ООО Слабый" },
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("button", { name: "⚡ Экспресс" })).toHaveLength(1);
+  });
+
+  it("экспресс — клик по пресету (по умолчанию) и «Передать» вызывает expressLead с ожидаемыми полями", async () => {
+    (api.expressLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 1,
+      score: 70,
+      qualification: "target",
+      status: "routed",
+      assignedTo: "Иванов И.И.",
+      funnel: "new",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "⚡ Экспресс" }));
+    expect(await screen.findByText("Кому")).toBeInTheDocument();
+
+    // пресет по умолчанию — «Позвонить завтра 10:00», клик «Передать» без доп. выбора (2 клика)
+    fireEvent.click(screen.getByRole("button", { name: "Передать" }));
+
+    await waitFor(() => expect(api.expressLead).toHaveBeenCalled());
+    const [calledId, calledOpts] = (api.expressLead as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledId).toBe(1);
+    expect(calledOpts.assignedTo).toBeUndefined();
+    expect(calledOpts.nextStepNote).toBe("Позвонить");
+    expect(calledOpts.nextStepAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+    // после успеха лид ушёл в «Распределение» — поповер закрылся
+    expect(screen.queryByText("Кому")).not.toBeInTheDocument();
+  });
+
+  it("экспресс — выбор другого пресета передаёт его note/at вместо дефолтного", async () => {
+    (api.expressLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 1,
+      score: 70,
+      qualification: "target",
+      status: "routed",
+      assignedTo: "Петров П.П.",
+      funnel: "new",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "⚡ Экспресс" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Без шага" }));
+    fireEvent.click(screen.getByRole("button", { name: "Передать" }));
+
+    await waitFor(() =>
+      expect(api.expressLead).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ nextStepAt: undefined, nextStepNote: undefined }),
+      ),
+    );
+  });
+
+  it("экспресс — 422 «не целевой» показывает сообщение в поповере, не двигая лид", async () => {
+    (api.expressLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      error: "Лид не целевой (балл 20) — экспресс недоступен, квалифицируй вручную",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "⚡ Экспресс" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Передать" }));
+
+    expect(await screen.findByText(/не целевой/)).toBeInTheDocument();
+    // поповер остался открыт, лид не сдвинулся — кнопка экспресс всё ещё на карточке
+    expect(screen.getByRole("button", { name: "⚡ Экспресс" })).toBeInTheDocument();
   });
 
   it("KPI «Ждут реакции >15м» считает только новые лиды старше 15 минут", () => {

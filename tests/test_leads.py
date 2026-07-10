@@ -414,6 +414,27 @@ async def test_lead_intake_dedup_appends_message_instead_of_new_lead(session, ap
     assert "Второе обращение, уже срочно" in dup.message
 
 
+async def test_lead_email_dedup_underscore_is_not_wildcard(session, api):
+    """Фикс ревью Ц1: `_` в e-mail — не LIKE-wildcard; похожий чужой адрес — не дубль."""
+    await api.post("/leads", json={"source": "site", "email": "ivan_petrov@mail.by"})
+
+    # адрес отличается ровно в позиции `_` — раньше ilike матчил его как дубль
+    r = await api.post("/leads", json={"source": "site", "email": "ivanxpetrov@mail.by"})
+    assert r.status_code == 201
+
+    # а точный дубль (в другом регистре) по-прежнему ловится
+    r2 = await api.post("/leads", json={"source": "site", "email": "IVAN_PETROV@mail.by"})
+    assert r2.status_code == 409
+
+
+async def test_lead_phone_dedup_ignores_short_tail(session, api):
+    """Фикс ревью Ц1: хвост короче 7 цифр (битый ввод) не участвует в дедупе."""
+    await api.post("/leads", json={"source": "phone", "phone": "+375291234567"})
+    # битый короткий ввод, совпадающий с окончанием чужого номера, — не дубль
+    r = await api.post("/leads", json={"source": "site", "phone": "4567"})
+    assert r.status_code == 201
+
+
 async def test_lead_first_action_at_set_once(session, api):
     """SLA первой реакции: NULL после создания, проставлен по первому действию, не перезаписан вторым."""
     lead = (
@@ -430,6 +451,94 @@ async def test_lead_first_action_at_set_once(session, api):
     await api.post(f"/leads/{lead['id']}/route")
     got2 = (await api.get(f"/leads/{lead['id']}")).json()
     assert got2["first_action_at"] == first_stamp  # второе действие не переставляет метку
+
+
+async def test_lead_express_qualifies_and_routes_in_one_call(session, api):
+    """Цикл 2: экспресс — квалификация + раздача + следующий шаг одной транзакцией."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Экспресс", "phone": "+375291234567",
+                "email": "e@x.by", "region": "Минск", "product": "лист",
+                "message": "Нужен лист 5 мм, объём 10 т, срочно пришлите цену.",
+            },
+        )
+    ).json()
+    assert lead["first_action_at"] is None
+
+    r = await api.post(
+        f"/leads/{lead['id']}/express",
+        json={"next_step_at": "2026-07-12T10:00:00", "next_step_note": "Позвонить завтра"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "routed"
+    assert body["assigned_to"]  # авто-правила проставили менеджера
+    assert body["score"] > 0
+    assert body["qualification"] == "target"
+    assert body["first_action_at"] is not None
+    assert body["next_step_at"].startswith("2026-07-12T10:00:00")
+    assert body["next_step_note"] == "Позвонить завтра"
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.qualified" in types
+    assert "leads.lead.routed" in types
+
+
+async def test_lead_express_manual_manager(session, api):
+    """Экспресс с ручным выбором менеджера — как ручной /route."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Экспресс2", "phone": "+375291234568",
+                "email": "e2@x.by", "region": "Минск", "product": "лист",
+                "message": "Нужен лист 5 мм, объём 10 т, срочно пришлите цену.",
+            },
+        )
+    ).json()
+
+    r = await api.post(f"/leads/{lead['id']}/express", json={"assigned_to": "Петров П.П."})
+    assert r.status_code == 200
+    assert r.json()["assigned_to"] == "Петров П.П."
+
+
+async def test_lead_express_rejects_unknown_manager(session, api):
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Экспресс3", "phone": "+375291234569",
+                "email": "e3@x.by", "product": "лист",
+                "message": "Нужен лист 5 мм, объём 10 т, срочно пришлите цену.",
+            },
+        )
+    ).json()
+
+    r = await api.post(f"/leads/{lead['id']}/express", json={"assigned_to": "Неизвестный Ф.И.О."})
+    assert r.status_code == 422
+
+
+async def test_lead_express_rejects_terminal_status(session, api):
+    lead = (await api.post("/leads", json={"source": "site"})).json()
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "дубль"})
+
+    r = await api.post(f"/leads/{lead['id']}/express")
+    assert r.status_code == 409
+
+
+async def test_lead_express_rejects_non_target_lead(session, api):
+    """Слабый лид (без телефона/e-mail/компании) — балл < 50, экспресс недоступен."""
+    lead = (await api.post("/leads", json={"source": "phone"})).json()
+
+    r = await api.post(f"/leads/{lead['id']}/express")
+    assert r.status_code == 422
+    assert "не целевой" in r.json()["detail"]
+
+    # лид не должен уйти в distribution — статус остался прежним
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["status"] == "new"
 
 
 async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
