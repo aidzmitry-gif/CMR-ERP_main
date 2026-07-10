@@ -13,21 +13,20 @@ beforeEach(() => {
 });
 
 describe("DealActions", () => {
-  it("переключает «Фокус» и шлёт updateDeal", async () => {
-    render(<DealActions dealId="1" focus={false} starred={false} priority="Средний" />);
-    fireEvent.click(screen.getByText("Фокус"));
-    await waitFor(() => expect(api.updateDeal).toHaveBeenCalledWith("1", { focus: true }));
+  it("не показывает кнопку «Фокус» (убрана по решению оператора)", () => {
+    render(<DealActions dealId="1" starred={false} priority="Средний" />);
+    expect(screen.queryByText("Фокус")).toBeNull();
   });
 
   it("циклически меняет приоритет Средний → Низкий", async () => {
-    render(<DealActions dealId="1" focus={false} starred={false} priority="Средний" />);
+    render(<DealActions dealId="1" starred={false} priority="Средний" />);
     fireEvent.click(screen.getByText("Средний"));
     await waitFor(() => expect(api.updateDeal).toHaveBeenCalledWith("1", { priority: "Низкий" }));
     expect(screen.getByText("Низкий")).toBeInTheDocument();
   });
 
   it("переключает «Избранное»", async () => {
-    render(<DealActions dealId="1" focus={false} starred={false} priority="Высокий" />);
+    render(<DealActions dealId="1" starred={false} priority="Высокий" />);
     fireEvent.click(screen.getByText("В избранное"));
     await waitFor(() => expect(api.updateDeal).toHaveBeenCalledWith("1", { starred: true }));
     expect(screen.getByText("В избранном")).toBeInTheDocument();

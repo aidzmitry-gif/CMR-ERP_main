@@ -1,6 +1,6 @@
 "use client";
 
-import { Flag, Star, Target } from "lucide-react";
+import { Flag, Star } from "lucide-react";
 import { useState } from "react";
 import { updateDeal } from "@/lib/api";
 
@@ -13,27 +13,16 @@ const PRIORITY_TONE: Record<string, string> = {
 
 export function DealActions({
   dealId,
-  focus: initFocus,
   starred: initStarred,
   priority: initPriority,
 }: {
   dealId: string;
-  focus: boolean;
   starred: boolean;
   priority: string;
 }) {
-  const [focus, setFocus] = useState(initFocus);
   const [starred, setStarred] = useState(initStarred);
   const [priority, setPriority] = useState(initPriority);
   const [busy, setBusy] = useState(false);
-
-  async function toggleFocus() {
-    const next = !focus;
-    setFocus(next);
-    setBusy(true);
-    await updateDeal(dealId, { focus: next });
-    setBusy(false);
-  }
 
   async function toggleStar() {
     const next = !starred;
@@ -53,16 +42,7 @@ export function DealActions({
   }
 
   return (
-    <div className="mt-4 grid grid-cols-3 gap-3">
-      <button
-        onClick={toggleFocus}
-        disabled={busy}
-        className={`flex items-center justify-center gap-2 rounded-xl py-3 font-medium disabled:opacity-60 ${
-          focus ? "bg-accent text-white" : "bg-blue-50 text-accent-ink"
-        }`}
-      >
-        <Target size={18} /> Фокус
-      </button>
+    <div className="mt-4 grid grid-cols-2 gap-3">
       <button
         onClick={cyclePriority}
         disabled={busy}

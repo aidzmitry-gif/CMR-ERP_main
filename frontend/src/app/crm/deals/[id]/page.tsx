@@ -160,7 +160,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DealMessages dealId={id} />
             <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
             <DealApprovals dealId={id} />
-            <DealActions dealId={id} focus={d.focus} starred={d.starred} priority={d.priority} />
+            <DealActions dealId={id} starred={d.starred} priority={d.priority} />
             <Card className="px-[18px] py-[14px]">
               <div className="mb-2 text-[13.5px] font-bold text-ink">Связь с клиентом</div>
               <ChannelButtons dealId={id} />

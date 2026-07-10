@@ -15,10 +15,10 @@ import clsx from "clsx";
 import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Children, useEffect, useId, useMemo, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
-import { DealCard } from "@/components/kanban/deal-card";
+import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
@@ -60,10 +60,38 @@ type CardExtras = {
   weighted: number;
   lostReasonTitle?: string;
   wonResult: boolean;
+  /** «Просрочено»/«Сегодня»/«Завтра» по next_step_at — чип срочности + цветная левая кромка. */
+  actBucket: "overdue" | "today" | "tomorrow" | null;
+  /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
+  noStep: boolean;
   onLose?: () => void;
   /** Открыть окно звонка прямо с карточки канбана (тот же кокпит, что у drawer-preview). */
   onCall?: () => void;
+  /** Меню карточки (⋯): ответственный/приоритет/избранное → оптимистичный патч + PATCH бэку. */
+  onUpdate?: (fields: DealCardPatch) => void;
 };
+
+/** Закрытые стадии (won/lost, включая cond_lost и коды секций вида rp_won): чипы срочности,
+ *  маркер «нет шага» и фильтры «Внимание» на них не действуют. */
+function isClosedStageId(id: string): boolean {
+  return id.endsWith("won") || id.endsWith("lost");
+}
+
+/** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
+const CARD_CAP = 50;
+
+/** Кнопка «Показать ещё N (из M)» под капом карточек колонки. */
+function ShowMore({ total, limit, onMore }: { total: number; limit: number; onMore: () => void }) {
+  if (total <= limit) return null;
+  return (
+    <button
+      onClick={onMore}
+      className="flex items-center justify-center rounded-xl border border-dashed border-line-strong py-2 text-xs font-medium text-muted hover:bg-sunken"
+    >
+      Показать ещё {Math.min(CARD_CAP, total - limit)} (из {total})
+    </button>
+  );
+}
 
 const PERIODS = [
   { key: "day", label: "День" },
@@ -267,7 +295,7 @@ function DraggableDeal({
   // Click vs double-click: первый клик → setTimeout(230ms) → onPreview;
   // второй клик в окне таймера → clear + onOpen. Глушим встроенный <Link>
   // у DealCard через preventDefault — навигация идёт через router.push в onOpen.
-  // Не мешаем клику по интерактивным дочерним (кнопка «Отказ», ChannelRow).
+  // Не мешаем клику по интерактивным дочерним (кнопка «Отказ», меню карточки ⋯).
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (clickTimer.current) clearTimeout(clickTimer.current);
@@ -275,7 +303,8 @@ function DraggableDeal({
 
   function handleClickCapture(e: React.MouseEvent) {
     const target = e.target as HTMLElement;
-    if (target.closest("button")) return; // отказ-кнопка, иконки каналов — не глушим
+    // Кнопки (отказ/звонок) и попап меню ⋯ (data-card-menu) — не глушим их клики.
+    if (target.closest("button") || target.closest("[data-card-menu]")) return;
     e.preventDefault();
     e.stopPropagation();
     if (clickTimer.current) {
@@ -308,11 +337,14 @@ function Column({
   stage,
   onAdd,
   fmt,
+  stuckCount = 0,
   children,
 }: {
   stage: Stage;
   onAdd: () => void;
   fmt: (value: number) => string;
+  /** Застрявших сделок в колонке (isStuck) — янтарный счётчик в шапке при N>0. */
+  stuckCount?: number;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
@@ -321,12 +353,20 @@ function Column({
   // «взвешенно» в колонке, не входя в общий прогноз → Σ колонок ≠ итогу строки.
   const showWeighted = isOpenStage(stage) && stage.deals.length > 0;
   const weighted = stageWeightedSum(stage);
+  // F: кап рендера карточек — длинные колонки не рисуют сотни DOM-узлов разом.
+  const [limit, setLimit] = useState(CARD_CAP);
+  const items = Children.toArray(children);
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
       <div className="overflow-hidden rounded-xl bg-surface shadow-card">
         <div className="h-1" style={{ backgroundColor: stage.color }} />
         <div className="px-4 py-3">
-          <div className="font-semibold text-ink">{stage.title}</div>
+          <div className="flex items-center justify-between gap-2 font-semibold text-ink">
+            <span className="truncate">{stage.title}</span>
+            <span className="shrink-0 rounded-md bg-sunken px-2 text-xs font-semibold leading-5 text-faint">
+              {stage.count}
+            </span>
+          </div>
           <div className="mt-0.5 text-xs text-muted">
             {stage.count} {pluralDeals(stage.count)} · {fmt(stage.sum)}
           </div>
@@ -343,6 +383,11 @@ function Column({
               </div>
             </>
           )}
+          {stuckCount > 0 && (
+            <div className="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+              🕒 застряло: {stuckCount}
+            </div>
+          )}
         </div>
       </div>
       <div
@@ -353,7 +398,8 @@ function Column({
           isOver && "bg-accent-soft ring-2 ring-accent",
         )}
       >
-        {children}
+        {items.slice(0, limit)}
+        <ShowMore total={items.length} limit={limit} onMore={() => setLimit((l) => l + CARD_CAP)} />
         <button
           onClick={onAdd}
           className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-line-strong py-2.5 text-xs font-medium text-muted hover:bg-sunken"
@@ -413,6 +459,18 @@ function FunnelSection({
     void updateDealStage(dealId, targetStage);
   }
 
+  /** Патч полей из меню карточки (⋯): доска секции живёт в локальном стейте —
+   *  оптимистично правим здесь + fire-and-forget PATCH бэку. */
+  function patchSectionDeal(dealId: string, fields: DealCardPatch) {
+    setStages((prev) =>
+      prev.map((s) => ({
+        ...s,
+        deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...fields } : d)),
+      })),
+    );
+    void updateDeal(dealId, fields);
+  }
+
   const total = stages.reduce((n, s) => n + s.count, 0);
 
   return (
@@ -429,20 +487,31 @@ function FunnelSection({
       </div>
       <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="flex gap-4 overflow-x-auto pb-2 thin-scroll">
-          {stages.map((stage) => (
-            <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => onAddDeal(stage.id, stages)}>
-              {stage.deals.map((deal) => (
-                <DraggableDeal
-                  key={deal.id}
-                  deal={deal}
-                  extras={cardExtras(deal, stage.id, stages)}
-                  fmt={fmt}
-                  onPreview={onPreview}
-                  onOpen={onOpen}
-                />
-              ))}
-            </Column>
-          ))}
+          {stages.map((stage) => {
+            const extrasByDeal = stage.deals.map(
+              (deal) => [deal, cardExtras(deal, stage.id, stages)] as const,
+            );
+            return (
+              <Column
+                key={stage.id}
+                stage={stage}
+                fmt={fmt}
+                stuckCount={extrasByDeal.filter(([, x]) => x.stuck).length}
+                onAdd={() => onAddDeal(stage.id, stages)}
+              >
+                {extrasByDeal.map(([deal, extras]) => (
+                  <DraggableDeal
+                    key={deal.id}
+                    deal={deal}
+                    extras={{ ...extras, onUpdate: (f) => patchSectionDeal(deal.id, f) }}
+                    fmt={fmt}
+                    onPreview={onPreview}
+                    onOpen={onOpen}
+                  />
+                ))}
+              </Column>
+            );
+          })}
         </div>
         <DragOverlay>
           {active ? (
@@ -468,12 +537,20 @@ function DateColumn({
   children: React.ReactNode;
 }) {
   const sum = bucket.deals.reduce((a, d) => a + d.amount, 0);
+  // F: тот же кап карточек, что и в стадийной колонке (бакет «Без даты» собирает сотни сделок).
+  const [limit, setLimit] = useState(CARD_CAP);
+  const items = Children.toArray(children);
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-3">
       <div className="overflow-hidden rounded-xl bg-surface shadow-card">
         <div className="h-1" style={{ backgroundColor: bucket.color }} />
         <div className="px-4 py-3">
-          <div className="font-semibold text-ink">{bucket.title}</div>
+          <div className="flex items-center justify-between gap-2 font-semibold text-ink">
+            <span className="truncate">{bucket.title}</span>
+            <span className="shrink-0 rounded-md bg-sunken px-2 text-xs font-semibold leading-5 text-faint">
+              {bucket.deals.length}
+            </span>
+          </div>
           <div className="mt-0.5 text-xs text-muted">
             {bucket.deals.length} {pluralDeals(bucket.deals.length)} · {fmt(sum)}
           </div>
@@ -481,7 +558,14 @@ function DateColumn({
       </div>
       <div className="flex min-h-20 flex-col gap-3 rounded-xl p-1">
         {bucket.deals.length > 0 ? (
-          children
+          <>
+            {items.slice(0, limit)}
+            <ShowMore
+              total={items.length}
+              limit={limit}
+              onMore={() => setLimit((l) => l + CARD_CAP)}
+            />
+          </>
         ) : (
           <div className="rounded-xl border border-dashed border-line-strong py-4 text-center text-xs text-faint">
             Пусто
@@ -514,7 +598,7 @@ function StaticDealCard({
 
   function handleClickCapture(e: React.MouseEvent) {
     const target = e.target as HTMLElement;
-    if (target.closest("button")) return;
+    if (target.closest("button") || target.closest("[data-card-menu]")) return;
     e.preventDefault();
     e.stopPropagation();
     if (clickTimer.current) {
@@ -706,9 +790,13 @@ export function DealsWorkspace({
   // воронки в модалке, а не дефолтные new_clients (`stages`) — храним стадии секции-источника.
   const [modalStages, setModalStages] = useState<Stage[] | null>(null);
   const [query, setQuery] = useState("");
-  // Приоритет — не локальный state: кнопка «Фильтры» переехала в шапку страницы (FiltersMenu,
-  // решение оператора), отдельное поддерево React от доски. Тот же URL-паттерн, что у `funnel`.
-  const priority = useSearchParams().get("priority");
+  // Фильтры шапки — не локальный state: кнопка «Фильтры» живёт в шапке страницы (FiltersMenu,
+  // решение оператора), отдельное поддерево React от доски. Тот же URL-паттерн, что у `funnel`:
+  // ?priority= (приоритет), ?owner= (ответственный), ?attn= (внимание: overdue | no_step).
+  const searchParams = useSearchParams();
+  const priority = searchParams.get("priority");
+  const ownerFilter = searchParams.get("owner");
+  const attn = searchParams.get("attn");
   const [view, setView] = useState<"board" | "list">("board");
   // П4 (слайс 4): переключатель группировки канбана — по стадиям (умолчание) / по датам
   // следующего действия (next_step_at). Действует только для view="board".
@@ -876,6 +964,16 @@ export function DealsWorkspace({
         );
       }
       if (priority) deals = deals.filter((d) => d.priority === priority);
+      if (ownerFilter) deals = deals.filter((d) => d.owner === ownerFilter);
+      // «Внимание» (FiltersMenu): просроченный шаг / нет шага — только по открытым стадиям
+      // (та же логика, что у чипов actBucket/«нет шага» на карточке).
+      if (attn === "overdue") {
+        deals = deals.filter(
+          (d) => !isClosedStageId(s.id) && now != null && dateBucketId(d, now) === "overdue",
+        );
+      } else if (attn === "no_step") {
+        deals = deals.filter((d) => !isClosedStageId(s.id) && !d.nextStep && !d.todo);
+      }
       if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
       if (actFilter) deals = deals.filter((d) => now != null && dateBucketId(d, now) === actFilter);
       return { ...s, deals, count: deals.length, sum: deals.reduce((a, d) => a + d.amount, 0) };
@@ -887,14 +985,37 @@ export function DealsWorkspace({
         stages: sec.stages.map(applyDealFilters),
       })),
     };
-  }, [stages, combinedStages, q, priority, stuckOnly, now, actFilter]);
+  }, [stages, combinedStages, q, priority, ownerFilter, attn, stuckOnly, now, actFilter]);
 
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
+
+  /** «Просрочено»/«Сегодня»/«Завтра» для чипа срочности карточки: только по открытым
+   *  сделкам — у выигранных/проигранных «дедлайн следующего шага» смысла не имеет. */
+  function actBucketFor(deal: Deal, closed: boolean): "overdue" | "today" | "tomorrow" | null {
+    if (closed || now == null) return null;
+    const b = dateBucketId(deal, now);
+    return b === "overdue" || b === "today" || b === "tomorrow" ? b : null;
+  }
+
+  /** Оптимистичный патч полей сделки из меню карточки (⋯) + fire-and-forget PATCH бэку.
+   *  Имена полей совпадают с DealUpdate бэка (owner/priority/starred) — шлём как есть. */
+  function patchDealFields(dealId: string, fields: DealCardPatch) {
+    setStages((prev) =>
+      prev.map((s) => ({
+        ...s,
+        deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...fields } : d)),
+      })),
+    );
+    void updateDeal(dealId, fields);
+  }
 
   /** Вычислить бейджи/плашки Сделки 2.0 для карточки по её стадии и текущему времени. */
   function cardExtras(deal: Deal, stageId: string): CardExtras {
     const code = deal.lostReasonCode;
+    const closed = isClosedStageId(stageId);
     return {
+      actBucket: actBucketFor(deal, closed),
+      noStep: !closed && !deal.nextStep && !deal.todo,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
       stuck: now != null && isStuck(deal, stageId, now),
       probability: probabilityFor(deal, stageId),
@@ -903,6 +1024,7 @@ export function DealsWorkspace({
       wonResult: stageId === "won",
       onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
       onCall: () => setCallDeal(deal),
+      onUpdate: (fields) => patchDealFields(deal.id, fields),
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -924,15 +1046,18 @@ export function DealsWorkspace({
   function combinedCardExtras(deal: Deal, stageId: string, sectionStages: Stage[]): CardExtras {
     const code = deal.lostReasonCode;
     const wonId = sectionStages.find((s) => s.id.endsWith("won"))?.id;
-    const lostId = sectionStages.find((s) => s.id.endsWith("lost"))?.id;
+    const closed = isClosedStageId(stageId);
     return {
+      actBucket: actBucketFor(deal, closed),
+      noStep: !closed && !deal.nextStep && !deal.todo,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
-      stuck: now != null && stageId !== wonId && stageId !== lostId && isStuck(deal, stageId, now),
+      stuck: now != null && !closed && isStuck(deal, stageId, now),
       probability: probabilityFor(deal, stageId),
       weighted: weightedAmount(deal, stageId),
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
       wonResult: stageId === wonId,
       onCall: () => setCallDeal(deal),
+      // onUpdate добавляет FunnelSection (доска секции — её локальный стейт).
     };
   }
 
@@ -1355,7 +1480,15 @@ export function DealsWorkspace({
           <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
               {filteredStages.map((stage) => (
-                <Column key={stage.id} stage={stage} fmt={fmt} onAdd={() => openModal(stage.id)}>
+                <Column
+                  key={stage.id}
+                  stage={stage}
+                  fmt={fmt}
+                  stuckCount={
+                    now == null ? 0 : stage.deals.filter((d) => isStuck(d, stage.id, now)).length
+                  }
+                  onAdd={() => openModal(stage.id)}
+                >
                   {stage.deals.map((deal) => (
                     <DraggableDeal
                       key={deal.id}

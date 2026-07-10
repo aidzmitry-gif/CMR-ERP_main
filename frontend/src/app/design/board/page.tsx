@@ -3,7 +3,7 @@ import { STAGES, KPIS } from "@/lib/mock-data";
 import { STAGE_PROBABILITY } from "@/lib/board";
 import {
   Plus, Search, SlidersHorizontal, Clock, LayoutGrid, List,
-  Star, MoreHorizontal, User, Calendar, Target, Flag, Phone, Mail, MessageSquare,
+  Star, MoreHorizontal, User, Calendar, Flag, Phone, Mail, MessageSquare,
 } from "lucide-react";
 
 /**
@@ -189,11 +189,8 @@ export default function BoardDemoPage() {
                         {d.date && <span className="inline-flex items-center gap-1 tabular-nums"><Calendar size={12} /> {d.date}</span>}
                       </div>
 
-                      {/* фокус / приоритет */}
+                      {/* приоритет («Фокус» убран по решению оператора) */}
                       <div className="mt-2.5 flex gap-2">
-                        <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line-strong py-1.5 text-xs font-medium text-muted">
-                          <Target size={13} className="text-accent-ink" /> Фокус
-                        </span>
                         <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line-strong py-1.5 text-xs font-medium text-muted">
                           <Flag size={13} className="text-[#F59E0B]" /> Приоритет
                         </span>

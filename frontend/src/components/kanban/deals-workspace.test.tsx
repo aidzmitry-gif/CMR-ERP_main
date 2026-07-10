@@ -26,6 +26,7 @@ vi.mock("@/lib/api", () => ({
   loseDeal: vi.fn().mockResolvedValue(true),
   fetchLossReasons: vi.fn().mockResolvedValue([]),
   fetchPlans: vi.fn().mockResolvedValue([]),
+  fetchLeadManagers: vi.fn().mockResolvedValue([]),
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
@@ -65,10 +66,13 @@ const stages: Stage[] = [
     id: "new",
     title: "Новая заявка",
     color: "#000",
-    count: 1,
-    sum: 100,
+    count: 2,
+    sum: 300,
     deals: [
+      // без nextStep/todo → маркер «нет шага» + фильтр ?attn=no_step
       { id: "1", number: "CRM-1", company: "ООО Доска", description: "Поставка", amount: 100, priority: "Средний", owner: "И" },
+      // шаг в прошлом → чип «Просрочено» + фильтр ?attn=overdue
+      { id: "2", number: "CRM-2", company: "ООО Просрочка", description: "Опт", amount: 200, priority: "Средний", owner: "Петров", nextStep: "Позвонить", nextStepAt: "2020-01-01T10:00:00" },
     ],
   },
   { id: "won", title: "Закрыто: Успешно", color: "#000", count: 0, sum: 0, deals: [] },
@@ -254,7 +258,8 @@ describe("DealsWorkspace (канбан)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByTitle("По датам действий"));
     expect(screen.getByText("Без даты")).toBeInTheDocument();
-    expect(screen.getByText("Просрочено")).toBeInTheDocument();
+    // «Просрочено» встречается и как заголовок бакета, и как чип на карточке CRM-2
+    expect(screen.getAllByText("Просрочено").length).toBeGreaterThan(0);
     expect(screen.getByText("ООО Доска")).toBeInTheDocument(); // карточка всё ещё видна
     // Стадийные колонки скрыты в режиме дат.
     expect(screen.queryByText("Новая заявка")).toBeNull();
@@ -296,6 +301,61 @@ describe("DealsWorkspace (канбан)", () => {
       target: { value: "несуществующий" },
     });
     expect(screen.queryByText("ООО Доска")).toBeNull();
+  });
+
+  // --- Слайс 2: фильтры «Ответственный»/«Внимание», чипы срочности, кап карточек ---
+
+  it("?owner= фильтрует по ответственному", () => {
+    mockSearchParams = new URLSearchParams({ owner: "Петров" });
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+    expect(screen.getByText("ООО Просрочка")).toBeInTheDocument();
+  });
+
+  it("?attn=no_step оставляет только сделки без следующего шага", () => {
+    mockSearchParams = new URLSearchParams({ attn: "no_step" });
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+    expect(screen.queryByText("ООО Просрочка")).toBeNull();
+  });
+
+  it("?attn=overdue оставляет только просроченные (считается после тика now)", async () => {
+    mockSearchParams = new URLSearchParams({ attn: "overdue" });
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    await waitFor(() => expect(screen.getByText("ООО Просрочка")).toBeInTheDocument());
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+  });
+
+  it("сделка с шагом в прошлом получает чип «Просрочено», без шага — маркер «нет шага»", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.getByText("нет шага")).toBeInTheDocument(); // CRM-1 — не зависит от now
+    await waitFor(() => expect(screen.getByText("Просрочено")).toBeInTheDocument()); // CRM-2
+  });
+
+  it("колонка рендерит максимум 50 карточек; «Показать ещё» раскрывает остальные", () => {
+    const many: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 60,
+        sum: 60,
+        deals: Array.from({ length: 60 }, (_, i) => ({
+          id: `d${i}`,
+          number: `CRM-${i}`,
+          company: `Компания ${i}`,
+          description: "",
+          amount: 1,
+          priority: "Средний" as const,
+          owner: "И",
+        })),
+      },
+    ];
+    render(<DealsWorkspace initialStages={many} initialKpis={[]} />);
+    expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(50);
+    fireEvent.click(screen.getByRole("button", { name: "Показать ещё 10 (из 60)" }));
+    expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60);
+    expect(screen.queryByRole("button", { name: /Показать ещё/ })).toBeNull();
   });
 
   it("demoData показывает плашку «демо-данные»; без него плашки нет", () => {
