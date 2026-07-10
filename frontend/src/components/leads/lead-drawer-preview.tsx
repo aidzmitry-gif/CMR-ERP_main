@@ -1,11 +1,22 @@
 "use client";
 
-import { ArrowRight, Mail, Phone, Star, User, X } from "lucide-react";
+import { ArrowRight, Mail, Package, Phone, Receipt, Star, User, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
+import { useProductPicker } from "@/components/kanban/product-picker";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
-import { fetchLeadManagers } from "@/lib/api";
+import {
+  commitLeadItemsToDeal,
+  convertLead,
+  fetchLeadItems,
+  fetchLeadManagers,
+  issueDocument,
+  type LeadCartItem,
+  saveLeadItems,
+} from "@/lib/api";
+import { formatByn } from "@/lib/format";
 import { NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
 import { REJECT_REASONS } from "@/lib/types";
 import type { Lead, Manager } from "@/lib/types";
@@ -36,6 +47,8 @@ export function LeadDrawerPreview({
   onConvert,
   onCall,
   onReject,
+  onItemsSaved,
+  onConverted,
 }: {
   lead: Lead | null;
   busy: boolean;
@@ -48,6 +61,10 @@ export function LeadDrawerPreview({
   onConvert: (id: number) => void;
   onCall: (lead: Lead) => void;
   onReject: (id: number, reason: string) => void;
+  // Цикл 3: подбор товара сохранён на лиде → обновить бейдж КП на карточке.
+  onItemsSaved?: (leadId: number, count: number, total: number) => void;
+  // Цикл 3: цепочка «В сделку + счёт» сконвертировала лид → пометить его converted.
+  onConverted?: (leadId: number, dealId?: number) => void;
 }) {
   useEffect(() => {
     if (!lead) return;
@@ -81,6 +98,105 @@ export function LeadDrawerPreview({
       cancelled = true;
     };
   }, [lead?.id]);
+
+  // --- Цикл 3: подбор товара (КП) на лиде + цепочка «В сделку + счёт» ---
+  const [savedItems, setSavedItems] = useState<LeadCartItem[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [chain, setChain] = useState<ChainState | null>(null);
+  // Общий стейт пикера (справочник+остатки+корзина) — как в окне звонка/сделке; грузится
+  // только когда каталог открыт (active=catalogOpen), refetchKey — id лида.
+  const picker = useProductPicker(catalogOpen, lead ? `lead-${lead.id}` : undefined);
+  const hydratedRef = useRef(false);
+
+  // Сохранённый подбор лида — грузим при смене лида (для списка КП и цепочки в сделку).
+  useEffect(() => {
+    setChain(null);
+    setCatalogOpen(false);
+    if (lead == null) {
+      setSavedItems([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchLeadItems(lead.id).then((items) => {
+      if (!cancelled) setSavedItems(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead?.id]);
+
+  // Гидрация корзины пикера из сохранённых позиций лида — один раз на открытие каталога,
+  // как только загрузился справочник (skus). Пикер не отдаёт setRows наружу (файл соседней
+  // полосы, править нельзя) — восстанавливаем через addSkuWithQty + setRowPrice по коду.
+  useEffect(() => {
+    if (!catalogOpen || hydratedRef.current || picker.skus.length === 0) return;
+    hydratedRef.current = true;
+    for (const it of savedItems) {
+      const sku = picker.skus.find((s) => s.id === it.skuId || s.code === it.skuCode);
+      if (!sku) continue;
+      picker.addSkuWithQty(sku, it.qty);
+      const base = picker.stock[sku.code]?.price;
+      if (base != null && it.price !== base) picker.setRowPrice(sku.id, it.price);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogOpen, picker.skus, savedItems]);
+
+  function openPicker() {
+    hydratedRef.current = false;
+    setCatalogOpen(true);
+  }
+
+  // Закрытие каталога = сохранить корзину (отмеченные позиции) на лид (replace-all).
+  async function closePickerAndSave() {
+    if (lead == null) return setCatalogOpen(false);
+    const items: LeadCartItem[] = picker.pickedRows.map((r) => {
+      const base = picker.stock[r.code]?.price;
+      const price = r.priceOverride ?? base ?? 0;
+      const discountPct = base && base > 0 && price < base ? Math.round((1 - price / base) * 1000) / 10 : 0;
+      return { skuId: r.skuId, skuCode: r.code, name: r.title, qty: r.qty, price, discountPct };
+    });
+    setSaving(true);
+    await saveLeadItems(lead.id, items);
+    setSaving(false);
+    setSavedItems(items);
+    setCatalogOpen(false);
+    picker.reset();
+    const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+    onItemsSaved?.(lead.id, items.length, total);
+  }
+
+  // Цепочка «В сделку + счёт»: конвертация → перенос позиций → счёт, со статусом по шагам.
+  async function convertWithInvoice() {
+    if (lead == null) return;
+    const counterparty = lead.company || lead.name || "Новый лид";
+    setChain({ deal: "run", items: "pending", invoice: "pending" });
+    const conv = await convertLead(lead.id);
+    if (!conv?.deal_id) {
+      setChain({ deal: "err", items: "pending", invoice: "pending", error: "Сделка не создалась — сервис sales не ответил" });
+      return;
+    }
+    const dealId = String(conv.deal_id);
+    onConverted?.(lead.id, conv.deal_id);
+    setChain({ deal: "ok", items: "run", invoice: "pending", dealId: conv.deal_id });
+
+    const { ok, total } = await commitLeadItemsToDeal(dealId, counterparty, savedItems);
+    if (total > 0 && ok === 0) {
+      setChain({ deal: "ok", items: "err", invoice: "pending", dealId: conv.deal_id, error: "Позиции не перенеслись в сделку (сделка создана)" });
+      return;
+    }
+    setChain({ deal: "ok", items: "ok", invoice: "run", dealId: conv.deal_id });
+
+    const doc = await issueDocument(dealId, "invoice");
+    setChain({
+      deal: "ok",
+      items: "ok",
+      invoice: doc.ok ? "ok" : "err",
+      dealId: conv.deal_id,
+      renderUrl: doc.renderUrl,
+      error: doc.ok ? undefined : "Счёт не выставлен (сделка и позиции готовы)",
+    });
+  }
 
   const open = lead != null;
   const qualified = lead && lead.status !== "new";
@@ -169,6 +285,55 @@ export function LeadDrawerPreview({
                   Документы
                 </div>
                 <LeadAttachments leadId={lead.id} />
+              </section>
+
+              <section className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Товары / КП
+                  </span>
+                  {!converted && !rejected && (
+                    <button
+                      type="button"
+                      onClick={openPicker}
+                      className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-ink hover:text-accent"
+                    >
+                      <Package size={13} /> Подобрать товары
+                    </button>
+                  )}
+                </div>
+                {savedItems.length > 0 ? (
+                  <div className="rounded-lg border border-line">
+                    {savedItems.map((it) => (
+                      <div
+                        key={it.skuId}
+                        className="flex items-center justify-between gap-2 border-b border-line px-3 py-1.5 text-[12.5px] last:border-0"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-ink">{it.name || it.skuCode}</span>
+                        <span className="shrink-0 tabular-nums text-muted">
+                          {it.qty} × {formatByn(it.price)}
+                        </span>
+                        <span className="w-24 shrink-0 text-right font-semibold tabular-nums text-ink">
+                          {formatByn(it.qty * it.price)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between px-3 py-2 text-[12.5px]">
+                      <span className="font-semibold text-muted">
+                        Итого · {savedItems.length} поз.
+                      </span>
+                      <span className="font-bold text-ink tabular-nums">
+                        {formatByn(savedItems.reduce((s, it) => s + it.qty * it.price, 0))}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-faint">
+                    {converted || rejected
+                      ? "Подбор не выполнялся."
+                      : "Подберите товары со склада — соберётся КП, его можно перенести в сделку и счёт."}
+                  </p>
+                )}
               </section>
 
               {lead.qualification && (
@@ -351,6 +516,35 @@ export function LeadDrawerPreview({
                     ? `Распределить → ${selectedManager}`
                     : "Распределить"}
               </Button>
+              {routed && !converted && !rejected && savedItems.length > 0 && chain == null && (
+                <Button
+                  variant="money"
+                  block
+                  icon={<Receipt size={14} />}
+                  disabled={busy}
+                  onClick={convertWithInvoice}
+                >
+                  ⚡ В сделку + счёт
+                </Button>
+              )}
+              {chain && (
+                <div className="space-y-1 rounded-lg border border-line bg-sunken p-2.5 text-[12.5px]">
+                  <StepLine label="Сделка" st={chain.deal} />
+                  <StepLine label="Позиции" st={chain.items} />
+                  <StepLine label="Счёт" st={chain.invoice} />
+                  {chain.error && <p className="text-[11.5px] font-medium text-danger">{chain.error}</p>}
+                  {chain.renderUrl && (
+                    <a
+                      href={chain.renderUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block text-[12px] font-semibold text-accent-ink hover:text-accent"
+                    >
+                      Открыть счёт →
+                    </a>
+                  )}
+                </div>
+              )}
               {converted && lead.dealId ? (
                 <Link href={`/crm/deals/${lead.dealId}`} className="block">
                   <Button variant="money" block icon={<ArrowRight size={14} />}>
@@ -361,7 +555,7 @@ export function LeadDrawerPreview({
                 <Button
                   variant="money"
                   block
-                  disabled={busy || !routed || !!rejected}
+                  disabled={busy || !routed || !!rejected || chain != null}
                   onClick={() => onConvert(lead.id)}
                 >
                   В сделку
@@ -376,7 +570,53 @@ export function LeadDrawerPreview({
           </>
         )}
       </aside>
+
+      {/* Каталог-пикер поверх drawer — тот же, что в сделках/звонке (без dealId: подбор
+          не уходит в бэк из модалки, а собирается в общем стейте и сохраняется на лид при
+          закрытии). Гидрируется из сохранённого КП лида. */}
+      {catalogOpen && lead && (
+        <CatalogPickerModal
+          state={picker}
+          counterparty={lead.company || lead.name || ""}
+          onClose={closePickerAndSave}
+          onCommitted={closePickerAndSave}
+        />
+      )}
+      {saving && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-[80] -translate-x-1/2 rounded-lg bg-ink px-4 py-2 text-[12.5px] font-semibold text-canvas shadow-pop">
+          Сохраняю подбор…
+        </div>
+      )}
     </>
+  );
+}
+
+/** Статус шага цепочки «В сделку + счёт»: pending → run → ok/err. */
+type StepStatus = "pending" | "run" | "ok" | "err";
+interface ChainState {
+  deal: StepStatus;
+  items: StepStatus;
+  invoice: StepStatus;
+  error?: string;
+  dealId?: number;
+  renderUrl?: string;
+}
+
+function StepLine({ label, st }: { label: string; st: StepStatus }) {
+  const glyph = st === "ok" ? "✓" : st === "err" ? "⚠" : st === "run" ? "…" : "·";
+  const cls =
+    st === "ok"
+      ? "text-money"
+      : st === "err"
+        ? "text-danger"
+        : st === "run"
+          ? "text-accent-ink"
+          : "text-faint";
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted">{label}</span>
+      <span className={`font-bold ${cls}`}>{glyph}</span>
+    </div>
   );
 }
 

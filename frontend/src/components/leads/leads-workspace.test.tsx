@@ -25,6 +25,11 @@ vi.mock("@/lib/api", () => ({
   uploadLeadAttachment: vi.fn(),
   leadAttachmentDownloadUrl: (leadId: number, attachmentId: number) =>
     `/api/leads/${leadId}/attachments/${attachmentId}/download`,
+  // Цикл 3: подбор товара (КП) на лиде + цепочка «В сделку + счёт»
+  fetchLeadItems: vi.fn().mockResolvedValue([]),
+  saveLeadItems: vi.fn().mockResolvedValue(true),
+  commitLeadItemsToDeal: vi.fn().mockResolvedValue({ ok: 1, total: 1 }),
+  issueDocument: vi.fn().mockResolvedValue({ ok: true, message: "✅ Счёт выставлен", renderUrl: "/api/x" }),
   // Пикер менеджера в drawer (ручная раздача лида) — список для «Кому передать».
   fetchLeadManagers: vi.fn().mockResolvedValue([
     { name: "Иванов И.И.", regions: ["минск"], products: ["лист"], load: 2 },
@@ -396,6 +401,57 @@ describe("LeadsWorkspace", () => {
     expect(await screen.findByText(/не целевой/)).toBeInTheDocument();
     // поповер остался открыт, лид не сдвинулся — кнопка экспресс всё ещё на карточке
     expect(screen.getByRole("button", { name: "⚡ Экспресс" })).toBeInTheDocument();
+  });
+
+  it("Цикл 3: карточка лида показывает бейдж КП «N поз.» при подобранных товарах", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, itemsCount: 2, itemsTotal: 750 }]}
+      />,
+    );
+    expect(screen.getByText(/2 поз\./)).toBeInTheDocument();
+  });
+
+  it("Цикл 3: цепочка «В сделку + счёт» зовёт convert → перенос позиций → счёт по порядку", async () => {
+    (api.fetchLeadItems as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { skuId: 7, skuCode: "6СТ-190", name: "АКБ 190", qty: 2, price: 300, discountPct: 0 },
+    ]);
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lead_id: 1,
+      deal_id: 42,
+      status: "converted",
+    });
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, status: "routed", assignedTo: "Иванов И.И.", funnel: "new", itemsCount: 1 },
+        ]}
+      />,
+    );
+
+    // кнопка появляется, когда подгрузились сохранённые позиции (fetchLeadItems)
+    const chainBtn = await screen.findByRole("button", { name: /В сделку \+ счёт/ });
+    fireEvent.click(chainBtn);
+
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledWith("42", "invoice"));
+    expect(api.convertLead).toHaveBeenCalledWith(1);
+    expect(api.commitLeadItemsToDeal).toHaveBeenCalledWith(
+      "42",
+      "ООО Тест",
+      expect.arrayContaining([expect.objectContaining({ skuId: 7, qty: 2 })]),
+    );
+    // порядок шагов: convert → позиции → счёт
+    const convertOrder = (api.convertLead as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    const commitOrder = (api.commitLeadItemsToDeal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    const invoiceOrder = (api.issueDocument as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(convertOrder).toBeLessThan(commitOrder);
+    expect(commitOrder).toBeLessThan(invoiceOrder);
+
+    // после успеха лид помечен converted → в футере ссылка на сделку
+    expect(await screen.findByRole("link", { name: /Открыть сделку/ })).toHaveAttribute(
+      "href",
+      "/crm/deals/42",
+    );
   });
 
   it("KPI «Ждут реакции >15м» считает только новые лиды старше 15 минут", () => {

@@ -1135,6 +1135,8 @@ interface ApiLead {
   next_step_note: string;
   created_at: string;
   first_action_at: string | null;
+  items_count?: number;
+  items_total?: number;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1160,6 +1162,8 @@ function mapLead(l: ApiLead): Lead {
     nextStepNote: l.next_step_note,
     createdAt: l.created_at,
     firstActionAt: l.first_action_at,
+    itemsCount: l.items_count ?? 0,
+    itemsTotal: l.items_total ?? 0,
   };
 }
 
@@ -1384,6 +1388,89 @@ export async function convertLead(id: number): Promise<LeadConvertResult | null>
   } catch {
     return null;
   }
+}
+
+/** Позиция подобранного КП на лиде (Цикл 3): корзина каталог-пикера, сохранённая на лиде. */
+export interface LeadCartItem {
+  skuId: number;
+  skuCode: string;
+  name: string;
+  qty: number;
+  price: number; // цена клиенту (уже со скидкой), BYN
+  discountPct: number;
+}
+
+interface ApiLeadItem {
+  id: number;
+  lead_id: number;
+  sku_id: number;
+  sku_code: string;
+  name: string;
+  qty: number;
+  price: number;
+  discount_pct: number;
+  created_at: string;
+}
+
+function mapLeadItem(it: ApiLeadItem): LeadCartItem {
+  return {
+    skuId: it.sku_id,
+    skuCode: it.sku_code,
+    name: it.name,
+    qty: it.qty,
+    price: it.price,
+    discountPct: it.discount_pct,
+  };
+}
+
+/** Подобранный КП лида (позиции каталог-пикера). */
+export async function fetchLeadItems(leadId: number): Promise<LeadCartItem[]> {
+  try {
+    const res = await fetch(`/api/leads/${leadId}/items`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return ((await res.json()) as ApiLeadItem[]).map(mapLeadItem);
+  } catch {
+    return [];
+  }
+}
+
+/** Заменить весь подбор лида (replace-all — весь список корзины пикера целиком). */
+export async function saveLeadItems(leadId: number, items: LeadCartItem[]): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/leads/${leadId}/items`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        items.map((it) => ({
+          sku_id: it.skuId,
+          sku_code: it.skuCode,
+          name: it.name,
+          qty: it.qty,
+          price: it.price,
+          discount_pct: it.discountPct,
+        })),
+      ),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Перенести подбор лида в созданную сделку: позиции (addDealItem) + цена клиенту
+ * (createPriceQuote) — тот же контракт, что и `commitToDeal` пикера, но от сохранённых
+ * позиций лида (без открытого пикера). Котировки ждём (await), чтобы рендер счёта
+ * не прочитал ещё не записанные цены. */
+export async function commitLeadItemsToDeal(
+  dealId: string,
+  counterparty: string,
+  items: LeadCartItem[],
+): Promise<{ ok: number; total: number }> {
+  const results = await Promise.all(items.map((it) => addDealItem(dealId, it.skuId, it.qty)));
+  await Promise.all(
+    items.map((it) => (it.price ? createPriceQuote(it.skuCode, counterparty, it.price) : Promise.resolve(true))),
+  );
+  return { ok: results.filter(Boolean).length, total: items.length };
 }
 
 function mapAttachment(raw: {

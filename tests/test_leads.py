@@ -560,6 +560,96 @@ async def test_lead_known_customer_boosts_and_regular_funnel(session, api):
     assert routed["funnel"] == "regular"  # действующий клиент → воронка постоянных
 
 
+# --- Цикл 3: подбор товара на лиде (КП) → перенос в сделку/счёт ---
+
+
+async def test_lead_items_put_get_replace_all_and_totals(session, api):
+    """Подбор товара на лиде: PUT (replace-all) → GET; items_count/items_total в LeadOut."""
+    lead = (await api.post("/leads", json={"source": "site", "company": "ООО КП"})).json()
+    lead_id = lead["id"]
+    assert lead["items_count"] == 0 and lead["items_total"] == 0
+
+    r = await api.put(
+        f"/leads/{lead_id}/items",
+        json=[
+            {"sku_id": 1, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300},
+            {"sku_id": 2, "sku_code": "6СТ-60", "name": "АКБ 60", "qty": 1, "price": 150, "discount_pct": 10},
+        ],
+    )
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 2
+    assert items[0]["sku_code"] == "6СТ-190" and items[0]["qty"] == 2
+
+    got = (await api.get(f"/leads/{lead_id}/items")).json()
+    assert [it["sku_id"] for it in got] == [1, 2]
+
+    # LeadOut несёт агрегат: 3 шт на 2*300 + 1*150 = 750
+    detail = (await api.get(f"/leads/{lead_id}")).json()
+    assert detail["items_count"] == 2
+    assert detail["items_total"] == 750
+
+    listed = next(le for le in (await api.get("/leads")).json() if le["id"] == lead_id)
+    assert listed["items_count"] == 2 and listed["items_total"] == 750
+
+    # второй PUT ПОЛНОСТЬЮ заменяет корзину (replace-all), а не дописывает
+    r2 = await api.put(
+        f"/leads/{lead_id}/items",
+        json=[{"sku_id": 5, "sku_code": "6СТ-100", "name": "АКБ 100", "qty": 3, "price": 200}],
+    )
+    assert r2.status_code == 200
+    got2 = (await api.get(f"/leads/{lead_id}/items")).json()
+    assert [it["sku_id"] for it in got2] == [5]
+    detail2 = (await api.get(f"/leads/{lead_id}")).json()
+    assert detail2["items_count"] == 1 and detail2["items_total"] == 600
+
+
+async def test_lead_items_put_rejects_converted_lead(session, api, services):
+    """Терминальный (converted) лид — 409 на PUT items (подбор править нельзя)."""
+    from core.services.eventbus import EventContext
+
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Терм", "region": "Минск", "product": "лист"})
+    ).json()
+    lead_id = lead["id"]
+    await api.post(f"/leads/{lead_id}/qualify")
+    await api.post(f"/leads/{lead_id}/route")
+    await api.post(f"/leads/{lead_id}/convert")
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    r = await api.put(
+        f"/leads/{lead_id}/items",
+        json=[{"sku_id": 1, "sku_code": "X", "name": "X", "qty": 1, "price": 10}],
+    )
+    assert r.status_code == 409
+
+
+async def test_lead_converted_event_carries_items(session, api):
+    """payload события leads.lead.converted содержит подобранные позиции (для sales/downstream)."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Позиц", "region": "Минск", "product": "лист"})
+    ).json()
+    lead_id = lead["id"]
+    await api.post(f"/leads/{lead_id}/qualify")
+    await api.post(f"/leads/{lead_id}/route")
+    await api.put(
+        f"/leads/{lead_id}/items",
+        json=[{"sku_id": 7, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
+    )
+
+    await api.post(f"/leads/{lead_id}/convert")
+
+    ev = next(
+        e for e in (await session.execute(select(OutboxEvent))).scalars().all()
+        if e.event_type == "leads.lead.converted" and e.payload.get("lead_id") == lead_id
+    )
+    items = ev.payload["items"]
+    assert len(items) == 1
+    assert items[0]["sku_code"] == "6СТ-190"
+    assert items[0]["qty"] == 2 and items[0]["price"] == 300 and items[0]["discount_pct"] == 5
+
+
 # --- Юнит: AI-обоснование квалификации (AI включён, mock-режим) ---
 
 

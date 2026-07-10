@@ -21,6 +21,7 @@ import {
   submitEmailLead,
   submitWebLead,
 } from "@/lib/api";
+import { formatByn } from "@/lib/format";
 import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
 import type { Lead, LeadStatus, Manager } from "@/lib/types";
 
@@ -423,6 +424,14 @@ function LeadCard({
         {lead.company || lead.name || "Лид без имени"}
       </div>
       {lead.product && <div className="mt-0.5 text-xs text-muted">{lead.product}</div>}
+      {(lead.itemsCount ?? 0) > 0 && (
+        <div
+          className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-money-soft px-1.5 py-0.5 text-[11px] font-semibold text-money"
+          title="Подобранный КП: позиции и сумма"
+        >
+          🧾 {lead.itemsCount} поз. · {formatByn(lead.itemsTotal ?? 0)}
+        </div>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 text-xs text-muted">
           <Pin />
@@ -900,6 +909,8 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         onConvert={onConvert}
         onReject={onReject}
         onCall={(l) => setCallPopupLead(l)}
+        onItemsSaved={(id, count, total) => patch(id, { itemsCount: count, itemsTotal: total })}
+        onConverted={(id, dealId) => patch(id, { status: "converted", dealId })}
       />
 
       {/* Единое окно звонка (call-window): тот же кокпит, что и в сделках, со скриптом лида,

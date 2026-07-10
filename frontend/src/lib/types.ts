@@ -263,6 +263,8 @@ export interface Lead {
   nextStepNote: string; // заметка к следующему шагу
   createdAt?: string; // ISO datetime приёма лида — для чипа ожидания реакции
   firstActionAt?: string | null; // ISO datetime первого действия лидоруба (qualify/route/reject), или null пока не тронут
+  itemsCount?: number; // Цикл 3: число позиций подобранного КП на лиде
+  itemsTotal?: number; // Цикл 3: сумма КП (qty*price), BYN
 }
 
 export interface LeadAttachment {
