@@ -785,6 +785,47 @@ async def test_marketing_attribution_end_to_end_via_web_intake(session, api, ser
     assert found["leads"] == 1
 
 
+async def test_campaign_launch_leads_emit_received_and_attribute(session, api, services):
+    """Фикс ревью Ц4: лиды из запуска кампании эмитят leads.lead.received (с UTM).
+
+    Раньше on_campaign_launched создавал лиды молча — marketing-атрибуция для
+    этого пути никогда не срабатывала (Campaign.leads не рос).
+    """
+    from sqlalchemy import select
+
+    from core.services.eventbus import EventContext
+    from modules.leads.models import Lead
+
+    campaign = (
+        await api.post(
+            "/marketing/campaigns",
+            json={
+                "name": "Запуск", "channel": "site", "budget": 50.0, "leads": 2,
+                "utm_source": "yandex", "utm_medium": "cpc", "utm_campaign": "launch-camp",
+                "goal": "лиды",
+            },
+        )
+    ).json()
+
+    await api.post(f"/marketing/campaigns/{campaign['id']}/launch")
+    # relay 1: campaign.launched → leads создаёт лиды и эмитит leads.lead.received;
+    # relay 2: leads.lead.received → marketing атрибутирует к кампании.
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    created = (
+        (await session.execute(select(Lead).where(Lead.utm_campaign == "launch-camp")))
+        .scalars().all()
+    )
+    assert len(created) == 2
+    assert all(le.utm_source == "yandex" for le in created)
+
+    attr = (await api.get("/marketing/campaigns/attribution")).json()
+    found = next(c for c in attr if c["id"] == campaign["id"])
+    assert found["leads"] == 2 + 2  # 2 заявленных при создании + 2 атрибутированных
+
+
 # --- Юнит: AI-обоснование квалификации (AI включён, mock-режим) ---
 
 
