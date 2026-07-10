@@ -3,7 +3,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchLeadManagers } from "@/lib/api";
+import { fetchManagersCached } from "@/components/kanban/deal-card";
 import type { Manager } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
@@ -12,6 +12,7 @@ const PRIORITIES = ["Высокий", "Средний", "Низкий"];
 const ATTENTION = [
   { key: "overdue", label: "Просроченные" },
   { key: "no_step", label: "Без шага" },
+  { key: "revive", label: "Реанимировать" },
 ];
 
 function Section({ title }: { title: string }) {
@@ -65,7 +66,8 @@ export function FiltersMenu() {
 
   useEffect(() => {
     if (open && managers == null) {
-      void fetchLeadManagers().then(setManagers);
+      // Общий кэш с меню карточки и «Чья доска» — реальный fetch случается один раз.
+      void fetchManagersCached().then(setManagers);
     }
   }, [open, managers]);
 

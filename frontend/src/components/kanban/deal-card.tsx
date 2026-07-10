@@ -20,6 +20,15 @@ const PRIORITIES: Priority[] = ["Высокий", "Средний", "Низки�
 /** Кэш списка менеджеров на модуль: меню открывается на сотнях карточек — грузим один раз. */
 let managersCache: Manager[] | null = null;
 
+/** Менеджеры с общим кэшем модуля (меню карточки, переключатель «Чья доска», FiltersMenu).
+ * Пустой ответ (бэк недоступен) не кэшируется — следующий вызов попробует снова. */
+export async function fetchManagersCached(): Promise<Manager[]> {
+  if (managersCache) return managersCache;
+  const list = await fetchLeadManagers();
+  if (list.length) managersCache = list;
+  return list;
+}
+
 /** Поля сделки, редактируемые из меню карточки (⋯). Имена совпадают с PATCH-полями
  * бэкенда (DealUpdate: owner/priority/starred) — вызывающий шлёт их в updateDeal как есть. */
 export type DealCardPatch = { owner?: string; priority?: Priority; starred?: boolean };
@@ -48,11 +57,13 @@ function CardMenu({ deal, onUpdate }: { deal: Deal; onUpdate: (fields: DealCardP
 
   function toggleOwners() {
     setSection((s) => (s === "owner" ? null : "owner"));
-    if (managersCache) return;
-    void fetchLeadManagers().then((list) => {
-      if (list.length) managersCache = list; // пустой ответ (бэк лёг) не кэшируем
-      setManagers(list);
-    });
+    if (managersCache) {
+      // FIX-1: карточка могла смонтироваться ДО заполнения кэша (useState(null) на mount) —
+      // синхронизируем стейт из кэша, иначе её меню навсегда застревает в «Загрузка…».
+      setManagers(managersCache);
+      return;
+    }
+    void fetchManagersCached().then(setManagers);
   }
 
   const itemCls =
@@ -178,6 +189,7 @@ export function DealCard({
   wonResult = false,
   actBucket = null,
   noStep = false,
+  reviveDays = null,
   onLose,
   onCall,
   onUpdate,
@@ -196,6 +208,8 @@ export function DealCard({
   actBucket?: "overdue" | "today" | "tomorrow" | null;
   /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
   noStep?: boolean;
+  /** «Условный отказ» без касания дольше порога — чип «реанимировать · N дн» (N = дни в стадии). */
+  reviveDays?: number | null;
   onLose?: () => void;
   /** Открыть окно звонка прямо с карточки (без захода в drawer-preview). */
   onCall?: () => void;
@@ -258,6 +272,14 @@ export function DealCard({
               className="inline-flex items-center rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
             >
               нет шага
+            </span>
+          )}
+          {reviveDays != null && (
+            <span
+              title="Условный отказ давно без касания — верни в работу"
+              className="inline-flex items-center rounded-[5px] bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:bg-orange-500/15 dark:text-orange-300"
+            >
+              реанимировать · {reviveDays} дн
             </span>
           )}
           <PriorityBadge priority={deal.priority} />

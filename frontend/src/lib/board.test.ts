@@ -2,17 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   LOST_STAGE,
+  REVIVE_AFTER_DAYS,
   STAGE_PROBABILITY,
   STUCK_DAYS,
   dateBucketId,
   daysInStage,
   ensureLostStage,
   groupByDateBucket,
+  isClosedStageId,
   isOpenStage,
   isStuck,
   moveDealToStage,
   probabilityFor,
   recomputeStages,
+  reviveDays,
+  sortDealsForBoard,
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
@@ -172,8 +176,89 @@ describe("isStuck (SALES-43)", () => {
     expect(isStuck(deal("1", 100, { stageChangedAt: old }), "lost", NOW)).toBe(false);
   });
 
+  it("FIX-2: cond_lost (и производные коды секций) — не висяк; у него сигнал «реанимировать»", () => {
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "cond_lost", NOW)).toBe(false);
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "rp_won", NOW)).toBe(false);
+    expect(isStuck(deal("1", 100, { stageChangedAt: old }), "tn_lost", NOW)).toBe(false);
+  });
+
   it("не висяк без даты входа в стадию", () => {
     expect(isStuck(deal("1", 100), "new", NOW)).toBe(false);
+  });
+});
+
+describe("isClosedStageId", () => {
+  it("закрытые: won/lost + производные; открытые: остальные", () => {
+    for (const id of ["won", "lost", "cond_lost", "rp_won", "tn_lost"]) {
+      expect(isClosedStageId(id)).toBe(true);
+    }
+    for (const id of ["new", "contract", "has_price", "meeting"]) {
+      expect(isClosedStageId(id)).toBe(false);
+    }
+  });
+});
+
+describe("reviveDays — реанимация «Условного отказа» (слайс 3)", () => {
+  const NOW = Date.parse("2026-06-11T12:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
+  it("cond_lost старше порога → дни в стадии; моложе порога → null", () => {
+    expect(reviveDays(deal("1", 100, { stageChangedAt: daysAgo(10) }), "cond_lost", NOW)).toBe(10);
+    expect(
+      reviveDays(deal("1", 100, { stageChangedAt: daysAgo(REVIVE_AFTER_DAYS) }), "cond_lost", NOW),
+    ).toBe(REVIVE_AFTER_DAYS);
+    expect(
+      reviveDays(deal("1", 100, { stageChangedAt: daysAgo(REVIVE_AFTER_DAYS - 1) }), "cond_lost", NOW),
+    ).toBeNull();
+  });
+
+  it("не cond_lost или нет даты — null", () => {
+    expect(reviveDays(deal("1", 100, { stageChangedAt: daysAgo(30) }), "new", NOW)).toBeNull();
+    expect(reviveDays(deal("1", 100, { stageChangedAt: daysAgo(30) }), "lost", NOW)).toBeNull();
+    expect(reviveDays(deal("1", 100), "cond_lost", NOW)).toBeNull();
+  });
+});
+
+describe("sortDealsForBoard — «деньги × срочность» (слайс 3)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime();
+  const at = (d: number) => new Date(2026, 5, d, 10).toISOString();
+
+  it("просроченные (weighted DESC) → сегодня → завтра → остальные по weighted DESC", () => {
+    const deals = [
+      deal("plain-big", 1_000_000), // без даты, большой чек
+      deal("today", 500, { nextStepAt: at(11) }),
+      deal("overdue-small", 100, { nextStepAt: at(1) }),
+      deal("tomorrow", 900, { nextStepAt: at(12) }),
+      deal("overdue-big", 200, { nextStepAt: at(2) }),
+      deal("plain-small", 50),
+    ];
+    const ordered = sortDealsForBoard(deals, "new", NOW).map((d) => d.id);
+    expect(ordered).toEqual([
+      "overdue-big", // 200 > 100 внутри «просрочено»
+      "overdue-small",
+      "today",
+      "tomorrow",
+      "plain-big", // остальные по weighted DESC
+      "plain-small",
+    ]);
+  });
+
+  it("закрытые стадии (won/lost/cond_lost) не сортируются — хронология как есть", () => {
+    const deals = [deal("b", 10, { nextStepAt: at(1) }), deal("a", 999)];
+    expect(sortDealsForBoard(deals, "won", NOW)).toBe(deals);
+    expect(sortDealsForBoard(deals, "cond_lost", NOW)).toBe(deals);
+  });
+
+  it("до маунта (now=null) порядок исходный — без прыжка гидрации", () => {
+    const deals = [deal("b", 10, { nextStepAt: at(1) }), deal("a", 999)];
+    expect(sortDealsForBoard(deals, "new", null)).toBe(deals);
+  });
+
+  it("не мутирует вход", () => {
+    const deals = [deal("b", 10, { nextStepAt: at(1) }), deal("a", 999)];
+    const copy = [...deals];
+    sortDealsForBoard(deals, "new", NOW);
+    expect(deals).toEqual(copy);
   });
 });
 

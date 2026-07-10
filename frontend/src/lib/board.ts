@@ -89,12 +89,32 @@ export function daysInStage(stageChangedAt: string | undefined, now: number): nu
   return Math.max(0, Math.floor((now - ts) / DAY_MS));
 }
 
+/** Закрытая стадия по коду: won/lost и производные (cond_lost, rp_won, tn_lost…) —
+ * endsWith покрывает и канонические id, и коды стадий секций «Все вместе». */
+export function isClosedStageId(stageId: string): boolean {
+  return stageId.endsWith("won") || stageId.endsWith("lost");
+}
+
 /** «Висяк» (SALES-43): открытая сделка без движения по стадии дольше порога.
- * Терминальные стадии (won/lost) висяками не считаются. */
+ * Закрытые стадии (won/lost, включая cond_lost) висяками не считаются — единый гейт
+ * для карточки, списка, счётчика колонки и фильтра; у cond_lost свой сигнал —
+ * «реанимировать» ({@link reviveDays}). */
 export function isStuck(deal: Deal, stageId: string, now: number, threshold = STUCK_DAYS): boolean {
-  if (stageId === "won" || stageId === "lost") return false;
+  if (isClosedStageId(stageId)) return false;
   const days = daysInStage(deal.stageChangedAt, now);
   return days != null && days >= threshold;
+}
+
+/** Порог «реанимации» условного отказа: дольше N дней в cond_lost — пора вернуть в работу. */
+export const REVIVE_AFTER_DAYS = 7;
+
+/** «Реанимировать» (слайс 3): сделка в «Условном отказе» без касания дольше порога —
+ * возвращает дни в стадии для чипа «реанимировать · N дн», иначе null. cond_lost —
+ * реанимируемая стадия (sales-stages.ts), для остальных сигнал не имеет смысла. */
+export function reviveDays(deal: Deal, stageId: string, now: number): number | null {
+  if (!stageId.endsWith("cond_lost")) return null;
+  const days = daysInStage(deal.stageChangedAt, now);
+  return days != null && days >= REVIVE_AFTER_DAYS ? days : null;
 }
 
 /** Бакет вида «По датам действий» (П4, слайс 4) — id колонки для {@link dateBucketId}. */
@@ -143,4 +163,21 @@ export function groupByDateBucket(
   const byId = new Map<DateBucketId, Deal[]>(DATE_BUCKETS.map((b) => [b.id, []]));
   for (const d of deals) byId.get(dateBucketId(d, now))!.push(d);
   return DATE_BUCKETS.map((b) => ({ ...b, deals: byId.get(b.id)! }));
+}
+
+/** Ранг срочности для сортировки колонки: просрочено → сегодня → завтра → остальные. */
+const URGENCY_RANK: Partial<Record<DateBucketId, number>> = { overdue: 0, today: 1, tomorrow: 2 };
+
+/** Порядок карточек в колонке (слайс 3): «деньги × срочность» — просроченные (по убыванию
+ * взвешенной суммы) → сегодня → завтра → остальные по взвешенной DESC. Закрытые стадии
+ * (won/lost/cond_lost) не сортируются — там важна хронология. До маунта (`now == null`)
+ * порядок исходный (SSR и клиент совпадают — без прыжка гидрации). */
+export function sortDealsForBoard(deals: Deal[], stageId: string, now: number | null): Deal[] {
+  if (now == null || isClosedStageId(stageId)) return deals;
+  return [...deals].sort((a, b) => {
+    const ra = URGENCY_RANK[dateBucketId(a, now)] ?? 3;
+    const rb = URGENCY_RANK[dateBucketId(b, now)] ?? 3;
+    if (ra !== rb) return ra - rb;
+    return weightedAmount(b, stageId) - weightedAmount(a, stageId);
+  });
 }

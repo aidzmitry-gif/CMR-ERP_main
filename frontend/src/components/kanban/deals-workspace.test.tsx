@@ -6,13 +6,15 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
-// next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id].
-// useSearchParams — приоритет теперь читается из URL (кнопка «Фильтры» переехала в шапку
-// страницы, FiltersMenu, отдельное поддерево React); mockSearchParams меняем per-test.
+// next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id];
+// replace — hoisted-спай (переключатель «Чья доска» пишет ?owner= через router.replace).
+// useSearchParams — фильтры читаются из URL (FiltersMenu в шапке); mockSearchParams per-test.
 let mockSearchParams = new URLSearchParams();
+const routerReplace = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: routerReplace, prefetch: vi.fn() }),
   useSearchParams: () => mockSearchParams,
+  usePathname: () => "/crm/deals",
 }));
 vi.mock("@/lib/api", () => ({
   createDeal: vi.fn(),
@@ -366,5 +368,65 @@ describe("DealsWorkspace (канбан)", () => {
     unmount();
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     expect(screen.queryByText(/Демо-данные: backend недоступен/)).toBeNull();
+  });
+
+  // --- Слайс 3 + FIX-2 ---
+
+  const condStage: Stage = {
+    id: "cond_lost",
+    title: "Условный отказ",
+    color: "#F97316",
+    count: 1,
+    sum: 100,
+    deals: [
+      { id: "c1", number: "CRM-9", company: "ООО Спячка", description: "", amount: 100, priority: "Средний", owner: "И", stageChangedAt: "2020-01-01T00:00:00" },
+    ],
+  };
+
+  it("FIX-2: cond_lost не «висяк» ни на доске, ни в списке, ни в «Все вместе» — но с чипом «реанимировать»", async () => {
+    const { unmount } = render(<DealsWorkspace initialStages={[condStage]} initialKpis={[]} />);
+    // now тикает после маунта: появляется «реанимировать · N дн», а «застряло»/«висяк» — нет
+    await waitFor(() =>
+      expect(screen.getByText(/реанимировать · \d+ дн/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/застряло:/)).toBeNull();
+    fireEvent.click(screen.getByTitle("Список"));
+    expect(screen.getByText(/· \d+ дн/)).toBeInTheDocument(); // дни в списке есть
+    expect(screen.queryByText(/дн · висяк/)).toBeNull(); // пометки «висяк» нет
+    unmount();
+    // «Все вместе»: combinedCardExtras считает так же, как cardExtras (единый isStuck)
+    render(
+      <DealsWorkspace
+        initialStages={[condStage]}
+        initialKpis={[]}
+        combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages: [condStage] }]}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/реанимировать · \d+ дн/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/застряло:/)).toBeNull();
+  });
+
+  it("?attn=revive оставляет только условные отказы старше порога", async () => {
+    mockSearchParams = new URLSearchParams({ attn: "revive" });
+    render(<DealsWorkspace initialStages={[...stages, condStage]} initialKpis={[]} />);
+    await waitFor(() => expect(screen.getByText("ООО Спячка")).toBeInTheDocument());
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+    expect(screen.queryByText("ООО Просрочка")).toBeNull();
+  });
+
+  it("переключатель «Чья доска» ставит ?owner= через router.replace (та же ручка, что FiltersMenu)", async () => {
+    mock(api.fetchLeadManagers).mockResolvedValue([
+      { name: "Петров П.П.", regions: [], products: [], load: 1 },
+    ]);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Петров П.П." }));
+    expect(routerReplace).toHaveBeenCalledWith(
+      `/crm/deals?${new URLSearchParams({ owner: "Петров П.П." }).toString()}`,
+    );
+    // «👥 Все» сбрасывает параметр
+    fireEvent.click(screen.getByRole("button", { name: "👥 Все" }));
+    expect(routerReplace).toHaveBeenLastCalledWith("/crm/deals?");
   });
 });

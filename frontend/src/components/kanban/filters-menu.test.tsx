@@ -62,7 +62,7 @@ describe("FiltersMenu", () => {
     );
   });
 
-  it("секция «Внимание»: «Просроченные» → ?attn=overdue, «Без шага» → ?attn=no_step", () => {
+  it("секция «Внимание»: «Просроченные» → ?attn=overdue, «Без шага» → ?attn=no_step, «Реанимировать» → ?attn=revive", () => {
     render(<FiltersMenu />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
@@ -72,6 +72,10 @@ describe("FiltersMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.click(screen.getByRole("button", { name: "Без шага" }));
     expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=no_step");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Реанимировать" }));
+    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=revive");
   });
 
   it("активные owner/attn видны бейджами на кнопке «Фильтры»", () => {

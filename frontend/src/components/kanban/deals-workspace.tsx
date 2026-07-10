@@ -14,11 +14,11 @@ import {
 import clsx from "clsx";
 import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Children, useEffect, useId, useMemo, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
-import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
+import { DealCard, fetchManagersCached, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
@@ -38,19 +38,22 @@ import {
   dateBucketId,
   daysInStage,
   groupByDateBucket,
+  isClosedStageId,
   isOpenStage,
   isStuck,
   LOSS_REASONS,
   moveDealToStage,
   probabilityFor,
   recomputeStages,
+  reviveDays,
+  sortDealsForBoard,
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
 import { STAGE_BY_ID } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
-import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
+import type { Deal, Kpi, LossReason, Manager, Stage } from "@/lib/types";
 
 /** Бейджи/плашки Сделки 2.0, вычисляемые для карточки из стадии и текущего времени. */
 type CardExtras = {
@@ -64,18 +67,14 @@ type CardExtras = {
   actBucket: "overdue" | "today" | "tomorrow" | null;
   /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
   noStep: boolean;
+  /** «Условный отказ» дольше порога без касания — чип «реанимировать · N дн» (слайс 3). */
+  reviveDays: number | null;
   onLose?: () => void;
   /** Открыть окно звонка прямо с карточки канбана (тот же кокпит, что у drawer-preview). */
   onCall?: () => void;
   /** Меню карточки (⋯): ответственный/приоритет/избранное → оптимистичный патч + PATCH бэку. */
   onUpdate?: (fields: DealCardPatch) => void;
 };
-
-/** Закрытые стадии (won/lost, включая cond_lost и коды секций вида rp_won): чипы срочности,
- *  маркер «нет шага» и фильтры «Внимание» на них не действуют. */
-function isClosedStageId(id: string): boolean {
-  return id.endsWith("won") || id.endsWith("lost");
-}
 
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
 const CARD_CAP = 50;
@@ -215,6 +214,10 @@ function PlanBanner({ now }: { now: number | null }) {
   );
 }
 
+/** Вертикальный разделитель pipeline-строки — модульный: React-компилятор запрещает
+ *  создавать компоненты во время рендера. */
+const Sep = () => <span className="hidden h-4 w-px bg-line sm:block" aria-hidden />;
+
 /** Pipeline-строка под скорбордом (порт макета): живые срезы открытого pipeline —
  *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа — DEMO-ставка
  *  22% (реальная — из landed cost закупок; методика цены ещё разрабатывается). */
@@ -223,12 +226,16 @@ function PipelineRow({
   now,
   fmt,
   chip,
+  planGap,
 }: {
   stages: Stage[];
   now: number | null;
   fmt: (value: number) => string;
   /** П3 (макет): chip-прогноз закрытия периода («Закроем месяц на ~X% плана»). */
   chip?: string | null;
+  /** Гэп до плана периода (слайс 3): сколько выручки не хватает и ≈сколько это сделок
+   * со средним чеком. null — плана/чека в данных нет (honest-empty, строка не рисуется). */
+  planGap?: { gap: number; deals: number; avg: number } | null;
 }) {
   const open = stages.filter(isOpenStage);
   const count = open.reduce((n, s) => n + s.deals.length, 0);
@@ -239,7 +246,6 @@ function PipelineRow({
     now == null
       ? null
       : stages.reduce((n, s) => n + s.deals.filter((d) => isStuck(d, s.id, now)).length, 0);
-  const Sep = () => <span className="hidden h-4 w-px bg-line sm:block" aria-hidden />;
   return (
     <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-surface px-4 py-3 text-[13px] shadow-card">
       <span className="text-muted">
@@ -269,6 +275,18 @@ function PipelineRow({
       <span className="text-muted">
         Висяки: <b className="text-amber-600">{stuck ?? "—"}</b>
       </span>
+      {planGap && (
+        <>
+          <Sep />
+          <span
+            className="text-muted"
+            title="План выручки периода минус факт; сделки — по среднему чеку (факт won или плановый)."
+          >
+            До плана: <b className="text-ink">{fmt(planGap.gap)}</b> · ≈{planGap.deals}{" "}
+            {pluralDeals(planGap.deals)} со ср. чеком {fmt(planGap.avg)}
+          </span>
+        </>
+      )}
       {chip && (
         <span className="ml-auto rounded-lg bg-accent-soft px-2.5 py-1 text-[12.5px] font-semibold text-accent-ink">
           {chip}
@@ -420,6 +438,7 @@ function FunnelSection({
   color,
   initialStages,
   fmt,
+  now,
   cardExtras,
   onPreview,
   onOpen,
@@ -429,6 +448,8 @@ function FunnelSection({
   color: string;
   initialStages: Stage[];
   fmt: (value: number) => string;
+  /** Время маунта родителя — для сортировки «деньги × срочность» (sortDealsForBoard). */
+  now: number | null;
   cardExtras: (deal: Deal, stageId: string, stages: Stage[]) => CardExtras;
   onPreview: (d: Deal) => void;
   onOpen: (d: Deal) => void;
@@ -488,7 +509,7 @@ function FunnelSection({
       <DndContext id={dndId} sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="flex gap-4 overflow-x-auto pb-2 thin-scroll">
           {stages.map((stage) => {
-            const extrasByDeal = stage.deals.map(
+            const extrasByDeal = sortDealsForBoard(stage.deals, stage.id, now).map(
               (deal) => [deal, cardExtras(deal, stage.id, stages)] as const,
             );
             return (
@@ -774,8 +795,11 @@ export function DealsWorkspace({
   demoData?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { fmt } = useCurrency();
   const [stages, setStages] = useState<Stage[]>(initialStages);
+  // A (слайс 3): менеджеры для переключателя «Чья доска» — общий кэш с меню карточки (⋯).
+  const [managers, setManagers] = useState<Manager[]>([]);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [period, setPeriod] = useState("day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
@@ -831,7 +855,18 @@ export function DealsWorkspace({
     void fetchPlans({ period_type: "month", period_key: periodKey }).then((plans) => {
       if (plans.some((p) => p.status === "approved")) setPlanApproved(true);
     });
+    // A: менеджеры для «Чья доска» (кэш общий с меню карточки — второй раз не фетчится).
+    void fetchManagersCached().then(setManagers);
   }, []);
+
+  /** A: переключатель «Чья доска» и секция «Ответственный» в FiltersMenu — две ручки
+   *  одного URL-параметра `?owner=` (источник истины — URL, как у funnel/priority). */
+  function setOwnerParam(name: string | null) {
+    const next = new URLSearchParams(searchParams.toString());
+    if (name) next.set("owner", name);
+    else next.delete("owner");
+    router.replace(`${pathname}?${next.toString()}`);
+  }
 
   function toggleMoreKpis() {
     // Запись вне updater-а: side-effect внутри setState под StrictMode дёргается дважды.
@@ -973,6 +1008,9 @@ export function DealsWorkspace({
         );
       } else if (attn === "no_step") {
         deals = deals.filter((d) => !isClosedStageId(s.id) && !d.nextStep && !d.todo);
+      } else if (attn === "revive") {
+        // «Реанимировать»: условные отказы старше порога без касания (reviveDays, board.ts).
+        deals = deals.filter((d) => now != null && reviveDays(d, s.id, now) != null);
       }
       if (stuckOnly) deals = deals.filter((d) => now != null && isStuck(d, s.id, now));
       if (actFilter) deals = deals.filter((d) => now != null && dateBucketId(d, now) === actFilter);
@@ -1016,7 +1054,10 @@ export function DealsWorkspace({
     return {
       actBucket: actBucketFor(deal, closed),
       noStep: !closed && !deal.nextStep && !deal.todo,
+      reviveDays: now != null ? reviveDays(deal, stageId, now) : null,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
+      // FIX-2: isStuck (board.ts) сам гейтит закрытые стадии (won/lost/cond_lost) — единый
+      // хелпер для карточки, списка, счётчика колонки, фильтра «Висяки» и PipelineRow.
       stuck: now != null && isStuck(deal, stageId, now),
       probability: probabilityFor(deal, stageId),
       weighted: weightedAmount(deal, stageId),
@@ -1050,8 +1091,10 @@ export function DealsWorkspace({
     return {
       actBucket: actBucketFor(deal, closed),
       noStep: !closed && !deal.nextStep && !deal.todo,
+      reviveDays: now != null ? reviveDays(deal, stageId, now) : null,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
-      stuck: now != null && !closed && isStuck(deal, stageId, now),
+      // FIX-2: гейт закрытых стадий живёт в самом isStuck — формула та же, что в cardExtras.
+      stuck: now != null && isStuck(deal, stageId, now),
       probability: probabilityFor(deal, stageId),
       weighted: weightedAmount(deal, stageId),
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
@@ -1107,6 +1150,25 @@ export function DealsWorkspace({
           if (ship && ship.target > 0 && elapsed != null && elapsed >= 0.1) {
             const projPct = Math.round((ship.value / elapsed / ship.target) * 100);
             chip = `Закроем ${PERIOD_ACC[period] ?? period} на ~${projPct}% плана`;
+          }
+          // Гэп до плана (слайс 3, D): план выручки минус факт; ≈сделок — по среднему чеку
+          // (факт avg_deal → плановый avg_deal → средний чек won-сделок доски). Данные уже
+          // пришли для скорборда — новых бэк-вызовов нет. Нет плана/чека → honest-empty.
+          let planGap: { gap: number; deals: number; avg: number } | null = null;
+          if (ship && ship.target > 0 && ship.target > ship.value) {
+            const gap = ship.target - ship.value;
+            const avgKpi = kpiByKey.get("avg_deal");
+            const wonDeals = stages.find((s) => s.id === "won")?.deals ?? [];
+            const wonAvg = wonDeals.length
+              ? wonDeals.reduce((a, d) => a + d.amount, 0) / wonDeals.length
+              : 0;
+            const avg =
+              avgKpi && avgKpi.value > 0
+                ? avgKpi.value
+                : avgKpi && avgKpi.target > 0
+                  ? avgKpi.target
+                  : wonAvg;
+            if (avg > 0) planGap = { gap, deals: Math.ceil(gap / avg), avg: Math.round(avg) };
           }
           const sub = periodSubLabel(period, now);
           return (
@@ -1256,7 +1318,7 @@ export function DealsWorkspace({
                 </div>
               </section>
 
-              <PipelineRow stages={stages} now={now} fmt={fmt} chip={chip} />
+              <PipelineRow stages={stages} now={now} fmt={fmt} chip={chip} planGap={planGap} />
             </>
           );
         })()}
@@ -1277,6 +1339,42 @@ export function DealsWorkspace({
               />
             </div>
             {funnelTabs}
+            {/* A (слайс 3): «Чья доска» — сегментированный переключатель по ответственному.
+                Та же ручка ?owner=, что у секции «Ответственный» в FiltersMenu (шапка страницы):
+                две ручки одного URL-параметра. Продавец смотрит и свою, и чужую доску. */}
+            {managers.length > 0 && (
+              <div
+                role="group"
+                aria-label="Чья доска"
+                className="flex items-center gap-0.5 overflow-x-auto rounded-lg border border-line bg-surface p-0.5"
+              >
+                <button
+                  onClick={() => setOwnerParam(null)}
+                  title="Сделки всех менеджеров"
+                  className={clsx(
+                    "rounded-md px-2.5 py-1.5 text-[12.5px] font-medium whitespace-nowrap",
+                    !ownerFilter ? "bg-accent-soft text-accent-ink" : "text-muted hover:text-ink",
+                  )}
+                >
+                  👥 Все
+                </button>
+                {managers.map((m) => (
+                  <button
+                    key={m.name}
+                    onClick={() => setOwnerParam(ownerFilter === m.name ? null : m.name)}
+                    title={`Доска менеджера: ${m.name}`}
+                    className={clsx(
+                      "rounded-md px-2.5 py-1.5 text-[12.5px] font-medium whitespace-nowrap",
+                      ownerFilter === m.name
+                        ? "bg-accent-soft text-accent-ink"
+                        : "text-muted hover:text-ink",
+                    )}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
             {(["today", "tomorrow"] as const).map((k) => (
               <button
@@ -1468,6 +1566,7 @@ export function DealsWorkspace({
                 color={FUNNEL_SECTION_COLOR[section.code] ?? "var(--accent)"}
                 initialStages={section.stages}
                 fmt={fmt}
+                now={now}
                 cardExtras={combinedCardExtras}
                 onPreview={setPreviewDeal}
                 onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
@@ -1489,7 +1588,8 @@ export function DealsWorkspace({
                   }
                   onAdd={() => openModal(stage.id)}
                 >
-                  {stage.deals.map((deal) => (
+                  {/* B (слайс 3): порядок «деньги × срочность» — sortDealsForBoard (board.ts). */}
+                  {sortDealsForBoard(stage.deals, stage.id, now).map((deal) => (
                     <DraggableDeal
                       key={deal.id}
                       deal={deal}

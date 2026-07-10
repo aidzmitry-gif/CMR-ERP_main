@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -105,6 +105,32 @@ describe("DealCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ответственный" }));
     fireEvent.click(await screen.findByRole("button", { name: /Орлов И\./ }));
     expect(onUpdate).toHaveBeenCalledWith({ owner: "Орлов И." });
+  });
+
+  it("кэш менеджеров общий: вторая карточка видит список без второго fetch (FIX-1)", async () => {
+    const { fetchLeadManagers } = await import("@/lib/api");
+    const before = (fetchLeadManagers as ReturnType<typeof vi.fn>).mock.calls.length;
+    render(
+      <>
+        <DealCard deal={deal} onUpdate={vi.fn()} />
+        <DealCard deal={{ ...deal, id: "2", number: "CRM-2" }} onUpdate={vi.fn()} />
+      </>,
+    );
+    const [menuA, menuB] = screen.getAllByRole("button", { name: "Меню карточки" });
+    const boxA = menuA.closest("[data-card-menu]") as HTMLElement;
+    const boxB = menuB.closest("[data-card-menu]") as HTMLElement;
+    // Карточка A: открыть меню → «Ответственный» → список загрузился (fetch, кэш заполнен)
+    fireEvent.click(menuA);
+    fireEvent.click(within(boxA).getByRole("button", { name: "Ответственный" }));
+    await within(boxA).findByRole("button", { name: /Орлов И\./ });
+    // Карточка B смонтирована ДО загрузки кэша (useState(null) на mount): её меню обязано
+    // показать менеджеров из кэша, а не вечную «Загрузку…», и БЕЗ второго fetch.
+    fireEvent.click(menuB);
+    fireEvent.click(within(boxB).getByRole("button", { name: "Ответственный" }));
+    expect(await within(boxB).findByRole("button", { name: /Орлов И\./ })).toBeInTheDocument();
+    expect(within(boxB).queryByText("Загрузка…")).toBeNull();
+    // ≤1: модульный кэш мог прогреть предыдущий тест файла; ключевое — B не делает второй fetch.
+    expect((fetchLeadManagers as ReturnType<typeof vi.fn>).mock.calls.length - before).toBeLessThanOrEqual(1);
   });
 
   it("без onUpdate меню не рендерится (декоративная иконка ⋯)", () => {
