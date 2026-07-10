@@ -418,16 +418,3 @@ function RegStub() {
   );
 }
 
-function LinkedStub() {
-  return (
-    <Card>
-      <PanelHeader icon="🔗" title="Сделки клиента" />
-      <CardBody>
-        <StubNote>
-          другие сделки контрагента — запросим по <code>counterparty.id</code> (тот же ключ, что в
-          MDM / 1С); при <code>merged_into_id != null</code> покажем плашку «контрагент слит».
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}

@@ -18,7 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   createDeal,
@@ -258,7 +258,6 @@ export function CallWindow({
     // нового клиента нет компании — иначе сохраняем известную компанию лида.
     const counterparty = ctx.company || req?.org || ctx.phone || "Новый клиент";
     // Date.now() в обработчике клика (не в рендере) — уникальный номер счёта в момент действия.
-    // eslint-disable-next-line react-hooks/purity
     const number = `CRM-CALL-${Date.now().toString(36).toUpperCase()}`;
     const deal = await createDeal({
       number,
@@ -435,7 +434,7 @@ export function CallWindow({
                           onClick={() =>
                             setChecked((s) => {
                               const n = new Set(s);
-                              n.has(it.id) ? n.delete(it.id) : n.add(it.id);
+                              if (!n.delete(it.id)) n.add(it.id);
                               return n;
                             })
                           }

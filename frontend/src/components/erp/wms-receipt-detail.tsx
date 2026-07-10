@@ -4,7 +4,6 @@ import clsx from "clsx";
 import { CheckCircle2, Lock } from "lucide-react";
 import { useState } from "react";
 
-import { SourceTag } from "@/components/source-tag";
 import { formatNumber } from "@/lib/format";
 import {
   acceptReceipt,

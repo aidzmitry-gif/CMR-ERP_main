@@ -3,7 +3,7 @@
 import { Printer } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { code39Bars, isCode39 } from "@/lib/barcode";
+import { code39Bars } from "@/lib/barcode";
 import { fetchLocations, locationLabel, type WmsLocation } from "@/lib/wms-ops";
 
 function Barcode({ code }: { code: string }) {

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Boxes, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { formatNumber } from "@/lib/format";

@@ -36,12 +36,6 @@ const STATUS_META: Record<LeadStatus, { label: string; cls: string }> = {
   converted: { label: "В сделке", cls: "bg-green-100 text-green-700" },
   rejected: { label: "Отклонён", cls: "bg-sunken text-muted" },
 };
-const FUNNEL_LABELS: Record<string, string> = {
-  new: "Новые клиенты",
-  regular: "Постоянные",
-  tender: "Тендеры",
-  project: "Проектные",
-};
 const INPUT =
   "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
