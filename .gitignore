@@ -77,6 +77,9 @@ coordination/.empty-mcp.json
 # Журнал активности флота (git-хуки .githooks) — локальный обмен между сессиями
 coordination/.activity.local.md
 
+# Кокпит флота (scripts/fleet_dashboard.py) — генерируемый HTML из локального состояния
+coordination/fleet-dashboard.html
+
 # Telegram-мост (tg_bridge.py) — runtime
 coordination/.tg-bridge-state.json
 coordination/.tg-events.jsonl

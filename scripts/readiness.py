@@ -148,6 +148,11 @@ def main(argv: list[str] | None = None) -> None:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         verb = _write_status(_auto_block(rows, total_migr, stamp))
         print(f"\nSTATUS.md: авто-блок {verb} ({stamp}); курируемые % не тронуты.")
+        try:  # заодно освежаем HTML-кокпит; fail-open — битый рендер не рушит readiness
+            import fleet_dashboard  # noqa: PLC0415  — тот же scripts/-каталог
+            fleet_dashboard.main()
+        except Exception as exc:  # pragma: no cover
+            print(f"(fleet-dashboard пропущен: {exc})")
     else:
         print("\n% готовности — см. coordination/STATUS.md (правится вручную). "
               "Свежий авто-блок: readiness.py --write.")
