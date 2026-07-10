@@ -36,4 +36,13 @@ describe("DealCard", () => {
     render(<DealCard deal={deal} />);
     expect(screen.getByRole("link")).toHaveAttribute("href", "/crm/deals/1");
   });
+
+  it("onCall открывает обработчик и не вложен в ссылку", () => {
+    const onCall = vi.fn();
+    render(<DealCard deal={deal} onCall={onCall} />);
+    const btn = screen.getByRole("button", { name: "Позвонить" });
+    expect(btn.closest("a")).toBeNull();
+    btn.click();
+    expect(onCall).toHaveBeenCalledTimes(1);
+  });
 });

@@ -7,13 +7,22 @@ async-драйвер sqlite не ругался на «другой loop».
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
+import sys
+from pathlib import Path
+from uuid import uuid4
+
+# psycopg async cannot run on Windows' default ProactorEventLoop.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Тесты — не прод: dev-режим, чтобы прод-guard (SECURITY.md P0-5) не падал на
 # dev-кредах БД из .env. Выставить ДО импорта core.runtime.app (тянет настройки).
 os.environ.setdefault("AIOS_ENVIRONMENT", "dev")
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -31,6 +40,16 @@ for _module in ENABLED_MODULES:
         pass
 
 SCHEMA_TRANSLATE = {module: None for module in ENABLED_MODULES}
+
+
+@pytest.fixture
+def tmp_path() -> Path:
+    """Sandbox-friendly tmp path: create unique dirs without teardown cleanup."""
+    root = Path(".tmp_pytest/manual")
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / uuid4().hex
+    path.mkdir()
+    return path
 
 
 @pytest_asyncio.fixture

@@ -23,14 +23,16 @@ test("лид: приём → AI-квалификация → распредел�
   await expect(page.getByText("ООО E2E-Тест").first()).toBeVisible();
 
   // 2) квалификация: появляется балл и вердикт «целевой» (+ AI-обоснование)
-  await page.getByRole("button", { name: "Квалифицировать" }).click();
-  await expect(page.getByText(/целевой/).first()).toBeVisible();
+  const drawer = page.getByRole("dialog", { name: /Превью лида ЛИД-/ });
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "Квалифицировать", exact: true }).click();
+  await expect(drawer.getByText(/целевой/).first()).toBeVisible();
 
   // 3) распределение: назначается менеджер
-  await page.getByRole("button", { name: "Распределить" }).click();
-  await expect(page.getByText(/Иванов И\.И\.|Петров П\.П\.|Сидоров С\.С\./)).toBeVisible();
+  await drawer.getByRole("button", { name: "Распределить", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "✓ Распределён" })).toBeVisible();
 
   // 4) конвертация в сделку → появляется ссылка на созданную сделку
-  await page.getByRole("button", { name: "В сделку" }).click();
-  await expect(page.getByRole("link", { name: /Открыть сделку/ })).toBeVisible();
+  await drawer.getByRole("button", { name: "В сделку", exact: true }).click();
+  await expect(drawer.getByRole("link", { name: /Открыть сделку/ })).toBeVisible();
 });

@@ -42,18 +42,36 @@ function channelLink(channel: string, phone: string, email: string): string | nu
 }
 
 /** Компактный ряд иконок каналов (индикатор для карточек на доске). */
-export function ChannelRow() {
+export function ChannelRow({ onPhone }: { onPhone?: () => void } = {}) {
   return (
     <div className="flex items-center gap-2">
-      {CHANNELS.map(({ key, color, Icon }) => (
-        <span
-          key={key}
-          className="flex h-7 w-7 items-center justify-center rounded-lg"
-          style={{ backgroundColor: color + "14", color }}
-        >
-          <Icon size={15} />
-        </span>
-      ))}
+      {CHANNELS.map(({ key, color, Icon, label }) =>
+        key === "phone" && onPhone ? (
+          <button
+            key={key}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPhone();
+            }}
+            title={label}
+            aria-label={label}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition hover:scale-105"
+            style={{ backgroundColor: color + "14", color }}
+          >
+            <Icon size={15} />
+          </button>
+        ) : (
+          <span
+            key={key}
+            className="flex h-7 w-7 items-center justify-center rounded-lg"
+            style={{ backgroundColor: color + "14", color }}
+            title={label}
+          >
+            <Icon size={15} />
+          </span>
+        ),
+      )}
     </div>
   );
 }

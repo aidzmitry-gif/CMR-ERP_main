@@ -27,13 +27,9 @@ import {
   lookupCounterparty,
   updateDeal,
 } from "@/lib/api";
+import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useCurrency } from "@/components/kanban/currency-context";
-import {
-  ProductPicker,
-  ProductPickerTotals,
-  useProductPicker,
-  WarehousePickerModal,
-} from "@/components/kanban/product-picker";
+import { ProductPicker, ProductPickerTotals, useProductPicker } from "@/components/kanban/product-picker";
 import { scriptFor } from "./call-scripts";
 
 /**
@@ -723,10 +719,12 @@ export function CallWindow({
       </div>
     </div>
     {warehousePickerOpen && (
-      <WarehousePickerModal
+      <CatalogPickerModal
         state={picker}
-        fmt={fmt}
+        dealId={ctx.kind === "deal" ? ctx.dealId : undefined}
+        counterparty={ctx.company ?? ""}
         onClose={() => setWarehousePickerOpen(false)}
+        onCommitted={() => setWarehousePickerOpen(false)}
       />
     )}
     </>

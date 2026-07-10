@@ -18,6 +18,7 @@
 
 # --- Локальная dev-БД и данные ---
 dev.db
+dev_calls.db
 *.sqlite3
 /data/
 connectors/data/
@@ -36,16 +37,35 @@ env/
 # --- Тесты и покрытие (не нужны в рантайме) ---
 tests/
 .pytest_cache/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
 .coverage
 coverage.xml
 htmlcov/
+.tmp_pytest/
+.tmp_ruff_cache/
+
+# --- Runtime logs / local process output ---
+*.log
+*.err
+_backend.log
+_backend.err
+_frontend.log
+_frontend.err
+_uvicorn.out.log
+_uvicorn.err.log
 
 # --- Фронтенд (собирается отдельно, не часть backend-образа) ---
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/build/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo
+frontend/e2e.db
 
 # --- Claude Code / оркестратор / Telegram-мост — runtime и конфиги агентов ---
 .claude/

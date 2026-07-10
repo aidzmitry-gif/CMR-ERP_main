@@ -14,6 +14,7 @@ env/
 
 # Локальная dev-БД (SQLite)
 dev.db
+dev_calls.db
 *.sqlite3
 
 # Коннекторы: вывод (inbox/media) и состояние, ключ сервисного аккаунта Google
@@ -24,13 +25,26 @@ connectors/data/
 
 # Инструменты
 .pytest_cache/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
+.tmp_pytest/
+.tmp_ruff_cache/
 
 # Покрытие тестами
 .coverage
 coverage.xml
 htmlcov/
+
+# Runtime logs / local process output
+*.log
+*.err
+_backend.log
+_backend.err
+_frontend.log
+_frontend.err
+_uvicorn.out.log
+_uvicorn.err.log
 
 # IDE / ОС
 .idea/
@@ -40,6 +54,14 @@ Thumbs.db
 
 # Локальные настройки Claude Code
 .claude/settings.local.json
+.claude/settings.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Локальные browser/review/runtime артефакты
+.playwright-mcp/
+.review/
+_docs_out/node_modules/
 
 # Локальные референсы из архива (не часть проекта)
 .refs_voronki/
