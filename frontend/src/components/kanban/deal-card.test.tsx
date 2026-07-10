@@ -151,4 +151,59 @@ describe("DealCard", () => {
     btn.click();
     expect(onCall).toHaveBeenCalledTimes(1);
   });
+
+  // --- Слайс 4: композер «след. шаг» ---
+
+  it("без onNextStep строка шага остаётся статичным текстом (как раньше), композер не рендерится", () => {
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} />);
+    expect(screen.getByText("—")).toBeInTheDocument(); // "След. шаг: —" (нет шага, статично)
+    expect(screen.queryByText("+ след. шаг")).toBeNull();
+  });
+
+  it("onNextStep передан, шага нет → кликабельная заглушка «+ след. шаг»", () => {
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} onNextStep={vi.fn()} />);
+    expect(screen.getByText("+ след. шаг")).toBeInTheDocument();
+  });
+
+  it("клик по строке шага открывает композер с пресетами стадии", () => {
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} stageId="qual" onNextStep={vi.fn()} />);
+    fireEvent.click(screen.getByText("+ след. шаг"));
+    expect(screen.getByText("Отправить КП")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeInTheDocument();
+  });
+
+  it("пункт CardMenu «След. шаг…» открывает тот же композер", () => {
+    render(
+      <DealCard deal={{ ...deal, nextStep: undefined }} stageId="qual" onUpdate={vi.fn()} onNextStep={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    fireEvent.click(screen.getByRole("button", { name: "След. шаг…" }));
+    expect(screen.getByText("Отправить КП")).toBeInTheDocument();
+  });
+
+  it("без onNextStep пункт «След. шаг…» в CardMenu не рендерится", () => {
+    render(<DealCard deal={deal} onUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    expect(screen.queryByRole("button", { name: "След. шаг…" })).toBeNull();
+  });
+
+  it("выбор пресета + «Сохранить» зовёт onNextStep с текстом и ISO-датой", () => {
+    const onNextStep = vi.fn();
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} stageId="qual" onNextStep={onNextStep} />);
+    fireEvent.click(screen.getByText("+ след. шаг"));
+    fireEvent.click(screen.getByText("Отправить КП"));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(onNextStep).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Отправить КП", atISO: expect.any(String) }),
+    );
+  });
+
+  it("«Выполнен, без следующего» зовёт onNextStep(null/null)", () => {
+    const onNextStep = vi.fn();
+    render(<DealCard deal={deal} stageId="qual" onNextStep={onNextStep} />); // deal уже с nextStep="Звонок"
+    // Триггер — кнопка «След. шаг: Звонок» (accessible name склеивает вложенный <span>).
+    fireEvent.click(screen.getByRole("button", { name: /Звонок/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Выполнен, без следующего" }));
+    expect(onNextStep).toHaveBeenCalledWith({ text: null, atISO: null });
+  });
 });

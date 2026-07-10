@@ -6,6 +6,7 @@ import {
   STAGE_PROBABILITY,
   STUCK_DAYS,
   dateBucketId,
+  dealStepText,
   daysInStage,
   ensureLostStage,
   groupByDateBucket,
@@ -16,6 +17,7 @@ import {
   probabilityFor,
   recomputeStages,
   reviveDays,
+  shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
   weightedAmount,
@@ -309,5 +311,50 @@ describe("dateBucketId / groupByDateBucket (П4, слайс 4)", () => {
     expect(buckets.find((b) => b.id === "tomorrow")?.deals).toEqual([]);
     const total = buckets.reduce((n, b) => n + b.deals.length, 0);
     expect(total).toBe(deals.length);
+  });
+
+  it("E (слайс 4): сделка с nextStepAt=сегодня получает бакет today — сквозная видимость чипа срочности", () => {
+    // Проверка, что источник dateBucketId — nextStepAt (не legacy actionDate/todo): именно это
+    // поле пишет композер NextStepComposer/handleNextStep, поэтому свежий шаг сразу
+    // отражается в actBucket/чипе карточки (deals-workspace.tsx: actBucketFor → dateBucketId).
+    expect(dateBucketId(deal("1", 100, { nextStepAt: at(2026, 5, 11, 9) }), NOW)).toBe("today");
+  });
+});
+
+describe("dealStepText (слайс 4)", () => {
+  it("todo + дата/время действия — склеены через « · »", () => {
+    expect(
+      dealStepText({ todo: "Согласовать КП", actionDate: "12.05", actionTime: "14:00" }),
+    ).toBe("Согласовать КП · 12.05 · 14:00");
+  });
+
+  it("без todo — просто nextStep", () => {
+    expect(dealStepText({ nextStep: "Позвонить" })).toBe("Позвонить");
+  });
+
+  it("todo без даты/времени — только сам todo (Boolean-фильтр пустых частей)", () => {
+    expect(dealStepText({ todo: "Согласовать КП" })).toBe("Согласовать КП");
+  });
+
+  it("ничего не задано — undefined", () => {
+    expect(dealStepText({})).toBeUndefined();
+  });
+});
+
+describe("shouldAutoAssignNextStep (слайс 4, D)", () => {
+  it("открытая стадия + нет шага (ни nextStep, ни todo) — true", () => {
+    expect(shouldAutoAssignNextStep({}, "qual")).toBe(true);
+  });
+
+  it("закрытая стадия (won/lost + производные won/lost секций) — false", () => {
+    expect(shouldAutoAssignNextStep({}, "won")).toBe(false);
+    expect(shouldAutoAssignNextStep({}, "lost")).toBe(false);
+    expect(shouldAutoAssignNextStep({}, "cond_lost")).toBe(false);
+    expect(shouldAutoAssignNextStep({}, "rp_won")).toBe(false);
+  });
+
+  it("у сделки уже есть шаг (nextStep ИЛИ todo) — false, не перетираем ручной выбор", () => {
+    expect(shouldAutoAssignNextStep({ nextStep: "Позвонить" }, "qual")).toBe(false);
+    expect(shouldAutoAssignNextStep({ todo: "Согласовать" }, "qual")).toBe(false);
   });
 });

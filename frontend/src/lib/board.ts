@@ -165,6 +165,27 @@ export function groupByDateBucket(
   return DATE_BUCKETS.map((b) => ({ ...b, deals: byId.get(b.id)! }));
 }
 
+/** Строка «следующий шаг» карточки (слайс 4): todo (легаси-поле карточки лида) склеивается
+ * с датой/временем действия через « · »; без todo — просто `nextStep`. Общая формула для
+ * карточки канбана и композера назначения шага (NextStepComposer) — держать в одном месте. */
+export function dealStepText(
+  deal: Pick<Deal, "todo" | "nextStep" | "actionDate" | "actionTime">,
+): string | undefined {
+  return deal.todo
+    ? [deal.todo, deal.actionDate, deal.actionTime].filter(Boolean).join(" · ")
+    : deal.nextStep;
+}
+
+/** Слайс 4 (D, «след. шаг в 2 клика»): при смене стадии стоит авто-подставить дефолтный
+ * пресет, когда целевая стадия открыта (не won/lost/cond_lost…) И у сделки ещё нет шага
+ * (ни `todo`, ни `nextStep`) — сделку с уже назначенным шагом не перетираем. */
+export function shouldAutoAssignNextStep(
+  deal: Pick<Deal, "nextStep" | "todo">,
+  targetStageId: string,
+): boolean {
+  return !isClosedStageId(targetStageId) && !deal.nextStep && !deal.todo;
+}
+
 /** Ранг срочности для сортировки колонки: просрочено → сегодня → завтра → остальные. */
 const URGENCY_RANK: Partial<Record<DateBucketId, number>> = { overdue: 0, today: 1, tomorrow: 2 };
 

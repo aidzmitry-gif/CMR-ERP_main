@@ -5,7 +5,9 @@ import { Calendar, ChevronRight, MoreHorizontal, Phone, Star, User } from "lucid
 import Link from "next/link";
 import { useState } from "react";
 import { PriorityBadge } from "@/components/priority-badge";
+import { NextStepComposer, type NextStepPatch } from "@/components/kanban/next-step-composer";
 import { fetchLeadManagers } from "@/lib/api";
+import { dealStepText } from "@/lib/board";
 import { formatMoney } from "@/lib/format";
 import type { Deal, Manager, Priority } from "@/lib/types";
 
@@ -36,7 +38,16 @@ export type DealCardPatch = { owner?: string; priority?: Priority; starred?: boo
 /** Меню карточки (⋯): «Ответственный →» (менеджеры из fetchLeadManagers), «Приоритет →»,
  * «В избранное». Popover по образцу FiltersMenu; drag глушится onPointerDown stopPropagation,
  * а клик-превью доски — атрибутом data-card-menu (DraggableDeal/StaticDealCard его пропускают). */
-function CardMenu({ deal, onUpdate }: { deal: Deal; onUpdate: (fields: DealCardPatch) => void }) {
+function CardMenu({
+  deal,
+  onUpdate,
+  onOpenNextStep,
+}: {
+  deal: Deal;
+  onUpdate: (fields: DealCardPatch) => void;
+  /** Пункт «След. шаг…» — второй триггер композера (слайс 4); без него пункт не рендерится. */
+  onOpenNextStep?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<"owner" | "priority" | null>(null);
   const [managers, setManagers] = useState<Manager[] | null>(managersCache);
@@ -166,6 +177,18 @@ function CardMenu({ deal, onUpdate }: { deal: Deal; onUpdate: (fields: DealCardP
                 {deal.starred ? "Убрать из избранного" : "В избранное"}
               </span>
             </button>
+            {onOpenNextStep && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenNextStep();
+                  close();
+                }}
+                className={itemCls}
+              >
+                След. шаг…
+              </button>
+            )}
           </div>
         </>
       )}
@@ -193,6 +216,8 @@ export function DealCard({
   onLose,
   onCall,
   onUpdate,
+  onNextStep,
+  stageId,
   fmt = formatMoney,
 }: {
   deal: Deal;
@@ -216,13 +241,19 @@ export function DealCard({
   /** Меню карточки (⋯): смена ответственного/приоритета/избранного. Без обработчика
    * меню не рендерится (DragOverlay) — остаётся декоративная иконка. */
   onUpdate?: (fields: DealCardPatch) => void;
+  /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг через композер
+   * (клик по строке шага или пункт CardMenu «След. шаг…»). Без обработчика строка шага
+   * остаётся статичным текстом (как раньше). */
+  onNextStep?: (patch: NextStepPatch) => void;
+  /** Стадия сделки — пресеты композера подбираются по ней (sales-stages.ts). */
+  stageId?: string;
   fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
-  // A4: todo и nextStep — единый язык «след. шага»: todo + дата/время действия через « · ».
-  const stepText = deal.todo
-    ? [deal.todo, deal.actionDate, deal.actionTime].filter(Boolean).join(" · ")
-    : deal.nextStep;
+  const stepText = dealStepText(deal);
+  // Слайс 4: композер «след. шаг» — поднят сюда, т.к. открывается из ДВУХ мест (строка
+  // шага ниже + пункт CardMenu «След. шаг…» в шапке).
+  const [nextStepOpen, setNextStepOpen] = useState(false);
   const itemsLine = deal.itemsLabel
     ? [deal.itemsCount != null ? `${deal.itemsCount} поз.` : null, deal.itemsLabel]
         .filter(Boolean)
@@ -306,7 +337,11 @@ export function DealCard({
             className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "text-faint")}
           />
           {onUpdate ? (
-            <CardMenu deal={deal} onUpdate={onUpdate} />
+            <CardMenu
+              deal={deal}
+              onUpdate={onUpdate}
+              onOpenNextStep={onNextStep ? () => setNextStepOpen(true) : undefined}
+            />
           ) : (
             <MoreHorizontal size={15} className="text-faint" />
           )}
@@ -338,18 +373,28 @@ export function DealCard({
             </span>
           </div>
         ) : null}
-
-        {!deal.todo && deal.closedDate ? (
-          <div className="mt-2 text-xs text-muted">
-            Дата закрытия: <span className="text-ink">{deal.closedDate}</span>
-          </div>
-        ) : (
-          <div className="mt-2 text-xs text-muted">
-            След. шаг: <span className="text-ink">{stepText || "—"}</span>
-          </div>
-        )}
         {itemsLine && <div className="mt-1 text-xs text-muted">{itemsLine}</div>}
       </Link>
+
+      {/* Слайс 4: строка «след. шаг» — ВНЕ <Link>, как кнопки «Позвонить»/«Отказ» ниже
+          (вложенный <button> в <a> ломает клик): композер открывается кликом по всей строке. */}
+      {!deal.todo && deal.closedDate ? (
+        <div className="mt-2 text-xs text-muted">
+          Дата закрытия: <span className="text-ink">{deal.closedDate}</span>
+        </div>
+      ) : onNextStep ? (
+        <NextStepComposer
+          deal={deal}
+          stageId={stageId}
+          open={nextStepOpen}
+          onOpenChange={setNextStepOpen}
+          onSave={onNextStep}
+        />
+      ) : (
+        <div className="mt-2 text-xs text-muted">
+          След. шаг: <span className="text-ink">{stepText || "—"}</span>
+        </div>
+      )}
 
       <div className="mt-2 flex items-center justify-between text-xs text-muted">
         <span className="inline-flex items-center gap-1">

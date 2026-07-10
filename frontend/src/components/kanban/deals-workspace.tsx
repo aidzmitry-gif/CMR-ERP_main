@@ -22,6 +22,7 @@ import { DealCard, fetchManagersCached, type DealCardPatch } from "@/components/
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
+import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
   createDeal,
   createDealTask,
@@ -46,11 +47,12 @@ import {
   probabilityFor,
   recomputeStages,
   reviveDays,
+  shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
   weightedAmount,
 } from "@/lib/board";
-import { STAGE_BY_ID } from "@/lib/sales-stages";
+import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
 import type { Deal, Kpi, LossReason, Manager, Stage } from "@/lib/types";
@@ -74,7 +76,20 @@ type CardExtras = {
   onCall?: () => void;
   /** Меню карточки (⋯): ответственный/приоритет/избранное → оптимистичный патч + PATCH бэку. */
   onUpdate?: (fields: DealCardPatch) => void;
+  /** Стадия сделки — композер «след. шаг» подбирает пресеты по ней (слайс 4). */
+  stageId?: string;
+  /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг из композера
+   *  карточки → оптимистичный патч + PATCH бэку (dealId уже закрыт в замыкании). */
+  onNextStep?: (patch: NextStepPatch) => void;
 };
+
+/** Слайс 4 (D): дефолтный (первый) пресет стадии → патч для авто-назначения при
+ *  смене стадии drag&drop (без ручного выбора в композере). Общая для основной доски
+ *  и секций «Все вместе» — обе держат свой `setStages`, но пресет считается одинаково. */
+function autoNextStepPatch(stageId: string): NextStepPatch {
+  const preset = nextStepPreset(stageId);
+  return { text: preset.label, atISO: presetDateISO(preset.offsetDays, Date.now()) };
+}
 
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
 const CARD_CAP = 50;
@@ -476,8 +491,14 @@ function FunnelSection({
     const dealId = String(e.active.id);
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
+    const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
     void updateDealStage(dealId, targetStage);
+    // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
+    // пресет стадии (не перетираем сделку с уже назначенным шагом).
+    if (found && shouldAutoAssignNextStep(found, targetStage)) {
+      patchSectionNextStep(dealId, autoNextStepPatch(targetStage));
+    }
   }
 
   /** Патч полей из меню карточки (⋯): доска секции живёт в локальном стейте —
@@ -490,6 +511,31 @@ function FunnelSection({
       })),
     );
     void updateDeal(dealId, fields);
+  }
+
+  /** Слайс 4: назначить/очистить следующий шаг из композера карточки секции «Все вместе» —
+   *  тот же оптимистичный патч + PATCH бэку, что и на основной доске (handleNextStep),
+   *  но пишет в локальный стейт секции. Гасим legacy todo/actionDate/actionTime — иначе
+   *  dealStepText (board.ts) отдал бы приоритет старому todo поверх нового next_step. */
+  function patchSectionNextStep(dealId: string, patch: NextStepPatch) {
+    setStages((prev) =>
+      prev.map((s) => ({
+        ...s,
+        deals: s.deals.map((d) =>
+          d.id === dealId
+            ? {
+                ...d,
+                nextStep: patch.text ?? undefined,
+                nextStepAt: patch.atISO ?? undefined,
+                todo: undefined,
+                actionDate: undefined,
+                actionTime: undefined,
+              }
+            : d,
+        ),
+      })),
+    );
+    void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
 
   const total = stages.reduce((n, s) => n + s.count, 0);
@@ -524,7 +570,11 @@ function FunnelSection({
                   <DraggableDeal
                     key={deal.id}
                     deal={deal}
-                    extras={{ ...extras, onUpdate: (f) => patchSectionDeal(deal.id, f) }}
+                    extras={{
+                      ...extras,
+                      onUpdate: (f) => patchSectionDeal(deal.id, f),
+                      onNextStep: (patch) => patchSectionNextStep(deal.id, patch),
+                    }}
                     fmt={fmt}
                     onPreview={onPreview}
                     onOpen={onOpen}
@@ -944,9 +994,17 @@ export function DealsWorkspace({
       return;
     }
 
+    const found = findDeal(dealId); // снимок ДО переноса — проверить, был ли уже шаг (D)
+
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
 
     void updateDealStage(dealId, targetStage);
+
+    // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
+    // пресет стадии (сделку с уже назначенным шагом не перетираем).
+    if (found?.deal && shouldAutoAssignNextStep(found.deal, targetStage)) {
+      handleNextStep(dealId, autoNextStepPatch(targetStage));
+    }
   }
 
   async function handleCreate(input: DealInput): Promise<boolean> {
@@ -1047,6 +1105,31 @@ export function DealsWorkspace({
     void updateDeal(dealId, fields);
   }
 
+  /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг — из композера
+   *  карточки (ручной выбор) или авто-назначения при смене стадии (handleDragEnd/drawer).
+   *  Гасим legacy todo/actionDate/actionTime — иначе dealStepText (board.ts) отдал бы
+   *  приоритет старому todo поверх нового next_step. Оптимистично, fire-and-forget PATCH. */
+  function handleNextStep(dealId: string, patch: NextStepPatch) {
+    setStages((prev) =>
+      prev.map((s) => ({
+        ...s,
+        deals: s.deals.map((d) =>
+          d.id === dealId
+            ? {
+                ...d,
+                nextStep: patch.text ?? undefined,
+                nextStepAt: patch.atISO ?? undefined,
+                todo: undefined,
+                actionDate: undefined,
+                actionTime: undefined,
+              }
+            : d,
+        ),
+      })),
+    );
+    void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
+  }
+
   /** Вычислить бейджи/плашки Сделки 2.0 для карточки по её стадии и текущему времени. */
   function cardExtras(deal: Deal, stageId: string): CardExtras {
     const code = deal.lostReasonCode;
@@ -1066,6 +1149,8 @@ export function DealsWorkspace({
       onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
       onCall: () => setCallDeal(deal),
       onUpdate: (fields) => patchDealFields(deal.id, fields),
+      stageId,
+      onNextStep: (patch) => handleNextStep(deal.id, patch),
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -1100,7 +1185,8 @@ export function DealsWorkspace({
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
       wonResult: stageId === wonId,
       onCall: () => setCallDeal(deal),
-      // onUpdate добавляет FunnelSection (доска секции — её локальный стейт).
+      stageId,
+      // onUpdate/onNextStep добавляет FunnelSection (доска секции — её локальный стейт).
     };
   }
 
@@ -1648,6 +1734,7 @@ export function DealsWorkspace({
             openLose(dealId);
             return;
           }
+          const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
           setStages((prev) => moveDealToStage(prev, dealId, stageId));
           // Поддерживаем превью консистентным: если перенесли активный deal, обновляем ссылку
           setPreviewDeal((p) =>
@@ -1656,6 +1743,12 @@ export function DealsWorkspace({
               : p,
           );
           void updateDealStage(dealId, stageId);
+          // D (слайс 4): авто-пресет, если целевая стадия открыта и шага ещё нет. ponytail:
+          // previewDeal (снимок выше) не подхватит свежий next_step, пока drawer не переоткроют —
+          // карточка на доске обновится сразу через handleNextStep→setStages.
+          if (found && shouldAutoAssignNextStep(found, stageId)) {
+            handleNextStep(dealId, autoNextStepPatch(stageId));
+          }
         }}
         onUpdateFields={(dealId, fields) => {
           // Оптимистично патчим во всех колонках; UI-маппинг snake→camel для starred/next_step.

@@ -66,3 +66,99 @@ export const STAGE_PROBABILITY: Record<string, number> = {
 
 /** Терминальная стадия «отказ» (SALES-40) — fallback-колонка доски без бэка. */
 export const LOST_STAGE: SalesStage = STAGE_BY_ID.lost;
+
+/**
+ * Пресет «следующего шага» (слайс 4, «след. шаг в 2 клика»): деловой текст + сдвиг срока
+ * в днях от `now` (см. {@link presetDateISO}). Первый пресет стадии — дефолт для авто-
+ * назначения при смене стадии (drag&drop без ручного выбора менеджера).
+ */
+export interface NextStepPreset {
+  label: string;
+  offsetDays: number;
+}
+
+/**
+ * Пресеты по стадиям канона (SALES_STAGES) — 3 на стадию, деловой русский, по смыслу
+ * стадии. won/lost — НАМЕРЕННО без пресетов (сделка закрыта, следующий шаг не нужен).
+ * cond_lost — реанимационные (сделка не терминальна, см. sales-stages.ts верх файла).
+ */
+export const NEXT_STEP_TEMPLATES: Record<string, NextStepPreset[]> = {
+  new: [
+    { label: "Позвонить, уточнить потребность", offsetDays: 0 },
+    { label: "Отправить приветственное письмо", offsetDays: 0 },
+    { label: "Квалифицировать заявку", offsetDays: 1 },
+  ],
+  qual: [
+    { label: "Отправить КП", offsetDays: 1 },
+    { label: "Уточнить бюджет и сроки", offsetDays: 0 },
+    { label: "Согласовать спецификацию", offsetDays: 1 },
+  ],
+  price_req: [
+    { label: "Уточнить у клиента объём и сроки", offsetDays: 0 },
+    { label: "Согласовать цену с закупками", offsetDays: 1 },
+    { label: "Напомнить клиенту про запрос", offsetDays: 2 },
+  ],
+  has_price: [
+    { label: "Отправить цену клиенту", offsetDays: 0 },
+    { label: "Позвонить по цене", offsetDays: 1 },
+    { label: "Согласовать скидку", offsetDays: 2 },
+  ],
+  meeting: [
+    { label: "Подтвердить встречу", offsetDays: 0 },
+    { label: "Подготовить презентацию/образцы", offsetDays: 1 },
+    { label: "Провести встречу", offsetDays: 1 },
+  ],
+  invoice: [
+    { label: "Проверить оплату", offsetDays: 3 },
+    { label: "Позвонить по счёту", offsetDays: 2 },
+    { label: "Напомнить об оплате", offsetDays: 1 },
+  ],
+  protected: [
+    { label: "Проверить резерв на складе", offsetDays: 1 },
+    { label: "Уточнить срок оплаты", offsetDays: 2 },
+    { label: "Подтвердить отгрузочные реквизиты", offsetDays: 2 },
+  ],
+  contract: [
+    { label: "Дожать подписание", offsetDays: 2 },
+    { label: "Отправить договор на подпись", offsetDays: 0 },
+    { label: "Проверить предоплату", offsetDays: 3 },
+  ],
+  cond_lost: [
+    { label: "Повторный заход: новая цена", offsetDays: 14 },
+    { label: "Узнать, что решил клиент", offsetDays: 7 },
+    { label: "Предложить рассрочку/бонус", offsetDays: 5 },
+  ],
+};
+
+/** Дефолт для стадий вне канона (напр. коды секций «Все вместе» rp_*, tn_* без явных
+ * пресетов, или будущие стадии редактора воронок) — нейтральные, работают для любой стадии. */
+export const DEFAULT_NEXT_STEP_TEMPLATES: NextStepPreset[] = [
+  { label: "Позвонить клиенту", offsetDays: 0 },
+  { label: "Написать клиенту", offsetDays: 1 },
+  { label: "Уточнить статус сделки", offsetDays: 2 },
+];
+
+/** Пресеты стадии; неизвестная/не заданная стадия — {@link DEFAULT_NEXT_STEP_TEMPLATES}. */
+export function nextStepTemplatesFor(stageId: string | undefined): NextStepPreset[] {
+  return (stageId && NEXT_STEP_TEMPLATES[stageId]) || DEFAULT_NEXT_STEP_TEMPLATES;
+}
+
+/** Первый (дефолтный) пресет стадии — для авто-назначения при смене стадии без пресетов UI. */
+export function nextStepPreset(stageId: string | undefined): NextStepPreset {
+  return nextStepTemplatesFor(stageId)[0];
+}
+
+/**
+ * ISO-строка локальной даты пресета срока: `now` + `offsetDays` дней, время фиксировано
+ * 09:00:00 (начало рабочего дня). БЕЗ суффикса `Z` — `Date.parse`/{@link dateBucketId}
+ * (board.ts) трактуют такую строку как локальное время (симметрично остальным датам канона).
+ * Детерминирована через явный параметр `now` — тестируема без реального времени.
+ */
+export function presetDateISO(offsetDays: number, now: number): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}T09:00:00`;
+}

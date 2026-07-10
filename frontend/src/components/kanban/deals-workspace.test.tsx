@@ -43,9 +43,13 @@ vi.mock("@dnd-kit/core", () => ({
   }) => (
     <div>
       <button data-testid="dnd-start" onClick={() => onDragStart({ active: { id: "1" } })} />
+      <button data-testid="dnd-start-2" onClick={() => onDragStart({ active: { id: "2" } })} />
       <button data-testid="dnd-end" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "won" } })} />
       <button data-testid="dnd-end-lost" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "lost" } })} />
       <button data-testid="dnd-end-null" onClick={() => onDragEnd({ active: { id: "1" }, over: null })} />
+      {/* Слайс 4 (D): "1" (CRM-1, без шага) / "2" (CRM-2, шаг уже есть) → стадия "qual" (открыта) */}
+      <button data-testid="dnd-end-qual" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "qual" } })} />
+      <button data-testid="dnd-end-2-qual" onClick={() => onDragEnd({ active: { id: "2" }, over: { id: "qual" } })} />
       {children}
     </div>
   ),
@@ -59,6 +63,7 @@ vi.mock("@dnd-kit/core", () => ({
 
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import * as api from "@/lib/api";
+import { nextStepPreset } from "@/lib/sales-stages";
 import type { Stage } from "@/lib/types";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -428,5 +433,60 @@ describe("DealsWorkspace (канбан)", () => {
     // «👥 Все» сбрасывает параметр
     fireEvent.click(screen.getByRole("button", { name: "👥 Все" }));
     expect(routerReplace).toHaveBeenLastCalledWith("/crm/deals?");
+  });
+
+  // --- Слайс 4: «след. шаг в 2 клика» ---
+
+  // "qual" — открытая стадия отсутствующая в базовой фикстуре `stages` (только new/won/lost) —
+  // нужна как цель dnd, куда МОЖНО приземлиться (moveDealToStage требует стадию-строку в стейте).
+  const stagesWithQual: Stage[] = [
+    stages[0], // "new": CRM-1 (id "1", без шага) + CRM-2 (id "2", шаг уже есть)
+    { id: "qual", title: "Квалифицирован", color: "#8B5CF6", count: 0, sum: 0, deals: [] },
+    stages[1], // won
+    stages[2], // lost
+  ];
+
+  it("D: dnd сделки БЕЗ шага на открытую стадию — авто-назначает пресет (updateDeal next_step/next_step_at)", async () => {
+    render(<DealsWorkspace initialStages={stagesWithQual} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start"));
+    fireEvent.click(screen.getByTestId("dnd-end-qual")); // "1" (CRM-1, без шага) → qual
+    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("1", "qual"));
+    expect(api.updateDeal).toHaveBeenCalledWith(
+      "1",
+      expect.objectContaining({ next_step: expect.any(String), next_step_at: expect.any(String) }),
+    );
+  });
+
+  it("D: dnd сделки С шагом на открытую стадию — не перетирает next_step (только смена стадии)", async () => {
+    render(<DealsWorkspace initialStages={stagesWithQual} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start-2"));
+    fireEvent.click(screen.getByTestId("dnd-end-2-qual")); // "2" (CRM-2, шаг уже есть) → qual
+    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("2", "qual"));
+    expect(api.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it("D: dnd на won (закрытая стадия) — авто-шага нет, даже если у сделки его не было", async () => {
+    render(<DealsWorkspace initialStages={stagesWithQual} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start")); // "1" — без шага
+    fireEvent.click(screen.getByTestId("dnd-end")); // → won
+    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("1", "won"));
+    expect(api.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it("E: назначить шаг с карточки (композер, пресет стадии + «Сегодня») → чип срочности «Сегодня» на карточке", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    // CRM-1 (id "1", стадия "new") — без шага: заглушка «+ след. шаг» кликабельна.
+    fireEvent.click(screen.getByText("+ след. шаг"));
+    fireEvent.click(screen.getByText(nextStepPreset("new").label)); // 1-й пресет стадии "new"
+    fireEvent.click(screen.getByRole("button", { name: "Сегодня" })); // пресет срока
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(api.updateDeal).toHaveBeenCalledWith(
+        "1",
+        expect.objectContaining({ next_step: nextStepPreset("new").label }),
+      ),
+    );
+    // dateBucketId (board.ts) читает nextStepAt → actBucketFor → чип «Сегодня» на карточке.
+    await waitFor(() => expect(screen.getByText("Сегодня")).toBeInTheDocument());
   });
 });
