@@ -274,7 +274,14 @@ export function focusQueue(
       const bucket = dateBucketId(deal, now);
       if (bucket === "overdue") {
         const dueTs = Date.parse(deal.nextStepAt ?? deal.actionDate ?? "");
-        const days = Number.isNaN(dueTs) ? 0 : Math.max(0, Math.floor((now - dueTs) / DAY_MS));
+        // FIX-R1 (ревью 62c1a7d): overdue у dateBucketId — календарный (дедлайн вчера 20:00
+        // уже overdue сегодня утром), а не 24-часовое окно от `now` — считаем от границы
+        // календарных суток, иначе утром по вчерашней просрочке текст даёт «просрочен 0 дн».
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+        const days = Number.isNaN(dueTs)
+          ? 1
+          : Math.max(1, Math.ceil((startOfToday.getTime() - dueTs) / DAY_MS));
         overdue.push({
           deal,
           stageId: stage.id,
@@ -329,4 +336,43 @@ export function focusQueue(
     .slice(0, cap)
     .map(({ deal, stageId, reason, severity }) => ({ deal, stageId, reason, severity }));
   return { items, total: ordered.length };
+}
+
+// ──────────────────────── Слайс 6: счёт в поток доски ────────────────────────
+
+/** Оплаченные статусы документа — paid/posted считаются оплаченными для бейджа счёта
+ *  (сигнал глазами продавца «деньги дошли», не тонкая бухгалтерская разница черновик/проведён). */
+const PAID_DOC_STATUSES: ReadonlySet<string> = new Set(["paid", "posted"]);
+
+/** Дней до даты по календарным суткам (не 24-часовое окно от `now`) — отрицательное,
+ *  если дата уже прошла. Общий date-math для статуса счёта: бейдж карточки
+ *  ({@link invoiceBadge}) и компактный блок «Документы» в drawer-preview форматируют
+ *  СВОЙ текст поверх одного числа — не расходятся при правке. */
+export function daysUntilDate(iso: string, now: number): number {
+  const target = new Date(`${iso}T00:00:00`).getTime();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today.getTime()) / DAY_MS);
+}
+
+export type InvoiceBadgeTone = "green" | "red" | "amber" | "neutral";
+
+export interface InvoiceBadgeResult {
+  label: string;
+  tone: InvoiceBadgeTone;
+}
+
+/** Бейдж статуса счёта для карточки колонки «Счёт» (слайс 6, C) — «счёт выставлен 5 дней,
+ *  не оплачен» не должен быть невидим на доске. «Оплачен» (paid/posted) перекрывает срок
+ *  действия; иначе просрочка/остаток дней резерва по `validUntil`. `null` — честный пропуск:
+ *  не оплачен и `validUntil` неизвестен, показывать нечего (не «просрочен»/«истекает 0д»). */
+export function invoiceBadge(
+  doc: { status: string; validUntil: string | null },
+  now: number,
+): InvoiceBadgeResult | null {
+  if (PAID_DOC_STATUSES.has(doc.status)) return { label: "✓ оплачен", tone: "green" };
+  if (!doc.validUntil) return null;
+  const days = daysUntilDate(doc.validUntil, now);
+  if (days < 0) return { label: "💳 просрочен", tone: "red" };
+  return { label: `💳 истекает ${days}д`, tone: days <= 2 ? "amber" : "neutral" };
 }

@@ -27,6 +27,7 @@ import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
   createDeal,
   createDealTask,
+  fetchDocuments,
   fetchLossReasons,
   fetchPlans,
   getKpis,
@@ -41,6 +42,7 @@ import {
   daysInStage,
   focusQueue,
   groupByDateBucket,
+  invoiceBadge,
   isClosedStageId,
   isOpenStage,
   isStuck,
@@ -52,6 +54,7 @@ import {
   shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
+  type InvoiceBadgeResult,
   weightedAmount,
 } from "@/lib/board";
 import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
@@ -86,6 +89,9 @@ type CardExtras = {
   /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг из композера
    *  карточки → оптимистичный патч + PATCH бэку (dealId уже закрыт в замыкании). */
   onNextStep?: (patch: NextStepPatch) => void;
+  /** Слайс 6 (C): статус счёта колонки «Счёт» — предвычисленный бейдж (invoiceBadge,
+   *  board.ts) по последнему счёту сделки. Не задан/null — карточка бейдж не рисует. */
+  invoiceBadge?: InvoiceBadgeResult | null;
 };
 
 /** Слайс 4 (D): дефолтный (первый) пресет стадии → патч для авто-назначения при
@@ -98,6 +104,11 @@ function autoNextStepPatch(stageId: string): NextStepPatch {
 
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
 const CARD_CAP = 50;
+
+/** Кап батч-фетча статуса счёта на карточках колонки «Счёт» (слайс 6, C): витрина первого
+ *  экрана колонки, не весь пайплайн — сотни fetchDocuments разом душат бэк. ponytail: если
+ *  колонка регулярно больше — грузить по видимости/скроллу, а не линейно увеличивать кап. */
+const INVOICE_BADGE_CAP = 12;
 
 /** Кнопка «Показать ещё N (из M)» под капом карточек колонки. */
 function ShowMore({ total, limit, onMore }: { total: number; limit: number; onMore: () => void }) {
@@ -893,6 +904,11 @@ export function DealsWorkspace({
   const [moreKpis, setMoreKpis] = useState(false);
   // П2: «план продаж согласован РОПом» в подзаголовке — если на текущий месяц есть approved-план.
   const [planApproved, setPlanApproved] = useState(false);
+  // Слайс 6 (C): статус последнего счёта по сделкам колонки «Счёт» — dealId → {validUntil,
+  // status, reserveStatus}; наполняется батч-фетчем после маунта (см. эффект ниже).
+  const [invoiceDocs, setInvoiceDocs] = useState<
+    Map<string, { validUntil: string | null; status: string; reserveStatus: string }>
+  >(new Map());
 
   // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
@@ -914,6 +930,33 @@ export function DealsWorkspace({
     });
     // A: менеджеры для «Чья доска» (кэш общий с меню карточки — второй раз не фетчится).
     void fetchManagersCached().then(setManagers);
+  }, []);
+
+  // Слайс 6 (C): статус счёта на карточках колонки «Счёт» — ленивый батч по загрузке доски,
+  // только первые INVOICE_BADGE_CAP сделок (см. константу выше). Однократно от начальной
+  // доски SSR (initialStages), не от живого `stages` — иначе drag&drop/фильтры триггерили бы
+  // рефетч всей колонки.
+  useEffect(() => {
+    const invoiceStage = initialStages.find((s) => s.id === "invoice");
+    if (!invoiceStage) return;
+    const targets = invoiceStage.deals.slice(0, INVOICE_BADGE_CAP);
+    void Promise.all(
+      targets.map((d) => fetchDocuments(d.id).then((docs) => [d.id, docs] as const)),
+    ).then((results) => {
+      const map = new Map<string, { validUntil: string | null; status: string; reserveStatus: string }>();
+      for (const [dealId, docs] of results) {
+        const latest = docs.filter((doc) => doc.kind === "invoice").sort((a, b) => b.id - a.id)[0];
+        if (latest) {
+          map.set(dealId, {
+            validUntil: latest.valid_until,
+            status: latest.status,
+            reserveStatus: latest.reserve_status,
+          });
+        }
+      }
+      setInvoiceDocs(map);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** A: переключатель «Чья доска» и секция «Ответственный» в FiltersMenu — две ручки
@@ -1156,6 +1199,11 @@ export function DealsWorkspace({
     // Слайс 5 (C): первая стадия ТЕКУЩЕГО списка = стадия новой заявки (тот же критерий
     // «первая стадия списка», что и focusQueue в board.ts — согласовано намеренно).
     const isFirstStage = filteredStages[0]?.id === stageId;
+    // Слайс 6 (C): статус счёта — из батч-фетча invoiceDocs (только колонка «Счёт», см. эффект выше).
+    const invDoc = invoiceDocs.get(deal.id);
+    const invBadge = invDoc && now != null
+      ? invoiceBadge({ status: invDoc.status, validUntil: invDoc.validUntil }, now)
+      : null;
     return {
       actBucket: actBucketFor(deal, closed),
       noStep: hasNoStep,
@@ -1175,6 +1223,7 @@ export function DealsWorkspace({
       onUpdate: (fields) => patchDealFields(deal.id, fields),
       stageId,
       onNextStep: (patch) => handleNextStep(deal.id, patch),
+      invoiceBadge: invBadge,
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -1495,7 +1544,13 @@ export function DealsWorkspace({
                 красный — в очереди есть что-то горящее (severity=crit). */}
             <button
               type="button"
-              onClick={() => setFocusOpen(true)}
+              onClick={() => {
+                // FIX-R2 (ревью 62c1a7d): клик по «Фокус дня» в окне отложенного клика по
+                // карточке (230мс до onPreview) не должен открыть ОБА оверлея разом —
+                // симметрично onSelectDeal панели (тот уже гасит focusOpen при выборе).
+                setPreviewDeal(null);
+                setFocusOpen(true);
+              }}
               title="Фокус дня — упорядоченная очередь приоритетных сделок"
               className={clsx(
                 "inline-flex items-center gap-1.5 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",

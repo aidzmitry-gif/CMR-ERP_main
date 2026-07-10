@@ -6,10 +6,23 @@ import Link from "next/link";
 import { useState } from "react";
 import { PriorityBadge } from "@/components/priority-badge";
 import { NextStepComposer, type NextStepPatch } from "@/components/kanban/next-step-composer";
-import { fetchLeadManagers } from "@/lib/api";
-import { dealStepText } from "@/lib/board";
+import { fetchLeadManagers, issueDocument } from "@/lib/api";
+import { dealStepText, isClosedStageId, type InvoiceBadgeResult, type InvoiceBadgeTone } from "@/lib/board";
 import { formatMoney } from "@/lib/format";
+import { presetDateISO } from "@/lib/sales-stages";
 import type { Deal, Manager, Priority } from "@/lib/types";
+
+/** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта с карточки
+ *  (то же самое, что делает drawer-preview при успешном issueDocument). */
+const INVOICE_NEXT_STEP = "Проверить оплату счёта";
+
+/** Слайс 6 (C): цвета бейджа статуса счёта (invoiceBadge, board.ts) на карточке. */
+const INVOICE_BADGE_CLS: Record<InvoiceBadgeTone, string> = {
+  green: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  red: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  neutral: "bg-sunken text-muted",
+};
 
 function formatShortDate(iso: string): string {
   const d = new Date(iso);
@@ -42,11 +55,17 @@ function CardMenu({
   deal,
   onUpdate,
   onOpenNextStep,
+  canIssueInvoice,
+  onNextStep,
 }: {
   deal: Deal;
   onUpdate: (fields: DealCardPatch) => void;
   /** Пункт «След. шаг…» — второй триггер композера (слайс 4); без него пункт не рендерится. */
   onOpenNextStep?: () => void;
+  /** Слайс 6 (D): пункт «Выставить счёт» — только для открытых нетерминальных стадий. */
+  canIssueInvoice: boolean;
+  /** Авто-шаг «Проверить оплату» после успешного счёта (как в drawer-preview, слайс 6 A). */
+  onNextStep?: (patch: NextStepPatch) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<"owner" | "priority" | null>(null);
@@ -75,6 +94,19 @@ function CardMenu({
       return;
     }
     void fetchManagersCached().then(setManagers);
+  }
+
+  /** Слайс 6 (D): «Выставить счёт» прямо из меню карточки — та же цепочка, что в
+   *  drawer-preview (issueDocument → авто-шаг «Проверить оплату» ВСЕГДА при успехе). Здесь
+   *  нет toast-инфраструктуры карточки — alert() достаточен для редкого клика из меню. */
+  async function issueInvoiceFromMenu() {
+    close();
+    const { ok, message, renderUrl } = await issueDocument(deal.id, "invoice");
+    window.alert(message);
+    if (ok) {
+      onNextStep?.({ text: INVOICE_NEXT_STEP, atISO: presetDateISO(3, Date.now()) });
+      if (renderUrl) window.open(renderUrl, "_blank");
+    }
   }
 
   const itemCls =
@@ -189,6 +221,11 @@ function CardMenu({
                 След. шаг…
               </button>
             )}
+            {canIssueInvoice && (
+              <button type="button" onClick={() => void issueInvoiceFromMenu()} className={itemCls}>
+                💳 Выставить счёт
+              </button>
+            )}
           </div>
         </>
       )}
@@ -219,6 +256,7 @@ export function DealCard({
   onUpdate,
   onNextStep,
   stageId,
+  invoiceBadge,
   fmt = formatMoney,
 }: {
   deal: Deal;
@@ -249,8 +287,12 @@ export function DealCard({
    * (клик по строке шага или пункт CardMenu «След. шаг…»). Без обработчика строка шага
    * остаётся статичным текстом (как раньше). */
   onNextStep?: (patch: NextStepPatch) => void;
-  /** Стадия сделки — пресеты композера подбираются по ней (sales-stages.ts). */
+  /** Стадия сделки — пресеты композера подбираются по ней (sales-stages.ts) и решают,
+   *  показывать ли пункт CardMenu «Выставить счёт» (только открытые нетерминальные). */
   stageId?: string;
+  /** Слайс 6 (C): статус счёта колонки «Счёт» — уже вычисленный бейдж (invoiceBadge, board.ts),
+   *  считает вызывающий (deals-workspace.tsx). Нет пропа/null — бейдж не рендерится. */
+  invoiceBadge?: InvoiceBadgeResult | null;
   fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
@@ -361,6 +403,8 @@ export function DealCard({
               deal={deal}
               onUpdate={onUpdate}
               onOpenNextStep={onNextStep ? () => setNextStepOpen(true) : undefined}
+              canIssueInvoice={!(stageId != null && isClosedStageId(stageId))}
+              onNextStep={onNextStep}
             />
           ) : (
             <MoreHorizontal size={15} className="text-faint" />
@@ -376,6 +420,16 @@ export function DealCard({
           {probability != null && probability > 0 && weighted != null && (
             <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink">
               {probability}% · ≈ {fmt(weighted)}
+            </span>
+          )}
+          {invoiceBadge && (
+            <span
+              className={clsx(
+                "rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+                INVOICE_BADGE_CLS[invoiceBadge.tone],
+              )}
+            >
+              {invoiceBadge.label}
             </span>
           )}
         </div>

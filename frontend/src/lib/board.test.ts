@@ -8,9 +8,11 @@ import {
   dateBucketId,
   dealStepText,
   daysInStage,
+  daysUntilDate,
   ensureLostStage,
   focusQueue,
   groupByDateBucket,
+  invoiceBadge,
   isClosedStageId,
   isOpenStage,
   isStuck,
@@ -436,6 +438,14 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
     expect(reason("nostep")).toBe("без шага · в стадии 2 дн");
   });
 
+  it("FIX-R1 (ревью 62c1a7d): просрочка на некратный интервал (вчера 20:00, сегодня 09:00) — «просрочен 1 дн», не 0", () => {
+    const nowToday9 = new Date(2026, 5, 11, 9, 0, 0).getTime();
+    const yesterday20 = new Date(2026, 5, 10, 20, 0, 0).toISOString();
+    const stages: Stage[] = [stage("qual", [deal("overdue2", 10, { nextStepAt: yesterday20 })])];
+    const items = focusQueue(stages, nowToday9).items;
+    expect(items[0].reason).toBe("просрочен 1 дн");
+  });
+
   it("«без касания» (1я стадия) всегда впереди «без шага» (остальные), даже при меньшей сумме/днях", () => {
     const stages: Stage[] = [
       stage("new", [deal("touch-small", 1, { stageChangedAt: daysAgoISO(1) })]),
@@ -497,5 +507,61 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
     const result3 = focusQueue(stages, NOW, 3);
     expect(result3.items).toHaveLength(3);
     expect(result3.total).toBe(15);
+  });
+});
+
+describe("daysUntilDate (слайс 6)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+
+  it("сегодня — 0", () => {
+    expect(daysUntilDate("2026-06-11", NOW)).toBe(0);
+  });
+
+  it("через N дней — положительное число", () => {
+    expect(daysUntilDate("2026-06-16", NOW)).toBe(5);
+  });
+
+  it("в прошлом — отрицательное число", () => {
+    expect(daysUntilDate("2026-06-01", NOW)).toBe(-10);
+  });
+});
+
+describe("invoiceBadge (слайс 6, C)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+
+  it("paid/posted — «✓ оплачен» зелёный, независимо от valid_until", () => {
+    expect(invoiceBadge({ status: "paid", validUntil: null }, NOW)).toEqual({
+      label: "✓ оплачен",
+      tone: "green",
+    });
+    expect(invoiceBadge({ status: "posted", validUntil: "2020-01-01" }, NOW)).toEqual({
+      label: "✓ оплачен",
+      tone: "green",
+    });
+  });
+
+  it("valid_until = null и не оплачен — honest-empty null (нет данных для бейджа)", () => {
+    expect(invoiceBadge({ status: "draft", validUntil: null }, NOW)).toBeNull();
+  });
+
+  it("valid_until сегодня — «истекает 0д», жёлтый (K<=2)", () => {
+    expect(invoiceBadge({ status: "draft", validUntil: "2026-06-11" }, NOW)).toEqual({
+      label: "💳 истекает 0д",
+      tone: "amber",
+    });
+  });
+
+  it("valid_until в прошлом — «просрочен» красный", () => {
+    expect(invoiceBadge({ status: "draft", validUntil: "2026-06-01" }, NOW)).toEqual({
+      label: "💳 просрочен",
+      tone: "red",
+    });
+  });
+
+  it("valid_until через 5 дней — нейтральный тон (K>2)", () => {
+    expect(invoiceBadge({ status: "draft", validUntil: "2026-06-16" }, NOW)).toEqual({
+      label: "💳 истекает 5д",
+      tone: "neutral",
+    });
   });
 });

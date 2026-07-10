@@ -30,7 +30,12 @@ import {
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useCurrency } from "@/components/kanban/currency-context";
 import { ProductPicker, ProductPickerTotals, useProductPicker } from "@/components/kanban/product-picker";
+import { presetDateISO } from "@/lib/sales-stages";
 import { scriptFor } from "./call-scripts";
+
+/** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — тот же,
+ *  что в drawer-preview/CardMenu (deal-drawer-preview.tsx/deal-card.tsx). */
+const INVOICE_NEXT_STEP = "Проверить оплату счёта";
 
 /**
  * Единое окно звонка (порт sales-call-popup.html, состояние «Идёт разговор»).
@@ -296,7 +301,10 @@ export function CallWindow({
   }
 
   /** Выставить счёт: создать документ в 1С + открыть печатную форму (шаблон
-   * sales-invoice-template.html, backend-рендер GET /documents/{id}/render). */
+   * sales-invoice-template.html, backend-рендер GET /documents/{id}/render).
+   * Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — то же
+   * правило, что в drawer-preview/CardMenu. Окно звонка не держит стейта доски — прямой
+   * fire-and-forget updateDeal (нет своего onUpdateFields, как у drawer-preview). */
   async function issueInvoice() {
     if (ctx.kind !== "deal") return flash("Счёт доступен только для существующей сделки");
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
@@ -306,7 +314,15 @@ export function CallWindow({
     setBusy(false);
     if (win && ok && renderUrl) win.location.href = renderUrl;
     else win?.close();
-    flash(message);
+    if (ok) {
+      void updateDeal(ctx.dealId, {
+        next_step: INVOICE_NEXT_STEP,
+        next_step_at: presetDateISO(3, Date.now()),
+      });
+      flash(`${message} · Шаг: Проверить оплату (3 дн)`);
+    } else {
+      flash(message);
+    }
   }
 
   /** Договор — уходит на согласование юристу (та же ветка, что и «Товар» в drawer-preview). */

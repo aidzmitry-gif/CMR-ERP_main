@@ -10,12 +10,18 @@ import {
   fetchSkus,
   fetchStock,
   issueDocument,
+  updateDeal,
   type SkuOption,
 } from "@/lib/api";
 // Чистая доменная логика подбора (агрегация остатков/срок/маржа) живёт в src/lib/stock.ts
 // с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
 import { aggregateStock, groupStockBySku, marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
+import { presetDateISO } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
+
+/** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — тот же,
+ *  что в drawer-preview/CardMenu/call-window.tsx. */
+const INVOICE_NEXT_STEP = "Проверить оплату счёта";
 
 /**
  * Подбор товара — общая логика/UI для окна звонка (call-window.tsx, встроенная колонка)
@@ -444,7 +450,15 @@ export function ProductPickerModal({
     if (win && ok && renderUrl) win.location.href = renderUrl;
     else win?.close();
     flash(message);
-    if (ok) onCommitted?.();
+    if (ok) {
+      // Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — то же
+      // правило, что в drawer-preview/CardMenu/call-window.tsx.
+      void updateDeal(dealId, {
+        next_step: INVOICE_NEXT_STEP,
+        next_step_at: presetDateISO(3, Date.now()),
+      });
+      onCommitted?.();
+    }
   }
 
   return (

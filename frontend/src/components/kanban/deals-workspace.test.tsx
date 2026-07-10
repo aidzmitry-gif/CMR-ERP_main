@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -29,6 +29,8 @@ vi.mock("@/lib/api", () => ({
   fetchLossReasons: vi.fn().mockResolvedValue([]),
   fetchPlans: vi.fn().mockResolvedValue([]),
   fetchLeadManagers: vi.fn().mockResolvedValue([]),
+  fetchDocuments: vi.fn().mockResolvedValue([]), // слайс 6 (C) — батч-статус счёта колонки «Счёт»
+  fetchContacts: vi.fn().mockResolvedValue([]), // ChannelButtons (drawer-preview) — FIX-R2 открывает drawer
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
@@ -488,5 +490,23 @@ describe("DealsWorkspace (канбан)", () => {
     );
     // dateBucketId (board.ts) читает nextStepAt → actBucketFor → чип «Сегодня» на карточке.
     await waitFor(() => expect(screen.getByText("Сегодня")).toBeInTheDocument());
+  });
+
+  it("FIX-R2 (ревью 62c1a7d): «Фокус дня» гасит уже открытый drawer-preview (не открывает оба оверлея разом)", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      // Одиночный клик по карточке → onPreview срабатывает через 230мс (см. DraggableDeal).
+      fireEvent.click(screen.getByTestId("deal-card-1"));
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+      const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
+      expect(drawer).toHaveAttribute("aria-hidden", "false");
+      fireEvent.click(screen.getByRole("button", { name: /Фокус дня/ }));
+      expect(drawer).toHaveAttribute("aria-hidden", "true");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -12,10 +12,14 @@ vi.mock("@/lib/api", () => ({
   fetchLeadManagers: vi
     .fn()
     .mockResolvedValue([{ name: "Орлов И.", regions: [], products: [], load: 1 }]),
+  issueDocument: vi.fn(),
 }));
 
 import { DealCard } from "@/components/kanban/deal-card";
+import * as api from "@/lib/api";
 import type { Deal } from "@/lib/types";
+
+const mockApi = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const deal: Deal = {
   id: "1",
@@ -223,5 +227,67 @@ describe("DealCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Звонок/ }));
     fireEvent.click(screen.getByRole("button", { name: "Выполнен, без следующего" }));
     expect(onNextStep).toHaveBeenCalledWith({ text: null, atISO: null });
+  });
+
+  // --- Слайс 6: счёт с карточки ---
+
+  it("C: invoiceBadge рендерит бейдж рядом с суммой; без пропа/null — не рендерит", () => {
+    const { rerender } = render(
+      <DealCard deal={deal} invoiceBadge={{ label: "💳 просрочен", tone: "red" }} />,
+    );
+    expect(screen.getByText("💳 просрочен")).toBeInTheDocument();
+    rerender(<DealCard deal={deal} invoiceBadge={null} />);
+    expect(screen.queryByText("💳 просрочен")).toBeNull();
+    rerender(<DealCard deal={deal} />);
+    expect(screen.queryByText(/просрочен|оплачен|истекает/)).toBeNull();
+  });
+
+  it("D: пункт «Выставить счёт» скрыт для закрытой стадии (won/lost)", () => {
+    render(<DealCard deal={deal} onUpdate={vi.fn()} stageId="won" />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    expect(screen.queryByText("💳 Выставить счёт")).toBeNull();
+  });
+
+  it("D: пункт «Выставить счёт» виден для открытой стадии", () => {
+    render(<DealCard deal={deal} onUpdate={vi.fn()} stageId="qual" />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    expect(screen.getByText("💳 Выставить счёт")).toBeInTheDocument();
+  });
+
+  it("D: клик «Выставить счёт» → issueDocument вызван; ok → onNextStep «Проверить оплату…» + window.open(renderUrl)", async () => {
+    vi.stubGlobal("open", vi.fn());
+    vi.stubGlobal("alert", vi.fn());
+    mockApi(api.issueDocument).mockResolvedValue({
+      ok: true,
+      message: "✅ Счёт СЧ-1 выставлен",
+      renderUrl: "/api/sales/documents/9/render",
+    });
+    const onNextStep = vi.fn();
+    render(<DealCard deal={deal} onUpdate={vi.fn()} onNextStep={onNextStep} stageId="qual" />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    fireEvent.click(screen.getByText("💳 Выставить счёт"));
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledWith("1", "invoice"));
+    await waitFor(() =>
+      expect(onNextStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining("Проверить оплату"),
+          atISO: expect.any(String),
+        }),
+      ),
+    );
+    expect(window.open).toHaveBeenCalledWith("/api/sales/documents/9/render", "_blank");
+    expect(window.alert).toHaveBeenCalledWith("✅ Счёт СЧ-1 выставлен");
+  });
+
+  it("D: неуспех (ok=false) — onNextStep НЕ вызван", async () => {
+    vi.stubGlobal("open", vi.fn());
+    vi.stubGlobal("alert", vi.fn());
+    mockApi(api.issueDocument).mockResolvedValue({ ok: false, message: "⚠️ Не удалось выставить счёт" });
+    const onNextStep = vi.fn();
+    render(<DealCard deal={deal} onUpdate={vi.fn()} onNextStep={onNextStep} stageId="qual" />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    fireEvent.click(screen.getByText("💳 Выставить счёт"));
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalled());
+    expect(onNextStep).not.toHaveBeenCalled();
   });
 });

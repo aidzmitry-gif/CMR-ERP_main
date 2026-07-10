@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import {
   ArrowRight,
   Calendar,
@@ -24,11 +25,27 @@ import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
-import { issueDocument } from "@/lib/api";
-import { daysInStage, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
+import { fetchDocuments, issueDocument, updateDeal, type DealDoc } from "@/lib/api";
+import { daysInStage, daysUntilDate, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
+import { presetDateISO } from "@/lib/sales-stages";
 import type { Deal, Stage } from "@/lib/types";
 import { formatNextStep } from "@/lib/format";
 import { useCurrency } from "./currency-context";
+
+/** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — единая
+ *  строка для оптимистичного патча (onUpdateFields) и прямого updateDeal (fire-and-forget). */
+const INVOICE_NEXT_STEP = "Проверить оплату счёта";
+
+/** Слайс 6 (B): краткие статусы документа для компактного read-only блока «Документы»
+ *  drawer'а — независимая копия deal-documents.tsx (там полноценный CRUD-список). */
+const DOC_STATUS_LABEL: Record<string, string> = {
+  draft: "Черновик",
+  pending_approval: "На согласовании",
+  posted: "Записан в 1С",
+  paid: "Оплачен",
+  rejected: "Отклонён",
+  cancelled: "Аннулирован",
+};
 
 /**
  * Drawer-preview сделки на доске (sales-card-expanded.html прототип).
@@ -82,6 +99,8 @@ export function DealDrawerPreview({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
   const [docMsg, setDocMsg] = useState<string | null>(null);
+  // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
+  const [docs, setDocs] = useState<DealDoc[]>([]);
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
   // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
@@ -92,8 +111,23 @@ export function DealDrawerPreview({
     setTaskDraft("");
     setPickerOpen(false);
     setDocMsg(null);
+    setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
   }, [deal?.id]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Слайс 6 (B): ленивый фетч документов при открытии/смене сделки; игнорируем поздний
+  // ответ, если сделку успели сменить, пока запрос летел (ignore-флаг, как useProductPicker).
+  useEffect(() => {
+    const dealId = deal?.id;
+    if (!dealId) return;
+    let ignore = false;
+    void fetchDocuments(dealId).then((list) => {
+      if (!ignore) setDocs(list);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [deal?.id]);
 
   const open = deal != null;
 
@@ -118,6 +152,19 @@ export function DealDrawerPreview({
     : undefined;
   const isTerminalLost = stageId === "lost" || stageId === "cond_lost";
 
+  // Слайс 6 (B): последний счёт/договор (по max id — не полагаемся на порядок ответа бэка)
+  // + человекочитаемый срок действия счёта поверх общего date-math (board.ts); своя копия
+  // текста — компактный бейдж карточки (invoiceBadge, board.ts) формулирует иначе.
+  const latestInvoice = [...docs].filter((d) => d.kind === "invoice").sort((a, b) => b.id - a.id)[0];
+  const latestContract = [...docs].filter((d) => d.kind === "contract").sort((a, b) => b.id - a.id)[0];
+  const invoiceExpiry = (() => {
+    if (!latestInvoice?.valid_until || now == null) return null;
+    const days = daysUntilDate(latestInvoice.valid_until, now);
+    if (days < 0) return { text: `просрочен ${-days} дн`, danger: true };
+    if (days === 0) return { text: "истекает сегодня", danger: true };
+    return { text: `истекает через ${days} дн`, danger: days <= 2 };
+  })();
+
   function commitStep() {
     if (!deal) return;
     const next = stepDraft.trim();
@@ -135,26 +182,41 @@ export function DealDrawerPreview({
     setTaskDraft("");
   }
 
-  /** Счёт по уже добавленным в сделку позициям (без похода в подбор товара). */
+  /** Счёт по уже добавленным в сделку позициям (без похода в подбор товара).
+   *  Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — контроль
+   *  оплаты не должен повиснуть молча; неуспешный счёт/договор шаг не трогают. onUpdateFields —
+   *  оптимистичный патч тем же проп-потоком, что commitStep/toggleStar ниже; updateDeal —
+   *  прямой fire-and-forget (симметрично call-window.tsx: там своего onUpdateFields нет). */
   async function issueInvoice() {
     if (!deal) return;
+    const dealId = deal.id;
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
     setDocBusy(true);
-    const { ok, message, renderUrl } = await issueDocument(deal.id, "invoice");
+    const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
     setDocBusy(false);
     if (win && ok && renderUrl) win.location.href = renderUrl;
     else win?.close();
-    setDocMsg(message);
+    if (ok) {
+      const nextStepAt = presetDateISO(3, Date.now());
+      onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
+      void updateDeal(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
+      setDocMsg(`${message} · Шаг: Проверить оплату (3 дн)`);
+      void fetchDocuments(dealId).then(setDocs); // новый счёт — сразу виден в блоке «Документы»
+    } else {
+      setDocMsg(message);
+    }
   }
 
   /** Договор — уходит на согласование юристу (та же ветка, что и POST /documents kind=contract). */
   async function issueContract() {
     if (!deal) return;
+    const dealId = deal.id;
     setDocBusy(true);
-    const { message } = await issueDocument(deal.id, "contract");
+    const { message } = await issueDocument(dealId, "contract");
     setDocBusy(false);
     setDocMsg(message);
+    void fetchDocuments(dealId).then(setDocs);
   }
 
   function toggleStar() {
@@ -427,6 +489,61 @@ export function DealDrawerPreview({
                 </Button>
               </section>
               {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
+
+              {/* === СТАТУС ДОКУМЕНТОВ: последний счёт/договор (слайс 6, B) === */}
+              {(latestInvoice || latestContract) && (
+                <section className="mt-3 rounded-xl border border-line p-3">
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Документы
+                  </div>
+                  <div className="space-y-1.5 text-[12.5px]">
+                    {latestInvoice && (
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-ink">Счёт {latestInvoice.number}</span>
+                          <span className="text-muted">· {fmt(latestInvoice.amount)}</span>
+                          <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                            {DOC_STATUS_LABEL[latestInvoice.status] ?? latestInvoice.status}
+                          </span>
+                          {invoiceExpiry && (
+                            <span
+                              className={clsx(
+                                "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                                invoiceExpiry.danger
+                                  ? "bg-red-50 text-red-600"
+                                  : "bg-amber-50 text-amber-600",
+                              )}
+                            >
+                              {invoiceExpiry.text}
+                            </span>
+                          )}
+                          {latestInvoice.reserve_status === "reserved" && (
+                            <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-600">
+                              резерв
+                            </span>
+                          )}
+                        </div>
+                        <a
+                          href={`/api/sales/documents/${latestInvoice.id}/render`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 text-[11.5px] font-semibold text-accent-ink hover:text-accent"
+                        >
+                          открыть
+                        </a>
+                      </div>
+                    )}
+                    {latestContract && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-ink">Договор {latestContract.number}</span>
+                        <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                          {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
               <div className="mt-4 rounded-xl border border-line p-3">
