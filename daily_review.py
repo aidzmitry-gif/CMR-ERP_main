@@ -70,10 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # acceptEdits: отчёт пишется без подтверждений, но команды/Bash НЕ исполняются.
+    # sonnet: аналитика по артефактам с оракулом (файл-отчёт) — тиринг по MODEL-TIERING.md.
     claude_call = (
         f"& {_psq(cli)} --print --verbose --permission-mode acceptEdits "
         f"--add-dir {_psq(str(ROOT))} --add-dir {_psq(str(CLAUDE_PROJECTS_DIR))} "
-        f"--model opus -- $prompt"
+        f"--model sonnet -- $prompt"
     )
     if "--dry-run" in argv:
         print("режим: acceptEdits (read-only анализ + запись отчёта; Bash не исполняется)")
@@ -90,9 +91,22 @@ def main(argv: list[str] | None = None) -> int:
         "$Host.UI.RawUI.WindowTitle = 'daily-review'\n"
         f"Set-Location -LiteralPath {_psq(str(ROOT))}\n"
         f"$prompt = Get-Content -Raw -Encoding UTF8 -LiteralPath {_psq(str(PROMPT_FILE))}\n"
+        # дата фиксируется ДО запуска: сессия может дописывать отчёт уже после полуночи
+        "$date = Get-Date -Format 'yyyy-MM-dd'\n"
+        "$started = Get-Date\n"
+        f"$report = Join-Path {_psq(str(ROOT))} ('coordination/daily-review/' + $date + '.md')\n"
+        f"$log = Join-Path {_psq(str(DATA_DIR))} 'last-run.log'\n"
         "Write-Host '=== ретроспектива дня (read-only): claude стартует ===' -ForegroundColor Cyan\n"
         f"{claude_call}\n"
-        "Write-Host '=== готово: отчёт в coordination/daily-review/ ===' -ForegroundColor Yellow\n",
+        # отчёт должен быть записан ЭТОЙ сессией: существующий вчерашний/ручной не считается
+        "if ((Test-Path $report) -and ((Get-Item $report).LastWriteTime -ge $started)) {\n"
+        "  \"$date OK - отчёт записан $(Get-Date -Format HH:mm)\" | Out-File $log -Encoding utf8\n"
+        "  Write-Host '=== готово: отчёт в coordination/daily-review/ ===' -ForegroundColor Yellow\n"
+        "} else {\n"
+        "  \"$date FAIL - claude завершился без отчёта (частая причина: headless-auth; проверь вручную: claude --print -- 'ping')\" | Out-File $log -Encoding utf8\n"
+        "  Write-Host 'FAIL: отчёт НЕ записан — смотри вывод выше; лог: coordination/.daily-review-data/last-run.log' -ForegroundColor Red\n"
+        "  Read-Host 'Enter — закрыть окно'\n"
+        "}\n",
         encoding="utf-8-sig",
     )
     ps_args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER)]
