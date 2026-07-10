@@ -202,3 +202,131 @@ export function sortDealsForBoard(deals: Deal[], stageId: string, now: number | 
     return weightedAmount(b, stageId) - weightedAmount(a, stageId);
   });
 }
+
+/** Северность элемента очереди «Фокус дня» (слайс 5) — единственный источник цвета чипа
+ *  на FocusPanel/карточке: 'crit' — горит прямо сейчас, 'warn' — сегодня/без шага,
+ *  'info' — реанимация (условный отказ остывает, не горит так же сильно). */
+export type FocusSeverity = "crit" | "warn" | "info";
+
+/** Один элемент очереди «Фокус дня»: сделка + почему она требует внимания именно сейчас. */
+export interface FocusQueueItem {
+  deal: Deal;
+  stageId: string;
+  reason: string;
+  severity: FocusSeverity;
+}
+
+/** Результат {@link focusQueue}: `items` — топ по приоритету длиной ≤ `cap`, `total` —
+ *  полное число элементов ДО обрезки (для хвоста «+ещё N» на панели). */
+export interface FocusQueueResult {
+  items: FocusQueueItem[];
+  total: number;
+}
+
+/**
+ * Очередь «Фокус дня» (слайс 5): упорядоченный список «что делать сейчас» — вместо
+ * сканирования колонок доски. Каждая сделка попадает НЕ БОЛЕЕ чем в одну категорию
+ * (приоритет по порядку ниже); закрытые стадии (won/lost, {@link isClosedStageId})
+ * исключены целиком. Приоритет:
+ *  1. Просроченный шаг (`dateBucketId` → «overdue») — по weighted DESC.
+ *  2. Шаг сегодня (bucket «today») — по weighted DESC.
+ *  3. Реанимация: «Условный отказ» (id endsWith «cond_lost») старше {@link REVIVE_AFTER_DAYS}
+ *     без касания ({@link reviveDays}) — по reviveDays DESC. Единственное правило, где
+ *     участвует cond_lost — остальные его не видят (тот же гейт, что у {@link isStuck}).
+ *  4. Открытые БЕЗ шага (ни `todo`, ни `nextStep`): сперва ПЕРВАЯ стадия переданного
+ *     списка `stages` (стадия новой заявки — первое касание важнее прогрева уже идущей
+ *     сделки) по daysInStage DESC, затем остальные открытые без шага — по weighted DESC.
+ * `now == null` (SSR/до маунта) → пустой результат, без прыжка гидрации.
+ */
+export function focusQueue(
+  stages: Pick<Stage, "id" | "deals">[],
+  now: number | null,
+  cap = 12,
+): FocusQueueResult {
+  if (now == null) return { items: [], total: 0 };
+
+  type Ranked = FocusQueueItem & { sortKey: number };
+  const overdue: Ranked[] = [];
+  const dueToday: Ranked[] = [];
+  const revive: Ranked[] = [];
+  const noTouch: Ranked[] = [];
+  const noStep: Ranked[] = [];
+
+  stages.forEach((stage, idx) => {
+    const revivable = stage.id.endsWith("cond_lost");
+    if (isClosedStageId(stage.id) && !revivable) return; // won/lost — вне очереди целиком
+
+    for (const deal of stage.deals) {
+      if (revivable) {
+        const days = reviveDays(deal, stage.id, now);
+        if (days != null) {
+          revive.push({
+            deal,
+            stageId: stage.id,
+            reason: `реанимировать · ${days} дн`,
+            severity: "info",
+            sortKey: days,
+          });
+        }
+        continue; // «условный отказ» участвует только в реанимации — не в overdue/без-шага
+      }
+
+      const bucket = dateBucketId(deal, now);
+      if (bucket === "overdue") {
+        const dueTs = Date.parse(deal.nextStepAt ?? deal.actionDate ?? "");
+        const days = Number.isNaN(dueTs) ? 0 : Math.max(0, Math.floor((now - dueTs) / DAY_MS));
+        overdue.push({
+          deal,
+          stageId: stage.id,
+          reason: `просрочен ${days} дн`,
+          severity: "crit",
+          sortKey: weightedAmount(deal, stage.id),
+        });
+        continue;
+      }
+      if (bucket === "today") {
+        dueToday.push({
+          deal,
+          stageId: stage.id,
+          reason: "шаг сегодня",
+          severity: "warn",
+          sortKey: weightedAmount(deal, stage.id),
+        });
+        continue;
+      }
+
+      if (deal.nextStep || deal.todo) continue; // шаг назначен, но не горит — вне очереди
+
+      const days = daysInStage(deal.stageChangedAt, now) ?? 0;
+      if (idx === 0) {
+        // Первая стадия переданного списка = стадия новой заявки (первое касание); для
+        // секций «Все вместе» вызывающий код передаёт список стадий КОНКРЕТНОЙ секции —
+        // первая стадия там её собственная (см. deals-workspace.tsx: combinedCardExtras).
+        noTouch.push({
+          deal,
+          stageId: stage.id,
+          reason: `без касания ${days} дн`,
+          severity: days >= 1 ? "crit" : "warn",
+          sortKey: days,
+        });
+      } else {
+        noStep.push({
+          deal,
+          stageId: stage.id,
+          reason: `без шага · в стадии ${days} дн`,
+          severity: "warn",
+          sortKey: weightedAmount(deal, stage.id),
+        });
+      }
+    }
+  });
+
+  const byKeyDesc = (a: Ranked, b: Ranked) => b.sortKey - a.sortKey;
+  [overdue, dueToday, revive, noTouch, noStep].forEach((bucket) => bucket.sort(byKeyDesc));
+
+  const ordered = [...overdue, ...dueToday, ...revive, ...noTouch, ...noStep];
+  const items: FocusQueueItem[] = ordered
+    .slice(0, cap)
+    .map(({ deal, stageId, reason, severity }) => ({ deal, stageId, reason, severity }));
+  return { items, total: ordered.length };
+}

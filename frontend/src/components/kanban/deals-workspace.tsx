@@ -21,6 +21,7 @@ import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard, fetchManagersCached, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
+import { FocusPanel } from "@/components/kanban/focus-panel";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
@@ -38,6 +39,7 @@ import {
 import {
   dateBucketId,
   daysInStage,
+  focusQueue,
   groupByDateBucket,
   isClosedStageId,
   isOpenStage,
@@ -69,6 +71,9 @@ type CardExtras = {
   actBucket: "overdue" | "today" | "tomorrow" | null;
   /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
   noStep: boolean;
+  /** Слайс 5 (C): первая стадия списка (новая заявка) без шага — дни без первого касания;
+   *  null — не первая стадия ИЛИ шаг уже есть (DealCard тогда решает через noStep как раньше). */
+  noTouchDays: number | null;
   /** «Условный отказ» дольше порога без касания — чип «реанимировать · N дн» (слайс 3). */
   reviveDays: number | null;
   onLose?: () => void;
@@ -856,6 +861,8 @@ export function DealsWorkspace({
   // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
   // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
   const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
+  // Слайс 5: панель «Фокус дня» — упорядоченная очередь «что делать сейчас» (focusQueue).
+  const [focusOpen, setFocusOpen] = useState(false);
   // callDeal = открыто окно звонка по этой сделке (тот же кокпит, что и у лида).
   const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1083,6 +1090,17 @@ export function DealsWorkspace({
     };
   }, [stages, combinedStages, q, priority, ownerFilter, attn, stuckOnly, now, actFilter]);
 
+  // Слайс 5 (A): очередь «Фокус дня» — строится от ТЕКУЩЕЙ отфильтрованной основной доски
+  // (filteredStages), поэтому «Чья доска» (слайс 3) и остальные фильтры автоматически дают
+  // «мой фокус» без отдельной логики. ponytail: в «Все вместе» секции («Все вместе»,
+  // filteredCombined) держат свой стейт ВНУТРИ FunnelSection (не поднят наверх, см.
+  // FunnelSection.stages) — точная объединённая очередь потребовала бы либо поднять их
+  // стейт сюда, либо звать focusQueue на секцию и мержить бакет-в-бакет (порядок важнее
+  // конкатенации). Пока в «Все вместе» фокус показывает только `filteredStages` (первая
+  // секция) — тот же охват, что уже использует PipelineRow выше. Апгрейд — при переносе
+  // per-section стейта наверх.
+  const focusResult = useMemo(() => focusQueue(filteredStages, now), [filteredStages, now]);
+
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
 
   /** «Просрочено»/«Сегодня»/«Завтра» для чипа срочности карточки: только по открытым
@@ -1134,9 +1152,15 @@ export function DealsWorkspace({
   function cardExtras(deal: Deal, stageId: string): CardExtras {
     const code = deal.lostReasonCode;
     const closed = isClosedStageId(stageId);
+    const hasNoStep = !closed && !deal.nextStep && !deal.todo;
+    // Слайс 5 (C): первая стадия ТЕКУЩЕГО списка = стадия новой заявки (тот же критерий
+    // «первая стадия списка», что и focusQueue в board.ts — согласовано намеренно).
+    const isFirstStage = filteredStages[0]?.id === stageId;
     return {
       actBucket: actBucketFor(deal, closed),
-      noStep: !closed && !deal.nextStep && !deal.todo,
+      noStep: hasNoStep,
+      noTouchDays:
+        hasNoStep && isFirstStage && now != null ? (daysInStage(deal.stageChangedAt, now) ?? 0) : null,
       reviveDays: now != null ? reviveDays(deal, stageId, now) : null,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
       // FIX-2: isStuck (board.ts) сам гейтит закрытые стадии (won/lost/cond_lost) — единый
@@ -1173,9 +1197,14 @@ export function DealsWorkspace({
     const code = deal.lostReasonCode;
     const wonId = sectionStages.find((s) => s.id.endsWith("won"))?.id;
     const closed = isClosedStageId(stageId);
+    const hasNoStep = !closed && !deal.nextStep && !deal.todo;
+    // Слайс 5 (C): первая стадия ЭТОЙ секции (не всей доски) — та же семантика, что cardExtras.
+    const isFirstStage = sectionStages[0]?.id === stageId;
     return {
       actBucket: actBucketFor(deal, closed),
-      noStep: !closed && !deal.nextStep && !deal.todo,
+      noStep: hasNoStep,
+      noTouchDays:
+        hasNoStep && isFirstStage && now != null ? (daysInStage(deal.stageChangedAt, now) ?? 0) : null,
       reviveDays: now != null ? reviveDays(deal, stageId, now) : null,
       days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
       // FIX-2: гейт закрытых стадий живёт в самом isStuck — формула та же, что в cardExtras.
@@ -1461,6 +1490,32 @@ export function DealsWorkspace({
                 ))}
               </div>
             )}
+            {/* B (слайс 5): «Фокус дня» — упорядоченная очередь «что делать сейчас» вместо
+                сканирования колонок. Бейдж = total ДО обрезки cap (реальная потребность),
+                красный — в очереди есть что-то горящее (severity=crit). */}
+            <button
+              type="button"
+              onClick={() => setFocusOpen(true)}
+              title="Фокус дня — упорядоченная очередь приоритетных сделок"
+              className={clsx(
+                "inline-flex items-center gap-1.5 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+                focusOpen ? "border-accent text-accent-ink" : "border-line text-muted",
+              )}
+            >
+              🎯 Фокус дня
+              {focusResult.total > 0 && (
+                <span
+                  className={clsx(
+                    "rounded-full px-1.5 py-0.5 text-[11px] font-bold",
+                    focusResult.items.some((i) => i.severity === "crit")
+                      ? "bg-red-600 text-white"
+                      : "bg-accent-soft text-accent-ink",
+                  )}
+                >
+                  {focusResult.total}
+                </span>
+              )}
+            </button>
             {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
             {(["today", "tomorrow"] as const).map((k) => (
               <button
@@ -1720,6 +1775,20 @@ export function DealsWorkspace({
           onConfirm={confirmLose}
         />
       )}
+
+      {/* Слайс 5 (B): панель «Фокус дня» — клик по элементу очереди закрывает панель и
+          открывает тот же drawer-preview, что и клик по карточке на доске. */}
+      <FocusPanel
+        open={focusOpen}
+        onClose={() => setFocusOpen(false)}
+        result={focusResult}
+        stageTitle={(stageId) => filteredStages.find((s) => s.id === stageId)?.title ?? stageId}
+        fmt={fmt}
+        onSelectDeal={(deal) => {
+          setFocusOpen(false);
+          setPreviewDeal(deal);
+        }}
+      />
 
       {/* Drawer-preview сделки: открывается single-click по карточке на доске.
           Цель — работа из канбана без проваливания в полную карточку: stage-mover,

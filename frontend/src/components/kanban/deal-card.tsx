@@ -212,6 +212,7 @@ export function DealCard({
   wonResult = false,
   actBucket = null,
   noStep = false,
+  noTouchDays = null,
   reviveDays = null,
   onLose,
   onCall,
@@ -233,6 +234,9 @@ export function DealCard({
   actBucket?: "overdue" | "today" | "tomorrow" | null;
   /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
   noStep?: boolean;
+  /** Слайс 5 (C): сделка в стадии новой заявки БЕЗ шага — дни без первого касания.
+   *  Приоритетнее общего noStep — вытесняет чип «нет шага», когда задан (не null). */
+  noTouchDays?: number | null;
   /** «Условный отказ» без касания дольше порога — чип «реанимировать · N дн» (N = дни в стадии). */
   reviveDays?: number | null;
   onLose?: () => void;
@@ -297,13 +301,29 @@ export function DealCard({
               {actBucket === "overdue" ? "Просрочено" : actBucket === "today" ? "Сегодня" : "Завтра"}
             </span>
           )}
-          {noStep && (
+          {noTouchDays != null ? (
+            // Слайс 5 (C): первое касание приоритетнее общего «нет шага» — новая заявка
+            // без реакции продавца горит сильнее, чем «прогреваемая» сделка без шага.
             <span
-              title="У сделки нет следующего шага — назначь действие"
-              className="inline-flex items-center rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+              title="Новая заявка ещё не тронута — первое касание важнее прогрева"
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold",
+                noTouchDays >= 1
+                  ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+                  : "bg-sunken text-muted",
+              )}
             >
-              нет шага
+              ⏱ без касания {noTouchDays} дн
             </span>
+          ) : (
+            noStep && (
+              <span
+                title="У сделки нет следующего шага — назначь действие"
+                className="inline-flex items-center rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+              >
+                нет шага
+              </span>
+            )
           )}
           {reviveDays != null && (
             <span

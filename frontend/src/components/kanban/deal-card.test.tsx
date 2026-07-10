@@ -62,6 +62,24 @@ describe("DealCard", () => {
     expect(screen.queryByText("нет шага")).toBeNull();
   });
 
+  // --- Слайс 5 (C): чип первого касания ---
+
+  it("noTouchDays рисует «⏱ без касания N дн» ВМЕСТО «нет шага» (первое касание приоритетнее)", () => {
+    const { rerender } = render(
+      <DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={2} />,
+    );
+    expect(screen.getByText(/без касания 2 дн/)).toBeInTheDocument();
+    expect(screen.queryByText("нет шага")).toBeNull();
+    rerender(<DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={0} />);
+    expect(screen.getByText(/без касания 0 дн/)).toBeInTheDocument();
+  });
+
+  it("noTouchDays=null (по умолчанию) — старый маркер «нет шага» продолжает работать", () => {
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={null} />);
+    expect(screen.getByText("нет шага")).toBeInTheDocument();
+    expect(screen.queryByText(/без касания/)).toBeNull();
+  });
+
   it("todo сведён к строке «След. шаг» с датой/временем и строкой номенклатуры (без «Редактировать товар»)", () => {
     render(
       <DealCard

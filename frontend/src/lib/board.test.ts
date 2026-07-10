@@ -9,6 +9,7 @@ import {
   dealStepText,
   daysInStage,
   ensureLostStage,
+  focusQueue,
   groupByDateBucket,
   isClosedStageId,
   isOpenStage,
@@ -356,5 +357,145 @@ describe("shouldAutoAssignNextStep (слайс 4, D)", () => {
   it("у сделки уже есть шаг (nextStep ИЛИ todo) — false, не перетираем ручной выбор", () => {
     expect(shouldAutoAssignNextStep({ nextStep: "Позвонить" }, "qual")).toBe(false);
     expect(shouldAutoAssignNextStep({ todo: "Согласовать" }, "qual")).toBe(false);
+  });
+});
+
+describe("focusQueue — «Фокус дня» (слайс 5)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+  const at = (d: number, h = 10) => new Date(2026, 5, d, h).toISOString();
+  const daysAgoISO = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
+  it("now == null — пустой результат (SSR-гейт)", () => {
+    const stages = [stage("new", [deal("1", 100)])];
+    expect(focusQueue(stages, null)).toEqual({ items: [], total: 0 });
+  });
+
+  it("нет квалифицирующих сделок (шаг уже назначен) — пустой результат", () => {
+    const stages = [stage("qual", [deal("has-step", 100, { nextStep: "Позвонить" })])];
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+  });
+
+  it("порядок приоритета: просрочено → сегодня → реанимация → без касания (1я стадия) → без шага (остальные)", () => {
+    const stages: Stage[] = [
+      stage("new", [deal("notouch", 50, { stageChangedAt: daysAgoISO(2) })]),
+      stage("qual", [
+        deal("nostep", 100_000, { stageChangedAt: daysAgoISO(1) }),
+        deal("overdue", 10, { nextStepAt: daysAgoISO(3) }),
+        deal("today", 10, { nextStepAt: at(11) }),
+      ]),
+      stage("cond_lost", [deal("revive", 10, { stageChangedAt: daysAgoISO(REVIVE_AFTER_DAYS) })]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["overdue", "today", "revive", "notouch", "nostep"]);
+  });
+
+  it("severity: overdue=crit, today=warn, revive=info", () => {
+    const stages: Stage[] = [
+      stage("qual", [
+        deal("overdue", 10, { nextStepAt: daysAgoISO(3) }),
+        deal("today", 10, { nextStepAt: at(11) }),
+      ]),
+      stage("cond_lost", [deal("revive", 10, { stageChangedAt: daysAgoISO(10) })]),
+    ];
+    const items = focusQueue(stages, NOW).items;
+    const sev = (id: string) => items.find((i) => i.deal.id === id)!.severity;
+    expect(sev("overdue")).toBe("crit");
+    expect(sev("today")).toBe("warn");
+    expect(sev("revive")).toBe("info");
+  });
+
+  it("severity «без касания»: ≥1 дн — crit, 0 дн — warn", () => {
+    const stages: Stage[] = [
+      stage("new", [
+        deal("notouch1", 10, { stageChangedAt: daysAgoISO(1) }),
+        deal("notouch0", 10, { stageChangedAt: daysAgoISO(0) }),
+      ]),
+    ];
+    const items = focusQueue(stages, NOW).items;
+    const sev = (id: string) => items.find((i) => i.deal.id === id)!.severity;
+    expect(sev("notouch1")).toBe("crit");
+    expect(sev("notouch0")).toBe("warn");
+  });
+
+  it("текст reason соответствует формату каждого правила", () => {
+    const stages: Stage[] = [
+      stage("new", [deal("notouch", 10, { stageChangedAt: daysAgoISO(5) })]),
+      stage("qual", [
+        deal("nostep", 10, { stageChangedAt: daysAgoISO(2) }),
+        deal("overdue", 10, { nextStepAt: daysAgoISO(3) }),
+        deal("today", 10, { nextStepAt: at(11) }),
+      ]),
+      stage("cond_lost", [deal("revive", 10, { stageChangedAt: daysAgoISO(10) })]),
+    ];
+    const items = focusQueue(stages, NOW).items;
+    const reason = (id: string) => items.find((i) => i.deal.id === id)!.reason;
+    expect(reason("overdue")).toBe("просрочен 3 дн");
+    expect(reason("today")).toBe("шаг сегодня");
+    expect(reason("revive")).toBe("реанимировать · 10 дн");
+    expect(reason("notouch")).toBe("без касания 5 дн");
+    expect(reason("nostep")).toBe("без шага · в стадии 2 дн");
+  });
+
+  it("«без касания» (1я стадия) всегда впереди «без шага» (остальные), даже при меньшей сумме/днях", () => {
+    const stages: Stage[] = [
+      stage("new", [deal("touch-small", 1, { stageChangedAt: daysAgoISO(1) })]),
+      stage("qual", [deal("step-big", 999_999, { stageChangedAt: daysAgoISO(30) })]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["touch-small", "step-big"]);
+  });
+
+  it("внутри «без касания» сортирует по daysInStage DESC, не по деньгам", () => {
+    const stages: Stage[] = [
+      stage("new", [
+        deal("a", 999_999, { stageChangedAt: daysAgoISO(1) }),
+        deal("b", 1, { stageChangedAt: daysAgoISO(9) }),
+      ]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["b", "a"]);
+  });
+
+  it("внутри «без шага» (остальные) сортирует по weighted DESC, не по дням", () => {
+    const stages: Stage[] = [
+      stage("new", []), // непустая позиция 0 — «qual» ниже НЕ первая стадия (иначе попал бы в «без касания»)
+      stage("qual", [
+        deal("a", 10, { stageChangedAt: daysAgoISO(30) }),
+        deal("b", 999_999, { stageChangedAt: daysAgoISO(1) }),
+      ]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["b", "a"]);
+  });
+
+  it("won/lost исключены целиком — даже формально «просроченные»", () => {
+    const stages: Stage[] = [
+      stage("won", [deal("w1", 100, { nextStepAt: daysAgoISO(5) })]),
+      stage("lost", [deal("l1", 100, { nextStepAt: daysAgoISO(5) })]),
+    ];
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+  });
+
+  it("cond_lost участвует ТОЛЬКО в реанимации — ниже порога не попадает никуда, даже если «просрочен»", () => {
+    const stages: Stage[] = [
+      stage("cond_lost", [
+        deal("fresh", 100, { nextStepAt: daysAgoISO(5), stageChangedAt: daysAgoISO(2) }),
+      ]),
+    ];
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+  });
+
+  it("cap ограничивает items (по умолчанию 12), total считает все квалифицирующие", () => {
+    const manyDeals = Array.from({ length: 15 }, (_, i) =>
+      deal(`d${i}`, 100 + i, { nextStepAt: daysAgoISO(1) }),
+    );
+    const stages: Stage[] = [stage("qual", manyDeals)];
+    const result = focusQueue(stages, NOW);
+    expect(result.items).toHaveLength(12);
+    expect(result.total).toBe(15);
+
+    const result3 = focusQueue(stages, NOW, 3);
+    expect(result3.items).toHaveLength(3);
+    expect(result3.total).toBe(15);
   });
 });
