@@ -2,7 +2,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Globe, Mail, Phone, Plus, X } from "lucide-react";
+import { Globe, Mail, Phone, Plus, User, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { CallWindow } from "@/components/calls/call-window";
@@ -731,6 +731,15 @@ function LeadCard({
           title="Подобранный КП: позиции и сумма"
         >
           🧾 {lead.itemsCount} поз. · {formatByn(lead.itemsTotal ?? 0)}
+        </div>
+      )}
+      {lead.assignedTo && (
+        <div
+          title={`Ответственный: ${lead.assignedTo}`}
+          className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-muted"
+        >
+          <User size={12} className="text-faint" />
+          {lead.assignedTo}
         </div>
       )}
       <div className="mt-2 flex items-center justify-between gap-2">

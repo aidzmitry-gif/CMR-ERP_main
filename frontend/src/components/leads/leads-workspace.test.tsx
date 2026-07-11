@@ -122,7 +122,8 @@ describe("LeadsWorkspace", () => {
         expect.objectContaining({ assignedTo: undefined }),
       ),
     );
-    expect(await screen.findByText(/Иванов И\.И\./)).toBeInTheDocument();
+    // менеджер показан и на карточке, и в drawer «Распределение» → несколько совпадений
+    expect((await screen.findAllByText(/Иванов И\.И\./)).length).toBeGreaterThan(0);
     expect(screen.getByText(/Новые клиенты/)).toBeInTheDocument();
   });
 
@@ -263,7 +264,7 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByText("+375290000000")).toBeInTheDocument();
     expect(screen.getByText("p@x.by")).toBeInTheDocument();
     expect(screen.getAllByText(/нецелевой/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Сидоров С\.С\./)).toBeInTheDocument();
+    expect(screen.getAllByText(/Сидоров С\.С\./).length).toBeGreaterThan(0);
     expect(screen.getByText("AI-пояснение по лиду")).toBeInTheDocument();
     expect(screen.getByText(/Постоянные/)).toBeInTheDocument(); // воронка regular
   });
