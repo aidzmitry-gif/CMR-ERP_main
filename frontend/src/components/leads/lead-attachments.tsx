@@ -11,8 +11,11 @@ import type { LeadAttachment } from "@/lib/types";
 
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   manual: { label: "вручную", cls: "bg-sunken text-muted" },
-  email: { label: "с почты", cls: "bg-blue-100 text-blue-700" },
-  tender: { label: "с тендера", cls: "bg-violet-100 text-violet-700" },
+  email: { label: "с почты", cls: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" },
+  tender: {
+    label: "с тендера",
+    cls: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+  },
 };
 
 function iconFor(contentType: string): string {
@@ -101,7 +104,7 @@ export function LeadAttachments({ leadId }: { leadId: number }) {
         onChange={handleFileChange}
         className="hidden"
       />
-      {error && <div className="mt-1.5 text-[12px] text-[#DC2626]">{error}</div>}
+      {error && <div className="mt-1.5 text-[12px] text-red-600 dark:text-red-400">{error}</div>}
     </div>
   );
 
@@ -143,7 +146,7 @@ export function LeadAttachments({ leadId }: { leadId: number }) {
                 onClick={() => handleDelete(a)}
                 aria-label={`Удалить вложение ${a.filename}`}
                 title="Удалить"
-                className="shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-[12.5px] text-muted hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+                className="shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-[12.5px] text-muted hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400"
               >
                 🗑
               </button>

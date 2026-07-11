@@ -306,7 +306,7 @@ export function LeadDrawerPreview({
 
               {/* Цикл 11: лид резолвнут в существующую компанию → добавить контакт без дублей */}
               {lead.counterpartyId != null && (lead.name || lead.phone || lead.email) && (
-                <section className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                <section className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3 dark:bg-sky-500/10">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                     {lead.customerKind === "regular" ? "Постоянник" : "Действующий клиент"}
                   </div>
@@ -317,11 +317,11 @@ export function LeadDrawerPreview({
                     type="button"
                     disabled={linkBusy}
                     onClick={onLinkContact}
-                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-60 dark:text-sky-300 dark:hover:bg-sky-500/15"
                   >
                     <User size={13} /> {linkBusy ? "Добавляю…" : "Добавить контакт в компанию"}
                   </button>
-                  {linkMsg && <div className="mt-1.5 text-[11.5px] font-medium text-sky-800">{linkMsg}</div>}
+                  {linkMsg && <div className="mt-1.5 text-[11.5px] font-medium text-sky-800 dark:text-sky-200">{linkMsg}</div>}
                 </section>
               )}
 
@@ -407,11 +407,11 @@ export function LeadDrawerPreview({
               )}
 
               {rejected && (
-                <section className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+                <section className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-500/10">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Отклонён
                   </div>
-                  <div className="mt-1 text-[13px] text-red-700">{lead.rejectReason}</div>
+                  <div className="mt-1 text-[13px] text-red-700 dark:text-red-300">{lead.rejectReason}</div>
                 </section>
               )}
 
@@ -420,7 +420,7 @@ export function LeadDrawerPreview({
                   <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     AI-обоснование
                   </div>
-                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-[13px] text-violet-900">
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-[13px] text-violet-900 dark:bg-violet-500/10 dark:text-violet-200">
                     {lead.aiRationale}
                   </div>
                 </section>
@@ -549,7 +549,7 @@ export function LeadDrawerPreview({
                         rejectReason === "не сейчас" ? snoozeDays : undefined,
                       )
                     }
-                    className="mt-1.5 w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+                    className="mt-1.5 w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/15"
                   >
                     {rejectReason === "не сейчас" ? `Отложить на ${snoozeDays} дн` : "Отклонить"}
                   </button>

@@ -20,9 +20,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = [
-    "sales", "procurement", "production", "wms", "logistics",
+    "sales", "leads", "procurement", "production", "wms", "logistics",
     "finance", "marketing", "service", "hr",
 ]
+# Токен имени миграций модуля, если он не совпадает с именем пакета. Миграции лидов
+# исторически названы префиксом `lead` (0087_leads_init, 0091-0101_lead_*), не `leads`.
+MIGR_TOKENS = {"leads": "lead"}
 ROUTE_RE = re.compile(r"@router\.(get|post|put|patch|delete)\b")
 MIGR_DIR = ROOT / "migrations" / "versions"
 FE_APP = ROOT / "frontend" / "src" / "app"
@@ -52,7 +55,8 @@ def route_count(pkg: Path) -> int:
 def migration_count(name: str) -> int:
     if not MIGR_DIR.exists():
         return 0
-    return sum(1 for f in MIGR_DIR.glob("*.py") if name in f.name)
+    token = MIGR_TOKENS.get(name, name)
+    return sum(1 for f in MIGR_DIR.glob("*.py") if token in f.name)
 
 
 def fe_ui(page_dirs: list[str]) -> str:
@@ -72,6 +76,7 @@ def fe_ui(page_dirs: list[str]) -> str:
 # фронт-страница(ы) каждого модуля (первая существующая определяет тип)
 FE_MAP = {
     "sales": ["crm/deals", "erp/sales"],
+    "leads": ["crm/leads"],
     "procurement": ["erp/procurement"],
     "production": ["erp/production"],
     "wms": ["erp/wms"],

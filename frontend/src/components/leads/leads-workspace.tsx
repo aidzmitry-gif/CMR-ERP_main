@@ -50,10 +50,19 @@ const SOURCE_LABELS: Record<string, string> = {
   tender: "Тендер",
 };
 const STATUS_META: Record<LeadStatus, { label: string; cls: string }> = {
-  new: { label: "Новый", cls: "bg-blue-100 text-blue-700" },
-  qualified: { label: "Квалифицирован", cls: "bg-violet-100 text-violet-700" },
-  routed: { label: "Распределён", cls: "bg-amber-100 text-amber-700" },
-  converted: { label: "В сделке", cls: "bg-green-100 text-green-700" },
+  new: { label: "Новый", cls: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" },
+  qualified: {
+    label: "Квалифицирован",
+    cls: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+  },
+  routed: {
+    label: "Распределён",
+    cls: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  },
+  converted: {
+    label: "В сделке",
+    cls: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300",
+  },
   rejected: { label: "Отклонён", cls: "bg-sunken text-muted" },
 };
 const INPUT =
@@ -163,7 +172,9 @@ function ScoreBadge({ lead }: { lead: Lead }) {
     <span
       className={clsx(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
-        target ? "bg-green-100 text-green-700" : "bg-sunken text-muted",
+        target
+          ? "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300"
+          : "bg-sunken text-muted",
       )}
       title={target ? "Целевой лид" : "Нецелевой лид"}
     >
@@ -218,7 +229,9 @@ function WaitChip({ createdAt }: { createdAt?: string }) {
       title={escalated ? "SLA горит — реагируй немедленно" : "Ожидает реакции с момента приёма"}
       className={clsx(
         "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
-        overdue ? "bg-red-100 text-red-700" : "bg-sunken text-muted",
+        overdue
+          ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+          : "bg-sunken text-muted",
       )}
     >
       {escalated ? "🔥 " : "⏱ "}
@@ -245,7 +258,11 @@ function RoutedAgeChip({ routedAt }: { routedAt?: string | null }) {
       title="У продавца с момента передачи — сделки ещё нет"
       className={clsx(
         "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
-        stale ? "bg-red-100 text-red-700" : warn ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
+        stale
+          ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+          : warn
+            ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+            : "bg-sunken text-muted",
       )}
     >
       ⏳ {formatWait(minutes)}
@@ -265,7 +282,9 @@ function NextStepChip({ at, note }: { at?: string | null; note?: string }) {
       title={note ? `Следующий шаг: ${note}` : "Следующий шаг по лиду"}
       className={clsx(
         "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
-        overdueMin > 0 ? "bg-red-100 text-red-700" : "bg-sunken text-muted",
+        overdueMin > 0
+          ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+          : "bg-sunken text-muted",
       )}
     >
       {overdueMin > 0 ? `⚠ шаг просрочен ${formatWait(overdueMin)}` : `→ шаг ${label}`}
@@ -302,7 +321,11 @@ function AttemptChip({ count, callbackAt }: { count?: number; callbackAt?: strin
       }
       className={clsx(
         "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
-        overdue ? "bg-red-100 text-red-700" : many ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
+        overdue
+          ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+          : many
+            ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+            : "bg-sunken text-muted",
       )}
     >
       ☎ {n}
@@ -439,7 +462,7 @@ function ExpressPopover({
         ))}
       </div>
       {error && (
-        <div className="mb-2 rounded-lg bg-red-100 px-2 py-1.5 text-[11px] text-red-700">{error}</div>
+        <div className="mb-2 rounded-lg bg-red-100 px-2 py-1.5 text-[11px] text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</div>
       )}
       <div className="flex gap-1.5">
         <button
@@ -504,7 +527,11 @@ function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: 
             return (
               <tr
                 key={`${r.source}·${r.utmCampaign}`}
-                className={clsx("border-t border-line", isBest && "bg-green-50", isWorst && "bg-red-50")}
+                className={clsx(
+                  "border-t border-line",
+                  isBest && "bg-green-50 dark:bg-green-500/10",
+                  isWorst && "bg-red-50 dark:bg-red-500/10",
+                )}
               >
                 <td className="px-2 py-1.5 font-medium text-ink">
                   {SOURCE_LABELS[r.source] ?? r.source}
@@ -515,7 +542,11 @@ function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: 
                 <td
                   className={clsx(
                     "px-2 py-1.5 text-right font-semibold",
-                    isBest ? "text-green-700" : isWorst ? "text-red-700" : "text-ink",
+                    isBest
+                      ? "text-green-700 dark:text-green-300"
+                      : isWorst
+                        ? "text-red-700 dark:text-red-300"
+                        : "text-ink",
                   )}
                 >
                   {r.conversionPct}%
@@ -565,7 +596,7 @@ function PlanBar({
       <div className="mt-0.5 text-[10.5px] text-faint">
         {p.remaining > 0 ? `осталось ${p.remaining}` : "норма закрыта ✓"}
         {p.remaining > 0 && !p.onTrack && (
-          <span className="text-amber-600"> · отстаём (к часу нужно {p.expectedByNow})</span>
+          <span className="text-amber-600 dark:text-amber-400"> · отстаём (к часу нужно {p.expectedByNow})</span>
         )}
       </div>
     </div>
@@ -578,7 +609,12 @@ function ReactionTile({ factMin, targetMin }: { factMin: number | null; targetMi
   return (
     <div>
       <div className="text-xs font-medium text-muted">Реакция (цель ≤ {targetMin}м)</div>
-      <div className={clsx("mt-1 text-lg font-bold tabular-nums", ok ? "text-money" : "text-amber-600")}>
+      <div
+        className={clsx(
+          "mt-1 text-lg font-bold tabular-nums",
+          ok ? "text-money" : "text-amber-600 dark:text-amber-400",
+        )}
+      >
         {factMin == null ? "—" : `${factMin} мин`}
       </div>
       <div className="text-[10.5px] text-faint">{ok ? "в норме ✓" : "медленно — ускоряйся"}</div>
@@ -736,7 +772,7 @@ function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading:
               <td
                 className={clsx(
                   "px-2 py-1.5 text-right font-semibold tabular-nums",
-                  r.stale > 0 ? "text-red-600" : "text-faint",
+                  r.stale > 0 ? "text-red-600 dark:text-red-400" : "text-faint",
                 )}
                 title={r.stale > 0 ? "Переданы >24ч назад, сделки нет — дожать продавца" : undefined}
               >
@@ -851,7 +887,7 @@ function LeadCard({
           {lead.customerKind === "regular" && (
             <span
               title="Постоянник — уже были обращения/сделки по этому контрагенту"
-              className="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-bold text-violet-700"
+              className="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-bold text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"
             >
               ⭐ постоянник
             </span>
@@ -859,7 +895,7 @@ function LeadCard({
           {lead.customerKind === "existing" && (
             <span
               title="Действующий клиент — контакт найден в базе (MDM/1С)"
-              className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700"
+              className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"
             >
               🤝 клиент
             </span>
@@ -867,7 +903,7 @@ function LeadCard({
           {lead.isKey && (
             <span
               title="Ключевой лид — высокий потенциал, приоритет и лучший закрывающий"
-              className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700"
+              className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
             >
               🔑 ключевой
             </span>
@@ -875,7 +911,7 @@ function LeadCard({
           {lead.revivedFromId != null && (
             <span
               title={`Контакт уже отклоняли ранее (лид №${lead.revivedFromId}) — проверьте историю`}
-              className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-700"
+              className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-700 dark:bg-orange-500/15 dark:text-orange-300"
             >
               ♻ был отказ
             </span>
@@ -883,7 +919,7 @@ function LeadCard({
           {lead.lastTouchAt != null && (
             <span
               title="Клиент обратился повторно — самый горячий сигнал дня, ответьте первым"
-              className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700"
+              className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
             >
               ↑ повтор
             </span>
@@ -893,7 +929,7 @@ function LeadCard({
             (waitingMinutes(lead.snoozeUntil) ?? 0) > 0 && (
               <span
                 title="Лид вернулся из отложенных («не сейчас») — спрос мог созреть, начните с него"
-                className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700"
+                className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"
               >
                 ⏰ проснулся
               </span>
@@ -909,7 +945,7 @@ function LeadCard({
             (waitingMinutes(lead.convertedAt ?? undefined) ?? 0) > DEAL_GUARD_MIN && (
               <span
                 title="Конвертация прошла, а сделка так и не появилась — проверьте и повторите конвертацию"
-                className="inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-700"
+                className="inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-700 dark:bg-red-500/15 dark:text-red-300"
               >
                 ⚠ сделка не создана
               </span>
@@ -1701,7 +1737,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         )}
                         {items.filter((l) => (waitingMinutes(l.routedAt ?? undefined) ?? 0) > ROUTED_WARN_MIN)
                           .length > 0 && (
-                          <div className="mt-0.5 text-[11px] font-semibold text-red-600">
+                          <div className="mt-0.5 text-[11px] font-semibold text-red-600 dark:text-red-400">
                             ⚠{" "}
                             {
                               items.filter(
