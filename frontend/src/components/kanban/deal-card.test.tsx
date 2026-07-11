@@ -308,10 +308,16 @@ describe("DealCard", () => {
     expect(screen.queryByText(/💬|☎ пропущен/)).toBeNull();
   });
 
-  it("цикл 17: unread>0 + waitAgeMs — бейдж рисует возраст «💬 ждёт Nч» вместо голого счётчика", () => {
+  it("цикл 17: unread>1 + waitAgeMs — бейдж «💬 N · ждёт Nч» (фикс: счётчик не теряется рядом с возрастом)", () => {
     render(<DealCard deal={deal} unread={2} waitAgeMs={5 * 3_600_000} />);
-    expect(screen.getByText("💬 ждёт 5ч")).toBeInTheDocument();
+    expect(screen.getByText("💬 2 · ждёт 5ч")).toBeInTheDocument();
     expect(screen.queryByText("💬 2")).toBeNull();
+    expect(screen.queryByText("💬 ждёт 5ч")).toBeNull();
+  });
+
+  it("цикл 17: unread===1 + waitAgeMs — бейдж «💬 ждёт Nч» без счётчика", () => {
+    render(<DealCard deal={deal} unread={1} waitAgeMs={5 * 3_600_000} />);
+    expect(screen.getByText("💬 ждёт 5ч")).toBeInTheDocument();
   });
 
   // --- Слайс 6: счёт с карточки ---

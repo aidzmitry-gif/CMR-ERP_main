@@ -484,6 +484,25 @@ export interface InboundSignalResult {
   tone: InboundSignalTone;
 }
 
+/** Строка оканчивается явной таймзоной (`Z`/`+hh:mm`/`+hhmm`) — {@link waitAgeMsFor}. */
+const HAS_TZ_RE = /[zZ]|[+-]\d\d:?\d\d$/;
+
+/** Цикл 17: now - waiting_since в мс — тот же паттерн, что {@link daysInStage}/{@link reviveDays}:
+ *  время режет вызывающий (cardExtras/combinedCardExtras в deals-workspace.tsx), эта функция —
+ *  чистый резолвер. `null` — waiting_since ещё нет с бэка (без миграции) или `now` не готов
+ *  (до маунта, гидрационный `now` в DealsWorkspace).
+ *
+ *  ФИКС (адверсарная верификация цикла 17): бэк шлёт наивный UTC без зоны
+ *  («2026-07-11T12:00:00») — голый `Date.parse` трактует такую строку как ЛОКАЛЬНОЕ время
+ *  рантайма, а не UTC (в Минске, UTC+3, свежее сообщение сразу читалось как «ждёт 3ч»).
+ *  Если в строке нет явной зоны — дописываем `Z` перед парсингом; строки, уже пришедшие
+ *  с зоной (или из тестов), не трогаем. */
+export function waitAgeMsFor(waitingSince: string | null | undefined, now: number | null): number | null {
+  if (waitingSince == null || now == null) return null;
+  const since = Date.parse(HAS_TZ_RE.test(waitingSince) ? waitingSince : `${waitingSince}Z`);
+  return Number.isNaN(since) ? null : Math.max(0, now - since);
+}
+
 /** Цикл 17: возраст ожидания ответа (now - waiting_since) человекочитаемо — «Nм» до часа,
  *  «Nч» до суток, дальше «Nд». Чистая функция, как {@link daysUntilDate} рядом. Отрицательный
  *  ms (рассинхрон часов клиент/сервер) не уходит в минус — честные «0м». */
@@ -510,6 +529,11 @@ export function formatWaitAge(ms: number): string {
  * что `daysInStage`/`reviveDays` — время считает cardExtras, резолвер получает готовое число) —
  * рисует возраст в лейбле («💬 ждёт 3м/2ч/1д») вместо голого счётчика. Не задан/null (бэк ещё
  * без waiting_since, или мигрирует старая dev.db) — старый лейбл `💬 N`, graceful.
+ *
+ * ФИКС (адверсарная верификация цикла 17): при известном waitAgeMs лейбл терял счётчик
+ * непрочитанных — «💬 ждёт 12м» неотличимо для 1 и для 5 сообщений. unread>1 — счётчик
+ * возвращаем перед возрастом («💬 3 · ждёт 12м»); unread===1 — старый лейбл без счётчика
+ * (одно сообщение не нуждается в «1 ·»).
  */
 export function inboundSignal(signals: {
   unread?: number;
@@ -518,8 +542,10 @@ export function inboundSignal(signals: {
 }): InboundSignalResult | null {
   const { unread = 0, missed = 0, waitAgeMs = null } = signals;
   if (unread > 0) {
+    const age = waitAgeMs != null ? `ждёт ${formatWaitAge(waitAgeMs)}` : null;
+    const label = age == null ? `💬 ${unread}` : unread > 1 ? `💬 ${unread} · ${age}` : `💬 ${age}`;
     return {
-      label: waitAgeMs != null ? `💬 ждёт ${formatWaitAge(waitAgeMs)}` : `💬 ${unread}`,
+      label,
       tone: "money",
       title: `Клиент ждёт ответа — непрочитанных сообщений: ${unread}`,
     };

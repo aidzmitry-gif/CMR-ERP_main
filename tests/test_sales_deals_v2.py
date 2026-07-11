@@ -109,6 +109,40 @@ async def test_win_deal(session, api):
     assert "sales.deal.won" in types
 
 
+# ── Цикл 18 (фикс верификации): won-код воронки, реверс из closed ───────────
+
+async def test_win_deal_repeat_clients_resolves_rp_won(api):
+    """Фикс 1: win на сделке repeat_clients ставит ``rp_won`` (не литерал "won", которого
+    нет в этой воронке) — иначе сделка выпадала бы с /board?funnel=repeat_clients."""
+    await api.get("/sales/stages")  # материализовать канон всех воронок
+    deal = await _new_deal(api, "RP-W-1", stage="rp_request", funnel="repeat_clients", amount=1500)
+
+    r = await api.post(f"/sales/deals/{deal['id']}/win")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stage"] == "rp_won"
+    assert body["closed_date"]
+
+    # повторно нельзя — 409 сверяется с ПРАВИЛЬНЫМ won-кодом воронки, не с литералом "won"
+    assert (await api.post(f"/sales/deals/{deal['id']}/win")).status_code == 409
+
+    board = (await api.get("/sales/board?funnel=repeat_clients")).json()
+    won_col = next(st for st in board["stages"] if st["id"] == "rp_won")
+    assert won_col["count"] == 1
+
+
+async def test_reverse_from_won_clears_closed_date(api):
+    """Фикс 2: реверс сделки из won в нетерминальную стадию сбрасывает ``closed_date`` —
+    иначе сделка, возвращённая в работу, продолжает числиться закрытой в отчётах."""
+    deal = await _new_deal(api, "REV-1", amount=900)
+    won = await api.post(f"/sales/deals/{deal['id']}/win")
+    assert won.json()["closed_date"]
+
+    back = await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "qual"})
+    assert back.status_code == 200
+    assert back.json()["closed_date"] is None
+
+
 # ── SALES-43: история стадий и висяки ───────────────────────────────────────
 
 async def test_stage_history_recorded(api):
@@ -214,8 +248,17 @@ async def test_chats_unread_and_mark_read(api):
 
 # ── Цикл 17: возраст ожидания ответа ────────────────────────────────────────
 
-async def test_chats_waiting_since(api):
-    """waiting_since = created_at самого старого непрочитанного входящего; гаснет после read."""
+async def test_chats_waiting_since(session, api):
+    """waiting_since = created_at САМОГО СТАРОГО непрочитанного входящего (MIN, не MAX).
+
+    Цикл 18 (фикс верификации): оба сообщения создаются в один SQLite-тик (секундная точность
+    created_at) — без явного расхождения дат min==max, и тест прошёл бы даже с ошибочным
+    func.max. Выставляем created_at напрямую разными датами, чтобы отличить min от max.
+    """
+    from sqlalchemy import select
+
+    from modules.sales.models import Message
+
     deal = await _new_deal(api, "U-2", counterparty="ООО Ждёт")
 
     await api.post(
@@ -227,12 +270,22 @@ async def test_chats_waiting_since(api):
         json={"channel": "whatsapp", "text": "Второе", "direction": "in"},
     )
 
+    rows = (
+        await session.execute(
+            select(Message).where(Message.deal_id == deal["id"]).order_by(Message.id)
+        )
+    ).scalars().all()
+    rows[0].created_at = datetime(2026, 1, 1, 10, 0, 0)  # «Первое» — старше
+    rows[1].created_at = datetime(2026, 1, 1, 11, 0, 0)  # «Второе» — младше
+    await session.commit()
+
     msgs = (await api.get(f"/sales/deals/{deal['id']}/messages")).json()
-    oldest_created_at = msgs[0]["created_at"]
+    oldest_created_at, newest_created_at = msgs[0]["created_at"], msgs[1]["created_at"]
 
     chats = (await api.get("/sales/chats")).json()
     chat = next(c for c in chats if c["deal_id"] == deal["id"])
     assert chat["waiting_since"] == oldest_created_at
+    assert chat["waiting_since"] != newest_created_at
 
     # отметить прочитанным → бейдж гаснет (waiting_since вновь None)
     r = await api.post(f"/sales/deals/{deal['id']}/messages/read")

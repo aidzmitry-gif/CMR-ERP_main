@@ -60,6 +60,7 @@ import {
   shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
+  waitAgeMsFor,
   type ApprovalBadgeResult,
   type InvoiceBadgeResult,
   type InvoiceRiskEntry,
@@ -129,7 +130,19 @@ function autoNextStepPatch(stageId: string): NextStepPatch {
  *  Голый PATCH стадии (`updateDealStage`) ничего из этого не делает — сделка «зависает»
  *  выигранной только на фронте. Локально (не в api.ts — хотспот другой полосы), тот же
  *  паттерн прокси-фетча, что margin-forecast (цикл 15, см. ниже в DealsWorkspace). 409
- *  (сделка уже была won) — идемпотентно: карточка и так уже в won локально, не ошибка. */
+ *  (сделка уже была won) — идемпотентно: карточка и так уже в won локально, не ошибка.
+ *
+ *  ponytail: все call site'ы решают «звать winDeal или голый PATCH» суффиксом
+ *  `targetStage.endsWith("won")` — кастомный код стадии "*won" из редактора стадий тоже
+ *  триггернёт /win. Потолок принят: редактор стадий пока не даёт создавать произвольные
+ *  коды на проде (только фиксированный набор), апгрейд — явный флаг «канонический won»
+ *  на стадии, если это изменится. */
+/** ФИКС (адверсарная верификация цикла 16): текст ошибки — общий для всех call site'ов
+ *  winDeal (dnd основной доски/FunnelSection, drawer stage-select/кнопка «Выиграна»), чтобы
+ *  откат карточки после `winDeal → false` выглядел одинаково независимо от того, откуда
+ *  пришло действие. */
+const WIN_FAILED_MSG = "Не удалось закрыть сделку как выигранную — попробуйте ещё раз.";
+
 async function winDeal(dealId: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/win`, { method: "POST", cache: "no-store" });
@@ -157,22 +170,15 @@ async function fetchChatSignals(): Promise<ChatSignal[]> {
 
 /** Цикл 17: гашение бейджа «клиент ждёт» — после отправки сообщения по сделке помечаем
  *  входящие прочитанными на бэке (fire-and-forget, паттерн winDeal); саму карту inboundSignals
- *  чистит вызывающий (DealsWorkspace) сразу, не дожидаясь ответа — бейдж гаснет без ре-фетча. */
+ *  чистит вызывающий (DealsWorkspace) сразу, не дожидаясь ответа — бейдж гаснет без ре-фетча.
+ *  ponytail: read гасит ВСЕ входящие сделки (все каналы) — принято: drawer показывает
+ *  объединённую переписку сделки. */
 async function markChatRead(dealId: string): Promise<void> {
   try {
     await fetch(`/api/sales/deals/${dealId}/messages/read`, { method: "POST", cache: "no-store" });
   } catch {
     // тихо: локальное гашение уже произошло, ре-фетч чатов на следующем маунте поправит счётчик
   }
-}
-
-/** Цикл 17: now - waiting_since в мс — считаем здесь (cardExtras/combinedCardExtras), не в
- *  DealCard/inboundSignal (тот же паттерн, что daysInStage/reviveDays). null — waiting_since
- *  ещё нет (бэк без миграции) или `now` не готов (до маунта, см. SSR-гидрация выше). */
-function waitAgeMsFor(waitingSince: string | null | undefined, now: number | null): number | null {
-  if (waitingSince == null || now == null) return null;
-  const since = Date.parse(waitingSince);
-  return Number.isNaN(since) ? null : Math.max(0, now - since);
 }
 
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
@@ -392,7 +398,11 @@ function PipelineRow({
             ≈ {fmt(margin.amount)}
           </b>
         ) : (
-          <b className="font-normal text-muted">маржа не рассчитана</b>
+          // ФИКС (адверсарная верификация): reason (цикл 15) объявлен в MarginForecast, но не
+          // показан — продавец не отличал «фасад закупок не подключён» от «нет позиций с ценой».
+          <b className="font-normal text-muted" title={marginForecast?.reason ?? undefined}>
+            маржа не рассчитана
+          </b>
         )}
       </span>
       <Sep />
@@ -559,6 +569,7 @@ function FunnelSection({
   onPreview,
   onOpen,
   onAddDeal,
+  onError,
 }: {
   title: string;
   color: string;
@@ -570,6 +581,10 @@ function FunnelSection({
   onPreview: (d: Deal) => void;
   onOpen: (d: Deal) => void;
   onAddDeal: (stageId: string, sectionStages: Stage[]) => void;
+  /** ФИКС (адверсарная верификация): секция владеет своим стейтом стадий — откат карточки
+   *  после неудачного winDeal делает она сама, но сообщение об ошибке рисует родитель
+   *  (общий boardMsg-баннер над всей доской, см. DealsWorkspace). */
+  onError?: (message: string) => void;
 }) {
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [active, setActive] = useState<Deal | null>(null);
@@ -593,12 +608,21 @@ function FunnelSection({
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
     const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
+    // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
+    const originStageId = stages.find((s) => s.deals.some((d) => d.id === dealId))?.id ?? null;
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
     // Цикл 16: won — канонический бэк-путь POST /win (closed_date + sales.deal.won), не голый
     // PATCH стадии; endsWith — тот же охват, что isClosedStageId/combinedCardExtras выше (won
     // секции могут прийти с префиксом кода воронки). Остальные стадии — как раньше, PATCH.
     if (targetStage.endsWith("won")) {
-      void winDeal(dealId);
+      // ФИКС (адверсарная верификация): false — реальный сбой (409 идемпотентен внутри
+      // winDeal) — откатываем локальный перенос, сообщение об ошибке — родителю (onError).
+      void winDeal(dealId).then((ok) => {
+        if (!ok && originStageId) {
+          setStages((prev) => moveDealToStage(prev, dealId, originStageId));
+          onError?.(WIN_FAILED_MSG);
+        }
+      });
     } else {
       void updateDealStage(dealId, targetStage);
     }
@@ -991,6 +1015,11 @@ export function DealsWorkspace({
   // повторный клик снимает). Дата — next_step_at через канон dateBucketId (board.ts).
   const [actFilter, setActFilter] = useState<"today" | "tomorrow" | null>(null);
   const [now, setNow] = useState<number | null>(null);
+  // ФИКС (адверсарная верификация цикла 16): winDeal может вернуть false (сеть/500 — не 409,
+  // тот идемпотентен внутри winDeal) — карточка держится в won локально, а бэк сделку НЕ
+  // закрыл (нет closed_date/sales.deal.won). Откатывающие call site'ы (handleDragEnd/
+  // onMoveStage/onWin ниже) ставят это сообщение рядом с откатом карточки в исходную стадию.
+  const [boardMsg, setBoardMsg] = useState<string | null>(null);
   const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
   const [losing, setLosing] = useState<{ dealId: string; label: string } | null>(null);
   // П1: второй ряд метрик под стрелкой «Ещё N показателей» (состояние переживает перезагрузку).
@@ -1149,12 +1178,22 @@ export function DealsWorkspace({
   // всю доску (тот же паттерн, что invoiceDocs/inboundSignals/approvals выше); заменяет
   // DEMO_MARGIN_RATE в PipelineRow. Воронка — из URL (?funnel=, тот же код, что SSR отрисовал
   // текущую доску); «Все вместе» (combinedStages) — маржа ПЕРВОЙ секции, тот же ponytail-охват,
-  // что уже принят у focusQueue/PipelineRow (см. комментарии выше). Однократно от маунта —
-  // ошибка/деградация фетча не должна ре-триггериться фильтрами/drag&drop.
+  // что уже принят у focusQueue/PipelineRow (см. комментарии выше). funnel/combinedStages
+  // намеренно НЕ в deps — смена воронки идёт через key-remount секции (проверено верификацией),
+  // ре-триггерить эффект по ним не нужно.
+  //
+  // ФИКС (адверсарная верификация): эндпоинт поддерживает owner=, а фронт его не слал — при
+  // доске, отфильтрованной по менеджеру (?owner=), count/sum считались по отфильтрованным
+  // stages, а маржа — по всей воронке (несогласованные числа в PipelineRow). ownerFilter — в
+  // deps: смена ответственного теперь рефетчит прогноз.
+  // ponytail: снимок на момент загрузки — при dnd weighted живёт, маржа не рефетчится
+  // (пересчитать на клиенте нельзя без landed cost); рефетч по смене owner/маунту достаточен.
   useEffect(() => {
     let ignore = false;
     const funnel = combinedStages?.[0]?.code ?? searchParams.get("funnel") ?? "new_clients";
-    void fetch(`/api/sales/pipeline/margin-forecast?funnel=${encodeURIComponent(funnel)}`, {
+    const params = new URLSearchParams({ funnel });
+    if (ownerFilter) params.set("owner", ownerFilter);
+    void fetch(`/api/sales/pipeline/margin-forecast?${params.toString()}`, {
       cache: "no-store",
     })
       .then((r) => (r.ok ? (r.json() as Promise<MarginForecast>) : null))
@@ -1168,7 +1207,7 @@ export function DealsWorkspace({
       ignore = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ownerFilter]);
 
   function toggleMoreKpis() {
     // Запись вне updater-а: side-effect внутри setState под StrictMode дёргается дважды.
@@ -1246,7 +1285,7 @@ export function DealsWorkspace({
       return;
     }
 
-    const found = findDeal(dealId); // снимок ДО переноса — проверить, был ли уже шаг (D)
+    const found = findDeal(dealId); // снимок ДО переноса — origin-стадия для отката + шаг (D)
 
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
 
@@ -1254,7 +1293,16 @@ export function DealsWorkspace({
     // sales.deal.won; голый PATCH стадии этого не делает — сделка «зависает» won только на
     // фронте). Остальные стадии — как раньше, через PATCH стадии.
     if (targetStage.endsWith("won")) {
-      void winDeal(dealId);
+      const originStageId = found?.stageId ?? null;
+      // ФИКС (адверсарная верификация): winDeal может вернуть false (сеть/500 — 409 уже
+      // трактуется как успех внутри winDeal) — бэк сделку не закрыл, откатываем оптимистичный
+      // перенос обратно в исходную стадию вместо тихого расхождения фронта с бэком.
+      void winDeal(dealId).then((ok) => {
+        if (!ok && originStageId) {
+          setStages((prev) => moveDealToStage(prev, dealId, originStageId));
+          setBoardMsg(WIN_FAILED_MSG);
+        }
+      });
     } else {
       void updateDealStage(dealId, targetStage);
     }
@@ -1593,6 +1641,25 @@ export function DealsWorkspace({
             className="mb-3 flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
           >
             ⚠️ Демо-данные: backend недоступен, показана демонстрационная доска — изменения не сохранятся.
+          </div>
+        )}
+        {/* ФИКС (адверсарная верификация цикла 16): winDeal вернул false (не 409 — тот
+            идемпотентен) — оптимистичный перенос в won откачен, сообщаем об этом здесь вместо
+            тихого расхождения фронта с бэком. */}
+        {boardMsg && (
+          <div
+            role="status"
+            className="mb-3 flex items-center gap-2 rounded-lg border border-red-300/60 bg-red-50 px-3 py-2 text-[12.5px] font-semibold text-red-800 dark:bg-red-500/10 dark:text-red-200"
+          >
+            ⚠️ {boardMsg}
+            <button
+              type="button"
+              onClick={() => setBoardMsg(null)}
+              className="ml-auto text-red-700/70 hover:text-red-900 dark:text-red-300/70 dark:hover:text-red-100"
+              aria-label="Скрыть сообщение"
+            >
+              ✕
+            </button>
           </div>
         )}
         {/* Тулбар (поиск/переключатель ЮЛ/«Стадии»/«План»/«Фильтры») переехал в шапку
@@ -2064,6 +2131,7 @@ export function DealsWorkspace({
                 onPreview={setPreviewDeal}
                 onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
                 onAddDeal={openModal}
+                onError={setBoardMsg}
               />
             ))}
           </>
@@ -2165,6 +2233,8 @@ export function DealsWorkspace({
             return;
           }
           const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
+          // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
+          const originStageId = stages.find((s) => s.deals.some((d) => d.id === dealId))?.id ?? null;
           setStages((prev) => moveDealToStage(prev, dealId, stageId));
           // Поддерживаем превью консистентным: если перенесли активный deal, обновляем ссылку
           setPreviewDeal((p) =>
@@ -2176,7 +2246,14 @@ export function DealsWorkspace({
           // «Выиграна» ниже (onWin); без этой ветки выбор «Успех» в списке стадий тихо
           // проскакивал мимо closed_date/sales.deal.won через голый PATCH.
           if (stageId.endsWith("won")) {
-            void winDeal(dealId);
+            // ФИКС (адверсарная верификация): false (не 409 — идемпотентен внутри winDeal) —
+            // откатываем перенос назад в исходную стадию, drawer сам подхватит её из `stages`.
+            void winDeal(dealId).then((ok) => {
+              if (!ok && originStageId) {
+                setStages((prev) => moveDealToStage(prev, dealId, originStageId));
+                setBoardMsg(WIN_FAILED_MSG);
+              }
+            });
           } else {
             void updateDealStage(dealId, stageId);
           }
@@ -2223,9 +2300,18 @@ export function DealsWorkspace({
           void createDealTask(dealId, { title });
         }}
         onWin={(dealId) => {
+          // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
+          const originStageId = findDeal(dealId)?.stageId ?? null;
           setStages((prev) => moveDealToStage(prev, dealId, "won"));
           // Цикл 16: канонический /win (closed_date + sales.deal.won), не голый PATCH стадии.
-          void winDeal(dealId);
+          // ФИКС (адверсарная верификация): false (не 409 — идемпотентен внутри winDeal) —
+          // бэк won не закрыл, откатываем карточку обратно в исходную стадию.
+          void winDeal(dealId).then((ok) => {
+            if (!ok && originStageId) {
+              setStages((prev) => moveDealToStage(prev, dealId, originStageId));
+              setBoardMsg(WIN_FAILED_MSG);
+            }
+          });
           setPreviewDeal(null);
         }}
         onLose={(dealId) => {

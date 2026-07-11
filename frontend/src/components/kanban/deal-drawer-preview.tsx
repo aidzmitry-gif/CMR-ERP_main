@@ -724,7 +724,12 @@ export function DealDrawerPreview({
                         маржа {margin.margin_pct}%
                       </span>
                     ) : (
-                      <span className="shrink-0 font-normal text-muted">маржа не рассчитана</span>
+                      // ФИКС (адверсарная верификация): reason (цикл 15) объявлен в DealMargin, но
+                      // не показан — продавец не отличал «фасад закупок не подключён» от «нет
+                      // позиций с ценой».
+                      <span className="shrink-0 font-normal text-muted" title={margin?.reason ?? undefined}>
+                        маржа не рассчитана
+                      </span>
                     )}
                   </div>
                   <Button

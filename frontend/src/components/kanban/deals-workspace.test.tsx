@@ -210,6 +210,22 @@ describe("DealsWorkspace (канбан)", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     // Оптимистичный перенос уже случился ДО фетча — 409 не должен откатывать карточку назад.
     expect(within(screen.getByTestId("stage-column-won")).getByText("ООО Доска")).toBeInTheDocument();
+    // ФИКС (адверсарная верификация): 409 — идемпотентный успех внутри winDeal, без баннера ошибки.
+    expect(screen.queryByText(/Не удалось закрыть сделку как выигранную/)).toBeNull();
+  });
+
+  it("false от /win (сеть/500, не 409) — откатывает карточку в исходную стадию и показывает ошибку (фикс адверсарной верификации)", async () => {
+    const fetchMock = stubWinFetch(500);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start"));
+    fireEvent.click(screen.getByTestId("dnd-end")); // handleDragEnd → оптимистично в "won"
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    // Бэк won НЕ закрыл (нет closed_date/sales.deal.won) — откат в исходную стадию "new".
+    await waitFor(() =>
+      expect(within(screen.getByTestId("stage-column-new")).getByText("ООО Доска")).toBeInTheDocument(),
+    );
+    expect(within(screen.getByTestId("stage-column-won")).queryByText("ООО Доска")).toBeNull();
+    expect(screen.getByText(/Не удалось закрыть сделку как выигранную/)).toBeInTheDocument();
   });
 
   it("drag без цели не сохраняет стадию", () => {

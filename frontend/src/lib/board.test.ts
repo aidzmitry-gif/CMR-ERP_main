@@ -33,6 +33,7 @@ import {
   shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
+  waitAgeMsFor,
   type InvoiceRiskEntry,
   weightedAmount,
 } from "@/lib/board";
@@ -694,6 +695,41 @@ describe("invoiceBadge (слайс 6, C)", () => {
   });
 });
 
+describe("waitAgeMsFor (цикл 17 + фикс адверсарной верификации: наивный UTC без зоны)", () => {
+  it("наивная строка без зоны (бэк шлёт naive UTC, «2026-07-11T12:00:00») — трактуется как UTC, не как локальное время раннера", () => {
+    const since = Date.parse("2026-07-11T12:00:00Z");
+    // ДО фикса Date.parse("2026-07-11T12:00:00") трактовал строку как ЛОКАЛЬНОЕ время —
+    // в TZ восточнее UTC результат ушёл бы в отрицательные часы (обрезанные до 0 Math.max),
+    // в TZ западнее — раздулся бы на лишние часы. Здесь возраст всегда ровно 5 минут.
+    expect(waitAgeMsFor("2026-07-11T12:00:00", since + 5 * 60_000)).toBe(5 * 60_000);
+  });
+
+  it("строка с явной зоной Z — поведение не тронуто (парсим как есть, Z не дублируем)", () => {
+    const since = Date.parse("2026-07-11T12:00:00Z");
+    expect(waitAgeMsFor("2026-07-11T12:00:00Z", since + 5 * 60_000)).toBe(5 * 60_000);
+  });
+
+  it("строка с явным смещением (+03:00) — тоже не тронута (уже есть зона)", () => {
+    const since = Date.parse("2026-07-11T15:00:00+03:00"); // == 12:00 UTC
+    expect(waitAgeMsFor("2026-07-11T15:00:00+03:00", since + 60_000)).toBe(60_000);
+  });
+
+  it("waitingSince/now не заданы — null (graceful, бэк без миграции / до маунта)", () => {
+    expect(waitAgeMsFor(null, 1000)).toBeNull();
+    expect(waitAgeMsFor(undefined, 1000)).toBeNull();
+    expect(waitAgeMsFor("2026-07-11T12:00:00Z", null)).toBeNull();
+  });
+
+  it("нераспознаваемая строка — null, не NaN", () => {
+    expect(waitAgeMsFor("не-дата", 1000)).toBeNull();
+  });
+
+  it("будущий waiting_since (рассинхрон часов клиент/сервер) не уходит в минус", () => {
+    const since = Date.parse("2026-07-11T12:00:00Z");
+    expect(waitAgeMsFor("2026-07-11T12:00:00", since - 1000)).toBe(0);
+  });
+});
+
 describe("inboundSignal (цикл 11: клиент ждёт ответа)", () => {
   it("unread>0 — бейдж «💬 N», тон money (самый горячий сигнал)", () => {
     expect(inboundSignal({ unread: 3, missed: 2 })).toEqual({
@@ -720,11 +756,19 @@ describe("inboundSignal (цикл 11: клиент ждёт ответа)", () =
     expect(inboundSignal({ unread: 0, missed: 0 })).toBeNull();
   });
 
-  it("цикл 17: unread>0 + waitAgeMs известен — лейбл «💬 ждёт Nм/Nч/Nд» вместо голого счётчика", () => {
+  it("цикл 17: unread>1 + waitAgeMs известен — лейбл «💬 N · ждёт Nм/Nч/Nд» (фикс: счётчик не теряется)", () => {
     expect(inboundSignal({ unread: 2, waitAgeMs: 5 * 60_000 })).toEqual({
-      label: "💬 ждёт 5м",
+      label: "💬 2 · ждёт 5м",
       tone: "money",
       title: "Клиент ждёт ответа — непрочитанных сообщений: 2",
+    });
+  });
+
+  it("цикл 17: unread===1 + waitAgeMs известен — лейбл «💬 ждёт Nм» без счётчика (1 и так очевидна)", () => {
+    expect(inboundSignal({ unread: 1, waitAgeMs: 5 * 60_000 })).toEqual({
+      label: "💬 ждёт 5м",
+      tone: "money",
+      title: "Клиент ждёт ответа — непрочитанных сообщений: 1",
     });
   });
 
