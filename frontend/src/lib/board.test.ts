@@ -529,18 +529,26 @@ describe("daysUntilDate (слайс 6)", () => {
 describe("invoiceBadge (слайс 6, C)", () => {
   const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
 
-  it("paid/posted — «✓ оплачен» зелёный, независимо от valid_until", () => {
+  it("«✓ оплачен» — ТОЛЬКО paid; posted = записан в 1С, деньги не дошли (ревью f4f825d)", () => {
     expect(invoiceBadge({ status: "paid", validUntil: null }, NOW)).toEqual({
       label: "✓ оплачен",
       tone: "green",
     });
+    // posted с истёкшим сроком — «просрочен», а не ложное «оплачен»
     expect(invoiceBadge({ status: "posted", validUntil: "2020-01-01" }, NOW)).toEqual({
-      label: "✓ оплачен",
-      tone: "green",
+      label: "💳 просрочен",
+      tone: "red",
     });
   });
 
-  it("valid_until = null и не оплачен — honest-empty null (нет данных для бейджа)", () => {
+  it("posted без valid_until — нейтральный «не оплачен» (записан в 1С, ждём денег)", () => {
+    expect(invoiceBadge({ status: "posted", validUntil: null }, NOW)).toEqual({
+      label: "💳 не оплачен",
+      tone: "neutral",
+    });
+  });
+
+  it("valid_until = null и не posted/paid — honest-empty null (нет данных для бейджа)", () => {
     expect(invoiceBadge({ status: "draft", validUntil: null }, NOW)).toBeNull();
   });
 

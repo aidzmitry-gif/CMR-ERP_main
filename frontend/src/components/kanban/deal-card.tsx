@@ -70,6 +70,7 @@ function CardMenu({
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<"owner" | "priority" | null>(null);
   const [managers, setManagers] = useState<Manager[] | null>(managersCache);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
 
   function stop(e: React.SyntheticEvent) {
     e.stopPropagation();
@@ -98,14 +99,27 @@ function CardMenu({
 
   /** Слайс 6 (D): «Выставить счёт» прямо из меню карточки — та же цепочка, что в
    *  drawer-preview (issueDocument → авто-шаг «Проверить оплату» ВСЕГДА при успехе). Здесь
-   *  нет toast-инфраструктуры карточки — alert() достаточен для редкого клика из меню. */
+   *  нет toast-инфраструктуры карточки — alert() достаточен для редкого клика из меню.
+   *  Ревью f4f825d: окно печати открываем СИНХРОННО до await (после сетевого разрыва жеста
+   *  popup-блокировщик съел бы window.open), busy-гейт — от второго счёта двойным кликом. */
   async function issueInvoiceFromMenu() {
+    if (invoiceBusy) return;
+    setInvoiceBusy(true);
     close();
-    const { ok, message, renderUrl } = await issueDocument(deal.id, "invoice");
-    window.alert(message);
-    if (ok) {
-      onNextStep?.({ text: INVOICE_NEXT_STEP, atISO: presetDateISO(3, Date.now()) });
-      if (renderUrl) window.open(renderUrl, "_blank");
+    const win = window.open("about:blank", "_blank");
+    try {
+      const { ok, message, renderUrl } = await issueDocument(deal.id, "invoice");
+      window.alert(message);
+      if (ok) {
+        onNextStep?.({ text: INVOICE_NEXT_STEP, atISO: presetDateISO(3, Date.now()) });
+        if (renderUrl && win) {
+          win.location.href = renderUrl;
+          return;
+        }
+      }
+      win?.close();
+    } finally {
+      setInvoiceBusy(false);
     }
   }
 
@@ -222,7 +236,12 @@ function CardMenu({
               </button>
             )}
             {canIssueInvoice && (
-              <button type="button" onClick={() => void issueInvoiceFromMenu()} className={itemCls}>
+              <button
+                type="button"
+                onClick={() => void issueInvoiceFromMenu()}
+                disabled={invoiceBusy}
+                className={clsx(itemCls, invoiceBusy && "opacity-50")}
+              >
                 💳 Выставить счёт
               </button>
             )}

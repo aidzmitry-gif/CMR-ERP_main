@@ -939,7 +939,12 @@ export function DealsWorkspace({
   useEffect(() => {
     const invoiceStage = initialStages.find((s) => s.id === "invoice");
     if (!invoiceStage) return;
-    const targets = invoiceStage.deals.slice(0, INVOICE_BADGE_CAP);
+    // кап берём в ПОРЯДКЕ РЕНДЕРА колонки (sortDealsForBoard), а не в порядке ответа
+    // бэка (по id) — иначе бейджи доставались бы случайному подмножеству (ревью f4f825d)
+    const targets = sortDealsForBoard(invoiceStage.deals, "invoice", Date.now()).slice(
+      0,
+      INVOICE_BADGE_CAP,
+    );
     void Promise.all(
       targets.map((d) => fetchDocuments(d.id).then((docs) => [d.id, docs] as const)),
     ).then((results) => {
@@ -1878,6 +1883,10 @@ export function DealsWorkspace({
           // Оптимистично патчим во всех колонках; UI-маппинг snake→camel для starred/next_step.
           const camel: Partial<Deal> = {};
           if ("next_step" in fields) camel.nextStep = String(fields.next_step ?? "");
+          // без этой ветки авто-шаг после счёта обновлял текст, но чип срочности/бакет
+          // жили старой датой до перезагрузки (ревью f4f825d)
+          if ("next_step_at" in fields)
+            camel.nextStepAt = fields.next_step_at == null ? undefined : String(fields.next_step_at);
           if ("starred" in fields) camel.starred = Boolean(fields.starred);
           if ("priority" in fields)
             camel.priority = fields.priority as Deal["priority"];

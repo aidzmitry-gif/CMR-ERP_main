@@ -340,9 +340,9 @@ export function focusQueue(
 
 // ──────────────────────── Слайс 6: счёт в поток доски ────────────────────────
 
-/** Оплаченные статусы документа — paid/posted считаются оплаченными для бейджа счёта
- *  (сигнал глазами продавца «деньги дошли», не тонкая бухгалтерская разница черновик/проведён). */
-const PAID_DOC_STATUSES: ReadonlySet<string> = new Set(["paid", "posted"]);
+// «Оплачен» — ТОЛЬКО status="paid" (его ставит finance.payment.paid). posted означает
+// «записан в 1С» и проставляется синхронно при выставлении счёта — деньги ещё НЕ дошли
+// (ревью f4f825d: «✓ оплачен» для posted красил бы зелёным каждый свежий счёт).
 
 /** Дней до даты по календарным суткам (не 24-часовое окно от `now`) — отрицательное,
  *  если дата уже прошла. Общий date-math для статуса счёта: бейдж карточки
@@ -363,16 +363,19 @@ export interface InvoiceBadgeResult {
 }
 
 /** Бейдж статуса счёта для карточки колонки «Счёт» (слайс 6, C) — «счёт выставлен 5 дней,
- *  не оплачен» не должен быть невидим на доске. «Оплачен» (paid/posted) перекрывает срок
- *  действия; иначе просрочка/остаток дней резерва по `validUntil`. `null` — честный пропуск:
- *  не оплачен и `validUntil` неизвестен, показывать нечего (не «просрочен»/«истекает 0д»). */
+ *  не оплачен» не должен быть невидим на доске. «Оплачен» — только `paid`; для неоплаченного
+ *  главное — срок резерва (`validUntil`: просрочен/истекает Kд), без срока `posted` даёт
+ *  нейтральный «не оплачен». `null` — честный пропуск: ни оплаты, ни срока, ни записи в 1С. */
 export function invoiceBadge(
   doc: { status: string; validUntil: string | null },
   now: number,
 ): InvoiceBadgeResult | null {
-  if (PAID_DOC_STATUSES.has(doc.status)) return { label: "✓ оплачен", tone: "green" };
-  if (!doc.validUntil) return null;
-  const days = daysUntilDate(doc.validUntil, now);
-  if (days < 0) return { label: "💳 просрочен", tone: "red" };
-  return { label: `💳 истекает ${days}д`, tone: days <= 2 ? "amber" : "neutral" };
+  if (doc.status === "paid") return { label: "✓ оплачен", tone: "green" };
+  if (doc.validUntil) {
+    const days = daysUntilDate(doc.validUntil, now);
+    if (days < 0) return { label: "💳 просрочен", tone: "red" };
+    return { label: `💳 истекает ${days}д`, tone: days <= 2 ? "amber" : "neutral" };
+  }
+  if (doc.status === "posted") return { label: "💳 не оплачен", tone: "neutral" };
+  return null;
 }

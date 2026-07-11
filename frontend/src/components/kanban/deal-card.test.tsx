@@ -254,8 +254,10 @@ describe("DealCard", () => {
     expect(screen.getByText("💳 Выставить счёт")).toBeInTheDocument();
   });
 
-  it("D: клик «Выставить счёт» → issueDocument вызван; ok → onNextStep «Проверить оплату…» + window.open(renderUrl)", async () => {
-    vi.stubGlobal("open", vi.fn());
+  it("D: клик «Выставить счёт» → issueDocument; ok → onNextStep «Проверить оплату…»; окно открыто СИНХРОННО (about:blank) и переведено на renderUrl", async () => {
+    // окно-пустышка до await — иначе popup-блокировщик съел бы печать счёта (ревью f4f825d)
+    const fakeWin = { location: { href: "" }, close: vi.fn() };
+    vi.stubGlobal("open", vi.fn(() => fakeWin));
     vi.stubGlobal("alert", vi.fn());
     mockApi(api.issueDocument).mockResolvedValue({
       ok: true,
@@ -266,6 +268,7 @@ describe("DealCard", () => {
     render(<DealCard deal={deal} onUpdate={vi.fn()} onNextStep={onNextStep} stageId="qual" />);
     fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
     fireEvent.click(screen.getByText("💳 Выставить счёт"));
+    expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(api.issueDocument).toHaveBeenCalledWith("1", "invoice"));
     await waitFor(() =>
       expect(onNextStep).toHaveBeenCalledWith(
@@ -275,12 +278,14 @@ describe("DealCard", () => {
         }),
       ),
     );
-    expect(window.open).toHaveBeenCalledWith("/api/sales/documents/9/render", "_blank");
+    expect(fakeWin.location.href).toBe("/api/sales/documents/9/render");
+    expect(fakeWin.close).not.toHaveBeenCalled();
     expect(window.alert).toHaveBeenCalledWith("✅ Счёт СЧ-1 выставлен");
   });
 
-  it("D: неуспех (ok=false) — onNextStep НЕ вызван", async () => {
-    vi.stubGlobal("open", vi.fn());
+  it("D: неуспех (ok=false) — onNextStep НЕ вызван, окно-пустышка закрыто", async () => {
+    const fakeWin = { location: { href: "" }, close: vi.fn() };
+    vi.stubGlobal("open", vi.fn(() => fakeWin));
     vi.stubGlobal("alert", vi.fn());
     mockApi(api.issueDocument).mockResolvedValue({ ok: false, message: "⚠️ Не удалось выставить счёт" });
     const onNextStep = vi.fn();
@@ -289,5 +294,30 @@ describe("DealCard", () => {
     fireEvent.click(screen.getByText("💳 Выставить счёт"));
     await waitFor(() => expect(api.issueDocument).toHaveBeenCalled());
     expect(onNextStep).not.toHaveBeenCalled();
+    expect(fakeWin.close).toHaveBeenCalled();
+    expect(fakeWin.location.href).toBe("");
+  });
+
+  it("D: повторный клик, пока счёт в полёте, НЕ создаёт второй документ (busy-гейт)", async () => {
+    vi.stubGlobal("open", vi.fn(() => ({ location: { href: "" }, close: vi.fn() })));
+    vi.stubGlobal("alert", vi.fn());
+    let resolveIssue!: (v: { ok: boolean; message: string }) => void;
+    // счётчик вызовов копится с предыдущих тестов файла — чистим перед замером
+    mockApi(api.issueDocument).mockClear();
+    mockApi(api.issueDocument).mockReturnValue(
+      new Promise((r) => {
+        resolveIssue = r;
+      }),
+    );
+    render(<DealCard deal={deal} onUpdate={vi.fn()} onNextStep={vi.fn()} stageId="qual" />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    fireEvent.click(screen.getByText("💳 Выставить счёт"));
+    // меню закрылось; открываем снова — пункт задизейблен, клик не проходит
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    const item = screen.getByText("💳 Выставить счёт");
+    expect(item).toBeDisabled();
+    fireEvent.click(item);
+    resolveIssue({ ok: false, message: "⚠️" });
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledTimes(1));
   });
 });
