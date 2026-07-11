@@ -815,3 +815,35 @@ export function approvalBadge(status: string | undefined): ApprovalBadgeResult |
   }
   return null;
 }
+
+// ──────────────────────── Цикл 15: правда о марже вместо демо-константы ────────────────────────
+
+export interface MarginForecastResult {
+  /** Вал. прибыль воронки (взвеш., BYN) — округлена; форматирует вызывающий (fmt). */
+  amount: number;
+  /** «оценено по N из M сделок» — только при частичном охвате (deals_priced < deals_total),
+   *  иначе `null` (полная оценка, отдельный чип не нужен). Рисует вызывающий (title/tooltip). */
+  title: string | null;
+}
+
+/**
+ * Резолвер строки «Прогноз маржи» PipelineRow (цикл 15) — заменяет DEMO_MARGIN_RATE (0.22)
+ * реальным `GET /sales/pipeline/margin-forecast`. `gross_weighted == null` — честная
+ * деградация бэка (фасад landed_cost не подключён ИЛИ ни одна активная сделка не оценена,
+ * `reason` тогда всегда задан) → `null` (вызывающий рисует «маржа не рассчитана», приглушённо),
+ * НЕ ноль и НЕ демо-ставка. `forecast == null` — фетч не удался/ещё не пришёл — тот же honest-null.
+ */
+export function marginForecastResult(
+  forecast: {
+    gross_weighted: number | null;
+    deals_priced: number;
+    deals_total: number;
+  } | null,
+): MarginForecastResult | null {
+  if (!forecast || forecast.gross_weighted == null) return null;
+  const partial = forecast.deals_priced < forecast.deals_total;
+  return {
+    amount: Math.round(forecast.gross_weighted),
+    title: partial ? `оценено по ${forecast.deals_priced} из ${forecast.deals_total} сделок` : null,
+  };
+}

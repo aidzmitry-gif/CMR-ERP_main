@@ -53,6 +53,7 @@ import {
   isOpenStage,
   isStuck,
   LOSS_REASONS,
+  marginForecastResult,
   moveDealToStage,
   probabilityFor,
   recomputeStages,
@@ -240,9 +241,15 @@ function workingDaysLeft(now: number): number {
   return count;
 }
 
-// ponytail: demo-ставка валовой маржи для прогноза. Реальная — из landed cost
-// (закупки); методика цены ещё разрабатывается ([[pricing-calculation-todo]]).
-const DEMO_MARGIN_RATE = 0.22;
+/** Цикл 15: прогноз маржи воронки — `GET /sales/pipeline/margin-forecast` (та же форма,
+ *  что читает pipeline-analytics.tsx). Локальный тип — паттерн, принятый в компонентах
+ *  (pipeline-analytics.tsx/deal-metrics.tsx), api.ts не трогаем ради двух полей. */
+type MarginForecast = {
+  gross_weighted: number | null;
+  deals_priced: number;
+  deals_total: number;
+  reason: string | null;
+};
 
 /** Баннер планирования: под конец месяца напоминает составить план на следующий и
  *  согласовать с РОПом (порт sales-board-mockup.html). Считается от текущей даты;
@@ -276,14 +283,16 @@ function PlanBanner({ now }: { now: number | null }) {
 const Sep = () => <span className="hidden h-4 w-px bg-line sm:block" aria-hidden />;
 
 /** Pipeline-строка под скорбордом (порт макета): живые срезы открытого pipeline —
- *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа — DEMO-ставка
- *  22% (реальная — из landed cost закупок; методика цены ещё разрабатывается). */
+ *  кол-во/сумма/взвешенный прогноз (SALES-44)/висяки (SALES-43). Маржа (цикл 15) — реальный
+ *  прогноз `GET /sales/pipeline/margin-forecast` (marginForecastResult, board.ts); честная
+ *  деградация «маржа не рассчитана» вместо демо-ставки, если фасад landed_cost не подключён. */
 function PipelineRow({
   stages,
   now,
   fmt,
   chip,
   planGap,
+  marginForecast,
 }: {
   stages: Stage[];
   now: number | null;
@@ -293,12 +302,15 @@ function PipelineRow({
   /** Гэп до плана периода (слайс 3): сколько выручки не хватает и ≈сколько это сделок
    * со средним чеком. null — плана/чека в данных нет (honest-empty, строка не рисуется). */
   planGap?: { gap: number; deals: number; avg: number } | null;
+  /** Цикл 15: сырой ответ margin-forecast (батч на всю доску, см. эффект в DealsWorkspace) —
+   *  резолвит marginForecastResult (board.ts); null — фетч не пришёл/упал (honest-null). */
+  marginForecast: MarginForecast | null;
 }) {
   const open = stages.filter(isOpenStage);
   const count = open.reduce((n, s) => n + s.deals.length, 0);
   const sum = open.reduce((n, s) => n + s.deals.reduce((a, d) => a + d.amount, 0), 0);
   const weighted = open.reduce((n, s) => n + stageWeightedSum(s), 0);
-  const margin = Math.round(weighted * DEMO_MARGIN_RATE);
+  const margin = marginForecastResult(marginForecast);
   const stuck =
     now == null
       ? null
@@ -319,14 +331,14 @@ function PipelineRow({
       </span>
       <Sep />
       <span className="text-muted">
-        Прогноз маржи{" "}
-        <span
-          className="text-faint"
-          title="Демо-ставка маржи 22%. Реальная маржа — из landed cost (закупки); методика цены ещё разрабатывается."
-        >
-          (вал. прибыль · демо 22%)
-        </span>
-        : <b className="text-money">≈ {fmt(margin)}</b>
+        Прогноз маржи <span className="text-faint">(вал. прибыль)</span>:{" "}
+        {margin ? (
+          <b className="text-money" title={margin.title ?? undefined}>
+            ≈ {fmt(margin.amount)}
+          </b>
+        ) : (
+          <b className="font-normal text-muted">маржа не рассчитана</b>
+        )}
       </span>
       <Sep />
       <span className="text-muted">
@@ -446,17 +458,9 @@ function Column({
             {stage.count} {pluralDeals(stage.count)} · {fmt(stage.sum)}
           </div>
           {showWeighted && (
-            <>
-              <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
-                взвешенно: {fmt(weighted)}
-              </div>
-              <div
-                className="text-[11px] font-semibold text-money"
-                title="Демо-ставка маржи 22%. Реальная — из landed cost (закупки); методика цены ещё разрабатывается."
-              >
-                прогноз маржи: ~{fmt(Math.round(weighted * DEMO_MARGIN_RATE))}
-              </div>
-            </>
+            <div className="mt-0.5 text-[11px] font-semibold text-accent-ink">
+              взвешенно: {fmt(weighted)}
+            </div>
           )}
           {stuckCount > 0 && (
             <div className="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
@@ -960,6 +964,10 @@ export function DealsWorkspace({
   // approvals с entity_ref==="deal:{id}"); наполняется ОДНИМ агрегатным батчем fetchApprovals({})
   // после маунта (см. эффект ниже), тот же паттерн, что invoiceDocs/inboundSignals выше.
   const [approvals, setApprovals] = useState<Map<string, string>>(new Map());
+  // Цикл 15: прогноз маржи воронки — ОДИН агрегатный фетч на всю доску (не по колонке/сделке),
+  // тот же паттерн, что invoiceDocs/inboundSignals/approvals выше; резолвит marginForecastResult
+  // (board.ts) в PipelineRow. null — фетч ещё не пришёл/упал (honest-null, см. эффект ниже).
+  const [marginForecast, setMarginForecast] = useState<MarginForecast | null>(null);
 
   // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
@@ -1071,6 +1079,31 @@ export function DealsWorkspace({
     return () => {
       ignore = true;
     };
+  }, []);
+
+  // Цикл 15: прогноз маржи воронки — ОДИН агрегатный GET /sales/pipeline/margin-forecast на
+  // всю доску (тот же паттерн, что invoiceDocs/inboundSignals/approvals выше); заменяет
+  // DEMO_MARGIN_RATE в PipelineRow. Воронка — из URL (?funnel=, тот же код, что SSR отрисовал
+  // текущую доску); «Все вместе» (combinedStages) — маржа ПЕРВОЙ секции, тот же ponytail-охват,
+  // что уже принят у focusQueue/PipelineRow (см. комментарии выше). Однократно от маунта —
+  // ошибка/деградация фетча не должна ре-триггериться фильтрами/drag&drop.
+  useEffect(() => {
+    let ignore = false;
+    const funnel = combinedStages?.[0]?.code ?? searchParams.get("funnel") ?? "new_clients";
+    void fetch(`/api/sales/pipeline/margin-forecast?funnel=${encodeURIComponent(funnel)}`, {
+      cache: "no-store",
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<MarginForecast>) : null))
+      .then((data) => {
+        if (!ignore) setMarginForecast(data);
+      })
+      .catch(() => {
+        if (!ignore) setMarginForecast(null);
+      });
+    return () => {
+      ignore = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function toggleMoreKpis() {
@@ -1671,7 +1704,14 @@ export function DealsWorkspace({
                 </div>
               </section>
 
-              <PipelineRow stages={stages} now={now} fmt={fmt} chip={chip} planGap={planGap} />
+              <PipelineRow
+                stages={stages}
+                now={now}
+                fmt={fmt}
+                chip={chip}
+                planGap={planGap}
+                marginForecast={marginForecast}
+              />
             </>
           );
         })()}

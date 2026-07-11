@@ -106,6 +106,16 @@ const DOC_STATUS_LABEL: Record<string, string> = {
   cancelled: "Аннулирован",
 };
 
+/** Цикл 15: факт-маржа сделки — `GET /sales/deals/{id}/margin` (тот же ответ, что читает
+ *  deal-metrics.tsx; локальный тип — тот же паттерн, только поля, нужные шапке скидочного
+ *  гейта ниже, api.ts не трогаем ради четырёх полей). */
+type DealMargin = {
+  margin_pct: number | null;
+  priced_count: number;
+  total_count: number;
+  reason: string | null;
+};
+
 /**
  * Drawer-preview сделки на доске (sales-card-expanded.html прототип).
  * Цель — рабочая поверхность ИЗ канбана: продавец двигает стадию, редактирует
@@ -169,6 +179,9 @@ export function DealDrawerPreview({
   // сообщение не должны блокироваться, пока летит этот запрос).
   const [dealItems, setDealItems] = useState<DealItemFull[]>([]);
   const [gateBusy, setGateBusy] = useState(false);
+  // Цикл 15: факт-маржа сделки — для шапки скидочного гейта ниже (реальная маржа рядом с
+  // прокси-гейтом по min_price). Тот же ленивый фетч + dealIdRef-гард, что и dealItems ниже.
+  const [margin, setMargin] = useState<DealMargin | null>(null);
   // Слайс 7: мини-секция «Договор» — выбор варианта (наш шаблон / форма клиента).
   // Шаблоны не привязаны к сделке — грузим один раз при первом открытии, кэш живёт,
   // пока смонтирован drawer (не сбрасываем при смене сделки, в отличие от docs/pickerOpen).
@@ -198,6 +211,7 @@ export function DealDrawerPreview({
     setDocMsg(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
+    setMargin(null); // цикл 15: та же причина — не мигать маржой предыдущей сделки
     setContractOpen(false); // не действовать на чужую сделку через оставшуюся открытой секцию
     setMsgOpen(false); // слайс 8: та же причина — не писать в чужую сделку открытой секцией
     setMsgChannel("whatsapp");
@@ -228,6 +242,21 @@ export function DealDrawerPreview({
     void fetchDealItems(dealId).then((list) => {
       if (dealIdRef.current === dealId) setDealItems(list);
     });
+  }, [deal?.id]);
+
+  // Цикл 15: ленивый фетч факт-маржи сделки при открытии/смене — тот же dealIdRef-гард,
+  // что и выше (поздний ответ по сделке, которую уже сменили, не всыпется в стейт).
+  useEffect(() => {
+    const dealId = deal?.id;
+    if (!dealId) return;
+    void fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/margin`, { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<DealMargin>) : null))
+      .then((data) => {
+        if (dealIdRef.current === dealId) setMargin(data);
+      })
+      .catch(() => {
+        if (dealIdRef.current === dealId) setMargin(null);
+      });
   }, [deal?.id]);
 
   const open = deal != null;
@@ -667,9 +696,24 @@ export function DealDrawerPreview({
                   role="status"
                   className="mt-3 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
                 >
-                  <div className="font-semibold">
-                    ⚠ Сумма ниже минимума по прайсу: {fmt(deal.amount)} при минимуме{" "}
-                    {fmt(gate.minTotal)}
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+                    <div className="font-semibold">
+                      ⚠ Сумма ниже минимума по прайсу: {fmt(deal.amount)} при минимуме{" "}
+                      {fmt(gate.minTotal)}
+                    </div>
+                    {/* Цикл 15: реальная маржа рядом с прокси-гейтом min_price — контекст для
+                        решения по скидке. margin_pct==null покрывает и reason (фасад landed_cost
+                        не подключён/ничего не оценено), и недоступность фетча (margin===null). */}
+                    {margin?.margin_pct != null ? (
+                      <span
+                        className="shrink-0 font-semibold"
+                        title={`оценено по ${margin.priced_count} из ${margin.total_count} позиций`}
+                      >
+                        маржа {margin.margin_pct}%
+                      </span>
+                    ) : (
+                      <span className="shrink-0 font-normal text-muted">маржа не рассчитана</span>
+                    )}
                   </div>
                   <Button
                     variant="secondary"

@@ -24,6 +24,7 @@ import {
   isClosedStageId,
   isOpenStage,
   isStuck,
+  marginForecastResult,
   moveDealToStage,
   probabilityFor,
   recomputeStages,
@@ -1009,5 +1010,35 @@ describe("approvalBadge (цикл 14: статус одобрения РОП)", 
   it("undefined/неизвестный статус — honest-null", () => {
     expect(approvalBadge(undefined)).toBeNull();
     expect(approvalBadge("weird")).toBeNull();
+  });
+});
+
+describe("marginForecastResult (цикл 15: правда о марже вместо демо-константы)", () => {
+  it("forecast == null (фетч не удался/ещё не пришёл) — honest-null", () => {
+    expect(marginForecastResult(null)).toBeNull();
+  });
+
+  it("gross_weighted == null (фасад landed_cost не подключён/ничего не оценено) — honest-null", () => {
+    expect(
+      marginForecastResult({ gross_weighted: null, deals_priced: 0, deals_total: 5 }),
+    ).toBeNull();
+  });
+
+  it("полная оценка (deals_priced === deals_total) — число без title", () => {
+    expect(
+      marginForecastResult({ gross_weighted: 1234.6, deals_priced: 5, deals_total: 5 }),
+    ).toEqual({ amount: 1235, title: null });
+  });
+
+  it("частичная оценка (deals_priced < deals_total) — число + title «оценено по N из M»", () => {
+    expect(
+      marginForecastResult({ gross_weighted: 1000, deals_priced: 3, deals_total: 5 }),
+    ).toEqual({ amount: 1000, title: "оценено по 3 из 5 сделок" });
+  });
+
+  it("gross_weighted == 0 — честный ноль, не путать с null", () => {
+    expect(
+      marginForecastResult({ gross_weighted: 0, deals_priced: 2, deals_total: 2 }),
+    ).toEqual({ amount: 0, title: null });
   });
 });
