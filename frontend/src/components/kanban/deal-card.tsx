@@ -516,7 +516,7 @@ export function DealCard({
                 onLose();
               }}
               onPointerDown={stopDrag}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-red-700 hover:bg-red-100"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-red-700 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-500/15"
             >
               ✕ Отказ
             </button>

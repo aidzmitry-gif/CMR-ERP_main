@@ -666,11 +666,17 @@ export function DealDrawerPreview({
                   </SectionLabel>
                   {stepEditing ? (
                     <div className="space-y-2">
+                      {/* Поле правит ТЕКСТ шага (deal.nextStep — «Позвонить», «Проверить оплату»),
+                          как и подписано. Раньше стоял type="datetime-local": пикер показывал
+                          пусто (текст не дата), а сохранение писало голую дату в текстовое поле
+                          и не двигало next_step_at (находка opus-верификации). Срок шага задаётся
+                          пресетами/авто-шагами/композером карточки — не этим полем. */}
                       <input
-                        type="datetime-local"
+                        type="text"
                         autoFocus
                         value={stepDraft}
                         onChange={(e) => setStepDraft(e.target.value)}
+                        placeholder="Опишите следующий шаг…"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitStep();
                           if (e.key === "Escape") {
@@ -678,7 +684,7 @@ export function DealDrawerPreview({
                             setStepEditing(false);
                           }
                         }}
-                        className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none"
+                        className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none placeholder:text-faint"
                       />
                       <div className="flex gap-2">
                         <Button variant="primary" size="sm" onClick={commitStep} icon={<Check size={13} />}>
