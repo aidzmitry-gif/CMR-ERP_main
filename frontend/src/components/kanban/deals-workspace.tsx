@@ -304,7 +304,7 @@ function PipelineRow({
       </span>
       <Sep />
       <span className="text-muted">
-        Висяки: <b className="text-amber-600">{stuck ?? "—"}</b>
+        Висяки: <b className="text-amber-600 dark:text-amber-400">{stuck ?? "—"}</b>
       </span>
       {planGap && (
         <>
@@ -1243,6 +1243,18 @@ export function DealsWorkspace({
       )
     : filteredStages.flatMap((s) => s.deals.map((d) => ({ deal: d, stageTitle: s.title, stageId: s.id })));
 
+  // Цикл 10: активен ли хоть один фильтр (поиск/приоритет/ответственный/внимание/висяки/
+  // действие сегодня-завтра). Нужен, чтобы честно объяснить пустую доску: «ничего не попало
+  // под фильтры» (с кнопкой сброса) vs «сделок пока нет» — без этого продавец не понимает,
+  // баг это или так и задумано (мандат «удобно в использовании»).
+  const hasActiveFilter = Boolean(query || priority || ownerFilter || attn || stuckOnly || actFilter);
+  const clearFilters = () => {
+    setQuery("");
+    setStuckOnly(false);
+    setActFilter(null);
+    router.push(pathname); // сбрасывает URL-фильтры (priority/owner/attn из FiltersMenu шапки)
+  };
+
   /** Бейджи карточки для секций «Все вместе»: та же формула, без «Отказ»-кнопки —
    *  причина отказа собирается через ту же модалку только на основной (не-комбинированной)
    *  доске; в комбинированном виде drag в терминальную колонку двигает сделку напрямую
@@ -1420,7 +1432,7 @@ export function DealsWorkspace({
                       onClick={() => setStuckOnly((v) => !v)}
                       className={clsx(
                         "inline-flex items-center gap-2 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-                        stuckOnly ? "border-amber-400 text-amber-700" : "border-line text-muted",
+                        stuckOnly ? "border-amber-400 text-amber-700 dark:text-amber-300" : "border-line text-muted",
                       )}
                     >
                       <Clock size={16} /> Висяки
@@ -1651,6 +1663,32 @@ export function DealsWorkspace({
           </div>
         </div>
 
+        {/* Цикл 10: честное пустое состояние доски. Список даёт свою строку «Сделок не найдено»
+            (в теле таблицы), поэтому баннер — только для канбана/по-датам/«Все вместе». Когда
+            активен фильтр — объясняем причину и даём сброс одним кликом; иначе — нейтральное
+            «сделок пока нет» (не пугаем пустой доской новую воронку). */}
+        {flatDeals.length === 0 && view !== "list" && (
+          <div
+            role="status"
+            className="mt-3 rounded-xl border border-line bg-surface px-4 py-8 text-center text-sm text-muted"
+          >
+            {hasActiveFilter ? (
+              <>
+                Под текущие фильтры не попала ни одна сделка.{" "}
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="font-semibold text-accent-ink hover:text-accent"
+                >
+                  Сбросить фильтры
+                </button>
+              </>
+            ) : (
+              "Сделок пока нет — создайте первую кнопкой «Создать сделку»."
+            )}
+          </div>
+        )}
+
         {view === "board" && groupBy === "dates" && now != null ? (
           /* П4: группировка по датам действий (next_step_at) — честные бакеты, без drag&drop
            * (перенос между бакетами = смена next_step_at, не текущее действие карточки).
@@ -1733,13 +1771,13 @@ export function DealsWorkspace({
                         />
                         {stageTitle}
                         {days != null && (
-                          <span className={stuck ? "font-semibold text-amber-600" : "text-faint"}>
+                          <span className={stuck ? "font-semibold text-amber-600 dark:text-amber-400" : "text-faint"}>
                             · {days} дн{stuck ? " · висяк" : ""}
                           </span>
                         )}
                       </span>
                       {lostTitle && (
-                        <div className="mt-0.5 text-[11px] text-red-700">Причина: {lostTitle}</div>
+                        <div className="mt-0.5 text-[11px] text-red-700 dark:text-red-300">Причина: {lostTitle}</div>
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-muted">{prob}%</td>

@@ -111,6 +111,23 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByText("ООО Доска")).toBeNull();
   });
 
+  it("пустая доска под фильтром: объясняет причину и даёт «Сбросить фильтры» (цикл 10)", () => {
+    mockSearchParams = new URLSearchParams();
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.change(screen.getByPlaceholderText("Поиск сделок..."), {
+      target: { value: "нет-такой-сделки" },
+    });
+    expect(screen.getByText(/Под текущие фильтры не попала ни одна сделка/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сбросить фильтры" })).toBeInTheDocument();
+  });
+
+  it("пустая доска без фильтров: нейтральное «Сделок пока нет», без кнопки сброса (цикл 10)", () => {
+    mockSearchParams = new URLSearchParams();
+    render(<DealsWorkspace initialStages={[]} initialKpis={[]} />);
+    expect(screen.getByText(/Сделок пока нет/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
+  });
+
   it("кнопка «Создать сделку» открывает модалку", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Создать сделку/ }));
