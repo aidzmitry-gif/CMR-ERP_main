@@ -268,6 +268,8 @@ export interface Lead {
   utmSource?: string; // Цикл 4: UTM-источник рекламы, приведшей лид
   utmCampaign?: string; // Цикл 4: UTM-кампания — чип на карточке лида
   isKey?: boolean; // Цикл 9: ключевой (высокопотенциальный) лид — бейдж 🔑, приоритет маршрутизации
+  counterpartyId?: number; // Цикл 10: эталон контрагента (golden record), если лид резолвнут в MDM
+  customerKind?: string; // Цикл 10: "" новый | "existing" действующий клиент | "regular" постоянник
 }
 
 /** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.

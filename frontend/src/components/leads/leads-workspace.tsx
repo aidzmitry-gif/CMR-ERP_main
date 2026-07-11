@@ -705,6 +705,22 @@ function LeadCard({
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold tracking-wide text-faint">№ ЛИД-{lead.id}</span>
         <div className="flex items-center gap-1.5">
+          {lead.customerKind === "regular" && (
+            <span
+              title="Постоянник — уже были обращения/сделки по этому контрагенту"
+              className="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-bold text-violet-700"
+            >
+              ⭐ постоянник
+            </span>
+          )}
+          {lead.customerKind === "existing" && (
+            <span
+              title="Действующий клиент — контакт найден в базе (MDM/1С)"
+              className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700"
+            >
+              🤝 клиент
+            </span>
+          )}
           {lead.isKey && (
             <span
               title="Ключевой лид — высокий потенциал, приоритет и лучший закрывающий"

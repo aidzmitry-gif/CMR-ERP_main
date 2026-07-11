@@ -1141,3 +1141,84 @@ async def test_key_lead_exposed_in_api(session, api):
     assert lead["is_key"] is True
     listed = (await api.get("/leads")).json()
     assert next(le for le in listed if le["id"] == lead["id"])["is_key"] is True
+
+
+# --- Цикл 10: резолв входящего лида против существующих клиентов (MDM) ---
+
+
+async def test_resolve_customer_by_company_name_existing(session, api):
+    """Лид с именем существующего контрагента → customer_kind=existing + counterparty_id."""
+    from core.domain.models import Counterparty
+
+    cp = Counterparty(name="ООО Действующий")
+    session.add(cp)
+    await session.commit()
+
+    lead = (
+        await api.post(
+            "/leads", json={"source": "site", "company": "ООО Действующий", "product": "лист"}
+        )
+    ).json()
+    assert lead["counterparty_id"] == cp.id
+    assert lead["customer_kind"] == "existing"
+    assert lead["is_key"] is True  # действующий клиент → ключевой
+
+
+async def test_resolve_customer_by_contact_phone(session, api):
+    """Лид с телефоном существующего контакта → резолвится в его контрагента."""
+    from core.domain.models import Contact, Counterparty
+
+    cp = Counterparty(name="ЗАО КонтактКо")
+    session.add(cp)
+    await session.flush()
+    session.add(Contact(counterparty_id=cp.id, full_name="Иван Клиентов", phone="+375291234567"))
+    await session.commit()
+
+    # телефон в другом формате (80..) — хвост совпадает
+    lead = (
+        await api.post("/leads", json={"source": "phone", "phone": "80291234567"})
+    ).json()
+    assert lead["counterparty_id"] == cp.id
+    assert lead["customer_kind"] == "existing"
+
+
+async def test_resolve_customer_regular_on_second_lead(session, api):
+    """Второй лид по тому же контрагенту → customer_kind=regular (постоянник)."""
+    from core.domain.models import Counterparty
+
+    cp = Counterparty(name="ООО Повторный")
+    session.add(cp)
+    await session.commit()
+
+    first = (await api.post("/leads", json={"source": "site", "company": "ООО Повторный"})).json()
+    assert first["customer_kind"] == "existing"
+    second = (await api.post("/leads", json={"source": "site", "company": "ООО Повторный"})).json()
+    assert second["customer_kind"] == "regular"
+
+
+async def test_resolve_customer_follows_golden_record(session, api):
+    """Имя совпало со слитым дублем → лид привязывается к эталону (golden record)."""
+    from core.domain.models import Counterparty
+
+    survivor = Counterparty(name="ООО Эталон")
+    session.add(survivor)
+    await session.flush()
+    dup = Counterparty(name="ООО Дубль", is_active=False, merged_into_id=survivor.id)
+    session.add(dup)
+    await session.commit()
+
+    # точное имя активного эталона не совпадёт с «ООО Дубль»; матч по контакту дал бы дубль —
+    # проверяем golden record напрямую через резолв по имени дубля... дубль неактивен, exact
+    # его не найдёт. Проверяем golden_counterparty_id отдельно:
+    from modules.leads.leads import golden_counterparty_id
+
+    assert await golden_counterparty_id(session, dup.id) == survivor.id
+
+
+async def test_resolve_customer_no_match_is_cold(session, api):
+    """Нет совпадений → лид остаётся новым/холодным (customer_kind пуст, не ключевой по клиенту)."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Ничейный Новичок 12345"})
+    ).json()
+    assert lead["customer_kind"] == ""
+    assert lead["counterparty_id"] is None

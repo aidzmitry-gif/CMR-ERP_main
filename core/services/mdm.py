@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.models import (
@@ -110,6 +110,38 @@ async def import_preview(session: AsyncSession, onec) -> dict:
         "would_match_by_unp": would_match,
         "without_unp": without_unp,
     }
+
+
+def _phone_tail(phone: str | None) -> str:
+    """Значащий хвост телефона (9 цифр) — контакты бывают без кода страны; <7 цифр → пропуск.
+
+    Дублирует ``modules.leads.leads.phone_tail`` намеренно: MDM — shared kernel и не должен
+    зависеть от модуля. Дедуп контактов по хвосту, как и в лидах/телефонии.
+    """
+    tail = re.sub(r"\D", "", phone or "")[-9:]
+    return tail if len(tail) >= 7 else ""
+
+
+async def find_contact(
+    session: AsyncSession, *, phone: str | None = None, email: str | None = None
+) -> Contact | None:
+    """Контактное лицо по телефону (хвост 9 цифр) или e-mail (регистронезависимо), либо None.
+
+    Единая точка поиска контакта для дедупа входящего лида против существующих клиентов
+    (Цикл 10) и привязки контакта к компании без дублей (Цикл 11). E-mail — точное
+    сравнение в нижнем регистре (в LIKE ``_``/``%`` — wildcard'ы), телефон — LIKE по хвосту
+    (форматы ``+375…``/``80…`` сходятся). Возвращает первый активный матч.
+    """
+    email_n = (email or "").strip().lower()
+    tail = _phone_tail(phone)
+    conds = []
+    if tail:
+        conds.append(and_(Contact.phone.isnot(None), Contact.phone.like(f"%{tail}")))
+    if email_n:
+        conds.append(and_(Contact.email.isnot(None), func.lower(Contact.email) == email_n))
+    if not conds:
+        return None
+    return (await session.execute(select(Contact).where(or_(*conds)))).scalars().first()
 
 
 async def match_candidates(

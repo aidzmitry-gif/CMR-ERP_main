@@ -638,6 +638,7 @@ export interface ChatItem {
   last_text: string;
   channel: string;
   direction: string;
+  unread?: number;
 }
 
 /** Диалоги для панели «Чаты и дела» (сделки с последним сообщением). */
@@ -1140,6 +1141,8 @@ interface ApiLead {
   utm_source?: string;
   utm_campaign?: string;
   is_key?: boolean;
+  counterparty_id?: number | null;
+  customer_kind?: string;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1170,6 +1173,8 @@ function mapLead(l: ApiLead): Lead {
     utmSource: l.utm_source,
     utmCampaign: l.utm_campaign,
     isKey: l.is_key ?? false,
+    counterpartyId: l.counterparty_id ?? undefined,
+    customerKind: l.customer_kind ?? "",
   };
 }
 
