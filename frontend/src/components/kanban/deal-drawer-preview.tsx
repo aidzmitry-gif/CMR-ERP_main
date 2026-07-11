@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Calendar,
   Check,
+  ChevronDown,
   ChevronRight,
   FileText,
   Flag,
@@ -18,7 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
@@ -27,6 +28,7 @@ import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import { fetchDocuments, issueDocument, updateDeal, type DealDoc } from "@/lib/api";
 import { daysInStage, daysUntilDate, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
+import { fetchContractTemplates, prepareContract, type ContractTemplate } from "@/lib/contracts-api";
 import { presetDateISO } from "@/lib/sales-stages";
 import type { Deal, Stage } from "@/lib/types";
 import { formatNextStep } from "@/lib/format";
@@ -35,6 +37,14 @@ import { useCurrency } from "./currency-context";
 /** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — единая
  *  строка для оптимистичного патча (onUpdateFields) и прямого updateDeal (fire-and-forget). */
 const INVOICE_NEXT_STEP = "Проверить оплату счёта";
+
+/** Слайс 7 (B): авто-шаг после подготовки договора ПО НАШЕМУ ШАБЛОНУ — уходит на
+ *  согласование сразу, контроль через 1 день (тот же паттерн, что INVOICE_NEXT_STEP). */
+const CONTRACT_TEMPLATE_NEXT_STEP = "Проверить согласование договора";
+
+/** Слайс 7 (B): авто-шаг для варианта «форма клиента» (их текст, без нашего шаблона) —
+ *  юрист должен успеть вычитать риски/протокол разногласий до подписания, контроль +2 дня. */
+const CONTRACT_CLIENT_NEXT_STEP = "Вычитать договор клиента: риски, протокол разногласий";
 
 /** Слайс 6 (B): краткие статусы документа для компактного read-only блока «Документы»
  *  drawer'а — независимая копия deal-documents.tsx (там полноценный CRUD-список). */
@@ -101,17 +111,30 @@ export function DealDrawerPreview({
   const [docMsg, setDocMsg] = useState<string | null>(null);
   // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
   const [docs, setDocs] = useState<DealDoc[]>([]);
+  // Слайс 7: мини-секция «Договор» — выбор варианта (наш шаблон / форма клиента).
+  // Шаблоны не привязаны к сделке — грузим один раз при первом открытии, кэш живёт,
+  // пока смонтирован drawer (не сбрасываем при смене сделки, в отличие от docs/pickerOpen).
+  const [contractOpen, setContractOpen] = useState(false);
+  const [templates, setTemplates] = useState<ContractTemplate[] | null>(null);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
+  // FIX-R6: «живой» id открытой сделки для async-колбэков документов (issueInvoice/
+  // prepareContractFromTemplate/issueClientContract) — обновляется эффектом ниже, а не при
+  // рендере (react-hooks/refs запрещает писать в ref во время рендера). Замыкание внутри
+  // async-функции держит СТАРЫЙ dealId, поэтому сверяем именно с рефом, не с `deal?.id`.
+  const dealIdRef = useRef<string | undefined>(deal?.id);
   // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    dealIdRef.current = deal?.id;
     setStepDraft(deal?.nextStep ?? "");
     setStepEditing(false);
     setTaskDraft("");
     setPickerOpen(false);
     setDocMsg(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
+    setContractOpen(false); // не действовать на чужую сделку через оставшуюся открытой секцию
   }, [deal?.id]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -201,22 +224,91 @@ export function DealDrawerPreview({
       const nextStepAt = presetDateISO(3, Date.now());
       onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
       void updateDeal(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: drawer мог переключиться на другую сделку, пока запрос летел — docs/docMsg
+    // не тегированы dealId, поэтому чужой поздний ответ не должен их перезаписывать.
+    if (dealIdRef.current !== dealId) return;
+    if (ok) {
       setDocMsg(`${message} · Шаг: Проверить оплату (3 дн)`);
-      void fetchDocuments(dealId).then(setDocs); // новый счёт — сразу виден в блоке «Документы»
+      // новый счёт — сразу виден в блоке «Документы» (тот же гард — на случай, если
+      // сделку сменили уже ПОСЛЕ первой проверки, пока летел этот второй запрос).
+      void fetchDocuments(dealId).then((list) => {
+        if (dealIdRef.current === dealId) setDocs(list);
+      });
     } else {
       setDocMsg(message);
     }
   }
 
-  /** Договор — уходит на согласование юристу (та же ветка, что и POST /documents kind=contract). */
-  async function issueContract() {
+  /** Слайс 7: открыть/закрыть мини-секцию «Договор» (выбор варианта). Шаблоны не зависят
+   *  от сделки — фетчим один раз при первом открытии, дальше переиспользуем кэш. */
+  function toggleContractMenu() {
+    const next = !contractOpen;
+    setContractOpen(next);
+    if (next && templates === null && !templatesLoading) {
+      setTemplatesLoading(true);
+      void fetchContractTemplates().then((list) => {
+        setTemplates(list);
+        setTemplatesLoading(false);
+      });
+    }
+  }
+
+  /** Договор «по нашему шаблону» (SALES-53) — уходит на согласование сразу; авто-шаг
+   *  «Проверить согласование» (+1 дн), тот же паттерн, что issueInvoice (onUpdateFields +
+   *  updateDeal). 409 (активный договор уже есть) / иная ошибка — только message, шаг не трогаем.
+   *  `now` — таймстамп с МЕСТА КЛИКА (аргумент, не Date.now() внутри тела): функция вызывается
+   *  из .map() с варьирующимся `code`, и react-compiler в этом случае считает Date.now() внутри
+   *  тела «нечистым вычислением рендера» (react-hooks/purity) — ложное срабатывание для обычного
+   *  обработчика клика, обходим передачей уже вычисленного значения. */
+  async function prepareContractFromTemplate(code: string, now: number) {
     if (!deal) return;
     const dealId = deal.id;
     setDocBusy(true);
-    const { message } = await issueDocument(dealId, "contract");
+    const { ok, message } = await prepareContract(dealId, code);
     setDocBusy(false);
-    setDocMsg(message);
-    void fetchDocuments(dealId).then(setDocs);
+    setContractOpen(false);
+    if (ok) {
+      const nextStepAt = presetDateISO(1, now);
+      onUpdateFields(dealId, { next_step: CONTRACT_TEMPLATE_NEXT_STEP, next_step_at: nextStepAt });
+      void updateDeal(dealId, { next_step: CONTRACT_TEMPLATE_NEXT_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    if (ok) {
+      setDocMsg(`${message} · Шаг: Проверить согласование (1 дн)`);
+      void fetchDocuments(dealId).then((list) => {
+        if (dealIdRef.current === dealId) setDocs(list);
+      });
+    } else {
+      setDocMsg(message);
+    }
+  }
+
+  /** Договор «форма клиента» (их текст, без нашего шаблона) — POST /documents kind=contract,
+   *  тоже уходит на согласование юристу. Авто-шаг «Вычитать риски/протокол разногласий» (+2 дн). */
+  async function issueClientContract() {
+    if (!deal) return;
+    const dealId = deal.id;
+    setDocBusy(true);
+    const { ok, message } = await issueDocument(dealId, "contract");
+    setDocBusy(false);
+    setContractOpen(false);
+    if (ok) {
+      const nextStepAt = presetDateISO(2, Date.now());
+      onUpdateFields(dealId, { next_step: CONTRACT_CLIENT_NEXT_STEP, next_step_at: nextStepAt });
+      void updateDeal(dealId, { next_step: CONTRACT_CLIENT_NEXT_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    if (ok) {
+      setDocMsg(`${message} · Шаг: Вычитать договор клиента (2 дн)`);
+      void fetchDocuments(dealId).then((list) => {
+        if (dealIdRef.current === dealId) setDocs(list);
+      });
+    } else {
+      setDocMsg(message);
+    }
   }
 
   function toggleStar() {
@@ -481,13 +573,66 @@ export function DealDrawerPreview({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => void issueContract()}
+                  onClick={toggleContractMenu}
                   disabled={docBusy}
+                  aria-expanded={contractOpen}
                   icon={<FileText size={13} />}
                 >
                   Договор
+                  <ChevronDown
+                    size={12}
+                    className={clsx("transition-transform", contractOpen && "rotate-180")}
+                  />
                 </Button>
               </section>
+
+              {/* === ВЫБОР ВАРИАНТА ДОГОВОРА (слайс 7): наш шаблон / форма клиента === */}
+              {contractOpen && (
+                <section className="mt-2 space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5">
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      По нашему шаблону
+                    </div>
+                    {templatesLoading && (
+                      <div className="text-[12px] text-muted">Загрузка…</div>
+                    )}
+                    {!templatesLoading && templates && templates.length === 0 && (
+                      <span className="inline-block rounded-md border border-line px-2 py-1 text-[12px] text-faint opacity-60">
+                        Шаблонов нет
+                      </span>
+                    )}
+                    {!templatesLoading && templates && templates.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {templates.map((t) => (
+                          <button
+                            key={t.code}
+                            type="button"
+                            onClick={() => void prepareContractFromTemplate(t.code, Date.now())}
+                            disabled={docBusy}
+                            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken disabled:opacity-50"
+                          >
+                            {t.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      Форма клиента (их договор)
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      block
+                      onClick={() => void issueClientContract()}
+                      disabled={docBusy}
+                    >
+                      Оформить по форме клиента
+                    </Button>
+                  </div>
+                </section>
+              )}
               {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
 
               {/* === СТАТУС ДОКУМЕНТОВ: последний счёт/договор (слайс 6, B) === */}
