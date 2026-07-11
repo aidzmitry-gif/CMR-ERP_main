@@ -47,6 +47,8 @@ vi.mock("@/lib/api", () => ({
   fetchLeadHandoffStats: vi.fn().mockResolvedValue([]),
   // Цикл 15: недозвон — попытка контакта + срок перезвона.
   logLeadAttempt: vi.fn(),
+  // Чистая функция (локальное naive-время → naive-UTC) — в тестах passthrough.
+  localToNaiveUtc: (s: string) => s,
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";

@@ -1199,7 +1199,7 @@ export async function logLeadAttempt(id: number, callbackAt?: string): Promise<L
     const init: RequestInit = { method: "POST" };
     if (callbackAt) {
       init.headers = { "Content-Type": "application/json" };
-      init.body = JSON.stringify({ callback_at: callbackAt });
+      init.body = JSON.stringify({ callback_at: localToNaiveUtc(callbackAt) });
     }
     const res = await fetch(`/api/leads/${id}/attempt`, init);
     if (!res.ok) return null;
@@ -1312,6 +1312,17 @@ export interface LeadRouteResult {
  *  `opts.assignedTo` — лид уходит именно этому менеджеру (ручной выбор), без него —
  *  прежнее авто-распределение по правилам. `opts.nextStepAt`/`opts.nextStepNote` —
  *  опционально сохраняются на лиде вместе с раздачей (работает и в авто-, и в ручном режиме). */
+/** Локальное naive-время (пресеты/`datetime-local`) → naive-UTC строка бэкенда.
+ *  Бэк хранит метки в наивном UTC; без конвертации «завтра 10:00» отображался бы
+ *  чипом шага как 13:00 (Минск = UTC+3). Уже-UTC строки (с Z) только чистим от Z. */
+export function localToNaiveUtc(local: string): string {
+  if (!local) return local;
+  if (local.endsWith("Z")) return local.slice(0, -1);
+  const d = new Date(local);
+  if (Number.isNaN(d.getTime())) return local;
+  return d.toISOString().slice(0, 19);
+}
+
 export async function routeLead(
   id: number,
   opts?: { assignedTo?: string; nextStepAt?: string; nextStepNote?: string },
@@ -1320,7 +1331,7 @@ export async function routeLead(
     const init: RequestInit = { method: "POST" };
     const body: Record<string, string> = {};
     if (opts?.assignedTo) body.assigned_to = opts.assignedTo;
-    if (opts?.nextStepAt) body.next_step_at = opts.nextStepAt;
+    if (opts?.nextStepAt) body.next_step_at = localToNaiveUtc(opts.nextStepAt);
     if (opts?.nextStepNote) body.next_step_note = opts.nextStepNote;
     if (Object.keys(body).length > 0) {
       init.headers = { "Content-Type": "application/json" };
@@ -1346,7 +1357,7 @@ export async function expressLead(
     const init: RequestInit = { method: "POST" };
     const body: Record<string, string> = {};
     if (opts?.assignedTo) body.assigned_to = opts.assignedTo;
-    if (opts?.nextStepAt) body.next_step_at = opts.nextStepAt;
+    if (opts?.nextStepAt) body.next_step_at = localToNaiveUtc(opts.nextStepAt);
     if (opts?.nextStepNote) body.next_step_note = opts.nextStepNote;
     if (Object.keys(body).length > 0) {
       init.headers = { "Content-Type": "application/json" };

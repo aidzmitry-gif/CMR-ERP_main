@@ -21,6 +21,7 @@ import {
   fetchLeadSourceStats,
   LeadDuplicateError,
   type LeadInput,
+  localToNaiveUtc,
   logLeadAttempt,
   qualifyLead,
   rejectLead,
@@ -1240,7 +1241,8 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         assignedTo: res.assigned_to,
         funnel: res.funnel,
         routedAt: new Date().toISOString(),
-        nextStepAt: opts?.nextStepAt ?? null,
+        // как на бэке: локальное время формы → naive-UTC, иначе чип шага съезжает на +3ч
+        nextStepAt: opts?.nextStepAt ? localToNaiveUtc(opts.nextStepAt) : null,
         nextStepNote: opts?.nextStepNote ?? "",
       });
       refreshPlan();
