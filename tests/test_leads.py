@@ -1692,3 +1692,45 @@ async def test_stats_window_sees_revived_activity(session, api, services):
     assert any(r["pending"] >= 1 for r in handoffs), "переданный сегодня реанимированный лид виден"
     sources = (await api.get("/leads/stats/sources")).json()
     assert any(r["source"] == "site" and r["total"] >= 1 for r in sources)
+
+
+# --- RBAC: вход воронки закрыт от анонима/чужого отдела (require_permission) ---
+
+
+async def test_rbac_guest_denied_everywhere(session, api):
+    """Аноним (роль guest — не объявлена, не суперроль) получает 403 на чтение, приём и раздачу:
+    ПДн клиентов, конвертация и вложения больше не открыты без права (fail-closed)."""
+    guest = {"X-User-Roles": "guest"}
+    assert (await api.get("/leads", headers=guest)).status_code == 403
+    assert (
+        await api.post("/leads", json={"source": "site", "phone": "+375291230200"}, headers=guest)
+    ).status_code == 403
+
+
+async def test_rbac_sales_reads_and_routes(session, api):
+    """Продавец (слаг sales) ведёт воронку целиком: читает, принимает, распределяет."""
+    sales = {"X-User-Roles": "sales"}
+    assert (await api.get("/leads", headers=sales)).status_code == 200
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Доступ", "phone": "+375291230201",
+                "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 15 тонн, срочно с доставкой в Минск",
+            },
+            headers=sales,
+        )
+    ).json()
+    assert (await api.post(f"/leads/{lead['id']}/route", headers=sales)).status_code == 200
+
+
+async def test_rbac_sales_cli_cannot_route(session, api):
+    """Клиентская работа (sales_cli) — приём/квалификация без раздачи: route → 403, qualify → 200."""
+    cli = {"X-User-Roles": "sales_cli"}
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Клиент", "phone": "+375291230202"})
+    ).json()
+    assert (await api.post(f"/leads/{lead['id']}/qualify", headers=cli)).status_code == 200
+    assert (await api.post(f"/leads/{lead['id']}/route", headers=cli)).status_code == 403
+    assert (await api.post(f"/leads/{lead['id']}/convert", headers=cli)).status_code == 403
