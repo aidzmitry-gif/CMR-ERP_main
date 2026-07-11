@@ -1127,9 +1127,17 @@ async def main() -> None:
                 for p in prices:
                     s.add(PriceQuote(sku_code=code, counterparty="ООО АльфаМеталл", price=Decimal(str(p))))
 
-        # Лиды на приёме (вход воронки: приём → квалификация → распределение)
+        # Лиды на приёме (вход воронки: приём → квалификация → распределение).
+        # Прогоняем скоринг, как на реальном интейке (events.on_intake_lead) — иначе
+        # балл=0, и на доске не видно ни «целевой», ни экспресс-передачи, ни ключевых.
         if (await s.execute(select(Lead))).scalars().first() is None:
-            s.add_all(_demo_leads())
+            from modules.leads.leads import apply_initial_score
+
+            demo_leads = _demo_leads()
+            s.add_all(demo_leads)
+            await s.flush()
+            for _lead in demo_leads:
+                await apply_initial_score(_lead, s)
 
         # Цели KPI + активности (План/Факт)
         if (await s.execute(select(KpiTarget))).scalars().first() is None:

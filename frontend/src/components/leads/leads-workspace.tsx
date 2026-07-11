@@ -927,9 +927,11 @@ function IntakeModal({
 export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
-  // selectedId = открыт drawer-preview по этому лиду (1-клик); первый лид
-  //   открыт по умолчанию, чтобы был визуальный фокус сразу при заходе.
-  const [selectedId, setSelectedId] = useState<number | null>(initialLeads[0]?.id ?? null);
+  // selectedId = открыт drawer-preview по этому лиду (1-клик). На заходе НЕ открываем:
+  //   у превью-дровера модальный бэкдроп (fixed inset-0 z-40), он перехватывает клики по
+  //   всей доске — авто-открытие глушило карточные действия (Экспресс/Квалифицировать/звонок)
+  //   с первого клика. Доска должна быть интерактивна сразу; превью — по явному 1-клику.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   // expressOpenId = у какой карточки открыт поповер экспресс-передачи (Цикл 2)
