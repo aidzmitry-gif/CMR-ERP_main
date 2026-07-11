@@ -14,25 +14,28 @@ export function workdayElapsedFraction(now: Date): number {
   return (h - WORKDAY_START_HOUR) / (WORKDAY_END_HOUR - WORKDAY_START_HOUR);
 }
 
-/** Минуты РАБОЧИМИ часами (9:00-18:00 локального времени, ежедневно) между двумя моментами.
+/** Минуты РАБОЧИМИ часами (9:00-18:00 локального времени) между двумя моментами.
  *
  * Цикл 14 — честный SLA: ночь не считается. Иначе к 9:05 утра все ночные лиды одинаково
  * «горят 9ч+» — сигнал неразличим (alarm fatigue), а реально горящий дневной лид тонет
  * в утреннем пожаре. Идём по дням, суммируя пересечение интервала с рабочим окном.
- * ponytail: выходные считаются рабочими — отдел работает и по субботам; появится график
- * смен — вынести окно в настройку. */
+ * Воскресенье — выходной, суббота — рабочая (симметрично бэку working_minutes_between).
+ * ponytail: график смен зашит (пн-сб 9-18, вс выходной); появится сменный — вынести в настройку. */
 export function workingMinutesBetween(from: Date, to: Date): number {
   if (to.getTime() <= from.getTime()) return 0;
   let total = 0;
   const cur = new Date(from);
   while (cur.getTime() < to.getTime()) {
-    const dayStart = new Date(cur);
-    dayStart.setHours(WORKDAY_START_HOUR, 0, 0, 0);
-    const dayEnd = new Date(cur);
-    dayEnd.setHours(WORKDAY_END_HOUR, 0, 0, 0);
-    const segStart = Math.max(cur.getTime(), dayStart.getTime());
-    const segEnd = Math.min(to.getTime(), dayEnd.getTime());
-    if (segEnd > segStart) total += (segEnd - segStart) / 60000;
+    if (cur.getDay() !== 0) {
+      // 0 = воскресенье → пропускаем
+      const dayStart = new Date(cur);
+      dayStart.setHours(WORKDAY_START_HOUR, 0, 0, 0);
+      const dayEnd = new Date(cur);
+      dayEnd.setHours(WORKDAY_END_HOUR, 0, 0, 0);
+      const segStart = Math.max(cur.getTime(), dayStart.getTime());
+      const segEnd = Math.min(to.getTime(), dayEnd.getTime());
+      if (segEnd > segStart) total += (segEnd - segStart) / 60000;
+    }
     cur.setHours(24, 0, 0, 0); // на следующий день 00:00
   }
   return Math.round(total);

@@ -1220,6 +1220,18 @@ export async function fetchLeads(roles?: string): Promise<Lead[]> {
   }
 }
 
+/** Один лид по id (SSR, кокпит /crm/leads/[id]) — точечный GET вместо «скачать все и найти».
+ *  null — не найден/сбой. Заодно будит созревший «не сейчас» (wake-on-read на бэке). */
+export async function fetchLead(id: number, roles?: string): Promise<Lead | null> {
+  try {
+    const res = await fetch(`${BASE}/leads/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
+    if (!res.ok) return null;
+    return mapLead((await res.json()) as ApiLead);
+  } catch {
+    return null;
+  }
+}
+
 /** Лиды из API (клиент, через /api) — для обновления приёма после входящих заявок.
  *  null (не пустой массив!) при сетевой ошибке/не-2xx — чтобы вызывающий поллинг НЕ
  *  подменял живую доску пустотой при разовом сбое сети (пустой [] = реально нет лидов). */

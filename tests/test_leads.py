@@ -1518,24 +1518,33 @@ def test_working_minutes_between():
     assert working_minutes_between(d(10, 20, 0), d(11, 6, 10)) == 10  # ночной лид → 10 мин
     assert working_minutes_between(d(10, 3, 0), d(10, 6, 30)) == 30  # клэмп к началу окна
     assert working_minutes_between(d(10, 16, 0), d(10, 17, 0)) == 0  # вечер вне окна
-    assert working_minutes_between(d(10, 14, 0), d(12, 7, 0)) == 60 + 540 + 60  # хвост+день+утро
+    # хвост+день+утро по будням (пн 13 → ср 15, воскресенья нет)
+    assert working_minutes_between(d(13, 14, 0), d(15, 7, 0)) == 60 + 540 + 60
+    # воскресенье (12 июля) — выходной: суббота считается, воскресенье пропускается
+    assert working_minutes_between(d(11, 14, 0), d(13, 7, 0)) == 60 + 0 + 60  # сб хвост + вс 0 + пн утро
+    assert working_minutes_between(d(12, 9, 0), d(12, 18, 0)) == 0  # весь воскресный день — ноль
     assert working_minutes_between(d(10, 12, 0), d(10, 12, 0)) == 0  # пустой интервал
 
 
-async def test_plan_reaction_counts_working_minutes(session, api):
+async def test_plan_reaction_counts_working_minutes(session, api, monkeypatch):
     """Факт «Реакция» в /leads/plan: ночной лид, разобранный утром, даёт рабочие минуты
-    (10), а не календарные (610) — метрика не сгорает от одного утреннего разбора."""
-    from datetime import datetime, timedelta, timezone
+    (10), а не календарные (610) — метрика не сгорает от одного утреннего разбора.
+    Время пинуем на вторник — иначе на прогоне в воскресенье (выходной) реакция была бы 0."""
+    from datetime import datetime, timedelta
 
+    import modules.leads.routes as routes
     from modules.leads.models import Lead
+
+    fixed = datetime(2026, 7, 14, 12, 0, 0)  # вторник
+    monkeypatch.setattr(routes, "_utcnow", lambda: fixed)
+    today0 = fixed.replace(hour=0, minute=0, second=0, microsecond=0)
 
     lead = (
         await api.post("/leads", json={"source": "site", "company": "ООО Ночной", "phone": "+375291230141"})
     ).json()
-    today0 = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
     obj = await session.get(Lead, lead["id"])
-    obj.created_at = today0 - timedelta(hours=4)  # вчера 20:00 UTC (23:00 Минска)
-    obj.first_action_at = today0 + timedelta(hours=6, minutes=10)  # сегодня 9:10 Минска
+    obj.created_at = today0 - timedelta(hours=4)  # пн 20:00 UTC (вне окна)
+    obj.first_action_at = today0 + timedelta(hours=6, minutes=10)  # вт 9:10 Минска (6:10 UTC)
     await session.commit()
 
     plan = (await api.get("/leads/plan")).json()
@@ -1666,6 +1675,48 @@ async def test_snoozed_lead_wakes_on_read(session, api):
     woke = next(r for r in rows if r["id"] == lead["id"])
     assert woke["status"] == "new"  # вернулся в работу
     assert woke["snooze_until"] is not None  # дата в прошлом → фронт рисует «⏰ проснулся»
+
+
+async def test_wake_clears_route_fields_and_get_lead_wakes(session, api):
+    """Проснувшийся лид — свежий «Новый»: чистятся assigned_to/funnel/callback_at.
+    И точечный GET /leads/{id} тоже будит (не только доска)."""
+    from datetime import datetime, timedelta, timezone
+
+    from modules.leads.models import Lead
+
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Чистка", "phone": "+375291230320"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")  # проставит assigned_to/funnel
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "не сейчас", "snooze_days": 90})
+
+    obj = await session.get(Lead, lead["id"])
+    obj.snooze_until = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    obj.callback_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    await session.commit()
+
+    woke = (await api.get(f"/leads/{lead['id']}")).json()  # точечный GET будит
+    assert woke["status"] == "new"
+    assert woke["assigned_to"] == ""  # маршрутный хвост очищен
+    assert woke["funnel"] == ""
+    assert woke["callback_at"] is None
+
+
+async def test_create_lead_normalizes_and_bounds(session, api):
+    """Границы приёма: неизвестный источник → «site», e-mail нормализован, перебор длины → 422."""
+    r = await api.post(
+        "/leads",
+        json={"source": "bogus", "company": "ООО Границы", "email": "  IVAN@X.BY  ", "phone": " +375291230321 "},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["source"] == "site"  # неизвестный канал приведён к site
+    assert body["email"] == "ivan@x.by"  # обрезка + нижний регистр
+    assert body["phone"] == "+375291230321"  # обрезка пробелов
+
+    too_long = await api.post("/leads", json={"source": "site", "name": "Я" * 256})
+    assert too_long.status_code == 422  # длиннее колонки — 422, не 500 на вставке
 
 
 async def test_snoozed_lead_sleeps_until_due(session, api):

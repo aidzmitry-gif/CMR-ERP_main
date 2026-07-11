@@ -3,7 +3,7 @@ import { ArrowLeft, Mail, Phone, Star, User } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { fetchLeads } from "@/lib/api";
+import { fetchLead } from "@/lib/api";
 import { currentRole } from "@/lib/role-server";
 
 /**
@@ -20,10 +20,8 @@ export default async function LeadDetailPage({
 }) {
   const { id } = await params;
   const role = await currentRole();
-  // Простой MVP: тащим все лиды и фильтруем по id (для быстрого старта;
-  // когда появится /api/sales/leads/{id} — заменим на точечный fetch).
-  const leads = await fetchLeads(role);
-  const lead = leads.find((l) => String(l.id) === id) ?? null;
+  // Точечный GET /leads/{id} — не тащим всю доску ради одной карточки (переживает объёмы).
+  const lead = Number.isFinite(Number(id)) ? await fetchLead(Number(id), role) : null;
 
   return (
     <AppShell crumbs={["CRM", "Лиды", `ЛИД-${id}`]}>

@@ -827,8 +827,21 @@ function LeadCard({
   return (
     <div
       onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      aria-label={`Лид ЛИД-${lead.id}${lead.company ? `, ${lead.company}` : ""} — открыть превью`}
+      onKeyDown={(e) => {
+        // клавиатурная доступность: Enter/Пробел на сфокусированной карточке = превью
+        // (как одиночный клик). Действия внутри — свои кнопки, доступны табом отдельно;
+        // тот же гард, что у onClick, чтобы Enter/Пробел на вложенной кнопке не срабатывал дважды.
+        if ((e.target as HTMLElement).closest("[data-card-action]")) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onPreview();
+        }
+      }}
       className={clsx(
-        "relative cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop",
+        "relative cursor-pointer rounded-xl border bg-surface p-3 shadow-card transition hover:shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
         selected ? "border-accent ring-1 ring-accent" : "border-line",
       )}
     >
