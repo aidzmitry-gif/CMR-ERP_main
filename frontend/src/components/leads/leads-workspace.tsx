@@ -190,6 +190,14 @@ function slaMinutes(createdAt?: string): number | null {
   return workingMinutesBetween(created, new Date());
 }
 
+// Точка отсчёта SLA (фикс ревью Ц16): у проснувшегося лида — момент пробуждения
+// (snooze_until, уже в прошлом), а не createdAt 90-дневной давности — иначе только
+// что вернувшийся лид мгновенно «🔥 90 дн» и навсегда раздувает «Ждут реакции >15м».
+function slaBasis(lead: Lead): string | undefined {
+  const woke = lead.snoozeUntil != null && (waitingMinutes(lead.snoozeUntil) ?? 0) > 0;
+  return woke ? (lead.snoozeUntil ?? undefined) : lead.createdAt;
+}
+
 function formatWait(minutes: number): string {
   if (minutes > 2880) return `${Math.round(minutes / 1440)} дн`; // Цикл 13: возраст передачи живёт днями
   return minutes > 90 ? `${Math.round(minutes / 60)} ч` : `${minutes} мин`;
@@ -880,7 +888,7 @@ function LeadCard({
           {(lead.status === "new" || lead.status === "qualified") && (
             <AttemptChip count={lead.attemptCount} callbackAt={lead.callbackAt} />
           )}
-          {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
+          {lead.status === "new" && <WaitChip createdAt={slaBasis(lead)} />}
           {lead.status === "routed" && <RoutedAgeChip routedAt={lead.routedAt} />}
           {lead.status === "routed" && <NextStepChip at={lead.nextStepAt} note={lead.nextStepNote} />}
           {lead.status === "converted" &&
@@ -1443,7 +1451,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
   // SLA первой реакции (Цикл 1): сколько новых лидов ждут дольше 15 мин + средняя
   // скорость реакции лидоруба сегодня (по лидам с уже проставленным first_action_at).
-  const waitingOver15 = byStatus.new.filter((l) => (slaMinutes(l.createdAt) ?? 0) > 15).length;
+  const waitingOver15 = byStatus.new.filter((l) => (slaMinutes(slaBasis(l)) ?? 0) > 15).length;
   // Цикл 16: отложенные «не сейчас», ждущие даты возврата — видимый запас будущих сделок.
   const snoozedCount = leads.filter(
     (l) => l.status === "rejected" && l.snoozeUntil != null && (waitingMinutes(l.snoozeUntil) ?? 0) === 0,
@@ -1597,7 +1605,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                       (a, b) =>
                         Number(b.isKey ?? false) - Number(a.isKey ?? false) ||
                         hot(b) - hot(a) ||
-                        (slaMinutes(b.createdAt) ?? 0) - (slaMinutes(a.createdAt) ?? 0),
+                        (slaMinutes(slaBasis(b)) ?? 0) - (slaMinutes(slaBasis(a)) ?? 0),
                     )
                   : col.key === "routed"
                     ? [...byStatus[col.key]].sort(

@@ -1662,3 +1662,33 @@ async def test_repeat_call_ambiguous_companies_skipped(session, api, services):
         got = (await api.get(f"/leads/{lead_id}")).json()
         assert "Повторный звонок" not in (got["message"] or "")
         assert got["last_touch_at"] is None
+
+
+async def test_stats_window_sees_revived_activity(session, api, services):
+    """Фикс ревью Ц16: лид создан 60 дней назад, но передан/сконвертирован СЕГОДНЯ —
+    виден в скорборде передач и качестве источников (окно по активности, не по created_at)."""
+    from datetime import datetime, timedelta, timezone
+
+    from modules.leads.models import Lead
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Реанимированный", "phone": "+375291230165",
+                "product": "лист", "region": "Минск",
+                "message": "Вернулись — нужен лист, объём большой, срочно, пришлите цену",
+            },
+        )
+    ).json()
+    obj = await session.get(Lead, lead["id"])
+    obj.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
+    await session.commit()
+
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+
+    handoffs = (await api.get("/leads/stats/handoffs")).json()  # дефолтное окно 30 дн
+    assert any(r["pending"] >= 1 for r in handoffs), "переданный сегодня реанимированный лид виден"
+    sources = (await api.get("/leads/stats/sources")).json()
+    assert any(r["source"] == "site" and r["total"] >= 1 for r in sources)

@@ -713,6 +713,32 @@ describe("LeadsWorkspace", () => {
     expect(tile).toHaveTextContent("1");
   });
 
+  it("Цикл 16: у проснувшегося лида SLA считается от пробуждения, а не от старого createdAt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 11, 12, 0, 0));
+    try {
+      render(
+        <LeadsWorkspace
+          initialLeads={[
+            {
+              ...lead,
+              id: 1,
+              status: "new",
+              createdAt: isoMinutesAgo(90 * 24 * 60), // создан 90 дней назад
+              snoozeUntil: isoMinutesAgo(10), // проснулся 10 минут назад
+            },
+          ]}
+        />,
+      );
+      const chip = screen.getByTitle("Ожидает реакции с момента приёма");
+      // не «🔥 90 дн»: отсчёт от пробуждения → свежие минуты, чип не красный
+      expect(chip.textContent).toContain("10 мин");
+      expect(chip.className).not.toMatch(/red/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {
     (api.fetchLeadSourceStats as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
