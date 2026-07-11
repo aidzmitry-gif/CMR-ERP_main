@@ -444,20 +444,24 @@ export function ProductPickerModal({
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
     setBusy(true);
-    await picker.commitToDeal(dealId, counterparty); // позиции+котировки записаны ДО рендера
-    const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
-    setBusy(false);
-    if (win && ok && renderUrl) win.location.href = renderUrl;
-    else win?.close();
-    flash(message);
-    if (ok) {
-      // Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — то же
-      // правило, что в drawer-preview/CardMenu/call-window.tsx.
-      void updateDeal(dealId, {
-        next_step: INVOICE_NEXT_STEP,
-        next_step_at: presetDateISO(3, Date.now()),
-      });
-      onCommitted?.();
+    try {
+      await picker.commitToDeal(dealId, counterparty); // позиции+котировки записаны ДО рендера
+      const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
+      if (win && ok && renderUrl) win.location.href = renderUrl;
+      else win?.close();
+      flash(message);
+      if (ok) {
+        // Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — то же
+        // правило, что в drawer-preview/CardMenu/call-window.tsx.
+        void updateDeal(dealId, {
+          next_step: INVOICE_NEXT_STEP,
+          next_step_at: presetDateISO(3, Date.now()),
+        });
+        onCommitted?.();
+      }
+    } finally {
+      // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
+      setBusy(false);
     }
   }
 

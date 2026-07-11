@@ -379,3 +379,35 @@ export function invoiceBadge(
   if (doc.status === "posted") return { label: "💳 не оплачен", tone: "neutral" };
   return null;
 }
+
+// ──────────────────────── Слайс 9: мягкий скидочный гейт (защита прибыли) ────────────────────────
+
+/** Результат {@link discountGate}: `minTotal` — минимально допустимая сумма по прайсу
+ *  (Σ `min_price × qty` по позициям с известным `min_price`), `gap` — на сколько сделка ниже. */
+export interface DiscountGateResult {
+  minTotal: number;
+  gap: number;
+}
+
+/**
+ * Мягкий скидочный гейт (слайс 9) — прокси реальной маржи: методика ценообразования ещё не
+ * готова (цены продавца на позиции нет), но у позиций есть справочный `min_price`. Если сумма
+ * сделки ниже минимума по прайсу — повод предупредить (гейт НЕ блокирует действия, это дело
+ * вызывающего UI — см. drawer). Позиции без `min_price` не участвуют в сумме (честный частичный
+ * охват, не 0); если ни у одной позиции `min_price` не известен — гейта нет (`null`), как и
+ * когда `amount` уже на уровне минимума или выше (граница — не нарушение).
+ */
+export function discountGate(
+  items: { qty: number; min_price: number | null }[],
+  amount: number,
+): DiscountGateResult | null {
+  let minTotal = 0;
+  let hasKnown = false;
+  for (const it of items) {
+    if (it.min_price == null) continue;
+    minTotal += it.min_price * it.qty;
+    hasKnown = true;
+  }
+  if (!hasKnown || amount >= minTotal) return null;
+  return { minTotal, gap: minTotal - amount };
+}

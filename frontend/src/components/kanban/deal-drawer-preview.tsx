@@ -27,8 +27,24 @@ import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
-import { aiDraftReply, fetchDocuments, issueDocument, sendMessage, type DealDoc } from "@/lib/api";
-import { daysInStage, daysUntilDate, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
+import {
+  aiDraftReply,
+  fetchDealItems,
+  fetchDocuments,
+  issueDocument,
+  requestApproval,
+  sendMessage,
+  type DealDoc,
+  type DealItemFull,
+} from "@/lib/api";
+import {
+  daysInStage,
+  daysUntilDate,
+  discountGate,
+  isStuck,
+  probabilityFor,
+  weightedAmount,
+} from "@/lib/board";
 import {
   fetchContractTemplates,
   prepareContract,
@@ -60,6 +76,10 @@ const MESSAGE_WAIT_REPLY_STEP = "Дождаться ответа клиента"
 /** Слайс 8 (D): авто-шаг после отправки пакета «счёт + договор» — сильное событие, как счёт/
  *  договор, поэтому перетирает текущий шаг ВСЕГДА (см. sendPackageToClient). */
 const PACKAGE_NEXT_STEP = "Контроль получения пакета";
+
+/** Слайс 9 (B): авто-шаг после запроса одобрения РОП на скидку — как сообщение клиенту
+ *  (MESSAGE_WAIT_REPLY_STEP), НЕ перетирает уже назначенный шаг (см. requestDiscountApproval). */
+const DISCOUNT_APPROVAL_NEXT_STEP = "Дождаться одобрения РОП";
 
 /** Слайс 8 (C): каналы секции «Написать клиенту» — без телефона (звонок — отдельное окно
  *  CallWindow, см. onCall). */
@@ -135,6 +155,11 @@ export function DealDrawerPreview({
   const [docMsg, setDocMsg] = useState<string | null>(null);
   // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
   const [docs, setDocs] = useState<DealDoc[]>([]);
+  // Слайс 9: позиции сделки (для мягкого скидочного гейта — прокси-маржа по min_price)
+  // + СВОЙ busy для кнопки «Запросить одобрение РОП» (НЕ docBusy — гейт мягкий, счёт/договор/
+  // сообщение не должны блокироваться, пока летит этот запрос).
+  const [dealItems, setDealItems] = useState<DealItemFull[]>([]);
+  const [gateBusy, setGateBusy] = useState(false);
   // Слайс 7: мини-секция «Договор» — выбор варианта (наш шаблон / форма клиента).
   // Шаблоны не привязаны к сделке — грузим один раз при первом открытии, кэш живёт,
   // пока смонтирован drawer (не сбрасываем при смене сделки, в отличие от docs/pickerOpen).
@@ -163,6 +188,7 @@ export function DealDrawerPreview({
     setPickerOpen(false);
     setDocMsg(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
+    setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
     setContractOpen(false); // не действовать на чужую сделку через оставшуюся открытой секцию
     setMsgOpen(false); // слайс 8: та же причина — не писать в чужую сделку открытой секцией
     setMsgChannel("whatsapp");
@@ -182,6 +208,17 @@ export function DealDrawerPreview({
     return () => {
       ignore = true;
     };
+  }, [deal?.id]);
+
+  // Слайс 9: ленивый фетч позиций сделки — для мягкого скидочного гейта (discountGate,
+  // board.ts). Тот же dealIdRef-гард от гонки, что и в issueInvoice/prepareContractFromTemplate/
+  // etc (FIX-R6) — поздний ответ по сделке, которую уже закрыли/сменили, не всыпется в стейт.
+  useEffect(() => {
+    const dealId = deal?.id;
+    if (!dealId) return;
+    void fetchDealItems(dealId).then((list) => {
+      if (dealIdRef.current === dealId) setDealItems(list);
+    });
   }, [deal?.id]);
 
   const open = deal != null;
@@ -206,6 +243,10 @@ export function DealDrawerPreview({
     ? (reasonByCode?.get(deal.lostReasonCode) ?? deal.lostReasonCode)
     : undefined;
   const isTerminalLost = stageId === "lost" || stageId === "cond_lost";
+
+  // Слайс 9: мягкий скидочный гейт (прокси-маржа по min_price, board.ts) — предупреждает,
+  // ничего не блокирует (см. плашку ниже и requestDiscountApproval).
+  const gate = deal ? discountGate(dealItems, deal.amount) : null;
 
   // Слайс 6 (B): последний счёт/договор (по max id — не полагаемся на порядок ответа бэка)
   // + человекочитаемый срок действия счёта поверх общего date-math (board.ts); своя копия
@@ -262,26 +303,30 @@ export function DealDrawerPreview({
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
     setDocBusy(true);
-    const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
-    setDocBusy(false);
-    if (win && ok && renderUrl) win.location.href = renderUrl;
-    else win?.close();
-    if (ok) {
-      const nextStepAt = presetDateISO(3, Date.now());
-      onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
-    }
-    // FIX-R6: drawer мог переключиться на другую сделку, пока запрос летел — docs/docMsg
-    // не тегированы dealId, поэтому чужой поздний ответ не должен их перезаписывать.
-    if (dealIdRef.current !== dealId) return;
-    if (ok) {
-      setDocMsg(`${message} · Шаг: Проверить оплату (3 дн)`);
-      // новый счёт — сразу виден в блоке «Документы» (тот же гард — на случай, если
-      // сделку сменили уже ПОСЛЕ первой проверки, пока летел этот второй запрос).
-      void fetchDocuments(dealId).then((list) => {
-        if (dealIdRef.current === dealId) setDocs(list);
-      });
-    } else {
-      setDocMsg(message);
+    try {
+      const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
+      if (win && ok && renderUrl) win.location.href = renderUrl;
+      else win?.close();
+      if (ok) {
+        const nextStepAt = presetDateISO(3, Date.now());
+        onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
+      }
+      // FIX-R6: drawer мог переключиться на другую сделку, пока запрос летел — docs/docMsg
+      // не тегированы dealId, поэтому чужой поздний ответ не должен их перезаписывать.
+      if (dealIdRef.current !== dealId) return;
+      if (ok) {
+        setDocMsg(`${message} · Шаг: Проверить оплату (3 дн)`);
+        // новый счёт — сразу виден в блоке «Документы» (тот же гард — на случай, если
+        // сделку сменили уже ПОСЛЕ первой проверки, пока летел этот второй запрос).
+        void fetchDocuments(dealId).then((list) => {
+          if (dealIdRef.current === dealId) setDocs(list);
+        });
+      } else {
+        setDocMsg(message);
+      }
+    } finally {
+      // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
+      setDocBusy(false);
     }
   }
 
@@ -425,6 +470,27 @@ export function DealDrawerPreview({
     setDocMsg(ok ? `${message} · Шаг: Контроль получения пакета (1 дн)` : message);
   }
 
+  /** Слайс 9 (B): запрос одобрения РОП на скидку — гейт МЯГКИЙ (плашка только предупреждает,
+   *  ничего не блокирует), поэтому busy-флаг СВОЙ (gateBusy), не общий docBusy — счёт/договор/
+   *  сообщение остаются кликабельными, пока летит этот запрос. Авто-шаг «Дождаться одобрения
+   *  РОП» (+1 дн) — тот же паттерн, что sendClientMessage: ставим ТОЛЬКО если у сделки ещё нет
+   *  своего шага (живой шаг менеджера не перетираем). */
+  async function requestDiscountApproval() {
+    if (!deal) return;
+    const dealId = deal.id;
+    const hadNoStep = !deal.nextStep && !deal.todo;
+    setGateBusy(true);
+    const ok = await requestApproval(dealId, "discount");
+    setGateBusy(false);
+    if (ok && hadNoStep) {
+      const nextStepAt = presetDateISO(1, Date.now());
+      onUpdateFields(dealId, { next_step: DISCOUNT_APPROVAL_NEXT_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    setDocMsg(ok ? "✅ Отправлено на одобрение РОП" : "⚠️ Не удалось отправить");
+  }
+
   function toggleStar() {
     if (!deal) return;
     onUpdateFields(deal.id, { starred: !deal.starred });
@@ -518,6 +584,30 @@ export function DealDrawerPreview({
                 <div className="mt-1 text-[12px] text-muted">
                   <span className="font-semibold text-accent-ink">{prob}%</span> · взвешенно ≈{" "}
                   {fmt(weightedAmount(deal, stageId))}
+                </div>
+              )}
+
+              {/* === СКИДОЧНЫЙ ГЕЙТ (слайс 9) — мягкий: предупреждает, НЕ блокирует другие
+                  кнопки (счёт/договор/сообщение остаются кликабельными). Прокси-маржа: реальная
+                  маржа заблокирована методикой ценообразования — сравниваем с Σ min_price×qty. === */}
+              {gate && (
+                <div
+                  role="status"
+                  className="mt-3 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+                >
+                  <div className="font-semibold">
+                    ⚠ Сумма ниже минимума по прайсу: {fmt(deal.amount)} при минимуме{" "}
+                    {fmt(gate.minTotal)}
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => void requestDiscountApproval()}
+                    disabled={gateBusy}
+                  >
+                    Запросить одобрение РОП
+                  </Button>
                 </div>
               )}
 

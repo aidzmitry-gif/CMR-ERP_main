@@ -31,6 +31,8 @@ vi.mock("@/lib/api", () => ({
   fetchLeadManagers: vi.fn().mockResolvedValue([]),
   fetchDocuments: vi.fn().mockResolvedValue([]), // слайс 6 (C) — батч-статус счёта колонки «Счёт»
   fetchContacts: vi.fn().mockResolvedValue([]), // ChannelButtons (drawer-preview) — FIX-R2 открывает drawer
+  fetchDealItems: vi.fn().mockResolvedValue([]), // слайс 9 — скидочный гейт (drawer-preview)
+  requestApproval: vi.fn(),
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
@@ -263,10 +265,11 @@ describe("DealsWorkspace (канбан)", () => {
 
   // --- П4 (слайс 4): группировка «По датам действий» ---
 
-  it("группа «По датам действий» показывает сделку в бакете «Без даты» (нет next_step_at)", () => {
+  it("группа «По датам действий» показывает сделку в бакете «Без даты» (нет next_step_at)", async () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByTitle("По датам действий"));
-    expect(screen.getByText("Без даты")).toBeInTheDocument();
+    // дат-вид гейтится гидрационным `now` (ставится микротаском) — ждём появления
+    expect(await screen.findByText("Без даты")).toBeInTheDocument();
     // «Просрочено» встречается и как заголовок бакета, и как чип на карточке CRM-2
     expect(screen.getAllByText("Просрочено").length).toBeGreaterThan(0);
     expect(screen.getByText("ООО Доска")).toBeInTheDocument(); // карточка всё ещё видна

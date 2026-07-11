@@ -15,6 +15,8 @@ vi.mock("@/lib/api", () => ({
   fetchStock: vi.fn().mockResolvedValue([]),
   sendMessage: vi.fn(),
   aiDraftReply: vi.fn(),
+  fetchDealItems: vi.fn().mockResolvedValue([]),
+  requestApproval: vi.fn(),
 }));
 vi.mock("@/lib/contracts-api", () => ({
   fetchContractTemplates: vi.fn().mockResolvedValue([]),
@@ -67,6 +69,7 @@ function renderDrawer(onUpdateFields = vi.fn(), dealOverride: Deal = deal) {
 beforeEach(() => {
   vi.clearAllMocks();
   mock(api.fetchDocuments).mockResolvedValue([]);
+  mock(api.fetchDealItems).mockResolvedValue([]);
   mock(contractsApi.fetchContractTemplates).mockResolvedValue([]);
   vi.stubGlobal(
     "open",
@@ -454,6 +457,90 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
 
     expect(await screen.findByText("Нужны проведённый счёт и согласованный договор")).toBeInTheDocument();
+    expect(onUpdateFields).not.toHaveBeenCalled();
+  });
+});
+
+describe("DealDrawerPreview — слайс 9: мягкий скидочный гейт (защита прибыли)", () => {
+  // deal.amount = 1000 (см. shared `deal` выше).
+  const itemBelowMin = {
+    id: 1,
+    sku_id: 10,
+    code: "A1",
+    title: "Товар А",
+    unit: "шт",
+    qty: 10,
+    last_price: 150,
+    min_price: 150, // Σ = 10×150 = 1500 > 1000 — сумма сделки ниже минимума по прайсу
+  };
+  const itemAtMin = {
+    id: 1,
+    sku_id: 10,
+    code: "A1",
+    title: "Товар А",
+    unit: "шт",
+    qty: 5,
+    last_price: 150,
+    min_price: 150, // Σ = 5×150 = 750 <= 1000 — минимум соблюдён, гейта нет
+  };
+
+  it("плашка рендерится, когда сумма сделки ниже Σ(min_price × qty)", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    renderDrawer();
+    expect(await screen.findByText(/Сумма ниже минимума по прайсу/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Запросить одобрение РОП" })).toBeInTheDocument();
+  });
+
+  it("плашка НЕ рендерится, когда сумма сделки на уровне минимума или выше", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemAtMin]);
+    renderDrawer();
+    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1"));
+    expect(screen.queryByText(/Сумма ниже минимума по прайсу/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Запросить одобрение РОП" })).toBeNull();
+  });
+
+  it("плашка НЕ рендерится при пустых позициях сделки", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([]);
+    renderDrawer();
+    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1"));
+    expect(screen.queryByText(/Сумма ниже минимума по прайсу/)).toBeNull();
+  });
+
+  it("клик «Запросить одобрение РОП» → requestApproval(id, discount); успех (у сделки нет шага) → тост + авто-шаг", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    mock(api.requestApproval).mockResolvedValue(true);
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(await screen.findByRole("button", { name: "Запросить одобрение РОП" }));
+
+    expect(await screen.findByText("✅ Отправлено на одобрение РОП")).toBeInTheDocument();
+    expect(api.requestApproval).toHaveBeenCalledWith("1", "discount");
+    expect(onUpdateFields).toHaveBeenCalledWith(
+      "1",
+      expect.objectContaining({
+        next_step: "Дождаться одобрения РОП",
+        next_step_at: expect.any(String),
+      }),
+    );
+  });
+
+  it("успех при уже назначенном шаге — тост БЕЗ авто-шага, живой шаг не перетираем", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    mock(api.requestApproval).mockResolvedValue(true);
+    const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
+    const { onUpdateFields } = renderDrawer(vi.fn(), dealWithStep);
+    fireEvent.click(await screen.findByRole("button", { name: "Запросить одобрение РОП" }));
+
+    expect(await screen.findByText("✅ Отправлено на одобрение РОП")).toBeInTheDocument();
+    expect(onUpdateFields).not.toHaveBeenCalled();
+  });
+
+  it("ошибка → тост «⚠️ Не удалось отправить», шаг не ставится", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    mock(api.requestApproval).mockResolvedValue(false);
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(await screen.findByRole("button", { name: "Запросить одобрение РОП" }));
+
+    expect(await screen.findByText("⚠️ Не удалось отправить")).toBeInTheDocument();
     expect(onUpdateFields).not.toHaveBeenCalled();
   });
 });

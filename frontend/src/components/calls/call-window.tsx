@@ -310,18 +310,22 @@ export function CallWindow({
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
     setBusy(true);
-    const { ok, message, renderUrl } = await issueDocument(ctx.dealId, "invoice");
-    setBusy(false);
-    if (win && ok && renderUrl) win.location.href = renderUrl;
-    else win?.close();
-    if (ok) {
-      void updateDeal(ctx.dealId, {
-        next_step: INVOICE_NEXT_STEP,
-        next_step_at: presetDateISO(3, Date.now()),
-      });
-      flash(`${message} · Шаг: Проверить оплату (3 дн)`);
-    } else {
-      flash(message);
+    try {
+      const { ok, message, renderUrl } = await issueDocument(ctx.dealId, "invoice");
+      if (win && ok && renderUrl) win.location.href = renderUrl;
+      else win?.close();
+      if (ok) {
+        void updateDeal(ctx.dealId, {
+          next_step: INVOICE_NEXT_STEP,
+          next_step_at: presetDateISO(3, Date.now()),
+        });
+        flash(`${message} · Шаг: Проверить оплату (3 дн)`);
+      } else {
+        flash(message);
+      }
+    } finally {
+      // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
+      setBusy(false);
     }
   }
 

@@ -9,6 +9,7 @@ import {
   dealStepText,
   daysInStage,
   daysUntilDate,
+  discountGate,
   ensureLostStage,
   focusQueue,
   groupByDateBucket,
@@ -571,5 +572,62 @@ describe("invoiceBadge (слайс 6, C)", () => {
       label: "💳 истекает 5д",
       tone: "neutral",
     });
+  });
+});
+
+describe("discountGate (слайс 9)", () => {
+  it("пустой список позиций — null (гейта нет)", () => {
+    expect(discountGate([], 1000)).toBeNull();
+  });
+
+  it("все min_price=null — null (нет ни одного справочного минимума)", () => {
+    expect(
+      discountGate(
+        [
+          { qty: 2, min_price: null },
+          { qty: 1, min_price: null },
+        ],
+        100,
+      ),
+    ).toBeNull();
+  });
+
+  it("ровно на границе (amount === minTotal) — null, граница не нарушение", () => {
+    // 2×100 + 1×50 = 250
+    expect(
+      discountGate(
+        [
+          { qty: 2, min_price: 100 },
+          { qty: 1, min_price: 50 },
+        ],
+        250,
+      ),
+    ).toBeNull();
+  });
+
+  it("amount ниже минимума — корректные minTotal/gap", () => {
+    // 2×100 + 1×50 = 250, amount=200 → gap=50
+    expect(
+      discountGate(
+        [
+          { qty: 2, min_price: 100 },
+          { qty: 1, min_price: 50 },
+        ],
+        200,
+      ),
+    ).toEqual({ minTotal: 250, gap: 50 });
+  });
+
+  it("частичные min_price — считает только позиции с известным минимумом", () => {
+    // известна только 1-я позиция: 3×40 = 120; 2-я (min_price=null) не участвует в сумме
+    expect(
+      discountGate(
+        [
+          { qty: 3, min_price: 40 },
+          { qty: 5, min_price: null },
+        ],
+        100,
+      ),
+    ).toEqual({ minTotal: 120, gap: 20 });
   });
 });

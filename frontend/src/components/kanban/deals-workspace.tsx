@@ -1651,13 +1651,13 @@ export function DealsWorkspace({
           </div>
         </div>
 
-        {view === "board" && groupBy === "dates" ? (
+        {view === "board" && groupBy === "dates" && now != null ? (
           /* П4: группировка по датам действий (next_step_at) — честные бакеты, без drag&drop
            * (перенос между бакетами = смена next_step_at, не текущее действие карточки).
            * Как в эталоне (sales-board-mockup.html): группировка выходит из стопки секций
            * «Все вместе» в один плоский срез — flatDeals уже учитывает combinedStages. */
           <div className="mt-3 flex gap-4 overflow-x-auto pb-2 thin-scroll">
-            {groupByDateBucket(flatDeals.map((f) => f.deal), now ?? Date.now()).map((bucket) => (
+            {groupByDateBucket(flatDeals.map((f) => f.deal), now).map((bucket) => (
               <DateColumn key={bucket.id} bucket={bucket} fmt={fmt}>
                 {bucket.deals.map((deal) => {
                   const found = findDeal(deal.id);
@@ -1872,11 +1872,15 @@ export function DealsWorkspace({
               : p,
           );
           void updateDealStage(dealId, stageId);
-          // D (слайс 4): авто-пресет, если целевая стадия открыта и шага ещё нет. ponytail:
-          // previewDeal (снимок выше) не подхватит свежий next_step, пока drawer не переоткроют —
-          // карточка на доске обновится сразу через handleNextStep→setStages.
+          // D (слайс 4): авто-пресет, если целевая стадия открыта и шага ещё нет.
           if (found && shouldAutoAssignNextStep(found, stageId)) {
-            handleNextStep(dealId, autoNextStepPatch(stageId));
+            const patch = autoNextStepPatch(stageId);
+            handleNextStep(dealId, patch);
+            // Синхронизируем и previewDeal: иначе «Написать клиенту» из ещё открытого
+            // drawer видел бы пустой шаг и молча перетирал только что назначенный (верификация арки)
+            setPreviewDeal((p) =>
+              p && p.id === dealId ? { ...p, nextStep: patch.text ?? undefined, nextStepAt: patch.atISO ?? undefined } : p,
+            );
           }
         }}
         onUpdateFields={(dealId, fields) => {
@@ -1887,6 +1891,13 @@ export function DealsWorkspace({
           // жили старой датой до перезагрузки (ревью f4f825d)
           if ("next_step_at" in fields)
             camel.nextStepAt = fields.next_step_at == null ? undefined : String(fields.next_step_at);
+          // Запись шага гасит legacy-todo, как handleNextStep/patchSectionNextStep, — иначе
+          // dealStepText показывал бы старый todo при новой дате (верификация арки; mock-данные)
+          if ("next_step" in fields || "next_step_at" in fields) {
+            camel.todo = undefined;
+            camel.actionDate = undefined;
+            camel.actionTime = undefined;
+          }
           if ("starred" in fields) camel.starred = Boolean(fields.starred);
           if ("priority" in fields)
             camel.priority = fields.priority as Deal["priority"];
