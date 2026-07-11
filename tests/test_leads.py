@@ -906,3 +906,59 @@ async def test_lead_plan_rejects_negative_target(session, api):
         json={"leads_target": -1, "qualified_target": 8, "converted_target": 3, "reaction_target_min": 15},
     )
     assert r.status_code == 422
+
+
+# --- Цикл 6: конвейер — «Разобрать целевых» одним действием ---
+
+
+async def test_express_bulk_routes_targets_skips_non_targets(session, api):
+    """POST /leads/express-bulk: целевые новые → routed; нецелевые — пропущены (не тронуты)."""
+    target = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Целевой", "phone": "+375291110001",
+                "email": "t@bulk.by", "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 20 тонн, срочно в Минск с доставкой",
+            },
+        )
+    ).json()
+    trash = (await api.post("/leads", json={"source": "phone", "message": "?"})).json()
+
+    r = await api.post("/leads/express-bulk")
+    assert r.status_code == 200
+    body = r.json()
+    assert target["id"] in body["expressed"]
+    assert body["skipped_non_target"] >= 1
+
+    # целевой распределён и назначен менеджер; нецелевой остался new
+    got_target = (await api.get(f"/leads/{target['id']}")).json()
+    assert got_target["status"] == "routed" and got_target["assigned_to"]
+    assert (await api.get(f"/leads/{trash['id']}")).json()["status"] == "new"
+
+
+async def test_express_bulk_balances_load_within_batch(session, api):
+    """Пачка целевых без узкой специализации балансируется между менеджерами (autoflush видит routed).
+
+    Регион/продукт пустые → под правила подходят ВСЕ менеджеры (catch-all), поэтому загрузка
+    размазывается, а не сваливается на одного (при узкой специализации все ушли бы одному — норм)."""
+    ids = []
+    for i in range(3):
+        lead = (
+            await api.post(
+                "/leads",
+                json={
+                    "source": "site", "company": f"ООО Клиент{i}", "phone": f"+37529222000{i}",
+                    "email": f"m{i}@bulk.by",
+                    "message": "Здравствуйте, интересует поставка, пришлите условия и цены, объёмы обсудим",
+                },
+            )
+        ).json()
+        ids.append(lead["id"])
+
+    r = await api.post("/leads/express-bulk")
+    assert r.status_code == 200
+    assert set(ids).issubset(set(r.json()["expressed"]))
+    # не все три ушли одному менеджеру — загрузка балансируется внутри пачки
+    owners = {(await api.get(f"/leads/{i}")).json()["assigned_to"] for i in ids}
+    assert len(owners) >= 2

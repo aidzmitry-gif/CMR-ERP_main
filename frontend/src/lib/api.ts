@@ -1413,6 +1413,24 @@ function mapLeadPlan(p: ApiLeadPlan): LeadPlan {
   };
 }
 
+/** Результат «Разобрать целевых» (Цикл 6): POST /leads/express-bulk. */
+export interface LeadBulkExpressResult {
+  expressed: number[]; // id распределённых лидов
+  skippedNonTarget: number; // нецелевые новые лиды — пропущены (разбирают вручную)
+}
+
+/** Разобрать все целевые новые лиды одним действием (Цикл 6). null — при сбое API. */
+export async function expressBulkLeads(): Promise<LeadBulkExpressResult | null> {
+  try {
+    const res = await fetch(`/api/leads/express-bulk`, { method: "POST" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { expressed: number[]; skipped_non_target: number };
+    return { expressed: body.expressed, skippedNonTarget: body.skipped_non_target };
+  } catch {
+    return null;
+  }
+}
+
 /** План/факт лидоруба за сегодня (Цикл 5): GET /leads/plan. null — если API недоступен. */
 export async function fetchLeadPlan(): Promise<LeadPlan | null> {
   try {

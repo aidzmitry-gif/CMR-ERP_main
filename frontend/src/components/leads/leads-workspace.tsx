@@ -10,6 +10,7 @@ import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import {
   convertLead,
   createLead,
+  expressBulkLeads,
   expressLead,
   fetchLeadManagers,
   fetchLeadPlan,
@@ -1003,6 +1004,59 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   }
 
   const pending = leads.filter((l) => l.status === "new").length;
+  // Конвейер (Цикл 6): целевые новые лиды — кандидаты на «Разобрать целевых» одним действием.
+  const eligibleNew = leads.filter((l) => l.status === "new" && l.score >= EXPRESS_SCORE_THRESHOLD);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  async function onBulkExpress() {
+    if (bulkBusy) return;
+    if (eligibleNew.length === 0) {
+      setNote("Целевых новых лидов нет — разбирать нечего");
+      window.setTimeout(() => setNote(""), 3000);
+      return;
+    }
+    setBulkBusy(true);
+    const res = await expressBulkLeads();
+    setBulkBusy(false);
+    if (!res) {
+      setNote("Не удалось разобрать лиды — попробуйте ещё раз");
+      window.setTimeout(() => setNote(""), 3000);
+      return;
+    }
+    await refresh(); // статусы поменялись у пачки — перезагружаем приём целиком
+    refreshPlan();
+    const n = res.expressed.length;
+    setNote(
+      n > 0
+        ? `Разобрано целевых: ${n}${res.skippedNonTarget ? ` · ${res.skippedNonTarget} нецелевых оставлено вручную` : ""}`
+        : "Целевых новых лидов нет",
+    );
+    window.setTimeout(() => setNote(""), 4000);
+  }
+
+  // Горячая клавиша E — «Разобрать целевых» (конвейер). e.code=KeyE независим от раскладки
+  // (лат./кир.); игнорируем, когда фокус в поле ввода. Подписка один раз, вызов через ref.
+  const bulkRef = useRef(onBulkExpress);
+  bulkRef.current = onBulkExpress;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.code === "KeyE" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        void bulkRef.current();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // живые срезы из реальных лидов (без фейковых план/факт — у лида нет даты)
   const byStatus: Record<LeadStatus, Lead[]> = {
@@ -1066,6 +1120,14 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
             >
               <Mail size={15} /> Письмо
+            </button>
+            <button
+              onClick={onBulkExpress}
+              disabled={bulkBusy || eligibleNew.length === 0}
+              title="Квалифицировать и распределить все целевые новые лиды (клавиша E)"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-money bg-money-soft px-3 py-2 text-sm font-semibold text-money hover:brightness-105 disabled:opacity-50"
+            >
+              {bulkBusy ? "Разбираю…" : `⚡ Разобрать целевых (${eligibleNew.length})`}
             </button>
             <button
               onClick={() => setModalOpen(true)}
