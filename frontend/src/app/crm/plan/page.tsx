@@ -1,10 +1,6 @@
-import { AppShell } from "@/components/app-shell";
-import { PlanBuilder } from "@/components/plan/plan-builder";
+import { redirect } from "next/navigation";
 
+// Старый URL конструктора плана — редиректим на новый экран (табы «Собрать план» + «Согласование»).
 export default function Page() {
-  return (
-    <AppShell crumbs={["CRM", "Конструктор плана"]}>
-      <PlanBuilder />
-    </AppShell>
-  );
+  redirect("/crm/deals/planning");
 }

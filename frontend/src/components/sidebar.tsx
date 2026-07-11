@@ -67,7 +67,7 @@ const MODULES: ModuleItem[] = [
       { label: "Постоянные клиенты", href: "/crm/regular" },
       { label: "Статус отгрузки", href: "/crm/shipments" },
       { label: "Валовая прибыль", href: "/crm/margin" },
-      { label: "Конструктор плана", href: "/crm/plan" },
+      { label: "План продаж", href: "/crm/deals/planning" },
       { label: "РОП · Обзор", href: "/crm/rop" },
       { label: "РОП · Планирование", href: "/crm/rop/planning" },
       { label: "РОП · Темп", href: "/crm/rop/pace" },

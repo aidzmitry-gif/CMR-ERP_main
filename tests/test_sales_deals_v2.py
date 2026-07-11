@@ -1110,3 +1110,114 @@ async def test_journal_honest_margin_without_facade(session, api):
     assert row["gross_profit"] is None
     assert row["margin_pct"] is None
     assert row["margin_reason"]
+
+
+# ── Конструктор месячного плана продавца (GET /plan-sources, PUT /plan-items) ────
+
+async def test_plan_sources_regulars_cycle_and_single_order(session, api):
+    """≥2 won-заказа одного контрагента → цикл перезаказа (среднее интервалов) и ожидание
+    следующего в месяце; контрагент с 1 заказом — cycle_days/expected пусты, in_month=False."""
+    from sqlalchemy import select
+
+    from modules.sales.models import Deal
+
+    d1 = await _new_deal(api, "REG-1", counterparty="Постоянный", amount=1000)
+    await api.post(f"/sales/deals/{d1['id']}/win")
+    d2 = await _new_deal(api, "REG-2", counterparty="Постоянный", amount=1000)
+    await api.post(f"/sales/deals/{d2['id']}/win")
+    obj1 = (await session.execute(select(Deal).where(Deal.id == d1["id"]))).scalar_one()
+    obj2 = (await session.execute(select(Deal).where(Deal.id == d2["id"]))).scalar_one()
+    obj1.closed_date = "10.01.2026"
+    obj2.closed_date = "10.03.2026"
+
+    d3 = await _new_deal(api, "REG-3", counterparty="Одноразовый", amount=500)
+    await api.post(f"/sales/deals/{d3['id']}/win")
+    obj3 = (await session.execute(select(Deal).where(Deal.id == d3["id"]))).scalar_one()
+    obj3.closed_date = "01.02.2026"
+    await session.commit()
+
+    rows = (await api.get("/sales/plan-sources", params={"month": "2026-05"})).json()
+    by_cp = {r["counterparty"]: r for r in rows["regulars"]}
+
+    regular = by_cp["Постоянный"]
+    assert regular["orders_count"] == 2
+    assert 58 <= regular["cycle_days"] <= 60
+    assert regular["expected"].startswith("2026-05")
+    assert regular["in_month"] is True
+
+    single = by_cp["Одноразовый"]
+    assert single["orders_count"] == 1
+    assert single["cycle_days"] is None
+    assert single["expected"] is None
+    assert single["in_month"] is False
+
+
+async def test_plan_sources_committed_open_only(api):
+    """committed отдаёт ОТКРЫТУЮ сделку с expected_close_date в месяце; won-сделку — нет."""
+    open_deal = await _new_deal(api, "CMT-1", amount=800, expected_close_date="15.08.2026")
+    won_deal = await _new_deal(api, "CMT-2", amount=900, expected_close_date="20.08.2026")
+    await api.post(f"/sales/deals/{won_deal['id']}/win")
+
+    rows = (await api.get("/sales/plan-sources", params={"month": "2026-08"})).json()
+    refs = {c["ref"] for c in rows["committed"]}
+    assert f"deal:{open_deal['id']}" in refs
+    assert f"deal:{won_deal['id']}" not in refs
+
+
+async def test_plan_items_replace_all_snapshot(api):
+    """PUT /plan-items — снапшот-замена: 2 строки → saved_items==2; 1 строка → стало 1."""
+    owner_id, period = 501, "2026-08"
+    row_a = {"source": "committed", "ref": "deal:1", "title": "A", "when_label": "закрытие ~15.08",
+             "revenue": 1000, "gross": 200, "probability": 70, "enabled": True}
+    row_b = {"source": "regular", "ref": "cp:Клиент", "title": "Клиент", "when_label": "",
+             "revenue": 500, "gross": 100, "probability": 60, "enabled": True}
+
+    put1 = await api.put(
+        "/sales/plan-items", params={"owner_id": owner_id, "period_key": period},
+        json=[row_a, row_b],
+    )
+    assert put1.status_code == 200
+    assert len(put1.json()) == 2
+
+    src1 = (await api.get(
+        "/sales/plan-sources", params={"month": period, "owner_id": owner_id}
+    )).json()
+    assert len(src1["saved_items"]) == 2
+
+    put2 = await api.put(
+        "/sales/plan-items", params={"owner_id": owner_id, "period_key": period}, json=[row_a],
+    )
+    assert len(put2.json()) == 1
+
+    src2 = (await api.get(
+        "/sales/plan-sources", params={"month": period, "owner_id": owner_id}
+    )).json()
+    assert len(src2["saved_items"]) == 1
+
+
+async def test_plan_sources_base_gross_from_approved_plan(api):
+    """base_gross — согласованный (approved) PlanTarget gross_profit за месяц владельца."""
+    owner_id, month = 502, "2026-09"
+    plan = (await api.post(
+        "/sales/plans",
+        json={"owner_id": owner_id, "metric": "gross_profit", "period_type": "month",
+              "period_key": month, "target": 15000},
+    )).json()
+    await api.post(f"/sales/plans/{plan['id']}/submit")
+    await api.post(f"/sales/plans/{plan['id']}/decide", json={"approved": True})
+
+    src = (await api.get(
+        "/sales/plan-sources", params={"month": month, "owner_id": owner_id}
+    )).json()
+    assert src["base_gross"] == 15000.0
+
+
+async def test_plan_sources_invalid_month_422(api):
+    """Кривой month → 422 на GET /plan-sources и на PUT /plan-items (period_key)."""
+    bad_get = await api.get("/sales/plan-sources", params={"month": "2026-13"})
+    assert bad_get.status_code == 422
+
+    bad_put = await api.put(
+        "/sales/plan-items", params={"owner_id": 1, "period_key": "not-a-month"}, json=[]
+    )
+    assert bad_put.status_code == 422
