@@ -120,6 +120,22 @@ function autoNextStepPatch(stageId: string): NextStepPatch {
   return { text: preset.label, atISO: presetDateISO(preset.offsetDays, Date.now()) };
 }
 
+/** Цикл 16: канонический путь «Выиграна» — `POST /sales/deals/{id}/win` (SALES-40): бэк сам
+ *  проставляет `closed_date`, переводит стадию в `won` (через `record_stage`) и эмитит
+ *  `sales.deal.won` (→ audit, план/факт по закрытым датам, дальше по цепочке в исполнение).
+ *  Голый PATCH стадии (`updateDealStage`) ничего из этого не делает — сделка «зависает»
+ *  выигранной только на фронте. Локально (не в api.ts — хотспот другой полосы), тот же
+ *  паттерн прокси-фетча, что margin-forecast (цикл 15, см. ниже в DealsWorkspace). 409
+ *  (сделка уже была won) — идемпотентно: карточка и так уже в won локально, не ошибка. */
+async function winDeal(dealId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sales/deals/${dealId}/win`, { method: "POST", cache: "no-store" });
+    return res.ok || res.status === 409;
+  } catch {
+    return false;
+  }
+}
+
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
 const CARD_CAP = 50;
 
@@ -539,7 +555,14 @@ function FunnelSection({
     if (!targetStage) return;
     const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
-    void updateDealStage(dealId, targetStage);
+    // Цикл 16: won — канонический бэк-путь POST /win (closed_date + sales.deal.won), не голый
+    // PATCH стадии; endsWith — тот же охват, что isClosedStageId/combinedCardExtras выше (won
+    // секции могут прийти с префиксом кода воронки). Остальные стадии — как раньше, PATCH.
+    if (targetStage.endsWith("won")) {
+      void winDeal(dealId);
+    } else {
+      void updateDealStage(dealId, targetStage);
+    }
     // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
     // пресет стадии (не перетираем сделку с уже назначенным шагом).
     if (found && shouldAutoAssignNextStep(found, targetStage)) {
@@ -1186,7 +1209,14 @@ export function DealsWorkspace({
 
     setStages((prev) => moveDealToStage(prev, dealId, targetStage));
 
-    void updateDealStage(dealId, targetStage);
+    // Цикл 16: won — канонический бэк-путь POST /win (закрывает closed_date + эмитит
+    // sales.deal.won; голый PATCH стадии этого не делает — сделка «зависает» won только на
+    // фронте). Остальные стадии — как раньше, через PATCH стадии.
+    if (targetStage.endsWith("won")) {
+      void winDeal(dealId);
+    } else {
+      void updateDealStage(dealId, targetStage);
+    }
 
     // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
     // пресет стадии (сделку с уже назначенным шагом не перетираем).
@@ -2099,7 +2129,14 @@ export function DealsWorkspace({
               ? (stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? p)
               : p,
           );
-          void updateDealStage(dealId, stageId);
+          // Цикл 16: won из стадия-мувера (select) — тот же канонический /win, что кнопка
+          // «Выиграна» ниже (onWin); без этой ветки выбор «Успех» в списке стадий тихо
+          // проскакивал мимо closed_date/sales.deal.won через голый PATCH.
+          if (stageId.endsWith("won")) {
+            void winDeal(dealId);
+          } else {
+            void updateDealStage(dealId, stageId);
+          }
           // D (слайс 4): авто-пресет, если целевая стадия открыта и шага ещё нет.
           if (found && shouldAutoAssignNextStep(found, stageId)) {
             const patch = autoNextStepPatch(stageId);
@@ -2144,7 +2181,8 @@ export function DealsWorkspace({
         }}
         onWin={(dealId) => {
           setStages((prev) => moveDealToStage(prev, dealId, "won"));
-          void updateDealStage(dealId, "won");
+          // Цикл 16: канонический /win (closed_date + sales.deal.won), не голый PATCH стадии.
+          void winDeal(dealId);
           setPreviewDeal(null);
         }}
         onLose={(dealId) => {

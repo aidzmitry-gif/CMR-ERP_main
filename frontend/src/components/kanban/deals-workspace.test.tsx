@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -76,6 +76,19 @@ import { nextStepPreset } from "@/lib/sales-stages";
 import type { Stage } from "@/lib/types";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
+/** Цикл 16: won-переход зовёт канонический `POST /win` через сырой `fetch` (winDeal в
+ *  deals-workspace.tsx — НЕ через api.ts, поэтому не покрыт моком `@/lib/api` выше). Стаб
+ *  per-test; `afterEach` ниже возвращает нативный fetch. */
+function stubWinFetch(status = 200) {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: status >= 200 && status < 300, status });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const stages: Stage[] = [
   {
@@ -174,11 +187,29 @@ describe("DealsWorkspace (канбан)", () => {
     await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("month"));
   });
 
-  it("drag&drop переносит сделку и сохраняет стадию", async () => {
+  it("drag&drop в won зовёт канонический POST /win, не голый PATCH стадии (цикл 16)", async () => {
+    const fetchMock = stubWinFetch(200);
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByTestId("dnd-start")); // handleDragStart → activeDeal
-    fireEvent.click(screen.getByTestId("dnd-end")); // handleDragEnd → перенос + сохранение
-    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("1", "won"));
+    fireEvent.click(screen.getByTestId("dnd-end")); // handleDragEnd → перенос в "won"
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/sales/deals/1/win",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(api.updateDealStage).not.toHaveBeenCalled(); // won идёт мимо PATCH стадии
+    expect(within(screen.getByTestId("stage-column-won")).getByText("ООО Доска")).toBeInTheDocument();
+  });
+
+  it("409 от /win (сделка уже была won) — идемпотентно, карточка не откатывается (цикл 16)", async () => {
+    const fetchMock = stubWinFetch(409);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-start"));
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    // Оптимистичный перенос уже случился ДО фетча — 409 не должен откатывать карточку назад.
+    expect(within(screen.getByTestId("stage-column-won")).getByText("ООО Доска")).toBeInTheDocument();
   });
 
   it("drag без цели не сохраняет стадию", () => {
@@ -479,10 +510,11 @@ describe("DealsWorkspace (канбан)", () => {
   });
 
   it("D: dnd на won (закрытая стадия) — авто-шага нет, даже если у сделки его не было", async () => {
+    const fetchMock = stubWinFetch(200);
     render(<DealsWorkspace initialStages={stagesWithQual} initialKpis={[]} />);
     fireEvent.click(screen.getByTestId("dnd-start")); // "1" — без шага
     fireEvent.click(screen.getByTestId("dnd-end")); // → won
-    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledWith("1", "won"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/sales/deals/1/win", expect.anything()));
     expect(api.updateDeal).not.toHaveBeenCalled();
   });
 
