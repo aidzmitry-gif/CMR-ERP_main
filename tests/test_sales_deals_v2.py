@@ -1014,3 +1014,99 @@ async def test_repeat_last_order_ignores_newer_parallel_deal(api, session):
     items = (await api.get(f"/sales/deals/{middle['id']}/repeat-last-order")).json()
     # только позиции ПРЕДЫДУЩЕЙ сделки (first), не черновик более новой (newer)
     assert {i["code"] for i in items} == {"RLO-OLD"}
+
+
+# ── Журнал продаж (GET /sales/journal) ──────────────────────────────────────────
+
+async def test_journal_only_won_deals(api):
+    """Журнал отдаёт ТОЛЬКО won-сделки — активная и отказная в реестр не попадают."""
+    active = await _new_deal(api, "JRN-ACT", amount=100)
+    lost = await _new_deal(api, "JRN-LST", amount=200)
+    await api.post(f"/sales/deals/{lost['id']}/lose", json={"reason_code": "price"})
+    won = await _new_deal(api, "JRN-WON", amount=300)
+    await api.post(f"/sales/deals/{won['id']}/win")
+
+    rows = (await api.get("/sales/journal")).json()
+    ids = {r["deal_id"] for r in rows}
+    assert won["id"] in ids
+    assert active["id"] not in ids
+    assert lost["id"] not in ids
+
+
+async def test_journal_funnel_aware_repeat_clients(api):
+    """Сделка repeat_clients, выигранная через /win (стадия ``rp_won``, не литерал "won"),
+    попадает в журнал с funnel=repeat_clients — тот же класс бага, что Фикс 1 win/lose."""
+    await api.get("/sales/stages")  # материализовать канон всех воронок
+    deal = await _new_deal(api, "JRN-RP-1", stage="rp_request", funnel="repeat_clients", amount=500)
+    r = await api.post(f"/sales/deals/{deal['id']}/win")
+    assert r.json()["stage"] == "rp_won"
+
+    rows = (await api.get("/sales/journal")).json()
+    row = next(x for x in rows if x["deal_id"] == deal["id"])
+    assert row["funnel"] == "repeat_clients"
+
+
+async def test_journal_payment_paid_and_none(session, api):
+    """Оплаченный счёт → payment="paid"+invoice_number; сделка без счетов → payment="none"."""
+    from core.services.eventbus import EventContext
+    from modules.sales.events import on_payment_paid
+
+    paid_deal = await _new_deal(api, "JRN-PAY-1", amount=1000)
+    doc = (
+        await api.post(f"/sales/deals/{paid_deal['id']}/documents", json={"kind": "invoice"})
+    ).json()
+    await on_payment_paid({"ref": doc["number"]}, EventContext(session, None))
+    await session.commit()
+    await api.post(f"/sales/deals/{paid_deal['id']}/win")
+
+    unpaid_deal = await _new_deal(api, "JRN-PAY-2", amount=500)
+    await api.post(f"/sales/deals/{unpaid_deal['id']}/win")
+
+    rows = (await api.get("/sales/journal")).json()
+    paid_row = next(r for r in rows if r["deal_id"] == paid_deal["id"])
+    unpaid_row = next(r for r in rows if r["deal_id"] == unpaid_deal["id"])
+    assert paid_row["payment"] == "paid"
+    assert paid_row["invoice_number"] == doc["number"]
+    assert unpaid_row["payment"] == "none"
+    assert unpaid_row["invoice_number"] is None
+
+
+async def test_journal_sorted_by_closed_on_desc(session, api):
+    """Сортировка реестра: closed_on DESC (свежезакрытые — первыми)."""
+    from sqlalchemy import select
+
+    from modules.sales.models import Deal
+
+    old = await _new_deal(api, "JRN-OLD", amount=10)
+    await api.post(f"/sales/deals/{old['id']}/win")
+    new = await _new_deal(api, "JRN-NEW", amount=20)
+    await api.post(f"/sales/deals/{new['id']}/win")
+
+    old_obj = (await session.execute(select(Deal).where(Deal.id == old["id"]))).scalar_one()
+    new_obj = (await session.execute(select(Deal).where(Deal.id == new["id"]))).scalar_one()
+    old_obj.closed_date = "01.01.2026"
+    new_obj.closed_date = "10.07.2026"
+    await session.commit()
+
+    rows = (await api.get("/sales/journal")).json()
+    ids = [r["deal_id"] for r in rows if r["deal_id"] in (old["id"], new["id"])]
+    assert ids == [new["id"], old["id"]]  # DESC по closed_on
+
+
+async def test_journal_honest_margin_without_facade(session, api):
+    """Честная деградация: без фасада landed_cost margin_pct is None + margin_reason непустой
+    (НЕ 0 — дефолт тестового ядра, core.services.landed_cost is None, пока не подменён стендом)."""
+    from modules.sales.models import DealItem
+
+    sku = await _seed_sku(session, "JRN-SKU")
+    deal = await _new_deal(api, "JRN-MGN-1", counterparty="ООО Журнал", amount=400)
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1))
+    await session.commit()
+    await api.post(f"/sales/deals/{deal['id']}/win")
+
+    rows = (await api.get("/sales/journal")).json()
+    row = next(r for r in rows if r["deal_id"] == deal["id"])
+    assert row["revenue"] is None
+    assert row["gross_profit"] is None
+    assert row["margin_pct"] is None
+    assert row["margin_reason"]

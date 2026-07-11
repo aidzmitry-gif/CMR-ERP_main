@@ -55,7 +55,7 @@ const MODULES: ModuleItem[] = [
     Icon: Workflow,
     href: "/crm/deals",
     sub: [
-      { label: "Продажи" },
+      { label: "Продажи", href: "/crm/sales" },
       { label: "Лиды", href: "/crm/leads" },
       { label: "Клиенты" },
       { label: "Контакты" },
@@ -365,6 +365,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   }, [order, allowedSlugs]);
 
   const crmActive =
+    pathname.startsWith("/crm/sales") ||
     pathname.startsWith("/crm/deals") ||
     pathname.startsWith("/crm/leads") ||
     pathname.startsWith("/crm/calls") ||
