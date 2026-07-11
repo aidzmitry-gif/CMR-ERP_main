@@ -1143,6 +1143,7 @@ interface ApiLead {
   is_key?: boolean;
   counterparty_id?: number | null;
   customer_kind?: string;
+  revived_from_id?: number | null;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1175,6 +1176,7 @@ function mapLead(l: ApiLead): Lead {
     isKey: l.is_key ?? false,
     counterpartyId: l.counterparty_id ?? undefined,
     customerKind: l.customer_kind ?? "",
+    revivedFromId: l.revived_from_id ?? undefined,
   };
 }
 

@@ -270,6 +270,7 @@ export interface Lead {
   isKey?: boolean; // Цикл 9: ключевой (высокопотенциальный) лид — бейдж 🔑, приоритет маршрутизации
   counterpartyId?: number; // Цикл 10: эталон контрагента (golden record), если лид резолвнут в MDM
   customerKind?: string; // Цикл 10: "" новый | "existing" действующий клиент | "regular" постоянник
+  revivedFromId?: number; // Цикл 12: id ранее отклонённого лида того же контакта (память об отказе)
 }
 
 /** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.

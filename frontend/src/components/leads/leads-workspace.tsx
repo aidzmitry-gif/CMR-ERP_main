@@ -729,6 +729,14 @@ function LeadCard({
               🔑 ключевой
             </span>
           )}
+          {lead.revivedFromId != null && (
+            <span
+              title={`Контакт уже отклоняли ранее (лид №${lead.revivedFromId}) — проверьте историю`}
+              className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-700"
+            >
+              ♻ был отказ
+            </span>
+          )}
           {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
           <StatusBadge status={lead.status} />
         </div>

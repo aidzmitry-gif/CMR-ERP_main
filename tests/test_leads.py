@@ -1306,3 +1306,50 @@ async def test_reresolve_cold_lead_on_repeat_contact(session, api, services):
     got = (await api.get(f"/leads/{lead['id']}")).json()
     assert got["counterparty_id"] == cp.id
     assert got["customer_kind"] == "existing"
+
+
+# --- Цикл 12: непредусмотренные сценарии (конфликт компаний, реанимация отказа) ---
+
+
+def test_companies_conflict_predicate():
+    """Конфликт компаний: разные имена — да; подстрока/пусто — нет."""
+    from modules.leads.leads import companies_conflict
+
+    assert companies_conflict("ООО Ромашка", "ООО Стройторг") is True
+    assert companies_conflict("Ромашка", "ООО Ромашка") is False  # подстрока
+    assert companies_conflict("", "ООО Ромашка") is False  # пусто → дозаписываем
+    assert companies_conflict("ООО Ромашка", None) is False
+
+
+async def test_dedup_skips_different_company_same_phone(session, api):
+    """Тот же телефон, но другая компания → НЕ дубль (заводим отдельный лид, не портим чужой)."""
+    first = (
+        await api.post(
+            "/leads", json={"source": "site", "company": "ООО Первая", "phone": "+375295550000"}
+        )
+    ).json()
+    # тот же номер, но явно другая компания — 201 (новый лид), не 409
+    r = await api.post(
+        "/leads", json={"source": "site", "company": "ООО Вторая", "phone": "+375295550000"}
+    )
+    assert r.status_code == 201
+    assert r.json()["id"] != first["id"]
+
+    # а тот же номер БЕЗ конфликта компании (пустая) — по-прежнему дубль (409)
+    dup = await api.post("/leads", json={"source": "phone", "phone": "+375295550000"})
+    assert dup.status_code == 409
+
+
+async def test_lead_revived_from_rejected(session, api):
+    """Новый лид от ранее отклонённого контакта ссылается на тот отказ (revived_from_id)."""
+    rejected = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Реанимация", "phone": "+375296660000"})
+    ).json()
+    await api.post(f"/leads/{rejected['id']}/reject", json={"reason": "нет бюджета"})
+
+    # новое обращение того же телефона → отдельный лид со ссылкой на отказ
+    revived = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Реанимация", "phone": "80296660000"})
+    ).json()
+    assert revived["id"] != rejected["id"]
+    assert revived["revived_from_id"] == rejected["id"]
