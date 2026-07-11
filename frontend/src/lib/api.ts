@@ -1139,6 +1139,7 @@ interface ApiLead {
   items_total?: number;
   utm_source?: string;
   utm_campaign?: string;
+  is_key?: boolean;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1168,6 +1169,7 @@ function mapLead(l: ApiLead): Lead {
     itemsTotal: l.items_total ?? 0,
     utmSource: l.utm_source,
     utmCampaign: l.utm_campaign,
+    isKey: l.is_key ?? false,
   };
 }
 

@@ -705,6 +705,14 @@ function LeadCard({
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold tracking-wide text-faint">№ ЛИД-{lead.id}</span>
         <div className="flex items-center gap-1.5">
+          {lead.isKey && (
+            <span
+              title="Ключевой лид — высокий потенциал, приоритет и лучший закрывающий"
+              className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700"
+            >
+              🔑 ключевой
+            </span>
+          )}
           {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
           <StatusBadge status={lead.status} />
         </div>
@@ -1315,12 +1323,14 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-2">
             {COLUMNS.map((col) => {
-              // Колонка «Новые» (Цикл 8, SLA-эскалация): старые лиды — наверх, чтобы горящие
-              // по времени реакции разбирались первыми. Остальные колонки — прежний порядок.
+              // Колонка «Новые» (Цикл 8/9): ключевые лиды — в самый верх (макс. выигрыш), затем
+              // по времени ожидания (горящие по SLA первыми). Остальные колонки — прежний порядок.
               const items =
                 col.key === "new"
                   ? [...byStatus[col.key]].sort(
-                      (a, b) => (waitingMinutes(b.createdAt) ?? 0) - (waitingMinutes(a.createdAt) ?? 0),
+                      (a, b) =>
+                        Number(b.isKey ?? false) - Number(a.isKey ?? false) ||
+                        (waitingMinutes(b.createdAt) ?? 0) - (waitingMinutes(a.createdAt) ?? 0),
                     )
                   : byStatus[col.key];
               return (

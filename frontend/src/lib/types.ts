@@ -267,6 +267,7 @@ export interface Lead {
   itemsTotal?: number; // Цикл 3: сумма КП (qty*price), BYN
   utmSource?: string; // Цикл 4: UTM-источник рекламы, приведшей лид
   utmCampaign?: string; // Цикл 4: UTM-кампания — чип на карточке лида
+  isKey?: boolean; // Цикл 9: ключевой (высокопотенциальный) лид — бейдж 🔑, приоритет маршрутизации
 }
 
 /** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.

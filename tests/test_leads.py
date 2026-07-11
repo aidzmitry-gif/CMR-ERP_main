@@ -1100,3 +1100,44 @@ async def test_manager_performance_counts_converted_in_volume(session, api):
     rate, volume = perf["Иванов И.И."]
     assert volume == 2  # оба переданных лида в объёме, включая конвертнутый
     assert rate == 0.5  # 1 из 2 доведён
+
+
+# --- Цикл 9: ключевые лиды (высокий потенциал → лучший закрывающий, макс. выигрыш) ---
+
+
+def test_is_key_lead_signals():
+    """Ключевой лид: высокий балл, тендер или маркер объёма в тексте."""
+    from modules.leads.leads import is_key_lead
+    from modules.leads.models import Lead
+
+    assert is_key_lead(Lead(source="site", score=75)) is True  # высокий балл
+    assert is_key_lead(Lead(source="tender", score=10)) is True  # тендер
+    assert is_key_lead(Lead(source="site", score=10, message="нужно 40 тонн листа")) is True  # объём
+    assert is_key_lead(Lead(source="site", score=30, product="лист", message="цена?")) is False
+
+
+def test_route_lead_key_ignores_load_penalty():
+    """Ключевой лид уходит лучшему закрывающему БЕЗ штрафа загрузки (макс. выигрыш)."""
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
+
+    generic = Lead(source="site")
+    # Иванов лучший по конверсии, но перегружен; обычный лид ушёл бы Петрову (штраф загрузки),
+    # ключевой — Иванову (штраф отключён).
+    loads = {"Иванов И.И.": 20, "Петров П.П.": 0, "Сидоров С.С.": 0}
+    perf = {"Иванов И.И.": 0.6, "Петров П.П.": 0.4, "Сидоров С.С.": 0.0}
+    assert route_lead(generic, loads, False, perf, key=False)[0] == "Петров П.П."
+    assert route_lead(generic, loads, False, perf, key=True)[0] == "Иванов И.И."
+
+
+async def test_key_lead_exposed_in_api(session, api):
+    """LeadOut несёт is_key — тендерный лид помечается ключевым."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "tender", "company": "РУП Энерго", "region": "Гомель", "product": "оборудование"},
+        )
+    ).json()
+    assert lead["is_key"] is True
+    listed = (await api.get("/leads")).json()
+    assert next(le for le in listed if le["id"] == lead["id"])["is_key"] is True
