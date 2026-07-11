@@ -135,6 +135,47 @@ async def test_lead_attachment_rejects_bad_type_and_oversize(session, api, monke
     assert (await api.get(f"/leads/{lead_id}/attachments")).json() == []
 
 
+def test_attachment_predecode_size_guard(monkeypatch):
+    """Огромный data_url отсекается ПО ДЛИНЕ base64 до b64decode (защита RAM, граница доверия)."""
+    import pytest
+
+    import modules.leads.storage as storage
+
+    monkeypatch.setattr(storage, "_MAX_B64_CHARS", 8)  # искусственно низкий потолок
+    with pytest.raises(storage.AttachmentRejected):
+        storage.decode_data_url("data:application/pdf;base64," + "QUJDREVGR0hJSg==")
+
+
+async def test_lead_attachment_delete_removes_file(session, api, monkeypatch, tmp_path):
+    """Удаление вложения: строка БД и файл на диске уходят (ошибочный скан с ПДн удаляем)."""
+    import base64
+
+    import modules.leads.storage as storage
+
+    data_dir = tmp_path / "leads-attachments"
+    monkeypatch.setattr(storage, "_DATA_DIR", data_dir)
+
+    lead = (await api.post("/leads", json={"source": "tender", "company": "РУП Удаление"})).json()
+    lead_id = lead["id"]
+    data_url = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 x\n%%EOF").decode()
+    att = (
+        await api.post(
+            f"/leads/{lead_id}/attachments",
+            json={"filename": "ошибка.pdf", "data_url": data_url, "source": "tender"},
+        )
+    ).json()
+    lead_dir = data_dir / str(lead_id)
+    assert any(lead_dir.iterdir()), "файл записан на диск"
+
+    r = await api.delete(f"/leads/{lead_id}/attachments/{att['id']}")
+    assert r.status_code == 204
+    assert (await api.get(f"/leads/{lead_id}/attachments")).json() == []
+    assert not any(lead_dir.iterdir()), "файл удалён с диска"
+
+    # повторное удаление / чужой лид — 404 (идемпотентно, без утечки)
+    assert (await api.delete(f"/leads/{lead_id}/attachments/{att['id']}")).status_code == 404
+
+
 async def test_lead_intake_emits_event(session, api):
     r = await api.post(
         "/leads",

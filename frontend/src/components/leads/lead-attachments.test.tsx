@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({
   fetchLeadAttachments: vi.fn(),
   uploadLeadAttachment: vi.fn(),
+  deleteLeadAttachment: vi.fn(),
   leadAttachmentDownloadUrl: (leadId: number, attachmentId: number) =>
     `/api/leads/${leadId}/attachments/${attachmentId}/download`,
 }));
@@ -81,5 +82,35 @@ describe("LeadAttachments", () => {
 
     await waitFor(() => expect(api.uploadLeadAttachment).toHaveBeenCalledWith(7, file));
     expect(await screen.findByText("manual.png")).toBeInTheDocument();
+  });
+
+  it("удаление вложения после подтверждения убирает его из списка", async () => {
+    (api.fetchLeadAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(attachments);
+    (api.deleteLeadAttachment as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<LeadAttachments leadId={7} />);
+    await screen.findByText("tender-scan.pdf");
+
+    fireEvent.click(screen.getByLabelText("Удалить вложение tender-scan.pdf"));
+
+    await waitFor(() => expect(api.deleteLeadAttachment).toHaveBeenCalledWith(7, 1));
+    await waitFor(() => expect(screen.queryByText("tender-scan.pdf")).not.toBeInTheDocument());
+    expect(screen.getByText("letter.docx")).toBeInTheDocument(); // остальные на месте
+    confirmSpy.mockRestore();
+  });
+
+  it("отказ в подтверждении не удаляет вложение", async () => {
+    (api.fetchLeadAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(attachments);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<LeadAttachments leadId={7} />);
+    await screen.findByText("tender-scan.pdf");
+
+    fireEvent.click(screen.getByLabelText("Удалить вложение tender-scan.pdf"));
+
+    expect(api.deleteLeadAttachment).not.toHaveBeenCalled();
+    expect(screen.getByText("tender-scan.pdf")).toBeInTheDocument();
+    confirmSpy.mockRestore();
   });
 });

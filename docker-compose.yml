@@ -78,6 +78,12 @@ services:
     # через хостовой loopback — bind на 127.0.0.1 оборвёт доступ. См. ops-вопрос в STATUS.
     ports:
       - "8000:8000"
+    # Вложения лидов (сканы тендерных заявок, файлы писем) пишутся на диск в ./data
+    # (modules/leads/storage.py, WORKDIR=/app) — без тома исчезают при каждой пересборке
+    # контейнера. Именованный том переживает rebuild; в проде можно заменить на bind-маунт
+    # на хостовой каталог с бэкапом.
+    volumes:
+      - appdata:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,3 +92,4 @@ services:
 
 volumes:
   pgdata:
+  appdata:

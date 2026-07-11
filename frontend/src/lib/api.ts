@@ -1787,6 +1787,16 @@ export function leadAttachmentDownloadUrl(leadId: number, attachmentId: number):
   return `/api/leads/${leadId}/attachments/${attachmentId}/download`;
 }
 
+/** Удалить вложение лида (ошибочно загруженный файл с ПДн). true — удалено (204/404). */
+export async function deleteLeadAttachment(leadId: number, attachmentId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/leads/${leadId}/attachments/${attachmentId}`, { method: "DELETE" });
+    return res.ok || res.status === 404; // 404 — уже нет, цель достигнута
+  } catch {
+    return false;
+  }
+}
+
 export interface OwnerMetrics {
   approvals_pending: number;
   approvals_total: number;

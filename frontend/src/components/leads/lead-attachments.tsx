@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  deleteLeadAttachment,
   fetchLeadAttachments,
   leadAttachmentDownloadUrl,
   uploadLeadAttachment,
@@ -71,6 +72,18 @@ export function LeadAttachments({ leadId }: { leadId: number }) {
     }
   }
 
+  async function handleDelete(a: LeadAttachment) {
+    if (!window.confirm(`Удалить вложение «${a.filename}»?`)) return;
+    const prev = attachments;
+    setAttachments((list) => list.filter((x) => x.id !== a.id)); // оптимистично
+    const ok = await deleteLeadAttachment(leadId, a.id);
+    if (!ok) {
+      setAttachments(prev); // откат: файл на месте, не вводим в заблуждение
+      setError("Не удалось удалить вложение");
+      setTimeout(() => setError(null), 3000);
+    }
+  }
+
   const uploadButton = (
     <div>
       <button
@@ -111,12 +124,12 @@ export function LeadAttachments({ leadId }: { leadId: number }) {
         {attachments.map((a) => {
           const badge = SOURCE_BADGE[a.source] ?? SOURCE_BADGE.manual;
           return (
-            <li key={a.id}>
+            <li key={a.id} className="flex items-center gap-1.5">
               <a
                 href={leadAttachmentDownloadUrl(leadId, a.id)}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-[12.5px] hover:bg-sunken"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-[12.5px] hover:bg-sunken"
               >
                 <span aria-hidden>{iconFor(a.contentType)}</span>
                 <span className="min-w-0 flex-1 truncate text-ink">{a.filename}</span>
@@ -125,6 +138,15 @@ export function LeadAttachments({ leadId }: { leadId: number }) {
                   {badge.label}
                 </span>
               </a>
+              <button
+                type="button"
+                onClick={() => handleDelete(a)}
+                aria-label={`Удалить вложение ${a.filename}`}
+                title="Удалить"
+                className="shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-[12.5px] text-muted hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+              >
+                🗑
+              </button>
             </li>
           );
         })}
