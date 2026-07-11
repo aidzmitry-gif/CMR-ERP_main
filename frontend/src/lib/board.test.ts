@@ -5,6 +5,7 @@ import {
   REVIVE_AFTER_DAYS,
   STAGE_PROBABILITY,
   STUCK_DAYS,
+  cardAttention,
   dateBucketId,
   dealStepText,
   daysInStage,
@@ -508,6 +509,115 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
     const result3 = focusQueue(stages, NOW, 3);
     expect(result3.items).toHaveLength(3);
     expect(result3.total).toBe(15);
+  });
+});
+
+describe("cardAttention (цикл 8: единый чип внимания карточки)", () => {
+  it("пустые сигналы — null (нет чипа)", () => {
+    expect(cardAttention({})).toBeNull();
+  });
+
+  it("1. actBucket=overdue — «Просрочено», tone crit", () => {
+    expect(cardAttention({ actBucket: "overdue" })).toEqual({
+      label: "Просрочено",
+      tone: "crit",
+      title: "Следующий шаг просрочен",
+    });
+  });
+
+  it("2. noTouchDays>=1 — «⏱ без касания N дн», tone crit", () => {
+    expect(cardAttention({ noTouchDays: 3 })).toEqual({
+      label: "⏱ без касания 3 дн",
+      tone: "crit",
+      title: "Новая заявка ещё не тронута — первое касание важнее прогрева",
+    });
+  });
+
+  it("3. actBucket=today — «Сегодня», tone warn", () => {
+    expect(cardAttention({ actBucket: "today" })).toEqual({
+      label: "Сегодня",
+      tone: "warn",
+      title: "Следующий шаг сегодня",
+    });
+  });
+
+  it("4. reviveDays задан — «реанимировать · N дн», tone revive", () => {
+    expect(cardAttention({ reviveDays: 10 })).toEqual({
+      label: "реанимировать · 10 дн",
+      tone: "revive",
+      title: "Условный отказ давно без касания — верни в работу",
+    });
+  });
+
+  it("5. actBucket=tomorrow — «Завтра», tone soft", () => {
+    expect(cardAttention({ actBucket: "tomorrow" })).toEqual({
+      label: "Завтра",
+      tone: "soft",
+      title: "Следующий шаг завтра",
+    });
+  });
+
+  it("6. stuck + daysInStage — «застрял N дн», tone soft", () => {
+    expect(cardAttention({ stuck: true, daysInStage: 5 })).toEqual({
+      label: "застрял 5 дн",
+      tone: "soft",
+      title: "Долго без движения по стадии",
+    });
+  });
+
+  it("6b. stuck без daysInStage — сигнала нет (null)", () => {
+    expect(cardAttention({ stuck: true, daysInStage: null })).toBeNull();
+  });
+
+  it("7. noTouchDays===0 — «⏱ без касания», tone muted", () => {
+    expect(cardAttention({ noTouchDays: 0 })).toEqual({
+      label: "⏱ без касания",
+      tone: "muted",
+      title: "Новая заявка сегодня — сделай первое касание",
+    });
+  });
+
+  it("8. noStep — «нет шага», tone soft", () => {
+    expect(cardAttention({ noStep: true })).toEqual({
+      label: "нет шага",
+      tone: "soft",
+      title: "У сделки нет следующего шага — назначь действие",
+    });
+  });
+
+  it("вытеснение: overdue побеждает noStep", () => {
+    const r = cardAttention({ actBucket: "overdue", noStep: true });
+    expect(r?.label).toBe("Просрочено");
+  });
+
+  it("вытеснение: noTouchDays>=1 побеждает actBucket=today", () => {
+    const r = cardAttention({ actBucket: "today", noTouchDays: 1 });
+    expect(r?.label).toBe("⏱ без касания 1 дн");
+  });
+
+  it("вытеснение: actBucket=today побеждает reviveDays", () => {
+    const r = cardAttention({ actBucket: "today", reviveDays: 10 });
+    expect(r?.label).toBe("Сегодня");
+  });
+
+  it("вытеснение: reviveDays побеждает actBucket=tomorrow", () => {
+    const r = cardAttention({ actBucket: "tomorrow", reviveDays: 10 });
+    expect(r?.label).toBe("реанимировать · 10 дн");
+  });
+
+  it("вытеснение: actBucket=tomorrow побеждает «застрял»", () => {
+    const r = cardAttention({ actBucket: "tomorrow", stuck: true, daysInStage: 5 });
+    expect(r?.label).toBe("Завтра");
+  });
+
+  it("вытеснение: «застрял» побеждает noTouchDays===0", () => {
+    const r = cardAttention({ stuck: true, daysInStage: 5, noTouchDays: 0 });
+    expect(r?.label).toBe("застрял 5 дн");
+  });
+
+  it("вытеснение: noTouchDays===0 побеждает noStep", () => {
+    const r = cardAttention({ noTouchDays: 0, noStep: true });
+    expect(r?.label).toBe("⏱ без касания");
   });
 });
 

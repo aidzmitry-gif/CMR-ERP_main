@@ -3,8 +3,8 @@ import { BarChart3 } from "lucide-react";
 import type { Priority } from "@/lib/types";
 
 const STYLES: Record<Priority, string> = {
-  Высокий: "bg-red-50 text-red-600",
-  Средний: "bg-amber-50 text-amber-600",
+  Высокий: "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300",
+  Средний: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
   Низкий: "bg-sunken text-muted",
 };
 

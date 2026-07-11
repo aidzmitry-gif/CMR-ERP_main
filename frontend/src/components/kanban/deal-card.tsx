@@ -7,7 +7,14 @@ import { useState } from "react";
 import { PriorityBadge } from "@/components/priority-badge";
 import { NextStepComposer, type NextStepPatch } from "@/components/kanban/next-step-composer";
 import { fetchLeadManagers, issueDocument } from "@/lib/api";
-import { dealStepText, isClosedStageId, type InvoiceBadgeResult, type InvoiceBadgeTone } from "@/lib/board";
+import {
+  cardAttention,
+  dealStepText,
+  isClosedStageId,
+  type AttentionTone,
+  type InvoiceBadgeResult,
+  type InvoiceBadgeTone,
+} from "@/lib/board";
 import { formatMoney } from "@/lib/format";
 import { presetDateISO } from "@/lib/sales-stages";
 import type { Deal, Manager, Priority } from "@/lib/types";
@@ -22,6 +29,16 @@ const INVOICE_BADGE_CLS: Record<InvoiceBadgeTone, string> = {
   red: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
   amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
   neutral: "bg-sunken text-muted",
+};
+
+/** Цикл 8: цвета единого чипа внимания карточки (cardAttention, board.ts) —
+ *  парные light/dark токены по тону. */
+const ATTENTION_CLS: Record<AttentionTone, string> = {
+  crit: "bg-red-600 text-white dark:bg-red-500",
+  warn: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  revive: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300",
+  soft: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  muted: "bg-sunken text-muted",
 };
 
 function formatShortDate(iso: string): string {
@@ -285,16 +302,17 @@ export function DealCard({
   weighted?: number;
   lostReasonTitle?: string;
   wonResult?: boolean;
-  /** Срочность следующего шага (эталон sales-board-mockup.html, act-badge): «Просрочено» —
-   * сплошной красный чип (самый горячий), «Сегодня» — красный, «Завтра» — янтарный;
-   * левая кромка в тон. null — без чипа/кромки. */
+  /** Цикл 8: actBucket/noStep/noTouchDays/reviveDays + `stuck`/`days` (висяк) больше НЕ рисуют
+   *  параллельные чипы — единый резолвер {@link cardAttention} (board.ts) выбирает ОДИН самый
+   *  важный сигнал по приоритету и рендерит его как один чип в шапке. Пропы ниже — только вход
+   *  для этого резолвера, каждый остаётся независимым источником данных для вызывающего кода. */
   actBucket?: "overdue" | "today" | "tomorrow" | null;
-  /** Открытая сделка без следующего шага — янтарный маркер «нет шага». */
+  /** Открытая сделка без следующего шага — маркер «нет шага» (низший приоритет cardAttention). */
   noStep?: boolean;
   /** Слайс 5 (C): сделка в стадии новой заявки БЕЗ шага — дни без первого касания.
-   *  Приоритетнее общего noStep — вытесняет чип «нет шага», когда задан (не null). */
+   *  Приоритетнее общего noStep в cardAttention. */
   noTouchDays?: number | null;
-  /** «Условный отказ» без касания дольше порога — чип «реанимировать · N дн» (N = дни в стадии). */
+  /** «Условный отказ» без касания дольше порога — N = дни в стадии. */
   reviveDays?: number | null;
   onLose?: () => void;
   /** Открыть окно звонка прямо с карточки (без захода в drawer-preview). */
@@ -316,6 +334,9 @@ export function DealCard({
 }) {
   const sideDate = deal.date ?? deal.closedDate;
   const stepText = dealStepText(deal);
+  // Цикл 8: один самый важный сигнал вместо конкурирующих чипов actBucket/noTouch/
+  // revive/noStep + отдельного 🕒-дней — единый резолвер cardAttention (board.ts).
+  const attention = cardAttention({ actBucket, noTouchDays, reviveDays, stuck, daysInStage: days, noStep });
   // Слайс 4: композер «след. шаг» — поднят сюда, т.к. открывается из ДВУХ мест (строка
   // шага ниже + пункт CardMenu «След. шаг…» в шапке).
   const [nextStepOpen, setNextStepOpen] = useState(false);
@@ -347,76 +368,47 @@ export function DealCard({
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted">№ {deal.number}</span>
         <div className="flex items-center gap-1.5">
-          {actBucket && (
+          {attention && (
             <span
-              title="Дата следующего шага"
-              className={clsx(
-                "inline-flex items-center rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold",
-                actBucket === "overdue"
-                  ? "bg-red-600 text-white dark:bg-red-500"
-                  : actBucket === "today"
-                    ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-              )}
-            >
-              {actBucket === "overdue" ? "Просрочено" : actBucket === "today" ? "Сегодня" : "Завтра"}
-            </span>
-          )}
-          {noTouchDays != null ? (
-            // Слайс 5 (C): первое касание приоритетнее общего «нет шага» — новая заявка
-            // без реакции продавца горит сильнее, чем «прогреваемая» сделка без шага.
-            <span
-              title="Новая заявка ещё не тронута — первое касание важнее прогрева"
+              title={attention.title}
               className={clsx(
                 "inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold",
-                noTouchDays >= 1
-                  ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
-                  : "bg-sunken text-muted",
+                ATTENTION_CLS[attention.tone],
               )}
             >
-              ⏱ без касания {noTouchDays} дн
-            </span>
-          ) : (
-            noStep && (
-              <span
-                title="У сделки нет следующего шага — назначь действие"
-                className="inline-flex items-center rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-              >
-                нет шага
-              </span>
-            )
-          )}
-          {reviveDays != null && (
-            <span
-              title="Условный отказ давно без касания — верни в работу"
-              className="inline-flex items-center rounded-[5px] bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:bg-orange-500/15 dark:text-orange-300"
-            >
-              реанимировать · {reviveDays} дн
+              {attention.label}
             </span>
           )}
           <PriorityBadge priority={deal.priority} />
-          {days != null && (
-            <span
-              className={clsx(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                stuck ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
-              )}
-            >
-              🕒 {days} дн.
-            </span>
-          )}
           {deal.supplyArrivedAt && (
             <span
               title={`Под приход: ${deal.supplyArrivedSku ?? "товар"} · пришёл ${formatShortDate(deal.supplyArrivedAt)}`}
-              className="inline-flex items-center gap-1 rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"
+              className="inline-flex items-center gap-1 rounded-[5px] bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
             >
               🚚 {formatShortDate(deal.supplyArrivedAt)}
             </span>
           )}
-          <Star
-            size={14}
-            className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "text-faint")}
-          />
+          {onUpdate ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                stopDrag(e);
+                onUpdate({ starred: !deal.starred });
+              }}
+              onPointerDown={stopDrag}
+              title={deal.starred ? "Звезда: убрать из избранного" : "Звезда: в избранное"}
+              aria-label={deal.starred ? "Звезда: убрать из избранного" : "Звезда: в избранное"}
+              className="flex h-5 w-5 items-center justify-center rounded-md text-faint hover:bg-sunken"
+            >
+              <Star size={14} className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "")} />
+            </button>
+          ) : (
+            <Star
+              size={14}
+              className={clsx(deal.starred ? "fill-amber-400 text-amber-400" : "text-faint")}
+            />
+          )}
           {onUpdate ? (
             <CardMenu
               deal={deal}
@@ -432,8 +424,8 @@ export function DealCard({
       </div>
 
       <Link href={`/crm/deals/${deal.id}`} className="block">
-        <div className="mt-2 font-semibold text-ink">{deal.company}</div>
-        <div className="text-xs text-muted">{deal.description}</div>
+        <div className="mt-2 truncate font-semibold text-ink">{deal.company}</div>
+        <div className="truncate text-xs text-muted">{deal.description}</div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[14.5px] font-bold text-ink">{fmt(deal.amount)}</span>
           {probability != null && probability > 0 && weighted != null && (
@@ -455,13 +447,13 @@ export function DealCard({
 
         {lostReasonTitle ? (
           <div className="mt-2">
-            <span className="inline-block rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+            <span className="inline-block rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300">
               Причина: {lostReasonTitle}
             </span>
           </div>
         ) : wonResult ? (
           <div className="mt-2">
-            <span className="inline-block rounded-md bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+            <span className="inline-block rounded-md bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-500/15 dark:text-green-300">
               ✓ Сделка выиграна
             </span>
           </div>

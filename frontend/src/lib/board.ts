@@ -338,6 +338,98 @@ export function focusQueue(
   return { items, total: ordered.length };
 }
 
+// ──────────────────────── Цикл 8: единый чип внимания карточки ────────────────────────
+
+/** Тон единого чипа внимания карточки ({@link cardAttention}) — определяет цвет:
+ *  'crit' — сплошной красный (горит сильнее всего), 'warn' — красный мягкий,
+ *  'revive' — оранжевый, 'soft' — янтарный, 'muted' — нейтральный. */
+export type AttentionTone = "crit" | "warn" | "revive" | "soft" | "muted";
+
+export interface CardAttention {
+  label: string;
+  tone: AttentionTone;
+  title: string;
+}
+
+/**
+ * Единый резолвер чипа внимания карточки (цикл 8): раньше в шапке карточки параллельно
+ * рендерились actBucket/noTouchDays/noStep/reviveDays + отдельно days/stuck — конкурирующие
+ * сигналы раздували шапку и путали взгляд. Возвращает ОДИН самый важный сигнал по приоритету
+ * (сверху вниз, первое совпадение побеждает):
+ *  1. Следующий шаг просрочен (`actBucket==="overdue"`).
+ *  2. Новая заявка не тронута ≥1 дня (`noTouchDays>=1`) — первое касание важнее прогрева.
+ *  3. Следующий шаг сегодня (`actBucket==="today"`).
+ *  4. «Условный отказ» пора реанимировать (`reviveDays`).
+ *  5. Следующий шаг завтра (`actBucket==="tomorrow"`).
+ *  6. Висяк — долго без движения по стадии (`stuck` + `daysInStage`).
+ *  7. Новая заявка без касания сегодня (`noTouchDays===0`) — ещё не горит, но заметно.
+ *  8. Нет следующего шага вовсе (`noStep`).
+ *  9. Иначе — нет сигнала (`null`), чип не рендерится.
+ */
+export function cardAttention(signals: {
+  actBucket?: "overdue" | "today" | "tomorrow" | null;
+  noTouchDays?: number | null;
+  reviveDays?: number | null;
+  stuck?: boolean;
+  daysInStage?: number | null;
+  noStep?: boolean;
+}): CardAttention | null {
+  const {
+    actBucket = null,
+    noTouchDays = null,
+    reviveDays = null,
+    stuck = false,
+    daysInStage = null,
+    noStep = false,
+  } = signals;
+
+  if (actBucket === "overdue") {
+    return { label: "Просрочено", tone: "crit", title: "Следующий шаг просрочен" };
+  }
+  if (noTouchDays != null && noTouchDays >= 1) {
+    return {
+      label: `⏱ без касания ${noTouchDays} дн`,
+      tone: "crit",
+      title: "Новая заявка ещё не тронута — первое касание важнее прогрева",
+    };
+  }
+  if (actBucket === "today") {
+    return { label: "Сегодня", tone: "warn", title: "Следующий шаг сегодня" };
+  }
+  if (reviveDays != null) {
+    return {
+      label: `реанимировать · ${reviveDays} дн`,
+      tone: "revive",
+      title: "Условный отказ давно без касания — верни в работу",
+    };
+  }
+  if (actBucket === "tomorrow") {
+    return { label: "Завтра", tone: "soft", title: "Следующий шаг завтра" };
+  }
+  if (stuck && daysInStage != null) {
+    return {
+      label: `застрял ${daysInStage} дн`,
+      tone: "soft",
+      title: "Долго без движения по стадии",
+    };
+  }
+  if (noTouchDays === 0) {
+    return {
+      label: "⏱ без касания",
+      tone: "muted",
+      title: "Новая заявка сегодня — сделай первое касание",
+    };
+  }
+  if (noStep) {
+    return {
+      label: "нет шага",
+      tone: "soft",
+      title: "У сделки нет следующего шага — назначь действие",
+    };
+  }
+  return null;
+}
+
 // ──────────────────────── Слайс 6: счёт в поток доски ────────────────────────
 
 // «Оплачен» — ТОЛЬКО status="paid" (его ставит finance.payment.paid). posted означает

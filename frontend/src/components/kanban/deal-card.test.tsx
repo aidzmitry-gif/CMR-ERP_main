@@ -68,20 +68,84 @@ describe("DealCard", () => {
 
   // --- Слайс 5 (C): чип первого касания ---
 
-  it("noTouchDays рисует «⏱ без касания N дн» ВМЕСТО «нет шага» (первое касание приоритетнее)", () => {
+  it("noTouchDays>=1 рисует «⏱ без касания N дн» ВМЕСТО «нет шага» (первое касание приоритетнее)", () => {
     const { rerender } = render(
       <DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={2} />,
     );
     expect(screen.getByText(/без касания 2 дн/)).toBeInTheDocument();
     expect(screen.queryByText("нет шага")).toBeNull();
+    // Цикл 8 (cardAttention, приоритет 7): noTouchDays===0 — тот же сигнал, но заявка
+    // ещё не горит (сегодняшняя) — короткий label без «0 дн», отдельный от «N дн».
     rerender(<DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={0} />);
-    expect(screen.getByText(/без касания 0 дн/)).toBeInTheDocument();
+    expect(screen.getByText("⏱ без касания")).toBeInTheDocument();
+    expect(screen.queryByText(/без касания 0 дн/)).toBeNull();
   });
 
   it("noTouchDays=null (по умолчанию) — старый маркер «нет шага» продолжает работать", () => {
     render(<DealCard deal={{ ...deal, nextStep: undefined }} noStep noTouchDays={null} />);
     expect(screen.getByText("нет шага")).toBeInTheDocument();
     expect(screen.queryByText(/без касания/)).toBeNull();
+  });
+
+  // --- Цикл 8: единый чип внимания (cardAttention) — один чип вместо гроздья ---
+
+  it("reviveDays рисует «реанимировать · N дн» единым чипом", () => {
+    render(<DealCard deal={deal} reviveDays={10} />);
+    expect(screen.getByText("реанимировать · 10 дн")).toBeInTheDocument();
+  });
+
+  it("stuck+days рисует «застрял N дн» (висяк без отдельного чипа «🕒 N дн.» на лице карточки)", () => {
+    render(<DealCard deal={deal} days={5} stuck />);
+    expect(screen.getByText("застрял 5 дн")).toBeInTheDocument();
+    // Консолидация цикла 8: «🕒 N дн.» больше не рисуется на лице карточки — сигнал поглощён
+    // attention-чипом «застрял»; он остаётся доступен в drawer-preview (там своя badges-строка).
+    expect(screen.queryByText(/🕒/)).toBeNull();
+  });
+
+  it("days без stuck — раньше рисовал нейтральный «🕒 N дн.», теперь на лице карточки чипа нет", () => {
+    render(<DealCard deal={deal} days={2} stuck={false} />);
+    expect(screen.queryByText(/🕒/)).toBeNull();
+    expect(screen.queryByText(/дн\./)).toBeNull();
+  });
+
+  it("только один attention-чип рендерится даже при нескольких одновременных сигналах (overdue вытесняет noStep)", () => {
+    render(<DealCard deal={{ ...deal, nextStep: undefined }} actBucket="overdue" noStep />);
+    expect(screen.getByText("Просрочено")).toBeInTheDocument();
+    expect(screen.queryByText("нет шага")).toBeNull();
+  });
+
+  // --- Цикл 8 (D): звезда — реальный тумблер «в избранное», не декорация ---
+
+  it("звезда с onUpdate — тумблер: клик зовёт onUpdate({starred: true}) для незвёздной сделки", () => {
+    const onUpdate = vi.fn();
+    render(<DealCard deal={{ ...deal, starred: false }} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Звезда: в избранное" }));
+    expect(onUpdate).toHaveBeenCalledWith({ starred: true });
+  });
+
+  it("звезда с onUpdate — повторный клик по звёздной сделке зовёт onUpdate({starred: false})", () => {
+    const onUpdate = vi.fn();
+    render(<DealCard deal={{ ...deal, starred: true }} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Звезда: убрать из избранного" }));
+    expect(onUpdate).toHaveBeenCalledWith({ starred: false });
+  });
+
+  it("звезда без onUpdate (DragOverlay) остаётся статичным индикатором — не кнопкой", () => {
+    render(<DealCard deal={{ ...deal, starred: true }} />);
+    expect(screen.queryByRole("button", { name: "Звезда: убрать из избранного" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Звезда: в избранное" })).toBeNull();
+  });
+
+  // --- Цикл 8 (C): truncate длинных строк компании/описания ---
+
+  it("компания и описание получают класс truncate (не раздувают карточку длинным текстом)", () => {
+    const { container } = render(
+      <DealCard deal={{ ...deal, company: "Очень длинное название компании ООО" }} />,
+    );
+    const companyEl = screen.getByText("Очень длинное название компании ООО");
+    expect(companyEl.className).toContain("truncate");
+    const descEl = container.querySelector(".text-xs.text-muted.truncate");
+    expect(descEl).not.toBeNull();
   });
 
   it("todo сведён к строке «След. шаг» с датой/временем и строкой номенклатуры (без «Редактировать товар»)", () => {
