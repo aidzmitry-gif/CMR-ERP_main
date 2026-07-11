@@ -269,6 +269,21 @@ export interface Lead {
   utmCampaign?: string; // Цикл 4: UTM-кампания — чип на карточке лида
 }
 
+/** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.
+ *  `*Target` — дневная норма, `*Fact` — факт за сегодня; `reactionTargetMin` — потолок
+ *  скорости первой реакции (держать НЕ выше), `reactionFactMin` — факт (null если сегодня
+ *  ещё не реагировали). */
+export interface LeadPlan {
+  leadsTarget: number;
+  qualifiedTarget: number;
+  convertedTarget: number;
+  reactionTargetMin: number;
+  leadsFact: number;
+  qualifiedFact: number;
+  convertedFact: number;
+  reactionFactMin: number | null;
+}
+
 /** Отчёт качества источника/кампании (Цикл 4) — GET /leads/stats/sources. */
 export interface LeadSourceStat {
   source: string;

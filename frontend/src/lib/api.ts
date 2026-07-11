@@ -1,7 +1,7 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
@@ -1386,6 +1386,66 @@ export async function fetchLeadSourceStats(days?: number): Promise<LeadSourceSta
     }));
   } catch {
     return [];
+  }
+}
+
+interface ApiLeadPlan {
+  leads_target: number;
+  qualified_target: number;
+  converted_target: number;
+  reaction_target_min: number;
+  leads_fact: number;
+  qualified_fact: number;
+  converted_fact: number;
+  reaction_fact_min: number | null;
+}
+
+function mapLeadPlan(p: ApiLeadPlan): LeadPlan {
+  return {
+    leadsTarget: p.leads_target,
+    qualifiedTarget: p.qualified_target,
+    convertedTarget: p.converted_target,
+    reactionTargetMin: p.reaction_target_min,
+    leadsFact: p.leads_fact,
+    qualifiedFact: p.qualified_fact,
+    convertedFact: p.converted_fact,
+    reactionFactMin: p.reaction_fact_min,
+  };
+}
+
+/** План/факт лидоруба за сегодня (Цикл 5): GET /leads/plan. null — если API недоступен. */
+export async function fetchLeadPlan(): Promise<LeadPlan | null> {
+  try {
+    const res = await fetch(`/api/leads/plan`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return mapLeadPlan((await res.json()) as ApiLeadPlan);
+  } catch {
+    return null;
+  }
+}
+
+/** Задать дневную норму лидоруба (Цикл 5): PUT /leads/plan → обновлённый план/факт. */
+export async function saveLeadPlan(targets: {
+  leadsTarget: number;
+  qualifiedTarget: number;
+  convertedTarget: number;
+  reactionTargetMin: number;
+}): Promise<LeadPlan | null> {
+  try {
+    const res = await fetch(`/api/leads/plan`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leads_target: targets.leadsTarget,
+        qualified_target: targets.qualifiedTarget,
+        converted_target: targets.convertedTarget,
+        reaction_target_min: targets.reactionTargetMin,
+      }),
+    });
+    if (!res.ok) return null;
+    return mapLeadPlan((await res.json()) as ApiLeadPlan);
+  } catch {
+    return null;
   }
 }
 

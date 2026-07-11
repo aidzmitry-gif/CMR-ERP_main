@@ -843,3 +843,66 @@ async def test_ai_qualify_lead_unit():
     lead = Lead(source="site", company="ООО Клиент", region="Минск", product="лист", message="Запрос")
     text = await qualify_lead(gateway, lead, 80, "target")
     assert isinstance(text, str) and len(text) > 0
+
+
+# --- Цикл 5: план/факт лидоруба (дневная норма + факт за сегодня) ---
+
+
+async def test_lead_plan_defaults_and_update(session, api):
+    """GET /leads/plan создаёт дневную норму по умолчанию; PUT обновляет цели."""
+    r = await api.get("/leads/plan")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["leads_target"] == 20 and body["qualified_target"] == 8
+    assert body["converted_target"] == 3 and body["reaction_target_min"] == 15
+    # факт на чистой базе — нули, реакция ещё не считалась
+    assert body["leads_fact"] == 0 and body["converted_fact"] == 0
+    assert body["reaction_fact_min"] is None
+
+    upd = await api.put(
+        "/leads/plan",
+        json={"leads_target": 30, "qualified_target": 12, "converted_target": 5, "reaction_target_min": 10},
+    )
+    assert upd.status_code == 200
+    assert upd.json()["leads_target"] == 30 and upd.json()["reaction_target_min"] == 10
+    # норма персистентна — повторный GET отдаёт обновлённые цели (одна строка на период)
+    assert (await api.get("/leads/plan")).json()["qualified_target"] == 12
+
+
+async def test_lead_plan_facts_count_todays_actions(session, api):
+    """Факт: обработано растёт после квалификации; целевых — только целевые в routed/converted."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Планфакт", "phone": "+375291234000",
+                "email": "p@f.by", "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 20 тонн, срочно в Минск",
+            },
+        )
+    ).json()
+    # до действий — факт 0
+    assert (await api.get("/leads/plan")).json()["leads_fact"] == 0
+
+    await api.post(f"/leads/{lead['id']}/qualify")  # первое действие → обработано +1
+    after_qualify = (await api.get("/leads/plan")).json()
+    assert after_qualify["leads_fact"] == 1
+    # целевых передано пока 0 — лид ещё не routed
+    assert after_qualify["qualified_fact"] == 0
+
+    await api.post(f"/leads/{lead['id']}/route")  # целевой ушёл продавцу
+    after_route = (await api.get("/leads/plan")).json()
+    assert after_route["qualified_fact"] == 1
+    assert after_route["converted_fact"] == 0
+
+    await api.post(f"/leads/{lead['id']}/convert")  # доведено до сделки
+    assert (await api.get("/leads/plan")).json()["converted_fact"] == 1
+
+
+async def test_lead_plan_rejects_negative_target(session, api):
+    """PUT отвергает отрицательные цели (Field ge=0)."""
+    r = await api.put(
+        "/leads/plan",
+        json={"leads_target": -1, "qualified_target": 8, "converted_target": 3, "reaction_target_min": 15},
+    )
+    assert r.status_code == 422

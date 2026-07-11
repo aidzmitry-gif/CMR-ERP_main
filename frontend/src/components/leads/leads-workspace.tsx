@@ -12,6 +12,7 @@ import {
   createLead,
   expressLead,
   fetchLeadManagers,
+  fetchLeadPlan,
   fetchLeadsClient,
   fetchLeadSourceStats,
   LeadDuplicateError,
@@ -19,12 +20,14 @@ import {
   qualifyLead,
   rejectLead,
   routeLead,
+  saveLeadPlan,
   submitEmailLead,
   submitWebLead,
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
-import type { Lead, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
+import { planPace, workdayElapsedFraction } from "@/lib/lead-plan";
+import type { Lead, LeadPlan, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
 
 // Порог балла для кнопки «⚡ Экспресс» на карточке «Новые» — совпадает с QUALIFY_THRESHOLD
 // бэка (modules/leads/leads.py): показываем экспресс только для уже явно целевых лидов,
@@ -411,6 +414,159 @@ function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: 
   );
 }
 
+// --- План/факт лидоруба (Цикл 5): дневная норма + факт за сегодня с темпом ---
+// Прогресс-бар «набрать не ниже» (обработано/целевых/сделки): факт/цель, остаток, отставание.
+function PlanBar({
+  label,
+  fact,
+  target,
+  elapsed,
+}: {
+  label: string;
+  fact: number;
+  target: number;
+  elapsed: number;
+}) {
+  const p = planPace(fact, target, elapsed);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="font-medium text-muted">{label}</span>
+        <span className="tabular-nums">
+          <b className="text-ink">{fact}</b>
+          <span className="text-faint"> / {target}</span>
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-sunken">
+        <div
+          className={clsx("h-full rounded-full transition-all", p.onTrack ? "bg-money" : "bg-amber-400")}
+          style={{ width: `${p.pct}%` }}
+        />
+      </div>
+      <div className="mt-0.5 text-[10.5px] text-faint">
+        {p.remaining > 0 ? `осталось ${p.remaining}` : "норма закрыта ✓"}
+        {p.remaining > 0 && !p.onTrack && (
+          <span className="text-amber-600"> · отстаём (к часу нужно {p.expectedByNow})</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Реакция — метрика «держать не выше» (потолок), отдельно от прогресс-баров.
+function ReactionTile({ factMin, targetMin }: { factMin: number | null; targetMin: number }) {
+  const ok = factMin == null || factMin <= targetMin;
+  return (
+    <div>
+      <div className="text-xs font-medium text-muted">Реакция (цель ≤ {targetMin}м)</div>
+      <div className={clsx("mt-1 text-lg font-bold tabular-nums", ok ? "text-money" : "text-amber-600")}>
+        {factMin == null ? "—" : `${factMin} мин`}
+      </div>
+      <div className="text-[10.5px] text-faint">{ok ? "в норме ✓" : "медленно — ускоряйся"}</div>
+    </div>
+  );
+}
+
+function PlanFactPanel({
+  plan,
+  onSave,
+}: {
+  plan: LeadPlan;
+  onSave: (t: {
+    leadsTarget: number;
+    qualifiedTarget: number;
+    convertedTarget: number;
+    reactionTargetMin: number;
+  }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(plan);
+  const [saving, setSaving] = useState(false);
+  const elapsed = workdayElapsedFraction(new Date());
+
+  async function commit() {
+    setSaving(true);
+    await onSave({
+      leadsTarget: draft.leadsTarget,
+      qualifiedTarget: draft.qualifiedTarget,
+      convertedTarget: draft.convertedTarget,
+      reactionTargetMin: draft.reactionTargetMin,
+    });
+    setSaving(false);
+    setEditing(false);
+  }
+
+  return (
+    <div className="rounded-xl bg-surface p-4 shadow-card">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+          Мой план на сегодня
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(plan);
+            setEditing((v) => !v);
+          }}
+          className="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-muted hover:bg-sunken"
+        >
+          {editing ? "Отмена" : "✎ Норма"}
+        </button>
+      </div>
+      {editing ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {(
+            [
+              ["leadsTarget", "Обработать"],
+              ["qualifiedTarget", "Целевых"],
+              ["convertedTarget", "В сделку"],
+              ["reactionTargetMin", "Реакция ≤ мин"],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="block">
+              <span className="mb-1 block text-[11px] font-medium text-muted">{label}</span>
+              <input
+                type="number"
+                min={0}
+                value={draft[key]}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, [key]: Math.max(0, Number(e.target.value) || 0) }))
+                }
+                className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+              />
+            </label>
+          ))}
+          <button
+            type="button"
+            disabled={saving}
+            onClick={commit}
+            className="col-span-2 rounded-lg bg-accent py-2 text-sm font-semibold text-white hover:bg-accent-ink disabled:opacity-60 sm:col-span-4"
+          >
+            {saving ? "Сохраняю…" : "Сохранить норму"}
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <PlanBar label="Обработано" fact={plan.leadsFact} target={plan.leadsTarget} elapsed={elapsed} />
+          <PlanBar
+            label="Целевых передано"
+            fact={plan.qualifiedFact}
+            target={plan.qualifiedTarget}
+            elapsed={elapsed}
+          />
+          <PlanBar
+            label="Доведено до сделки"
+            fact={plan.convertedFact}
+            target={plan.convertedTarget}
+            elapsed={elapsed}
+          />
+          <ReactionTile factMin={plan.reactionFactMin} targetMin={plan.reactionTargetMin} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeadCard({
   lead,
   selected,
@@ -677,6 +833,27 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   const [sourceStats, setSourceStats] = useState<LeadSourceStat[]>([]);
   const [sourceStatsLoading, setSourceStatsLoading] = useState(false);
   const [sourceStatsLoaded, setSourceStatsLoaded] = useState(false);
+  // План/факт лидоруба (Цикл 5): дневная норма + факт за сегодня. Грузим при маунте,
+  // освежаем факт после каждого действия (квалификация/раздача/сделка меняют цифры).
+  const [plan, setPlan] = useState<LeadPlan | null>(null);
+
+  useEffect(() => {
+    void fetchLeadPlan().then((p) => p && setPlan(p));
+  }, []);
+
+  function refreshPlan() {
+    void fetchLeadPlan().then((p) => p && setPlan(p));
+  }
+
+  async function savePlanTargets(t: {
+    leadsTarget: number;
+    qualifiedTarget: number;
+    convertedTarget: number;
+    reactionTargetMin: number;
+  }) {
+    const updated = await saveLeadPlan(t);
+    if (updated) setPlan(updated);
+  }
 
   async function toggleSourceStats() {
     setSourceStatsOpen((prev) => !prev);
@@ -747,6 +924,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         reason: res.reason,
         aiRationale: res.ai_rationale ?? undefined,
       });
+      refreshPlan();
     }
     setBusyId(null);
   }
@@ -757,7 +935,10 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   ) {
     setBusyId(id);
     const res = await routeLead(id, opts);
-    if (res) patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
+    if (res) {
+      patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
+      refreshPlan();
+    }
     setBusyId(null);
   }
 
@@ -776,20 +957,27 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setExpressOpenId(null);
     setNote(`Лид ЛИД-${id} передан ${res.assignedTo || "менеджеру"} — экспресс`);
     window.setTimeout(() => setNote(""), 3000);
+    refreshPlan();
     return null;
   }
 
   async function onConvert(id: number) {
     setBusyId(id);
     const res = await convertLead(id);
-    if (res) patch(id, { status: "converted", dealId: res.deal_id });
+    if (res) {
+      patch(id, { status: "converted", dealId: res.deal_id });
+      refreshPlan();
+    }
     setBusyId(null);
   }
 
   async function onReject(id: number, reason: string) {
     setBusyId(id);
     const res = await rejectLead(id, reason);
-    if (res) patch(id, { status: "rejected", rejectReason: res.reject_reason });
+    if (res) {
+      patch(id, { status: "rejected", rejectReason: res.reject_reason });
+      refreshPlan();
+    }
     setBusyId(null);
   }
 
@@ -887,6 +1075,13 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
             </button>
           </div>
         </div>
+
+        {/* План/факт лидоруба (Цикл 5) — своя дневная норма + факт за сегодня с темпом */}
+        {plan && (
+          <div className="mb-4">
+            <PlanFactPanel plan={plan} onSave={savePlanTargets} />
+          </div>
+        )}
 
         {leads.length > 0 && (
           <>
