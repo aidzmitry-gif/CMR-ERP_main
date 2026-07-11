@@ -2,7 +2,7 @@
 
 import { SlidersHorizontal } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchManagersCached } from "@/components/kanban/deal-card";
 import type { Manager } from "@/lib/types";
 
@@ -71,12 +71,22 @@ export function FiltersMenu() {
     }
   }, [open, managers]);
 
+  // Мульти-выбор за одно открытие (решение оператора): меню НЕ закрывается по клику —
+  // продавец выставляет приоритет+ответственного+внимание разом и жмёт «Готово» (или мимо).
+  // Ref накапливает выбор синхронно: useSearchParams обновляется лишь после навигации,
+  // и без ref второй быстрый клик прочитал бы устаревший URL и потерял первый фильтр.
+  const draftRef = useRef(params.toString());
+  useEffect(() => {
+    draftRef.current = params.toString();
+  }, [params]);
+
   function setParam(key: "priority" | "owner" | "attn", value: string | null) {
-    const next = new URLSearchParams(params.toString());
+    const next = new URLSearchParams(draftRef.current);
     if (value) next.set(key, value);
     else next.delete(key);
-    router.replace(`${pathname}?${next.toString()}`);
-    setOpen(false);
+    draftRef.current = next.toString();
+    // scroll:false — доска не прыгает вверх на каждом клике по фильтру при открытом меню.
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
 
   const active = priority || owner || attn;
@@ -152,6 +162,14 @@ export function FiltersMenu() {
                 onClick={() => setParam("attn", a.key)}
               />
             ))}
+            <div className="my-1 border-t border-line" />
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="block w-full rounded-lg bg-accent-soft px-2.5 py-2 text-center text-[13px] font-semibold text-accent-ink hover:opacity-90"
+            >
+              Готово
+            </button>
           </div>
         </>
       )}

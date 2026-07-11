@@ -35,8 +35,10 @@ describe("FiltersMenu", () => {
 
     expect(navigation.replace).toHaveBeenCalledWith(
       `/crm/deals?${new URLSearchParams({ funnel: "repeat_clients", priority: "Высокий" }).toString()}`,
+      { scroll: false },
     );
-    expect(screen.queryByRole("button", { name: "Средний", exact: true })).not.toBeInTheDocument();
+    // Мульти-выбор: меню НЕ закрывается после клика — можно выбрать ещё фильтры.
+    expect(screen.getByRole("button", { name: "Средний", exact: true })).toBeInTheDocument();
   });
 
   it("сбрасывает только приоритет и оставляет остальные параметры", () => {
@@ -48,7 +50,9 @@ describe("FiltersMenu", () => {
     // «Все» есть в каждой секции (Приоритет/Ответственный/Внимание) — первый сбрасывает приоритет
     fireEvent.click(screen.getAllByRole("button", { name: "Все", exact: true })[0]);
 
-    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?funnel=new_clients");
+    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?funnel=new_clients", {
+      scroll: false,
+    });
   });
 
   it("секция «Ответственный»: выбирает менеджера из fetchLeadManagers → ?owner=", async () => {
@@ -59,23 +63,46 @@ describe("FiltersMenu", () => {
 
     expect(navigation.replace).toHaveBeenCalledWith(
       `/crm/deals?${new URLSearchParams({ owner: "Орлов И." }).toString()}`,
+      { scroll: false },
     );
   });
 
   it("секция «Внимание»: «Просроченные» → ?attn=overdue, «Без шага» → ?attn=no_step, «Реанимировать» → ?attn=revive", () => {
     render(<FiltersMenu />);
 
+    // Меню больше не закрывается по клику — все три варианта проверяются за одно открытие
+    // (каждый следующий клик перезаписывает attn, накапливаясь через draftRef).
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.click(screen.getByRole("button", { name: "Просроченные" }));
-    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=overdue");
+    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=overdue", { scroll: false });
 
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.click(screen.getByRole("button", { name: "Без шага" }));
-    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=no_step");
+    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=no_step", { scroll: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Реанимировать" }));
+    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=revive", { scroll: false });
+  });
+
+  it("3 фильтра за одно открытие: приоритет + ответственный + внимание накапливаются, «Готово» закрывает", async () => {
+    render(<FiltersMenu />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Реанимировать" }));
-    expect(navigation.replace).toHaveBeenCalledWith("/crm/deals?attn=revive");
+    fireEvent.click(screen.getByRole("button", { name: "Высокий", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Орлов И." }));
+    fireEvent.click(screen.getByRole("button", { name: "Просроченные" }));
+
+    // useSearchParams в моке статичен — накопление держит draftRef (в бою его синкает URL).
+    expect(navigation.replace).toHaveBeenLastCalledWith(
+      `/crm/deals?${new URLSearchParams({
+        priority: "Высокий",
+        owner: "Орлов И.",
+        attn: "overdue",
+      }).toString()}`,
+      { scroll: false },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    expect(screen.queryByRole("button", { name: "Готово" })).not.toBeInTheDocument();
   });
 
   it("активные owner/attn видны бейджами на кнопке «Фильтры»", () => {
