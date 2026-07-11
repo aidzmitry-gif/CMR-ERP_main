@@ -1353,3 +1353,32 @@ async def test_lead_revived_from_rejected(session, api):
     ).json()
     assert revived["id"] != rejected["id"]
     assert revived["revived_from_id"] == rejected["id"]
+
+
+async def test_dedup_finds_right_company_among_multiple_same_phone(session, api):
+    """Фикс ревью Ц12: два открытых лида на один телефон у РАЗНЫХ фирм — новый лид своей
+    фирмы находит СВОЙ дубль (409), а не заводит третий вслепую."""
+    a = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Альфа", "phone": "+375297770000"})
+    ).json()
+    # вторая фирма с тем же телефоном → отдельный лид (конфликт компаний)
+    b = await api.post("/leads", json={"source": "site", "company": "ООО Бета", "phone": "+375297770000"})
+    assert b.status_code == 201
+    # снова Альфа с тем же телефоном → должен найтись дубль A (409), а не создаться третий
+    again = await api.post("/leads", json={"source": "site", "company": "ООО Альфа", "phone": "80297770000"})
+    assert again.status_code == 409
+    assert again.json()["detail"]["duplicate_of"] == a["id"]
+
+
+async def test_revival_ignores_other_company_rejection(session, api):
+    """Фикс ревью Ц12: отказ ДРУГОЙ компании с общим телефоном не приписывается новому лиду."""
+    rej_other = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Чужая", "phone": "+375298880000"})
+    ).json()
+    await api.post(f"/leads/{rej_other['id']}/reject", json={"reason": "конкурент"})
+
+    # новая фирма с тем же телефоном — НЕ должна получить чужой revived_from_id
+    mine = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Моя", "phone": "80298880000"})
+    ).json()
+    assert mine["revived_from_id"] is None
