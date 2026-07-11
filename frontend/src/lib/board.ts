@@ -652,6 +652,110 @@ export interface DiscountGateResult {
   gap: number;
 }
 
+// ──────────────────────── Цикл 13: очередь «Дожать до плана» ────────────────────────
+
+/** Порог затухания близости даты (в днях) — за {@link CLOSEABILITY_DECAY_DAYS} дней до
+ *  ожидаемого закрытия близость уже вдвое ниже максимума (см. {@link closeProximity}). */
+const CLOSEABILITY_DECAY_DAYS = 14;
+
+/** Пол близости для далёкой даты — далёкий `expectedCloseDate` не обнуляет счёт совсем
+ *  (сделка всё ещё открыта и в работе), просто перестаёт быть приоритетом «прямо сейчас». */
+const CLOSEABILITY_FLOOR = 0.15;
+
+/** Близость для сделки БЕЗ `expectedCloseDate` — среднее между «горит» и «далеко»: нет данных
+ *  для суждения о сроке, но и открытая сделка без даты не должна тонуть в хвосте очереди
+ *  только из-за пропуска поля (честная нейтральная оценка, не 0 и не максимум). */
+const CLOSEABILITY_NO_DATE_PROXIMITY = 0.4;
+
+/**
+ * Близость ожидаемой даты закрытия сделки к «пора закрывать» (0..1) — множитель балла
+ * {@link closeabilityQueue}. Дата уже прошла или сегодня → максимум (1): открытая сделка
+ * с просроченным/сегодняшним ожиданием — дожимать СЕЙЧАС. Дата в будущем → плавное затухание
+ * `{@link CLOSEABILITY_DECAY_DAYS} / (CLOSEABILITY_DECAY_DAYS + days)` (через 14 дней — 0.5,
+ * через 42 — 0.25…), не ниже пола {@link CLOSEABILITY_FLOOR}. Нет даты или её не разобрать →
+ * {@link CLOSEABILITY_NO_DATE_PROXIMITY} (честный нейтральный fallback, не крах на мусорной дате).
+ */
+export function closeProximity(expectedCloseDate: string | undefined, now: number): number {
+  if (!expectedCloseDate) return CLOSEABILITY_NO_DATE_PROXIMITY;
+  const days = daysUntilDate(expectedCloseDate, now);
+  if (Number.isNaN(days)) return CLOSEABILITY_NO_DATE_PROXIMITY;
+  if (days <= 0) return 1;
+  return Math.max(CLOSEABILITY_FLOOR, CLOSEABILITY_DECAY_DAYS / (CLOSEABILITY_DECAY_DAYS + days));
+}
+
+/** Подпись срочности ожидаемой даты закрытия для карточки очереди {@link closeabilityQueue}. */
+export function closeDateLabel(expectedCloseDate: string | undefined, now: number): string {
+  if (!expectedCloseDate) return "дата не задана";
+  const days = daysUntilDate(expectedCloseDate, now);
+  if (Number.isNaN(days)) return "дата не задана";
+  if (days === 0) return "ожид. сегодня";
+  if (days < 0) return `просрочена на ${Math.abs(days)} дн`;
+  return `ожид. через ${days} дн`;
+}
+
+/** Один элемент очереди «Дожать до плана» — сделка + разложенные множители балла (для
+ *  отрисовки панелью: вероятность/взвешенная сумма/подпись даты, не только итоговый score). */
+export interface CloseabilityItem {
+  deal: Deal;
+  stageId: string;
+  score: number;
+  probability: number;
+  weighted: number;
+  dateLabel: string;
+}
+
+/** Результат {@link closeabilityQueue}: `items` — топ по баллу длиной ≤ `cap`, `total` —
+ *  полное число элементов ДО обрезки (тот же контракт, что {@link FocusQueueResult}). */
+export interface CloseabilityResult {
+  items: CloseabilityItem[];
+  total: number;
+}
+
+/**
+ * Очередь «Дожать до плана» (цикл 13): скорборд считает ЧИСЛО гэпа до плана продаж (см.
+ * `planGap` в deals-workspace.tsx), но не говорит, какие ИМЕННО открытые сделки дожимать —
+ * продавец сканирует колонки вручную. `closeabilityQueue` ранжирует открытые сделки
+ * (терминальные и `cond_lost` — {@link isClosedStageId} — вне очереди целиком; для реанимации
+ * cond_lost есть отдельная ветка {@link focusQueue}) по баллу «насколько реалистично закрыть
+ * её СЕЙЧАС»:
+ *
+ * ```
+ * score = probabilityFor(deal, stageId) × closeProximity(expectedCloseDate, now) × amount
+ * ```
+ *
+ * — вероятность (явная или дефолт по стадии) и близость ожидаемой даты — множители 0..1
+ * (см. {@link closeProximity}: просрочена/сегодня — максимум, далёкая/пустая — ниже, но не
+ * ноль), сумма сделки — вес денег (крупная сделка с той же вероятностью важнее мелкой для
+ * закрытия гэпа выручки). Сортировка — по score DESC; топ `cap` в `items`, `total` — полное
+ * число ДО обрезки.
+ */
+export function closeabilityQueue(
+  stages: Pick<Stage, "id" | "deals">[],
+  now: number | null,
+  cap = 12,
+): CloseabilityResult {
+  if (now == null) return { items: [], total: 0 };
+
+  const ranked: CloseabilityItem[] = [];
+  for (const stage of stages) {
+    if (isClosedStageId(stage.id)) continue; // won/lost + cond_lost (endsWith "lost") — вне очереди
+    for (const deal of stage.deals) {
+      const probability = probabilityFor(deal, stage.id);
+      const proximity = closeProximity(deal.expectedCloseDate, now);
+      ranked.push({
+        deal,
+        stageId: stage.id,
+        score: (probability / 100) * proximity * deal.amount,
+        probability,
+        weighted: weightedAmount(deal, stage.id),
+        dateLabel: closeDateLabel(deal.expectedCloseDate, now),
+      });
+    }
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  return { items: ranked.slice(0, cap), total: ranked.length };
+}
+
 /**
  * Мягкий скидочный гейт (слайс 9) — прокси реальной маржи: методика ценообразования ещё не
  * готова (цены продавца на позиции нет), но у позиций есть справочный `min_price`. Если сумма

@@ -499,7 +499,7 @@ describe("DealsWorkspace (канбан)", () => {
     await waitFor(() => expect(screen.getByText("Сегодня")).toBeInTheDocument());
   });
 
-  it("FIX-R2 (ревью 62c1a7d): «Фокус дня» гасит уже открытый drawer-preview (не открывает оба оверлея разом)", async () => {
+  it("FIX-R2 (ревью 62c1a7d): «Что делать» гасит уже открытый drawer-preview (не открывает оба оверлея разом)", async () => {
     vi.useFakeTimers();
     try {
       render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
@@ -510,21 +510,62 @@ describe("DealsWorkspace (канбан)", () => {
       });
       const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
       expect(drawer).toHaveAttribute("aria-hidden", "false");
-      fireEvent.click(screen.getByRole("button", { name: /Фокус дня/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Что делать/ }));
       expect(drawer).toHaveAttribute("aria-hidden", "true");
     } finally {
       vi.useRealTimers();
     }
   });
 
-  // --- Цикл 12: «Счета под риском» (счёт проведён, не оплачен, срок/резерв уходит) ---
+  // --- Цикл 13 (решение оператора): кокпит «Что делать» — одна кнопка, 3 вкладки
+  // (⚡ Сейчас / 🧾 Счета / 🏁 Дожать) вместо трёх прежних отдельных кнопок-панелей. ---
 
-  it("цикл 12: не рендерит триггер «Счета под риском», пока очередь пуста (fetchDocuments → [])", () => {
+  it("кокпит: одна кнопка «Что делать» — три прежние отдельные кнопки-триггеры больше не рендерятся", async () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
-    expect(screen.queryByRole("button", { name: /Счета под риском/ })).toBeNull();
+    // Очереди зависят от гидрационного `now` (queueMicrotask после маунта, см. эффект в
+    // deals-workspace.tsx) — до него все три total=0 и кнопка не рендерится; ждём появления.
+    expect(await screen.findByRole("button", { name: /Что делать/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^🎯 Фокус дня/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^🧾 Счета под риском/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^🏁 Дожать до плана/ })).toBeNull();
   });
 
-  it("цикл 12: просроченный posted-счёт на стадии «invoice» — бейдж-триггер + панель + переход в drawer", async () => {
+  it("кокпит: кнопка «Что делать» скрыта, если все три очереди пусты (доска без открытых сделок)", async () => {
+    const closedOnly: Stage[] = [{ id: "won", title: "Закрыто: Успешно", color: "#000", count: 0, sum: 0, deals: [] }];
+    render(<DealsWorkspace initialStages={closedOnly} initialKpis={[]} />);
+    // Флеш гидрационного `now`, чтобы честно проверить состояние ПОСЛЕ маунта, а не гонку.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("button", { name: /Что делать/ })).toBeNull();
+  });
+
+  it("кокпит: клик открывает вкладку «Сейчас» с очередью focusQueue (CRM-1 без шага) и клик по строке открывает drawer", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Что делать/ }));
+    const panel = screen.getByRole("dialog", { hidden: true, name: "Что делать" });
+    // Эмодзи вкладок — в aria-hidden span, вне доступного имени кнопки, поэтому матчим по тексту.
+    expect(within(panel).getByRole("button", { name: /Сейчас/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /Счета/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /Дожать/ })).toBeInTheDocument();
+    expect(within(panel).getByText("ООО Доска")).toBeInTheDocument(); // CRM-1 — без шага, в очереди
+    fireEvent.click(within(panel).getByText("ООО Доска"));
+    expect(screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ })).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
+  });
+
+  it("кокпит: вкладка «Счета» пуста (fetchDocuments → []) — честное пустое состояние, счётчик 0", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Что делать/ }));
+    const panel = screen.getByRole("dialog", { hidden: true, name: "Что делать" });
+    fireEvent.click(within(panel).getByRole("button", { name: /Счета/ }));
+    expect(within(panel).getByText("Всё под контролем ✨")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /Счета/ })).toHaveTextContent("Счета0");
+  });
+
+  it("цикл 12: просроченный posted-счёт на стадии «invoice» — кокпит открывается сразу на вкладке «Счета» (самая срочная), список + переход в drawer", async () => {
     const riskStages: Stage[] = [
       ...stages,
       {
@@ -556,23 +597,37 @@ describe("DealsWorkspace (канбан)", () => {
               status: "posted",
               onec_ref: null,
               amount: 500,
-              valid_until: "2020-01-01", // далеко в прошлом — «просрочен»
+              valid_until: "2020-01-01", // далеко в прошлом — «просрочен» → severity crit
               reserve_status: "reserved",
             },
           ]
         : [],
     );
     render(<DealsWorkspace initialStages={riskStages} initialKpis={[]} />);
-    const riskButton = await screen.findByRole("button", { name: /Счета под риском/ });
-    fireEvent.click(riskButton);
-    const panel = screen.getByRole("dialog", { hidden: true, name: "Счета под риском" });
+    const trigger = await screen.findByRole("button", { name: /Что делать/ });
+    // Счёт-crit важнее гэпа до плана и важнее «Фокус дня» — pickCockpitTab открывает «Счета» сразу.
+    fireEvent.click(trigger);
+    const panel = screen.getByRole("dialog", { hidden: true, name: "Что делать" });
     expect(within(panel).getByText(/просрочен \d+ дн/)).toBeInTheDocument();
     expect(within(panel).getByText(/СЧ-100/)).toBeInTheDocument();
-    // Клик по элементу очереди закрывает панель и открывает drawer-preview той же сделки.
+    // Клик по элементу очереди закрывает кокпит и открывает drawer-preview той же сделки.
     fireEvent.click(within(panel).getByText("ООО Риск"));
     expect(screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ })).toHaveAttribute(
       "aria-hidden",
       "false",
     );
+  });
+
+  it("кокпит: вкладка «Дожать» показывает контекст гэпа до плана и открытые сделки, ранжированные по закрываемости", async () => {
+    const kpis = [
+      { id: "ship_plan", label: "Выручка", value: 100, target: 1000, percent: 10, icon: "ruble" as const, tone: "blue" as const, money: true },
+      { id: "avg_deal", label: "Средний чек", value: 200, target: 200, percent: 100, icon: "ruble" as const, tone: "blue" as const, money: true },
+    ];
+    render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Что делать/ }));
+    const panel = screen.getByRole("dialog", { hidden: true, name: "Что делать" });
+    fireEvent.click(within(panel).getByRole("button", { name: /Дожать/ }));
+    expect(within(panel).getByText(/До плана:/)).toBeInTheDocument();
+    expect(within(panel).getByText("ООО Доска")).toBeInTheDocument(); // открытая сделка стадии "new"
   });
 });

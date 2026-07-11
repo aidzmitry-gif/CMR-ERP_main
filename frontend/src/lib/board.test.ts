@@ -6,6 +6,9 @@ import {
   STAGE_PROBABILITY,
   STUCK_DAYS,
   cardAttention,
+  closeabilityQueue,
+  closeDateLabel,
+  closeProximity,
   dateBucketId,
   dealStepText,
   daysInStage,
@@ -856,6 +859,126 @@ describe("invoicesAtRisk (цикл 12: счета под риском — рез
   it("cap обрезает очередь, но total считает ДО обрезки", () => {
     const entries = [1, 2, 3].map((n) => entry(String(n), n, { validUntil: "2026-06-01" }));
     const { items, total } = invoicesAtRisk(entries, NOW, 2);
+    expect(items).toHaveLength(2);
+    expect(total).toBe(3);
+  });
+});
+
+describe("closeProximity / closeDateLabel (цикл 13: дожать до плана)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+
+  it("просроченная дата — максимальная близость (1)", () => {
+    expect(closeProximity("2026-06-01", NOW)).toBe(1);
+  });
+
+  it("сегодняшняя дата — максимальная близость (1)", () => {
+    expect(closeProximity("2026-06-11", NOW)).toBe(1);
+  });
+
+  it("дата через 14 дней — близость 0.5 (половина затухания)", () => {
+    expect(closeProximity("2026-06-25", NOW)).toBeCloseTo(0.5, 5);
+  });
+
+  it("очень далёкая дата не опускается ниже пола 0.15", () => {
+    expect(closeProximity("2027-06-11", NOW)).toBeCloseTo(0.15, 5);
+  });
+
+  it("нет даты — нейтральная близость 0.4 (не 0 и не максимум)", () => {
+    expect(closeProximity(undefined, NOW)).toBe(0.4);
+  });
+
+  it("неразборчивая дата — тот же нейтральный fallback, без падения", () => {
+    expect(closeProximity("не дата", NOW)).toBe(0.4);
+  });
+
+  it("closeDateLabel: сегодня/просрочена/через N/не задана", () => {
+    expect(closeDateLabel("2026-06-11", NOW)).toBe("ожид. сегодня");
+    expect(closeDateLabel("2026-06-01", NOW)).toBe("просрочена на 10 дн");
+    expect(closeDateLabel("2026-06-20", NOW)).toBe("ожид. через 9 дн");
+    expect(closeDateLabel(undefined, NOW)).toBe("дата не задана");
+  });
+});
+
+describe("closeabilityQueue (цикл 13: дожать до плана)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+
+  it("сортирует по итоговому баллу DESC (probability × proximity × amount)", () => {
+    const stages = [
+      stage("negotiation", [
+        deal("low", 1000, { probability: 20, expectedCloseDate: "2026-06-11" }),
+        deal("high", 1000, { probability: 90, expectedCloseDate: "2026-06-11" }),
+      ]),
+    ];
+    const { items } = closeabilityQueue(stages, NOW);
+    expect(items.map((i) => i.deal.id)).toEqual(["high", "low"]);
+  });
+
+  it("вклад вероятности: выше probability при равных сумме/дате — выше в очереди", () => {
+    const stages = [
+      stage("negotiation", [
+        deal("a", 5000, { probability: 30, expectedCloseDate: "2026-06-11" }),
+        deal("b", 5000, { probability: 70, expectedCloseDate: "2026-06-11" }),
+      ]),
+    ];
+    const { items } = closeabilityQueue(stages, NOW);
+    expect(items[0].deal.id).toBe("b");
+    expect(items[0].probability).toBe(70);
+  });
+
+  it("вклад суммы: крупнее amount при равных probability/дате — выше в очереди", () => {
+    const stages = [
+      stage("negotiation", [
+        deal("small", 1000, { probability: 50, expectedCloseDate: "2026-06-11" }),
+        deal("big", 9000, { probability: 50, expectedCloseDate: "2026-06-11" }),
+      ]),
+    ];
+    const { items } = closeabilityQueue(stages, NOW);
+    expect(items.map((i) => i.deal.id)).toEqual(["big", "small"]);
+  });
+
+  it("вклад близости даты: просроченная/сегодня опережает далёкую при равных probability/сумме", () => {
+    const stages = [
+      stage("negotiation", [
+        deal("far", 5000, { probability: 50, expectedCloseDate: "2027-06-11" }),
+        deal("soon", 5000, { probability: 50, expectedCloseDate: "2026-06-11" }),
+      ]),
+    ];
+    const { items } = closeabilityQueue(stages, NOW);
+    expect(items.map((i) => i.deal.id)).toEqual(["soon", "far"]);
+  });
+
+  it("won/lost/cond_lost — терминальные стадии исключены из очереди целиком", () => {
+    const stages = [
+      stage("negotiation", [deal("open", 1000, { probability: 50 })]),
+      stage("won", [deal("w", 5000, { probability: 100 })]),
+      stage("lost", [deal("l", 5000, { probability: 0 })]),
+      stage("cond_lost", [deal("c", 5000, { probability: 5 })]),
+    ];
+    const { items, total } = closeabilityQueue(stages, NOW);
+    expect(total).toBe(1);
+    expect(items.map((i) => i.deal.id)).toEqual(["open"]);
+  });
+
+  it("сделка без expectedCloseDate участвует в очереди (нейтральная близость, не исключается)", () => {
+    const stages = [stage("negotiation", [deal("no-date", 1000, { probability: 50 })])];
+    const { items, total } = closeabilityQueue(stages, NOW);
+    expect(total).toBe(1);
+    expect(items[0].dateLabel).toBe("дата не задана");
+  });
+
+  it("now == null — пустой результат (SSR/до маунта)", () => {
+    const stages = [stage("negotiation", [deal("a", 1000, { probability: 50 })])];
+    expect(closeabilityQueue(stages, null)).toEqual({ items: [], total: 0 });
+  });
+
+  it("cap обрезает очередь, но total считает ДО обрезки", () => {
+    const stages = [
+      stage(
+        "negotiation",
+        [1, 2, 3].map((n) => deal(String(n), n * 1000, { probability: 50 })),
+      ),
+    ];
+    const { items, total } = closeabilityQueue(stages, NOW, 2);
     expect(items).toHaveLength(2);
     expect(total).toBe(3);
   });

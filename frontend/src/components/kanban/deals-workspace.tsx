@@ -21,8 +21,7 @@ import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
-import { FocusPanel } from "@/components/kanban/focus-panel";
-import { InvoiceRiskPanel } from "@/components/kanban/invoice-risk-panel";
+import { ActionCockpit, type CockpitTab } from "@/components/kanban/action-cockpit";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
@@ -41,6 +40,7 @@ import {
   type DealInput,
 } from "@/lib/api";
 import {
+  closeabilityQueue,
   dateBucketId,
   daysInStage,
   focusQueue,
@@ -889,11 +889,11 @@ export function DealsWorkspace({
   // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
   // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
   const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
-  // Слайс 5: панель «Фокус дня» — упорядоченная очередь «что делать сейчас» (focusQueue).
-  const [focusOpen, setFocusOpen] = useState(false);
-  // Цикл 12: панель «Счета под риском» — очередь просроченных/истекающих неоплаченных
-  // счетов (invoicesAtRisk).
-  const [invoiceRiskOpen, setInvoiceRiskOpen] = useState(false);
+  // Цикл 13 (решение оператора): три прежние отдельные очереди-панели («Фокус дня»/
+  // «Счета под риском»/«Дожать до плана») объединены в один кокпит «Что делать» с
+  // 3 вкладками — один open-стейт + текущая вкладка вместо трёх независимых панелей.
+  const [cockpitOpen, setCockpitOpen] = useState(false);
+  const [cockpitTab, setCockpitTab] = useState<CockpitTab>("now");
   // callDeal = открыто окно звонка по этой сделке (тот же кокпит, что и у лида).
   const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1217,6 +1217,65 @@ export function DealsWorkspace({
     return invoicesAtRisk(entries, now);
   }, [invoiceDocs, filteredStages, now]);
 
+  // Цикл 13: очередь «Дожать до плана» — тот же паттерн, что focusResult/invoiceRiskResult
+  // выше: строится из ТЕКУЩЕЙ отфильтрованной доски (filteredStages), поэтому «Чья доска»/
+  // фильтры автоматически сужают и эту очередь. Тот же ponytail «Все вместе» вне охвата.
+  const closeabilityResult = useMemo(
+    () => closeabilityQueue(filteredStages, now),
+    [filteredStages, now],
+  );
+
+  // Гэп до плана (слайс 3, D → поднято на уровень компонента в цикле 13): план выручки
+  // минус факт; ≈сделок — по среднему чеку (факт avg_deal → плановый avg_deal → средний чек
+  // won-сделок доски). Раньше жил ТОЛЬКО внутри IIFE скорборда — теперь единственный источник
+  // здесь, скорборд (ниже) и кнопка/шапка «Дожать до плана» читают ОДНО и то же значение
+  // (без дублирования формулы). Нет плана/чека → honest-empty (null).
+  const planGap = useMemo(() => {
+    const ship = kpis.find((k) => k.id === "ship_plan");
+    if (!ship || ship.target <= 0 || ship.target <= ship.value) return null;
+    const gap = ship.target - ship.value;
+    const avgKpi = kpis.find((k) => k.id === "avg_deal");
+    const wonDeals = stages.find((s) => s.id === "won")?.deals ?? [];
+    const wonAvg = wonDeals.length
+      ? wonDeals.reduce((a, d) => a + d.amount, 0) / wonDeals.length
+      : 0;
+    const avg =
+      avgKpi && avgKpi.value > 0 ? avgKpi.value : avgKpi && avgKpi.target > 0 ? avgKpi.target : wonAvg;
+    if (avg <= 0) return null;
+    return { gap, deals: Math.ceil(gap / avg), avg: Math.round(avg) };
+  }, [kpis, stages]);
+
+  // Цикл 13 (решение оператора): единая кнопка-триггер кокпита вместо трёх прежних —
+  // видна, только если хоть в одной из трёх очередей есть что показать («не шуметь»,
+  // тот же принцип, что раньше был у «Счета под риском»/«Дожать до плана»).
+  const cockpitAnyTotal =
+    focusResult.total > 0 || invoiceRiskResult.total > 0 || closeabilityResult.total > 0;
+  const invoiceHasCrit = invoiceRiskResult.items.some((i) => i.severity === "crit");
+  // Акцент кнопки — если ЛЮБАЯ из трёх очередей горит (invoice crit ИЛИ реальный гэп
+  // до плана ИЛИ фокус-crit), а не только та, что определяет дефолтную вкладку.
+  const cockpitAnyCrit =
+    invoiceHasCrit ||
+    (Boolean(planGap) && closeabilityResult.total > 0) ||
+    focusResult.items.some((i) => i.severity === "crit");
+  // Дефолтная вкладка при открытии — самая срочная НЕПУСТАЯ очередь: счёт-crit важнее
+  // гэпа до плана важнее фокуса (деньги, которые прямо сейчас утекают, — первым делом);
+  // если crit нигде нет — первая непустая по тому же приоритету.
+  function pickCockpitTab(): CockpitTab {
+    if (invoiceRiskResult.total > 0 && invoiceHasCrit) return "invoices";
+    if (closeabilityResult.total > 0 && planGap) return "close";
+    if (focusResult.total > 0) return "now";
+    if (invoiceRiskResult.total > 0) return "invoices";
+    if (closeabilityResult.total > 0) return "close";
+    return "now";
+  }
+  // Бейдж на кнопке = счётчик той же самой «самой срочной непустой» очереди, что откроется по клику.
+  const cockpitBadgeCount =
+    {
+      now: focusResult.total,
+      invoices: invoiceRiskResult.total,
+      close: closeabilityResult.total,
+    }[pickCockpitTab()] ?? 0;
+
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
 
   /** «Просрочено»/«Сегодня»/«Завтра» для чипа срочности карточки: только по открытым
@@ -1411,25 +1470,9 @@ export function DealsWorkspace({
             const projPct = Math.round((ship.value / elapsed / ship.target) * 100);
             chip = `Закроем ${PERIOD_ACC[period] ?? period} на ~${projPct}% плана`;
           }
-          // Гэп до плана (слайс 3, D): план выручки минус факт; ≈сделок — по среднему чеку
-          // (факт avg_deal → плановый avg_deal → средний чек won-сделок доски). Данные уже
-          // пришли для скорборда — новых бэк-вызовов нет. Нет плана/чека → honest-empty.
-          let planGap: { gap: number; deals: number; avg: number } | null = null;
-          if (ship && ship.target > 0 && ship.target > ship.value) {
-            const gap = ship.target - ship.value;
-            const avgKpi = kpiByKey.get("avg_deal");
-            const wonDeals = stages.find((s) => s.id === "won")?.deals ?? [];
-            const wonAvg = wonDeals.length
-              ? wonDeals.reduce((a, d) => a + d.amount, 0) / wonDeals.length
-              : 0;
-            const avg =
-              avgKpi && avgKpi.value > 0
-                ? avgKpi.value
-                : avgKpi && avgKpi.target > 0
-                  ? avgKpi.target
-                  : wonAvg;
-            if (avg > 0) planGap = { gap, deals: Math.ceil(gap / avg), avg: Math.round(avg) };
-          }
+          // Гэп до плана (слайс 3, D) — вынесен в useMemo `planGap` на уровень компонента
+          // (цикл 13): и скорборд ниже, и кнопка/шапка «Дожать до плана» читают ОДНО и то же
+          // значение, без дублирования формулы.
           const sub = periodSubLabel(period, now);
           return (
             <>
@@ -1602,65 +1645,37 @@ export function DealsWorkspace({
             {/* Фильтр по ответственному — единственная ручка ?owner= в секции «Ответственный»
                 меню «Фильтры» (шапка страницы). Дублирующий сегмент-переключатель «Чья доска»
                 убран по решению оператора: фильтр остаётся в «Фильтрах». */}
-            {/* B (слайс 5): «Фокус дня» — упорядоченная очередь «что делать сейчас» вместо
-                сканирования колонок. Бейдж = total ДО обрезки cap (реальная потребность),
-                красный — в очереди есть что-то горящее (severity=crit). */}
-            <button
-              type="button"
-              onClick={() => {
-                // FIX-R2 (ревью 62c1a7d): клик по «Фокус дня» в окне отложенного клика по
-                // карточке (230мс до onPreview) не должен открыть ОБА оверлея разом —
-                // симметрично onSelectDeal панели (тот уже гасит focusOpen при выборе).
-                setPreviewDeal(null);
-                setFocusOpen(true);
-              }}
-              title="Фокус дня — упорядоченная очередь приоритетных сделок"
-              className={clsx(
-                "inline-flex items-center gap-1.5 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-                focusOpen ? "border-accent text-accent-ink" : "border-line text-muted",
-              )}
-            >
-              🎯 Фокус дня
-              {focusResult.total > 0 && (
-                <span
-                  className={clsx(
-                    "rounded-full px-1.5 py-0.5 text-[11px] font-bold",
-                    focusResult.items.some((i) => i.severity === "crit")
-                      ? "bg-red-600 text-white"
-                      : "bg-accent-soft text-accent-ink",
-                  )}
-                >
-                  {focusResult.total}
-                </span>
-              )}
-            </button>
-            {/* Цикл 12: «Счета под риском» — счёт проведён, но не оплачен, а срок/резерв
-                уходит (почти закрытая выручка, которая утекает). Скрыт при пустой очереди
-                (решение оператора «не шуметь») — в отличие от «Фокус дня», который всегда
-                на виду как навигационная точка входа. */}
-            {invoiceRiskResult.total > 0 && (
+            {/* Цикл 13 (решение оператора): единая точка входа в кокпит «Что делать» вместо
+                трёх прежних отдельных кнопок («Фокус дня»/«Счета под риском»/«Дожать до
+                плана») — один оверлей ActionCockpit с 3 вкладками (см. рендер ниже). Скрыта
+                при пустой очереди по ВСЕМ трём («не шуметь», как раньше у двух из трёх кнопок).
+                Бейдж/акцент — той же самой «самой срочной непустой» очереди, что откроется
+                по клику (pickCockpitTab выше). */}
+            {cockpitAnyTotal && (
               <button
                 type="button"
                 onClick={() => {
+                  // FIX-R2 (ревью 62c1a7d): клик по кокпиту в окне отложенного клика по
+                  // карточке (230мс до onPreview) не должен открыть ОБА оверлея разом —
+                  // симметрично onSelectDeal кокпита (тот уже гасит cockpitOpen при выборе).
                   setPreviewDeal(null);
-                  setInvoiceRiskOpen(true);
+                  setCockpitTab(pickCockpitTab());
+                  setCockpitOpen(true);
                 }}
-                title="Счета под риском — просрочены/истекают/резерв уходит"
+                title="Что делать — фокус дня, счета под риском, дожать до плана"
                 className={clsx(
                   "inline-flex items-center gap-1.5 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
-                  invoiceRiskOpen ? "border-accent text-accent-ink" : "border-line text-muted",
+                  cockpitOpen ? "border-accent text-accent-ink" : "border-line text-muted",
                 )}
               >
-                🧾 Счета под риском
+                ▶ Что делать
                 <span
                   className={clsx(
                     "rounded-full px-1.5 py-0.5 text-[11px] font-bold",
-                    invoiceRiskResult.items.some((i) => i.severity === "crit")
-                      ? "bg-red-600 text-white"
-                      : "bg-accent-soft text-accent-ink",
+                    cockpitAnyCrit ? "bg-red-600 text-white" : "bg-accent-soft text-accent-ink",
                   )}
                 >
-                  {invoiceRiskResult.total}
+                  {cockpitBadgeCount}
                 </span>
               </button>
             )}
@@ -1950,29 +1965,24 @@ export function DealsWorkspace({
         />
       )}
 
-      {/* Слайс 5 (B): панель «Фокус дня» — клик по элементу очереди закрывает панель и
-          открывает тот же drawer-preview, что и клик по карточке на доске. */}
-      <FocusPanel
-        open={focusOpen}
-        onClose={() => setFocusOpen(false)}
-        result={focusResult}
+      {/* Цикл 13 (решение оператора): кокпит «Что делать» — единый оверлей с 3 вкладками
+          (⚡ Сейчас / 🧾 Счета / 🏁 Дожать) вместо трёх прежних отдельных панелей
+          (FocusPanel/InvoiceRiskPanel/CloseabilityPanel). Клик по элементу очереди на
+          любой вкладке закрывает кокпит и открывает тот же drawer-preview, что и клик
+          по карточке на доске. */}
+      <ActionCockpit
+        open={cockpitOpen}
+        onClose={() => setCockpitOpen(false)}
+        tab={cockpitTab}
+        onTabChange={setCockpitTab}
+        focusResult={focusResult}
+        invoiceRiskResult={invoiceRiskResult}
+        closeabilityResult={closeabilityResult}
+        planGap={planGap}
         stageTitle={(stageId) => filteredStages.find((s) => s.id === stageId)?.title ?? stageId}
         fmt={fmt}
         onSelectDeal={(deal) => {
-          setFocusOpen(false);
-          setPreviewDeal(deal);
-        }}
-      />
-
-      {/* Цикл 12: панель «Счета под риском» — клик по элементу очереди закрывает панель и
-          открывает тот же drawer-preview сделки, что и FocusPanel/клик по карточке. */}
-      <InvoiceRiskPanel
-        open={invoiceRiskOpen}
-        onClose={() => setInvoiceRiskOpen(false)}
-        result={invoiceRiskResult}
-        fmt={fmt}
-        onSelectDeal={(deal) => {
-          setInvoiceRiskOpen(false);
+          setCockpitOpen(false);
           setPreviewDeal(deal);
         }}
       />
