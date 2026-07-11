@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -13,10 +13,13 @@ vi.mock("@/lib/api", () => ({
   fetchContacts: vi.fn().mockResolvedValue([]),
   fetchSkus: vi.fn().mockResolvedValue([]),
   fetchStock: vi.fn().mockResolvedValue([]),
+  sendMessage: vi.fn(),
+  aiDraftReply: vi.fn(),
 }));
 vi.mock("@/lib/contracts-api", () => ({
   fetchContractTemplates: vi.fn().mockResolvedValue([]),
   prepareContract: vi.fn(),
+  sendPackage: vi.fn(),
 }));
 
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
@@ -40,11 +43,15 @@ const stages: Stage[] = [
   { id: "invoice", title: "Счёт отправлен", color: "#000", count: 1, sum: 1000, deals: [deal] },
 ];
 
-function renderDrawer(onUpdateFields = vi.fn()) {
+function renderDrawer(onUpdateFields = vi.fn(), dealOverride: Deal = deal) {
+  const stagesForDeal: Stage[] =
+    dealOverride === deal
+      ? stages
+      : [{ id: "invoice", title: "Счёт отправлен", color: "#000", count: 1, sum: 1000, deals: [dealOverride] }];
   render(
     <DealDrawerPreview
-      deal={deal}
-      stages={stages}
+      deal={dealOverride}
+      stages={stagesForDeal}
       onClose={() => {}}
       onMoveStage={() => {}}
       onUpdateFields={onUpdateFields}
@@ -68,7 +75,7 @@ beforeEach(() => {
 });
 
 describe("DealDrawerPreview — слайс 6 (A): авто-шаг после счёта", () => {
-  it("успешный счёт → onUpdateFields и updateDeal с next_step «Проверить оплату…» (+3 дн)", async () => {
+  it("успешный счёт → onUpdateFields с next_step «Проверить оплату…» (+3 дн); updateDeal НЕ дублируем", async () => {
     mock(api.issueDocument).mockResolvedValue({
       ok: true,
       message: "✅ Счёт СЧ-1 выставлен",
@@ -79,17 +86,16 @@ describe("DealDrawerPreview — слайс 6 (A): авто-шаг после с�
 
     expect(await screen.findByText(/Шаг: Проверить оплату/)).toBeInTheDocument();
     expect(api.issueDocument).toHaveBeenCalledWith("1", "invoice");
-    expect(api.updateDeal).toHaveBeenCalledWith(
+    expect(onUpdateFields).toHaveBeenCalledWith(
       "1",
       expect.objectContaining({
         next_step: expect.stringContaining("Проверить оплату"),
         next_step_at: expect.any(String),
       }),
     );
-    expect(onUpdateFields).toHaveBeenCalledWith(
-      "1",
-      expect.objectContaining({ next_step: expect.stringContaining("Проверить оплату") }),
-    );
+    // Фикс ревью 61fb9e9: onUpdateFields (владелец — deals-workspace.tsx) САМ шлёт сетевой
+    // PATCH — drawer НЕ должен звать updateDeal напрямую (иначе дублирующий запрос).
+    expect(api.updateDeal).not.toHaveBeenCalled();
   });
 
   it("неуспешный счёт (ok=false) — updateDeal НЕ вызван", async () => {
@@ -143,17 +149,15 @@ describe("DealDrawerPreview — слайс 7: варианты договора"
 
     expect(await screen.findByText(/Шаг: Проверить согласование/)).toBeInTheDocument();
     expect(contractsApi.prepareContract).toHaveBeenCalledWith("1", "supply-basic");
-    expect(api.updateDeal).toHaveBeenCalledWith(
+    expect(onUpdateFields).toHaveBeenCalledWith(
       "1",
       expect.objectContaining({
         next_step: expect.stringContaining("Проверить согласование договора"),
         next_step_at: expect.any(String),
       }),
     );
-    expect(onUpdateFields).toHaveBeenCalledWith(
-      "1",
-      expect.objectContaining({ next_step: expect.stringContaining("Проверить согласование договора") }),
-    );
+    // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
+    expect(api.updateDeal).not.toHaveBeenCalled();
   });
 
   it("409 при подготовке по шаблону — message показан, шаг НЕ ставится", async () => {
@@ -182,17 +186,15 @@ describe("DealDrawerPreview — слайс 7: варианты договора"
 
     expect(await screen.findByText(/Шаг: Вычитать договор клиента/)).toBeInTheDocument();
     expect(api.issueDocument).toHaveBeenCalledWith("1", "contract");
-    expect(api.updateDeal).toHaveBeenCalledWith(
+    expect(onUpdateFields).toHaveBeenCalledWith(
       "1",
       expect.objectContaining({
         next_step: expect.stringContaining("Вычитать договор клиента"),
         next_step_at: expect.any(String),
       }),
     );
-    expect(onUpdateFields).toHaveBeenCalledWith(
-      "1",
-      expect.objectContaining({ next_step: expect.stringContaining("Вычитать договор клиента") }),
-    );
+    // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
+    expect(api.updateDeal).not.toHaveBeenCalled();
   });
 
   it("«Форма клиента» — ошибка → message показан, шаг НЕ ставится", async () => {
@@ -252,5 +254,206 @@ describe("DealDrawerPreview — слайс 6 (B): блок «Документы�
     renderDrawer();
     expect(await screen.findByText(/Договор ДГ-2/)).toBeInTheDocument();
     expect(screen.getByText("На согласовании")).toBeInTheDocument();
+  });
+});
+
+describe("DealDrawerPreview — слайс 8 (C): секция «Написать клиенту»", () => {
+  it("канал по умолчанию whatsapp; клик по шаблону стадии подставляет текст в textarea", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    expect(within(group).getByRole("button", { name: "WhatsApp" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // deal в стадии invoice (см. `stages` выше) — шаблон из MESSAGE_TEMPLATES.invoice
+    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
+    expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue(
+      "Добрый день! Напоминаю: счёт №… действителен до …. Подтвердите, пожалуйста, оплату.",
+    );
+  });
+
+  it("клик по каналу переключает выбранный канал (aria-pressed)", async () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(within(group).getByRole("button", { name: "Telegram" }));
+    expect(within(group).getByRole("button", { name: "Telegram" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(group).getByRole("button", { name: "WhatsApp" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("«AI-черновик»: aiDraftReply → текст в textarea", async () => {
+    mock(api.aiDraftReply).mockResolvedValue("Черновик от AI");
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI-черновик" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("Черновик от AI"),
+    );
+    expect(api.aiDraftReply).toHaveBeenCalledWith("1");
+  });
+
+  it("«AI-черновик»: null (AI выключен) → честный тост, textarea не трогаем", async () => {
+    mock(api.aiDraftReply).mockResolvedValue(null);
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI-черновик" }));
+    expect(await screen.findByText("AI-слой выключен — черновик недоступен")).toBeInTheDocument();
+    expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
+  });
+
+  it("«Отправить» disabled при пустом тексте", () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    expect(screen.getByRole("button", { name: "Отправить" })).toBeDisabled();
+  });
+
+  it("успешная отправка (у сделки нет шага) → тост + авто-шаг «Дождаться ответа клиента» (+2 дн)", async () => {
+    mock(api.sendMessage).mockResolvedValue(true);
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(await screen.findByText("✅ Отправлено (WhatsApp) · Шаг: Дождаться ответа (2 дн)")).toBeInTheDocument();
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      "1",
+      "whatsapp",
+      "Добрый день! Напоминаю: счёт №… действителен до …. Подтвердите, пожалуйста, оплату.",
+    );
+    expect(onUpdateFields).toHaveBeenCalledWith(
+      "1",
+      expect.objectContaining({
+        next_step: "Дождаться ответа клиента",
+        next_step_at: expect.any(String),
+      }),
+    );
+    // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    // textarea очищается после успешной отправки
+    expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
+  });
+
+  it("успешная отправка (у сделки УЖЕ есть шаг) → тост БЕЗ авто-шага, живой шаг не перетираем", async () => {
+    mock(api.sendMessage).mockResolvedValue(true);
+    const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
+    const { onUpdateFields } = renderDrawer(vi.fn(), dealWithStep);
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(await screen.findByText("✅ Отправлено (WhatsApp)")).toBeInTheDocument();
+    expect(screen.queryByText(/Шаг: Дождаться ответа/)).toBeNull();
+    expect(onUpdateFields).not.toHaveBeenCalled();
+  });
+
+  it("ошибка отправки → тост «⚠️ Не отправилось», шаг не ставится", async () => {
+    mock(api.sendMessage).mockResolvedValue(false);
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(await screen.findByText("⚠️ Не отправилось")).toBeInTheDocument();
+    expect(onUpdateFields).not.toHaveBeenCalled();
+  });
+});
+
+describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет клиенту»", () => {
+  const postedInvoice = {
+    id: 9,
+    kind: "invoice",
+    number: "СЧ-1",
+    status: "posted",
+    onec_ref: null,
+    amount: 5000,
+    valid_until: null,
+    reserve_status: "none",
+  };
+  const postedContract = {
+    id: 4,
+    kind: "contract",
+    number: "ДГ-2",
+    status: "posted",
+    onec_ref: null,
+    amount: 1,
+    valid_until: null,
+    reserve_status: "none",
+  };
+
+  it("нет кнопки, если договор ещё pending_approval (честное отсутствие, не дизейбл)", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([
+      postedInvoice,
+      { ...postedContract, status: "pending_approval" },
+    ]);
+    renderDrawer();
+    await screen.findByText("Документы");
+    expect(screen.queryByRole("button", { name: "📦 Пакет клиенту" })).toBeNull();
+  });
+
+  it("нет кнопки, если договора нет вообще", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([postedInvoice]);
+    renderDrawer();
+    await screen.findByText("Документы");
+    expect(screen.queryByRole("button", { name: "📦 Пакет клиенту" })).toBeNull();
+  });
+
+  it("счёт posted + договор posted → кнопка видима", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
+    renderDrawer();
+    expect(await screen.findByRole("button", { name: "📦 Пакет клиенту" })).toBeInTheDocument();
+  });
+
+  it("счёт paid + договор posted → кнопка тоже видима (paid — тот же признак у бэка)", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([{ ...postedInvoice, status: "paid" }, postedContract]);
+    renderDrawer();
+    expect(await screen.findByRole("button", { name: "📦 Пакет клиенту" })).toBeInTheDocument();
+  });
+
+  it("успех → тост + авто-шаг «Контроль получения пакета» (+1 дн), ПЕРЕТИРАЕТ уже назначенный шаг", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
+    mock(contractsApi.sendPackage).mockResolvedValue({
+      ok: true,
+      message: "✅ Пакет отправлен: счёт + договор",
+    });
+    const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
+    const { onUpdateFields } = renderDrawer(vi.fn(), dealWithStep);
+    fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
+
+    expect(
+      await screen.findByText("✅ Пакет отправлен: счёт + договор · Шаг: Контроль получения пакета (1 дн)"),
+    ).toBeInTheDocument();
+    expect(contractsApi.sendPackage).toHaveBeenCalledWith("1");
+    expect(onUpdateFields).toHaveBeenCalledWith(
+      "1",
+      expect.objectContaining({
+        next_step: "Контроль получения пакета",
+        next_step_at: expect.any(String),
+      }),
+    );
+    // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
+    expect(api.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it("409 → тост с detail с бэка, шаг НЕ ставится", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
+    mock(contractsApi.sendPackage).mockResolvedValue({
+      ok: false,
+      message: "Нужны проведённый счёт и согласованный договор",
+    });
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
+
+    expect(await screen.findByText("Нужны проведённый счёт и согласованный договор")).toBeInTheDocument();
+    expect(onUpdateFields).not.toHaveBeenCalled();
   });
 });

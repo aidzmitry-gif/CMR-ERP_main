@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchContractTemplates, prepareContract } from "@/lib/contracts-api";
+import { fetchContractTemplates, prepareContract, sendPackage } from "@/lib/contracts-api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -93,6 +93,67 @@ describe("contracts-api", () => {
     expect(await prepareContract("1", "supply-basic")).toEqual({
       ok: false,
       message: "⚠️ Не удалось подготовить договор",
+    });
+  });
+
+  it("sendPackage при успехе — ok + фиксированный текст пакета", async () => {
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({
+        deal_id: 1,
+        invoice_number: "СЧ-1",
+        contract_number: "ДГ-1",
+        channel: "email",
+        sent: true,
+      }),
+    }));
+    expect(await sendPackage("1")).toEqual({
+      ok: true,
+      message: "✅ Пакет отправлен: счёт + договор",
+    });
+  });
+
+  it("sendPackage шлёт POST на /deals/{id}/send-package", async () => {
+    const f = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    mockFetch(f);
+    await sendPackage("7");
+    expect(f).toHaveBeenCalledWith(
+      "/api/sales/deals/7/send-package",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("sendPackage при 409 — ok:false + detail с бэка как message", async () => {
+    mockFetch(async () => ({
+      ok: false,
+      json: async () => ({ detail: "Нужны проведённый счёт и согласованный договор" }),
+    }));
+    expect(await sendPackage("1")).toEqual({
+      ok: false,
+      message: "Нужны проведённый счёт и согласованный договор",
+    });
+  });
+
+  it("sendPackage при ошибке без JSON-тела → общее сообщение", async () => {
+    mockFetch(async () => ({
+      ok: false,
+      json: async () => {
+        throw new Error("not json");
+      },
+    }));
+    expect(await sendPackage("1")).toEqual({
+      ok: false,
+      message: "⚠️ Не удалось отправить пакет",
+    });
+  });
+
+  it("sendPackage при исключении сети → ok:false с общим сообщением", async () => {
+    mockFetch(async () => {
+      throw new Error("net");
+    });
+    expect(await sendPackage("1")).toEqual({
+      ok: false,
+      message: "⚠️ Не удалось отправить пакет",
     });
   });
 });

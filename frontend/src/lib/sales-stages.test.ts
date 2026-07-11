@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_MESSAGE_TEMPLATES,
   DEFAULT_NEXT_STEP_TEMPLATES,
+  MESSAGE_TEMPLATES,
   NEXT_STEP_TEMPLATES,
   PROGRESSION_STAGES,
   SALES_STAGES,
   STAGE_BY_ID,
   TERMINAL_STAGES,
+  messageTemplatesFor,
   nextStepPreset,
   nextStepTemplatesFor,
   presetDateISO,
@@ -117,5 +120,49 @@ describe("presetDateISO (слайс 4) — детерминированная л
     const morning = new Date(2026, 5, 11, 0, 1, 0).getTime();
     const night = new Date(2026, 5, 11, 23, 59, 0).getTime();
     expect(presetDateISO(0, morning)).toBe(presetDateISO(0, night));
+  });
+});
+
+describe("MESSAGE_TEMPLATES (слайс 8, «касания клиента с доски»)", () => {
+  it("у каждой открытой стадии канона (все, кроме won/lost) есть 2-3 шаблона", () => {
+    for (const s of SALES_STAGES) {
+      if (s.id === "won" || s.id === "lost") continue;
+      const templates = MESSAGE_TEMPLATES[s.id];
+      expect(templates, `стадия ${s.id} без шаблонов сообщений`).toBeDefined();
+      expect(templates.length).toBeGreaterThanOrEqual(2);
+      expect(templates.length).toBeLessThanOrEqual(3);
+      for (const t of templates) {
+        expect(t.label.length).toBeGreaterThan(0);
+        expect(t.text.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("won/lost — намеренно без шаблонов (сделка закрыта, писать нечего)", () => {
+    expect(MESSAGE_TEMPLATES.won).toBeUndefined();
+    expect(MESSAGE_TEMPLATES.lost).toBeUndefined();
+  });
+
+  it("has_price — есть шаблон «Напомнить о КП»", () => {
+    expect(MESSAGE_TEMPLATES.has_price.some((t) => t.label === "Напомнить о КП")).toBe(true);
+  });
+
+  it("invoice — есть шаблон напоминания об оплате", () => {
+    expect(MESSAGE_TEMPLATES.invoice.some((t) => t.label.includes("оплат"))).toBe(true);
+  });
+
+  it("cond_lost — реанимационные шаблоны (сделка не терминальна)", () => {
+    expect(MESSAGE_TEMPLATES.cond_lost.some((t) => t.label.includes("улучшенным"))).toBe(true);
+  });
+});
+
+describe("messageTemplatesFor", () => {
+  it("отдаёт шаблоны стадии канона как есть", () => {
+    expect(messageTemplatesFor("has_price")).toBe(MESSAGE_TEMPLATES.has_price);
+  });
+
+  it("неизвестная/не заданная стадия — DEFAULT_MESSAGE_TEMPLATES", () => {
+    expect(messageTemplatesFor("рп_какая-то")).toBe(DEFAULT_MESSAGE_TEMPLATES);
+    expect(messageTemplatesFor(undefined)).toBe(DEFAULT_MESSAGE_TEMPLATES);
   });
 });

@@ -55,3 +55,30 @@ export async function prepareContract(
     return { ok: false, message: "⚠️ Не удалось подготовить договор" };
   }
 }
+
+/** Итог отправки пакета клиенту (симметрично {@link PrepareContractResult}). */
+export interface SendPackageResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Отправить клиенту пакет «счёт + договор» одной записью (слайс 8, SALES-53 C.4):
+ * POST /deals/{id}/send-package. Требует последний ПРОВЕДЁННЫЙ/оплаченный счёт И
+ * ПРОВЕДЁННЫЙ (согласованный) договор — иначе 409; читаем `detail` с бэка как есть
+ * (тот же паттерн, что {@link prepareContract}).
+ */
+export async function sendPackage(dealId: string): Promise<SendPackageResult> {
+  try {
+    const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/send-package`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { detail?: string };
+      return { ok: false, message: body.detail ?? "⚠️ Не удалось отправить пакет" };
+    }
+    return { ok: true, message: "✅ Пакет отправлен: счёт + договор" };
+  } catch {
+    return { ok: false, message: "⚠️ Не удалось отправить пакет" };
+  }
+}

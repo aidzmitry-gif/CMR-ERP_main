@@ -9,6 +9,7 @@ import {
   ChevronRight,
   FileText,
   Flag,
+  MessageSquare,
   Phone,
   Plus,
   Receipt,
@@ -26,16 +27,22 @@ import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
-import { fetchDocuments, issueDocument, updateDeal, type DealDoc } from "@/lib/api";
+import { aiDraftReply, fetchDocuments, issueDocument, sendMessage, type DealDoc } from "@/lib/api";
 import { daysInStage, daysUntilDate, isStuck, probabilityFor, weightedAmount } from "@/lib/board";
-import { fetchContractTemplates, prepareContract, type ContractTemplate } from "@/lib/contracts-api";
-import { presetDateISO } from "@/lib/sales-stages";
+import {
+  fetchContractTemplates,
+  prepareContract,
+  sendPackage,
+  type ContractTemplate,
+} from "@/lib/contracts-api";
+import { messageTemplatesFor, presetDateISO } from "@/lib/sales-stages";
 import type { Deal, Stage } from "@/lib/types";
 import { formatNextStep } from "@/lib/format";
 import { useCurrency } from "./currency-context";
 
 /** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — единая
- *  строка для оптимистичного патча (onUpdateFields) и прямого updateDeal (fire-and-forget). */
+ *  строка для патча onUpdateFields (пропом владеет deals-workspace.tsx, шлёт и стейт, и сетевой
+ *  PATCH сам — см. комментарий у issueInvoice; отдельный updateDeal здесь НЕ зовём). */
 const INVOICE_NEXT_STEP = "Проверить оплату счёта";
 
 /** Слайс 7 (B): авто-шаг после подготовки договора ПО НАШЕМУ ШАБЛОНУ — уходит на
@@ -45,6 +52,23 @@ const CONTRACT_TEMPLATE_NEXT_STEP = "Проверить согласование
 /** Слайс 7 (B): авто-шаг для варианта «форма клиента» (их текст, без нашего шаблона) —
  *  юрист должен успеть вычитать риски/протокол разногласий до подписания, контроль +2 дня. */
 const CONTRACT_CLIENT_NEXT_STEP = "Вычитать договор клиента: риски, протокол разногласий";
+
+/** Слайс 8 (C): авто-шаг после отправки сообщения клиенту — сообщение слабее счёта/договора,
+ *  ставится ТОЛЬКО когда у сделки ещё не было своего шага (см. sendClientMessage). */
+const MESSAGE_WAIT_REPLY_STEP = "Дождаться ответа клиента";
+
+/** Слайс 8 (D): авто-шаг после отправки пакета «счёт + договор» — сильное событие, как счёт/
+ *  договор, поэтому перетирает текущий шаг ВСЕГДА (см. sendPackageToClient). */
+const PACKAGE_NEXT_STEP = "Контроль получения пакета";
+
+/** Слайс 8 (C): каналы секции «Написать клиенту» — без телефона (звонок — отдельное окно
+ *  CallWindow, см. onCall). */
+const MESSAGE_CHANNELS: { key: string; label: string }[] = [
+  { key: "whatsapp", label: "WhatsApp" },
+  { key: "telegram", label: "Telegram" },
+  { key: "email", label: "Email" },
+  { key: "viber", label: "Viber" },
+];
 
 /** Слайс 6 (B): краткие статусы документа для компактного read-only блока «Документы»
  *  drawer'а — независимая копия deal-documents.tsx (там полноценный CRUD-список). */
@@ -117,6 +141,11 @@ export function DealDrawerPreview({
   const [contractOpen, setContractOpen] = useState(false);
   const [templates, setTemplates] = useState<ContractTemplate[] | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  // Слайс 8 (C): мини-секция «Написать клиенту» — канал + свободный текст (шаблон стадии
+  // подставляет text). Шаблоны синхронные (sales-stages.ts) — без своего loading-стейта.
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgChannel, setMsgChannel] = useState("whatsapp");
+  const [msgText, setMsgText] = useState("");
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
   // FIX-R6: «живой» id открытой сделки для async-колбэков документов (issueInvoice/
@@ -135,6 +164,9 @@ export function DealDrawerPreview({
     setDocMsg(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setContractOpen(false); // не действовать на чужую сделку через оставшуюся открытой секцию
+    setMsgOpen(false); // слайс 8: та же причина — не писать в чужую сделку открытой секцией
+    setMsgChannel("whatsapp");
+    setMsgText("");
   }, [deal?.id]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -188,6 +220,17 @@ export function DealDrawerPreview({
     return { text: `истекает через ${days} дн`, danger: days <= 2 };
   })();
 
+  // Слайс 8 (D): видимость кнопки «Пакет клиенту» — ТО ЖЕ условие, что у бэка (send_package):
+  // статус фильтруем ДО поиска последнего документа (latestInvoice/latestContract выше —
+  // латест ВООБЩЕ, вкл. черновик/отклонённый, здесь строже — латест среди проведённых).
+  const packageInvoice = [...docs]
+    .filter((d) => d.kind === "invoice" && (d.status === "posted" || d.status === "paid"))
+    .sort((a, b) => b.id - a.id)[0];
+  const packageContract = [...docs]
+    .filter((d) => d.kind === "contract" && d.status === "posted")
+    .sort((a, b) => b.id - a.id)[0];
+  const canSendPackage = packageInvoice != null && packageContract != null;
+
   function commitStep() {
     if (!deal) return;
     const next = stepDraft.trim();
@@ -208,8 +251,11 @@ export function DealDrawerPreview({
   /** Счёт по уже добавленным в сделку позициям (без похода в подбор товара).
    *  Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — контроль
    *  оплаты не должен повиснуть молча; неуспешный счёт/договор шаг не трогают. onUpdateFields —
-   *  оптимистичный патч тем же проп-потоком, что commitStep/toggleStar ниже; updateDeal —
-   *  прямой fire-and-forget (симметрично call-window.tsx: там своего onUpdateFields нет). */
+   *  ЕДИНСТВЕННЫЙ вызов, нужный для патча: пропом владеет deals-workspace.tsx, и его обработчик
+   *  САМ делает и оптимистичный патч стейта, и `void updateDeal(...)` (сетевой PATCH) — see
+   *  onUpdateFields в deals-workspace.tsx (~:1882). Отдельный вызов updateDeal ЗДЕСЬ был бы
+   *  дублирующим сетевым PATCH (баг, пойман ревью 61fb9e9) — commitStep/toggleStar ниже всегда
+   *  звали только onUpdateFields, это и есть верный паттерн. */
   async function issueInvoice() {
     if (!deal) return;
     const dealId = deal.id;
@@ -223,7 +269,6 @@ export function DealDrawerPreview({
     if (ok) {
       const nextStepAt = presetDateISO(3, Date.now());
       onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
-      void updateDeal(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
     }
     // FIX-R6: drawer мог переключиться на другую сделку, пока запрос летел — docs/docMsg
     // не тегированы dealId, поэтому чужой поздний ответ не должен их перезаписывать.
@@ -255,12 +300,13 @@ export function DealDrawerPreview({
   }
 
   /** Договор «по нашему шаблону» (SALES-53) — уходит на согласование сразу; авто-шаг
-   *  «Проверить согласование» (+1 дн), тот же паттерн, что issueInvoice (onUpdateFields +
-   *  updateDeal). 409 (активный договор уже есть) / иная ошибка — только message, шаг не трогаем.
-   *  `now` — таймстамп с МЕСТА КЛИКА (аргумент, не Date.now() внутри тела): функция вызывается
-   *  из .map() с варьирующимся `code`, и react-compiler в этом случае считает Date.now() внутри
-   *  тела «нечистым вычислением рендера» (react-hooks/purity) — ложное срабатывание для обычного
-   *  обработчика клика, обходим передачей уже вычисленного значения. */
+   *  «Проверить согласование» (+1 дн), тот же паттерн, что issueInvoice (только onUpdateFields —
+   *  см. комментарий там). 409 (активный договор уже есть) / иная ошибка — только message,
+   *  шаг не трогаем. `now` — таймстамп с МЕСТА КЛИКА (аргумент, не Date.now() внутри тела):
+   *  функция вызывается из .map() с варьирующимся `code`, и react-compiler в этом случае
+   *  считает Date.now() внутри тела «нечистым вычислением рендера» (react-hooks/purity) —
+   *  ложное срабатывание для обычного обработчика клика, обходим передачей уже вычисленного
+   *  значения. */
   async function prepareContractFromTemplate(code: string, now: number) {
     if (!deal) return;
     const dealId = deal.id;
@@ -271,7 +317,6 @@ export function DealDrawerPreview({
     if (ok) {
       const nextStepAt = presetDateISO(1, now);
       onUpdateFields(dealId, { next_step: CONTRACT_TEMPLATE_NEXT_STEP, next_step_at: nextStepAt });
-      void updateDeal(dealId, { next_step: CONTRACT_TEMPLATE_NEXT_STEP, next_step_at: nextStepAt });
     }
     // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
     if (dealIdRef.current !== dealId) return;
@@ -297,7 +342,6 @@ export function DealDrawerPreview({
     if (ok) {
       const nextStepAt = presetDateISO(2, Date.now());
       onUpdateFields(dealId, { next_step: CONTRACT_CLIENT_NEXT_STEP, next_step_at: nextStepAt });
-      void updateDeal(dealId, { next_step: CONTRACT_CLIENT_NEXT_STEP, next_step_at: nextStepAt });
     }
     // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
     if (dealIdRef.current !== dealId) return;
@@ -309,6 +353,76 @@ export function DealDrawerPreview({
     } else {
       setDocMsg(message);
     }
+  }
+
+  /** Слайс 8 (C): открыть/закрыть секцию «Написать клиенту» — шаблоны синхронные
+   *  (sales-stages.ts), в отличие от toggleContractMenu поход в бэк не нужен. */
+  function toggleMsgMenu() {
+    setMsgOpen((v) => !v);
+  }
+
+  /** AI-черновик текста сообщения (AI-слой, Итерация 1). null — AI выключен/ошибка; честно
+   *  показываем это в docMsg, а не притворяемся, что черновик пуст сам по себе. */
+  async function draftAiMessage() {
+    if (!deal) return;
+    const dealId = deal.id;
+    setDocBusy(true);
+    const text = await aiDraftReply(dealId);
+    setDocBusy(false);
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    if (text) setMsgText(text);
+    else setDocMsg("AI-слой выключен — черновик недоступен");
+  }
+
+  /** Отправить сообщение клиенту по выбранному каналу. Авто-шаг «Дождаться ответа клиента»
+   *  (+2 дн) — ТОЛЬКО если у сделки сейчас нет своего шага (ни nextStep, ни todo): сообщение —
+   *  более слабое событие, чем счёт/договор (issueInvoice/prepareContractFromTemplate перетирают
+   *  шаг всегда) — уже назначенный менеджером живой шаг не трогаем. */
+  async function sendClientMessage() {
+    if (!deal) return;
+    const text = msgText.trim();
+    if (!text) return;
+    const dealId = deal.id;
+    const channel = msgChannel;
+    const hadNoStep = !deal.nextStep && !deal.todo;
+    setDocBusy(true);
+    const ok = await sendMessage(dealId, channel, text);
+    setDocBusy(false);
+    if (ok && hadNoStep) {
+      const nextStepAt = presetDateISO(2, Date.now());
+      onUpdateFields(dealId, { next_step: MESSAGE_WAIT_REPLY_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    const channelLabel = MESSAGE_CHANNELS.find((c) => c.key === channel)?.label ?? channel;
+    if (ok) {
+      setMsgText("");
+      setDocMsg(
+        hadNoStep
+          ? `✅ Отправлено (${channelLabel}) · Шаг: Дождаться ответа (2 дн)`
+          : `✅ Отправлено (${channelLabel})`,
+      );
+    } else {
+      setDocMsg("⚠️ Не отправилось");
+    }
+  }
+
+  /** Слайс 8 (D): пакет «счёт + договор» одной отправкой — сильное событие (как выставление
+   *  счёта), поэтому авто-шаг «Контроль получения пакета» (+1 дн) перетирает текущий ВСЕГДА. */
+  async function sendPackageToClient() {
+    if (!deal) return;
+    const dealId = deal.id;
+    setDocBusy(true);
+    const { ok, message } = await sendPackage(dealId);
+    setDocBusy(false);
+    if (ok) {
+      const nextStepAt = presetDateISO(1, Date.now());
+      onUpdateFields(dealId, { next_step: PACKAGE_NEXT_STEP, next_step_at: nextStepAt });
+    }
+    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
+    if (dealIdRef.current !== dealId) return;
+    setDocMsg(ok ? `${message} · Шаг: Контроль получения пакета (1 дн)` : message);
   }
 
   function toggleStar() {
@@ -686,6 +800,99 @@ export function DealDrawerPreview({
                         </span>
                       </div>
                     )}
+                  </div>
+                  {/* Слайс 8 (D): честное отсутствие — кнопки нет, пока нет проведённого
+                      счёта И проведённого договора (то же условие, что у бэка send_package). */}
+                  {canSendPackage && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      block
+                      className="mt-2"
+                      onClick={() => void sendPackageToClient()}
+                      disabled={docBusy}
+                    >
+                      📦 Пакет клиенту
+                    </Button>
+                  )}
+                </section>
+              )}
+
+              {/* === НАПИСАТЬ КЛИЕНТУ (слайс 8): канал + шаблон стадии + свободный текст + AI === */}
+              <Button
+                variant="secondary"
+                block
+                className="mt-4"
+                onClick={toggleMsgMenu}
+                aria-expanded={msgOpen}
+                icon={<MessageSquare size={15} />}
+              >
+                Написать клиенту
+                <ChevronDown size={13} className={clsx("transition-transform", msgOpen && "rotate-180")} />
+              </Button>
+
+              {msgOpen && (
+                <section
+                  role="group"
+                  aria-label="Написать клиенту"
+                  className="mt-2 space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5"
+                >
+                  <div className="flex gap-1.5">
+                    {MESSAGE_CHANNELS.map((c) => (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setMsgChannel(c.key)}
+                        aria-pressed={msgChannel === c.key}
+                        className={clsx(
+                          "flex-1 rounded-md border px-2 py-1.5 text-[12px] font-medium",
+                          msgChannel === c.key
+                            ? "border-accent bg-accent/10 text-accent-ink"
+                            : "border-line-strong bg-surface text-muted hover:bg-sunken",
+                        )}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {messageTemplatesFor(stageId).map((t) => (
+                      <button
+                        key={t.label}
+                        type="button"
+                        onClick={() => setMsgText(t.text)}
+                        className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={msgText}
+                    onChange={(e) => setMsgText(e.target.value)}
+                    placeholder="Текст сообщения клиенту…"
+                    aria-label="Текст сообщения клиенту"
+                    rows={3}
+                    className="w-full resize-none rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      variant="violet"
+                      size="sm"
+                      onClick={() => void draftAiMessage()}
+                      disabled={docBusy}
+                    >
+                      AI-черновик
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => void sendClientMessage()}
+                      disabled={docBusy || !msgText.trim()}
+                    >
+                      Отправить
+                    </Button>
                   </div>
                 </section>
               )}
