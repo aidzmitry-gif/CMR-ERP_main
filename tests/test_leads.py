@@ -962,3 +962,56 @@ async def test_express_bulk_balances_load_within_batch(session, api):
     # не все три ушли одному менеджеру — загрузка балансируется внутри пачки
     owners = {(await api.get(f"/leads/{i}")).json()["assigned_to"] for i in ids}
     assert len(owners) >= 2
+
+
+# --- Цикл 7: скорборд передач + деньги по источникам ---
+
+
+async def _seed_converted_lead_with_kp(api, services, session, company, region, product, price):
+    """Хелпер: провести лид до converted с одной позицией КП на заданную сумму."""
+    from core.services.eventbus import EventContext
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": company, "phone": f"+37529{abs(hash(company)) % 10000000:07d}",
+                "email": f"{abs(hash(company)) % 9999}@kp.by", "product": product, "region": region,
+                "message": "Нужен металл, объём большой, срочно с доставкой, пришлите цену и сроки",
+            },
+        )
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+    await api.put(
+        f"/leads/{lead['id']}/items",
+        json=[{"sku_id": 1, "sku_code": "SKU-1", "name": product, "qty": 1, "price": price}],
+    )
+    await api.post(f"/leads/{lead['id']}/convert")
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+    return lead
+
+
+async def test_handoff_stats_scorecard(session, api, services):
+    """GET /leads/stats/handoffs: по продавцу — передано/в сделке/Σ КП, отсортировано по деньгам."""
+    await _seed_converted_lead_with_kp(api, services, session, "ООО Первый", "Минск", "лист", 40000)
+
+    rows = (await api.get("/leads/stats/handoffs")).json()
+    assert len(rows) >= 1
+    ivanov = next(r for r in rows if r["manager"] == "Иванов И.И.")  # металл/Минск → Иванов
+    assert ivanov["assigned"] >= 1
+    assert ivanov["converted"] >= 1
+    assert ivanov["pipeline"] == 40000.0
+    assert ivanov["conversion_pct"] == 100.0
+
+
+async def test_source_stats_include_pipeline_money(session, api, services):
+    """GET /leads/stats/sources: колонка pipeline = Σ КП сконвертированных лидов источника."""
+    await _seed_converted_lead_with_kp(api, services, session, "ООО Денежный", "Минск", "арматура", 25000)
+
+    rows = (await api.get("/leads/stats/sources")).json()
+    site_rows = [r for r in rows if r["source"] == "site"]
+    assert site_rows
+    assert sum(r["pipeline"] for r in site_rows) >= 25000.0

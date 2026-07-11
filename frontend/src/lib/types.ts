@@ -295,6 +295,18 @@ export interface LeadSourceStat {
   avgScore: number;
   targetPct: number;
   conversionPct: number;
+  pipeline: number; // Цикл 7: Σ КП сконвертированных лидов источника (BYN)
+}
+
+/** Скорборд передач лидоруба продавцам (Цикл 7) — GET /leads/stats/handoffs.
+ *  Вклад специалиста в план продавца: передано (routed/converted), доведено до сделки,
+ *  сумма КП (pipeline, BYN), конверсия. */
+export interface LeadHandoffStat {
+  manager: string;
+  assigned: number;
+  converted: number;
+  pipeline: number;
+  conversionPct: number;
 }
 
 export interface LeadAttachment {

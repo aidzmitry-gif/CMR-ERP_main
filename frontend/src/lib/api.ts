@@ -1,7 +1,7 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
 import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
-import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
+import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
 // Базовый URL бэкенда для серверных компонентов (SSR-fetch).
@@ -1365,6 +1365,7 @@ interface ApiLeadSourceStat {
   avg_score: number;
   target_pct: number;
   conversion_pct: number;
+  pipeline: number;
 }
 
 /** Отчёт качества источников/кампаний (Цикл 4): GET /leads/stats/sources — лениво, при открытии панели. */
@@ -1382,6 +1383,33 @@ export async function fetchLeadSourceStats(days?: number): Promise<LeadSourceSta
       rejected: s.rejected,
       avgScore: s.avg_score,
       targetPct: s.target_pct,
+      conversionPct: s.conversion_pct,
+      pipeline: s.pipeline ?? 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+interface ApiLeadHandoffStat {
+  manager: string;
+  assigned: number;
+  converted: number;
+  pipeline: number;
+  conversion_pct: number;
+}
+
+/** Скорборд передач лидоруба продавцам (Цикл 7): GET /leads/stats/handoffs — лениво. */
+export async function fetchLeadHandoffStats(days?: number): Promise<LeadHandoffStat[]> {
+  try {
+    const qs = days ? `?days=${days}` : "";
+    const res = await fetch(`/api/leads/stats/handoffs${qs}`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return ((await res.json()) as ApiLeadHandoffStat[]).map((s) => ({
+      manager: s.manager,
+      assigned: s.assigned,
+      converted: s.converted,
+      pipeline: s.pipeline,
       conversionPct: s.conversion_pct,
     }));
   } catch {

@@ -12,6 +12,7 @@ import {
   createLead,
   expressBulkLeads,
   expressLead,
+  fetchLeadHandoffStats,
   fetchLeadManagers,
   fetchLeadPlan,
   fetchLeadsClient,
@@ -28,7 +29,7 @@ import {
 import { formatByn } from "@/lib/format";
 import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
 import { planPace, workdayElapsedFraction } from "@/lib/lead-plan";
-import type { Lead, LeadPlan, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
+import type { Lead, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
 
 // Порог балла для кнопки «⚡ Экспресс» на карточке «Новые» — совпадает с QUALIFY_THRESHOLD
 // бэка (modules/leads/leads.py): показываем экспресс только для уже явно целевых лидов,
@@ -379,6 +380,7 @@ function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: 
             <th className="px-2 py-1 text-right font-semibold">Лиды</th>
             <th className="px-2 py-1 text-right font-semibold">% целевых</th>
             <th className="px-2 py-1 text-right font-semibold">% в сделку</th>
+            <th className="px-2 py-1 text-right font-semibold">Σ КП</th>
             <th className="px-2 py-1 text-right font-semibold">Ср. балл</th>
           </tr>
         </thead>
@@ -404,6 +406,9 @@ function SourceStatsPanel({ rows, loading }: { rows: LeadSourceStat[]; loading: 
                   )}
                 >
                   {r.conversionPct}%
+                </td>
+                <td className="px-2 py-1.5 text-right font-medium tabular-nums text-money">
+                  {r.pipeline > 0 ? formatByn(r.pipeline) : "—"}
                 </td>
                 <td className="px-2 py-1.5 text-right text-muted">{r.avgScore}</td>
               </tr>
@@ -564,6 +569,62 @@ function PlanFactPanel({
           <ReactionTile factMin={plan.reactionFactMin} targetMin={plan.reactionTargetMin} />
         </div>
       )}
+    </div>
+  );
+}
+
+// Скорборд передач лидоруба продавцам (Цикл 7): вклад в план каждого продавца деньгами.
+// Кому специалист передал лиды, сколько тот довёл до сделки и на какую сумму КП.
+function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl bg-surface p-4 text-center text-xs text-muted shadow-card">Загрузка…</div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl bg-surface p-4 text-center text-xs text-muted shadow-card">
+        Пока никому не передавали лиды за 30 дней
+      </div>
+    );
+  }
+  const totalPipeline = rows.reduce((s, r) => s + r.pipeline, 0);
+  return (
+    <div className="overflow-x-auto rounded-xl bg-surface p-3 shadow-card">
+      <table className="w-full min-w-[480px] text-left text-xs">
+        <thead>
+          <tr className="text-muted">
+            <th className="px-2 py-1 font-semibold">Продавец</th>
+            <th className="px-2 py-1 text-right font-semibold">Передано</th>
+            <th className="px-2 py-1 text-right font-semibold">В сделке</th>
+            <th className="px-2 py-1 text-right font-semibold">Конверсия</th>
+            <th className="px-2 py-1 text-right font-semibold">Σ КП передал</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.manager} className="border-t border-line">
+              <td className="px-2 py-1.5 font-medium text-ink">{r.manager}</td>
+              <td className="px-2 py-1.5 text-right text-ink">{r.assigned}</td>
+              <td className="px-2 py-1.5 text-right text-ink">{r.converted}</td>
+              <td className="px-2 py-1.5 text-right font-semibold text-ink">{r.conversionPct}%</td>
+              <td className="px-2 py-1.5 text-right font-medium tabular-nums text-money">
+                {r.pipeline > 0 ? formatByn(r.pipeline) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-line">
+            <td className="px-2 py-1.5 font-semibold text-muted" colSpan={4}>
+              Всего в пайплайн продавцам
+            </td>
+            <td className="px-2 py-1.5 text-right font-bold tabular-nums text-money">
+              {formatByn(totalPipeline)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -856,6 +917,12 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     if (updated) setPlan(updated);
   }
 
+  // Скорборд передач продавцам (Цикл 7): та же ленивая загрузка при первом открытии.
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffStats, setHandoffStats] = useState<LeadHandoffStat[]>([]);
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [handoffLoaded, setHandoffLoaded] = useState(false);
+
   async function toggleSourceStats() {
     setSourceStatsOpen((prev) => !prev);
     if (sourceStatsLoaded) return;
@@ -863,6 +930,15 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setSourceStats(await fetchLeadSourceStats());
     setSourceStatsLoading(false);
     setSourceStatsLoaded(true);
+  }
+
+  async function toggleHandoffStats() {
+    setHandoffOpen((prev) => !prev);
+    if (handoffLoaded) return;
+    setHandoffLoading(true);
+    setHandoffStats(await fetchLeadHandoffStats());
+    setHandoffLoading(false);
+    setHandoffLoaded(true);
   }
 
   const selected = leads.find((l) => l.id === selectedId) ?? null;
@@ -1184,11 +1260,24 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               >
                 {sourceStatsOpen ? "Скрыть" : "📊 Качество источников"}
               </button>
+              <button
+                type="button"
+                onClick={toggleHandoffStats}
+                className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-muted hover:bg-sunken"
+              >
+                {handoffOpen ? "Скрыть" : "🤝 Передачи продавцам"}
+              </button>
             </div>
 
             {sourceStatsOpen && (
               <div className="mb-5">
                 <SourceStatsPanel rows={sourceStats} loading={sourceStatsLoading} />
+              </div>
+            )}
+
+            {handoffOpen && (
+              <div className="mb-5">
+                <HandoffScorecard rows={handoffStats} loading={handoffLoading} />
               </div>
             )}
           </>
