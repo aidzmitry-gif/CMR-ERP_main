@@ -75,6 +75,14 @@ function isoMinutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60000).toISOString().replace("Z", "");
 }
 
+// Превью-дровер больше НЕ открывается сам при заходе (его модальный бэкдроп глушил
+// клики по карточкам) — открываем явным 1-кликом по карточке и ждём диалог
+// (в LeadCard одиночный клик срабатывает через таймер 230мс).
+async function openPreview(id: number) {
+  fireEvent.click(screen.getByText(`№ ЛИД-${id}`));
+  return await screen.findByRole("dialog");
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("LeadsWorkspace", () => {
@@ -97,7 +105,8 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[lead]} />);
 
-    // первый лид выбран по умолчанию → действие доступно в правой панели
+    // открываем превью явным кликом → действие доступно в правой панели
+    await openPreview(1);
     fireEvent.click(screen.getByRole("button", { name: "Квалифицировать" }));
 
     await waitFor(() => expect(api.qualifyLead).toHaveBeenCalledWith(1));
@@ -114,6 +123,7 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
 
+    await openPreview(1);
     fireEvent.click(await screen.findByRole("button", { name: "Распределить" }));
 
     await waitFor(() =>
@@ -136,6 +146,7 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
 
+    await openPreview(1);
     // список менеджеров подгружается асинхронно (fetchLeadManagers)
     expect(await screen.findByText("Кому передать")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /Петрова А\.С\./ }));
@@ -172,6 +183,7 @@ describe("LeadsWorkspace", () => {
         initialLeads={[{ ...lead, status: "routed", assignedTo: "Иванов И.И.", funnel: "new" }]}
       />,
     );
+    await openPreview(1);
     fireEvent.click(screen.getByRole("button", { name: "В сделку" }));
     await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
     const link = await screen.findByRole("link", { name: /Открыть сделку/ });
@@ -200,7 +212,7 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByText(/Выберите лид/)).toBeInTheDocument();
   });
 
-  it("отображает статусы «В сделке» и «Отклонён»", () => {
+  it("отображает статусы «В сделке» и «Отклонён»", async () => {
     render(
       <LeadsWorkspace
         initialLeads={[
@@ -211,7 +223,8 @@ describe("LeadsWorkspace", () => {
     );
     expect(screen.getAllByText("В сделке").length).toBeGreaterThan(0);
     expect(screen.getByText("Отклонён")).toBeInTheDocument();
-    // выбран первый (конвертированный) → в панели ссылка на сделку
+    // открываем превью конвертированного → в панели ссылка на сделку
+    await openPreview(2);
     expect(screen.getByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/5");
   });
 
@@ -239,7 +252,7 @@ describe("LeadsWorkspace", () => {
     await waitFor(() => expect(api.qualifyLead).toHaveBeenCalledWith(2));
   });
 
-  it("панель показывает контакты, нецелевой вердикт, распределение и AI-обоснование", () => {
+  it("панель показывает контакты, нецелевой вердикт, распределение и AI-обоснование", async () => {
     render(
       <LeadsWorkspace
         initialLeads={[
@@ -261,6 +274,7 @@ describe("LeadsWorkspace", () => {
         ]}
       />,
     );
+    await openPreview(4);
     expect(screen.getByText("+375290000000")).toBeInTheDocument();
     expect(screen.getByText("p@x.by")).toBeInTheDocument();
     expect(screen.getAllByText(/нецелевой/).length).toBeGreaterThan(0);
@@ -277,6 +291,7 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
 
+    await openPreview(1);
     expect(await screen.findByText("Отклонить лид")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "дубль" } });
 
@@ -296,6 +311,7 @@ describe("LeadsWorkspace", () => {
     });
     render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
 
+    await openPreview(1);
     expect(await screen.findByText("Кому передать")).toBeInTheDocument();
     const datetimeInput = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
     fireEvent.change(datetimeInput, { target: { value: "2026-07-05T10:00" } });
@@ -439,6 +455,7 @@ describe("LeadsWorkspace", () => {
       />,
     );
 
+    await openPreview(1);
     // кнопка появляется, когда подгрузились сохранённые позиции (fetchLeadItems)
     const chainBtn = await screen.findByRole("button", { name: /В сделку \+ счёт/ });
     fireEvent.click(chainBtn);
