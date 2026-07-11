@@ -14,6 +14,7 @@ import {
   fetchLeadManagers,
   issueDocument,
   type LeadCartItem,
+  linkLeadContact,
   saveLeadItems,
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
@@ -80,12 +81,16 @@ export function LeadDrawerPreview({
   const [rejectReason, setRejectReason] = useState("");
   const [nextStepAt, setNextStepAt] = useState("");
   const [nextStepNote, setNextStepNote] = useState("");
+  // Цикл 11: привязка контакта лида к его компании (без дублей)
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedManager(null);
     setRejectReason("");
     setNextStepAt("");
     setNextStepNote("");
+    setLinkMsg(null);
     if (lead == null) {
       setManagers([]);
       return;
@@ -209,6 +214,23 @@ export function LeadDrawerPreview({
     });
   }
 
+  // Цикл 11: добавить контакт лида в его компанию (get-or-create, без дублей).
+  async function onLinkContact() {
+    if (lead == null || linkBusy) return;
+    setLinkBusy(true);
+    setLinkMsg(null);
+    const res = await linkLeadContact(lead.id);
+    setLinkBusy(false);
+    if (res == null) setLinkMsg("Не удалось добавить контакт — попробуйте ещё раз");
+    else if ("error" in res) setLinkMsg(res.error);
+    else
+      setLinkMsg(
+        res.created
+          ? `Контакт «${res.fullName || "—"}» добавлен в компанию`
+          : `Контакт «${res.fullName || "—"}» уже был в компании`,
+      );
+  }
+
   const open = lead != null;
   const qualified = lead && lead.status !== "new";
   const rejected = lead && lead.status === "rejected";
@@ -279,6 +301,27 @@ export function LeadDrawerPreview({
                   </Row>
                 )}
               </dl>
+
+              {/* Цикл 11: лид резолвнут в существующую компанию → добавить контакт без дублей */}
+              {lead.counterpartyId != null && (lead.name || lead.phone || lead.email) && (
+                <section className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    {lead.customerKind === "regular" ? "Постоянник" : "Действующий клиент"}
+                  </div>
+                  <div className="mt-1 text-[12.5px] text-ink">
+                    Контакт можно добавить в карточку компании (без дублей).
+                  </div>
+                  <button
+                    type="button"
+                    disabled={linkBusy}
+                    onClick={onLinkContact}
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                  >
+                    <User size={13} /> {linkBusy ? "Добавляю…" : "Добавить контакт в компанию"}
+                  </button>
+                  {linkMsg && <div className="mt-1.5 text-[11.5px] font-medium text-sky-800">{linkMsg}</div>}
+                </section>
+              )}
 
               {lead.message && (
                 <section className="mt-4">

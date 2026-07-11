@@ -1222,3 +1222,87 @@ async def test_resolve_customer_no_match_is_cold(session, api):
     ).json()
     assert lead["customer_kind"] == ""
     assert lead["counterparty_id"] is None
+
+
+# --- Цикл 11: добавить контакт в существующую компанию без дублей ---
+
+
+async def test_link_contact_creates_then_dedups(session, api):
+    """POST /link-contact: создаёт контакт в компании лида, повтор с тем же телефоном — не дублит."""
+    from core.domain.models import Contact, Counterparty
+    from sqlalchemy import select as _select
+
+    cp = Counterparty(name="ООО Клиент11")
+    session.add(cp)
+    await session.commit()
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Клиент11", "name": "Пётр Контактов", "phone": "+375291112244"},
+        )
+    ).json()
+    assert lead["counterparty_id"] == cp.id  # резолв Цикла 10
+
+    r1 = (await api.post(f"/leads/{lead['id']}/link-contact")).json()
+    assert r1["created"] is True
+    assert r1["counterparty_id"] == cp.id
+    assert r1["full_name"] == "Пётр Контактов"
+
+    # второй раз — тот же контакт (дедуп по телефону в рамках компании), не дубль
+    r2 = (await api.post(f"/leads/{lead['id']}/link-contact")).json()
+    assert r2["created"] is False
+    assert r2["contact_id"] == r1["contact_id"]
+
+    # в базе ровно один контакт под этой компанией
+    contacts = (
+        await session.execute(_select(Contact).where(Contact.counterparty_id == cp.id))
+    ).scalars().all()
+    assert len(contacts) == 1
+
+
+async def test_link_contact_requires_counterparty(session, api):
+    """Лид без резолва в компанию → 422 (некуда привязывать контакт)."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Безкомпании 999", "phone": "+375290001111"})
+    ).json()
+    assert lead["counterparty_id"] is None
+    r = await api.post(f"/leads/{lead['id']}/link-contact")
+    assert r.status_code == 422
+
+
+async def test_link_contact_unknown_counterparty_404(session, api):
+    """Явный несуществующий counterparty_id → 404."""
+    lead = (await api.post("/leads", json={"source": "site", "name": "X", "phone": "+375290002222"})).json()
+    r = await api.post(f"/leads/{lead['id']}/link-contact", json={"counterparty_id": 999999})
+    assert r.status_code == 404
+
+
+async def test_reresolve_cold_lead_on_repeat_contact(session, api, services):
+    """Фикс ревью Ц10: холодный лид, чей контакт появился в MDM ПОЗЖЕ, при повторном
+    обращении (дедуп-дозапись) повторно резолвится и получает метку клиента."""
+    from core.domain.models import Contact, Counterparty
+    from core.services.eventbus import EventContext
+
+    # 1) холодный веб-лид (контакта в MDM ещё нет)
+    await api.post("/integrations/web/lead", json={"phone": "+375293334455", "message": "первое"})
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+    lead = next(le for le in (await api.get("/leads")).json() if (le.get("phone") or "").endswith("3334455"))
+    assert lead["customer_kind"] == ""
+
+    # 2) контакт появился в базе позже
+    cp = Counterparty(name="ООО Поздний Клиент")
+    session.add(cp)
+    await session.flush()
+    session.add(Contact(counterparty_id=cp.id, full_name="Поздний", phone="+375293334455"))
+    await session.commit()
+
+    # 3) повторное обращение того же телефона (иной формат) → дозапись + повторный резолв
+    await api.post("/integrations/web/lead", json={"phone": "80293334455", "message": "повтор"})
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["counterparty_id"] == cp.id
+    assert got["customer_kind"] == "existing"

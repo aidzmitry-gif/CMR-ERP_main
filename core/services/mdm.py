@@ -144,6 +144,57 @@ async def find_contact(
     return (await session.execute(select(Contact).where(or_(*conds)))).scalars().first()
 
 
+async def link_contact(
+    session: AsyncSession,
+    counterparty_id: int,
+    *,
+    full_name: str,
+    phone: str | None = None,
+    email: str | None = None,
+    is_primary: bool = False,
+) -> tuple[Contact, bool]:
+    """Привязать контактное лицо к контрагенту БЕЗ дублей (get-or-create). → (contact, created).
+
+    Единая точка добавления контакта в компанию (Цикл 11): если под этим контрагентом уже
+    есть контакт с тем же телефоном (хвост 9 цифр) или e-mail — возвращаем его (``created=False``),
+    дозаполняя пустые поля (survivorship-lite: непустое не затираем). Иначе создаём новый.
+    Дедуп ограничен рамками контрагента (в отличие от глобального ``find_contact``), чтобы
+    один и тот же телефон у разных компаний не склеивался. Транзакцию коммитит вызывающий код.
+    """
+    email_n = (email or "").strip().lower()
+    tail = _phone_tail(phone)
+    conds = []
+    if tail:
+        conds.append(and_(Contact.phone.isnot(None), Contact.phone.like(f"%{tail}")))
+    if email_n:
+        conds.append(and_(Contact.email.isnot(None), func.lower(Contact.email) == email_n))
+    existing = None
+    if conds:
+        existing = (
+            await session.execute(
+                select(Contact).where(Contact.counterparty_id == counterparty_id, or_(*conds))
+            )
+        ).scalars().first()
+    if existing is not None:
+        if not existing.full_name and full_name:
+            existing.full_name = full_name
+        if not existing.phone and phone:
+            existing.phone = phone
+        if not existing.email and email:
+            existing.email = email
+        return existing, False
+    contact = Contact(
+        counterparty_id=counterparty_id,
+        full_name=full_name or "",
+        phone=phone or None,
+        email=email or None,
+        is_primary=is_primary,
+    )
+    session.add(contact)
+    await session.flush()
+    return contact, True
+
+
 async def match_candidates(
     session: AsyncSession, *, unp: str | None, exclude_id: int | None = None
 ) -> list[Counterparty]:

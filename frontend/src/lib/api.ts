@@ -1376,6 +1376,48 @@ interface ApiLeadSourceStat {
   pipeline: number;
 }
 
+/** Результат привязки контакта к компании (Цикл 11): POST /leads/{id}/link-contact. */
+export interface LinkContactResult {
+  contactId: number;
+  counterpartyId: number;
+  created: boolean; // true — контакт создан; false — уже был в компании
+  fullName: string;
+}
+
+/** Добавить контакт лида в существующую компанию без дублей (Цикл 11).
+ *  Возвращает результат, {error} при 4xx или null при сбое. */
+export async function linkLeadContact(
+  leadId: number,
+  opts?: { counterpartyId?: number; fullName?: string; phone?: string; email?: string; isPrimary?: boolean },
+): Promise<LinkContactResult | { error: string } | null> {
+  try {
+    const res = await fetch(`/api/leads/${leadId}/link-contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        counterparty_id: opts?.counterpartyId,
+        full_name: opts?.fullName ?? "",
+        phone: opts?.phone,
+        email: opts?.email,
+        is_primary: opts?.isPrimary ?? false,
+      }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+      return { error: body?.detail ?? "Не удалось добавить контакт" };
+    }
+    const b = (await res.json()) as {
+      contact_id: number;
+      counterparty_id: number;
+      created: boolean;
+      full_name: string;
+    };
+    return { contactId: b.contact_id, counterpartyId: b.counterparty_id, created: b.created, fullName: b.full_name };
+  } catch {
+    return null;
+  }
+}
+
 /** Отчёт качества источников/кампаний (Цикл 4): GET /leads/stats/sources — лениво, при открытии панели. */
 export async function fetchLeadSourceStats(days?: number): Promise<LeadSourceStat[]> {
   try {
