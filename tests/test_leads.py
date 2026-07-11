@@ -1735,6 +1735,95 @@ async def test_stats_window_sees_revived_activity(session, api, services):
     assert any(r["source"] == "site" and r["total"] >= 1 for r in sources)
 
 
+# --- Этап денег/надёжности ---
+
+
+async def test_new_lead_cancels_pending_wake(session, api):
+    """Фантомный дубль: контакт вернулся новым лидом, пока спит его «не сейчас» — авто-возврат
+    спящего гасится (snooze_until=None), иначе два лидоруба звонят одному клиенту."""
+    from modules.leads.models import Lead
+
+    a = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Возврат", "phone": "+375291230300"})
+    ).json()
+    await api.post(f"/leads/{a['id']}/reject", json={"reason": "не сейчас", "snooze_days": 90})
+    slept = await session.get(Lead, a["id"])
+    assert slept.snooze_until is not None  # заснул
+
+    # тот же контакт возвращается новым лидом (дедуп не ловит: A терминальный)
+    b = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Возврат", "phone": "+375291230300"})
+    ).json()
+    assert b["id"] != a["id"]
+    assert b["revived_from_id"] == a["id"]  # память об отказе сохранена
+    await session.refresh(slept)
+    assert slept.snooze_until is None  # авто-возврат погашен — дубль не проснётся
+
+
+async def test_incoming_call_cancels_pending_wake(session, api, services):
+    """Тот же гард для канала «звонок»: контакт звонит, пока спит его «не сейчас» — авто-возврат
+    гасится, звонок не плодит фантомный дубль (on_call_logged, а не только веб-интейк)."""
+    from modules.leads.models import Lead
+
+    a = (
+        await api.post("/leads", json={"source": "phone", "phone": "+375291230310"})
+    ).json()
+    await api.post(f"/leads/{a['id']}/reject", json={"reason": "не сейчас", "snooze_days": 90})
+
+    services.event_bus.emit(
+        session, "sales.call.logged", {"direction": "in", "phone": "+375291230310", "agent_ext": "101"}
+    )
+    await session.commit()
+    from core.services.eventbus import EventContext
+
+    await services.event_bus.relay_once(session, EventContext(session, services))
+
+    slept = await session.get(Lead, a["id"])
+    assert slept.snooze_until is None  # звонок погасил авто-возврат
+
+
+async def test_converted_event_carries_counterparty_id(session, api):
+    """Событие конвертации несёт counterparty_id эталона — sales привяжет сделку к клиенту, не заведёт дубль."""
+    from core.domain.models import Counterparty
+    from core.domain.models import OutboxEvent as OE
+
+    session.add(Counterparty(name="ООО Эталон-Конв", is_active=True))
+    await session.commit()
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Эталон-Конв", "phone": "+375291230301", "product": "лист"},
+        )
+    ).json()
+    assert lead["counterparty_id"] is not None  # резолв нашёл клиента
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+    await api.post(f"/leads/{lead['id']}/convert")
+
+    events = (await session.execute(select(OE).where(OE.event_type == "leads.lead.converted"))).scalars().all()
+    conv = next(e for e in events if e.payload.get("lead_id") == lead["id"])
+    assert conv.payload["counterparty_id"] == lead["counterparty_id"]
+
+
+async def test_lead_items_reject_bad_money(session, api):
+    """Граница денег: нулевое количество, отрицательная цена/скидка >100% → 422 (Σ КП не искажаема)."""
+    lead = (await api.post("/leads", json={"source": "site", "company": "ООО КП"})).json()
+    lid = lead["id"]
+    assert (
+        await api.put(f"/leads/{lid}/items", json=[{"sku_id": 1, "qty": 0, "price": 10}])
+    ).status_code == 422
+    assert (
+        await api.put(f"/leads/{lid}/items", json=[{"sku_id": 1, "qty": 1, "price": -5}])
+    ).status_code == 422
+    assert (
+        await api.put(f"/leads/{lid}/items", json=[{"sku_id": 1, "qty": 1, "price": 5, "discount_pct": 150}])
+    ).status_code == 422
+    # валидная позиция проходит
+    ok = await api.put(f"/leads/{lid}/items", json=[{"sku_id": 1, "qty": 2, "price": 5, "discount_pct": 10}])
+    assert ok.status_code == 200
+
+
 # --- RBAC: вход воронки закрыт от анонима/чужого отдела (require_permission) ---
 
 

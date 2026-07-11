@@ -1174,10 +1174,52 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
   const [note, setNote] = useState("");
   const [demoBusy, setDemoBusy] = useState(false);
+  // Минутный тик: SLA-чипы (WaitChip, «просрочен», возраст «у продавца») считаются от
+  // текущего времени в render — без пере-рендера они замирают. Тик раз в минуту оживляет их.
+  const [, setMinuteTick] = useState(0);
+
+  /** Общий однострочный флеш-нотис (сообщение + авто-скрытие) — вместо повторов setNote+timeout. */
+  function flash(message: string, ms = 3500) {
+    setNote(message);
+    window.setTimeout(() => setNote(""), ms);
+  }
 
   async function refresh() {
-    setLeads(await fetchLeadsClient());
+    const fresh = await fetchLeadsClient();
+    if (fresh === null) return; // сетевая ошибка — НЕ подменяем живую доску пустотой
+    // aiRationale — клиентское поле (бэк его не отдаёт): сохраняем при обновлении по id,
+    // иначе поллинг стирал бы AI-обоснование со всех лидов.
+    setLeads((prev) => {
+      const byId = new Map(prev.map((l) => [l.id, l]));
+      return fresh.map((l) => {
+        const old = byId.get(l.id);
+        return old?.aiRationale ? { ...l, aiRationale: old.aiRationale } : l;
+      });
+    });
   }
+
+  // Живая доска: минутный тик для SLA-чипов + мягкий поллинг приёма (новая заявка видна
+  // без F5). Поллинг молчит, пока лидоруб в действии (busy/модал/поповер экспресса/звонок) —
+  // чтобы обновление не выдёргивало из-под руки открытую форму. «Занятость» держим в ref, а
+  // не в deps интервала: иначе каждое действие (busyId null→id→null) пересоздавало бы таймер
+  // и сбрасывало 45-секундный отсчёт — при активной работе refresh не срабатывал бы вовсе.
+  const pausePollRef = useRef(false);
+  useEffect(() => {
+    pausePollRef.current =
+      busyId !== null || modalOpen || expressOpenId !== null || callPopupLead !== null;
+  }, [busyId, modalOpen, expressOpenId, callPopupLead]);
+  useEffect(() => {
+    // Интервалы создаём один раз; свежую «занятость» интервал читает через ref (не через deps),
+    // иначе каждое действие сбрасывало бы 45-секундный отсчёт и refresh не срабатывал при работе.
+    const tick = window.setInterval(() => setMinuteTick((t) => t + 1), 60_000);
+    const poll = window.setInterval(() => {
+      if (!pausePollRef.current) void refresh();
+    }, 45_000);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(poll);
+    };
+  }, []);
 
   // Демо: внешний канал (сайт/почта) шлёт заявку в публичный коннектор → лид приходит
   // событием через relay (~2с), затем подтягиваем приём.
@@ -1231,6 +1273,8 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         aiRationale: res.ai_rationale ?? undefined,
       });
       refreshPlan();
+    } else {
+      flash(`Не удалось квалифицировать ЛИД-${id} — попробуйте ещё раз`);
     }
     setBusyId(null);
   }
@@ -1255,10 +1299,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
       });
       refreshPlan();
       // Цикл 8: показать, почему выбран этот менеджер (умная маршрутизация по конверсии).
-      if (res.rationale) {
-        setNote(`Распределён → ${res.rationale}`);
-        window.setTimeout(() => setNote(""), 4000);
-      }
+      if (res.rationale) flash(`Распределён → ${res.rationale}`, 4000);
+    } else {
+      flash(`Не удалось распределить ЛИД-${id} — попробуйте ещё раз`);
     }
     setBusyId(null);
   }
@@ -1292,9 +1335,10 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
       // aiRationale — клиентское поле (LeadOut его не отдаёт): переносим при подмене,
       // иначе AI-обоснование исчезает из drawer сразу после клика «Недозвон» (ревью Ц15).
       setLeads((prev) => prev.map((l) => (l.id === id ? { ...res, aiRationale: l.aiRationale } : l)));
-      setNote(`Недозвон по ЛИД-${id}: попытка ${res.attemptCount ?? "—"}, перезвон через 2 ч`);
-      window.setTimeout(() => setNote(""), 3000);
+      flash(`Недозвон по ЛИД-${id}: попытка ${res.attemptCount ?? "—"}, перезвон через 2 ч`, 3000);
       refreshPlan(); // недозвон = первое действие, факт «Обработано»/«Реакция» меняется
+    } else {
+      flash(`Не удалось зафиксировать недозвон по ЛИД-${id} — попробуйте ещё раз`);
     }
   }
 
@@ -1319,19 +1363,20 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
             items,
           );
           if (ok < total) {
-            setNote(`Сделка создана, но перенесено ${ok}/${total} позиций КП — проверьте сделку`);
-            window.setTimeout(() => setNote(""), 4000);
+            flash(`Сделка создана, но перенесено ${ok}/${total} позиций КП — проверьте сделку`, 4000);
           }
         }
       } else if (!res.deal_id && (cur?.itemsCount ?? 0) > 0) {
         // Фикс ревью Ц14: поллинг deal_id истёк (событие в пути дольше 12с) — не молчим:
         // повторная конвертация вернёт 409, а КП само не переедет. Честно говорим, что делать.
-        setNote(
+        flash(
           "Сделка создаётся дольше обычного — позиции КП не перенесены. Обновите страницу и перенесите КП из карточки лида",
+          6000,
         );
-        window.setTimeout(() => setNote(""), 6000);
       }
       refreshPlan();
+    } else {
+      flash(`Не удалось конвертировать ЛИД-${id} в сделку — попробуйте ещё раз`);
     }
     setBusyId(null);
   }
@@ -1343,10 +1388,11 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
       patch(id, { status: "rejected", rejectReason: res.reject_reason });
       // Цикл 16: «не сейчас» — отсрочка, а не похороны; скажем, когда лид вернётся.
       if (reason === "не сейчас" && snoozeDays) {
-        setNote(`ЛИД-${id} отложен — сам вернётся в «Новые» через ${snoozeDays} дн`);
-        window.setTimeout(() => setNote(""), 4000);
+        flash(`ЛИД-${id} отложен — сам вернётся в «Новые» через ${snoozeDays} дн`, 4000);
       }
       refreshPlan();
+    } else {
+      flash(`Не удалось отклонить ЛИД-${id} — попробуйте ещё раз`);
     }
     setBusyId(null);
   }

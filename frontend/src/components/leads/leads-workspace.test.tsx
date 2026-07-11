@@ -47,6 +47,8 @@ vi.mock("@/lib/api", () => ({
   fetchLeadHandoffStats: vi.fn().mockResolvedValue([]),
   // Цикл 15: недозвон — попытка контакта + срок перезвона.
   logLeadAttempt: vi.fn(),
+  // Живой поллинг приёма: null = сетевая ошибка/нет обновления (доску не трогаем).
+  fetchLeadsClient: vi.fn().mockResolvedValue(null),
   // Чистая функция (локальное naive-время → naive-UTC) — в тестах passthrough.
   localToNaiveUtc: (s: string) => s,
 }));
@@ -192,6 +194,21 @@ describe("LeadsWorkspace", () => {
     await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
     const link = await screen.findByRole("link", { name: /Открыть сделку/ });
     expect(link).toHaveAttribute("href", "/crm/deals/42");
+  });
+
+  it("сбой конвертации показывает ошибку, а не молчит (лид не считается обработанным)", async () => {
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue(null); // сетевой сбой/ошибка
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, status: "routed", assignedTo: "Иванов И.И.", funnel: "new" }]}
+      />,
+    );
+    await openPreview(1);
+    fireEvent.click(screen.getByRole("button", { name: "В сделку" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
+    expect(await screen.findByText(/Не удалось конвертировать/)).toBeInTheDocument();
+    // лид остаётся распределённым (не переехал в «converted» молча)
+    expect(screen.queryByRole("link", { name: /Открыть сделку/ })).not.toBeInTheDocument();
   });
 
   it("приём лида через форму добавляет его в инбокс", async () => {

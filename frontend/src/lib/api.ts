@@ -1220,14 +1220,16 @@ export async function fetchLeads(roles?: string): Promise<Lead[]> {
   }
 }
 
-/** Лиды из API (клиент, через /api) — для обновления приёма после входящих заявок. */
-export async function fetchLeadsClient(): Promise<Lead[]> {
+/** Лиды из API (клиент, через /api) — для обновления приёма после входящих заявок.
+ *  null (не пустой массив!) при сетевой ошибке/не-2xx — чтобы вызывающий поллинг НЕ
+ *  подменял живую доску пустотой при разовом сбое сети (пустой [] = реально нет лидов). */
+export async function fetchLeadsClient(): Promise<Lead[] | null> {
   try {
     const res = await fetch("/api/leads", { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiLead[]).map(mapLead);
   } catch {
-    return [];
+    return null;
   }
 }
 
