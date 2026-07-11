@@ -131,6 +131,28 @@ async def test_win_deal_repeat_clients_resolves_rp_won(api):
     assert won_col["count"] == 1
 
 
+async def test_lose_deal_repeat_clients_resolves_rp_lost(api):
+    """Тот же класс бага, что Фикс 1 (win): lose на сделке repeat_clients ставит ``rp_lost``
+    (не литерал "lost", которого нет в этой воронке) — иначе закрытая сделка выпадала бы
+    с /board?funnel=repeat_clients."""
+    await api.get("/sales/stages")  # материализовать канон всех воронок
+    deal = await _new_deal(api, "RP-L-1", stage="rp_request", funnel="repeat_clients", amount=800)
+
+    r = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "price"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stage"] == "rp_lost"
+    assert body["closed_date"]
+
+    # повторно нельзя — 409 сверяется с ПРАВИЛЬНЫМ lost-кодом воронки, не с литералом "lost"
+    again = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "other"})
+    assert again.status_code == 409
+
+    board = (await api.get("/sales/board?funnel=repeat_clients")).json()
+    lost_col = next(st for st in board["stages"] if st["id"] == "rp_lost")
+    assert lost_col["count"] == 1
+
+
 async def test_reverse_from_won_clears_closed_date(api):
     """Фикс 2: реверс сделки из won в нетерминальную стадию сбрасывает ``closed_date`` —
     иначе сделка, возвращённая в работу, продолжает числиться закрытой в отчётах."""
