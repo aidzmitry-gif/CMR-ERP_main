@@ -1015,3 +1015,63 @@ async def test_source_stats_include_pipeline_money(session, api, services):
     site_rows = [r for r in rows if r["source"] == "site"]
     assert site_rows
     assert sum(r["pipeline"] for r in site_rows) >= 25000.0
+
+
+# --- Цикл 8: умная маршрутизация по истории конверсии + обоснование ---
+
+
+def test_route_lead_prefers_better_closer_with_history():
+    """route_lead с историей конверсии выбирает лучшего закрывающего среди кандидатов."""
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
+
+    # без гео/продукта кандидаты — все три; загрузка равная
+    generic = Lead(source="site")
+    loads = {"Иванов И.И.": 0, "Петров П.П.": 0, "Сидоров С.С.": 0}
+    perf = {"Иванов И.И.": 0.1, "Петров П.П.": 0.5, "Сидоров С.С.": 0.2}
+    assert route_lead(generic, loads, False, perf)[0] == "Петров П.П."  # лучшая конверсия
+
+
+def test_route_lead_load_penalty_overrides_small_conversion_edge():
+    """Небольшое преимущество в конверсии не перевешивает крупный перекос загрузки."""
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
+
+    generic = Lead(source="site")
+    # Иванов чуть лучше по конверсии (+1 п.п.), но загружен на 10 лидов больше → штраф побеждает
+    loads = {"Иванов И.И.": 10, "Петров П.П.": 0, "Сидоров С.С.": 0}
+    perf = {"Иванов И.И.": 0.51, "Петров П.П.": 0.50, "Сидоров С.С.": 0.0}
+    assert route_lead(generic, loads, False, perf)[0] == "Петров П.П."
+
+
+def test_route_lead_no_history_falls_back_to_load():
+    """Без истории (пустой performance) — прежнее правило наименее загруженного."""
+    from modules.leads.leads import route_lead
+    from modules.leads.models import Lead
+
+    generic = Lead(source="site")
+    loads = {"Иванов И.И.": 3, "Петров П.П.": 1, "Сидоров С.С.": 5}
+    assert route_lead(generic, loads, False, {})[0] == "Петров П.П."
+
+
+async def test_route_returns_rationale(session, api):
+    """POST /route возвращает обоснование выбора менеджера (Цикл 8)."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Обоснование", "region": "Минск", "product": "лист"},
+        )
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    r = (await api.post(f"/leads/{lead['id']}/route")).json()
+    assert r["assigned_to"] == "Иванов И.И."
+    assert "Иванов И.И." in r["rationale"]  # человекочитаемое «почему»
+
+
+async def test_route_manual_rationale(session, api):
+    """Ручной выбор менеджера → обоснование «Ручной выбор»."""
+    lead = (await api.post("/leads", json={"source": "site", "company": "ООО Ручной"})).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    r = (await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Петров П.П."})).json()
+    assert r["assigned_to"] == "Петров П.П."
+    assert "Ручной выбор" in r["rationale"]

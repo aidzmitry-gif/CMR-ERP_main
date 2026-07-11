@@ -1267,6 +1267,7 @@ export interface LeadRouteResult {
   status: LeadStatus;
   assigned_to: string;
   funnel: string;
+  rationale?: string; // Цикл 8: почему этот менеджер (конверсия/загрузка или ручной выбор)
 }
 
 /** Распределить лид на менеджера по правилам (география/продукт/нагрузка/воронка).

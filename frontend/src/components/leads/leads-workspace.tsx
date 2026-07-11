@@ -181,19 +181,26 @@ function formatWait(minutes: number): string {
   return minutes > 90 ? `${Math.round(minutes / 60)} ч` : `${minutes} мин`;
 }
 
+// Пороги SLA первой реакции (Цикл 1/8): >15 мин — задержка (красный чип), >60 мин —
+// эскалация «горит» (🔥) + такие лиды всплывают наверх колонки «Новые».
+const SLA_OVERDUE_MIN = 15;
+const SLA_ESCALATE_MIN = 60;
+
 function WaitChip({ createdAt }: { createdAt?: string }) {
   const minutes = waitingMinutes(createdAt);
   if (minutes == null) return null;
-  const overdue = minutes > 15;
+  const overdue = minutes > SLA_OVERDUE_MIN;
+  const escalated = minutes > SLA_ESCALATE_MIN;
   return (
     <span
-      title="Ожидает реакции с момента приёма"
+      title={escalated ? "SLA горит — реагируй немедленно" : "Ожидает реакции с момента приёма"}
       className={clsx(
         "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
         overdue ? "bg-red-100 text-red-700" : "bg-sunken text-muted",
       )}
     >
-      ⏱ {formatWait(minutes)}
+      {escalated ? "🔥 " : "⏱ "}
+      {formatWait(minutes)}
     </span>
   );
 }
@@ -1015,6 +1022,11 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     if (res) {
       patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
       refreshPlan();
+      // Цикл 8: показать, почему выбран этот менеджер (умная маршрутизация по конверсии).
+      if (res.rationale) {
+        setNote(`Распределён → ${res.rationale}`);
+        window.setTimeout(() => setNote(""), 4000);
+      }
     }
     setBusyId(null);
   }
@@ -1291,7 +1303,14 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-2">
             {COLUMNS.map((col) => {
-              const items = byStatus[col.key];
+              // Колонка «Новые» (Цикл 8, SLA-эскалация): старые лиды — наверх, чтобы горящие
+              // по времени реакции разбирались первыми. Остальные колонки — прежний порядок.
+              const items =
+                col.key === "new"
+                  ? [...byStatus[col.key]].sort(
+                      (a, b) => (waitingMinutes(b.createdAt) ?? 0) - (waitingMinutes(a.createdAt) ?? 0),
+                    )
+                  : byStatus[col.key];
               return (
                 <div key={col.key} className="flex w-[280px] shrink-0 flex-col">
                   <div
