@@ -271,6 +271,8 @@ export interface Lead {
   counterpartyId?: number; // Цикл 10: эталон контрагента (golden record), если лид резолвнут в MDM
   customerKind?: string; // Цикл 10: "" новый | "existing" действующий клиент | "regular" постоянник
   revivedFromId?: number; // Цикл 12: id ранее отклонённого лида того же контакта (память об отказе)
+  routedAt?: string | null; // Цикл 13: момент передачи продавцу — возраст «у продавца» на карточке
+  convertedAt?: string | null; // Цикл 13: момент конвертации — сторож «converted без сделки»
 }
 
 /** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.
@@ -311,6 +313,9 @@ export interface LeadHandoffStat {
   converted: number;
   pipeline: number;
   conversionPct: number;
+  pending: number; // Цикл 13: передано, но ещё не в сделке («в работе» у продавца)
+  pendingPipeline: number; // Цикл 13: Σ КП «в работе» (BYN)
+  stale: number; // Цикл 13: висят у продавца >24ч без сделки
 }
 
 export interface LeadAttachment {

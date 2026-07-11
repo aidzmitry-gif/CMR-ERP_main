@@ -1229,8 +1229,9 @@ async def test_resolve_customer_no_match_is_cold(session, api):
 
 async def test_link_contact_creates_then_dedups(session, api):
     """POST /link-contact: создаёт контакт в компании лида, повтор с тем же телефоном — не дублит."""
-    from core.domain.models import Contact, Counterparty
     from sqlalchemy import select as _select
+
+    from core.domain.models import Contact, Counterparty
 
     cp = Counterparty(name="ООО Клиент11")
     session.add(cp)
@@ -1382,3 +1383,79 @@ async def test_revival_ignores_other_company_rejection(session, api):
         await api.post("/leads", json={"source": "site", "company": "ООО Моя", "phone": "80298880000"})
     ).json()
     assert mine["revived_from_id"] is None
+
+
+# --- Цикл 13: пост-передача под контролем ---
+
+
+async def test_route_sets_routed_at(session, api):
+    """Раздача проставляет routed_at — возраст «у продавца» для контроля зависших."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Контроль", "phone": "+375291230013"})
+    ).json()
+    assert lead["routed_at"] is None
+    await api.post(f"/leads/{lead['id']}/qualify")
+    routed = (await api.post(f"/leads/{lead['id']}/route")).json()
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["routed_at"] is not None
+    assert routed["id"] == lead["id"]
+
+
+async def test_express_bulk_sets_default_next_step(session, api):
+    """Конвейер не раздаёт «без шага»: bulk-экспресс ставит дефолтный next_step (завтра, «Позвонить»)."""
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Шаг", "phone": "+375291230014",
+                "email": "step@bulk.by", "product": "лист", "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 20 тонн, срочно в Минск с доставкой",
+            },
+        )
+    ).json()
+    r = await api.post("/leads/express-bulk")
+    assert lead["id"] in r.json()["expressed"]
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["next_step_at"] is not None
+    assert got["next_step_note"] == "Позвонить"
+    assert got["routed_at"] is not None
+
+
+async def test_handoff_stats_pending_and_stale(session, api, services):
+    """Скорборд Ц13: переданный (не сконвертированный) лид виден как pending с Σ КП;
+    переданный >24ч назад без сделки считается stale."""
+    from datetime import datetime, timedelta, timezone
+
+    from modules.leads.models import Lead
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site", "company": "ООО Висяк", "phone": "+375291230015",
+                "product": "лист", "region": "Минск",
+                "message": "Нужен металл, объём большой, срочно, пришлите цену",
+            },
+        )
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+    await api.put(
+        f"/leads/{lead['id']}/items",
+        json=[{"sku_id": 1, "sku_code": "SKU-1", "name": "лист", "qty": 1, "price": 7000}],
+    )
+
+    rows = (await api.get("/leads/stats/handoffs")).json()
+    row = next(r for r in rows if r["manager"] == "Иванов И.И.")  # металл/Минск → Иванов
+    assert row["pending"] >= 1
+    assert row["pending_pipeline"] >= 7000.0
+    assert row["stale"] == 0  # только что передан — не завис
+
+    # состариваем передачу: routed_at позавчера → лид попадает в stale
+    obj = await session.get(Lead, lead["id"])
+    obj.routed_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
+    await session.commit()
+
+    rows = (await api.get("/leads/stats/handoffs")).json()
+    row = next(r for r in rows if r["manager"] == "Иванов И.И.")
+    assert row["stale"] >= 1

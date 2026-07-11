@@ -495,6 +495,68 @@ describe("LeadsWorkspace", () => {
     expect(tile).toHaveTextContent("1");
   });
 
+  it("Цикл 13: переданный лид показывает возраст «у продавца» и просроченный шаг", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          {
+            ...lead,
+            id: 1,
+            status: "routed",
+            assignedTo: "Иванов И.И.",
+            funnel: "new",
+            routedAt: isoMinutesAgo(30 * 60), // 30 часов у продавца → жёлтая зона
+            nextStepAt: isoMinutesAgo(120), // шаг просрочен на 2 часа
+            nextStepNote: "Позвонить",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTitle(/У продавца с момента передачи/)).toBeInTheDocument();
+    expect(screen.getByText(/шаг просрочен/)).toBeInTheDocument();
+  });
+
+  it("Цикл 13: converted без сделки дольше 10 минут — тревога «сделка не создана»", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, status: "converted", convertedAt: isoMinutesAgo(15) }, // dealId нет
+          { ...lead, id: 2, status: "converted", dealId: 5, convertedAt: isoMinutesAgo(15) },
+        ]}
+      />,
+    );
+    // тревога только у лида БЕЗ deal_id (событие потерялось), у нормального — нет
+    expect(screen.getAllByText("⚠ сделка не создана")).toHaveLength(1);
+  });
+
+  it("Цикл 13: шапка «Распределение» показывает Σ КП в работе и зависших >24ч", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          {
+            ...lead,
+            id: 1,
+            status: "routed",
+            assignedTo: "Иванов И.И.",
+            routedAt: isoMinutesAgo(10),
+            itemsCount: 2,
+            itemsTotal: 5000,
+          },
+          {
+            ...lead,
+            id: 2,
+            status: "routed",
+            assignedTo: "Петров П.П.",
+            company: "ООО Висяк",
+            routedAt: isoMinutesAgo(30 * 60), // >24ч — завис
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Σ КП в работе/)).toBeInTheDocument();
+    expect(screen.getByText(/1 висят >24ч/)).toBeInTheDocument();
+  });
+
   it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {
     (api.fetchLeadSourceStats as ReturnType<typeof vi.fn>).mockResolvedValue([
       {

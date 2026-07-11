@@ -178,6 +178,7 @@ function waitingMinutes(createdAt?: string): number | null {
 }
 
 function formatWait(minutes: number): string {
+  if (minutes > 2880) return `${Math.round(minutes / 1440)} дн`; // Цикл 13: возраст передачи живёт днями
   return minutes > 90 ? `${Math.round(minutes / 60)} ч` : `${minutes} мин`;
 }
 
@@ -201,6 +202,52 @@ function WaitChip({ createdAt }: { createdAt?: string }) {
     >
       {escalated ? "🔥 " : "⏱ "}
       {formatWait(minutes)}
+    </span>
+  );
+}
+
+// Пост-передача под контролем (Цикл 13): возраст «у продавца» с момента раздачи.
+// >24ч — жёлтый (пора подтолкнуть продавца), >48ч — красный (лид завис, дожим сегодня).
+const ROUTED_WARN_MIN = 24 * 60;
+const ROUTED_STALE_MIN = 48 * 60;
+// Сторож converted-без-сделки (Цикл 13): сделку создаёт sales по событию шины (2с-поллинг);
+// если через 10 мин deal_id так и не появился — событие потерялось, лид ушёл со всех радаров.
+const DEAL_GUARD_MIN = 10;
+
+function RoutedAgeChip({ routedAt }: { routedAt?: string | null }) {
+  const minutes = waitingMinutes(routedAt ?? undefined);
+  if (minutes == null) return null;
+  const warn = minutes > ROUTED_WARN_MIN;
+  const stale = minutes > ROUTED_STALE_MIN;
+  return (
+    <span
+      title="У продавца с момента передачи — сделки ещё нет"
+      className={clsx(
+        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+        stale ? "bg-red-100 text-red-700" : warn ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
+      )}
+    >
+      ⏳ {formatWait(minutes)}
+    </span>
+  );
+}
+
+// Чип следующего шага на переданном лиде (Цикл 13): до сих пор next_step_at ставился при
+// раздаче, но нигде не показывался (write-only) — просроченное обещание клиенту не видел никто.
+function NextStepChip({ at, note }: { at?: string | null; note?: string }) {
+  if (!at) return null;
+  const overdueMin = waitingMinutes(at) ?? 0; // минуты ПОСЛЕ срока; 0 — срок ещё впереди
+  const d = new Date(at.endsWith("Z") ? at : `${at}Z`);
+  const label = d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return (
+    <span
+      title={note ? `Следующий шаг: ${note}` : "Следующий шаг по лиду"}
+      className={clsx(
+        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+        overdueMin > 0 ? "bg-red-100 text-red-700" : "bg-sunken text-muted",
+      )}
+    >
+      {overdueMin > 0 ? `⚠ шаг просрочен ${formatWait(overdueMin)}` : `→ шаг ${label}`}
     </span>
   );
 }
@@ -596,9 +643,10 @@ function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading:
     );
   }
   const totalPipeline = rows.reduce((s, r) => s + r.pipeline, 0);
+  const totalPending = rows.reduce((s, r) => s + r.pendingPipeline, 0);
   return (
     <div className="overflow-x-auto rounded-xl bg-surface p-3 shadow-card">
-      <table className="w-full min-w-[480px] text-left text-xs">
+      <table className="w-full min-w-[560px] text-left text-xs">
         <thead>
           <tr className="text-muted">
             <th className="px-2 py-1 font-semibold">Продавец</th>
@@ -606,6 +654,9 @@ function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading:
             <th className="px-2 py-1 text-right font-semibold">В сделке</th>
             <th className="px-2 py-1 text-right font-semibold">Конверсия</th>
             <th className="px-2 py-1 text-right font-semibold">Σ КП передал</th>
+            {/* Цикл 13: пост-передача под контролем — «в работе» и зависшие >24ч */}
+            <th className="px-2 py-1 text-right font-semibold">В работе (Σ КП)</th>
+            <th className="px-2 py-1 text-right font-semibold">&gt;24ч</th>
           </tr>
         </thead>
         <tbody>
@@ -618,6 +669,20 @@ function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading:
               <td className="px-2 py-1.5 text-right font-medium tabular-nums text-money">
                 {r.pipeline > 0 ? formatByn(r.pipeline) : "—"}
               </td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-ink">
+                {r.pending > 0
+                  ? `${r.pending}${r.pendingPipeline > 0 ? ` · ${formatByn(r.pendingPipeline)}` : ""}`
+                  : "—"}
+              </td>
+              <td
+                className={clsx(
+                  "px-2 py-1.5 text-right font-semibold tabular-nums",
+                  r.stale > 0 ? "text-red-600" : "text-faint",
+                )}
+                title={r.stale > 0 ? "Переданы >24ч назад, сделки нет — дожать продавца" : undefined}
+              >
+                {r.stale > 0 ? `⚠ ${r.stale}` : "—"}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -629,6 +694,10 @@ function HandoffScorecard({ rows, loading }: { rows: LeadHandoffStat[]; loading:
             <td className="px-2 py-1.5 text-right font-bold tabular-nums text-money">
               {formatByn(totalPipeline)}
             </td>
+            <td className="px-2 py-1.5 text-right font-bold tabular-nums text-money">
+              {totalPending > 0 ? formatByn(totalPending) : "—"}
+            </td>
+            <td />
           </tr>
         </tfoot>
       </table>
@@ -738,6 +807,18 @@ function LeadCard({
             </span>
           )}
           {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
+          {lead.status === "routed" && <RoutedAgeChip routedAt={lead.routedAt} />}
+          {lead.status === "routed" && <NextStepChip at={lead.nextStepAt} note={lead.nextStepNote} />}
+          {lead.status === "converted" &&
+            lead.dealId == null &&
+            (waitingMinutes(lead.convertedAt ?? undefined) ?? 0) > DEAL_GUARD_MIN && (
+              <span
+                title="Конвертация прошла, а сделка так и не появилась — проверьте и повторите конвертацию"
+                className="inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-700"
+              >
+                ⚠ сделка не создана
+              </span>
+            )}
           <StatusBadge status={lead.status} />
         </div>
       </div>
@@ -1350,7 +1431,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
           <div className="flex gap-3 overflow-x-auto pb-2">
             {COLUMNS.map((col) => {
               // Колонка «Новые» (Цикл 8/9): ключевые лиды — в самый верх (макс. выигрыш), затем
-              // по времени ожидания (горящие по SLA первыми). Остальные колонки — прежний порядок.
+              // по времени ожидания (горящие по SLA первыми). «Распределение» (Цикл 13):
+              // просроченный шаг — наверх (самые просроченные первыми), затем дольше всех
+              // у продавца. Остальные колонки — прежний порядок.
               const items =
                 col.key === "new"
                   ? [...byStatus[col.key]].sort(
@@ -1358,7 +1441,15 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         Number(b.isKey ?? false) - Number(a.isKey ?? false) ||
                         (waitingMinutes(b.createdAt) ?? 0) - (waitingMinutes(a.createdAt) ?? 0),
                     )
-                  : byStatus[col.key];
+                  : col.key === "routed"
+                    ? [...byStatus[col.key]].sort(
+                        (a, b) =>
+                          (waitingMinutes(b.nextStepAt ?? undefined) ?? 0) -
+                            (waitingMinutes(a.nextStepAt ?? undefined) ?? 0) ||
+                          (waitingMinutes(b.routedAt ?? undefined) ?? 0) -
+                            (waitingMinutes(a.routedAt ?? undefined) ?? 0),
+                      )
+                    : byStatus[col.key];
               return (
                 <div key={col.key} className="flex w-[280px] shrink-0 flex-col">
                   <div
@@ -1372,6 +1463,31 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                     <div className="mt-1 text-xs text-muted">
                       <b className="text-ink">{items.length}</b> {pluralLeads(items.length)}
                     </div>
+                    {/* Цикл 13: деньги «в работе» у продавцов и зависшие — прямо в шапке колонки */}
+                    {col.key === "routed" && items.length > 0 && (
+                      <>
+                        {items.some((l) => (l.itemsTotal ?? 0) > 0) && (
+                          <div className="mt-1 text-[11px] text-muted">
+                            Σ КП в работе:{" "}
+                            <b className="text-ink">
+                              {formatByn(items.reduce((s, l) => s + (l.itemsTotal ?? 0), 0))}
+                            </b>
+                          </div>
+                        )}
+                        {items.filter((l) => (waitingMinutes(l.routedAt ?? undefined) ?? 0) > ROUTED_WARN_MIN)
+                          .length > 0 && (
+                          <div className="mt-0.5 text-[11px] font-semibold text-red-600">
+                            ⚠{" "}
+                            {
+                              items.filter(
+                                (l) => (waitingMinutes(l.routedAt ?? undefined) ?? 0) > ROUTED_WARN_MIN,
+                              ).length
+                            }{" "}
+                            висят &gt;24ч
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                   <div className="flex flex-col gap-3">
                     {items.map((l) => (

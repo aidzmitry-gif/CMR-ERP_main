@@ -1144,6 +1144,8 @@ interface ApiLead {
   counterparty_id?: number | null;
   customer_kind?: string;
   revived_from_id?: number | null;
+  routed_at?: string | null;
+  converted_at?: string | null;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1177,6 +1179,8 @@ function mapLead(l: ApiLead): Lead {
     counterpartyId: l.counterparty_id ?? undefined,
     customerKind: l.customer_kind ?? "",
     revivedFromId: l.revived_from_id ?? undefined,
+    routedAt: l.routed_at ?? null,
+    convertedAt: l.converted_at ?? null,
   };
 }
 
@@ -1449,6 +1453,9 @@ interface ApiLeadHandoffStat {
   converted: number;
   pipeline: number;
   conversion_pct: number;
+  pending?: number;
+  pending_pipeline?: number;
+  stale?: number;
 }
 
 /** Скорборд передач лидоруба продавцам (Цикл 7): GET /leads/stats/handoffs — лениво. */
@@ -1463,6 +1470,9 @@ export async function fetchLeadHandoffStats(days?: number): Promise<LeadHandoffS
       converted: s.converted,
       pipeline: s.pipeline,
       conversionPct: s.conversion_pct,
+      pending: s.pending ?? 0,
+      pendingPipeline: s.pending_pipeline ?? 0,
+      stale: s.stale ?? 0,
     }));
   } catch {
     return [];
