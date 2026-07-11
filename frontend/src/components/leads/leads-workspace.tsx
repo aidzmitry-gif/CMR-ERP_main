@@ -866,6 +866,16 @@ function LeadCard({
               ↑ повтор
             </span>
           )}
+          {lead.status === "new" &&
+            lead.snoozeUntil != null &&
+            (waitingMinutes(lead.snoozeUntil) ?? 0) > 0 && (
+              <span
+                title="Лид вернулся из отложенных («не сейчас») — спрос мог созреть, начните с него"
+                className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700"
+              >
+                ⏰ проснулся
+              </span>
+            )}
           {(lead.status === "new" || lead.status === "qualified") && (
             <AttemptChip count={lead.attemptCount} callbackAt={lead.callbackAt} />
           )}
@@ -1269,7 +1279,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     const res = await logLeadAttempt(id);
     setBusyId(null);
     if (res) {
-      setLeads((prev) => prev.map((l) => (l.id === id ? res : l)));
+      // aiRationale — клиентское поле (LeadOut его не отдаёт): переносим при подмене,
+      // иначе AI-обоснование исчезает из drawer сразу после клика «Недозвон» (ревью Ц15).
+      setLeads((prev) => prev.map((l) => (l.id === id ? { ...res, aiRationale: l.aiRationale } : l)));
       setNote(`Недозвон по ЛИД-${id}: попытка ${res.attemptCount ?? "—"}, перезвон через 2 ч`);
       window.setTimeout(() => setNote(""), 3000);
       refreshPlan(); // недозвон = первое действие, факт «Обработано»/«Реакция» меняется
@@ -1314,11 +1326,16 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(null);
   }
 
-  async function onReject(id: number, reason: string) {
+  async function onReject(id: number, reason: string, snoozeDays?: number) {
     setBusyId(id);
-    const res = await rejectLead(id, reason);
+    const res = await rejectLead(id, reason, snoozeDays);
     if (res) {
       patch(id, { status: "rejected", rejectReason: res.reject_reason });
+      // Цикл 16: «не сейчас» — отсрочка, а не похороны; скажем, когда лид вернётся.
+      if (reason === "не сейчас" && snoozeDays) {
+        setNote(`ЛИД-${id} отложен — сам вернётся в «Новые» через ${snoozeDays} дн`);
+        window.setTimeout(() => setNote(""), 4000);
+      }
       refreshPlan();
     }
     setBusyId(null);
@@ -1425,6 +1442,10 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   // SLA первой реакции (Цикл 1): сколько новых лидов ждут дольше 15 мин + средняя
   // скорость реакции лидоруба сегодня (по лидам с уже проставленным first_action_at).
   const waitingOver15 = byStatus.new.filter((l) => (slaMinutes(l.createdAt) ?? 0) > 15).length;
+  // Цикл 16: отложенные «не сейчас», ждущие даты возврата — видимый запас будущих сделок.
+  const snoozedCount = leads.filter(
+    (l) => l.status === "rejected" && l.snoozeUntil != null && (waitingMinutes(l.snoozeUntil) ?? 0) === 0,
+  ).length;
   const todayUtc = new Date().toISOString().slice(0, 10);
   // Фикс ревью Ц14: те же РАБОЧИЕ минуты, что и в план/факте (_plan_facts) — иначе два
   // виджета «Реакция» на одной доске показывали бы 5 мин и 610 мин за один и тот же лид.
@@ -1502,6 +1523,8 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
               {avgReactionToday != null && (
                 <KpiTile label="Реакция сегодня" value={`~${avgReactionToday} мин`} />
               )}
+              {/* Цикл 16: отложенные «не сейчас» — не потеряны, ждут своей даты */}
+              {snoozedCount > 0 && <KpiTile label="⏰ Отложенные" value={snoozedCount} />}
             </div>
 
             {/* Каналы — распределение текущих лидов */}

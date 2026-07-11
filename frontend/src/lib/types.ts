@@ -230,8 +230,12 @@ export interface DealDetail {
 export type LeadStatus = "new" | "qualified" | "routed" | "converted" | "rejected";
 
 /** Фиксированный список причин отказа лида — зеркалит бэкендовый REJECT_REASONS
- *  (modules/leads/leads.py). POST /leads/{id}/reject вернёт 422 на значение вне списка. */
-export const REJECT_REASONS = ["не наш профиль", "нет бюджета", "дубль", "конкурент"] as const;
+ *  (modules/leads/leads.py). POST /leads/{id}/reject вернёт 422 на значение вне списка.
+ *  «не сейчас» (Цикл 16) — рецикл: лид откладывается и сам вернётся в «Новые». */
+export const REJECT_REASONS = ["не наш профиль", "нет бюджета", "дубль", "конкурент", "не сейчас"] as const;
+
+/** Пресеты отсрочки для «не сейчас» (Цикл 16): через сколько дней лид вернётся в работу. */
+export const SNOOZE_PRESETS = [30, 90, 180] as const;
 
 export interface Manager {
   name: string;
@@ -276,6 +280,7 @@ export interface Lead {
   attemptCount?: number; // Цикл 15: попытки контакта (недозвоны) — чип «☎ N»
   callbackAt?: string | null; // Цикл 15: срок перезвона; просрочен → красный чип + подъём
   lastTouchAt?: string | null; // Цикл 15: повторное касание клиента — бейдж «↑ повтор»
+  snoozeUntil?: string | null; // Цикл 16: дата авто-возврата «не сейчас»; в прошлом у new = «⏰ проснулся»
 }
 
 /** Дневной план/факт лидоруба (Цикл 5) — GET/PUT /leads/plan.

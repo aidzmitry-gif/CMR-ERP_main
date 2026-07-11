@@ -1149,6 +1149,7 @@ interface ApiLead {
   attempt_count?: number;
   callback_at?: string | null;
   last_touch_at?: string | null;
+  snooze_until?: string | null;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1187,6 +1188,7 @@ function mapLead(l: ApiLead): Lead {
     attemptCount: l.attempt_count ?? 0,
     callbackAt: l.callback_at ?? null,
     lastTouchAt: l.last_touch_at ?? null,
+    snoozeUntil: l.snooze_until ?? null,
   };
 }
 
@@ -1363,16 +1365,18 @@ export async function expressLead(
 }
 
 /** Отклонить лид (терминальный статус, как converted). Причина — одна из REJECT_REASONS
- *  (иначе бэк вернёт 422). 409, если лид уже converted/rejected. */
+ *  (иначе бэк вернёт 422). 409, если лид уже converted/rejected. Для «не сейчас» (Цикл 16)
+ *  snoozeDays задаёт дату авто-возврата в «Новые» (без него бэк ставит 90 дней). */
 export async function rejectLead(
   id: number,
   reason: string,
+  snoozeDays?: number,
 ): Promise<{ id: number; status: LeadStatus; reject_reason: string } | null> {
   try {
     const res = await fetch(`/api/leads/${id}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify(snoozeDays ? { reason, snooze_days: snoozeDays } : { reason }),
     });
     if (!res.ok) return null;
     return (await res.json()) as { id: number; status: LeadStatus; reject_reason: string };

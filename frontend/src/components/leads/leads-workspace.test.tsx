@@ -299,7 +299,8 @@ describe("LeadsWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Отклонить" }));
 
-    await waitFor(() => expect(api.rejectLead).toHaveBeenCalledWith(1, "дубль"));
+    // третий аргумент — snoozeDays (Цикл 16), для обычных причин undefined
+    await waitFor(() => expect(api.rejectLead).toHaveBeenCalledWith(1, "дубль", undefined));
     expect(await screen.findByText("дубль", { selector: "div" })).toBeInTheDocument();
     expect(screen.getAllByText("Отклонён").length).toBeGreaterThan(0);
   });
@@ -668,6 +669,46 @@ describe("LeadsWorkspace", () => {
       />,
     );
     expect(screen.getByText("↑ повтор")).toBeInTheDocument();
+  });
+
+  it("Цикл 16: отказ «не сейчас» показывает пресеты отсрочки и шлёт snoozeDays", async () => {
+    (api.rejectLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1,
+      status: "rejected",
+      reject_reason: "не сейчас",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, status: "qualified", score: 70, qualification: "target" }]} />);
+
+    await openPreview(1);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "не сейчас" } });
+    // пресеты отсрочки появились; выбираем 30 дней
+    fireEvent.click(await screen.findByRole("button", { name: "30 дн" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отложить на 30 дн" }));
+
+    await waitFor(() => expect(api.rejectLead).toHaveBeenCalledWith(1, "не сейчас", 30));
+  });
+
+  it("Цикл 16: проснувшийся лид — бейдж «⏰ проснулся», отложенные — в KPI", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          // дата возврата в прошлом + статус new = проснулся (wake-on-read бэка)
+          { ...lead, id: 1, status: "new", snoozeUntil: isoMinutesAgo(60) },
+          // ещё спит: rejected с датой в будущем → считается в «⏰ Отложенные»
+          {
+            ...lead,
+            id: 2,
+            status: "rejected",
+            rejectReason: "не сейчас",
+            company: "ООО Спит",
+            snoozeUntil: new Date(Date.now() + 30 * 86400_000).toISOString().replace("Z", ""),
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("⏰ проснулся")).toBeInTheDocument();
+    const tile = screen.getByText("⏰ Отложенные").closest("div")?.parentElement;
+    expect(tile).toHaveTextContent("1");
   });
 
   it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {

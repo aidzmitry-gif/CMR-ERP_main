@@ -19,7 +19,7 @@ import {
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
-import { REJECT_REASONS } from "@/lib/types";
+import { REJECT_REASONS, SNOOZE_PRESETS } from "@/lib/types";
 import type { Lead, Manager } from "@/lib/types";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -61,7 +61,7 @@ export function LeadDrawerPreview({
   ) => void;
   onConvert: (id: number) => void;
   onCall: (lead: Lead) => void;
-  onReject: (id: number, reason: string) => void;
+  onReject: (id: number, reason: string, snoozeDays?: number) => void;
   // Цикл 3: подбор товара сохранён на лиде → обновить бейдж КП на карточке.
   onItemsSaved?: (leadId: number, count: number, total: number) => void;
   // Цикл 3: цепочка «В сделку + счёт» сконвертировала лид → пометить его converted.
@@ -79,6 +79,8 @@ export function LeadDrawerPreview({
   const [managers, setManagers] = useState<Manager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  // Рецикл «не сейчас» (Цикл 16): через сколько дней отложенный лид сам вернётся в «Новые».
+  const [snoozeDays, setSnoozeDays] = useState<number>(90);
   const [nextStepAt, setNextStepAt] = useState("");
   const [nextStepNote, setNextStepNote] = useState("");
   // Цикл 11: привязка контакта лида к его компании (без дублей)
@@ -517,13 +519,39 @@ export function LeadDrawerPreview({
                       </option>
                     ))}
                   </select>
+                  {/* Цикл 16: «не сейчас» — не свалка, а отсрочка: лид сам вернётся в «Новые» */}
+                  {rejectReason === "не сейчас" && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[11px] text-muted">Вернуть через</span>
+                      {SNOOZE_PRESETS.map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setSnoozeDays(d)}
+                          className={`rounded-full border px-2 py-1 text-[11px] font-medium ${
+                            snoozeDays === d
+                              ? "border-accent bg-accent-soft text-accent-ink"
+                              : "border-line text-muted hover:bg-sunken"
+                          }`}
+                        >
+                          {d} дн
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => onReject(lead.id, rejectReason || REJECT_REASONS[0])}
+                    onClick={() =>
+                      onReject(
+                        lead.id,
+                        rejectReason || REJECT_REASONS[0],
+                        rejectReason === "не сейчас" ? snoozeDays : undefined,
+                      )
+                    }
                     className="mt-1.5 w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                   >
-                    Отклонить
+                    {rejectReason === "не сейчас" ? `Отложить на ${snoozeDays} дн` : "Отклонить"}
                   </button>
                 </section>
               )}

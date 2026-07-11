@@ -1581,3 +1581,84 @@ async def test_repeat_intake_marks_touch(session, api, services):
     assert len(leads_found) == 1  # дубль не создан
     assert leads_found[0].last_touch_at is not None
     assert "Повторное обращение" in leads_found[0].message
+
+
+# --- Цикл 16: рецикл «не сейчас» — отсрочка с авто-возвратом ---
+
+
+async def test_reject_ne_seychas_sets_snooze(session, api):
+    """Отказ «не сейчас» ставит дату авто-возврата (пресет дней), другие причины — нет."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Потом", "phone": "+375291230161"})
+    ).json()
+    r = await api.post(f"/leads/{lead['id']}/reject", json={"reason": "не сейчас", "snooze_days": 30})
+    assert r.status_code == 200
+
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["status"] == "rejected"
+    assert got["snooze_until"] is not None  # вернётся через ~30 дней
+
+    other = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Навсегда", "phone": "+375291230162"})
+    ).json()
+    await api.post(f"/leads/{other['id']}/reject", json={"reason": "нет бюджета"})
+    assert (await api.get(f"/leads/{other['id']}")).json()["snooze_until"] is None
+
+
+async def test_snoozed_lead_wakes_on_read(session, api):
+    """Wake-on-read: наступила дата — отложенный лид сам вернулся в «Новые» при чтении доски."""
+    from datetime import datetime, timedelta, timezone
+
+    from modules.leads.models import Lead
+
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Проснись", "phone": "+375291230163"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "не сейчас", "snooze_days": 90})
+
+    # время пришло: подвигаем дату в прошлое (как будто 90 дней прошли)
+    obj = await session.get(Lead, lead["id"])
+    obj.snooze_until = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    await session.commit()
+
+    rows = (await api.get("/leads")).json()
+    woke = next(r for r in rows if r["id"] == lead["id"])
+    assert woke["status"] == "new"  # вернулся в работу
+    assert woke["snooze_until"] is not None  # дата в прошлом → фронт рисует «⏰ проснулся»
+
+
+async def test_snoozed_lead_sleeps_until_due(session, api):
+    """До даты возврата отложенный лид остаётся rejected — доска его не воскрешает раньше."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Рано", "phone": "+375291230164"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/reject", json={"reason": "не сейчас", "snooze_days": 180})
+
+    rows = (await api.get("/leads")).json()
+    still = next(r for r in rows if r["id"] == lead["id"])
+    assert still["status"] == "rejected"
+
+
+async def test_repeat_call_ambiguous_companies_skipped(session, api, services):
+    """Фикс ревью Ц15: два открытых лида РАЗНЫХ компаний с одним хвостом номера —
+    повторный звонок неоднозначен, «Повторный звонок» НЕ дописывается никому."""
+    from core.services.eventbus import EventContext
+
+    a = (
+        await api.post("/leads", json={"source": "phone", "company": "ООО Альфа-Тел", "phone": "+375291230155"})
+    ).json()
+    b = (
+        await api.post("/leads", json={"source": "phone", "company": "ООО Бета-Тел", "phone": "80291230155"})
+    ).json()
+
+    services.event_bus.emit(
+        session, "sales.call.logged", {"direction": "in", "phone": "+375291230155", "agent_ext": "102"}
+    )
+    await session.commit()
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    for lead_id in (a["id"], b["id"]):
+        got = (await api.get(f"/leads/{lead_id}")).json()
+        assert "Повторный звонок" not in (got["message"] or "")
+        assert got["last_touch_at"] is None
