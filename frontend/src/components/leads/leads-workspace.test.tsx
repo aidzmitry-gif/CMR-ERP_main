@@ -38,6 +38,13 @@ vi.mock("@/lib/api", () => ({
   ]),
   // Панель «Качество источников» (Цикл 4) — грузится лениво при открытии.
   fetchLeadSourceStats: vi.fn().mockResolvedValue([]),
+  // Цикл 5: план/факт лидоруба — грузится на маунте (null = панель скрыта в тестах).
+  fetchLeadPlan: vi.fn().mockResolvedValue(null),
+  saveLeadPlan: vi.fn().mockResolvedValue(null),
+  // Цикл 6: конвейер «Разобрать целевых».
+  expressBulkLeads: vi.fn().mockResolvedValue({ expressed: [], skippedNonTarget: 0 }),
+  // Цикл 7: скорборд передач продавцам — грузится лениво при открытии.
+  fetchLeadHandoffStats: vi.fn().mockResolvedValue([]),
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";

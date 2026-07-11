@@ -1075,3 +1075,28 @@ async def test_route_manual_rationale(session, api):
     r = (await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Петров П.П."})).json()
     assert r["assigned_to"] == "Петров П.П."
     assert "Ручной выбор" in r["rationale"]
+
+
+async def test_manager_performance_counts_converted_in_volume(session, api):
+    """Фикс ревью Ц8 (старвейшн): _manager_performance отдаёт (конверсия, объём), и объём
+    включает конвертнутые лиды — иначе нагрузка быстрого закрывающего «испаряется» и штраф
+    LOAD_PENALTY его не догоняет, лид уходит одному, остальные простаивают."""
+    from modules.leads.routes import _manager_performance
+
+    ids = []
+    for i in range(2):
+        lead = (
+            await api.post(
+                "/leads",
+                json={"source": "site", "company": f"ООО Объём{i}", "region": "Минск", "product": "лист"},
+            )
+        ).json()
+        await api.post(f"/leads/{lead['id']}/qualify")
+        await api.post(f"/leads/{lead['id']}/route")  # оба → Иванов (Минск+лист)
+        ids.append(lead["id"])
+    await api.post(f"/leads/{ids[0]}/convert")  # один доведён до сделки (статус converted)
+
+    perf = await _manager_performance(session)
+    rate, volume = perf["Иванов И.И."]
+    assert volume == 2  # оба переданных лида в объёме, включая конвертнутый
+    assert rate == 0.5  # 1 из 2 доведён

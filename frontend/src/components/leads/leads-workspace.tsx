@@ -1123,9 +1123,12 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   }
 
   // Горячая клавиша E — «Разобрать целевых» (конвейер). e.code=KeyE независим от раскладки
-  // (лат./кир.); игнорируем, когда фокус в поле ввода. Подписка один раз, вызов через ref.
+  // (лат./кир.); игнорируем, когда фокус в поле ввода. Подписка один раз, вызов через ref —
+  // ref обновляем в эффекте (не в рендере), чтобы обработчик всегда звал свежее замыкание.
   const bulkRef = useRef(onBulkExpress);
-  bulkRef.current = onBulkExpress;
+  useEffect(() => {
+    bulkRef.current = onBulkExpress;
+  });
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement | null;
