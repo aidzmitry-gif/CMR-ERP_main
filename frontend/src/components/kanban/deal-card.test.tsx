@@ -308,6 +308,12 @@ describe("DealCard", () => {
     expect(screen.queryByText(/💬|☎ пропущен/)).toBeNull();
   });
 
+  it("цикл 17: unread>0 + waitAgeMs — бейдж рисует возраст «💬 ждёт Nч» вместо голого счётчика", () => {
+    render(<DealCard deal={deal} unread={2} waitAgeMs={5 * 3_600_000} />);
+    expect(screen.getByText("💬 ждёт 5ч")).toBeInTheDocument();
+    expect(screen.queryByText("💬 2")).toBeNull();
+  });
+
   // --- Слайс 6: счёт с карточки ---
 
   it("C: invoiceBadge рендерит бейдж рядом с суммой; без пропа/null — не рендерит", () => {

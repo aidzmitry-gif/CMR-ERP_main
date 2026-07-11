@@ -132,6 +132,7 @@ export function DealDrawerPreview({
   onWin,
   onLose,
   onCall,
+  onMessageSent,
   now,
   reasonByCode,
   approvals,
@@ -146,6 +147,10 @@ export function DealDrawerPreview({
   onLose: (dealId: string) => void;
   /** Открыть окно звонка по сделке (тот же кокпит, что и у лида). */
   onCall?: (deal: Deal) => void;
+  /** Цикл 17: сообщение клиенту успешно ушло (композер «Написать клиенту» или пакет
+   *  счёт+договор) — гасит бейдж «клиент ждёт» (deals-workspace.tsx: messages/read на бэке
+   *  + локальный сброс inboundSignals). Без обработчика — поведение как раньше (не гаснет). */
+  onMessageSent?: (dealId: string) => void;
   /** Текущее время (из DealsWorkspace) — для «дней в стадии»/висяка без hydration-mismatch. */
   now: number | null;
   /** code→title причины отказа (тот же резолв, что на карточке доски — SALES-40). */
@@ -480,6 +485,10 @@ export function DealDrawerPreview({
       const nextStepAt = presetDateISO(2, Date.now());
       onUpdateFields(dealId, { next_step: MESSAGE_WAIT_REPLY_STEP, next_step_at: nextStepAt });
     }
+    // Цикл 17: сообщение ушло клиенту — гасим бейдж «клиент ждёт» (messages/read + локальный
+    // сброс inboundSignals в deals-workspace.tsx). Не гейтим hadNoStep — гашение относится к
+    // входящим от клиента, не к тому, был ли у сделки следующий шаг.
+    if (ok) onMessageSent?.(dealId);
     // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
     if (dealIdRef.current !== dealId) return;
     const channelLabel = MESSAGE_CHANNELS.find((c) => c.key === channel)?.label ?? channel;
@@ -506,6 +515,9 @@ export function DealDrawerPreview({
     if (ok) {
       const nextStepAt = presetDateISO(1, Date.now());
       onUpdateFields(dealId, { next_step: PACKAGE_NEXT_STEP, next_step_at: nextStepAt });
+      // Цикл 17: пакет тоже пишет исходящее сообщение в переписку (routes.py send_package) —
+      // тот же гейт гашения, что sendClientMessage.
+      onMessageSent?.(dealId);
     }
     // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
     if (dealIdRef.current !== dealId) return;

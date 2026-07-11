@@ -52,6 +52,7 @@ function renderDrawer(
   onUpdateFields = vi.fn(),
   dealOverride: Deal = deal,
   approvals?: Map<string, string>,
+  onMessageSent = vi.fn(),
 ) {
   const stagesForDeal: Stage[] =
     dealOverride === deal
@@ -67,11 +68,12 @@ function renderDrawer(
       onAddTask={() => {}}
       onWin={() => {}}
       onLose={() => {}}
+      onMessageSent={onMessageSent}
       now={Date.now()}
       approvals={approvals}
     />,
   );
-  return { onUpdateFields };
+  return { onUpdateFields, onMessageSent };
 }
 
 beforeEach(() => {
@@ -335,7 +337,7 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
 
   it("успешная отправка (у сделки нет шага) → тост + авто-шаг «Дождаться ответа клиента» (+2 дн)", async () => {
     mock(api.sendMessage).mockResolvedValue(true);
-    const { onUpdateFields } = renderDrawer();
+    const { onUpdateFields, onMessageSent } = renderDrawer();
     fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
     const group = screen.getByRole("group", { name: "Написать клиенту" });
     fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
@@ -358,6 +360,9 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
     expect(api.updateDeal).not.toHaveBeenCalled();
     // textarea очищается после успешной отправки
     expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
+    // Цикл 17: гашение бейджа «клиент ждёт» — вызывающий (deals-workspace.tsx) шлёт
+    // messages/read + сбрасывает inboundSignals по этому dealId.
+    expect(onMessageSent).toHaveBeenCalledWith("1");
   });
 
   it("успешная отправка (у сделки УЖЕ есть шаг) → тост БЕЗ авто-шага, живой шаг не перетираем", async () => {
@@ -376,7 +381,7 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
 
   it("ошибка отправки → тост «⚠️ Не отправилось», шаг не ставится", async () => {
     mock(api.sendMessage).mockResolvedValue(false);
-    const { onUpdateFields } = renderDrawer();
+    const { onUpdateFields, onMessageSent } = renderDrawer();
     fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
     const group = screen.getByRole("group", { name: "Написать клиенту" });
     fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
@@ -384,6 +389,8 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
 
     expect(await screen.findByText("⚠️ Не отправилось")).toBeInTheDocument();
     expect(onUpdateFields).not.toHaveBeenCalled();
+    // Цикл 17: неуспешная отправка не гасит бейдж — клиент так и не получил сообщение.
+    expect(onMessageSent).not.toHaveBeenCalled();
   });
 });
 
@@ -445,7 +452,7 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
       message: "✅ Пакет отправлен: счёт + договор",
     });
     const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
-    const { onUpdateFields } = renderDrawer(vi.fn(), dealWithStep);
+    const { onUpdateFields, onMessageSent } = renderDrawer(vi.fn(), dealWithStep);
     fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
 
     expect(
@@ -461,6 +468,8 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     );
     // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
     expect(api.updateDeal).not.toHaveBeenCalled();
+    // Цикл 17: пакет тоже пишет исходящее сообщение в переписку — тот же гейт гашения.
+    expect(onMessageSent).toHaveBeenCalledWith("1");
   });
 
   it("409 → тост с detail с бэка, шаг НЕ ставится", async () => {

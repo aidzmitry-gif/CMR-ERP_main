@@ -212,6 +212,37 @@ async def test_chats_unread_and_mark_read(api):
     assert chat2["unread"] == 0
 
 
+# ── Цикл 17: возраст ожидания ответа ────────────────────────────────────────
+
+async def test_chats_waiting_since(api):
+    """waiting_since = created_at самого старого непрочитанного входящего; гаснет после read."""
+    deal = await _new_deal(api, "U-2", counterparty="ООО Ждёт")
+
+    await api.post(
+        f"/sales/deals/{deal['id']}/messages",
+        json={"channel": "whatsapp", "text": "Первое", "direction": "in"},
+    )
+    await api.post(
+        f"/sales/deals/{deal['id']}/messages",
+        json={"channel": "whatsapp", "text": "Второе", "direction": "in"},
+    )
+
+    msgs = (await api.get(f"/sales/deals/{deal['id']}/messages")).json()
+    oldest_created_at = msgs[0]["created_at"]
+
+    chats = (await api.get("/sales/chats")).json()
+    chat = next(c for c in chats if c["deal_id"] == deal["id"])
+    assert chat["waiting_since"] == oldest_created_at
+
+    # отметить прочитанным → бейдж гаснет (waiting_since вновь None)
+    r = await api.post(f"/sales/deals/{deal['id']}/messages/read")
+    assert r.status_code == 200 and r.json()["read"] == 2
+
+    chats2 = (await api.get("/sales/chats")).json()
+    chat2 = next(c for c in chats2 if c["deal_id"] == deal["id"])
+    assert chat2["waiting_since"] is None
+
+
 # ── Сделки 2.0: редактор стадий (sales.stage CRUD) ──────────────────────────
 async def test_stage_editor_lazy_seed_and_crud(api):
     # первый GET лениво материализует канон (11 new_clients + 5 repeat_clients + 5 tenders = 21)

@@ -29,7 +29,6 @@ import {
   createDealTask,
   fetchApprovals,
   fetchCalls,
-  fetchChats,
   fetchDocuments,
   fetchLossReasons,
   fetchPlans,
@@ -102,10 +101,14 @@ type CardExtras = {
    *  board.ts) по последнему счёту сделки. Не задан/null — карточка бейдж не рисует. */
   invoiceBadge?: InvoiceBadgeResult | null;
   /** Цикл 11: непрочитанных вх. сообщений по сделке — сырой сигнал для inboundSignal
-   *  (board.ts), из батч-фетча fetchChats (см. эффект ниже). DealCard сам резолвит бейдж. */
+   *  (board.ts), из батч-фетча чатов (см. эффект ниже). DealCard сам резолвит бейдж. */
   unread?: number;
   /** Цикл 11: есть пропущенный вх. звонок без ответа — из батч-фетча fetchCalls(status=missed). */
   missed?: number;
+  /** Цикл 17: возраст ожидания ответа (now - waiting_since) в мс — считаем здесь (тот же
+   *  паттерн, что days/reviveDays: время режется в cardExtras, резолвер board.ts получает
+   *  готовое число), не в DealCard. null — waiting_since ещё нет с бэка (graceful в inboundSignal). */
+  waitAgeMs?: number | null;
   /** Цикл 14: результат последнего согласования РОП по сделке (approvalBadge, board.ts) —
    *  предвычислено из батч-фетча fetchApprovals({}) (см. эффект ниже). null/не задан — карточка
    *  бейдж не рисует (нет согласования или статус pending — не шумим). */
@@ -134,6 +137,42 @@ async function winDeal(dealId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Цикл 17: локальный тип чата для батча inboundSignals — только поля, нужные доске
+ *  (api.ts ChatItem не трогаем, там waiting_since нет и хотспот другой полосы). Тот же
+ *  паттерн raw-фетча через прокси, что winDeal/margin-forecast выше. deal_id — на случай
+ *  будущих строк без привязки к сделке (как call.deal_id у fetchCalls). */
+type ChatSignal = { deal_id: number | null; unread: number; waiting_since: string | null };
+
+async function fetchChatSignals(): Promise<ChatSignal[]> {
+  try {
+    const res = await fetch("/api/sales/chats", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as ChatSignal[];
+  } catch {
+    return [];
+  }
+}
+
+/** Цикл 17: гашение бейджа «клиент ждёт» — после отправки сообщения по сделке помечаем
+ *  входящие прочитанными на бэке (fire-and-forget, паттерн winDeal); саму карту inboundSignals
+ *  чистит вызывающий (DealsWorkspace) сразу, не дожидаясь ответа — бейдж гаснет без ре-фетча. */
+async function markChatRead(dealId: string): Promise<void> {
+  try {
+    await fetch(`/api/sales/deals/${dealId}/messages/read`, { method: "POST", cache: "no-store" });
+  } catch {
+    // тихо: локальное гашение уже произошло, ре-фетч чатов на следующем маунте поправит счётчик
+  }
+}
+
+/** Цикл 17: now - waiting_since в мс — считаем здесь (cardExtras/combinedCardExtras), не в
+ *  DealCard/inboundSignal (тот же паттерн, что daysInStage/reviveDays). null — waiting_since
+ *  ещё нет (бэк без миграции) или `now` не готов (до маунта, см. SSR-гидрация выше). */
+function waitAgeMsFor(waitingSince: string | null | undefined, now: number | null): number | null {
+  if (waitingSince == null || now == null) return null;
+  const since = Date.parse(waitingSince);
+  return Number.isNaN(since) ? null : Math.max(0, now - since);
 }
 
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
@@ -980,9 +1019,11 @@ export function DealsWorkspace({
   }, [initialStages]);
   // Цикл 11: входящий сигнал «клиент ждёт ответа» — dealId → {unread, missed}; наполняется
   // батч-фетчем ниже (два агрегатных вызова на всю доску, не по колонке/сделке).
-  const [inboundSignals, setInboundSignals] = useState<Map<string, { unread: number; missed: number }>>(
-    new Map(),
-  );
+  // Цикл 17: + waitingSince (created_at старейшего непрочитанного, ISO) — возраст ожидания
+  // на бейдже карточки (formatWaitAge, board.ts); null — непрочитанных нет либо бэк старый.
+  const [inboundSignals, setInboundSignals] = useState<
+    Map<string, { unread: number; missed: number; waitingSince: string | null }>
+  >(new Map());
   // Цикл 14: статус одобрения РОП — dealId → status последнего согласования (по max id среди
   // approvals с entity_ref==="deal:{id}"); наполняется ОДНИМ агрегатным батчем fetchApprovals({})
   // после маунта (см. эффект ниже), тот же паттерн, что invoiceDocs/inboundSignals выше.
@@ -1059,17 +1100,17 @@ export function DealsWorkspace({
   // как в соседних эффектах, гейт от записи в размонтированный компонент.
   useEffect(() => {
     let ignore = false;
-    void Promise.all([fetchChats(), fetchCalls({ status: "missed" })]).then(([chats, calls]) => {
+    void Promise.all([fetchChatSignals(), fetchCalls({ status: "missed" })]).then(([chats, calls]) => {
       if (ignore) return;
-      const map = new Map<string, { unread: number; missed: number }>();
+      const map = new Map<string, { unread: number; missed: number; waitingSince: string | null }>();
       for (const chat of chats) {
-        if (!chat.unread) continue;
-        map.set(String(chat.deal_id), { unread: chat.unread, missed: 0 });
+        if (chat.deal_id == null || !chat.unread) continue;
+        map.set(String(chat.deal_id), { unread: chat.unread, missed: 0, waitingSince: chat.waiting_since });
       }
       for (const call of calls) {
         if (call.deal_id == null || call.direction !== "in") continue;
         const key = String(call.deal_id);
-        const cur = map.get(key) ?? { unread: 0, missed: 0 };
+        const cur = map.get(key) ?? { unread: 0, missed: 0, waitingSince: null };
         map.set(key, { ...cur, missed: cur.missed + 1 });
       }
       setInboundSignals(map);
@@ -1471,6 +1512,7 @@ export function DealsWorkspace({
       invoiceBadge: invBadge,
       unread: inbound?.unread,
       missed: inbound?.missed,
+      waitAgeMs: waitAgeMsFor(inbound?.waitingSince, now),
       approval: approvalBadge(approvals.get(deal.id)),
     };
   }
@@ -1531,6 +1573,7 @@ export function DealsWorkspace({
       stageId,
       unread: inbound?.unread,
       missed: inbound?.missed,
+      waitAgeMs: waitAgeMsFor(inbound?.waitingSince, now),
       approval: approvalBadge(approvals.get(deal.id)),
       // onUpdate/onNextStep добавляет FunnelSection (доска секции — её локальный стейт).
     };
@@ -2191,6 +2234,18 @@ export function DealsWorkspace({
           setPreviewDeal(null);
         }}
         onCall={(d) => setCallDeal(d)}
+        onMessageSent={(dealId) => {
+          // Цикл 17: гашение бейджа «клиент ждёт» сразу (не дожидаясь ре-фетча чатов) —
+          // messages/read fire-and-forget на бэке (markChatRead) + локальный сброс здесь.
+          void markChatRead(dealId);
+          setInboundSignals((prev) => {
+            const cur = prev.get(dealId);
+            if (!cur) return prev;
+            const next = new Map(prev);
+            next.set(dealId, { ...cur, unread: 0, waitingSince: null });
+            return next;
+          });
+        }}
         now={now}
         reasonByCode={reasonByCode}
         approvals={approvals}

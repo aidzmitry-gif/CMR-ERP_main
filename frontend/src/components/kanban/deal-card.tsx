@@ -313,6 +313,7 @@ export function DealCard({
   invoiceBadge,
   unread,
   missed,
+  waitAgeMs,
   approval,
   fmt = formatMoney,
 }: {
@@ -356,6 +357,10 @@ export function DealCard({
   unread?: number;
   /** Цикл 11: есть пропущенный вх. звонок без ответа (батч fetchCalls status=missed). */
   missed?: number;
+  /** Цикл 17: возраст ожидания (now - waiting_since) в мс — предвычислен вызывающим
+   *  (deals-workspace.tsx, тот же паттерн, что days/reviveDays) из батч-фетча чатов
+   *  (waiting_since). Не задан/null — inboundSignal рисует старый лейбл `💬 N` (graceful). */
+  waitAgeMs?: number | null;
   /** Цикл 14: результат последнего согласования РОП (approvalBadge, board.ts) — предвычислен
    *  вызывающим (deals-workspace.tsx) из батч-фетча fetchApprovals({}). Нет пропа/null — бейдж
    *  не рендерится (нет согласования или статус pending — не шумим). */
@@ -368,7 +373,7 @@ export function DealCard({
   // revive/noStep + отдельного 🕒-дней — единый резолвер cardAttention (board.ts).
   const attention = cardAttention({ actBucket, noTouchDays, reviveDays, stuck, daysInStage: days, noStep });
   // Цикл 11: клиент ждёт ответа — независимая ось от attention (см. doc-комментарий inboundSignal).
-  const inbound = inboundSignal({ unread, missed });
+  const inbound = inboundSignal({ unread, missed, waitAgeMs });
   // Слайс 4: композер «след. шаг» — поднят сюда, т.к. открывается из ДВУХ мест (строка
   // шага ниже + пункт CardMenu «След. шаг…» в шапке).
   const [nextStepOpen, setNextStepOpen] = useState(false);

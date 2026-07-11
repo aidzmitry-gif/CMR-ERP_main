@@ -484,6 +484,18 @@ export interface InboundSignalResult {
   tone: InboundSignalTone;
 }
 
+/** Цикл 17: возраст ожидания ответа (now - waiting_since) человекочитаемо — «Nм» до часа,
+ *  «Nч» до суток, дальше «Nд». Чистая функция, как {@link daysUntilDate} рядом. Отрицательный
+ *  ms (рассинхрон часов клиент/сервер) не уходит в минус — честные «0м». */
+export function formatWaitAge(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 60) return `${minutes}м`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 24) return `${hours}ч`;
+  const days = Math.floor(ms / DAY_MS);
+  return `${days}д`;
+}
+
 /**
  * Резолвер входящего сигнала карточки (цикл 11): тёплый клиент, приславший сообщение или
  * сделавший пропущенный звонок, был невидим на доске — продавец узнавал об этом, только
@@ -493,12 +505,21 @@ export interface InboundSignalResult {
  *
  * Не путать с {@link cardAttention}: та ось — тайминг МОЕГО следующего шага (я опаздываю),
  * эта — ждёт ли клиент МЕНЯ прямо сейчас (он горячий). Разные оси, оба чипа рендерятся рядом.
+ *
+ * Цикл 17: `waitAgeMs` (уже посчитанный вызывающим из `now - waiting_since`, тот же паттерн,
+ * что `daysInStage`/`reviveDays` — время считает cardExtras, резолвер получает готовое число) —
+ * рисует возраст в лейбле («💬 ждёт 3м/2ч/1д») вместо голого счётчика. Не задан/null (бэк ещё
+ * без waiting_since, или мигрирует старая dev.db) — старый лейбл `💬 N`, graceful.
  */
-export function inboundSignal(signals: { unread?: number; missed?: number }): InboundSignalResult | null {
-  const { unread = 0, missed = 0 } = signals;
+export function inboundSignal(signals: {
+  unread?: number;
+  missed?: number;
+  waitAgeMs?: number | null;
+}): InboundSignalResult | null {
+  const { unread = 0, missed = 0, waitAgeMs = null } = signals;
   if (unread > 0) {
     return {
-      label: `💬 ${unread}`,
+      label: waitAgeMs != null ? `💬 ждёт ${formatWaitAge(waitAgeMs)}` : `💬 ${unread}`,
       tone: "money",
       title: `Клиент ждёт ответа — непрочитанных сообщений: ${unread}`,
     };

@@ -17,6 +17,7 @@ import {
   discountGate,
   ensureLostStage,
   focusQueue,
+  formatWaitAge,
   groupByDateBucket,
   inboundSignal,
   invoiceBadge,
@@ -717,6 +718,48 @@ describe("inboundSignal (цикл 11: клиент ждёт ответа)", () =
   it("ни unread ни missed — null, бейдж не рендерится", () => {
     expect(inboundSignal({})).toBeNull();
     expect(inboundSignal({ unread: 0, missed: 0 })).toBeNull();
+  });
+
+  it("цикл 17: unread>0 + waitAgeMs известен — лейбл «💬 ждёт Nм/Nч/Nд» вместо голого счётчика", () => {
+    expect(inboundSignal({ unread: 2, waitAgeMs: 5 * 60_000 })).toEqual({
+      label: "💬 ждёт 5м",
+      tone: "money",
+      title: "Клиент ждёт ответа — непрочитанных сообщений: 2",
+    });
+  });
+
+  it("цикл 17: waitAgeMs не задан/null — graceful, старый лейбл «💬 N» (бэк без waiting_since)", () => {
+    expect(inboundSignal({ unread: 2, waitAgeMs: null })?.label).toBe("💬 2");
+    expect(inboundSignal({ unread: 2 })?.label).toBe("💬 2");
+  });
+});
+
+describe("formatWaitAge (цикл 17: возраст ожидания ответа)", () => {
+  it("< 60 минут — «Nм»", () => {
+    expect(formatWaitAge(0)).toBe("0м");
+    expect(formatWaitAge(5 * 60_000)).toBe("5м");
+  });
+
+  it("граница 59м/60м — 59 минут ещё «м», 60 минут уже «ч»", () => {
+    expect(formatWaitAge(59 * 60_000)).toBe("59м");
+    expect(formatWaitAge(60 * 60_000)).toBe("1ч");
+  });
+
+  it("< 24 часов — «Nч»", () => {
+    expect(formatWaitAge(5 * 3_600_000)).toBe("5ч");
+  });
+
+  it("граница 23ч/24ч — 23 часа ещё «ч», 24 часа уже «д»", () => {
+    expect(formatWaitAge(23 * 3_600_000)).toBe("23ч");
+    expect(formatWaitAge(24 * 3_600_000)).toBe("1д");
+  });
+
+  it("≥ 24 часов — «Nд»", () => {
+    expect(formatWaitAge(3 * 86_400_000)).toBe("3д");
+  });
+
+  it("отрицательный ms (рассинхрон часов) — честные «0м», не минус", () => {
+    expect(formatWaitAge(-1000)).toBe("0м");
   });
 });
 
