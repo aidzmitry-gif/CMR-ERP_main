@@ -333,21 +333,46 @@ describe("LeadsWorkspace", () => {
   });
 
   it("чип ожидания на карточке «Новые» подсвечивается при задержке дольше 15 минут", () => {
-    render(
-      <LeadsWorkspace
-        initialLeads={[
-          { ...lead, id: 1, createdAt: isoMinutesAgo(20) },
-          { ...lead, id: 2, createdAt: isoMinutesAgo(5) },
-        ]}
-      />,
-    );
-    const chips = screen.getAllByTitle("Ожидает реакции с момента приёма");
-    const overdue = chips.find((c) => c.textContent?.includes("20"));
-    const fresh = chips.find((c) => c.textContent?.includes("5"));
-    expect(overdue).toBeDefined();
-    expect(overdue?.className).toMatch(/red/);
-    expect(fresh).toBeDefined();
-    expect(fresh?.className).not.toMatch(/red/);
+    // Цикл 14: SLA считается рабочими часами (9-18) — пиним «сейчас» в середину дня,
+    // иначе ночной/утренний прогон CI даст 0 рабочих минут и тест соврёт.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 11, 12, 0, 0));
+    try {
+      render(
+        <LeadsWorkspace
+          initialLeads={[
+            { ...lead, id: 1, createdAt: isoMinutesAgo(20) },
+            { ...lead, id: 2, createdAt: isoMinutesAgo(5) },
+          ]}
+        />,
+      );
+      const chips = screen.getAllByTitle("Ожидает реакции с момента приёма");
+      const overdue = chips.find((c) => c.textContent?.includes("20"));
+      const fresh = chips.find((c) => c.textContent?.includes("5"));
+      expect(overdue).toBeDefined();
+      expect(overdue?.className).toMatch(/red/);
+      expect(fresh).toBeDefined();
+      expect(fresh?.className).not.toMatch(/red/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Цикл 14: ночной лид утром не «горит» — ждёт рабочие минуты, а не часы", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 11, 9, 10, 0)); // утро, 9:10 локального времени
+    try {
+      // вчера 23:00 ЛОКАЛЬНОГО времени → naive-UTC строка, как отдаёт бэкенд
+      // (через локальный Date — тест не зависит от таймзоны машины CI)
+      const nightIso = new Date(2026, 6, 10, 23, 0, 0).toISOString().replace("Z", "");
+      render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, createdAt: nightIso }]} />);
+      const chip = screen.getByTitle("Ожидает реакции с момента приёма");
+      // 10 рабочих минут (9:00→9:10), не «13 ч»: без пожара и без эскалации
+      expect(chip.textContent).toContain("10 мин");
+      expect(chip.className).not.toMatch(/red/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("кнопка «⚡ Экспресс» показана на карточке нового лида с высоким баллом и скрыта при низком", () => {
@@ -555,6 +580,58 @@ describe("LeadsWorkspace", () => {
     );
     expect(screen.getByText(/Σ КП в работе/)).toBeInTheDocument();
     expect(screen.getByText(/1 висят >24ч/)).toBeInTheDocument();
+  });
+
+  it("Цикл 14: «В сделку» с карточки переносит позиции КП в созданную сделку", async () => {
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lead_id: 1,
+      deal_id: 42,
+      status: "converted",
+    });
+    (api.fetchLeadItems as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { skuId: 7, skuCode: "6СТ-190", name: "АКБ 190", qty: 2, price: 300, discountPct: 0 },
+    ]);
+    (api.commitLeadItemsToDeal as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: 1, total: 1 });
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          {
+            ...lead,
+            id: 1,
+            status: "routed",
+            assignedTo: "Иванов И.И.",
+            funnel: "new",
+            itemsCount: 1,
+            itemsTotal: 600,
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "⚡ В сделку" }));
+    await waitFor(() =>
+      expect(api.commitLeadItemsToDeal).toHaveBeenCalledWith(
+        "42",
+        "ООО Тест",
+        expect.arrayContaining([expect.objectContaining({ skuId: 7, qty: 2 })]),
+      ),
+    );
+  });
+
+  it("Цикл 14: конвертация лида без КП не дёргает перенос позиций", async () => {
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lead_id: 1,
+      deal_id: 43,
+      status: "converted",
+    });
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, status: "routed", assignedTo: "Иванов И.И.", funnel: "new" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "⚡ В сделку" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
+    expect(api.fetchLeadItems).not.toHaveBeenCalled();
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
   });
 
   it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {

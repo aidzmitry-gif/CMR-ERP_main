@@ -1459,3 +1459,44 @@ async def test_handoff_stats_pending_and_stale(session, api, services):
     rows = (await api.get("/leads/stats/handoffs")).json()
     row = next(r for r in rows if r["manager"] == "Иванов И.И.")
     assert row["stale"] >= 1
+
+
+# --- Цикл 14: КП доезжает до сделки + честный SLA рабочими часами ---
+
+
+def test_working_minutes_between():
+    """Рабочие минуты (окно 6-15 UTC = 9-18 Минска, ежедневно): ночь не считается."""
+    from datetime import datetime
+
+    from modules.leads.leads import working_minutes_between
+
+    def d(day: int, h: int, m: int = 0) -> datetime:
+        return datetime(2026, 7, day, h, m)
+
+    assert working_minutes_between(d(10, 7, 0), d(10, 8, 30)) == 90  # внутри рабочего дня
+    assert working_minutes_between(d(10, 20, 0), d(11, 6, 10)) == 10  # ночной лид → 10 мин
+    assert working_minutes_between(d(10, 3, 0), d(10, 6, 30)) == 30  # клэмп к началу окна
+    assert working_minutes_between(d(10, 16, 0), d(10, 17, 0)) == 0  # вечер вне окна
+    assert working_minutes_between(d(10, 14, 0), d(12, 7, 0)) == 60 + 540 + 60  # хвост+день+утро
+    assert working_minutes_between(d(10, 12, 0), d(10, 12, 0)) == 0  # пустой интервал
+
+
+async def test_plan_reaction_counts_working_minutes(session, api):
+    """Факт «Реакция» в /leads/plan: ночной лид, разобранный утром, даёт рабочие минуты
+    (10), а не календарные (610) — метрика не сгорает от одного утреннего разбора."""
+    from datetime import datetime, timedelta, timezone
+
+    from modules.leads.models import Lead
+
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Ночной", "phone": "+375291230141"})
+    ).json()
+    today0 = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+    obj = await session.get(Lead, lead["id"])
+    obj.created_at = today0 - timedelta(hours=4)  # вчера 20:00 UTC (23:00 Минска)
+    obj.first_action_at = today0 + timedelta(hours=6, minutes=10)  # сегодня 9:10 Минска
+    await session.commit()
+
+    plan = (await api.get("/leads/plan")).json()
+    assert plan["leads_fact"] == 1
+    assert plan["reaction_fact_min"] == 10

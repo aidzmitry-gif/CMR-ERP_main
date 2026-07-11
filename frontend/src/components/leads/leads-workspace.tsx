@@ -8,11 +8,13 @@ import { useEffect, useRef, useState } from "react";
 import { CallWindow } from "@/components/calls/call-window";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import {
+  commitLeadItemsToDeal,
   convertLead,
   createLead,
   expressBulkLeads,
   expressLead,
   fetchLeadHandoffStats,
+  fetchLeadItems,
   fetchLeadManagers,
   fetchLeadPlan,
   fetchLeadsClient,
@@ -28,7 +30,7 @@ import {
 } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 import { DEFAULT_NEXT_STEP_PRESET_KEY, NEXT_STEP_PRESETS } from "@/lib/lead-next-step";
-import { planPace, workdayElapsedFraction } from "@/lib/lead-plan";
+import { planPace, workdayElapsedFraction, workingMinutesBetween } from "@/lib/lead-plan";
 import type { Lead, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, Manager } from "@/lib/types";
 
 // Порог балла для кнопки «⚡ Экспресс» на карточке «Новые» — совпадает с QUALIFY_THRESHOLD
@@ -168,13 +170,22 @@ function ScoreBadge({ lead }: { lead: Lead }) {
   );
 }
 
-// Чип ожидания реакции (SLA первой реакции, Цикл 1): минуты с приёма лида,
-// часы — когда ожидание затянулось (>90 мин); >15 мин подсвечивается как задержка.
-function waitingMinutes(createdAt?: string): number | null {
+// Календарные минуты с момента метки (naive UTC ISO бэкенда) — для пост-передачи (Цикл 13):
+// возраст «у продавца» и просрочка шага меряются календарём (как stale на бэке).
+function waitingMinutes(iso?: string): number | null {
+  if (!iso) return null;
+  const t = new Date(iso.endsWith("Z") ? iso : `${iso}Z`).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+
+// РАБОЧИЕ минуты ожидания реакции (SLA, Цикл 1 → честный расчёт в Цикле 14): ночь и
+// выходные не считаются — ночной лид в 9:05 ждёт 5 минут, а не «горит 9 часов».
+function slaMinutes(createdAt?: string): number | null {
   if (!createdAt) return null;
-  const created = new Date(createdAt.endsWith("Z") ? createdAt : `${createdAt}Z`).getTime();
-  if (Number.isNaN(created)) return null;
-  return Math.max(0, Math.round((Date.now() - created) / 60000));
+  const created = new Date(createdAt.endsWith("Z") ? createdAt : `${createdAt}Z`);
+  if (Number.isNaN(created.getTime())) return null;
+  return workingMinutesBetween(created, new Date());
 }
 
 function formatWait(minutes: number): string {
@@ -188,7 +199,7 @@ const SLA_OVERDUE_MIN = 15;
 const SLA_ESCALATE_MIN = 60;
 
 function WaitChip({ createdAt }: { createdAt?: string }) {
-  const minutes = waitingMinutes(createdAt);
+  const minutes = slaMinutes(createdAt); // Цикл 14: рабочие минуты — ночные лиды не «горят»
   if (minutes == null) return null;
   const overdue = minutes > SLA_OVERDUE_MIN;
   const escalated = minutes > SLA_ESCALATE_MIN;
@@ -1144,7 +1155,16 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(id);
     const res = await routeLead(id, opts);
     if (res) {
-      patch(id, { status: res.status, assignedTo: res.assigned_to, funnel: res.funnel });
+      // Фикс ревью Ц13: проставляем routedAt/следующий шаг локально — иначе чипы «⏳ у
+      // продавца»/«шаг просрочен» и агрегаты колонки протухают до перезагрузки страницы.
+      patch(id, {
+        status: res.status,
+        assignedTo: res.assigned_to,
+        funnel: res.funnel,
+        routedAt: new Date().toISOString(),
+        nextStepAt: opts?.nextStepAt ?? null,
+        nextStepNote: opts?.nextStepNote ?? "",
+      });
       refreshPlan();
       // Цикл 8: показать, почему выбран этот менеджер (умная маршрутизация по конверсии).
       if (res.rationale) {
@@ -1178,7 +1198,28 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     setBusyId(id);
     const res = await convertLead(id);
     if (res) {
-      patch(id, { status: "converted", dealId: res.deal_id });
+      // convertedAt локально (фикс ревью Ц13): сторож «⚠ сделка не создана» должен
+      // сработать и в живой сессии без перезагрузки, если deal_id так и не пришёл.
+      patch(id, { status: "converted", dealId: res.deal_id, convertedAt: new Date().toISOString() });
+      // Цикл 14: подобранное на лиде КП доезжает до сделки при ЛЮБОЙ конвертации.
+      // Раньше позиции переносила только цепочка «В сделку + счёт», а обычная «В сделку»
+      // (карточка и drawer) создавала ПУСТУЮ сделку (amount=0) — продавец начинал с нуля,
+      // хотя скорборд уже засчитал Σ КП как переданные деньги.
+      const cur = leads.find((l) => l.id === id);
+      if (res.deal_id && (cur?.itemsCount ?? 0) > 0) {
+        const items = await fetchLeadItems(id);
+        if (items.length > 0) {
+          const { ok, total } = await commitLeadItemsToDeal(
+            String(res.deal_id),
+            cur?.company || cur?.name || "Новый лид",
+            items,
+          );
+          if (ok < total) {
+            setNote(`Сделка создана, но перенесено ${ok}/${total} позиций КП — проверьте сделку`);
+            window.setTimeout(() => setNote(""), 4000);
+          }
+        }
+      }
       refreshPlan();
     }
     setBusyId(null);
@@ -1294,7 +1335,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
 
   // SLA первой реакции (Цикл 1): сколько новых лидов ждут дольше 15 мин + средняя
   // скорость реакции лидоруба сегодня (по лидам с уже проставленным first_action_at).
-  const waitingOver15 = byStatus.new.filter((l) => (waitingMinutes(l.createdAt) ?? 0) > 15).length;
+  const waitingOver15 = byStatus.new.filter((l) => (slaMinutes(l.createdAt) ?? 0) > 15).length;
   const todayUtc = new Date().toISOString().slice(0, 10);
   const reactionTimesToday = leads
     .filter((l) => l.createdAt && l.firstActionAt?.startsWith(todayUtc))
@@ -1439,7 +1480,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                   ? [...byStatus[col.key]].sort(
                       (a, b) =>
                         Number(b.isKey ?? false) - Number(a.isKey ?? false) ||
-                        (waitingMinutes(b.createdAt) ?? 0) - (waitingMinutes(a.createdAt) ?? 0),
+                        (slaMinutes(b.createdAt) ?? 0) - (slaMinutes(a.createdAt) ?? 0),
                     )
                   : col.key === "routed"
                     ? [...byStatus[col.key]].sort(
@@ -1543,7 +1584,9 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         onReject={onReject}
         onCall={(l) => setCallPopupLead(l)}
         onItemsSaved={(id, count, total) => patch(id, { itemsCount: count, itemsTotal: total })}
-        onConverted={(id, dealId) => patch(id, { status: "converted", dealId })}
+        onConverted={(id, dealId) =>
+          patch(id, { status: "converted", dealId, convertedAt: new Date().toISOString() })
+        }
       />
 
       {/* Единое окно звонка (call-window): тот же кокпит, что и в сделках, со скриптом лида,
