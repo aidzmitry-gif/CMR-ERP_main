@@ -211,10 +211,13 @@ describe("DealDrawerPreview — слайс 7: варианты договора"
 });
 
 describe("DealDrawerPreview — слайс 6 (B): блок «Документы»", () => {
-  it("нет документов (или ошибка фетча — fetchDocuments сам гасит её в []) — блок не рендерится", async () => {
+  it("нет документов (или ошибка фетча — fetchDocuments сам гасит её в []) — блок статуса не рендерится", async () => {
     renderDrawer();
     await waitFor(() => expect(api.fetchDocuments).toHaveBeenCalledWith("1"));
-    expect(screen.queryByText("Документы")).toBeNull();
+    // Цикл 9: группа «Документы» (заголовок) всегда на месте — рендерится условно только
+    // вложенный блок статуса последних счёта/договора, переименованный в «Статус документов»
+    // (чтобы не дублировать заголовок группы).
+    expect(screen.queryByText("Статус документов")).toBeNull();
   });
 
   it("счёт с valid_until в прошлом — «просрочен N дн», бейдж «резерв», ссылка «открыть»", async () => {
@@ -231,7 +234,9 @@ describe("DealDrawerPreview — слайс 6 (B): блок «Документы�
       },
     ]);
     renderDrawer();
-    expect(await screen.findByText("Документы")).toBeInTheDocument();
+    // «Документы» — заголовок группы, виден всегда; ждём именно вложенный блок статуса,
+    // который рендерится только после того, как fetchDocuments реально резолвнулся.
+    expect(await screen.findByText("Статус документов")).toBeInTheDocument();
     expect(screen.getByText(/Счёт СЧ-1/)).toBeInTheDocument();
     expect(screen.getByText(/просрочен \d+ дн/)).toBeInTheDocument();
     expect(screen.getByText("резерв")).toBeInTheDocument();

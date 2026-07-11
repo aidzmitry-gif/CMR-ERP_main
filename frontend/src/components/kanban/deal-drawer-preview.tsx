@@ -550,13 +550,16 @@ export function DealDrawerPreview({
 
             {/* Скроллируемое тело */}
             <div className="flex-1 overflow-y-auto px-[18px] py-[14px]">
+              {/* ══════════ ГРУППА 1 — КОНТЕКСТ (read-only) ══════════ */}
               <div className="flex flex-wrap items-center gap-2">
                 <PriorityBadge priority={deal.priority} withIcon />
                 <SourceTag entity="контрагент" source="mdm/1c" />
                 {days != null && (
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      stuck ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted"
+                      stuck
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                        : "bg-sunken text-muted"
                     }`}
                   >
                     🕒 {days} дн.{stuck ? " · висяк" : ""}
@@ -567,7 +570,7 @@ export function DealDrawerPreview({
               {/* Причина отказа (SALES-40) — тот же резолв, что на карточке доски */}
               {lostTitle && (
                 <div className="mt-2">
-                  <span className="inline-block rounded-md bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                  <span className="inline-block rounded-md bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300">
                     Причина отказа: {lostTitle}
                   </span>
                   {deal.lostComment && (
@@ -611,412 +614,413 @@ export function DealDrawerPreview({
                 </div>
               )}
 
-              {/* === STAGE-MOVER === */}
-              <section className="mt-4">
-                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                  Стадия
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={
-                      currentStageIdx >= 0 ? stages[currentStageIdx].id : ""
-                    }
-                    onChange={(e) => onMoveStage(deal.id, e.target.value)}
-                    aria-label="Стадия сделки"
-                    className="flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
-                  >
-                    {stages.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title}
-                      </option>
-                    ))}
-                  </select>
-                  {nextStage && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => onMoveStage(deal.id, nextStage.id)}
-                      icon={<ChevronRight size={14} />}
-                      title={`Переместить в «${nextStage.title}»`}
+              {/* ══════════ ГРУППА 2 — ДВИЖЕНИЕ ПО ВОРОНКЕ ══════════ */}
+              <div className="mt-5 border-t border-line pt-4">
+                {/* === STAGE-MOVER === */}
+                <section>
+                  <SectionLabel>Стадия</SectionLabel>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={currentStageIdx >= 0 ? stages[currentStageIdx].id : ""}
+                      onChange={(e) => onMoveStage(deal.id, e.target.value)}
+                      aria-label="Стадия сделки"
+                      className="flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
                     >
-                      {nextStage.title}
-                    </Button>
-                  )}
-                </div>
-              </section>
-
-              {/* === NEXT STEP — inline edit === */}
-              <section className="mt-4">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    <Flag size={11} className="text-accent-ink" />
-                    Следующий шаг
-                  </span>
-                  {!stepEditing && (
-                    <button
-                      type="button"
-                      onClick={() => setStepEditing(true)}
-                      className="text-[11px] font-semibold text-accent-ink hover:text-accent"
-                    >
-                      Изменить
-                    </button>
-                  )}
-                </div>
-                {stepEditing ? (
-                  <div className="space-y-2">
-                    <input
-                      type="datetime-local"
-                      autoFocus
-                      value={stepDraft}
-                      onChange={(e) => setStepDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitStep();
-                        if (e.key === "Escape") {
-                          setStepDraft(deal.nextStep ?? "");
-                          setStepEditing(false);
-                        }
-                      }}
-                      className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none"
-                    />
-                    <div className="flex gap-2">
-                      <Button variant="primary" size="sm" onClick={commitStep} icon={<Check size={13} />}>
-                        Сохранить
-                      </Button>
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.title}
+                        </option>
+                      ))}
+                    </select>
+                    {nextStage && (
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
-                        onClick={() => {
-                          setStepDraft(deal.nextStep ?? "");
-                          setStepEditing(false);
-                        }}
+                        onClick={() => onMoveStage(deal.id, nextStage.id)}
+                        icon={<ChevronRight size={14} />}
+                        title={`Переместить в «${nextStage.title}»`}
                       >
-                        Отмена
+                        {nextStage.title}
                       </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-[13px] text-ink">{formatNextStep(deal.nextStep)}</div>
-                )}
-              </section>
-
-              {/* === QUICK TASK === */}
-              <section className="mt-4">
-                <div className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                  <Plus size={11} className="text-accent-ink" />
-                  Быстрая задача
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={taskDraft}
-                    onChange={(e) => setTaskDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addTask();
-                    }}
-                    placeholder="Позвонить, отправить КП, …"
-                    className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
-                  />
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={addTask}
-                    disabled={!taskDraft.trim()}
-                    icon={<Plus size={13} />}
-                  >
-                    Добавить
-                  </Button>
-                </div>
-              </section>
-
-              {/* === META-список === */}
-              <dl className="mt-4 divide-y divide-line border-y border-line">
-                <Row label="Ответственный" icon={<User size={13} className="text-muted" />}>
-                  {deal.owner || "—"}
-                </Row>
-                {(deal.date || deal.closedDate || deal.expectedCloseDate) && (
-                  <Row
-                    label={deal.closedDate ? "Закрыта" : "Ожид. закрытие"}
-                    icon={<Calendar size={13} className="text-muted" />}
-                  >
-                    {deal.closedDate ?? deal.expectedCloseDate ?? deal.date ?? "—"}
-                  </Row>
-                )}
-              </dl>
-
-              {/* === ЗВОНОК → окно-кокпит (скрипт + подбор товара + позиции в сделку) === */}
-              {onCall && (
-                <Button
-                  variant="call"
-                  block
-                  className="mt-4"
-                  onClick={() => onCall(deal)}
-                  icon={<Phone size={15} />}
-                >
-                  Позвонить — окно звонка
-                </Button>
-              )}
-
-              {/* === ДОКУМЕНТЫ: подбор товара + счёт + договор === */}
-              <section className="mt-4 grid grid-cols-3 gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPickerOpen(true)}
-                  icon={<ShoppingCart size={13} />}
-                >
-                  Товар
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void issueInvoice()}
-                  disabled={docBusy}
-                  icon={<Receipt size={13} />}
-                >
-                  Счёт
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={toggleContractMenu}
-                  disabled={docBusy}
-                  aria-expanded={contractOpen}
-                  icon={<FileText size={13} />}
-                >
-                  Договор
-                  <ChevronDown
-                    size={12}
-                    className={clsx("transition-transform", contractOpen && "rotate-180")}
-                  />
-                </Button>
-              </section>
-
-              {/* === ВЫБОР ВАРИАНТА ДОГОВОРА (слайс 7): наш шаблон / форма клиента === */}
-              {contractOpen && (
-                <section className="mt-2 space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5">
-                  <div>
-                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                      По нашему шаблону
-                    </div>
-                    {templatesLoading && (
-                      <div className="text-[12px] text-muted">Загрузка…</div>
                     )}
-                    {!templatesLoading && templates && templates.length === 0 && (
-                      <span className="inline-block rounded-md border border-line px-2 py-1 text-[12px] text-faint opacity-60">
-                        Шаблонов нет
-                      </span>
-                    )}
-                    {!templatesLoading && templates && templates.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {templates.map((t) => (
-                          <button
-                            key={t.code}
-                            type="button"
-                            onClick={() => void prepareContractFromTemplate(t.code, Date.now())}
-                            disabled={docBusy}
-                            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken disabled:opacity-50"
-                          >
-                            {t.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                      Форма клиента (их договор)
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      block
-                      onClick={() => void issueClientContract()}
-                      disabled={docBusy}
-                    >
-                      Оформить по форме клиента
-                    </Button>
                   </div>
                 </section>
-              )}
-              {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
 
-              {/* === СТАТУС ДОКУМЕНТОВ: последний счёт/договор (слайс 6, B) === */}
-              {(latestInvoice || latestContract) && (
-                <section className="mt-3 rounded-xl border border-line p-3">
-                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    Документы
-                  </div>
-                  <div className="space-y-1.5 text-[12.5px]">
-                    {latestInvoice && (
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-ink">Счёт {latestInvoice.number}</span>
-                          <span className="text-muted">· {fmt(latestInvoice.amount)}</span>
-                          <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                            {DOC_STATUS_LABEL[latestInvoice.status] ?? latestInvoice.status}
-                          </span>
-                          {invoiceExpiry && (
-                            <span
-                              className={clsx(
-                                "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                                invoiceExpiry.danger
-                                  ? "bg-red-50 text-red-600"
-                                  : "bg-amber-50 text-amber-600",
-                              )}
-                            >
-                              {invoiceExpiry.text}
-                            </span>
-                          )}
-                          {latestInvoice.reserve_status === "reserved" && (
-                            <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-600">
-                              резерв
-                            </span>
-                          )}
-                        </div>
-                        <a
-                          href={`/api/sales/documents/${latestInvoice.id}/render`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="shrink-0 text-[11.5px] font-semibold text-accent-ink hover:text-accent"
+                {/* === NEXT STEP — inline edit === */}
+                <section className="mt-3">
+                  <SectionLabel
+                    icon={<Flag size={11} className="text-accent-ink" />}
+                    action={
+                      !stepEditing && (
+                        <button
+                          type="button"
+                          onClick={() => setStepEditing(true)}
+                          className="text-[11px] font-semibold text-accent-ink hover:text-accent"
                         >
-                          открыть
-                        </a>
+                          Изменить
+                        </button>
+                      )
+                    }
+                  >
+                    Следующий шаг
+                  </SectionLabel>
+                  {stepEditing ? (
+                    <div className="space-y-2">
+                      <input
+                        type="datetime-local"
+                        autoFocus
+                        value={stepDraft}
+                        onChange={(e) => setStepDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitStep();
+                          if (e.key === "Escape") {
+                            setStepDraft(deal.nextStep ?? "");
+                            setStepEditing(false);
+                          }
+                        }}
+                        className="w-full rounded-lg border border-accent bg-surface px-2.5 py-2 text-sm text-ink outline-none"
+                      />
+                      <div className="flex gap-2">
+                        <Button variant="primary" size="sm" onClick={commitStep} icon={<Check size={13} />}>
+                          Сохранить
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setStepDraft(deal.nextStep ?? "");
+                            setStepEditing(false);
+                          }}
+                        >
+                          Отмена
+                        </Button>
                       </div>
-                    )}
-                    {latestContract && (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-ink">Договор {latestContract.number}</span>
-                        <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                          {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {/* Слайс 8 (D): честное отсутствие — кнопки нет, пока нет проведённого
-                      счёта И проведённого договора (то же условие, что у бэка send_package). */}
-                  {canSendPackage && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      block
-                      className="mt-2"
-                      onClick={() => void sendPackageToClient()}
-                      disabled={docBusy}
-                    >
-                      📦 Пакет клиенту
-                    </Button>
+                    </div>
+                  ) : (
+                    <div className="text-[13px] text-ink">{formatNextStep(deal.nextStep)}</div>
                   )}
                 </section>
-              )}
 
-              {/* === НАПИСАТЬ КЛИЕНТУ (слайс 8): канал + шаблон стадии + свободный текст + AI === */}
-              <Button
-                variant="secondary"
-                block
-                className="mt-4"
-                onClick={toggleMsgMenu}
-                aria-expanded={msgOpen}
-                icon={<MessageSquare size={15} />}
-              >
-                Написать клиенту
-                <ChevronDown size={13} className={clsx("transition-transform", msgOpen && "rotate-180")} />
-              </Button>
-
-              {msgOpen && (
-                <section
-                  role="group"
-                  aria-label="Написать клиенту"
-                  className="mt-2 space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5"
-                >
-                  <div className="flex gap-1.5">
-                    {MESSAGE_CHANNELS.map((c) => (
-                      <button
-                        key={c.key}
-                        type="button"
-                        onClick={() => setMsgChannel(c.key)}
-                        aria-pressed={msgChannel === c.key}
-                        className={clsx(
-                          "flex-1 rounded-md border px-2 py-1.5 text-[12px] font-medium",
-                          msgChannel === c.key
-                            ? "border-accent bg-accent/10 text-accent-ink"
-                            : "border-line-strong bg-surface text-muted hover:bg-sunken",
-                        )}
-                      >
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {messageTemplatesFor(stageId).map((t) => (
-                      <button
-                        key={t.label}
-                        type="button"
-                        onClick={() => setMsgText(t.text)}
-                        className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken"
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    value={msgText}
-                    onChange={(e) => setMsgText(e.target.value)}
-                    placeholder="Текст сообщения клиенту…"
-                    aria-label="Текст сообщения клиенту"
-                    rows={3}
-                    className="w-full resize-none rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-                  />
+                {/* === QUICK TASK === */}
+                <section className="mt-3">
+                  <SectionLabel icon={<Plus size={11} className="text-accent-ink" />}>
+                    Быстрая задача
+                  </SectionLabel>
                   <div className="flex gap-2">
-                    <Button
-                      variant="violet"
-                      size="sm"
-                      onClick={() => void draftAiMessage()}
-                      disabled={docBusy}
-                    >
-                      AI-черновик
-                    </Button>
+                    <input
+                      value={taskDraft}
+                      onChange={(e) => setTaskDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") addTask();
+                      }}
+                      placeholder="Позвонить, отправить КП, …"
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-ink outline-none focus:border-accent"
+                    />
                     <Button
                       variant="primary"
                       size="sm"
-                      className="flex-1"
-                      onClick={() => void sendClientMessage()}
-                      disabled={docBusy || !msgText.trim()}
+                      onClick={addTask}
+                      disabled={!taskDraft.trim()}
+                      icon={<Plus size={13} />}
                     >
-                      Отправить
+                      Добавить
                     </Button>
                   </div>
                 </section>
-              )}
 
-              {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
-              <div className="mt-4 rounded-xl border border-line p-3">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                  Связь с клиентом
-                </div>
-                <ChannelButtons dealId={deal.id} />
+                {/* === META-список === */}
+                <dl className="mt-3 divide-y divide-line border-y border-line">
+                  <Row label="Ответственный" icon={<User size={13} className="text-muted" />}>
+                    {deal.owner || "—"}
+                  </Row>
+                  {(deal.date || deal.closedDate || deal.expectedCloseDate) && (
+                    <Row
+                      label={deal.closedDate ? "Закрыта" : "Ожид. закрытие"}
+                      icon={<Calendar size={13} className="text-muted" />}
+                    >
+                      {deal.closedDate ?? deal.expectedCloseDate ?? deal.date ?? "—"}
+                    </Row>
+                  )}
+                </dl>
               </div>
 
-              {/* === WIN / LOSE === скрываем для уже отказных (lost/cond_lost): причина показана выше */}
+              {/* ══════════ ГРУППА 3 — ДОКУМЕНТЫ (денежный поток) ══════════
+                  Действия (Товар/Счёт/Договор) → раскрытие варианта договора под кнопкой →
+                  результат последнего действия (docMsg) → статус последних счёта/договора + Пакет. */}
+              <div className="mt-5 border-t border-line pt-4">
+                <SectionLabel icon={<FileText size={11} className="text-accent-ink" />}>
+                  Документы
+                </SectionLabel>
+                <div className="mt-1.5 grid grid-cols-3 gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setPickerOpen(true)}
+                    icon={<ShoppingCart size={13} />}
+                  >
+                    Товар
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void issueInvoice()}
+                    disabled={docBusy}
+                    icon={<Receipt size={13} />}
+                  >
+                    Счёт
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={toggleContractMenu}
+                    disabled={docBusy}
+                    aria-expanded={contractOpen}
+                    icon={<FileText size={13} />}
+                  >
+                    Договор
+                    <ChevronDown
+                      size={12}
+                      className={clsx("transition-transform", contractOpen && "rotate-180")}
+                    />
+                  </Button>
+                </div>
+
+                {/* === ВЫБОР ВАРИАНТА ДОГОВОРА (слайс 7): наш шаблон / форма клиента === */}
+                {contractOpen && (
+                  <section className="mt-2 space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5">
+                    <div>
+                      <SectionLabel>По нашему шаблону</SectionLabel>
+                      {templatesLoading && (
+                        <div className="text-[12px] text-muted">Загрузка…</div>
+                      )}
+                      {!templatesLoading && templates && templates.length === 0 && (
+                        <span className="inline-block rounded-md border border-line px-2 py-1 text-[12px] text-faint opacity-60">
+                          Шаблонов нет
+                        </span>
+                      )}
+                      {!templatesLoading && templates && templates.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {templates.map((t) => (
+                            <button
+                              key={t.code}
+                              type="button"
+                              onClick={() => void prepareContractFromTemplate(t.code, Date.now())}
+                              disabled={docBusy}
+                              className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken disabled:opacity-50"
+                            >
+                              {t.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <SectionLabel>Форма клиента (их договор)</SectionLabel>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        block
+                        onClick={() => void issueClientContract()}
+                        disabled={docBusy}
+                      >
+                        Оформить по форме клиента
+                      </Button>
+                    </div>
+                  </section>
+                )}
+                {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
+
+                {/* === СТАТУС ДОКУМЕНТОВ: последний счёт/договор (слайс 6, B) === */}
+                {(latestInvoice || latestContract) && (
+                  <section className="mt-3 rounded-xl border border-line p-3">
+                    <SectionLabel>Статус документов</SectionLabel>
+                    <div className="space-y-1.5 text-[12.5px]">
+                      {latestInvoice && (
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-ink">Счёт {latestInvoice.number}</span>
+                            <span className="text-muted">· {fmt(latestInvoice.amount)}</span>
+                            <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                              {DOC_STATUS_LABEL[latestInvoice.status] ?? latestInvoice.status}
+                            </span>
+                            {invoiceExpiry && (
+                              <span
+                                className={clsx(
+                                  "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                                  invoiceExpiry.danger
+                                    ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300"
+                                    : "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
+                                )}
+                              >
+                                {invoiceExpiry.text}
+                              </span>
+                            )}
+                            {latestInvoice.reserve_status === "reserved" && (
+                              <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:bg-sky-500/15 dark:text-sky-300">
+                                резерв
+                              </span>
+                            )}
+                          </div>
+                          <a
+                            href={`/api/sales/documents/${latestInvoice.id}/render`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 text-[11.5px] font-semibold text-accent-ink hover:text-accent"
+                          >
+                            открыть
+                          </a>
+                        </div>
+                      )}
+                      {latestContract && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-ink">Договор {latestContract.number}</span>
+                          <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                            {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Слайс 8 (D): честное отсутствие — кнопки нет, пока нет проведённого
+                        счёта И проведённого договора (то же условие, что у бэка send_package). */}
+                    {canSendPackage && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        block
+                        className="mt-2"
+                        onClick={() => void sendPackageToClient()}
+                        disabled={docBusy}
+                      >
+                        📦 Пакет клиенту
+                      </Button>
+                    )}
+                  </section>
+                )}
+              </div>
+
+              {/* ══════════ ГРУППА 4 — ОБЩЕНИЕ ══════════
+                  Звонок-кокпит (скрипт+подбор товара) → написать клиенту (шаблон/AI/текст) →
+                  быстрые каналы связи (клик по иконке — прямая ссылка tel:/wa.me/…). */}
+              <div className="mt-5 border-t border-line pt-4">
+                <SectionLabel icon={<MessageSquare size={11} className="text-accent-ink" />}>
+                  Общение
+                </SectionLabel>
+                <div className="mt-1.5 space-y-2">
+                  {/* === ЗВОНОК → окно-кокпит (скрипт + подбор товара + позиции в сделку) === */}
+                  {onCall && (
+                    <Button variant="call" block onClick={() => onCall(deal)} icon={<Phone size={15} />}>
+                      Позвонить — окно звонка
+                    </Button>
+                  )}
+
+                  {/* === НАПИСАТЬ КЛИЕНТУ (слайс 8): канал + шаблон стадии + свободный текст + AI === */}
+                  <Button
+                    variant="secondary"
+                    block
+                    onClick={toggleMsgMenu}
+                    aria-expanded={msgOpen}
+                    icon={<MessageSquare size={15} />}
+                  >
+                    Написать клиенту
+                    <ChevronDown size={13} className={clsx("transition-transform", msgOpen && "rotate-180")} />
+                  </Button>
+
+                  {msgOpen && (
+                    <section
+                      role="group"
+                      aria-label="Написать клиенту"
+                      className="space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5"
+                    >
+                      <div className="flex gap-1.5">
+                        {MESSAGE_CHANNELS.map((c) => (
+                          <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => setMsgChannel(c.key)}
+                            aria-pressed={msgChannel === c.key}
+                            className={clsx(
+                              "flex-1 rounded-md border px-2 py-1.5 text-[12px] font-medium",
+                              msgChannel === c.key
+                                ? "border-accent bg-accent/10 text-accent-ink"
+                                : "border-line-strong bg-surface text-muted hover:bg-sunken",
+                            )}
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {messageTemplatesFor(stageId).map((t) => (
+                          <button
+                            key={t.label}
+                            type="button"
+                            onClick={() => setMsgText(t.text)}
+                            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken"
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        value={msgText}
+                        onChange={(e) => setMsgText(e.target.value)}
+                        placeholder="Текст сообщения клиенту…"
+                        aria-label="Текст сообщения клиенту"
+                        rows={3}
+                        className="w-full resize-none rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          variant="violet"
+                          size="sm"
+                          onClick={() => void draftAiMessage()}
+                          disabled={docBusy}
+                        >
+                          AI-черновик
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => void sendClientMessage()}
+                          disabled={docBusy || !msgText.trim()}
+                        >
+                          Отправить
+                        </Button>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* === КАНАЛЫ СВЯЗИ (реальные кнопки звонок/WhatsApp/Telegram/Email/Viber) === */}
+                  <ChannelButtons dealId={deal.id} />
+                </div>
+              </div>
+
+              {/* ══════════ ГРУППА 5 — ИСХОД ══════════
+                  скрываем для уже отказных (lost/cond_lost): причина показана выше, в контексте. */}
               {!isTerminalLost && (
-                <section className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    variant="money"
-                    size="sm"
-                    onClick={() => onWin(deal.id)}
-                    icon={<Check size={14} />}
-                    className="flex-1"
-                  >
-                    Выиграна
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => onLose(deal.id)}
-                    icon={<XCircle size={14} />}
-                    className="flex-1"
-                  >
-                    Отказ
-                  </Button>
-                </section>
+                <div className="mt-5 border-t border-line pt-4">
+                  <section className="flex flex-wrap gap-2">
+                    <Button
+                      variant="money"
+                      size="sm"
+                      onClick={() => onWin(deal.id)}
+                      icon={<Check size={14} />}
+                      className="flex-1"
+                    >
+                      Выиграна
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => onLose(deal.id)}
+                      icon={<XCircle size={14} />}
+                      className="flex-1"
+                    >
+                      Отказ
+                    </Button>
+                  </section>
+                </div>
               )}
 
               <div className="mt-4 text-center text-[11px] text-faint">
@@ -1064,6 +1068,29 @@ function Row({
         {label}
       </span>
       <span className="min-w-0 text-right font-medium text-ink">{children}</span>
+    </div>
+  );
+}
+
+/** Цикл 9: единый заголовок секции drawer'а — раньше ~8 мест дублировали
+ *  `text-[11px] font-semibold uppercase tracking-wide text-faint` ad-hoc (иногда с иконкой,
+ *  иногда с trailing-действием типа «Изменить»). Один компонент — консистентный разнобой убран. */
+function SectionLabel({
+  icon,
+  action,
+  children,
+}: {
+  icon?: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-1.5 flex items-center justify-between gap-2">
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+        {icon}
+        {children}
+      </span>
+      {action}
     </div>
   );
 }
