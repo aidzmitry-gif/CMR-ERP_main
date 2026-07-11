@@ -16,6 +16,7 @@ import {
   groupByDateBucket,
   inboundSignal,
   invoiceBadge,
+  invoicesAtRisk,
   isClosedStageId,
   isOpenStage,
   isStuck,
@@ -26,6 +27,7 @@ import {
   shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
+  type InvoiceRiskEntry,
   weightedAmount,
 } from "@/lib/board";
 import type { Deal, Stage } from "@/lib/types";
@@ -767,5 +769,94 @@ describe("discountGate (слайс 9)", () => {
         100,
       ),
     ).toEqual({ minTotal: 120, gap: 20 });
+  });
+});
+
+describe("invoicesAtRisk (цикл 12: счета под риском — резерв уходит)", () => {
+  const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
+
+  const entry = (
+    dealId: string,
+    amount: number,
+    doc: Partial<InvoiceRiskEntry["doc"]>,
+  ): InvoiceRiskEntry => ({
+    deal: deal(dealId, amount),
+    doc: {
+      number: `СЧ-${dealId}`,
+      status: "posted",
+      validUntil: null,
+      reserveStatus: "reserved",
+      amount,
+      ...doc,
+    },
+  });
+
+  it("просроченный posted-счёт попадает в очередь — severity crit, подпись «просрочен N дн»", () => {
+    const { items, total } = invoicesAtRisk([entry("1", 1000, { validUntil: "2026-06-01" })], NOW);
+    expect(total).toBe(1);
+    expect(items[0]).toMatchObject({ severity: "crit", reason: "просрочен 10 дн", docNumber: "СЧ-1" });
+  });
+
+  it("истекающий в пределах порога — severity warn, подпись «истекает N дн»", () => {
+    const { items } = invoicesAtRisk([entry("1", 1000, { validUntil: "2026-06-13" })], NOW);
+    expect(items[0]).toMatchObject({ severity: "warn", reason: "истекает 2 дн · резерв уйдёт" });
+  });
+
+  it("истекающий за пределами порога (>3 дн) и резерв не снят — вне очереди", () => {
+    const { items, total } = invoicesAtRisk([entry("1", 1000, { validUntil: "2026-06-20" })], NOW);
+    expect(items).toHaveLength(0);
+    expect(total).toBe(0);
+  });
+
+  it("резерв уже снят, оплаты нет (даже без активного срока) — severity warn", () => {
+    const { items } = invoicesAtRisk(
+      [entry("1", 1000, { validUntil: null, reserveStatus: "released" })],
+      NOW,
+    );
+    expect(items[0]).toMatchObject({ severity: "warn", reason: "резерв снят, оплаты нет" });
+  });
+
+  it("оплаченный (paid) счёт — исключён из очереди даже с истёкшим сроком", () => {
+    const { items, total } = invoicesAtRisk(
+      [entry("1", 1000, { status: "paid", validUntil: "2020-01-01" })],
+      NOW,
+    );
+    expect(items).toHaveLength(0);
+    expect(total).toBe(0);
+  });
+
+  it("черновик (draft, ещё не выставлен всерьёз) — исключён из очереди", () => {
+    const { items } = invoicesAtRisk([entry("1", 1000, { status: "draft", validUntil: "2020-01-01" })], NOW);
+    expect(items).toHaveLength(0);
+  });
+
+  it("сортировка: просроченные впереди истекающих, крупнее просрочка — раньше", () => {
+    const { items } = invoicesAtRisk(
+      [
+        entry("expiring", 5000, { validUntil: "2026-06-13" }), // истекает через 2 дн
+        entry("overdue-small", 100, { validUntil: "2026-06-10" }), // просрочен 1 дн
+        entry("overdue-big", 100, { validUntil: "2026-06-01" }), // просрочен 10 дн
+      ],
+      NOW,
+    );
+    expect(items.map((i) => i.deal.id)).toEqual(["overdue-big", "overdue-small", "expiring"]);
+  });
+
+  it("при равной срочности — крупнее сумма счёта раньше", () => {
+    const { items } = invoicesAtRisk(
+      [
+        entry("small", 500, { validUntil: "2026-06-13" }),
+        entry("big", 5000, { validUntil: "2026-06-13" }),
+      ],
+      NOW,
+    );
+    expect(items.map((i) => i.deal.id)).toEqual(["big", "small"]);
+  });
+
+  it("cap обрезает очередь, но total считает ДО обрезки", () => {
+    const entries = [1, 2, 3].map((n) => entry(String(n), n, { validUntil: "2026-06-01" }));
+    const { items, total } = invoicesAtRisk(entries, NOW, 2);
+    expect(items).toHaveLength(2);
+    expect(total).toBe(3);
   });
 });

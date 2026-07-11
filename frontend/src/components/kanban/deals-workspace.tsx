@@ -22,6 +22,7 @@ import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { FocusPanel } from "@/components/kanban/focus-panel";
+import { InvoiceRiskPanel } from "@/components/kanban/invoice-risk-panel";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
 import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
@@ -45,6 +46,7 @@ import {
   focusQueue,
   groupByDateBucket,
   invoiceBadge,
+  invoicesAtRisk,
   isClosedStageId,
   isOpenStage,
   isStuck,
@@ -57,6 +59,7 @@ import {
   sortDealsForBoard,
   stageWeightedSum,
   type InvoiceBadgeResult,
+  type InvoiceRiskEntry,
   weightedAmount,
 } from "@/lib/board";
 import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
@@ -112,10 +115,19 @@ function autoNextStepPatch(stageId: string): NextStepPatch {
 /** Кап карточек в колонке (F): сотни сделок не душат доску DOM'ом; остальное — по кнопке. */
 const CARD_CAP = 50;
 
-/** Кап батч-фетча статуса счёта на карточках колонки «Счёт» (слайс 6, C): витрина первого
- *  экрана колонки, не весь пайплайн — сотни fetchDocuments разом душат бэк. ponytail: если
- *  колонка регулярно больше — грузить по видимости/скроллу, а не линейно увеличивать кап. */
-const INVOICE_BADGE_CAP = 12;
+/** Стадии, где реально бывает выставленный неоплаченный счёт (invoice → protected →
+ *  contract — прогрессия sales-stages.ts, счёт может пережить сделку дальше по воронке).
+ *  Порядок = порядок конкатенации батча ниже: invoice ПЕРВОЙ — сохраняет инвариант «карточки
+ *  колонки «Счёт» получают надмножество прежнего охвата» (см. INVOICE_DOCS_CAP). */
+const RISK_STAGE_IDS = ["invoice", "protected", "contract"] as const;
+
+/** Кап батч-фетча статуса счёта (слайс 6, C + цикл 12 «Счета под риском»): витрина первых
+ *  сделок трёх стадий {@link RISK_STAGE_IDS} (в порядке sortDealsForBoard), не весь пайплайн —
+ *  сотни fetchDocuments разом душат бэк. Поднят с 12 (одна колонка «Счёт») до 40 (три стадии,
+ *  цикл 12 расширил охват под очередь «Счета под риском» — риск-счета живут и на protected/
+ *  contract, не только в invoice) — см. эффект ниже. ponytail: если стадии регулярно
+ *  больше — грузить по видимости/скроллу, а не линейно увеличивать кап. */
+const INVOICE_DOCS_CAP = 40;
 
 /** Кнопка «Показать ещё N (из M)» под капом карточек колонки. */
 function ShowMore({ total, limit, onMore }: { total: number; limit: number; onMore: () => void }) {
@@ -879,6 +891,9 @@ export function DealsWorkspace({
   const [previewDeal, setPreviewDeal] = useState<Deal | null>(null);
   // Слайс 5: панель «Фокус дня» — упорядоченная очередь «что делать сейчас» (focusQueue).
   const [focusOpen, setFocusOpen] = useState(false);
+  // Цикл 12: панель «Счета под риском» — очередь просроченных/истекающих неоплаченных
+  // счетов (invoicesAtRisk).
+  const [invoiceRiskOpen, setInvoiceRiskOpen] = useState(false);
   // callDeal = открыто окно звонка по этой сделке (тот же кокпит, что и у лида).
   const [callDeal, setCallDeal] = useState<Deal | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -909,10 +924,15 @@ export function DealsWorkspace({
   const [moreKpis, setMoreKpis] = useState(false);
   // П2: «план продаж согласован РОПом» в подзаголовке — если на текущий месяц есть approved-план.
   const [planApproved, setPlanApproved] = useState(false);
-  // Слайс 6 (C): статус последнего счёта по сделкам колонки «Счёт» — dealId → {validUntil,
-  // status, reserveStatus}; наполняется батч-фетчем после маунта (см. эффект ниже).
+  // Слайс 6 (C) + цикл 12: последний счёт сделки — dealId → {validUntil, status,
+  // reserveStatus, number, amount}; наполняется батч-фетчем после маунта (см. эффект ниже).
+  // Обслуживает и бейдж колонки «Счёт» (invoiceBadge), и очередь «Счета под риском»
+  // (invoicesAtRisk, board.ts) — общий набор полей, один батч на обоих потребителей.
   const [invoiceDocs, setInvoiceDocs] = useState<
-    Map<string, { validUntil: string | null; status: string; reserveStatus: string }>
+    Map<
+      string,
+      { validUntil: string | null; status: string; reserveStatus: string; number: string; amount: number }
+    >
   >(new Map());
   // Цикл 11: входящий сигнал «клиент ждёт ответа» — dealId → {unread, missed}; наполняется
   // батч-фетчем ниже (два агрегатных вызова на всю доску, не по колонке/сделке).
@@ -940,23 +960,28 @@ export function DealsWorkspace({
     });
   }, []);
 
-  // Слайс 6 (C): статус счёта на карточках колонки «Счёт» — ленивый батч по загрузке доски,
-  // только первые INVOICE_BADGE_CAP сделок (см. константу выше). Однократно от начальной
+  // Слайс 6 (C) + цикл 12: статус счёта — ленивый батч по загрузке доски, первые
+  // INVOICE_DOCS_CAP сделок ПО ТРЁМ СТАДИЯМ {@link RISK_STAGE_IDS} (было — только колонка
+  // «Счёт»; цикл 12 расширил охват под очередь «Счета под риском», не сузив прежний —
+  // invoice-стадия конкатенируется первой, поэтому карточки колонки «Счёт» получают строгое
+  // надмножество прежнего топ-12, ревью f4f825d остаётся в силе). Однократно от начальной
   // доски SSR (initialStages), не от живого `stages` — иначе drag&drop/фильтры триггерили бы
-  // рефетч всей колонки.
+  // рефетч.
   useEffect(() => {
-    const invoiceStage = initialStages.find((s) => s.id === "invoice");
-    if (!invoiceStage) return;
-    // кап берём в ПОРЯДКЕ РЕНДЕРА колонки (sortDealsForBoard), а не в порядке ответа
-    // бэка (по id) — иначе бейджи доставались бы случайному подмножеству (ревью f4f825d)
-    const targets = sortDealsForBoard(invoiceStage.deals, "invoice", Date.now()).slice(
-      0,
-      INVOICE_BADGE_CAP,
-    );
+    // кап берём в ПОРЯДКЕ РЕНДЕРА колонок (sortDealsForBoard по каждой стадии), а не в
+    // порядке ответа бэка (по id) — иначе бейджи/риск-очередь доставались бы случайному
+    // подмножеству (ревью f4f825d)
+    const targets = RISK_STAGE_IDS.flatMap((stageId) => {
+      const s = initialStages.find((st) => st.id === stageId);
+      return s ? sortDealsForBoard(s.deals, stageId, Date.now()) : [];
+    }).slice(0, INVOICE_DOCS_CAP);
     void Promise.all(
       targets.map((d) => fetchDocuments(d.id).then((docs) => [d.id, docs] as const)),
     ).then((results) => {
-      const map = new Map<string, { validUntil: string | null; status: string; reserveStatus: string }>();
+      const map = new Map<
+        string,
+        { validUntil: string | null; status: string; reserveStatus: string; number: string; amount: number }
+      >();
       for (const [dealId, docs] of results) {
         const latest = docs.filter((doc) => doc.kind === "invoice").sort((a, b) => b.id - a.id)[0];
         if (latest) {
@@ -964,6 +989,8 @@ export function DealsWorkspace({
             validUntil: latest.valid_until,
             status: latest.status,
             reserveStatus: latest.reserve_status,
+            number: latest.number,
+            amount: latest.amount,
           });
         }
       }
@@ -1173,6 +1200,22 @@ export function DealsWorkspace({
   // секция) — тот же охват, что уже использует PipelineRow выше. Апгрейд — при переносе
   // per-section стейта наверх.
   const focusResult = useMemo(() => focusQueue(filteredStages, now), [filteredStages, now]);
+
+  // Цикл 12: очередь «Счета под риском» — тот же паттерн, что focusResult выше: строится
+  // из invoiceDocs (батч по RISK_STAGE_IDS, см. эффект выше) поверх ТЕКУЩЕЙ отфильтрованной
+  // доски (filteredStages), поэтому «Чья доска»/фильтры автоматически сужают и эту очередь.
+  // Тот же ponytail, что у focusQueue: секции «Все вместе» здесь не участвуют.
+  const invoiceRiskResult = useMemo(() => {
+    if (now == null || invoiceDocs.size === 0) return { items: [], total: 0 };
+    const dealById = new Map<string, Deal>();
+    for (const s of filteredStages) for (const d of s.deals) dealById.set(d.id, d);
+    const entries: InvoiceRiskEntry[] = [];
+    for (const [dealId, doc] of invoiceDocs) {
+      const deal = dealById.get(dealId);
+      if (deal) entries.push({ deal, doc });
+    }
+    return invoicesAtRisk(entries, now);
+  }, [invoiceDocs, filteredStages, now]);
 
   const reasonByCode = new Map(lossReasons.map((r) => [r.code, r.title]));
 
@@ -1591,6 +1634,36 @@ export function DealsWorkspace({
                 </span>
               )}
             </button>
+            {/* Цикл 12: «Счета под риском» — счёт проведён, но не оплачен, а срок/резерв
+                уходит (почти закрытая выручка, которая утекает). Скрыт при пустой очереди
+                (решение оператора «не шуметь») — в отличие от «Фокус дня», который всегда
+                на виду как навигационная точка входа. */}
+            {invoiceRiskResult.total > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewDeal(null);
+                  setInvoiceRiskOpen(true);
+                }}
+                title="Счета под риском — просрочены/истекают/резерв уходит"
+                className={clsx(
+                  "inline-flex items-center gap-1.5 rounded-lg border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-sunken",
+                  invoiceRiskOpen ? "border-accent text-accent-ink" : "border-line text-muted",
+                )}
+              >
+                🧾 Счета под риском
+                <span
+                  className={clsx(
+                    "rounded-full px-1.5 py-0.5 text-[11px] font-bold",
+                    invoiceRiskResult.items.some((i) => i.severity === "crit")
+                      ? "bg-red-600 text-white"
+                      : "bg-accent-soft text-accent-ink",
+                  )}
+                >
+                  {invoiceRiskResult.total}
+                </span>
+              </button>
+            )}
             {/* Быстрый фильтр «действие сегодня/завтра» (мокап actSeg); повторный клик — снять */}
             {(["today", "tomorrow"] as const).map((k) => (
               <button
@@ -1887,6 +1960,19 @@ export function DealsWorkspace({
         fmt={fmt}
         onSelectDeal={(deal) => {
           setFocusOpen(false);
+          setPreviewDeal(deal);
+        }}
+      />
+
+      {/* Цикл 12: панель «Счета под риском» — клик по элементу очереди закрывает панель и
+          открывает тот же drawer-preview сделки, что и FocusPanel/клик по карточке. */}
+      <InvoiceRiskPanel
+        open={invoiceRiskOpen}
+        onClose={() => setInvoiceRiskOpen(false)}
+        result={invoiceRiskResult}
+        fmt={fmt}
+        onSelectDeal={(deal) => {
+          setInvoiceRiskOpen(false);
           setPreviewDeal(deal);
         }}
       />

@@ -509,6 +509,140 @@ export function inboundSignal(signals: { unread?: number; missed?: number }): In
   return null;
 }
 
+// ──────────────────────── Цикл 12: счета под риском (резерв уходит) ────────────────────────
+
+/** Порог «скоро истекает» для очереди «Счета под риском» (в днях) — граница ВКЛЮЧЕНИЯ
+ *  документа в очередь «дожать сейчас». Отдельный от {@link invoiceBadge} (там ≤2д — только
+ *  порог цвета бейджа amber/neutral на карточке, не решение «показывать ли вообще»). */
+const INVOICE_RISK_EXPIRING_DAYS = 3;
+
+/** Северность элемента очереди «Счета под риском»: 'crit' — просрочен (деньги уже опаздывают),
+ *  'warn' — истекает скоро ИЛИ резерв уже снят, а оплаты нет. */
+export type InvoiceRiskSeverity = "crit" | "warn";
+
+/** Один документ-счёт со сделкой — вход {@link invoicesAtRisk} (deals-workspace.tsx собирает
+ *  батч-фетчем `fetchDocuments` по стадиям invoice/protected/contract). */
+export interface InvoiceRiskEntry {
+  deal: Deal;
+  doc: {
+    number: string;
+    status: string;
+    validUntil: string | null;
+    reserveStatus: string;
+    amount: number;
+  };
+}
+
+/** Один элемент очереди «Счета под риском» — уже готов для отрисовки панелью. */
+export interface InvoiceRiskItem {
+  deal: Deal;
+  docNumber: string;
+  amount: number;
+  reserveStatus: string;
+  severity: InvoiceRiskSeverity;
+  /** Подпись срочности: «просрочен N дн» / «истекает N дн[ · резерв уйдёт]» / «резерв снят…». */
+  reason: string;
+}
+
+/** Результат {@link invoicesAtRisk}: `items` — топ по срочности длиной ≤ `cap`, `total` —
+ *  полное число элементов ДО обрезки (для хвоста «+ещё N» на панели, как у {@link FocusQueueResult}). */
+export interface InvoiceRiskResult {
+  items: InvoiceRiskItem[];
+  total: number;
+}
+
+/**
+ * Очередь «Счета под риском» (цикл 12): счёт проведён (`posted` — записан в 1С), но НЕ
+ * оплачен — почти закрытая выручка, которая утекает, а резерв товара под ней освобождается.
+ * Без этой очереди продавец узнаёт о рисковом счёте, только листая колонки доски вручную.
+ *
+ * В очередь попадает `posted`-счёт (не `paid` — деньги уже дошли, не `draft`/иное — ещё не
+ * выставлен всерьёз), если хотя бы одно верно:
+ *  1. срок действия (`validUntil`) уже прошёл — просрочен (severity `crit`);
+ *  2. срок истекает в пределах {@link INVOICE_RISK_EXPIRING_DAYS} дней (severity `warn`);
+ *  3. резерв уже снят (`reserveStatus==="released"`), а счёт всё ещё не оплачен — товар
+ *     свободен, но выручка так и не закрылась (severity `warn`, без даты — валидUntil
+ *     может отсутствовать или быть в прошлом уже посчитан веткой 1/2 выше).
+ *
+ * Сортировка — «что дожимать первым»: просроченные впереди истекающих (внутри группы —
+ * более срочные раньше: больше дней просрочки / меньше дней до истечения), при равной
+ * срочности — крупнее сумма счёта раньше (деньги важнее). «Резерв снят» без активного
+ * срока — последней группой (крупнее сумма раньше).
+ */
+export function invoicesAtRisk(
+  entries: InvoiceRiskEntry[],
+  now: number,
+  cap = 20,
+): InvoiceRiskResult {
+  type Ranked = { item: InvoiceRiskItem; bucket: 0 | 1 | 2; sortDays: number };
+  const ranked: Ranked[] = [];
+
+  for (const { deal, doc } of entries) {
+    if (doc.status !== "posted") continue; // paid — деньги дошли; draft — ещё не выставлен всерьёз
+
+    if (doc.validUntil) {
+      const days = daysUntilDate(doc.validUntil, now);
+      if (days < 0) {
+        ranked.push({
+          item: {
+            deal,
+            docNumber: doc.number,
+            amount: doc.amount,
+            reserveStatus: doc.reserveStatus,
+            severity: "crit",
+            reason: `просрочен ${Math.abs(days)} дн`,
+          },
+          bucket: 0,
+          sortDays: Math.abs(days),
+        });
+        continue;
+      }
+      if (days <= INVOICE_RISK_EXPIRING_DAYS) {
+        const reserveNote = doc.reserveStatus === "reserved" ? " · резерв уйдёт" : "";
+        ranked.push({
+          item: {
+            deal,
+            docNumber: doc.number,
+            amount: doc.amount,
+            reserveStatus: doc.reserveStatus,
+            severity: "warn",
+            reason: `истекает ${days} дн${reserveNote}`,
+          },
+          bucket: 1,
+          sortDays: days,
+        });
+        continue;
+      }
+    }
+    if (doc.reserveStatus === "released") {
+      ranked.push({
+        item: {
+          deal,
+          docNumber: doc.number,
+          amount: doc.amount,
+          reserveStatus: doc.reserveStatus,
+          severity: "warn",
+          reason: "резерв снят, оплаты нет",
+        },
+        bucket: 2,
+        sortDays: 0,
+      });
+    }
+  }
+
+  ranked.sort((a, b) => {
+    if (a.bucket !== b.bucket) return a.bucket - b.bucket;
+    if (a.sortDays !== b.sortDays) {
+      // bucket 0 (просрочен): больше дней просрочки — раньше; bucket 1 (истекает): меньше
+      // дней до истечения — раньше; bucket 2 не различается по sortDays (всегда 0).
+      return a.bucket === 1 ? a.sortDays - b.sortDays : b.sortDays - a.sortDays;
+    }
+    return b.item.amount - a.item.amount;
+  });
+
+  return { items: ranked.slice(0, cap).map((r) => r.item), total: ranked.length };
+}
+
 // ──────────────────────── Слайс 9: мягкий скидочный гейт (защита прибыли) ────────────────────────
 
 /** Результат {@link discountGate}: `minTotal` — минимально допустимая сумма по прайсу

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -515,5 +515,64 @@ describe("DealsWorkspace (канбан)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- Цикл 12: «Счета под риском» (счёт проведён, не оплачен, срок/резерв уходит) ---
+
+  it("цикл 12: не рендерит триггер «Счета под риском», пока очередь пуста (fetchDocuments → [])", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(screen.queryByRole("button", { name: /Счета под риском/ })).toBeNull();
+  });
+
+  it("цикл 12: просроченный posted-счёт на стадии «invoice» — бейдж-триггер + панель + переход в drawer", async () => {
+    const riskStages: Stage[] = [
+      ...stages,
+      {
+        id: "invoice",
+        title: "Счёт отправлен",
+        color: "#0EA5E9",
+        count: 1,
+        sum: 500,
+        deals: [
+          {
+            id: "10",
+            number: "CRM-10",
+            company: "ООО Риск",
+            description: "Поставка",
+            amount: 500,
+            priority: "Средний",
+            owner: "И",
+          },
+        ],
+      },
+    ];
+    mock(api.fetchDocuments).mockImplementation(async (dealId: string) =>
+      dealId === "10"
+        ? [
+            {
+              id: 1,
+              kind: "invoice",
+              number: "СЧ-100",
+              status: "posted",
+              onec_ref: null,
+              amount: 500,
+              valid_until: "2020-01-01", // далеко в прошлом — «просрочен»
+              reserve_status: "reserved",
+            },
+          ]
+        : [],
+    );
+    render(<DealsWorkspace initialStages={riskStages} initialKpis={[]} />);
+    const riskButton = await screen.findByRole("button", { name: /Счета под риском/ });
+    fireEvent.click(riskButton);
+    const panel = screen.getByRole("dialog", { hidden: true, name: "Счета под риском" });
+    expect(within(panel).getByText(/просрочен \d+ дн/)).toBeInTheDocument();
+    expect(within(panel).getByText(/СЧ-100/)).toBeInTheDocument();
+    // Клик по элементу очереди закрывает панель и открывает drawer-preview той же сделки.
+    fireEvent.click(within(panel).getByText("ООО Риск"));
+    expect(screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ })).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
   });
 });
