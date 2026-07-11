@@ -27,6 +27,7 @@ import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
   createDeal,
   createDealTask,
+  fetchApprovals,
   fetchCalls,
   fetchChats,
   fetchDocuments,
@@ -40,6 +41,7 @@ import {
   type DealInput,
 } from "@/lib/api";
 import {
+  approvalBadge,
   closeabilityQueue,
   dateBucketId,
   daysInStage,
@@ -58,6 +60,7 @@ import {
   shouldAutoAssignNextStep,
   sortDealsForBoard,
   stageWeightedSum,
+  type ApprovalBadgeResult,
   type InvoiceBadgeResult,
   type InvoiceRiskEntry,
   weightedAmount,
@@ -102,6 +105,10 @@ type CardExtras = {
   unread?: number;
   /** Цикл 11: есть пропущенный вх. звонок без ответа — из батч-фетча fetchCalls(status=missed). */
   missed?: number;
+  /** Цикл 14: результат последнего согласования РОП по сделке (approvalBadge, board.ts) —
+   *  предвычислено из батч-фетча fetchApprovals({}) (см. эффект ниже). null/не задан — карточка
+   *  бейдж не рисует (нет согласования или статус pending — не шумим). */
+  approval?: ApprovalBadgeResult | null;
 };
 
 /** Слайс 4 (D): дефолтный (первый) пресет стадии → патч для авто-назначения при
@@ -939,6 +946,10 @@ export function DealsWorkspace({
   const [inboundSignals, setInboundSignals] = useState<Map<string, { unread: number; missed: number }>>(
     new Map(),
   );
+  // Цикл 14: статус одобрения РОП — dealId → status последнего согласования (по max id среди
+  // approvals с entity_ref==="deal:{id}"); наполняется ОДНИМ агрегатным батчем fetchApprovals({})
+  // после маунта (см. эффект ниже), тот же паттерн, что invoiceDocs/inboundSignals выше.
+  const [approvals, setApprovals] = useState<Map<string, string>>(new Map());
 
   // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
@@ -1019,6 +1030,31 @@ export function DealsWorkspace({
         map.set(key, { ...cur, missed: cur.missed + 1 });
       }
       setInboundSignals(map);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Цикл 14: статус одобрения РОП — ОДИН агрегатный вызов fetchApprovals({}) на всю доску
+  // (бэк отдаёт ВСЕ согласования без параметров), как и invoiceDocs/inboundSignals выше;
+  // мапим на dealId по entity_ref==="deal:{id}", берём статус согласования с MAX id (последнее).
+  useEffect(() => {
+    let ignore = false;
+    void fetchApprovals({}).then((list) => {
+      if (ignore) return;
+      const map = new Map<string, string>();
+      const maxId = new Map<string, number>();
+      for (const a of list) {
+        if (!a.entity_ref.startsWith("deal:")) continue;
+        const dealId = a.entity_ref.slice("deal:".length);
+        const prevMax = maxId.get(dealId);
+        if (prevMax == null || a.id > prevMax) {
+          maxId.set(dealId, a.id);
+          map.set(dealId, a.status);
+        }
+      }
+      setApprovals(map);
     });
     return () => {
       ignore = true;
@@ -1360,6 +1396,7 @@ export function DealsWorkspace({
       invoiceBadge: invBadge,
       unread: inbound?.unread,
       missed: inbound?.missed,
+      approval: approvalBadge(approvals.get(deal.id)),
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -1419,6 +1456,7 @@ export function DealsWorkspace({
       stageId,
       unread: inbound?.unread,
       missed: inbound?.missed,
+      approval: approvalBadge(approvals.get(deal.id)),
       // onUpdate/onNextStep добавляет FunnelSection (доска секции — её локальный стейт).
     };
   }
@@ -2064,6 +2102,7 @@ export function DealsWorkspace({
         onCall={(d) => setCallDeal(d)}
         now={now}
         reasonByCode={reasonByCode}
+        approvals={approvals}
       />
 
       {/* Окно звонка по сделке — единый кокпит (скрипт сделки + подбор товара →

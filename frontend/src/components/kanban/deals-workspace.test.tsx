@@ -34,6 +34,10 @@ vi.mock("@/lib/api", () => ({
   fetchContacts: vi.fn().mockResolvedValue([]), // ChannelButtons (drawer-preview) — FIX-R2 открывает drawer
   fetchDealItems: vi.fn().mockResolvedValue([]), // слайс 9 — скидочный гейт (drawer-preview)
   requestApproval: vi.fn(),
+  fetchApprovals: vi.fn().mockResolvedValue([]), // цикл 14 — батч статуса одобрения РОП
+  fetchLastOrder: vi.fn().mockResolvedValue([]), // цикл 14 — «Повторить заказ» (drawer-preview)
+  addDealItem: vi.fn().mockResolvedValue(true),
+  createPriceQuote: vi.fn().mockResolvedValue(true),
 }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({

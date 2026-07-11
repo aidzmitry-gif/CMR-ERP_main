@@ -321,6 +321,27 @@ describe("DealCard", () => {
     expect(screen.queryByText(/просрочен|оплачен|истекает/)).toBeNull();
   });
 
+  // --- Цикл 14: статус одобрения РОП ---
+
+  it("цикл 14: approval рендерит бейдж «✅ скидка одобрена» рядом с суммой; без пропа/null — не рендерит", () => {
+    const { rerender } = render(
+      <DealCard
+        deal={deal}
+        approval={{ label: "✅ скидка одобрена", tone: "money", title: "РОП одобрил скидку" }}
+      />,
+    );
+    expect(screen.getByText("✅ скидка одобрена")).toBeInTheDocument();
+    rerender(<DealCard deal={deal} approval={null} />);
+    expect(screen.queryByText("✅ скидка одобрена")).toBeNull();
+    rerender(<DealCard deal={deal} />);
+    expect(screen.queryByText(/скидка одобрена|не одобрено/)).toBeNull();
+  });
+
+  it("цикл 14: approval rejected рендерит «⛔ не одобрено»", () => {
+    render(<DealCard deal={deal} approval={{ label: "⛔ не одобрено", tone: "red", title: "Отклонено" }} />);
+    expect(screen.getByText("⛔ не одобрено")).toBeInTheDocument();
+  });
+
   it("D: пункт «Выставить счёт» скрыт для закрытой стадии (won/lost)", () => {
     render(<DealCard deal={deal} onUpdate={vi.fn()} stageId="won" />);
     fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));

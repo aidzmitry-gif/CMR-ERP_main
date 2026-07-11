@@ -778,3 +778,40 @@ export function discountGate(
   if (!hasKnown || amount >= minTotal) return null;
   return { minTotal, gap: minTotal - amount };
 }
+
+// ──────────────────────── Цикл 14: статус одобрения РОП на карточке/drawer ────────────────────────
+
+/** Тон бейджа одобрения ({@link approvalBadge}) — 'money' — одобрено (закрывай по
+ *  согласованной цене СЕЙЧАС), 'red' — отклонено. */
+export type ApprovalTone = "money" | "red";
+
+export interface ApprovalBadgeResult {
+  label: string;
+  tone: ApprovalTone;
+  title: string;
+}
+
+/**
+ * Резолвер бейджа «статус одобрения РОП» (цикл 14) — скидочный гейт (слайс 9) показывает
+ * только САМ ФАКТ запроса («Запросить одобрение РОП»), но не его результат: продавец узнавал
+ * об одобрении/отказе, только листая согласования отдельным экраном. Показывает РЕЗУЛЬТАТ, на
+ * который продавец должен отреагировать:
+ *  - `approved` — «✅ скидка одобрена» (тон money) — сигнал «закрывай по согласованной цене СЕЙЧАС».
+ *  - `rejected` — «⛔ не одобрено» (тон red).
+ *  - `pending`/иное/`undefined` — намеренно `null` (честный пропуск): сам факт «на согласовании»
+ *    уже виден по кнопке скидочного гейта — дублирующий нейтральный чип на насыщенной шапке
+ *    карточки был бы шумом, не новой информацией.
+ */
+export function approvalBadge(status: string | undefined): ApprovalBadgeResult | null {
+  if (status === "approved") {
+    return {
+      label: "✅ скидка одобрена",
+      tone: "money",
+      title: "РОП одобрил скидку — закрывай по согласованной цене",
+    };
+  }
+  if (status === "rejected") {
+    return { label: "⛔ не одобрено", tone: "red", title: "РОП отклонил запрос на скидку" };
+  }
+  return null;
+}

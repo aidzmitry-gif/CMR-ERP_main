@@ -12,6 +12,8 @@ import {
   dealStepText,
   inboundSignal,
   isClosedStageId,
+  type ApprovalBadgeResult,
+  type ApprovalTone,
   type AttentionTone,
   type InboundSignalTone,
   type InvoiceBadgeResult,
@@ -48,6 +50,13 @@ const ATTENTION_CLS: Record<AttentionTone, string> = {
 const INBOUND_SIGNAL_CLS: Record<InboundSignalTone, string> = {
   money: "bg-money-soft text-money",
   amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+};
+
+/** Цикл 14: цвета бейджа статуса одобрения РОП (approvalBadge, board.ts) — «money» = одобрено
+ *  (закрывай по согласованной цене), «red» = отклонено. */
+const APPROVAL_CLS: Record<ApprovalTone, string> = {
+  money: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  red: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
 };
 
 function formatShortDate(iso: string): string {
@@ -304,6 +313,7 @@ export function DealCard({
   invoiceBadge,
   unread,
   missed,
+  approval,
   fmt = formatMoney,
 }: {
   deal: Deal;
@@ -346,6 +356,10 @@ export function DealCard({
   unread?: number;
   /** Цикл 11: есть пропущенный вх. звонок без ответа (батч fetchCalls status=missed). */
   missed?: number;
+  /** Цикл 14: результат последнего согласования РОП (approvalBadge, board.ts) — предвычислен
+   *  вызывающим (deals-workspace.tsx) из батч-фетча fetchApprovals({}). Нет пропа/null — бейдж
+   *  не рендерится (нет согласования или статус pending — не шумим). */
+  approval?: ApprovalBadgeResult | null;
   fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
@@ -470,6 +484,17 @@ export function DealCard({
               )}
             >
               {invoiceBadge.label}
+            </span>
+          )}
+          {approval && (
+            <span
+              title={approval.title}
+              className={clsx(
+                "rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+                APPROVAL_CLS[approval.tone],
+              )}
+            >
+              {approval.label}
             </span>
           )}
         </div>

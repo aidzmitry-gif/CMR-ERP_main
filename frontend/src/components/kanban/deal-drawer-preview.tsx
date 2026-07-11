@@ -13,6 +13,7 @@ import {
   Phone,
   Plus,
   Receipt,
+  RefreshCw,
   ShoppingCart,
   Star,
   User,
@@ -28,9 +29,12 @@ import { useProductPicker } from "@/components/kanban/product-picker";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import {
+  addDealItem,
   aiDraftReply,
+  createPriceQuote,
   fetchDealItems,
   fetchDocuments,
+  fetchLastOrder,
   issueDocument,
   requestApproval,
   sendMessage,
@@ -38,6 +42,7 @@ import {
   type DealItemFull,
 } from "@/lib/api";
 import {
+  approvalBadge,
   daysInStage,
   daysUntilDate,
   discountGate,
@@ -119,6 +124,7 @@ export function DealDrawerPreview({
   onCall,
   now,
   reasonByCode,
+  approvals,
 }: {
   deal: Deal | null;
   stages: Stage[];
@@ -134,6 +140,9 @@ export function DealDrawerPreview({
   now: number | null;
   /** code→title причины отказа (тот же резолв, что на карточке доски — SALES-40). */
   reasonByCode?: Map<string, string>;
+  /** Цикл 14: dealId → status последнего согласования РОП (батч fetchApprovals({}),
+   *  deals-workspace.tsx) — тот же паттерн, что reasonByCode: сырая карта, резолв здесь. */
+  approvals?: Map<string, string>;
 }) {
   // Esc-закрытие
   useEffect(() => {
@@ -247,6 +256,10 @@ export function DealDrawerPreview({
   // Слайс 9: мягкий скидочный гейт (прокси-маржа по min_price, board.ts) — предупреждает,
   // ничего не блокирует (см. плашку ниже и requestDiscountApproval).
   const gate = deal ? discountGate(dealItems, deal.amount) : null;
+
+  // Цикл 14: результат последнего согласования РОП — та же карта, что резолвит бейдж
+  // карточки (deals-workspace.tsx), здесь резолвим сами (как reasonByCode выше).
+  const approval = deal ? approvalBadge(approvals?.get(deal.id)) : null;
 
   // Слайс 6 (B): последний счёт/договор (по max id — не полагаемся на порядок ответа бэка)
   // + человекочитаемый срок действия счёта поверх общего date-math (board.ts); своя копия
@@ -496,6 +509,37 @@ export function DealDrawerPreview({
     onUpdateFields(deal.id, { starred: !deal.starred });
   }
 
+  /** Сценарий B (цикл 14): повторить прошлый заказ контрагента — та же пара примитивов
+   *  (addDealItem + createPriceQuote), которой пользуются commitToDeal (product-picker.tsx) и
+   *  commitLeadItemsToDeal (api.ts) — не изобретаем новый способ добавить позиции в сделку.
+   *  Не заводит СВОЙ picker/остатки (useProductPicker(pickerOpen, …) тут гейтит склад активным
+   *  открытым пикером) — DealItemFull уже несёт `last_price` прошлой цены клиенту, этого
+   *  достаточно для котировки. Честная деградация: прошлых заказов нет → сообщение, не падаем. */
+  async function repeatOrder() {
+    if (!deal) return;
+    const dealId = deal.id;
+    const counterparty = deal.company;
+    setDocBusy(true);
+    const items = await fetchLastOrder(dealId);
+    if (dealIdRef.current !== dealId) return; // сделку сменили, пока летел запрос (FIX-R6)
+    if (!items.length) {
+      setDocMsg("Прошлых заказов нет");
+      setDocBusy(false);
+      return;
+    }
+    const results = await Promise.all(items.map((it) => addDealItem(dealId, it.sku_id, it.qty)));
+    await Promise.all(
+      items.map((it) => (it.last_price ? createPriceQuote(it.code, counterparty, it.last_price) : Promise.resolve(true))),
+    );
+    setDocBusy(false);
+    if (dealIdRef.current !== dealId) return;
+    const ok = results.filter(Boolean).length;
+    setDocMsg(`✅ Добавлено из прошлого заказа: ${ok}/${items.length}`);
+    void fetchDealItems(dealId).then((list) => {
+      if (dealIdRef.current === dealId) setDealItems(list);
+    });
+  }
+
   return (
     <>
       <div
@@ -587,6 +631,25 @@ export function DealDrawerPreview({
                 <div className="mt-1 text-[12px] text-muted">
                   <span className="font-semibold text-accent-ink">{prob}%</span> · взвешенно ≈{" "}
                   {fmt(weightedAmount(deal, stageId))}
+                </div>
+              )}
+
+              {/* === СТАТУС ОДОБРЕНИЯ РОП (цикл 14) — РЕЗУЛЬТАТ запроса скидки (не сам факт
+                  запроса — тот виден по кнопке гейта ниже): approved — закрывай СЕЙЧАС по
+                  согласованной цене; rejected — не одобрено. pending честно не шумит (см.
+                  approvalBadge, board.ts). === */}
+              {approval && (
+                <div
+                  role="status"
+                  className={clsx(
+                    "mt-3 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold",
+                    approval.tone === "money"
+                      ? "border-emerald-300/60 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"
+                      : "border-red-300/60 bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-200",
+                  )}
+                >
+                  {approval.label}
+                  <div className="mt-0.5 text-[11.5px] font-normal opacity-90">{approval.title}</div>
                 </div>
               )}
 
@@ -790,6 +853,21 @@ export function DealDrawerPreview({
                     />
                   </Button>
                 </div>
+
+                {/* === ПОВТОРИТЬ ПРОШЛЫЙ ЗАКАЗ (сценарий B, цикл 14) — самая дешёвая выручка:
+                    позиции последнего заказа контрагента одной кнопкой, без похода в подбор
+                    товара. Честная деградация — «Прошлых заказов нет» в docMsg, без падения. === */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  block
+                  className="mt-1.5"
+                  onClick={() => void repeatOrder()}
+                  disabled={docBusy}
+                  icon={<RefreshCw size={13} />}
+                >
+                  Повторить заказ
+                </Button>
 
                 {/* === ВЫБОР ВАРИАНТА ДОГОВОРА (слайс 7): наш шаблон / форма клиента === */}
                 {contractOpen && (

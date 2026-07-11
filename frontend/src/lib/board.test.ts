@@ -5,6 +5,7 @@ import {
   REVIVE_AFTER_DAYS,
   STAGE_PROBABILITY,
   STUCK_DAYS,
+  approvalBadge,
   cardAttention,
   closeabilityQueue,
   closeDateLabel,
@@ -981,5 +982,32 @@ describe("closeabilityQueue (цикл 13: дожать до плана)", () => 
     const { items, total } = closeabilityQueue(stages, NOW, 2);
     expect(items).toHaveLength(2);
     expect(total).toBe(3);
+  });
+});
+
+describe("approvalBadge (цикл 14: статус одобрения РОП)", () => {
+  it("approved — «✅ скидка одобрена», тон money", () => {
+    expect(approvalBadge("approved")).toEqual({
+      label: "✅ скидка одобрена",
+      tone: "money",
+      title: "РОП одобрил скидку — закрывай по согласованной цене",
+    });
+  });
+
+  it("rejected — «⛔ не одобрено», тон red", () => {
+    expect(approvalBadge("rejected")).toEqual({
+      label: "⛔ не одобрено",
+      tone: "red",
+      title: "РОП отклонил запрос на скидку",
+    });
+  });
+
+  it("pending — honest-null (не шумим, факт запроса уже виден по скидочному гейту)", () => {
+    expect(approvalBadge("pending")).toBeNull();
+  });
+
+  it("undefined/неизвестный статус — honest-null", () => {
+    expect(approvalBadge(undefined)).toBeNull();
+    expect(approvalBadge("weird")).toBeNull();
   });
 });

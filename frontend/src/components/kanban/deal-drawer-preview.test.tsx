@@ -17,6 +17,9 @@ vi.mock("@/lib/api", () => ({
   aiDraftReply: vi.fn(),
   fetchDealItems: vi.fn().mockResolvedValue([]),
   requestApproval: vi.fn(),
+  fetchLastOrder: vi.fn().mockResolvedValue([]), // цикл 14 — «Повторить заказ»
+  addDealItem: vi.fn().mockResolvedValue(true),
+  createPriceQuote: vi.fn().mockResolvedValue(true),
 }));
 vi.mock("@/lib/contracts-api", () => ({
   fetchContractTemplates: vi.fn().mockResolvedValue([]),
@@ -45,7 +48,11 @@ const stages: Stage[] = [
   { id: "invoice", title: "Счёт отправлен", color: "#000", count: 1, sum: 1000, deals: [deal] },
 ];
 
-function renderDrawer(onUpdateFields = vi.fn(), dealOverride: Deal = deal) {
+function renderDrawer(
+  onUpdateFields = vi.fn(),
+  dealOverride: Deal = deal,
+  approvals?: Map<string, string>,
+) {
   const stagesForDeal: Stage[] =
     dealOverride === deal
       ? stages
@@ -61,6 +68,7 @@ function renderDrawer(onUpdateFields = vi.fn(), dealOverride: Deal = deal) {
       onWin={() => {}}
       onLose={() => {}}
       now={Date.now()}
+      approvals={approvals}
     />,
   );
   return { onUpdateFields };
@@ -70,6 +78,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mock(api.fetchDocuments).mockResolvedValue([]);
   mock(api.fetchDealItems).mockResolvedValue([]);
+  mock(api.fetchLastOrder).mockResolvedValue([]);
+  mock(api.addDealItem).mockResolvedValue(true);
+  mock(api.createPriceQuote).mockResolvedValue(true);
   mock(contractsApi.fetchContractTemplates).mockResolvedValue([]);
   vi.stubGlobal(
     "open",
@@ -547,5 +558,56 @@ describe("DealDrawerPreview — слайс 9: мягкий скидочный г
 
     expect(await screen.findByText("⚠️ Не удалось отправить")).toBeInTheDocument();
     expect(onUpdateFields).not.toHaveBeenCalled();
+  });
+});
+
+describe("DealDrawerPreview — цикл 14 (A): статус одобрения РОП", () => {
+  it("approved — плашка «✅ скидка одобрена» (тон money)", async () => {
+    renderDrawer(vi.fn(), deal, new Map([["1", "approved"]]));
+    expect(await screen.findByText("✅ скидка одобрена")).toBeInTheDocument();
+  });
+
+  it("rejected — плашка «⛔ не одобрено»", async () => {
+    renderDrawer(vi.fn(), deal, new Map([["1", "rejected"]]));
+    expect(await screen.findByText("⛔ не одобрено")).toBeInTheDocument();
+  });
+
+  it("pending / нет согласований — плашка не рендерится (honest-empty, не шумим)", () => {
+    renderDrawer(vi.fn(), deal, new Map([["1", "pending"]]));
+    expect(screen.queryByText(/скидка одобрена/)).toBeNull();
+    expect(screen.queryByText(/не одобрено/)).toBeNull();
+  });
+});
+
+describe("DealDrawerPreview — цикл 14 (B): «Повторить заказ»", () => {
+  const lastOrderItem = {
+    id: 1,
+    sku_id: 10,
+    code: "A1",
+    title: "Товар А",
+    unit: "шт",
+    qty: 3,
+    last_price: 100,
+    min_price: null,
+  };
+
+  it("успех: fetchLastOrder → addDealItem/createPriceQuote по КАЖДОЙ позиции + тост с числом", async () => {
+    mock(api.fetchLastOrder).mockResolvedValue([lastOrderItem]);
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: /Повторить заказ/ }));
+
+    expect(await screen.findByText("✅ Добавлено из прошлого заказа: 1/1")).toBeInTheDocument();
+    expect(api.fetchLastOrder).toHaveBeenCalledWith("1");
+    expect(api.addDealItem).toHaveBeenCalledWith("1", 10, 3);
+    expect(api.createPriceQuote).toHaveBeenCalledWith("A1", "ООО Карта", 100);
+  });
+
+  it("прошлых заказов нет — honest-empty сообщение, без падения", async () => {
+    mock(api.fetchLastOrder).mockResolvedValue([]);
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: /Повторить заказ/ }));
+
+    expect(await screen.findByText("Прошлых заказов нет")).toBeInTheDocument();
+    expect(api.addDealItem).not.toHaveBeenCalled();
   });
 });
