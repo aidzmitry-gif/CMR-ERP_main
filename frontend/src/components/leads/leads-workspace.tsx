@@ -21,6 +21,7 @@ import {
   fetchLeadSourceStats,
   LeadDuplicateError,
   type LeadInput,
+  logLeadAttempt,
   qualifyLead,
   rejectLead,
   routeLead,
@@ -259,6 +260,44 @@ function NextStepChip({ at, note }: { at?: string | null; note?: string }) {
       )}
     >
       {overdueMin > 0 ? `⚠ шаг просрочен ${formatWait(overdueMin)}` : `→ шаг ${label}`}
+    </span>
+  );
+}
+
+// Недозвон как состояние (Цикл 15): «☎ N · к 15:00». Просроченный перезвон — красный
+// (пора звонить, лид всплывает наверх), 6+ попыток — жёлтый сигнал «смени канал»
+// (93% конверсий достигаются к 6-й попытке, дальше звонить дороже, чем писать).
+const ATTEMPT_CHANNEL_SWITCH = 6;
+
+function AttemptChip({ count, callbackAt }: { count?: number; callbackAt?: string | null }) {
+  const n = count ?? 0;
+  if (n === 0 && !callbackAt) return null;
+  const overdue = callbackAt ? (waitingMinutes(callbackAt) ?? 0) > 0 : false;
+  const many = n >= ATTEMPT_CHANNEL_SWITCH;
+  const when = callbackAt
+    ? new Date(callbackAt.endsWith("Z") ? callbackAt : `${callbackAt}Z`).toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+  return (
+    <span
+      title={
+        many
+          ? `${n} попыток дозвона — смените канал: письмо/мессенджер`
+          : overdue
+            ? "Срок перезвона прошёл — позвоните сейчас"
+            : "Попытки дозвона · когда перезвонить"
+      }
+      className={clsx(
+        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+        overdue ? "bg-red-100 text-red-700" : many ? "bg-amber-100 text-amber-700" : "bg-sunken text-muted",
+      )}
+    >
+      ☎ {n}
+      {when ? (overdue ? " · просрочен" : ` · к ${when}`) : ""}
     </span>
   );
 }
@@ -727,6 +766,7 @@ function LeadCard({
   onQualify,
   onRoute,
   onConvert,
+  onAttempt,
   onToggleExpress,
   onExpress,
 }: {
@@ -740,6 +780,7 @@ function LeadCard({
   onQualify: () => void;
   onRoute: () => void;
   onConvert: () => void;
+  onAttempt: () => void;
   onToggleExpress: () => void;
   onExpress: (
     id: number,
@@ -816,6 +857,17 @@ function LeadCard({
             >
               ♻ был отказ
             </span>
+          )}
+          {lead.lastTouchAt != null && (
+            <span
+              title="Клиент обратился повторно — самый горячий сигнал дня, ответьте первым"
+              className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700"
+            >
+              ↑ повтор
+            </span>
+          )}
+          {(lead.status === "new" || lead.status === "qualified") && (
+            <AttemptChip count={lead.attemptCount} callbackAt={lead.callbackAt} />
           )}
           {lead.status === "new" && <WaitChip createdAt={lead.createdAt} />}
           {lead.status === "routed" && <RoutedAgeChip routedAt={lead.routedAt} />}
@@ -922,6 +974,22 @@ function LeadCard({
               className="flex-1 rounded-lg border border-accent bg-surface py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent-soft disabled:opacity-60"
             >
               ⚡ Экспресс
+            </button>
+          )}
+          {(lead.status === "new" || lead.status === "qualified") && (
+            <button
+              type="button"
+              data-card-action
+              disabled={busy}
+              title="Недозвон: +1 попытка, перезвон через 2 часа"
+              aria-label="Недозвон"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAttempt();
+              }}
+              className="rounded-lg border border-line px-2 py-1.5 text-xs font-semibold text-muted hover:bg-sunken disabled:opacity-60"
+            >
+              📵
             </button>
           )}
         </div>
@@ -1194,6 +1262,20 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
     return null;
   }
 
+  // Недозвон (Цикл 15): 1 клик — попытка зафиксирована, перезвон в очереди. Ответ бэка —
+  // полный лид, подменяем объект целиком (как в onExpress), чипы обновляются сразу.
+  async function onAttempt(id: number) {
+    setBusyId(id);
+    const res = await logLeadAttempt(id);
+    setBusyId(null);
+    if (res) {
+      setLeads((prev) => prev.map((l) => (l.id === id ? res : l)));
+      setNote(`Недозвон по ЛИД-${id}: попытка ${res.attemptCount ?? "—"}, перезвон через 2 ч`);
+      window.setTimeout(() => setNote(""), 3000);
+      refreshPlan(); // недозвон = первое действие, факт «Обработано»/«Реакция» меняется
+    }
+  }
+
   async function onConvert(id: number) {
     setBusyId(id);
     const res = await convertLead(id);
@@ -1219,6 +1301,13 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
             window.setTimeout(() => setNote(""), 4000);
           }
         }
+      } else if (!res.deal_id && (cur?.itemsCount ?? 0) > 0) {
+        // Фикс ревью Ц14: поллинг deal_id истёк (событие в пути дольше 12с) — не молчим:
+        // повторная конвертация вернёт 409, а КП само не переедет. Честно говорим, что делать.
+        setNote(
+          "Сделка создаётся дольше обычного — позиции КП не перенесены. Обновите страницу и перенесите КП из карточки лида",
+        );
+        window.setTimeout(() => setNote(""), 6000);
       }
       refreshPlan();
     }
@@ -1337,12 +1426,12 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   // скорость реакции лидоруба сегодня (по лидам с уже проставленным first_action_at).
   const waitingOver15 = byStatus.new.filter((l) => (slaMinutes(l.createdAt) ?? 0) > 15).length;
   const todayUtc = new Date().toISOString().slice(0, 10);
+  // Фикс ревью Ц14: те же РАБОЧИЕ минуты, что и в план/факте (_plan_facts) — иначе два
+  // виджета «Реакция» на одной доске показывали бы 5 мин и 610 мин за один и тот же лид.
   const reactionTimesToday = leads
     .filter((l) => l.createdAt && l.firstActionAt?.startsWith(todayUtc))
     .map((l) =>
-      Math.round(
-        (new Date(`${l.firstActionAt}Z`).getTime() - new Date(`${l.createdAt}Z`).getTime()) / 60000,
-      ),
+      workingMinutesBetween(new Date(`${l.createdAt}Z`), new Date(`${l.firstActionAt}Z`)),
     )
     .filter((m) => m >= 0);
   const avgReactionToday = reactionTimesToday.length
@@ -1471,15 +1560,18 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-2">
             {COLUMNS.map((col) => {
-              // Колонка «Новые» (Цикл 8/9): ключевые лиды — в самый верх (макс. выигрыш), затем
-              // по времени ожидания (горящие по SLA первыми). «Распределение» (Цикл 13):
-              // просроченный шаг — наверх (самые просроченные первыми), затем дольше всех
-              // у продавца. Остальные колонки — прежний порядок.
+              // Колонка «Новые» (Цикл 8/9/15): ключевые — в самый верх (макс. выигрыш),
+              // затем «горячие» (повторное касание клиента или просроченный перезвон),
+              // затем по рабочему времени ожидания. «Распределение» (Цикл 13): просроченный
+              // шаг — наверх, затем дольше всех у продавца. Остальные — прежний порядок.
+              const hot = (l: Lead) =>
+                Number(l.lastTouchAt != null || (waitingMinutes(l.callbackAt ?? undefined) ?? 0) > 0);
               const items =
                 col.key === "new"
                   ? [...byStatus[col.key]].sort(
                       (a, b) =>
                         Number(b.isKey ?? false) - Number(a.isKey ?? false) ||
+                        hot(b) - hot(a) ||
                         (slaMinutes(b.createdAt) ?? 0) - (slaMinutes(a.createdAt) ?? 0),
                     )
                   : col.key === "routed"
@@ -1544,6 +1636,7 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
                         onQualify={() => onQualify(l.id)}
                         onRoute={() => onRoute(l.id)}
                         onConvert={() => onConvert(l.id)}
+                        onAttempt={() => onAttempt(l.id)}
                         onToggleExpress={() => setExpressOpenId((prev) => (prev === l.id ? null : l.id))}
                         onExpress={onExpress}
                       />

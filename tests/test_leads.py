@@ -1500,3 +1500,84 @@ async def test_plan_reaction_counts_working_minutes(session, api):
     plan = (await api.get("/leads/plan")).json()
     assert plan["leads_fact"] == 1
     assert plan["reaction_fact_min"] == 10
+
+
+# --- Цикл 15: недозвон как состояние + повторное касание клиента ---
+
+
+async def test_attempt_increments_and_sets_callback(session, api):
+    """POST /attempt: +1 попытка, срок перезвона (дефолт «через 2ч» / явный), first_action."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Недозвон", "phone": "+375291230151"})
+    ).json()
+    assert lead["attempt_count"] == 0 and lead["first_action_at"] is None
+
+    r1 = (await api.post(f"/leads/{lead['id']}/attempt")).json()
+    assert r1["attempt_count"] == 1
+    assert r1["callback_at"] is not None  # дефолт: через 2 часа
+    assert r1["first_action_at"] is not None  # недозвон = реакция состоялась
+
+    r2 = (
+        await api.post(f"/leads/{lead['id']}/attempt", json={"callback_at": "2026-07-16T10:00:00"})
+    ).json()
+    assert r2["attempt_count"] == 2
+    assert r2["callback_at"].startswith("2026-07-16T10:00")  # «перезвоните в четверг» записан
+
+
+async def test_attempt_conflicts_after_routing(session, api):
+    """Недозвон фиксируется до передачи: на routed-лиде — 409 (им занимается продавец)."""
+    lead = (
+        await api.post("/leads", json={"source": "site", "company": "ООО Поздно", "phone": "+375291230152"})
+    ).json()
+    await api.post(f"/leads/{lead['id']}/qualify")
+    await api.post(f"/leads/{lead['id']}/route")
+    r = await api.post(f"/leads/{lead['id']}/attempt")
+    assert r.status_code == 409
+
+
+async def test_repeat_call_marks_touch(session, api, services):
+    """Повторный звонок с номера открытого лида: раньше исчезал бесследно (голый return),
+    теперь — след в message + last_touch_at (бейдж «↑ повтор»)."""
+    from core.services.eventbus import EventContext
+
+    lead = (
+        await api.post("/leads", json={"source": "phone", "company": "ООО Повтор", "phone": "+375291230153"})
+    ).json()
+    services.event_bus.emit(
+        session, "sales.call.logged", {"direction": "in", "phone": "+375291230153", "agent_ext": "101"}
+    )
+    await session.commit()
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    got = (await api.get(f"/leads/{lead['id']}")).json()
+    assert got["last_touch_at"] is not None
+    assert "Повторный звонок" in got["message"]
+
+
+async def test_repeat_intake_marks_touch(session, api, services):
+    """Повторная веб-заявка того же контакта дописывается к лиду И поднимает его
+    (last_touch_at → бейдж «↑ повтор» на доске)."""
+    from core.services.eventbus import EventContext
+
+    await api.post("/integrations/web/lead", json={"company": "ООО Веб-Повтор", "phone": "+375291230154"})
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    await api.post(
+        "/integrations/web/lead",
+        json={"company": "ООО Веб-Повтор", "phone": "+375291230154", "message": "Ну что там с ценой?"},
+    )
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    from sqlalchemy import select
+
+    from modules.leads.models import Lead
+
+    leads_found = (
+        (await session.execute(select(Lead).where(Lead.phone == "+375291230154"))).scalars().all()
+    )
+    assert len(leads_found) == 1  # дубль не создан
+    assert leads_found[0].last_touch_at is not None
+    assert "Повторное обращение" in leads_found[0].message

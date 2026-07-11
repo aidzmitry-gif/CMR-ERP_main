@@ -45,6 +45,8 @@ vi.mock("@/lib/api", () => ({
   expressBulkLeads: vi.fn().mockResolvedValue({ expressed: [], skippedNonTarget: 0 }),
   // Цикл 7: скорборд передач продавцам — грузится лениво при открытии.
   fetchLeadHandoffStats: vi.fn().mockResolvedValue([]),
+  // Цикл 15: недозвон — попытка контакта + срок перезвона.
+  logLeadAttempt: vi.fn(),
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";
@@ -632,6 +634,40 @@ describe("LeadsWorkspace", () => {
     await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
     expect(api.fetchLeadItems).not.toHaveBeenCalled();
     expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+  });
+
+  it("Цикл 15: кнопка «Недозвон» фиксирует попытку и показывает чип перезвона", async () => {
+    (api.logLeadAttempt as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 1,
+      attemptCount: 1,
+      callbackAt: new Date(Date.now() + 2 * 3600_000).toISOString().replace("Z", ""),
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1 }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Недозвон" }));
+
+    await waitFor(() => expect(api.logLeadAttempt).toHaveBeenCalledWith(1));
+    expect(await screen.findByText(/☎ 1/)).toBeInTheDocument();
+  });
+
+  it("Цикл 15: просроченный перезвон — красный чип «просрочен»", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, attemptCount: 2, callbackAt: isoMinutesAgo(30) }]}
+      />,
+    );
+    const chip = screen.getByText(/☎ 2 · просрочен/);
+    expect(chip.className).toMatch(/red/);
+  });
+
+  it("Цикл 15: повторное касание клиента — бейдж «↑ повтор»", () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, lastTouchAt: isoMinutesAgo(5) }]}
+      />,
+    );
+    expect(screen.getByText("↑ повтор")).toBeInTheDocument();
   });
 
   it("панель «Качество источников» грузит данные лениво при открытии и рендерит строки", async () => {

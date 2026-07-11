@@ -1146,6 +1146,9 @@ interface ApiLead {
   revived_from_id?: number | null;
   routed_at?: string | null;
   converted_at?: string | null;
+  attempt_count?: number;
+  callback_at?: string | null;
+  last_touch_at?: string | null;
 }
 
 function mapLead(l: ApiLead): Lead {
@@ -1181,7 +1184,27 @@ function mapLead(l: ApiLead): Lead {
     revivedFromId: l.revived_from_id ?? undefined,
     routedAt: l.routed_at ?? null,
     convertedAt: l.converted_at ?? null,
+    attemptCount: l.attempt_count ?? 0,
+    callbackAt: l.callback_at ?? null,
+    lastTouchAt: l.last_touch_at ?? null,
   };
+}
+
+/** Недозвон (Цикл 15): +1 попытка контакта; callbackAt — срок перезвона (без него бэк
+ *  ставит «через 2 часа»). Возвращает обновлённый лид или null при ошибке/409. */
+export async function logLeadAttempt(id: number, callbackAt?: string): Promise<Lead | null> {
+  try {
+    const init: RequestInit = { method: "POST" };
+    if (callbackAt) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify({ callback_at: callbackAt });
+    }
+    const res = await fetch(`/api/leads/${id}/attempt`, init);
+    if (!res.ok) return null;
+    return mapLead((await res.json()) as ApiLead);
+  } catch {
+    return null;
+  }
 }
 
 /** Лиды на приёме (вход воронки) из API (SSR); fallback — пусто. */
