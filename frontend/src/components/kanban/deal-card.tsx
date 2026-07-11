@@ -397,9 +397,12 @@ export function DealCard({
       )}
       {/* Шапка — вне <Link>: меню ⋯ это <button>, вложение в <a> ломает клики. Навигация
           по карточке на доске идёт через click-capture DraggableDeal, шапка кликабельна там же. */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted">№ {deal.number}</span>
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-start justify-between gap-1.5">
+        <span className="shrink-0 text-xs text-muted">№ {deal.number}</span>
+        {/* Цикл 8/11/14: бейджи (входящий/внимание/приоритет/приход/счёт-меню) могут набраться
+            все сразу на 280px — flex-wrap + min-w-0 переносят их на 2-ю строку вместо клипа
+            номера/оверфлоу (находка opus-верификации). */}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {inbound && (
             <span
               title={inbound.title}

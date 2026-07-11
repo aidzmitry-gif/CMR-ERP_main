@@ -521,7 +521,13 @@ export function DealDrawerPreview({
     const counterparty = deal.company;
     setDocBusy(true);
     const items = await fetchLastOrder(dealId);
-    if (dealIdRef.current !== dealId) return; // сделку сменили, пока летел запрос (FIX-R6)
+    // сделку сменили, пока летел запрос (FIX-R6) — СБРОСИТЬ docBusy, иначе на новой сделке
+    // doc-кнопки (Счёт/Договор/Товар/Повторить, все disabled={docBusy}) залипнут навсегда
+    // (находка opus-верификации арки).
+    if (dealIdRef.current !== dealId) {
+      setDocBusy(false);
+      return;
+    }
     if (!items.length) {
       setDocMsg("Прошлых заказов нет");
       setDocBusy(false);

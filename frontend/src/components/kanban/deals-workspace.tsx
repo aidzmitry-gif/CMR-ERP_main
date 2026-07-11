@@ -941,6 +941,16 @@ export function DealsWorkspace({
       { validUntil: string | null; status: string; reserveStatus: string; number: string; amount: number }
     >
   >(new Map());
+  // Цикл 12 + находка opus: сколько сделок поздних стадий не влезло в INVOICE_DOCS_CAP —
+  // честный хвост «+N не проверено» в очереди «Счета под риском» (не роняем счета молча).
+  // Производное от initialStages (не state+effect — иначе setState-в-эффекте).
+  const invoiceScanUncovered = useMemo(() => {
+    const candidates = RISK_STAGE_IDS.reduce((n, stageId) => {
+      const s = initialStages.find((st) => st.id === stageId);
+      return n + (s ? s.deals.length : 0);
+    }, 0);
+    return Math.max(0, candidates - INVOICE_DOCS_CAP);
+  }, [initialStages]);
   // Цикл 11: входящий сигнал «клиент ждёт ответа» — dealId → {unread, missed}; наполняется
   // батч-фетчем ниже (два агрегатных вызова на всю доску, не по колонке/сделке).
   const [inboundSignals, setInboundSignals] = useState<Map<string, { unread: number; missed: number }>>(
@@ -982,6 +992,8 @@ export function DealsWorkspace({
     // кап берём в ПОРЯДКЕ РЕНДЕРА колонок (sortDealsForBoard по каждой стадии), а не в
     // порядке ответа бэка (по id) — иначе бейджи/риск-очередь доставались бы случайному
     // подмножеству (ревью f4f825d)
+    // кап-хвост «+N не проверено» считается отдельным useMemo (invoiceScanUncovered) —
+    // здесь только цели фетча в порядке рендера колонок.
     const targets = RISK_STAGE_IDS.flatMap((stageId) => {
       const s = initialStages.find((st) => st.id === stageId);
       return s ? sortDealsForBoard(s.deals, stageId, Date.now()) : [];
@@ -2015,6 +2027,7 @@ export function DealsWorkspace({
         onTabChange={setCockpitTab}
         focusResult={focusResult}
         invoiceRiskResult={invoiceRiskResult}
+        invoiceScanUncovered={invoiceScanUncovered}
         closeabilityResult={closeabilityResult}
         planGap={planGap}
         stageTitle={(stageId) => filteredStages.find((s) => s.id === stageId)?.title ?? stageId}

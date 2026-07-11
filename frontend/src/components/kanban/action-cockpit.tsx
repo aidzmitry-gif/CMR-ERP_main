@@ -218,6 +218,7 @@ export function ActionCockpit({
   onTabChange,
   focusResult,
   invoiceRiskResult,
+  invoiceScanUncovered = 0,
   closeabilityResult,
   planGap,
   stageTitle,
@@ -230,6 +231,9 @@ export function ActionCockpit({
   onTabChange: (tab: CockpitTab) => void;
   focusResult: FocusQueueResult;
   invoiceRiskResult: InvoiceRiskResult;
+  /** Цикл 12 + находка opus: сколько счетов поздних стадий не влезло в кап батча — честный
+   *  хвост «+N не проверено», чтобы очередь не выглядела полной, когда за капом есть счета. */
+  invoiceScanUncovered?: number;
   closeabilityResult: CloseabilityResult;
   /** Гэп до плана периода (та же величина, что в шапке скорборда) — контекст вкладки «Дожать»;
    *  `null`, если плана/среднего чека в данных нет (honest-empty). */
@@ -339,7 +343,15 @@ export function ActionCockpit({
                 />
               )}
               {tab === "invoices" && (
-                <InvoiceRiskList result={invoiceRiskResult} fmt={fmt} onSelectDeal={onSelectDeal} />
+                <>
+                  <InvoiceRiskList result={invoiceRiskResult} fmt={fmt} onSelectDeal={onSelectDeal} />
+                  {invoiceScanUncovered > 0 && (
+                    <div className="mt-2 rounded-lg bg-sunken px-3 py-2 text-center text-[11px] text-muted">
+                      ⚠ Ещё {invoiceScanUncovered} {plural(invoiceScanUncovered, ["сделка", "сделки", "сделок"])} поздних
+                      стадий не просканировано на риск счёта
+                    </div>
+                  )}
+                </>
               )}
               {tab === "close" && (
                 <>
