@@ -18,7 +18,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Children, useEffect, useId, useMemo, useRef, useState } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
-import { DealCard, fetchManagersCached, type DealCardPatch } from "@/components/kanban/deal-card";
+import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { FocusPanel } from "@/components/kanban/focus-panel";
@@ -60,7 +60,7 @@ import {
 import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
-import type { Deal, Kpi, LossReason, Manager, Stage } from "@/lib/types";
+import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
 
 /** Бейджи/плашки Сделки 2.0, вычисляемые для карточки из стадии и текущего времени. */
 type CardExtras = {
@@ -864,8 +864,6 @@ export function DealsWorkspace({
   const pathname = usePathname();
   const { fmt } = useCurrency();
   const [stages, setStages] = useState<Stage[]>(initialStages);
-  // A (слайс 3): менеджеры для переключателя «Чья доска» — общий кэш с меню карточки (⋯).
-  const [managers, setManagers] = useState<Manager[]>([]);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   const [period, setPeriod] = useState("day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
@@ -928,8 +926,6 @@ export function DealsWorkspace({
     void fetchPlans({ period_type: "month", period_key: periodKey }).then((plans) => {
       if (plans.some((p) => p.status === "approved")) setPlanApproved(true);
     });
-    // A: менеджеры для «Чья доска» (кэш общий с меню карточки — второй раз не фетчится).
-    void fetchManagersCached().then(setManagers);
   }, []);
 
   // Слайс 6 (C): статус счёта на карточках колонки «Счёт» — ленивый батч по загрузке доски,
@@ -963,15 +959,6 @@ export function DealsWorkspace({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /** A: переключатель «Чья доска» и секция «Ответственный» в FiltersMenu — две ручки
-   *  одного URL-параметра `?owner=` (источник истины — URL, как у funnel/priority). */
-  function setOwnerParam(name: string | null) {
-    const next = new URLSearchParams(searchParams.toString());
-    if (name) next.set("owner", name);
-    else next.delete("owner");
-    router.replace(`${pathname}?${next.toString()}`);
-  }
 
   function toggleMoreKpis() {
     // Запись вне updater-а: side-effect внутри setState под StrictMode дёргается дважды.
@@ -1252,7 +1239,10 @@ export function DealsWorkspace({
     setQuery("");
     setStuckOnly(false);
     setActFilter(null);
-    router.push(pathname); // сбрасывает URL-фильтры (priority/owner/attn из FiltersMenu шапки)
+    // сбрасываем URL-фильтры (priority/owner/attn из FiltersMenu), но СОХРАНЯЕМ выбранную
+    // воронку (?funnel=): сброс фильтров не должен выкидывать из «Все вместе» на дефолт.
+    const funnel = searchParams.get("funnel");
+    router.push(funnel ? `${pathname}?funnel=${encodeURIComponent(funnel)}` : pathname);
   };
 
   /** Бейджи карточки для секций «Все вместе»: та же формула, без «Отказ»-кнопки —
@@ -1520,42 +1510,9 @@ export function DealsWorkspace({
               />
             </div>
             {funnelTabs}
-            {/* A (слайс 3): «Чья доска» — сегментированный переключатель по ответственному.
-                Та же ручка ?owner=, что у секции «Ответственный» в FiltersMenu (шапка страницы):
-                две ручки одного URL-параметра. Продавец смотрит и свою, и чужую доску. */}
-            {managers.length > 0 && (
-              <div
-                role="group"
-                aria-label="Чья доска"
-                className="flex items-center gap-0.5 overflow-x-auto rounded-lg border border-line bg-surface p-0.5"
-              >
-                <button
-                  onClick={() => setOwnerParam(null)}
-                  title="Сделки всех менеджеров"
-                  className={clsx(
-                    "rounded-md px-2.5 py-1.5 text-[12.5px] font-medium whitespace-nowrap",
-                    !ownerFilter ? "bg-accent-soft text-accent-ink" : "text-muted hover:text-ink",
-                  )}
-                >
-                  👥 Все
-                </button>
-                {managers.map((m) => (
-                  <button
-                    key={m.name}
-                    onClick={() => setOwnerParam(ownerFilter === m.name ? null : m.name)}
-                    title={`Доска менеджера: ${m.name}`}
-                    className={clsx(
-                      "rounded-md px-2.5 py-1.5 text-[12.5px] font-medium whitespace-nowrap",
-                      ownerFilter === m.name
-                        ? "bg-accent-soft text-accent-ink"
-                        : "text-muted hover:text-ink",
-                    )}
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Фильтр по ответственному — единственная ручка ?owner= в секции «Ответственный»
+                меню «Фильтры» (шапка страницы). Дублирующий сегмент-переключатель «Чья доска»
+                убран по решению оператора: фильтр остаётся в «Фильтрах». */}
             {/* B (слайс 5): «Фокус дня» — упорядоченная очередь «что делать сейчас» вместо
                 сканирования колонок. Бейдж = total ДО обрезки cap (реальная потребность),
                 красный — в очереди есть что-то горящее (severity=crit). */}

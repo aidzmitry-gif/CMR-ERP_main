@@ -7,7 +7,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 // next/navigation: useRouter — для прокидывания router.push в double-click → /crm/deals/[id];
-// replace — hoisted-спай (переключатель «Чья доска» пишет ?owner= через router.replace).
+// replace — hoisted-спай (router.replace, если понадобится проверить навигацию по фильтрам).
 // useSearchParams — фильтры читаются из URL (FiltersMenu в шапке); mockSearchParams per-test.
 let mockSearchParams = new URLSearchParams();
 const routerReplace = vi.hoisted(() => vi.fn());
@@ -441,20 +441,6 @@ describe("DealsWorkspace (канбан)", () => {
     await waitFor(() => expect(screen.getByText("ООО Спячка")).toBeInTheDocument());
     expect(screen.queryByText("ООО Доска")).toBeNull();
     expect(screen.queryByText("ООО Просрочка")).toBeNull();
-  });
-
-  it("переключатель «Чья доска» ставит ?owner= через router.replace (та же ручка, что FiltersMenu)", async () => {
-    mock(api.fetchLeadManagers).mockResolvedValue([
-      { name: "Петров П.П.", regions: [], products: [], load: 1 },
-    ]);
-    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Петров П.П." }));
-    expect(routerReplace).toHaveBeenCalledWith(
-      `/crm/deals?${new URLSearchParams({ owner: "Петров П.П." }).toString()}`,
-    );
-    // «👥 Все» сбрасывает параметр
-    fireEvent.click(screen.getByRole("button", { name: "👥 Все" }));
-    expect(routerReplace).toHaveBeenLastCalledWith("/crm/deals?");
   });
 
   // --- Слайс 4: «след. шаг в 2 клика» ---
