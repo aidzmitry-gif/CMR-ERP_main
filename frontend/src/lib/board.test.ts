@@ -14,6 +14,7 @@ import {
   ensureLostStage,
   focusQueue,
   groupByDateBucket,
+  inboundSignal,
   invoiceBadge,
   isClosedStageId,
   isOpenStage,
@@ -682,6 +683,33 @@ describe("invoiceBadge (слайс 6, C)", () => {
       label: "💳 истекает 5д",
       tone: "neutral",
     });
+  });
+});
+
+describe("inboundSignal (цикл 11: клиент ждёт ответа)", () => {
+  it("unread>0 — бейдж «💬 N», тон money (самый горячий сигнал)", () => {
+    expect(inboundSignal({ unread: 3, missed: 2 })).toEqual({
+      label: "💬 3",
+      tone: "money",
+      title: "Клиент ждёт ответа — непрочитанных сообщений: 3",
+    });
+  });
+
+  it("unread=0, missed>0 — «☎ пропущен», тон amber", () => {
+    expect(inboundSignal({ unread: 0, missed: 1 })).toEqual({
+      label: "☎ пропущен",
+      tone: "amber",
+      title: "Пропущенный звонок от клиента без ответа",
+    });
+  });
+
+  it("unread приоритетнее missed — при обоих сигналах побеждает unread", () => {
+    expect(inboundSignal({ unread: 1, missed: 5 })?.tone).toBe("money");
+  });
+
+  it("ни unread ни missed — null, бейдж не рендерится", () => {
+    expect(inboundSignal({})).toBeNull();
+    expect(inboundSignal({ unread: 0, missed: 0 })).toBeNull();
   });
 });
 

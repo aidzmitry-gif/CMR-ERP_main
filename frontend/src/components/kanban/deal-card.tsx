@@ -10,8 +10,10 @@ import { fetchLeadManagers, issueDocument } from "@/lib/api";
 import {
   cardAttention,
   dealStepText,
+  inboundSignal,
   isClosedStageId,
   type AttentionTone,
+  type InboundSignalTone,
   type InvoiceBadgeResult,
   type InvoiceBadgeTone,
 } from "@/lib/board";
@@ -39,6 +41,13 @@ const ATTENTION_CLS: Record<AttentionTone, string> = {
   revive: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300",
   soft: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
   muted: "bg-sunken text-muted",
+};
+
+/** Цикл 11: цвета бейджа входящего сигнала карточки (inboundSignal, board.ts) — «money»
+ *  переиспользует токен --money-soft/--money (уже light/dark-парный, globals.css). */
+const INBOUND_SIGNAL_CLS: Record<InboundSignalTone, string> = {
+  money: "bg-money-soft text-money",
+  amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
 };
 
 function formatShortDate(iso: string): string {
@@ -293,6 +302,8 @@ export function DealCard({
   onNextStep,
   stageId,
   invoiceBadge,
+  unread,
+  missed,
   fmt = formatMoney,
 }: {
   deal: Deal;
@@ -330,6 +341,11 @@ export function DealCard({
   /** Слайс 6 (C): статус счёта колонки «Счёт» — уже вычисленный бейдж (invoiceBadge, board.ts),
    *  считает вызывающий (deals-workspace.tsx). Нет пропа/null — бейдж не рендерится. */
   invoiceBadge?: InvoiceBadgeResult | null;
+  /** Цикл 11: непрочитанных вх. сообщений по сделке (батч fetchChats, deals-workspace.tsx) —
+   *  сырой сигнал для {@link inboundSignal}, резолвится здесь же (как cardAttention). */
+  unread?: number;
+  /** Цикл 11: есть пропущенный вх. звонок без ответа (батч fetchCalls status=missed). */
+  missed?: number;
   fmt?: (value: number) => string;
 }) {
   const sideDate = deal.date ?? deal.closedDate;
@@ -337,6 +353,8 @@ export function DealCard({
   // Цикл 8: один самый важный сигнал вместо конкурирующих чипов actBucket/noTouch/
   // revive/noStep + отдельного 🕒-дней — единый резолвер cardAttention (board.ts).
   const attention = cardAttention({ actBucket, noTouchDays, reviveDays, stuck, daysInStage: days, noStep });
+  // Цикл 11: клиент ждёт ответа — независимая ось от attention (см. doc-комментарий inboundSignal).
+  const inbound = inboundSignal({ unread, missed });
   // Слайс 4: композер «след. шаг» — поднят сюда, т.к. открывается из ДВУХ мест (строка
   // шага ниже + пункт CardMenu «След. шаг…» в шапке).
   const [nextStepOpen, setNextStepOpen] = useState(false);
@@ -368,6 +386,17 @@ export function DealCard({
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted">№ {deal.number}</span>
         <div className="flex items-center gap-1.5">
+          {inbound && (
+            <span
+              title={inbound.title}
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold",
+                INBOUND_SIGNAL_CLS[inbound.tone],
+              )}
+            >
+              {inbound.label}
+            </span>
+          )}
           {attention && (
             <span
               title={attention.title}

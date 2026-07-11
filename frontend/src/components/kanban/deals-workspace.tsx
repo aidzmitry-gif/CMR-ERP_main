@@ -27,6 +27,8 @@ import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
   createDeal,
   createDealTask,
+  fetchCalls,
+  fetchChats,
   fetchDocuments,
   fetchLossReasons,
   fetchPlans,
@@ -92,6 +94,11 @@ type CardExtras = {
   /** Слайс 6 (C): статус счёта колонки «Счёт» — предвычисленный бейдж (invoiceBadge,
    *  board.ts) по последнему счёту сделки. Не задан/null — карточка бейдж не рисует. */
   invoiceBadge?: InvoiceBadgeResult | null;
+  /** Цикл 11: непрочитанных вх. сообщений по сделке — сырой сигнал для inboundSignal
+   *  (board.ts), из батч-фетча fetchChats (см. эффект ниже). DealCard сам резолвит бейдж. */
+  unread?: number;
+  /** Цикл 11: есть пропущенный вх. звонок без ответа — из батч-фетча fetchCalls(status=missed). */
+  missed?: number;
 };
 
 /** Слайс 4 (D): дефолтный (первый) пресет стадии → патч для авто-назначения при
@@ -907,6 +914,11 @@ export function DealsWorkspace({
   const [invoiceDocs, setInvoiceDocs] = useState<
     Map<string, { validUntil: string | null; status: string; reserveStatus: string }>
   >(new Map());
+  // Цикл 11: входящий сигнал «клиент ждёт ответа» — dealId → {unread, missed}; наполняется
+  // батч-фетчем ниже (два агрегатных вызова на всю доску, не по колонке/сделке).
+  const [inboundSignals, setInboundSignals] = useState<Map<string, { unread: number; missed: number }>>(
+    new Map(),
+  );
 
   // Время фиксируем после маунта: иначе SSR и клиент посчитают «дни в стадии» (SALES-43) по
   // разным часам и React ругнётся на расхождение гидрации. До маунта (now=null) бейджи дней
@@ -958,6 +970,32 @@ export function DealsWorkspace({
       setInvoiceDocs(map);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Цикл 11: «клиент ждёт ответа» — ленивый батч ДВУХ агрегатных вызовов (не пер-сделочный,
+  // не по колонке — в отличие от invoiceDocs выше это сигнал для ВСЕЙ доски: тёплый клиент
+  // не должен быть виден только в одной колонке). Однократно от маунта; ignore-флаг —
+  // как в соседних эффектах, гейт от записи в размонтированный компонент.
+  useEffect(() => {
+    let ignore = false;
+    void Promise.all([fetchChats(), fetchCalls({ status: "missed" })]).then(([chats, calls]) => {
+      if (ignore) return;
+      const map = new Map<string, { unread: number; missed: number }>();
+      for (const chat of chats) {
+        if (!chat.unread) continue;
+        map.set(String(chat.deal_id), { unread: chat.unread, missed: 0 });
+      }
+      for (const call of calls) {
+        if (call.deal_id == null || call.direction !== "in") continue;
+        const key = String(call.deal_id);
+        const cur = map.get(key) ?? { unread: 0, missed: 0 };
+        map.set(key, { ...cur, missed: cur.missed + 1 });
+      }
+      setInboundSignals(map);
+    });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   function toggleMoreKpis() {
@@ -1196,6 +1234,8 @@ export function DealsWorkspace({
     const invBadge = invDoc && now != null
       ? invoiceBadge({ status: invDoc.status, validUntil: invDoc.validUntil }, now)
       : null;
+    // Цикл 11: сырые unread/missed из батч-фетча (см. эффект выше) — резолвит DealCard.
+    const inbound = inboundSignals.get(deal.id);
     return {
       actBucket: actBucketFor(deal, closed),
       noStep: hasNoStep,
@@ -1216,6 +1256,8 @@ export function DealsWorkspace({
       stageId,
       onNextStep: (patch) => handleNextStep(deal.id, patch),
       invoiceBadge: invBadge,
+      unread: inbound?.unread,
+      missed: inbound?.missed,
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -1256,6 +1298,8 @@ export function DealsWorkspace({
     const hasNoStep = !closed && !deal.nextStep && !deal.todo;
     // Слайс 5 (C): первая стадия ЭТОЙ секции (не всей доски) — та же семантика, что cardExtras.
     const isFirstStage = sectionStages[0]?.id === stageId;
+    // Цикл 11: тот же батч-фетч, что и в cardExtras — сигнал не капается по колонке/воронке.
+    const inbound = inboundSignals.get(deal.id);
     return {
       actBucket: actBucketFor(deal, closed),
       noStep: hasNoStep,
@@ -1271,6 +1315,8 @@ export function DealsWorkspace({
       wonResult: stageId === wonId,
       onCall: () => setCallDeal(deal),
       stageId,
+      unread: inbound?.unread,
+      missed: inbound?.missed,
       // onUpdate/onNextStep добавляет FunnelSection (доска секции — её локальный стейт).
     };
   }

@@ -293,6 +293,21 @@ describe("DealCard", () => {
     expect(onNextStep).toHaveBeenCalledWith({ text: null, atISO: null });
   });
 
+  // --- Цикл 11: входящий сигнал «клиент ждёт ответа» ---
+
+  it("цикл 11: unread>0 рисует «💬 N», приоритетнее missed", () => {
+    const { rerender } = render(<DealCard deal={deal} unread={2} missed={1} />);
+    expect(screen.getByText("💬 2")).toBeInTheDocument();
+    rerender(<DealCard deal={deal} unread={0} missed={1} />);
+    expect(screen.queryByText("💬 2")).toBeNull();
+    expect(screen.getByText("☎ пропущен")).toBeInTheDocument();
+  });
+
+  it("цикл 11: без unread/missed бейдж не рендерится", () => {
+    render(<DealCard deal={deal} />);
+    expect(screen.queryByText(/💬|☎ пропущен/)).toBeNull();
+  });
+
   // --- Слайс 6: счёт с карточки ---
 
   it("C: invoiceBadge рендерит бейдж рядом с суммой; без пропа/null — не рендерит", () => {
