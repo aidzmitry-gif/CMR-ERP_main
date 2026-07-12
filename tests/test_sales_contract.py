@@ -107,6 +107,52 @@ async def test_send_package_one_record(api):
     assert len([m for m in msgs if "Отправлен пакет" in m["text"]]) == 1
 
 
+async def test_package_render_combines_invoice_and_contract(api):
+    await _make_template(api)
+    deal = await _make_deal(api, counterparty="ООО «ПакетТест»")
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert inv.status_code == 201, inv.text
+    con = await api.post(
+        f"/sales/deals/{deal['id']}/contract",
+        json={"template_code": "supply", "unp": "190000003"},
+    )
+    assert con.status_code == 201, con.text
+    # до согласования договора пакет ещё не собрать (тот же гейт, что у send-package)
+    assert (await api.get(f"/sales/deals/{deal['id']}/package/render")).status_code == 409
+    dec = await api.post(
+        f"/sales/documents/{con.json()['id']}/decide", json={"approved": True, "by": "РОП"}
+    )
+    assert dec.status_code == 200, dec.text
+    r = await api.get(f"/sales/deals/{deal['id']}/package/render")
+    assert r.status_code == 200, r.text
+    html = r.text
+    assert inv.json()["number"] in html  # счёт в пакете
+    assert "ДОГОВОР" in html  # тело договора по шаблону
+    assert "page-break-before" in html  # разрыв страницы между счётом и договором
+
+
+async def test_package_render_template_less_contract_cover(api):
+    # Договор «по форме клиента» (template_id=None) — «открыть» и пакет отдают честную обложку,
+    # а не 409 (регресс на находку верификатора: _contract_html падал на template-less договоре).
+    deal = await _make_deal(api, counterparty="ООО «ФормаКлиента»")
+    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert inv.status_code == 201, inv.text
+    con = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
+    assert con.status_code == 201, con.text
+    dec = await api.post(
+        f"/sales/documents/{con.json()['id']}/decide", json={"approved": True, "by": "РОП"}
+    )
+    assert dec.status_code == 200, dec.text
+    # одиночный рендер template-less договора — обложка, не 409
+    single = await api.get(f"/sales/documents/{con.json()['id']}/render")
+    assert single.status_code == 200, single.text
+    assert "Оформлен по форме клиента" in single.text
+    # пакет: счёт + template-less договор — 200 с обложкой
+    pkg = await api.get(f"/sales/deals/{deal['id']}/package/render")
+    assert pkg.status_code == 200, pkg.text
+    assert "Оформлен по форме клиента" in pkg.text
+
+
 async def test_prepare_contract_duplicate_409(api):
     """Повторная подготовка договора по сделке (активный уже есть) → 409."""
     await _make_template(api)
@@ -229,10 +275,14 @@ _TINY_PNG_DATA_URL = (
 
 
 async def test_branding_honest_empty_before_upload(api):
-    """Нет загруженного лого — {"logo_data_url": null}, не 404."""
+    """Нет загруженного факсимиле — все поля null (честный None), не 404."""
     r = await api.get("/sales/branding")
     assert r.status_code == 200, r.text
-    assert r.json() == {"logo_data_url": None}
+    assert r.json() == {
+        "logo_data_url": None,
+        "stamp_data_url": None,
+        "signature_data_url": None,
+    }
 
 
 async def test_branding_upload_rejects_non_image(api):

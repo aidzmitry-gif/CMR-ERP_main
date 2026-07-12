@@ -1023,27 +1023,48 @@ export function DealDrawerPreview({
                         </div>
                       )}
                       {latestContract && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-ink">Договор {latestContract.number}</span>
-                          <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                            {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-ink">Договор {latestContract.number}</span>
+                            <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                              {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
+                            </span>
+                          </div>
+                          <a
+                            href={`/api/sales/documents/${latestContract.id}/render`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 text-[11.5px] font-semibold text-accent-ink hover:text-accent"
+                          >
+                            открыть
+                          </a>
                         </div>
                       )}
                     </div>
                     {/* Слайс 8 (D): честное отсутствие — кнопки нет, пока нет проведённого
                         счёта И проведённого договора (то же условие, что у бэка send_package). */}
                     {canSendPackage && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        block
-                        className="mt-2"
-                        onClick={() => void sendPackageToClient()}
-                        disabled={docBusy}
-                      >
-                        📦 Пакет клиенту
-                      </Button>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          block
+                          onClick={() => void sendPackageToClient()}
+                          disabled={docBusy}
+                        >
+                          📦 Пакет клиенту
+                        </Button>
+                        {/* Комбинированный лист счёт+договор для Ctrl+P → PDF (не фиксирует
+                            факт отправки — только открывает печатную форму пакета). */}
+                        <a
+                          href={`/api/sales/deals/${deal.id}/package/render`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line px-3 text-[12.5px] font-medium text-ink hover:bg-sunken"
+                        >
+                          Открыть пакет (PDF)
+                        </a>
+                      </div>
                     )}
                   </section>
                 )}
