@@ -63,8 +63,9 @@ test.describe("deals board", () => {
     await page.goto("/crm/deals");
     await expect(page.locator('[data-testid="stage-column-new"]')).toBeVisible();
 
-    // Открываем панель фильтров
-    await page.getByRole("button", { name: "Фильтры" }).click();
+    // Открываем панель фильтров. Якорь ^: у пустой отфильтрованной доски есть кнопка
+    // «Сбросить фильтры» — substring-матч по имени дал бы strict mode violation.
+    await page.getByRole("button", { name: /^Фильтры/ }).click();
 
     // Кнопки приоритета появляются — ждём «Высокий»
     const highBtn = page.getByRole("button", { name: "Высокий", exact: true });
@@ -75,10 +76,13 @@ test.describe("deals board", () => {
     await expect(page).toHaveURL(/priority=/);
     expect(new URL(page.url()).searchParams.get("priority")).toBe("Высокий");
 
-    // Сбрасываем в «Все» → кнопка «Высокий» теряет активный класс
-    await page.getByRole("button", { name: "Фильтры" }).click();
-    await page.getByRole("button", { name: "Все", exact: true }).click();
+    // Мульти-выбор (b7878fe): меню НЕ закрылось — сбрасываем в «Все» без переоткрытия.
+    // «Все» есть в каждой секции (Приоритет/Ответственный/Внимание) — первый и есть приоритет.
+    await page.getByRole("button", { name: "Все", exact: true }).first().click();
     await expect(page).not.toHaveURL(/priority=/);
+
+    // Закрываем меню «Готово» — иначе фикс-бэкдроп меню перехватит клик по «Висяки».
+    await page.getByRole("button", { name: "Готово" }).click();
 
     // Тогл «Только висяки»: неактивен (border-line) → активен (border-amber-400) → неактивен
     const stuckBtn = page.getByRole("button", { name: "Висяки" });
