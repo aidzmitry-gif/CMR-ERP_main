@@ -869,7 +869,7 @@ function projClass(pct: number): string {
 function PlanFactPlaceholder({ label }: { label: string }) {
   return (
     <div className="min-w-0 bg-surface px-4 py-3">
-      <div className="text-[11.5px] leading-tight text-muted">{label}</div>
+      <div className="min-h-[2.2em] text-[11.5px] leading-tight text-muted">{label}</div>
       <div className="mt-1.5 text-[22px] font-bold leading-none tracking-tight text-faint">—</div>
       <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken" />
       <div className="mt-1.5 text-[11px] text-faint">нет данных · появится с бэк-расчётом</div>
@@ -908,7 +908,7 @@ function PlanFactCell({
   return (
     <div className="min-w-0 bg-surface px-4 py-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="truncate text-[11.5px] leading-tight text-muted">{label ?? kpi.label}</div>
+        <div className="min-h-[2.2em] text-[11.5px] leading-tight text-muted">{label ?? kpi.label}</div>
         {onLog && !kpi.money && (
           <button
             onClick={onLog}
@@ -921,13 +921,13 @@ function PlanFactCell({
       </div>
       <div
         className={clsx(
-          "mt-1.5 truncate font-bold leading-none tracking-tight text-ink",
+          "mt-1.5 font-bold leading-none tracking-tight text-ink",
           headline ? "text-[26px]" : "text-[22px]",
         )}
       >
         {value}
-        <span className="whitespace-nowrap text-[13px] font-normal text-faint"> / {target}</span>
       </div>
+      <div className="mt-1 text-[12.5px] font-normal text-faint">из {target}</div>
       {subnote && <div className="mt-0.5 text-[11px] text-faint">{subnote}</div>}
       <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-sunken">
         <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${Math.min(kpi.percent, 100)}%` }} />
@@ -944,7 +944,7 @@ function PlanFactCell({
         {kpi.percent}% выполнено
       </div>
       {showProj && (
-        <div className="mt-1 truncate text-[10.5px] text-muted">
+        <div className="mt-1 text-[11px] text-muted">
           → идём на <span className="font-bold text-ink">{kpi.money ? fmt(projVal) : projVal}</span>{" "}
           <span className={`font-bold ${projClass(projPct)}`}>({projPct}%)</span>
         </div>
@@ -1799,15 +1799,12 @@ export function DealsWorkspace({
                   </div>
                 </div>
                 <div className="overflow-hidden rounded-2xl bg-line shadow-card">
-                  {/* overflow-x-auto + min-w — страховка: при недостаточной реальной ширине
-                      (DPI-масштаб браузера/встроенные панели съедают больше px, чем кажется
-                      по разрешению) колонки не сжимаются до нечитаемости и не «пропадают» —
-                      появляется горизонтальный скролл, ничего не теряется молча. В обычном
-                      случае (места хватает) скролл не активируется, выглядит как раньше. */}
+                  {/* overflow-x-auto — страховка на узких/зумленных экранах: если даже две
+                      колонки не влезают, появляется горизонтальный скролл, ничего не теряется. */}
                   <div className="overflow-x-auto thin-scroll">
-                    {/* Первичный ряд — 8 метрик макета в его порядке; на xl одна строка,
-                        первая колонка (headline) шире, как sb-row эталона. */}
-                    <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[880px] xl:grid-cols-[minmax(0,1.5fr)_repeat(7,minmax(0,1fr))]">
+                    {/* Первичный ряд — 8 метрик макета. Ширину ячейки держим достаточной, чтобы
+                        суммы BYN и строка «идём на» читались без обрезки (2→3→4 колонки). */}
+                    <div className="grid grid-cols-2 gap-px md:grid-cols-3 xl:grid-cols-4">
                       {PRIMARY_CELLS.map((cell) => {
                         const kpi = kpiByKey.get(cell.key);
                         if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
@@ -1828,7 +1825,7 @@ export function DealsWorkspace({
                     </div>
                     {/* Второй ряд (П1): тот же вид ячеек, раскрывается стрелкой. */}
                     {moreKpis && secondary.length > 0 && (
-                      <div className="grid gap-px border-t border-dashed border-line sm:grid-cols-2 lg:grid-cols-4 xl:min-w-[880px] xl:grid-cols-8">
+                      <div className="grid grid-cols-2 gap-px border-t border-dashed border-line md:grid-cols-3 xl:grid-cols-4">
                         {secondary.map((kpi) => (
                           <PlanFactCell
                             key={kpi.id}
