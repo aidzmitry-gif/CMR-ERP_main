@@ -69,6 +69,27 @@ def test_role_without_module_gets_403():
     assert "crm" in r.json()["detail"]
 
 
+# --- RBAC-права действий (require_permission), а не только доступ к модулю ---
+def test_sales_slugs_get_deal_permissions():
+    """Регресс: продажные слаги (не только супер-роли) имеют право читать сделки.
+
+    Модуль объявляет RBAC-роли под слагами config/access.py (sales/sales_head/sales_cli),
+    иначе has_permission не сматчил бы «Менеджер»/«РОП» с ролями из X-User-Roles и продавец
+    ловил бы 403 на журнале/марже (только Директор/Коммерческий проходили бы).
+    """
+    from core.services.auth import CurrentUser, has_permission
+
+    core = client.app.state.core
+    for slug in ("sales", "sales_head", "sales_cli"):
+        user = CurrentUser(username="dev", roles=[slug])
+        assert has_permission(core, user, "sales.deal.read"), slug
+    # согласование документов — только РОП (и супер-роли), не рядовой продавец
+    assert has_permission(core, CurrentUser("dev", ["sales_head"]), "sales.deal.approve")
+    assert not has_permission(core, CurrentUser("dev", ["sales"]), "sales.deal.approve")
+    # чужой отдел — без прав на сделки
+    assert not has_permission(core, CurrentUser("dev", ["procurement"]), "sales.deal.read")
+
+
 def test_system_routes_always_open():
     # системные роуты открыты даже для ограниченной роли
     assert client.get("/health", headers={"X-User-Roles": "sales"}).status_code == 200
