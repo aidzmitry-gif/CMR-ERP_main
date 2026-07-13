@@ -68,3 +68,19 @@ async def test_demo_source_is_deterministic(session):
 
 async def test_demo_source_empty_input(session):
     assert await DemoPriceCostSource().get_item_price_cost(session, []) == {}
+
+
+def test_create_app_auto_wires_demo_source_under_flag(monkeypatch):
+    """Сквозной шов: реальный create_app с dev+флагом сам регистрирует демо-источник
+    (не только хелпер в изоляции). Без флага create_app оставляет price_cost=None."""
+    from config.settings import get_settings
+    from core.runtime.app import create_app
+
+    monkeypatch.setenv("AIOS_ENVIRONMENT", "dev")
+    monkeypatch.setenv("AIOS_DEMO_PRICE_COST", "1")
+    get_settings.cache_clear()
+    try:
+        app = create_app()
+        assert isinstance(app.state.core.services.price_cost, DemoPriceCostSource)
+    finally:
+        get_settings.cache_clear()  # не протекать закэшенными настройками в другие тесты
