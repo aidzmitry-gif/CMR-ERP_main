@@ -36,11 +36,14 @@ function DealsHeaderActions() {
 export default async function DealsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ funnel?: string }>;
+  searchParams: Promise<{ funnel?: string; owner_id?: string }>;
 }) {
-  const { funnel } = await searchParams;
+  const { funnel, owner_id } = await searchParams;
   const activeFunnel = funnel ?? "new_clients";
   const role = await currentRole();
+  // Владелец плана (dev/демо через ?owner_id=) — «План» скорборда из согласованного PlanTarget.
+  // Нет параметра → undefined → доска без изменений (как раньше). ponytail: связать с логином.
+  const ownerId = owner_id ? Number.parseInt(owner_id, 10) || undefined : undefined;
 
   // key на FunnelTabs обязателен: элемент создаётся в server-компоненте DealsPage и уезжает
   // пропом в client-компонент DealsWorkspace через RSC-границу. При клиентском рендере React
@@ -69,6 +72,7 @@ export default async function DealsPage({
           combinedStages={sections}
           demoData={sections.some((r) => r.demo)}
           funnelTabs={funnelTabs}
+          ownerId={ownerId}
         />
       </AppShell>
     );
@@ -86,6 +90,7 @@ export default async function DealsPage({
         initialKpis={kpis}
         demoData={board.demo}
         funnelTabs={funnelTabs}
+        ownerId={ownerId}
       />
     </AppShell>
   );

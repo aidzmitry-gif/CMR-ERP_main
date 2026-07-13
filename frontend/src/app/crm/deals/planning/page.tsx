@@ -5,8 +5,9 @@ import { PlanningTabs } from "@/components/plan/planning-tabs";
 import { currentRole } from "@/lib/role-server";
 
 /**
- * Экран плана продавца (П9 + П12 ТЗ): «Собрать план» (конструктор из источников) и
- * «Согласование» (встречное планирование по PlanTarget, deal-plan-editor.tsx).
+ * Единый экран плана продавца (П9 + П12 ТЗ, макет sales-plan-unified.html): сверху
+ * конструктор из источников, снизу — панель согласования по метрикам. Один поток, без
+ * вкладок и повторного ввода (planning-tabs.tsx).
  *
  * Без HR-связки на фронте берём `?owner_id=` из URL (для dev/демо). Когда появится
  * персональный логин с employee_id — заменим на сервер-резолв. ponytail: пока owner_id
@@ -30,9 +31,10 @@ export default async function DealsPlanningPage({
           >
             <ArrowLeft size={14} /> К доске
           </Link>
-          <h1 className="mb-1 text-[19px] font-extrabold text-ink">План продавца</h1>
+          <h1 className="mb-1 text-[19px] font-extrabold text-ink">План продавца — собрать и согласовать</h1>
           <p className="mb-4 text-[12.5px] text-muted">
-            Соберите план из источников или согласуйте цели по метрикам с РОПом. Деньги — бел. руб. (BYN).
+            Сверху соберите план из источников, снизу — те же цифры уходят РОПу на согласование по
+            показателям. Один поток, без повторного ввода. Деньги — бел. руб. (BYN).
           </p>
           <PlanningTabs ownerId={ownerId} role={role} />
         </div>

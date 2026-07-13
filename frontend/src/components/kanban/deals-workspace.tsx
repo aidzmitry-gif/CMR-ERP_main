@@ -69,6 +69,7 @@ import {
 import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
 import { useCurrency } from "./currency-context";
 import { computeFunnel } from "@/lib/funnel";
+import { getKpisForOwner } from "@/lib/planning-api";
 import type { Deal, Kpi, LossReason, Stage } from "@/lib/types";
 
 /** Бейджи/плашки Сделки 2.0, вычисляемые для карточки из стадии и текущего времени. */
@@ -967,6 +968,7 @@ export function DealsWorkspace({
   funnelTabs,
   combinedStages,
   demoData = false,
+  ownerId,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
@@ -975,13 +977,17 @@ export function DealsWorkspace({
   combinedStages?: { code: string; title: string; stages: Stage[] }[];
   /** SSR-фетч доски упал в mock-fallback (backend недоступен) — показать плашку «демо». */
   demoData?: boolean;
+  /** Владелец плана: когда задан, «План» скорборда берётся из согласованного PlanTarget. */
+  ownerId?: number;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const { fmt } = useCurrency();
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
-  const [period, setPeriod] = useState("day");
+  // Доска по владельцу (owner-план) стартует с «месяца»: оверрайд согласованным планом на бэке
+  // применяется только к месячному периоду (месячная цель когерентна лишь с месячным фактом).
+  const [period, setPeriod] = useState(ownerId != null ? "month" : "day");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   // single-click по сделке открывает drawer-preview (sales-card-expanded.html);
   // double-click уходит на /crm/deals/[id] (полная страница, sales-card-full.html).
@@ -1330,17 +1336,36 @@ export function DealsWorkspace({
     return true;
   }
 
+  // KPI-загрузчик: с owner_id (если задан) «План» денег-метрик приходит из согласованного
+  // PlanTarget продавца (getKpisForOwner), иначе — обычный getKpis (доска без владельца).
+  const reloadKpis = (p: string) => (ownerId != null ? getKpisForOwner(p, ownerId) : getKpis(p));
+
   async function handleLog(kpiKey: string) {
     if (!(await logActivity(kpiKey))) return;
-    const fresh = await getKpis(period);
+    const fresh = await reloadKpis(period);
     if (fresh.length) setKpis(fresh);
   }
 
   async function handlePeriod(p: string) {
     setPeriod(p);
-    const fresh = await getKpis(p);
+    const fresh = await reloadKpis(p);
     if (fresh.length) setKpis(fresh);
   }
+
+  // Владелец задан → перечитать KPI с owner_id один раз (SSR-initialKpis его не знает),
+  // чтобы «План» денег-метрик сразу показал согласованный PlanTarget. Смену периода
+  // обрабатывает handlePeriod — здесь только начальная подмена под владельца.
+  useEffect(() => {
+    if (ownerId == null) return;
+    let alive = true;
+    void getKpisForOwner(period, ownerId).then((fresh) => {
+      if (alive && fresh.length) setKpis(fresh);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerId]);
 
   function openModal(stageId: string, sectionStages?: Stage[]) {
     setModalStage(stageId);
