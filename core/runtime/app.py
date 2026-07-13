@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -32,6 +33,24 @@ async def _run_hooks(hooks) -> None:
         result = hook()
         if inspect.isawaitable(result):
             await result
+
+
+def _register_dev_fixtures(services) -> None:
+    """Dev-фикстуры за флагами — ТОЛЬКО для локальной разработки/демо, НИКОГДА не в проде.
+
+    ``AIOS_DEMO_PRICE_COST=1`` в dev-окружении включает демо-источник цены/себестоимости
+    (пока живая 1С не подключена, см. ``cost-price-from-1c-decision``): продавец видит связную
+    цену/маржу с честной пометкой ``source='demo'``. Двойной гейт — окружение dev И флаг: прод
+    не активирует даже с флагом. Флаг читается из окружения напрямую (config/settings.py не
+    расширяем ради dev-удобства). Реальный источник (напр. из ``integrations``) не затираем.
+    """
+    if not services.config.environment.lower().startswith("dev"):
+        return
+    if os.getenv("AIOS_DEMO_PRICE_COST") == "1" and services.price_cost is None:
+        from core.services.price_cost_demo import DemoPriceCostSource
+
+        services.price_cost = DemoPriceCostSource()
+        logger.info("dev-фикстура: демо-источник цены/себестоимости включён (source='demo')")
 
 
 async def _background_loop(services, tick_hooks=()) -> None:
@@ -67,6 +86,8 @@ def create_app() -> FastAPI:
     # системные справочники ядра (public): единицы, валюты+курсы, страны, банки, НДС,
     # контрагенты, контакты, номенклатура, сотрудники — в реестр-витрину «Справочники».
     register_system_references(core)
+    # dev-фикстуры за флагами (демо-источник цены/себес и т.п.) — no-op в проде
+    _register_dev_fixtures(services)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
