@@ -22,6 +22,11 @@ import { STAGE_PROBABILITY } from "@/lib/sales-stages";
  */
 type MarginLineStatus = "priced" | "no_price" | "no_cost";
 
+// Провенанс источника (PC3): откуда себес/цена. cost — 1С / демо-фикстура / закупки (landed);
+// price — согласованный КП клиента либо дефолт из прайса 1С (демо/1С).
+type CostSource = "onec" | "demo" | "landed" | null;
+type PriceSource = "quote" | "onec" | "demo" | null;
+
 type MarginLine = {
   sku_code: string;
   title: string;
@@ -35,6 +40,15 @@ type MarginLine = {
   cost_shipment_id: number | null;
   cost_fixed_at: string | null;
   cost_fx_rate: number | null;
+  cost_source: CostSource;
+  price_source: PriceSource;
+};
+
+// Метка источника себестоимости — честная, простыми словами (без жаргона).
+const COST_SRC_LABEL: Record<Exclude<CostSource, null>, string> = {
+  onec: "из 1С",
+  demo: "демо (не 1С)",
+  landed: "из закупок",
 };
 
 type DealMargin = {
@@ -114,11 +128,20 @@ export function DealMetrics({
     margin.priced_count > 0 &&
     margin.priced_count < margin.total_count;
 
-  // Провенанс себеса (партия/курс) — из любой priced-позиции (берём первую).
-  const provenance =
+  // Провенанс источника (PC3) — по priced-позициям. Источник себеса берём с первой размеченной
+  // позиции; landed-детали (партия/курс) — только когда себес реально из закупок.
+  const pricedLines =
     status === "ready" && margin != null
-      ? margin.lines.find((l) => l.status === "priced" && l.cost_shipment_id != null) ?? null
-      : null;
+      ? margin.lines.filter((l) => l.status === "priced")
+      : [];
+  const costSrc: CostSource = pricedLines.find((l) => l.cost_source)?.cost_source ?? null;
+  const landedProv =
+    pricedLines.find((l) => l.cost_source === "landed" && l.cost_shipment_id != null) ?? null;
+  // Цена хотя бы по одной priced-позиции взята из прайса 1С (нет согласованного КП) — честно
+  // предупреждаем: это не согласованная с клиентом цена.
+  const priceFromList = pricedLines.some(
+    (l) => l.price_source === "onec" || l.price_source === "demo",
+  );
 
   return (
     <>
@@ -156,15 +179,26 @@ export function DealMetrics({
         </div>
       )}
 
-      {provenance && (
+      {costSrc && (
         <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint">
           <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
-            себес · из procurement
+            себес · {COST_SRC_LABEL[costSrc]}
           </span>
-          <span>
-            партия #{provenance.cost_shipment_id}
-            {provenance.cost_fx_rate != null && ` · курс ${provenance.cost_fx_rate}`}
+          {landedProv && (
+            <span>
+              партия #{landedProv.cost_shipment_id}
+              {landedProv.cost_fx_rate != null && ` · курс ${landedProv.cost_fx_rate}`}
+            </span>
+          )}
+        </div>
+      )}
+
+      {priceFromList && (
+        <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint">
+          <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-amber-600 dark:text-amber-400">
+            цена · прайс 1С
           </span>
+          <span>не согласована с клиентом (нет котировки в КП).</span>
         </div>
       )}
 
