@@ -184,7 +184,9 @@ export function DealMetrics({
           <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
             себес · {COST_SRC_LABEL[costSrc]}
           </span>
-          {landedProv && (
+          {/* Партию/курс показываем ТОЛЬКО когда ярлык — landed: иначе при смешанных источниках
+              деталь landed-позиции легла бы под ярлык «из 1С» (ложный провенанс денег). */}
+          {costSrc === "landed" && landedProv && (
             <span>
               партия #{landedProv.cost_shipment_id}
               {landedProv.cost_fx_rate != null && ` · курс ${landedProv.cost_fx_rate}`}

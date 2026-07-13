@@ -633,10 +633,11 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                   badge={
                     sources.defaults.margin_pct == null
                       ? undefined
-                      : sources.defaults.margin_pct_source === "onec" ||
-                          sources.defaults.margin_pct_source === "demo"
+                      : sources.defaults.margin_pct_source === "onec"
                         ? "из 1С"
-                        : "из истории"
+                        : sources.defaults.margin_pct_source === "demo"
+                          ? "демо (не 1С)"
+                          : "из истории"
                   }
                 />
               </div>
