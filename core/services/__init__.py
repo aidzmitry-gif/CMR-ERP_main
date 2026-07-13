@@ -18,6 +18,7 @@ from core.services.eventbus import OutboxEventBus
 from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
+from core.services.price_cost import PriceCostGateway
 from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
@@ -46,6 +47,10 @@ class Services:
     telephony: TelephonyGateway | None = None
     # себестоимость партии (landed cost) — наполняет модуль procurement; None — не подключён
     landed_cost: LandedCostGateway | None = None
+    # цена продажи + себестоимость из учётной системы (1С) — reference-backed (справочник/MDM,
+    # наполняется integrations из 1С) либо dev-фикстура; None → источник не подключён (честная
+    # деградация, НЕ 0). Решение cost-price-from-1c-decision (PC1). В 1С напрямую не ходим.
+    price_cost: PriceCostGateway | None = None
     # read-фасад мастер-входов landed cost по SKU (пошлина ТН ВЭД+НДС+вес/объём+провенанс) —
     # core-native (всегда доступен, не наполняется модулем); апстрим закупок/маржи. REF3-1.
     sku_master: ModuleType = sku_master
