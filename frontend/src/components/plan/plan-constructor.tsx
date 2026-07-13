@@ -630,7 +630,14 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                   label="Маржа (вал. прибыль), %"
                   value={activity.marginPct}
                   onChange={(v) => setActivity((c) => ({ ...c, marginPct: v }))}
-                  badge={sources.defaults.margin_pct != null ? "из истории" : undefined}
+                  badge={
+                    sources.defaults.margin_pct == null
+                      ? undefined
+                      : sources.defaults.margin_pct_source === "onec" ||
+                          sources.defaults.margin_pct_source === "demo"
+                        ? "из 1С"
+                        : "из истории"
+                  }
                 />
               </div>
 

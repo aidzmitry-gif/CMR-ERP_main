@@ -205,3 +205,34 @@ async def test_forecast_uses_1c_cost_without_landed(api, session):
         app.state.core.services.price_cost = None
     assert r["gross_weighted"] is not None  # себес из 1С учтён, деградации нет
     assert r["deals_priced"] >= 1 and r["reason"] is None
+
+
+async def test_plan_sources_margin_default_falls_back_to_1c_catalog(api, session):
+    """PC5: нет истории won → маржа-дефолт конструктора из прайса 1С (средняя маржа каталога),
+    источник помечен. Средний чек из каталога НЕ выдумываем (это чек сделки, не цена SKU)."""
+    await _seed_sku(session, "CAT-1")
+    await _seed_sku(session, "CAT-2")
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+    app.state.core.services.price_cost = _FakePriceCost({
+        "CAT-1": ItemPriceCost(cost_byn=60.0, price_byn=100.0, source="demo"),  # маржа 40%
+        "CAT-2": ItemPriceCost(cost_byn=80.0, price_byn=100.0, source="demo"),  # маржа 20%
+    })
+    try:
+        r = (await api.get("/sales/plan-sources", params={"month": "2030-01"})).json()
+    finally:
+        app.state.core.services.price_cost = None
+    d = r["defaults"]
+    assert d["margin_pct"] == 30 and d["margin_pct_source"] == "demo"  # (40+20)/2
+    assert d["avg_check"] is None  # чек из каталога не выдумываем
+
+
+async def test_plan_sources_no_margin_default_without_facade(api, session):
+    """PC5: без фасада price_cost — маржа-дефолт None (честно), источника нет."""
+    await _seed_sku(session, "CAT-3")
+    await session.commit()
+    app = api._transport.app  # type: ignore[attr-defined]
+    app.state.core.services.price_cost = None
+    r = (await api.get("/sales/plan-sources", params={"month": "2030-02"})).json()
+    d = r["defaults"]
+    assert d["margin_pct"] is None and d["margin_pct_source"] is None

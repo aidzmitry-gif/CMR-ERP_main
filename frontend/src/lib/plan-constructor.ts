@@ -57,6 +57,9 @@ export interface RegularRow {
 export interface CalcDefaults {
   avg_check: number | null;
   margin_pct: number | null;
+  // Провенанс маржи-дефолта: "history" (won-сделки продавца) | "onec"/"demo" (средняя маржа
+  // каталога из прайса 1С — фолбэк при пустой истории) | null (нет дефолта). PC5.
+  margin_pct_source?: string | null;
 }
 
 export interface PlanSources {
