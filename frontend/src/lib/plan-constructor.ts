@@ -183,6 +183,167 @@ export function reverseCount(
   return { needDeals, needLeads, needCalls };
 }
 
+// ── Методы прогноза конструктора (макет sales-plan-unified.html) ─────────────
+// Пять «честных» сигналов поверх сырой суммы: взвешенный прогноз, полоса уверенности,
+// темп месяца, концентрация (единая точка отказа), покрытие воронки. Все — чистые
+// функции над теми же драфтами/активностью, что уже собирает конструктор.
+
+/** Взвешенный прогноз: приход товара берём с дисконтом 90% (приход может сорваться),
+ * постоянных — по их вероятности перезаказа, новых (расчёт активности) — как есть.
+ * Показывает «вероятный» сбор в отличие от «потолка» (assemble.total, где всё по 100%). */
+export const COMMITTED_CONFIDENCE = 0.9;
+export function weightedForecast(drafts: PlanItemDraft[], activityGross: number): number {
+  let weighted = 0;
+  for (const d of drafts) {
+    if (!d.enabled) continue;
+    if (d.source === "committed") weighted += d.gross * COMMITTED_CONFIDENCE;
+    else if (d.source === "regular") weighted += (d.gross * (d.probability || 100)) / 100;
+  }
+  return Math.round(weighted + activityGross); // деньги показываем целыми BYN
+}
+
+export interface ConfidenceBand {
+  guaranteed: number; // только приход товара (s1) — почти наверняка
+  probable: number; // взвешенный прогноз, не ниже гарантированного
+  ceiling: number; // весь собранный план (потолок), не ниже вероятного
+}
+
+/** Полоса уверенности: Гарантировано (приход товара) → Вероятно (взвешенный) → Потолок
+ * (весь сбор). Монотонна: каждый следующий уровень не ниже предыдущего. */
+export function confidenceBand(s1: number, weighted: number, total: number): ConfidenceBand {
+  const guaranteed = Math.round(s1);
+  const probable = Math.round(Math.max(s1, weighted));
+  const ceiling = Math.round(Math.max(Math.max(s1, weighted), total));
+  return { guaranteed, probable, ceiling };
+}
+
+export interface MonthPace {
+  passed: number; // прошло рабочих дней
+  total: number; // всего рабочих дней в месяце
+  frac: number; // доля прошедших [0..1]
+  applicable: boolean; // месяц идёт прямо сейчас — только тогда темп осмыслен
+}
+
+/** Рабочие дни выбранного месяца (пн-сб рабочие, вс выходной — канон проекта) и сколько
+ * прошло. Темп имеет смысл ТОЛЬКО для текущего месяца: для будущего плана «сегодня» ещё
+ * не наступило (applicable=false → маркер темпа не показываем, чтобы не вводить в заблуждение). */
+export function monthPace(monthKey: string, now: Date): MonthPace {
+  const [y, m] = monthKey.split("-").map(Number);
+  if (!y || !m) return { passed: 0, total: 0, frac: 0, applicable: false };
+  const mon = m - 1;
+  const days = new Date(y, mon + 1, 0).getDate();
+  const isCurrent = now.getFullYear() === y && now.getMonth() === mon;
+  const isPast = y < now.getFullYear() || (y === now.getFullYear() && mon < now.getMonth());
+  let total = 0;
+  let passed = 0;
+  for (let d = 1; d <= days; d++) {
+    if (new Date(y, mon, d).getDay() === 0) continue; // вс — выходной
+    total++;
+    if (isPast || (isCurrent && d <= now.getDate())) passed++;
+  }
+  return { passed, total, frac: total ? passed / total : 0, applicable: isCurrent };
+}
+
+export type PaceTone = "green" | "amber" | "red";
+export interface PaceStatus {
+  expected: number; // где вы должны быть сегодня по рабочим дням
+  delta: number; // собрано − ожидаемо (>0 — опережаете)
+  tone: PaceTone;
+  ahead: boolean;
+}
+
+/** Бейдж темпа: сравнить собранное с ожидаемым по прошедшим рабочим дням. Отставание
+ * больше 15% от ожидаемого — красный, иначе жёлтый; опережение — зелёный. */
+export function paceStatus(total: number, base: number, frac: number): PaceStatus {
+  const expected = Math.round(base * frac);
+  const delta = Math.round(total) - expected; // деньги целыми BYN
+  if (delta >= 0) return { expected, delta, tone: "green", ahead: true };
+  const behindPct = expected > 0 ? -delta / expected : 0;
+  return { expected, delta, tone: behindPct > 0.15 ? "red" : "amber", ahead: false };
+}
+
+export type SeverityTone = "green" | "amber" | "red";
+export interface Concentration {
+  pct: number; // макс. доля одной сделки/источника от собранного [0..1]
+  label: string;
+  tone: SeverityTone;
+}
+
+/** Концентрация плана — единая точка отказа: какая доля собранного держится на одной
+ * сделке ИЛИ одном источнике. >40% — красный (план «на одной ноге»), 25–40% — жёлтый. */
+export function concentration(
+  drafts: PlanItemDraft[],
+  totals: { s1: number; s2: number; s3: number; total: number },
+): Concentration {
+  let maxDeal = 0;
+  let maxDealName = "";
+  for (const d of drafts) {
+    if (d.enabled && d.gross > maxDeal) {
+      maxDeal = d.gross;
+      maxDealName = d.title;
+    }
+  }
+  const bySource: [string, number][] = [
+    ["источник «Сделки месяца»", totals.s1],
+    ["источник «Постоянные»", totals.s2],
+    ["источник «Новые»", totals.s3],
+  ];
+  let maxSrc = 0;
+  let maxSrcName = "";
+  for (const [name, value] of bySource) {
+    if (value > maxSrc) {
+      maxSrc = value;
+      maxSrcName = name;
+    }
+  }
+  const dealPct = totals.total > 0 ? maxDeal / totals.total : 0;
+  const srcPct = totals.total > 0 ? maxSrc / totals.total : 0;
+  const bySrc = srcPct >= dealPct;
+  const pct = bySrc ? srcPct : dealPct;
+  const who = bySrc ? maxSrcName : `сделка «${maxDealName}»`;
+  const round = Math.round(pct * 100);
+  if (pct > 0.4) return { pct, tone: "red", label: `⚠ план на одной ноге: ${who} — ${round}%` };
+  if (pct >= 0.25) return { pct, tone: "amber", label: `◐ концентрация: ${who} — ${round}%` };
+  return { pct, tone: "green", label: `✓ распределён — макс. доля ${round}%` };
+}
+
+export interface FunnelCoverage {
+  coverage: number; // потенциальная прибыль всех заявок ÷ дефицит (раз)
+  tone: SeverityTone;
+  text: string;
+  needMoreLeads: number | null; // сколько ещё заявок до 3× запаса
+}
+
+/** Покрытие воронки: хватит ли заявок на входе, чтобы дефицит В ПРИНЦИПЕ закрыть новыми
+ * сделками. Считаем в прибыли ÷ прибыли (потенциальная прибыль всех заявок ÷ дефицит) —
+ * не смешивая выручку с прибылью. ≥3× — запас, 1.5–3× — впритык, <1.5× — не хватит. */
+export function funnelCoverage(
+  leads: number,
+  perDealGross: number,
+  deficit: number,
+): FunnelCoverage | null {
+  if (deficit <= 0 || perDealGross <= 0) return null;
+  const coverage = (leads * perDealGross) / deficit;
+  let tone: SeverityTone;
+  let text: string;
+  if (coverage >= 3) {
+    tone = "green";
+    text = "заявок на входе хватает с запасом";
+  } else if (coverage >= 1.5) {
+    tone = "amber";
+    text = "заявок на входе в обрез — впритык";
+  } else {
+    tone = "red";
+    text = "заявок на входе мало — на эту цель не хватит";
+  }
+  let needMoreLeads: number | null = null;
+  if (coverage < 3) {
+    const k = Math.ceil((3 * deficit) / perDealGross - leads);
+    needMoreLeads = k > 0 ? k : null;
+  }
+  return { coverage, tone, text, needMoreLeads };
+}
+
 /** "YYYY-MM" следующего календарного месяца от даты d (планы строят наперёд). */
 export function nextMonthKey(d: Date): string {
   const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);

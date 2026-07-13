@@ -18,18 +18,25 @@ import { formatByn, formatNumber } from "@/lib/format";
 import {
   assemble,
   calcActivity,
+  concentration,
+  confidenceBand,
   formatDateShort,
+  funnelCoverage,
   mergeSaved,
   metricsFromPlan,
+  monthPace,
   nextMonthKey,
+  paceStatus,
   regularCycleCaption,
   reverseCount,
   toDrafts,
   verdictOf,
+  weightedForecast,
   type ActivityInput,
   type PlanItemDraft,
   type PlanSources,
   type RegularRow,
+  type SeverityTone,
 } from "@/lib/plan-constructor";
 import type { Manager } from "@/lib/types";
 
@@ -83,6 +90,9 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
   const [usingSaved, setUsingSaved] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // Дата — только на клиенте после монтирования: маркер темпа зависит от «сегодня», а на
+  // сервере и клиенте new Date() разошлись бы (гидратация). До монтирования темп не рисуем.
+  const [now, setNow] = useState<Date | null>(null);
 
   // Продавцы — из общего кэша (карточки сделок); owner_id приходит пропсом с URL.
   // ponytail: имя↔owner_id пока не связаны (нет HR-справочника сотрудников).
@@ -92,6 +102,8 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
       setOwnerName((cur) => cur || list[0]?.name || "");
     });
   }, []);
+
+  useEffect(() => setNow(new Date()), []);
 
   useEffect(() => {
     if (!ownerName) return;
@@ -134,6 +146,17 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
   const need = verdict && !verdict.ok ? reverseCount(-verdict.diff, activity) : null;
   const footerValue = planOverride ?? Math.round(totals.total / 1000) * 1000;
   const scale = Math.max(totals.total, base ?? 0) || 1;
+
+  // Пять сигналов прогноза (макет sales-plan-unified.html) — чистые расчёты из lib.
+  const weighted = useMemo(() => weightedForecast(drafts, activityCalc.gross), [drafts, activityCalc.gross]);
+  const band = useMemo(() => confidenceBand(totals.s1, weighted, totals.total), [totals.s1, weighted, totals.total]);
+  const conc = useMemo(() => concentration(drafts, totals), [drafts, totals]);
+  const pace = now ? monthPace(month, now) : null;
+  const paceInfo = pace?.applicable && base != null ? paceStatus(totals.total, base, pace.frac) : null;
+  const coverage =
+    verdict && !verdict.ok
+      ? funnelCoverage(activity.leads, (activity.avgCheck * activity.marginPct) / 100, -verdict.diff)
+      : null;
 
   const regularMeta = useMemo(
     () => new Map<string, RegularRow>((sources?.regulars ?? []).map((r) => [r.counterparty, r])),
@@ -309,6 +332,15 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                   {formatByn(totals.total)}
                 </div>
               </div>
+              <div>
+                <div className="text-[11px] text-muted">Взвешенный прогноз</div>
+                <div className="mt-0.5 text-2xl font-bold tabular-nums text-money">
+                  {formatByn(weighted)}
+                </div>
+                <div className="text-[10px] text-faint">
+                  приход товара — 90% · постоянные — по их вероятности · новые — как есть
+                </div>
+              </div>
               <div className="ml-auto text-right">
                 {verdict == null ? (
                   <span className="inline-block rounded-full bg-sunken px-3.5 py-1.5 text-sm font-bold text-muted">
@@ -328,6 +360,15 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                     {verdict.ok
                       ? `перекрывают базу на ${formatByn(verdict.diff)}`
                       : `собрано ${base ? Math.round((totals.total / base) * 100) : 0}% базы`}
+                  </div>
+                )}
+                {paceInfo != null && (
+                  <div className="mt-1.5">
+                    <span className={`inline-block rounded-md px-2 py-0.5 text-[10.5px] font-bold ${toneChip(paceInfo.tone)}`}>
+                      {paceInfo.ahead
+                        ? `↑ опережаете темп на ${formatByn(paceInfo.delta)}`
+                        : `↓ отстаёте от темпа на ${formatByn(-paceInfo.delta)}`}
+                    </span>
                   </div>
                 )}
               </div>
@@ -352,19 +393,70 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                 )}
               </div>
               {base != null && (
-                <div className="absolute -top-1 bottom-[-4px] w-0.5 bg-ink" style={{ left: `${(base / scale) * 100}%` }}>
+                <div className="absolute -top-1 bottom-[-4px] w-0.5 bg-ink" style={{ left: markerLeft(base, scale) }}>
                   <span className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-1 text-[10px] font-bold text-ink">
                     план РОПа
                   </span>
                 </div>
               )}
+              {paceInfo != null && (
+                <div
+                  className="absolute -top-1 bottom-[-4px] w-0.5 bg-accent"
+                  style={{ left: markerLeft(Math.min(paceInfo.expected, scale), scale) }}
+                >
+                  <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-1 text-[9.5px] font-bold text-accent-ink">
+                    сегодня
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-4 text-[11px]">
+            {/* Полоса уверенности: почти наверняка (приход) → вероятно (взвеш.) → потолок (весь сбор).
+                Один синий-градиент по убыванию уверенности — не путается с цветами источников выше. */}
+            <div className="relative mt-6">
+              <div className="flex h-2 overflow-hidden rounded bg-sunken">
+                {band.guaranteed > 0 && (
+                  <div className="h-full bg-blue-600" style={{ width: `${(band.guaranteed / scale) * 100}%` }} />
+                )}
+                {band.probable > band.guaranteed && (
+                  <div
+                    className="h-full bg-blue-400"
+                    style={{ width: `${((band.probable - band.guaranteed) / scale) * 100}%` }}
+                  />
+                )}
+                {band.ceiling > band.probable && (
+                  <div
+                    className="h-full bg-blue-200 dark:bg-blue-500/30"
+                    style={{ width: `${((band.ceiling - band.probable) / scale) * 100}%` }}
+                  />
+                )}
+              </div>
+              {base != null && (
+                <div
+                  className="absolute -top-0.5 bottom-[-2px] w-0.5 bg-ink"
+                  style={{ left: markerLeft(base, scale) }}
+                />
+              )}
+            </div>
+            <div className="mt-1.5 text-[11px] text-faint">
+              Почти наверняка{" "}
+              <b className="text-blue-700 dark:text-blue-300">{formatByn(band.guaranteed)}</b> · Вероятно{" "}
+              <b className="text-blue-500 dark:text-blue-400">{formatByn(band.probable)}</b> · Потолок{" "}
+              <b className="text-muted">{formatByn(band.ceiling)}</b>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px]">
               <LegendItem cls="bg-blue-500" label="📦 Сделки месяца" />
               <LegendItem cls="bg-emerald-500" label="♻ Постоянные" />
               <LegendItem cls="bg-amber-500" label="⚡ Новые (по действиям)" />
               <LegendItem cls="bg-red-200 dark:bg-red-500/25" label="дефицит" />
+              {totals.total > 0 && (
+                <span
+                  className={`ml-auto inline-flex items-center rounded-lg px-2.5 py-1 text-[11.5px] font-bold ${toneChip(conc.tone)}`}
+                >
+                  {conc.label}
+                </span>
+              )}
             </div>
           </div>
 
@@ -457,7 +549,7 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                       <th className="px-4 py-2 text-left font-semibold">Клиент</th>
                       <th className="px-4 py-2 text-left font-semibold">Ожид. заказ</th>
                       <th className="px-4 py-2 text-right font-semibold">Ср. чек</th>
-                      <th className="px-4 py-2 text-right font-semibold">Вер-ть</th>
+                      <th className="px-4 py-2 text-right font-semibold">Вероятность</th>
                       <th className="px-4 py-2 text-right font-semibold">План, вал. приб.</th>
                     </tr>
                   </thead>
@@ -595,6 +687,17 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
                       посчитать — впишите средний чек и маржу.
                     </>
                   )}
+                  {coverage != null && (
+                    // Только качественный вердикт по входу воронки — сколько ещё заявок нужно,
+                    // уже сказано в обратном счёте выше (при текущей конверсии), без второго числа.
+                    <div className="mt-2">
+                      <span
+                        className={`inline-block rounded-md px-2 py-0.5 text-[11.5px] font-bold ${toneChip(coverage.tone)}`}
+                      >
+                        {coverage.text}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -639,6 +742,19 @@ export function PlanConstructor({ ownerId }: { ownerId: number }) {
       )}
     </div>
   );
+}
+
+/** Позиция маркера в %, зажатая в [3,97]: центрированная подпись («план РОПа»/«сегодня»)
+ * не вылезает за карточку на краях (дефицит → база на 100%, начало месяца → темп у 0%). */
+function markerLeft(value: number, scale: number): string {
+  return `${Math.min(Math.max((value / scale) * 100, 3), 97)}%`;
+}
+
+/** SeverityTone → пара классов (мягкий фон + читаемый текст, обе темы). */
+function toneChip(tone: SeverityTone): string {
+  if (tone === "red") return "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300";
+  if (tone === "amber") return "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300";
+  return "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300";
 }
 
 function LegendItem({ cls, label }: { cls: string; label: string }) {

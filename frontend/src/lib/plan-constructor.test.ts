@@ -3,19 +3,41 @@ import { describe, expect, it } from "vitest";
 import {
   assemble,
   calcActivity,
+  concentration,
+  confidenceBand,
+  funnelCoverage,
   mergeSaved,
   metricsFromPlan,
+  monthPace,
   nextMonthKey,
+  paceStatus,
   regularCycleCaption,
   regularWhenLabel,
   reverseCount,
   toDrafts,
   verdictOf,
+  weightedForecast,
   type CommittedRow,
+  type PlanItemDraft,
   type PlanItemOut,
   type PlanSources,
   type RegularRow,
 } from "./plan-constructor";
+
+/** Мини-фабрика драфт-строки для тестов методов прогноза. */
+function draft(over: Partial<PlanItemDraft>): PlanItemDraft {
+  return {
+    source: "committed",
+    ref: "x",
+    title: "Сделка",
+    when_label: "—",
+    revenue: 0,
+    gross: 0,
+    probability: 100,
+    enabled: true,
+    ...over,
+  };
+}
 
 const COMMITTED: CommittedRow = {
   ref: "CRM-1029",
@@ -249,5 +271,145 @@ describe("nextMonthKey", () => {
 
   it("переход через год", () => {
     expect(nextMonthKey(new Date(2026, 11, 20))).toBe("2027-01"); // декабрь → январь
+  });
+});
+
+describe("weightedForecast", () => {
+  it("приход ×0.9, постоянные ×вер-ть, новые как есть", () => {
+    const drafts = [
+      draft({ source: "committed", gross: 10000, probability: 100 }),
+      draft({ source: "regular", gross: 10000, probability: 70 }),
+    ];
+    // 10000×0.9 + 10000×0.7 + 5000 = 9000 + 7000 + 5000
+    expect(weightedForecast(drafts, 5000)).toBe(21000);
+  });
+
+  it("выключенные строки не считаются", () => {
+    const drafts = [draft({ source: "committed", gross: 10000, enabled: false })];
+    expect(weightedForecast(drafts, 0)).toBe(0);
+  });
+
+  it("взвешенный не выше потолка при вер-ти <100%", () => {
+    const drafts = [
+      draft({ source: "committed", gross: 20000 }),
+      draft({ source: "regular", gross: 20000, probability: 50 }),
+    ];
+    const total = assemble(drafts, 3000).total;
+    expect(weightedForecast(drafts, 3000)).toBeLessThan(total);
+  });
+});
+
+describe("confidenceBand", () => {
+  it("монотонна: гарантировано ≤ вероятно ≤ потолок", () => {
+    const b = confidenceBand(30000, 45000, 60000);
+    expect(b).toEqual({ guaranteed: 30000, probable: 45000, ceiling: 60000 });
+  });
+
+  it("не даёт уровням проседать ниже предыдущего", () => {
+    // взвешенный ниже гарантированного (странные данные) — вероятно подтягивается к нему
+    const b = confidenceBand(50000, 40000, 45000);
+    expect(b.probable).toBe(50000);
+    expect(b.ceiling).toBe(50000);
+  });
+});
+
+describe("monthPace", () => {
+  it("текущий месяц: доля рабочих дней и applicable=true", () => {
+    // 15 июля 2026 (среда); вс — выходной
+    const p = monthPace("2026-07", new Date(2026, 6, 15, 12));
+    expect(p.applicable).toBe(true);
+    expect(p.total).toBeGreaterThan(20); // ~27 рабочих дней (пн-сб)
+    expect(p.passed).toBeGreaterThan(0);
+    expect(p.frac).toBeCloseTo(p.passed / p.total, 5);
+  });
+
+  it("будущий месяц: applicable=false (темп ещё не наступил)", () => {
+    const p = monthPace("2026-08", new Date(2026, 6, 15));
+    expect(p.applicable).toBe(false);
+  });
+
+  it("прошедший месяц: все рабочие дни пройдены", () => {
+    const p = monthPace("2026-06", new Date(2026, 6, 15));
+    expect(p.applicable).toBe(false);
+    expect(p.passed).toBe(p.total);
+  });
+});
+
+describe("paceStatus", () => {
+  it("опережение — зелёный", () => {
+    const s = paceStatus(60000, 90000, 0.5); // ожидалось 45000, собрано 60000
+    expect(s).toMatchObject({ tone: "green", ahead: true });
+    expect(s.delta).toBe(15000);
+  });
+
+  it("небольшое отставание — жёлтый", () => {
+    const s = paceStatus(43000, 90000, 0.5); // ожидалось 45000, отстаём на ~4.4%
+    expect(s.tone).toBe("amber");
+    expect(s.ahead).toBe(false);
+  });
+
+  it("отставание больше 15% — красный", () => {
+    const s = paceStatus(30000, 90000, 0.5); // ожидалось 45000, отстаём на 33%
+    expect(s.tone).toBe("red");
+  });
+});
+
+describe("concentration", () => {
+  const totals = { s1: 50000, s2: 30000, s3: 20000, total: 100000 };
+
+  it(">40% на одном источнике — красный «на одной ноге»", () => {
+    const drafts = [draft({ source: "committed", gross: 25000, title: "Сделка А" })];
+    const c = concentration(drafts, totals); // источник s1=50% > любой сделки
+    expect(c.tone).toBe("red");
+    expect(c.pct).toBeCloseTo(0.5, 5);
+    expect(c.label).toContain("Сделки месяца");
+  });
+
+  it("25–40% — жёлтая концентрация", () => {
+    const t = { s1: 35000, s2: 33000, s3: 32000, total: 100000 };
+    const drafts = [draft({ gross: 20000 })];
+    const c = concentration(drafts, t);
+    expect(c.tone).toBe("amber");
+  });
+
+  it("равномерно — зелёный", () => {
+    const t = { s1: 20000, s2: 20000, s3: 20000, total: 100000 };
+    const drafts = [draft({ gross: 15000 })];
+    const c = concentration(drafts, t);
+    expect(c.tone).toBe("green");
+    expect(c.label).toContain("распределён");
+  });
+
+  it("пустой план (total=0) не делит на ноль", () => {
+    const c = concentration([], { s1: 0, s2: 0, s3: 0, total: 0 });
+    expect(c.pct).toBe(0);
+    expect(c.tone).toBe("green");
+  });
+});
+
+describe("funnelCoverage", () => {
+  it("нет дефицита — null", () => {
+    expect(funnelCoverage(100, 500, 0)).toBeNull();
+    expect(funnelCoverage(100, 500, -1000)).toBeNull();
+  });
+
+  it("нулевая прибыль со сделки — null (нечего делить)", () => {
+    expect(funnelCoverage(100, 0, 5000)).toBeNull();
+  });
+
+  it("считает в прибыли÷прибыли, ≥3× — запас", () => {
+    // 100 заявок × 300 прибыли = 30000 потенциала ÷ дефицит 5000 = 6×
+    const c = funnelCoverage(100, 300, 5000);
+    expect(c?.coverage).toBeCloseTo(6, 5);
+    expect(c?.tone).toBe("green");
+    expect(c?.needMoreLeads).toBeNull();
+  });
+
+  it("<1.5× — не хватит, подсказывает сколько ещё заявок до 3×", () => {
+    // 10 заявок × 300 = 3000 ÷ дефицит 5000 = 0.6×
+    const c = funnelCoverage(10, 300, 5000);
+    expect(c?.tone).toBe("red");
+    // до 3×: нужно 3×5000/300 = 50 заявок, ещё 40
+    expect(c?.needMoreLeads).toBe(40);
   });
 });
