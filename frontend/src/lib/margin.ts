@@ -67,3 +67,20 @@ export async function fetchDealMargin(dealId: string): Promise<DealMargin | null
 export function marginBySku(margin: DealMargin | null): Map<string, MarginLine> {
   return new Map((margin?.lines ?? []).map((l) => [l.sku_code, l]));
 }
+
+/**
+ * Источник себестоимости для АГРЕГАТНОЙ метки сделки: единый источник, только если у всех
+ * priced-позиций с известным источником он одинаков; `"mixed"` — если источники разные (тогда
+ * нельзя приписывать всей сделке метку одной позиции: себес суммирует разные источники —
+ * список даёт честный per-позиционный ярлык, PLATFORM #1); `null` — источников нет.
+ */
+export function aggregateCostSource(lines: MarginLine[]): CostSource | "mixed" {
+  const srcs = new Set(
+    lines
+      .filter((l) => l.status === "priced" && l.cost_source != null)
+      .map((l) => l.cost_source),
+  );
+  if (srcs.size === 0) return null;
+  if (srcs.size === 1) return [...srcs][0] as Exclude<CostSource, null>;
+  return "mixed";
+}

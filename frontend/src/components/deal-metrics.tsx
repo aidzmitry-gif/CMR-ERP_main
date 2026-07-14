@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useCurrency } from "@/components/kanban/currency-context";
-import { COST_SRC_LABEL, type CostSource, type DealMargin } from "@/lib/margin";
+import { aggregateCostSource, COST_SRC_LABEL, type DealMargin } from "@/lib/margin";
 import { STAGE_PROBABILITY } from "@/lib/sales-stages";
 
 /**
@@ -86,15 +86,18 @@ export function DealMetrics({
     margin.priced_count > 0 &&
     margin.priced_count < margin.total_count;
 
-  // Провенанс источника (PC3) — по priced-позициям. Источник себеса берём с первой размеченной
-  // позиции; landed-детали (партия/курс) — только когда себес реально из закупок.
+  // Провенанс источника (PC3) — по priced-позициям. Агрегатная метка едина ТОЛЬКО когда все
+  // priced-строки одного источника; иначе «смешанный источник» (список даёт честный per-позиционный
+  // ярлык). landed-детали (партия/курс) — только когда весь себес сделки из закупок.
   const pricedLines =
     status === "ready" && margin != null
       ? margin.lines.filter((l) => l.status === "priced")
       : [];
-  const costSrc: CostSource = pricedLines.find((l) => l.cost_source)?.cost_source ?? null;
+  const aggCost = aggregateCostSource(pricedLines); // CostSource | "mixed"
   const landedProv =
-    pricedLines.find((l) => l.cost_source === "landed" && l.cost_shipment_id != null) ?? null;
+    aggCost === "landed"
+      ? pricedLines.find((l) => l.cost_source === "landed" && l.cost_shipment_id != null) ?? null
+      : null;
   // Цена хотя бы по одной priced-позиции взята из прайса 1С (нет согласованного КП) — честно
   // предупреждаем: это не согласованная с клиентом цена.
   const priceFromList = pricedLines.some(
@@ -137,14 +140,14 @@ export function DealMetrics({
         </div>
       )}
 
-      {costSrc && (
+      {aggCost && (
         <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-faint">
           <span className="rounded-md bg-sunken px-1.5 py-0.5 font-semibold text-muted">
-            себес · {COST_SRC_LABEL[costSrc]}
+            себес · {aggCost === "mixed" ? "смешанный источник" : COST_SRC_LABEL[aggCost]}
           </span>
-          {/* Партию/курс показываем ТОЛЬКО когда ярлык — landed: иначе при смешанных источниках
-              деталь landed-позиции легла бы под ярлык «из 1С» (ложный провенанс денег). */}
-          {costSrc === "landed" && landedProv && (
+          {/* Партию/курс показываем ТОЛЬКО когда весь себес сделки из landed: иначе при смешанных
+              источниках деталь landed-позиции легла бы под общий ярлык (ложный провенанс денег). */}
+          {aggCost === "landed" && landedProv && (
             <span>
               партия #{landedProv.cost_shipment_id}
               {landedProv.cost_fx_rate != null && ` · курс ${landedProv.cost_fx_rate}`}
