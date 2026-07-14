@@ -58,8 +58,13 @@ ONEC_ENTITY_SETS: list[dict] = [
     # --- ЭТАП 4. Деньги / дебиторка ---
     # {"name": "AccumulationRegister_РасчетыСКлиентами", "key_field": "Recorder"},
 
-    # --- ЭТАП 5. Цены ---
-    # {"name": "InformationRegister_ЦеныНоменклатуры", "key_field": "Период"},
+    # --- ЭТАП 5. Цены (опубликован в ka_copy; RecordSet: Номенклатура_Key, Цена, ВидЦены_Key, Period) ---
+    # {"name": "InformationRegister_ЦеныНоменклатуры", "key_field": "Recorder"},
+    #
+    # --- Себестоимость (Z3, 2026-07-14): НЕ опубликованы в OData ka_copy (HTTP 404):
+    # AccumulationRegister_СебестоимостьТоваров, AccumulationRegister_СтоимостьТоваров,
+    # AccumulationRegister_ВыручкаИСебестоимостьПродаж. Чтобы наполнить StockItem.cost —
+    # опубликовать один из регистров и дочитать «Стоимость/Количество» за период.
 ]
 
 # Тестовая выгрузка: несколько сущностей с малыми лимитами (не все есть в каждой базе).

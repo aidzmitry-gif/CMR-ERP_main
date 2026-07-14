@@ -25,7 +25,17 @@ class IntegrationsModule(ModuleContract):
         # опубликовать 1С-коннектор и складской шлюз в фасаде ядра — другие модули
         # пишут/читают в 1С и резервируют остатки через core.services, не импортируя
         # этот модуль (§2.4).
-        core.services.onec = OneCClient(core.config.onec_base_url)
+        cfg = core.config
+        core.services.onec = OneCClient(
+            cfg.onec_base_url,
+            getattr(cfg, "onec_user", "") or "",
+            getattr(cfg, "onec_password", "") or "",
+        )
+        # Цена/себес для маржи/КП: только когда 1С сконфигурирована (иначе dev-mock/демо).
+        if cfg.onec_base_url:
+            from modules.integrations.price_cost import StockPriceCostSource
+
+            core.services.price_cost = StockPriceCostSource()
         core.services.stock = StockService()
         core.services.registry = RegistryClient(core.config.egr_base_url)
         # телефонный шлюз: исходящий звонок через облачную АТС zruchna. Входящие

@@ -4,9 +4,11 @@
   IMPORT_FROM=2025-12-01T00:00:00 IMPORT_TO=2026-01-01T00:00:00
 
 Двухфазный ETL с файловым кэшем в data/import_<YYYY-MM>/ (повторный прогон безопасен):
-  python scripts/import_month.py extract   # Bitrix REST + 1C OData -> jsonl-кэш
-  python scripts/import_month.py load-prices # цены SKU из строк реализаций (кэш)
-  python scripts/import_month.py verify    # счётчики по таблицам
+  python scripts/import_month.py extract      # Bitrix REST + 1C OData -> jsonl-кэш
+  python scripts/import_month.py extract-onec # только 1С (без Bitrix) — товары/цены
+  python scripts/import_month.py load-onec    # Sku + StockItem.price из кэша 1С
+  python scripts/import_month.py load-prices  # цены SKU из строк реализаций (кэш)
+  python scripts/import_month.py verify       # счётчики по таблицам
   python scripts/import_month.py all
 
 Идемпотентность load: контрагент — CounterpartyAlias(source, external_ref) + склейка по УНП;
@@ -235,7 +237,19 @@ def extract() -> None:
                 "ENTITY_TYPE_ID": "4", "@ENTITY_ID": chunk}, "select": ["ENTITY_ID", "RQ_INN"]})
         _dump("bx_requisites", rows)
 
-    # --- 1С: реализации ноября + ссылочные контрагенты и номенклатура ---
+    # --- 1С: реализации + ссылочные контрагенты и номенклатура ---
+    extract_onec()
+    print("extract: готово ->", OUT_DIR)
+
+
+def extract_onec() -> None:
+    """Только 1С (без Bitrix): реализации окна + SKU/контрагенты по ключам.
+
+    Для живой ``ka_copy`` (данные с окт.2025) задайте
+    ``IMPORT_FROM``/``IMPORT_ONEC_FROM`` на месяц с продажами, напр. 2025-12.
+    """
+    if not ONEC_BASE:
+        raise RuntimeError("ONEC_BASE_URL / IMPORT_ONEC_BASE не задан — extract-onec невозможен")
     if not _cached("onec_sales"):
         docs = onec_window("Document_РеализацияТоваровУслуг", ONEC_FROM, ONEC_TO)
         _dump("onec_sales", docs)
@@ -253,7 +267,7 @@ def extract() -> None:
         rows = [r for r in (onec_by_key("Catalog_Номенклатура", k, "Ref_Key,Code,Description")
                             for k in refs) if r]
         _dump("onec_sku", rows)
-    print("extract: готово ->", OUT_DIR)
+    print("extract-onec: готово ->", OUT_DIR, f"(sales={len(docs)})")
 
 
 # ---------------------------------------------------------------- load
@@ -616,6 +630,36 @@ async def load_prices() -> None:
     print("load-prices:", ", ".join(f"{k}: {v}" for k, v in stats.items()))
 
 
+async def load_onec() -> None:
+    """Sku + StockItem.price из кэша 1С (без Bitrix). Идемпотентно."""
+    from core.domain.models import Sku
+    from core.services import build_services
+
+    services = build_services()
+    services.db.init_engine()
+    if services.db.is_sqlite:
+        await services.db.connect()
+    assert services.db.session_factory is not None
+    stats = {"sku": 0, "stock_price": 0, "stock_price_updated": 0}
+    async with services.db.session_factory() as s:
+        existing_sku = set((await s.execute(select(Sku.code))).scalars())
+        for row in _load_jsonl("onec_sku"):
+            code = (row.get("Code") or "").strip()
+            if not code or code in existing_sku:
+                continue
+            s.add(Sku(
+                code=code,
+                title=(row.get("Description") or code)[:255],
+                provenance={"title": {"source": "1c", "at": LABEL}},
+            ))
+            existing_sku.add(code)
+            stats["sku"] += 1
+        await _load_sales_prices(s, stats)
+        await s.commit()
+    await services.db.disconnect()
+    print("load-onec:", ", ".join(f"{k}: {v}" for k, v in stats.items()))
+
+
 async def verify() -> None:
     from sqlalchemy import func as sa_func
 
@@ -647,8 +691,12 @@ if __name__ == "__main__":
     os.chdir(PROJECT_ROOT)
     if phase in ("extract", "all"):
         extract()
+    if phase == "extract-onec":
+        extract_onec()
     if phase in ("load", "all"):
         asyncio.run(load())
+    if phase == "load-onec":
+        asyncio.run(load_onec())
     if phase == "load-prices":
         asyncio.run(load_prices())
     if phase in ("verify", "all"):
