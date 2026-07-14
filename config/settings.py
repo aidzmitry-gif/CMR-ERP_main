@@ -79,14 +79,18 @@ class Settings(BaseSettings):
     # Базовый URL SEO/GEO UI для deep-link из CRM (AIOS_SEO_UI_BASE_URL).
     seo_ui_base_url: str = "http://localhost:3000"
 
-    # Реквизиты своей организации (продавец) для договоров SALES-53 — конфиг, не shared-схема
+    # Реквизиты своей организации (продавец) для счетов/договоров SALES-53 — конфиг, не shared-схема
     # (ТЗ C.5). Переопределяются env AIOS_SELLER_*. Реквизиты покупателя берутся по УНП из ЕГР.
     seller_name: str = "ООО «Аккумуляторные решения»"
-    seller_unp: str = ""
-    seller_address: str = ""
+    seller_unp: str = "192766048"
+    seller_address: str = "220035, г. Минск, ул. Тимирязева, д.65А, пом. №407"
     seller_director: str = ""
-    seller_phone: str = ""
+    seller_phone: str = "+375 29 635-00-95, +375 (17) 396-23-02"
     seller_email: str = ""
+    # Банковские реквизиты продавца (расчётный счёт в счёте на оплату)
+    seller_account: str = "BY15ALFA30122190570050270000"
+    seller_bank: str = "ЗАО «Альфа-Банк», код 153001270"
+    seller_bik: str = ""
 
     @model_validator(mode="after")
     def _no_dev_defaults_in_prod(self) -> "Settings":
