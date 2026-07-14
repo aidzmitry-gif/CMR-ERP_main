@@ -35,7 +35,6 @@ export const DEAL_SCRIPT: CallScript = [
     title: "Приветствие",
     items: [
       { id: "d-greet", text: "Поздороваться, назвать себя и компанию", done: true },
-      { id: "d-ok", text: "Уточнить, удобно ли говорить", done: true },
     ],
   },
   {
