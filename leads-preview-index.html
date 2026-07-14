@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Лиды · карта экранов</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { canvas:"#f6f7f9", ink:"#0f172a", muted:"#64748b", brand:{DEFAULT:"#2563eb",100:"#dbeafe",600:"#2563eb"} },
+        boxShadow: { card:"0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+      } },
+    };
+  </script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}</style>
+</head>
+<body class="bg-canvas text-ink">
+  <div class="mx-auto max-w-[900px] p-8">
+    <h1 class="text-2xl font-bold">Лиды — карта экранов</h1>
+    <p class="mt-1 text-sm text-muted">Три экрана по работе с лидами. Клик по карточке открывает экран. Так проще не путать, где что находится.</p>
+
+    <div class="mt-6 grid gap-3 sm:grid-cols-2">
+      <a href="leads-planning-preview.html" class="rounded-2xl bg-white p-4 shadow-card ring-1 ring-brand/20 hover:ring-2 hover:ring-brand/40 sm:col-span-2">
+        <div class="text-sm font-semibold text-ink">1 · Планирование лидов
+          <span class="ml-1 inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">лидоруб → РОП</span>
+        </div>
+        <div class="mt-1 text-[13px] text-muted">Сколько обращений нужно за месяц, чтобы выполнить план по деньгам. Лидоруб собирает план и отправляет РОПу на согласование.
+          Внутри две вкладки — <b>«Собрать»</b> (лидоруб составляет) и <b>«Согласование»</b> (РОП утверждает или возвращает), плюс переключатель роли <b>лидоруб ↔ РОП</b>.</div>
+      </a>
+
+      <a href="lead-cockpit-mockup.html" class="rounded-2xl bg-white p-4 shadow-card hover:ring-2 hover:ring-brand/40">
+        <div class="text-sm font-semibold text-ink">2 · Кокпит лида</div>
+        <div class="mt-1 text-[13px] text-muted">Карточка одного лида: контакт, текст обращения, следующий шаг, документы, история звонков и сообщений.</div>
+      </a>
+
+      <a href="#" onclick="return false" class="rounded-2xl bg-white p-4 shadow-card ring-1 ring-emerald-200 cursor-default">
+        <div class="text-sm font-semibold text-ink">3 · Доска лидов
+          <span class="ml-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">рабочий экран</span>
+        </div>
+        <div class="mt-1 text-[13px] text-muted">Все лиды по стадиям: новые → квалификация → распределение → в сделке. Это живой экран прямо в системе — адрес <b>/crm/leads</b> (не превью-картинка).</div>
+      </a>
+    </div>
+
+    <div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-4 text-[12.5px] text-muted">
+      <div class="font-semibold text-slate-600">Как не путать вкладки внутри экрана</div>
+      <div class="mt-1">Вкладки — это переключатели <b>наверху экрана</b>, активная подсвечена цветом. На экране планирования их две: «Собрать» и «Согласование».
+        Отдельно — переключатель роли (лидоруб / РОП): он показывает, <b>чьими глазами</b> вы смотрите на тот же план.</div>
+    </div>
+
+    <p class="mt-6 text-xs text-slate-400">Превью-снимки для просмотра; работает навигация по карточкам. Экраны продаж — в отдельной карте.</p>
+  </div>
+</body>
+</html>
