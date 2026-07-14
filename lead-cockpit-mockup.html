@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<title>Кокпит квалификатора лидов — макет (РОП + автоматизация)</title>
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var i=document.getElementById('themeIco'),x=document.getElementById('themeTxt');if(i)i.textContent=t==='dark'?'☀️':'🌙';if(x)x.textContent=t==='dark'?'Светлая':'Тёмная';try{localStorage.setItem('theme',t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark');}
+try{if(localStorage.getItem('theme')==='dark')applyTheme('dark');}catch(e){}
+/* демо-отклик: кнопки без своего действия показывают тост (чтобы не было «ничего не произошло») */
+(function(){
+  function dtoast(msg){var t=document.getElementById('_demoToast');if(!t){t=document.createElement('div');t.id='_demoToast';t.style.cssText='position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--canvas);font:600 13px var(--font);padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:99999;opacity:0;pointer-events:none;transition:.22s;max-width:90vw';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(10px)';},1900);}
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('button,.btn,[class*="btn"],.abtn,.chip,.seg button,.tab,a[role="button"]');
+    if(!el)return;
+    if(el.id==='themeTgl'||el.closest('#themeTgl'))return;
+    if(el.hasAttribute('onclick')||el.closest('[onclick]'))return;
+    if(el.tagName==='A'&&el.getAttribute('href')&&el.getAttribute('href')!=='#')return;
+    if(getComputedStyle(el).cursor!=='pointer'&&el.tagName!=='BUTTON')return;
+    var label=(el.textContent||'').trim().slice(0,32)||'Действие';
+    dtoast('Демо: «'+label+'» — действие появится с бэкендом');
+  },true);
+})();
+</script>
+<style>
+:root{
+  --font:"Inter",system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --canvas:#EEF1F5; --surface:#fff; --sunken:#F4F6F9;
+  --ink:#0F172A; --muted:#5B6B82; --faint:#93A1B5;
+  --line:#E2E8F0; --line-strong:#CBD5E1;
+  --brand:#1E5EFF; --brand-50:#E3ECFF; --brand50:#E3ECFF; --brand-100:#E3ECFF; --brand100:#E3ECFF;
+  --brand-700:#1545CC; --brand700:#1545CC;
+  --accent:#1E5EFF; --accent-ink:#1545CC; --accent-soft:#E3ECFF;
+  --money:#0E7C4A; --money-soft:#E2F3EA;
+  --ok:#0E7C4A; --warn:#B45309; --bad:#DC2626;
+  --ai:#7C3AED; --ai-50:#F2EBFE;
+  --green-soft:#ECFDF5; --green-ink:#047857;
+  --amber-soft:#FFFBEB; --amber-ink:#B45309;
+  --red-soft:#FEF2F2; --red-ink:#B91C1C;
+  --blue-soft:#EFF5FF; --blue-ink:#1D4ED8;
+  --violet-soft:#EDE9FE; --violet-ink:#6D28D9;
+  --shadow-card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --card:0 1px 1px rgba(20,20,40,.03),0 2px 4px rgba(20,20,40,.04),0 6px 16px rgba(20,20,40,.04);
+  --pop:0 1px 2px rgba(20,20,40,.06),0 12px 28px rgba(20,20,40,.12);
+}
+html.dark{
+  --canvas:#0E1116; --surface:#171B22; --sunken:#1F242C;
+  --ink:#E8EAED; --muted:#9BA3AE; --faint:#6B7280;
+  --line:#2A3038; --line-strong:#3A424C;
+  --brand:#6E8BFF; --brand-50:#232A3D; --brand50:#232A3D; --brand-100:#232A3D; --brand100:#232A3D;
+  --brand-700:#8AA0FF; --brand700:#8AA0FF;
+  --accent:#6E8BFF; --accent-ink:#8AA0FF; --accent-soft:#232A3D;
+  --money:#34D399; --money-soft:#16271F;
+  --ok:#34D399; --warn:#FBBF24; --bad:#F87171;
+  --ai:#A78BFA; --ai-50:#241B3A;
+  --green-soft:#16271F; --green-ink:#34D399;
+  --amber-soft:#2A2114; --amber-ink:#FBBF24;
+  --red-soft:#3A1D1D; --red-ink:#F87171;
+  --blue-soft:#1B2740; --blue-ink:#7FA8FF;
+  --violet-soft:#241B3A; --violet-ink:#C4B5FD;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --card:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);
+  --pop:0 2px 4px rgba(0,0,0,.5),0 18px 40px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--canvas);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;transition:background .2s,color .2s}
+body{font-size:14px}
+img,svg{max-width:100%}
+input,select,textarea{background:var(--surface);color:var(--ink);font-family:inherit}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+option{background:var(--surface);color:var(--ink)}
+a{color:inherit}
+
+/* ═══════════ каркас страницы ═══════════ */
+.wrap{max-width:1180px;margin:0 auto;padding:20px;padding-bottom:70px}
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;
+     gap:16px;background:var(--surface);border-bottom:1px solid var(--line);padding:12px 20px;flex-wrap:wrap}
+.topbar h1{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.tb-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.legend{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.legend-note{width:100%;font-size:11px;color:var(--faint);margin-top:2px;text-align:right}
+.badge-new{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;border-radius:99px;
+     padding:3px 10px;background:var(--green-soft);color:var(--green-ink);white-space:nowrap}
+.badge-new .dot,.dot-new{width:6px;height:6px;border-radius:50%;background:var(--green-ink);flex-shrink:0;display:inline-block}
+.badge-has{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;border-radius:99px;
+     padding:3px 10px;background:var(--sunken);color:var(--muted);white-space:nowrap}
+.badge-has .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex-shrink:0;display:inline-block}
+.theme-tgl{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;border:1px solid var(--line);
+     background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 13px;cursor:pointer;white-space:nowrap}
+.theme-tgl:hover{background:var(--sunken)}
+.theme-tgl #themeIco{font-size:15px;line-height:0}
+
+section.sec-block{margin:22px 0}
+.sec-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding-bottom:10px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.sec-head h2{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.sec-head .sec-sub{font-size:12.5px;color:var(--muted)}
+.sec-intro{font-size:12.5px;color:var(--muted);line-height:1.55;margin:-8px 0 16px;max-width:900px}
+
+/* ═══════════ Секция A: канбан ═══════════ */
+.board-scroll{overflow-x:auto;padding-bottom:8px;margin-bottom:4px}
+.board-scroll::-webkit-scrollbar{height:8px}
+.board-scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:99px}
+.board{display:flex;gap:14px;min-width:max-content}
+.col{width:250px;min-width:240px;flex-shrink:0;background:var(--sunken);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:9px}
+.col-title{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;font-weight:700;font-size:13px}
+.col-title .n{font-size:11.5px;font-weight:700;color:var(--muted);background:var(--surface);border-radius:99px;padding:1px 9px}
+.col-title .with-new{display:flex;align-items:center;gap:7px}
+
+.mcard{background:var(--surface);border-radius:11px;box-shadow:var(--card);padding:11px;cursor:pointer;transition:box-shadow .15s;border:1px solid transparent}
+.mcard:hover{box-shadow:var(--pop)}
+.mcard.picked{border-color:var(--brand)}
+.mc-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.mc-chan{display:flex;align-items:center;gap:7px;min-width:0}
+.chan-ic{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11.5px;flex-shrink:0;color:#fff}
+.mc-id{font-size:11.5px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-age{font-size:11px;color:var(--faint);font-weight:600;white-space:nowrap;flex-shrink:0}
+.mc-age.stuck{color:var(--red-ink)}
+.mc-company{font-weight:700;font-size:13.5px;margin-top:7px;line-height:1.3}
+.mc-interest{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35;
+     display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.mc-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.chip-score{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:var(--green-soft);color:var(--green-ink)}
+.chip-att{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 7px;
+     background:var(--surface);color:var(--green-ink);border:1px solid var(--green-ink)}
+.chip-chan{font-size:10.5px;font-weight:600;border-radius:6px;padding:2px 7px;background:var(--sunken);color:var(--muted)}
+
+.reveal-hint{font-size:12.5px;color:var(--faint);margin:16px 2px 10px;display:flex;gap:8px;align-items:flex-start}
+.reveal-hint b{color:var(--muted)}
+
+/* ═══ подсказка-плашка над кокпитом ═══ */
+.tip-strip{display:flex;gap:10px;align-items:flex-start;background:var(--blue-soft);border:1px solid var(--blue-ink);
+     border-radius:11px;padding:11px 14px;font-size:12.5px;color:var(--blue-ink);margin-bottom:14px;line-height:1.5}
+.tip-strip .ic{font-size:15px;flex-shrink:0}
+
+/* ═══ Кокпит: 3 зоны ═══ */
+.cockpit{background:var(--surface);border-radius:16px;box-shadow:var(--pop);border:1px solid var(--line);overflow:hidden}
+.cockpit-grid{display:grid;grid-template-columns:1.15fr 1fr .95fr;gap:0}
+.zone{padding:18px;min-width:0}
+.zone + .zone{border-left:1px solid var(--line)}
+.zone-title{font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800;color:var(--faint);margin-bottom:12px}
+
+/* зона 1 шапка */
+.z1-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px}
+.z1-head .lead-id{display:flex;align-items:center;gap:9px}
+.z1-head .lead-id .chan-ic{width:28px;height:28px;font-size:14px}
+.z1-head h3{font-size:16px;font-weight:800}
+.z1-head .meta{font-size:12px;color:var(--muted);margin-top:2px}
+.closex{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;font-size:13px;flex-shrink:0}
+.closex:hover{background:var(--sunken)}
+
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:12.5px;margin-bottom:12px}
+dl.kv dt{color:var(--muted);white-space:nowrap}
+dl.kv dd{font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.tag-mdm{font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 6px;background:var(--blue-soft);color:var(--blue-ink);letter-spacing:.02em}
+
+.msg-box{background:var(--sunken);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--ink);margin-bottom:14px}
+.msg-box .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:700;margin-bottom:5px}
+
+.docs-title{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.docs-title .star-new{font-size:13px;font-weight:800;color:var(--green-ink)}
+.docs-title .txt{font-size:12.5px;font-weight:800}
+.doc-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px}
+.doc-strip::-webkit-scrollbar{height:6px}
+.doc-strip::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:99px}
+.doc-chip{flex-shrink:0;display:flex;flex-direction:column;gap:3px;min-width:126px;border:1px solid var(--line);border-radius:10px;
+     padding:8px 10px;cursor:pointer;background:var(--surface);transition:.14s}
+.doc-chip:hover{background:var(--sunken)}
+.doc-chip.on{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset}
+.doc-chip .dc-top{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700}
+.doc-chip .dc-size{font-size:10.5px;color:var(--faint)}
+.doc-src{align-self:flex-start;font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 6px;margin-top:1px}
+.doc-src.tender{background:var(--violet-soft);color:var(--violet-ink)}
+.doc-src.mail{background:var(--blue-soft);color:var(--blue-ink)}
+
+.doc-preview{border:1px dashed var(--line-strong);border-radius:10px;padding:12px;background:var(--sunken);margin-bottom:12px}
+.doc-preview .dp-name{font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.doc-preview .dp-line{height:8px;border-radius:4px;background:var(--line);margin-bottom:6px}
+.doc-preview .dp-line:nth-child(2){width:92%}
+.doc-preview .dp-line.w1{width:96%}.doc-preview .dp-line.w2{width:70%}.doc-preview .dp-line.w3{width:85%}.doc-preview .dp-line.w4{width:55%}
+.dp-open{margin-top:8px;font-size:11.5px;font-weight:700;border:1px solid var(--line);background:var(--surface);color:var(--brand-700);
+     border-radius:8px;padding:6px 11px;cursor:pointer}
+.dp-open:hover{background:var(--brand-50)}
+
+.ai-extract{border:1px solid var(--ai);background:var(--ai-50);border-radius:11px;padding:11px 12px;font-size:12.5px;line-height:1.55}
+.ai-extract .aix-head{font-weight:800;color:var(--ai);margin-bottom:4px}
+.ai-extract .aix-model{font-size:10.5px;color:var(--faint);margin-top:6px}
+
+/* зона 2: AI-копилот */
+.ai-panel{background:var(--ai-50);border:1px solid var(--ai);border-radius:12px;padding:13px}
+.ai-panel-head{display:flex;align-items:baseline;gap:7px;margin-bottom:12px}
+.ai-panel-head b{font-size:13.5px;color:var(--ai)}
+.ai-panel-head span{font-size:10.5px;color:var(--faint)}
+.ai-item{padding:10px 0;border-top:1px solid var(--line)}
+.ai-item:first-child{border-top:none;padding-top:2px}
+.ai-item-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.ai-item-txt{font-size:12.5px;line-height:1.5;color:var(--ink)}
+.ai-item-txt b{font-weight:700}
+.model-pill{flex-shrink:0;font-size:10px;font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.model-pill.rules{background:var(--sunken);color:var(--muted)}
+.model-pill.haiku{background:var(--green-soft);color:var(--green-ink)}
+.model-pill.sonnet{background:var(--blue-soft);color:var(--blue-ink)}
+.model-pill.opus{background:var(--violet-soft);color:var(--violet-ink)}
+.ai-item-sub{font-size:11px;color:var(--faint);margin-top:3px}
+.ai-mini-btn{margin-top:7px;font-size:11.5px;font-weight:700;border:1px solid var(--ai);color:var(--ai);background:var(--surface);
+     border-radius:8px;padding:5px 11px;cursor:pointer}
+.ai-mini-btn:hover{background:var(--ai-50)}
+.ai-footnote{font-size:11px;color:var(--faint);line-height:1.5;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+
+/* зона 3: действия */
+.actions{display:flex;flex-direction:column;gap:9px}
+.abtn{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border-radius:10px;padding:10px 12px;font-size:13px;
+     font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.abtn:hover{background:var(--sunken)}
+.abtn.outline{border-color:var(--brand);color:var(--brand-700)}
+.abtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.abtn.primary:hover{background:var(--brand-700)}
+.abtn.money{background:var(--money);border-color:var(--money);color:#fff}
+.abtn.money:hover{filter:brightness(.94)}
+.abtn.danger-ln{border-color:var(--red-ink);color:var(--red-ink)}
+.abtn .aicon{font-size:15px;flex-shrink:0}
+.a-sub{font-size:11px;color:var(--faint);margin:-3px 0 0 34px;line-height:1.4}
+
+.a-block{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--sunken)}
+.a-block + .a-block{margin-top:9px}
+.chan-pick{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.pill-tgl{font-size:11.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--muted);
+     border-radius:99px;padding:4px 11px;cursor:pointer}
+.pill-tgl.on{background:var(--brand-100);border-color:var(--brand);color:var(--brand-700)}
+
+.divider-lbl{display:flex;align-items:center;gap:9px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;
+     font-weight:800;color:var(--faint);margin:6px 0 2px}
+.divider-lbl::after{content:"";flex:1;height:1px;background:var(--line)}
+.divider-lbl .with-new{display:flex;align-items:center;gap:6px}
+
+.reason-select{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;margin-top:7px}
+
+.picker-list{display:flex;flex-direction:column;gap:7px;margin-top:8px}
+.picker-row{display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer;background:var(--surface)}
+.picker-row:hover{background:var(--sunken)}
+.picker-row.on{border-color:var(--brand);background:var(--brand-50)}
+.picker-row input[type=radio]{margin-top:3px;accent-color:var(--brand);flex-shrink:0}
+.pr-body{min-width:0;flex:1}
+.pr-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.pr-name{font-weight:700;font-size:12.5px}
+.ai-star{font-size:10px;font-weight:700;border-radius:6px;padding:1px 7px;background:var(--violet-soft);color:var(--violet-ink)}
+.pr-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.load-bar{height:5px;border-radius:99px;background:var(--line);margin-top:6px;overflow:hidden}
+.load-bar > span{display:block;height:100%;border-radius:99px;background:var(--brand)}
+
+.funnel-pick{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.next-step-fld{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+.next-step-fld input,.next-step-fld textarea{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;outline:none}
+.next-step-fld input:focus,.next-step-fld textarea:focus{border-color:var(--brand)}
+.next-step-fld textarea{resize:none;height:44px;font-family:inherit}
+
+.open-full{display:block;text-align:center;font-size:12px;font-weight:700;color:var(--brand-700);text-decoration:none;
+     border-top:1px solid var(--line);padding-top:11px;margin-top:2px}
+.open-full .sub2{display:block;font-size:11px;font-weight:400;color:var(--faint);margin-top:2px}
+
+/* ═══════════ Секция B: таблица тиринга ═══════════ */
+.tier-scroll{overflow-x:auto}
+.tier-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+.tier-tbl th{text-align:left;padding:9px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);
+     font-weight:800;border-bottom:1px solid var(--line);background:var(--sunken)}
+.tier-tbl th:first-child{border-top-left-radius:9px}
+.tier-tbl th:last-child{border-top-right-radius:9px}
+.tier-tbl td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+.tier-tbl tr:last-child td{border-bottom:none}
+.tier-tbl td.fn{font-weight:600}
+.tier-tbl td.why{color:var(--muted)}
+.tier-callout{margin-top:14px;background:var(--ai-50);border:1px solid var(--ai);border-radius:11px;padding:13px 15px;font-size:12.5px;line-height:1.6}
+.tier-callout b{color:var(--ai)}
+.tier-howbuilt{margin-top:12px;background:var(--sunken);border-radius:11px;padding:12px 15px;font-size:12px;color:var(--muted);line-height:1.6}
+.tier-howbuilt b{color:var(--ink)}
+
+/* tabla-cards при узком экране */
+.tier-cards{display:none;flex-direction:column;gap:10px}
+.tier-card{border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:var(--surface)}
+.tier-card .tc-fn{font-weight:700;font-size:13px;margin-bottom:6px}
+.tier-card .tc-why{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+
+/* ═══════════ Секция C: as-is/to-be ═══════════ */
+.astobe-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ab-col-head{font-size:13.5px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.ab-list{display:flex;flex-direction:column;gap:8px}
+.ab-item{display:flex;align-items:flex-start;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:10px;
+     padding:9px 11px;font-size:12.5px;line-height:1.5;box-shadow:var(--card)}
+.ab-item .dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.ab-item.has .dot{background:var(--faint)}
+.ab-item.new .dot{background:var(--green-ink)}
+.ab-item b{font-weight:700}
+
+/* ═══════════ Секция D: слайсы ═══════════ */
+.slice-list{display:flex;flex-direction:column;gap:10px}
+.slice-card{display:flex;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 14px;box-shadow:var(--card)}
+.slice-num{flex-shrink:0;width:30px;height:30px;border-radius:9px;background:var(--brand-100);color:var(--brand-700);
+     font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+.slice-body{min-width:0;font-size:12.5px;line-height:1.55}
+.slice-body .st{font-weight:700;font-size:13px;margin-bottom:3px}
+.slice-body .who{display:inline-block;margin-top:6px;font-size:10.5px;font-weight:700;color:var(--muted);
+     background:var(--sunken);border-radius:6px;padding:2px 8px}
+
+.debt-box{margin-top:14px;background:var(--red-soft);border:1px solid var(--red-ink);border-radius:11px;padding:12px 15px}
+.debt-box .db-head{font-weight:800;color:var(--red-ink);font-size:13px;margin-bottom:8px}
+.debt-box ul{margin:0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--ink)}
+
+/* ═══════════ адаптив ~760px ═══════════ */
+@media (max-width:760px){
+  .wrap{padding:14px}
+  .topbar{padding:10px 14px}
+  .legend-note{text-align:left}
+  .cockpit-grid{grid-template-columns:1fr}
+  .zone + .zone{border-left:none;border-top:1px solid var(--line)}
+  .astobe-grid{grid-template-columns:1fr}
+  .tier-scroll{display:none}
+  .tier-cards{display:flex}
+  .col{width:78vw}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>🎯 Лиды — кокпит квалификатора</h1>
+  <div class="tb-right">
+    <div class="legend">
+      <span class="badge-new"><span class="dot"></span>НОВОЕ</span>
+      <span class="badge-has"><span class="dot"></span>есть</span>
+    </div>
+    <button class="theme-tgl" id="themeTgl" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><span id="themeIco">🌙</span><span id="themeTxt">Тёмная</span></button>
+    <span class="legend-note" style="width:auto;margin:0">Зелёным — предлагаемые улучшения; серым — то, что уже работает в /crm/leads.</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ═══════════════ СЕКЦИЯ A ═══════════════ -->
+  <section class="sec-block" id="secA">
+    <div class="sec-head">
+      <h2>A. Канбан лидов и раскрытая карточка</h2>
+      <span class="sec-sub">5 колонок · клик по мини-карточке «Новые» открывает кокпит ниже (демо зафиксирован на ЛИД‑0142)</span>
+    </div>
+    <div class="legend-note" style="text-align:left;margin:-6px 0 10px">⏱ возраст красным (<b style="color:var(--red-ink)">3 дн+</b>) — только на этапах ДО раздачи (Новые/Квалифицированы): лид ждёт решения квалификатора. После раздачи срок первого ответа переходит на продавца (его «Следующий шаг») — там красный больше не нужен.</div>
+
+    <div class="board-scroll">
+      <div class="board">
+
+        <!-- Новые -->
+        <div class="col">
+          <div class="col-title"><span>Новые</span><span class="n">4</span></div>
+
+          <div class="mcard picked" data-lead="0142">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:var(--violet-ink)">🏛</span><span class="mc-id">ЛИД‑0142</span></div>
+              <span class="mc-age">2 ч</span>
+            </div>
+            <div class="mc-company">ЗАО «Белтехмонтаж»</div>
+            <div class="mc-interest">Датчики давления + частотные преобразователи</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 82</span>
+              <span class="chip-att">● 📎 4</span>
+              <span class="chip-chan">Тендер</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#3B82F6">✉️</span><span class="mc-id">ЛИД‑0140</span></div>
+              <span class="mc-age">40 мин</span>
+            </div>
+            <div class="mc-company">ООО «Промэлектрика»</div>
+            <div class="mc-interest">Электромонтаж цеха, КИПиА</div>
+            <div class="mc-chips">
+              <span class="chip-score" style="background:var(--amber-soft);color:var(--amber-ink)">🌤 54</span>
+              <span class="chip-att">● 📎 1</span>
+              <span class="chip-chan">E-mail</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:var(--brand)">🌐</span><span class="mc-id">ЛИД‑0139</span></div>
+              <span class="mc-age">5 ч</span>
+            </div>
+            <div class="mc-company">ИП Ковальчук С.В.</div>
+            <div class="mc-interest">Насосное оборудование, консультация</div>
+            <div class="mc-chips">
+              <span class="chip-score" style="background:var(--red-soft);color:var(--red-ink)">🧊 31</span>
+              <span class="chip-chan">Сайт</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#22C55E">📞</span><span class="mc-id">ЛИД‑0137</span></div>
+              <span class="mc-age stuck">3 дн</span>
+            </div>
+            <div class="mc-company">УП «Гидропривод-Сервис»</div>
+            <div class="mc-interest">Частотники до 15 кВт, срочно</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 76</span>
+              <span class="chip-chan">Звонок</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Квалифицированы -->
+        <div class="col">
+          <div class="col-title"><span>Квалифицированы</span><span class="n">3</span></div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#229ED9">✈️</span><span class="mc-id">ЛИД‑0134</span></div>
+              <span class="mc-age">1 дн</span>
+            </div>
+            <div class="mc-company">ОАО «Микроэлектромаш»</div>
+            <div class="mc-interest">КИПиА, автоматизация линии</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 88</span>
+              <span class="chip-att">● 📎 2</span>
+              <span class="chip-chan">Telegram</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#25D366">🟢</span><span class="mc-id">ЛИД‑0133</span></div>
+              <span class="mc-age">1 дн</span>
+            </div>
+            <div class="mc-company">ЧУП «Автозапчасть+»</div>
+            <div class="mc-interest">Датчики давления, розница</div>
+            <div class="mc-chips">
+              <span class="chip-score" style="background:var(--amber-soft);color:var(--amber-ink)">🌤 61</span>
+              <span class="chip-chan">WhatsApp</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#3B82F6">✉️</span><span class="mc-id">ЛИД‑0130</span></div>
+              <span class="mc-age">2 дн</span>
+            </div>
+            <div class="mc-company">ОДО «ЭнергоМонтажСервис»</div>
+            <div class="mc-interest">Электромонтаж подстанции</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 79</span>
+              <span class="chip-att">● 📎 3</span>
+              <span class="chip-chan">E-mail</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Распределены -->
+        <div class="col">
+          <div class="col-title"><span>Распределены</span><span class="n">2</span></div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:var(--violet-ink)">🏛</span><span class="mc-id">ЛИД‑0126</span></div>
+              <span class="mc-age">3 дн</span>
+            </div>
+            <div class="mc-company">РУП «Белнасоспром»</div>
+            <div class="mc-interest">Насосы + частотники, тендер</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 91</span>
+              <span class="chip-att">● 📎 5</span>
+              <span class="chip-chan">Тендер</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#22C55E">📞</span><span class="mc-id">ЛИД‑0122</span></div>
+              <span class="mc-age">4 дн</span>
+            </div>
+            <div class="mc-company">СООО «ТехАвтоматика»</div>
+            <div class="mc-interest">КИПиА для цеха розлива</div>
+            <div class="mc-chips">
+              <span class="chip-score" style="background:var(--amber-soft);color:var(--amber-ink)">🌤 58</span>
+              <span class="chip-chan">Звонок</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- В сделках -->
+        <div class="col">
+          <div class="col-title"><span>В сделках</span><span class="n">2</span></div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:var(--brand)">🌐</span><span class="mc-id">ЛИД‑0118</span></div>
+              <span class="mc-age">6 дн</span>
+            </div>
+            <div class="mc-company">ОАО «Белэлектромонтаж»</div>
+            <div class="mc-interest">Электромонтаж, полный цикл</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 84</span>
+              <span class="chip-chan">Сайт</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:#3B82F6">✉️</span><span class="mc-id">ЛИД‑0110</span></div>
+              <span class="mc-age">9 дн</span>
+            </div>
+            <div class="mc-company">ЗАО «Гидромашсервис»</div>
+            <div class="mc-interest">Насосное оборудование, опт</div>
+            <div class="mc-chips">
+              <span class="chip-score">🔥 87</span>
+              <span class="chip-chan">E-mail</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Отклонены (НОВОЕ) -->
+        <div class="col">
+          <div class="col-title"><span class="with-new">Отклонены <span class="badge-new"><span class="dot"></span>НОВОЕ</span></span><span class="n">1</span></div>
+
+          <div class="mcard">
+            <div class="mc-top">
+              <div class="mc-chan"><span class="chan-ic" style="background:var(--brand)">🌐</span><span class="mc-id">ЛИД‑0107</span></div>
+              <span class="mc-age">11 дн</span>
+            </div>
+            <div class="mc-company">ЧП «Стройинструмент»</div>
+            <div class="mc-interest">Не наш профиль — стройматериалы</div>
+            <div class="mc-chips">
+              <span class="chip-score" style="background:var(--red-soft);color:var(--red-ink)">🧊 18</span>
+              <span class="chip-chan">Сайт</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="reveal-hint">▼ <b>Раскрытая карточка ЛИД‑0142</b> — всё делается здесь, без захода в полную карточку лида.</div>
+
+    <div class="tip-strip"><span class="ic">💡</span><span>Раньше эти действия жили только внутри боковой шторки (drawer) или требовали полной карточки. Теперь весь цикл квалификации и раздачи — в одном месте на доске.</span></div>
+
+    <div class="tip-strip" style="background:var(--money-soft);border-color:var(--money)"><span class="ic">⏱</span><span><b>Было:</b> открыть шторку → квалифицировать → распределить (бэкенд сам решает, кому) → отдельно перейти в полную карточку, чтобы прочитать вложения. <b>Стало:</b> 1 разворот карточки на доске — квалифицировать → глянуть документы и AI-выжимку тут же → выбрать продавца руками из списка с загрузкой → поставить срок → передать. Полная карточка нужна, только если нужен глубокий разбор (юр. условия тендера, история).</span></div>
+
+    <!-- ═══ КОКПИТ ═══ -->
+    <div class="cockpit">
+      <div class="cockpit-grid">
+
+        <!-- Зона 1 — Заявка и документы -->
+        <div class="zone">
+          <div class="zone-title">Заявка и документы</div>
+
+          <div class="z1-head">
+            <div class="lead-id">
+              <span class="chan-ic" style="background:var(--violet-ink)">🏛</span>
+              <div>
+                <h3>ЛИД‑0142</h3>
+                <div class="meta">ЗАО «Белтехмонтаж» · г. Минск · возраст 2 ч</div>
+              </div>
+            </div>
+            <button class="closex" title="Закрыть кокпит">×</button>
+          </div>
+
+          <dl class="kv">
+            <dt>Контакт</dt><dd>Ковалёв Андрей Петрович</dd>
+            <dt>Телефон</dt><dd>+375 29 644-21-08</dd>
+            <dt>E-mail</dt><dd>a.kovalev@beltm.by</dd>
+            <dt>УНП</dt><dd>190455321 <span class="tag-mdm">MDM</span></dd>
+          </dl>
+
+          <div class="msg-box">
+            <div class="lbl">Обращение (из тендерной заявки)</div>
+            «Просим предоставить КП на поставку датчиков давления (30&nbsp;шт) и частотных преобразователей (12&nbsp;шт)
+            согласно приложенной спецификации. Срок поставки — 30 дней.»
+          </div>
+
+          <div class="docs-title"><span class="star-new">★</span><span class="txt">Документы заявки</span><span class="badge-new"><span class="dot"></span>НОВОЕ</span></div>
+
+          <div class="doc-strip" id="docStrip">
+            <div class="doc-chip on" data-doc="0" data-name="Техническое_задание.pdf">
+              <div class="dc-top">📄 <span>Техническое_задание.pdf</span></div>
+              <div class="dc-size">240 КБ</div>
+              <span class="doc-src tender">с тендера</span>
+            </div>
+            <div class="doc-chip" data-doc="1" data-name="Спецификация_позиции.xlsx">
+              <div class="dc-top">📊 <span>Спецификация_позиции.xlsx</span></div>
+              <div class="dc-size">48 КБ</div>
+              <span class="doc-src tender">с тендера</span>
+            </div>
+            <div class="doc-chip" data-doc="2" data-name="Письмо_контрагента.docx">
+              <div class="dc-top">📝 <span>Письмо_контрагента.docx</span></div>
+              <div class="dc-size">30 КБ</div>
+              <span class="doc-src mail">с почты</span>
+            </div>
+            <div class="doc-chip" data-doc="3" data-name="Скан_печати.jpg">
+              <div class="dc-top">🖼 <span>Скан_печати.jpg</span></div>
+              <div class="dc-size">610 КБ</div>
+              <span class="doc-src mail">с почты</span>
+            </div>
+          </div>
+
+          <div class="doc-preview">
+            <div class="dp-name">📄 <span id="docPreviewName">Техническое_задание.pdf</span></div>
+            <div class="dp-line w1"></div>
+            <div class="dp-line w2"></div>
+            <div class="dp-line w3"></div>
+            <div class="dp-line w4"></div>
+            <button class="dp-open">Открыть в просмотрщике</button>
+          </div>
+
+          <div class="ai-extract">
+            <div class="aix-head">🤖 Из ТЗ</div>
+            30 датчиков давления (0–16 бар), 12 ЧП (до 15 кВт), срок 30 дней, ориент. бюджет ~180 000 Br, поставка на объект в Минске. Требуется сертификат СТБ.
+            <div class="aix-model">извлечено: Sonnet (разбор PDF/xlsx)</div>
+          </div>
+        </div>
+
+        <!-- Зона 2 — AI-копилот -->
+        <div class="zone">
+          <div class="zone-title">AI-копилот квалификатора</div>
+
+          <div class="ai-panel">
+            <div class="ai-panel-head"><b>🤖 AI-копилот</b><span>(за фичефлагом AIOS_AI_ENABLED)</span></div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt">🔥 <b>Горячий лид</b> — вердикт: ЦЕЛЕВОЙ, 82/100</div>
+                <span class="model-pill rules">правила</span>
+              </div>
+              <div class="ai-item-sub">оракул: балл score_lead, без LLM</div>
+            </div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt"><b>Ключевые факты:</b> датчики давления ×30, ЧП ×12, срок 30 дн, бюджет ~180k Br</div>
+                <span class="model-pill sonnet">Sonnet + JSON-схема</span>
+              </div>
+              <div class="ai-item-sub">извлечение из документа</div>
+            </div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt">Похоже на <b>тендер под проектную воронку</b></div>
+                <span class="model-pill rules">правила</span>
+              </div>
+              <div class="ai-item-sub">оракул: choose_funnel</div>
+            </div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt">Рекомендую продавца: <b>Пётр Смирнов</b> (спец по КИПиА, Минск, загрузка 4/10)</div>
+                <span class="model-pill rules">правила + справочник</span>
+              </div>
+              <div class="ai-item-sub">гео/продукт/загрузка — детерминированный матч</div>
+            </div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt">Черновик уточнения клиенту</div>
+                <span class="model-pill sonnet">Sonnet</span>
+              </div>
+              <div class="ai-item-sub">текст клиенту, тон важен — человек вычитывает</div>
+              <button class="ai-mini-btn">✍️ Сгенерировать письмо</button>
+            </div>
+
+            <div class="ai-item">
+              <div class="ai-item-top">
+                <div class="ai-item-txt">Следующее действие: <b>запросить недостающую позицию — марку ЧП</b></div>
+                <span class="model-pill sonnet">Sonnet</span>
+              </div>
+            </div>
+
+            <div class="ai-footnote">Тяжёлый разбор (юр. условия тендера, риски, маржинальность) — не здесь, а в полной карточке на Opus.</div>
+          </div>
+        </div>
+
+        <!-- Зона 3 — действия -->
+        <div class="zone">
+          <div class="zone-title">Действия квалификатора</div>
+
+          <div class="actions">
+            <button class="abtn outline"><span class="aicon">📞</span>Позвонить</button>
+
+            <div class="a-block">
+              <button class="abtn" style="border:none;background:none;padding:0"><span class="aicon">✉️</span>Написать <span class="badge-new" style="margin-left:auto"><span class="dot"></span>НОВОЕ</span></button>
+              <div class="chan-pick" id="writeChanPick">
+                <button class="pill-tgl on" data-chan="email">E-mail</button>
+                <button class="pill-tgl" data-chan="telegram">Telegram</button>
+                <button class="pill-tgl" data-chan="whatsapp">WhatsApp</button>
+              </div>
+              <div class="a-sub" style="margin-left:0;margin-top:7px">ответ в канал обращения</div>
+            </div>
+
+            <button class="abtn"><span class="aicon">❓</span>Запросить уточнение <span class="badge-new" style="margin-left:auto"><span class="dot"></span>НОВОЕ</span></button>
+            <div class="a-sub">AI подготовит письмо о недостающих данных</div>
+
+            <div class="divider-lbl">Квалификация</div>
+            <button class="abtn outline"><span class="aicon">✅</span>Квалифицировать</button>
+            <div class="a-sub">балл/вердикт уже посчитаны — 82/100 · ЦЕЛЕВОЙ</div>
+
+            <div class="a-block">
+              <button class="abtn danger-ln" style="border:none;background:none;padding:0"><span class="aicon">⛔</span>Отклонить <span class="badge-new" style="margin-left:auto"><span class="dot"></span>НОВОЕ</span></button>
+              <select class="reason-select">
+                <option>не наш профиль</option>
+                <option>нет бюджета</option>
+                <option>дубль</option>
+                <option>конкурент</option>
+              </select>
+            </div>
+
+            <div class="divider-lbl"><span class="with-new">Раздача продавцу <span class="badge-new"><span class="dot"></span>НОВОЕ — сейчас авто-чёрный-ящик</span></span></div>
+
+            <div class="a-block" id="salesPicker">
+              <div class="picker-list">
+                <label class="picker-row on" data-seller="petr">
+                  <input type="radio" name="seller" checked>
+                  <div class="pr-body">
+                    <div class="pr-top"><span class="pr-name">Пётр Смирнов</span><span class="ai-star">⭐ AI</span></div>
+                    <div class="pr-meta">КИПиА · Минск · загрузка 4/10</div>
+                    <div class="load-bar"><span style="width:40%"></span></div>
+                  </div>
+                </label>
+                <label class="picker-row" data-seller="olga">
+                  <input type="radio" name="seller">
+                  <div class="pr-body">
+                    <div class="pr-top"><span class="pr-name">Ольга Ткачук</span></div>
+                    <div class="pr-meta">Электромонтаж · Минск · загрузка 7/10</div>
+                    <div class="load-bar"><span style="width:70%"></span></div>
+                  </div>
+                </label>
+                <label class="picker-row" data-seller="igor">
+                  <input type="radio" name="seller">
+                  <div class="pr-body">
+                    <div class="pr-top"><span class="pr-name">Игорь Дубров</span></div>
+                    <div class="pr-meta">Насосы · Гомель · загрузка 2/10</div>
+                    <div class="load-bar"><span style="width:20%"></span></div>
+                  </div>
+                </label>
+              </div>
+
+              <div class="divider-lbl" style="margin-top:11px">Воронка</div>
+              <div class="funnel-pick" id="funnelPick">
+                <button class="pill-tgl" data-fn="new">Новый</button>
+                <button class="pill-tgl" data-fn="regular">Постоянный</button>
+                <button class="pill-tgl on" data-fn="project">Проект</button>
+                <button class="pill-tgl" data-fn="tender">Тендер</button>
+              </div>
+
+              <div class="divider-lbl" style="margin-top:11px"><span class="with-new">Следующий шаг продавцу <span class="badge-new"><span class="dot"></span>НОВОЕ</span></span></div>
+              <div class="next-step-fld">
+                <input type="datetime-local" value="2026-07-05T10:00">
+                <textarea placeholder="Заметка...">прозвонить, уточнить марку ЧП</textarea>
+              </div>
+            </div>
+
+            <button class="abtn primary"><span class="aicon">🤝</span>Распределить выбранному</button>
+            <div class="a-sub">назначит Петра, воронка «Проект», поставит срок</div>
+
+            <div class="divider-lbl">&nbsp;</div>
+            <button class="abtn money"><span class="aicon">⚡</span>В сделку</button>
+            <div class="a-sub">создаст сделку CRM-LEAD-0142, перенесёт позиции и файлы</div>
+
+            <a href="#" class="open-full">Открыть полную карточку лида →<span class="sub2">для глубокого анализа: вся переписка, история, юр. проверка</span></a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ СЕКЦИЯ B ═══════════════ -->
+  <section class="sec-block" id="secB">
+    <div class="sec-head">
+      <h2>B. Как AI-функции кокпита раскладываются по моделям</h2>
+      <span class="sec-sub">экономия + качество</span>
+    </div>
+    <div class="sec-intro">Принцип из canon MODEL-TIERING: качество там, где цена ошибки высока; экономия — на механике. Есть дешёвый оракул / результат легко проверить → Sonnet или ниже. Нет оракула, деньги/обязательства → Opus. В проде это ставится в единый LLMGateway.complete(kind=…) — точка тиринг-роутинга уже спроектирована, правило маппинга надо добавить.</div>
+
+    <div class="tier-scroll">
+      <table class="tier-tbl">
+        <thead><tr><th style="width:30%">AI-функция</th><th style="width:18%">Модель/тир</th><th>Почему</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="fn">Скоринг «горячий/холодный» (само число)</td>
+            <td><span class="model-pill rules">правила</span></td>
+            <td class="why">Оракул уже есть: детерминированный движок score_lead, балл по заполненности профиля и каналу. LLM тут не решает.</td>
+          </tr>
+          <tr>
+            <td class="fn">Объяснение скоринга текстом</td>
+            <td><span class="model-pill sonnet">Sonnet</span></td>
+            <td class="why">Генеративный текст малой сложности, дёшево проверяем. Так уже сделано в modules/leads/ai.py (kind="qualify").</td>
+          </tr>
+          <tr>
+            <td class="fn">Извлечение полей из письма/заявки (кол-во, сроки, контакты)</td>
+            <td><span class="model-pill sonnet">Sonnet + JSON-схема</span></td>
+            <td class="why">Структурное извлечение; качество даёт не модель, а валидация по схеме — при провале retry/эскалация. Шаблон — connectors/insights.py.</td>
+          </tr>
+          <tr>
+            <td class="fn">Разбор тендерного PDF/XLSX (ТЗ, позиции, сроки, бюджет)</td>
+            <td><span class="model-pill sonnet">Sonnet + JSON-схема</span></td>
+            <td class="why">Длинный документ, нужна аккуратность; гейт = схема, цена ошибки средняя.</td>
+          </tr>
+          <tr>
+            <td class="fn">Рекомендация продавца (матч гео/продукт/загрузка) + выбор воронки</td>
+            <td><span class="model-pill rules">правила</span></td>
+            <td class="why">Справочник + пороги (route_lead/choose_funnel уже есть). LLM не нужен, локально и мгновенно.</td>
+          </tr>
+          <tr>
+            <td class="fn">Черновик уточняющего письма клиенту</td>
+            <td><span class="model-pill sonnet">Sonnet + human-in-the-loop</span></td>
+            <td class="why">Текст наружу; человек вычитывает перед отправкой (дешёвый оракул). Никогда не автослать.</td>
+          </tr>
+          <tr>
+            <td class="fn">Суммаризация переписки/истории лида</td>
+            <td><span class="model-pill sonnet">Sonnet</span></td>
+            <td class="why">Сжатие, риск низкий (kind="summary").</td>
+          </tr>
+          <tr>
+            <td class="fn">Глубокий разбор тендера: юр.условия, штрафы, риски, маржинальность</td>
+            <td><span class="model-pill opus">Opus</span></td>
+            <td class="why">Деньги и обязательства, нет дешёвого оракула. Только в полной карточке, по кнопке, не в потоке. В кокпите Opus НЕ нужен.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tier-cards">
+      <div class="tier-card"><div class="tc-fn">Скоринг «горячий/холодный»</div><span class="model-pill rules">правила</span><div class="tc-why">Оракул уже есть: score_lead. LLM тут не решает.</div></div>
+      <div class="tier-card"><div class="tc-fn">Объяснение скоринга текстом</div><span class="model-pill sonnet">Sonnet</span><div class="tc-why">Малая сложность, дёшево проверяем (kind="qualify").</div></div>
+      <div class="tier-card"><div class="tc-fn">Извлечение полей из письма/заявки</div><span class="model-pill sonnet">Sonnet + JSON-схема</span><div class="tc-why">Валидация по схеме, retry/эскалация при провале.</div></div>
+      <div class="tier-card"><div class="tc-fn">Разбор тендерного PDF/XLSX</div><span class="model-pill sonnet">Sonnet + JSON-схема</span><div class="tc-why">Длинный документ, гейт = схема.</div></div>
+      <div class="tier-card"><div class="tc-fn">Рекомендация продавца + воронка</div><span class="model-pill rules">правила</span><div class="tc-why">Справочник + пороги, локально и мгновенно.</div></div>
+      <div class="tier-card"><div class="tc-fn">Черновик уточняющего письма</div><span class="model-pill sonnet">Sonnet + human-in-the-loop</span><div class="tc-why">Человек вычитывает перед отправкой.</div></div>
+      <div class="tier-card"><div class="tc-fn">Суммаризация переписки</div><span class="model-pill sonnet">Sonnet</span><div class="tc-why">Сжатие, риск низкий.</div></div>
+      <div class="tier-card"><div class="tc-fn">Глубокий разбор тендера (юр/риски/маржа)</div><span class="model-pill opus">Opus</span><div class="tc-why">Деньги и обязательства, нет оракула. Только в полной карточке.</div></div>
+    </div>
+
+    <div class="tier-callout"><b>Вывод:</b> в самом кокпите Opus не нужен: почти всё — детерминированные правила (оракул) + Sonnet под гейтом (JSON-схема для извлечения, human-in-the-loop для писем клиенту). Opus держим на редкий тяжёлый разбор тендера в полной карточке. Это и есть экономия: локальная qwen/правила на потоке, Sonnet точечно, Opus почти никогда.</div>
+
+    <div class="tier-howbuilt"><b>Как собран этот анализ (та же дисциплина):</b> разведку кода (бэк лидов, фронт, интейк, канон тиринга) вели 4 параллельных агента на Sonnet — дёшево и проверяемо. РОП-синтез, дизайн-решения и раскладку по моделям держал Opus — высокая цена ошибки. Сборку HTML по готовому спеку (оракул — дословные токены эталона) сделал Sonnet.</div>
+  </section>
+
+  <!-- ═══════════════ СЕКЦИЯ C ═══════════════ -->
+  <section class="sec-block" id="secC">
+    <div class="sec-head">
+      <h2>C. Что уже работает / чего не хватает</h2>
+    </div>
+
+    <div class="astobe-grid">
+      <div>
+        <div class="ab-col-head">✅ Уже есть</div>
+        <div class="ab-list">
+          <div class="ab-item has"><span class="dot"></span>Канбан лидов из 5 колонок (без drag&amp;drop)</div>
+          <div class="ab-item has"><span class="dot"></span>Боковая шторка-превью лида (LeadDrawerPreview) по клику</div>
+          <div class="ab-item has"><span class="dot"></span>Квалификация одним POST (скоринг + AI-обоснование за фичефлагом)</div>
+          <div class="ab-item has"><span class="dot"></span>Авто-распределение по правилам (route_lead: гео/продукт/нагрузка)</div>
+          <div class="ab-item has"><span class="dot"></span>Конвертация в сделку (через событие leads.lead.converted → sales создаёт Deal)</div>
+          <div class="ab-item has"><span class="dot"></span>Окно звонка с УНП-резолвом и подбором товара со склада (общее со сделками)</div>
+        </div>
+      </div>
+      <div>
+        <div class="ab-col-head">🟢 Предлагаю добавить</div>
+        <div class="ab-list">
+          <div class="ab-item new"><span class="dot"></span>Действия прямо на карточке/в раскрытом кокпите, а не только в шторке</div>
+          <div class="ab-item new"><span class="dot"></span><b>Просмотр документов заявки</b> с почты и тендера (сейчас вложения выбрасываются на интейке — нет ни модели, ни API)</div>
+          <div class="ab-item new"><span class="dot"></span><b>Ручной выбор продавца</b> из списка с загрузкой (сейчас route — чёрный ящик, нельзя выбрать конкретного)</div>
+          <div class="ab-item new"><span class="dot"></span>Отклонение лида (rejected) — статус есть в докстринге, кода нет</div>
+          <div class="ab-item new"><span class="dot"></span>«Написать» в канал обращения (email/telegram/whatsapp) + AI-черновик уточнения</div>
+          <div class="ab-item new"><span class="dot"></span>Следующий шаг продавцу (дата+заметка при раздаче) — поля next_step в модели нет</div>
+          <div class="ab-item new"><span class="dot"></span>Бейджи срочности/возраста и «📎 N вложений» на мини-карточке</div>
+          <div class="ab-item new"><span class="dot"></span>Bulk-раздача нескольких лидов разом</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ СЕКЦИЯ D ═══════════════ -->
+  <section class="sec-block" id="secD">
+    <div class="sec-head">
+      <h2>D. Порядок внедрения (html-first → слайсы)</h2>
+    </div>
+
+    <div class="slice-list">
+      <div class="slice-card">
+        <div class="slice-num">0</div>
+        <div class="slice-body">
+          <div class="st">Слайс 0 (сначала!) — починить интейк</div>
+          Долг xfail: modules/leads НЕ подписан на <code>intake.lead.received</code> → лиды с сайта/почты физически не создаются. Без этого «раздача из канбана» работает только с ручными/звонковыми лидами.
+          <span class="who">бэк, Sonnet; событие-контракт свериться — Opus</span>
+        </div>
+      </div>
+      <div class="slice-card">
+        <div class="slice-num">1</div>
+        <div class="slice-body">
+          <div class="st">Слайс 1 — кокпит на доске (фронт)</div>
+          Раскрытая краткая карточка + действия из неё. Порт из этого макета. Переиспользовать LeadDrawerPreview, Button, StatusBadge, ScoreBadge, ChannelIcon.
+          <span class="who">Sonnet</span>
+        </div>
+      </div>
+      <div class="slice-card">
+        <div class="slice-num">2</div>
+        <div class="slice-body">
+          <div class="st">Слайс 2 — документы лида (greenfield, проектировать с нуля)</div>
+          Сейчас нет ни модели вложения, ни парс-библиотек, ни IMAP — email-webhook читает только from/subject/text, тендер-площадки нет (сознательно отложено). Нужно: модель LeadAttachment (storage_path/mime_type/parsed_text/source) + storage + upload/list API; интейк почты перестаёт выбрасывать multipart-вложения; коннектор площадки (icetrade/goszakupki) отдельно. AI-выжимку строить по образцу connectors/insights.py (LLM→строгий JSON). Полоса документов + выжимка.
+          <span class="who">схема/миграция/контракт — Opus, парсер+UI — Sonnet</span>
+        </div>
+      </div>
+      <div class="slice-card">
+        <div class="slice-num">3</div>
+        <div class="slice-body">
+          <div class="st">Слайс 3 — ручная раздача</div>
+          Эндпоинт assign {salesperson_id}; assigned_to → FK на пользователя; GET managers из справочника с реальной загрузкой (учесть и sales.deal, не только leads). Пикер продавца.
+          <span class="who">бэк — Opus на FK/контракт, UI — Sonnet</span>
+        </div>
+      </div>
+      <div class="slice-card">
+        <div class="slice-num">4</div>
+        <div class="slice-body">
+          <div class="st">Слайс 4 — отклонение + следующий шаг</div>
+          Статус rejected + причина; поле next_step/next_step_at.
+          <span class="who">Sonnet</span>
+        </div>
+      </div>
+      <div class="slice-card">
+        <div class="slice-num">5</div>
+        <div class="slice-body">
+          <div class="st">Слайс 5 — AI-копилот на тиринге</div>
+          Расширить LLMGateway маппингом kind→модель; функции: извлечение, разбор тендера, черновик письма, суммаризация.
+          <span class="who">роутер-контракт — Opus, функции — Sonnet</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="debt-box">
+      <div class="db-head">Бэкенд-долги, вскрытые анализом</div>
+      <ul>
+        <li>xfail-интейк (см. слайс 0)</li>
+        <li>Разрыв контракта событий: marketing слушает <code>sales.lead.received</code>, а leads шлёт <code>leads.lead.received</code> → UTM-атрибуция новых лидов не срабатывает</li>
+        <li>MANAGERS зашиты в коде (3 персоны), не из справочника</li>
+        <li>assigned_to — строка, не FK; RBAC на роутах ещё не применяется</li>
+        <li>Мёртвый пустой leads_router в modules/sales</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// документы: переключение превью
+document.querySelectorAll('.doc-chip').forEach(function(chip){
+  chip.addEventListener('click', function(){
+    document.querySelectorAll('.doc-chip').forEach(function(c){ c.classList.remove('on'); });
+    chip.classList.add('on');
+    document.getElementById('docPreviewName').textContent = chip.getAttribute('data-name');
+  });
+});
+
+// канал письма
+document.querySelectorAll('#writeChanPick .pill-tgl').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('#writeChanPick .pill-tgl').forEach(function(b){ b.classList.remove('on'); });
+    btn.classList.add('on');
+  });
+});
+
+// воронка
+document.querySelectorAll('#funnelPick .pill-tgl').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('#funnelPick .pill-tgl').forEach(function(b){ b.classList.remove('on'); });
+    btn.classList.add('on');
+  });
+});
+
+// пикер продавца
+document.querySelectorAll('#salesPicker .picker-row').forEach(function(row){
+  row.addEventListener('click', function(e){
+    document.querySelectorAll('#salesPicker .picker-row').forEach(function(r){ r.classList.remove('on'); r.querySelector('input').checked=false; });
+    row.classList.add('on');
+    row.querySelector('input').checked = true;
+  });
+});
+
+// клик по мини-карточке лида — демо-скролл к кокпиту (карточка уже "раскрыта" статически)
+document.querySelectorAll('.mcard').forEach(function(card){
+  card.addEventListener('click', function(){
+    document.querySelector('.cockpit').scrollIntoView({behavior:'smooth', block:'center'});
+  });
+});
+</script>
+</body>
+</html>

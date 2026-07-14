@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Лидоруб · Планирование лидов — согласование с РОП</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Токены сиблингов rop-planning-*-preview.html (brand/canvas/ink/muted/shadow-card) — 1:1,
+    // но переведены на CSS-переменные (:root / .dark), чтобы добавить тёмную тему D по DESIGN.md,
+    // ничего не выкидывая из светлой C. Тоггл — кнопка в шапке (localStorage + prefers-color-scheme).
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            canvas:  "rgb(var(--canvas) / <alpha-value>)",
+            surface: "rgb(var(--surface) / <alpha-value>)",
+            ink:     "rgb(var(--ink) / <alpha-value>)",
+            muted:   "rgb(var(--muted) / <alpha-value>)",
+            brand: {
+              DEFAULT: "rgb(var(--brand) / <alpha-value>)",
+              100: "rgb(var(--brand-soft) / <alpha-value>)",
+              600: "rgb(var(--brand) / <alpha-value>)",
+            },
+          },
+          boxShadow: { card: "0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04)" },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root {
+      --canvas: 246 247 249;   /* #f6f7f9 — как в сиблингах */
+      --surface: 255 255 255;
+      --ink: 15 23 42;
+      --muted: 100 116 139;
+      --brand: 37 99 235;      /* #2563eb — как в сиблингах */
+      --brand-soft: 219 234 254;
+    }
+    .dark {
+      /* Значения темы D из frontend/src/app/globals.css (единый источник истины тёмной темы) */
+      --canvas: 14 17 22;      /* #0E1116 */
+      --surface: 23 27 34;     /* #171B22 */
+      --ink: 232 234 237;      /* #E8EAED */
+      --muted: 155 163 174;    /* #9BA3AE */
+      --brand: 110 139 255;    /* #6E8BFF */
+      --brand-soft: 35 42 61;  /* #232A3D */
+    }
+    body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    input[type=number]{width:100%}
+    input, select, textarea { background: rgb(var(--surface)); color: rgb(var(--ink)); }
+    .card { border-radius:1rem; background: rgb(var(--surface)); box-shadow:0 1px 3px rgba(15,23,42,.06),0 1px 2px rgba(15,23,42,.04); }
+    .dark .card { box-shadow:none; border:1px solid rgb(255 255 255 / .08); }
+    .subcard { border-radius:.75rem; border:1px solid rgb(226 232 240); background: rgb(248 250 252); }
+    .dark .subcard { border-color: rgb(255 255 255 / .1); background: rgb(255 255 255 / .04); }
+    .field { border-radius:.5rem; border:1px solid rgb(203 213 225); padding:.375rem .75rem; }
+    .dark .field { border-color: rgb(255 255 255 / .15); }
+    .hair { border-color: rgb(226 232 240); }
+    .dark .hair { border-color: rgb(255 255 255 / .1); }
+    .metalabel { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; color:#94a3b8; }
+    .dark .metalabel { color:#7c8797; }
+  </style>
+</head>
+<body class="bg-canvas text-ink transition-colors">
+  <!-- ⚠️ Автономный офлайн-мокап «Планирование лидов» для лидоруба (спец по лидам).
+       Sibling-каркас скопирован 1:1 из rop-planning-soglasovanie-preview.html (шапка/вкладки/токены/
+       карточки). Верхний уровень воронки: цель по выручке → реверс до сырых лидов, питает
+       /crm/deals/planning (месячный план продаж), сам план НЕ дублирует. Демо-данные — металлопрокат,
+       BYN, честные заглушки. -->
+
+  <div class="mx-auto max-w-[1220px] space-y-4 p-6">
+
+    <!-- Заголовок -->
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-bold text-ink">Планирование лидов</h1>
+        <p class="mt-1 text-sm text-muted max-w-[760px]">
+          Обратная воронка от цели по выручке (план продаж) до сырых лидов по каналам. Собери план,
+          обоснуй допущения и отправь РОПу на согласование. Валюта — BYN.
+        </p>
+      </div>
+      <button id="themeToggle" class="shrink-0 rounded-full bg-surface px-3 py-1.5 text-[13px] font-semibold text-muted shadow-card hover:text-brand-600" title="Переключить тему">
+        <span id="themeIcon">🌙</span> <span id="themeLabel">Тёмная</span>
+      </button>
+    </div>
+
+    <!-- Вкладки: Собрать / Согласование (как /crm/deals/planning) -->
+    <div class="flex flex-wrap gap-1.5 text-[13px]">
+      <button id="tabBuildBtn" class="rounded-full px-3 py-1.5 font-semibold"></button>
+      <button id="tabApproveBtn" class="rounded-full px-3 py-1.5 font-semibold"></button>
+    </div>
+
+    <!-- Переключатель роли (демо обеих сторон согласования в одном мокапе) -->
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Роль:</span>
+      <div class="inline-flex gap-1 rounded-full bg-slate-100 dark:bg-white/10 p-1">
+        <button id="roleLeadBtn" class="rounded-full px-3 py-1.5 text-[13px] font-semibold">Я — лидоруб (Кирилл Мазур)</button>
+        <button id="roleRopBtn" class="rounded-full px-3 py-1.5 text-[13px] font-semibold">Я — РОП (Дмитрий Волков)</button>
+      </div>
+    </div>
+
+    <!-- ======================= ПАНЕЛЬ ЛИДОРУБА ======================= -->
+    <div id="leadPanel" class="space-y-4">
+
+      <!-- Решение РОПа (обратный канал) -->
+      <section id="ropDecision" class="rounded-2xl border p-4 text-sm"></section>
+
+      <!-- Шапка: период + статус + действия -->
+      <div class="card flex flex-wrap items-center justify-between gap-3 p-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="periodSel" class="field text-[13px] font-semibold">
+            <option>Июль 2026</option>
+            <option>Август 2026</option>
+            <option>Июнь 2026</option>
+          </select>
+          <span id="statusBadge"></span>
+          <span id="roundBadge" class="hidden text-[11px] font-medium text-muted"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="saveDraftBtn" class="rounded-lg bg-surface px-3 py-1.5 text-[13px] font-semibold text-muted shadow-card ring-1 ring-black/5 dark:ring-white/10 hover:text-brand-600">Сохранить черновик</button>
+          <button id="submitBtn" class="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-semibold text-white shadow-card hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Отправить РОПу на согласование</button>
+        </div>
+      </div>
+      <div id="gateNote" class="hidden -mt-2 text-[12px] font-medium text-amber-600"></div>
+
+      <!-- Подсказка: когда составлять план -->
+      <div class="rounded-xl subcard px-4 py-2.5 text-[12.5px] text-muted leading-relaxed">
+        🗓 <b class="text-ink">Когда составлять:</b> до <b class="text-ink">28 числа</b> текущего месяца — оставьте РОПу 3 дня на согласование, чтобы к 1-му числу план был утверждён и источники запущены.
+        Дальше: <b class="text-ink">каждую неделю</b> сверяйте факт с планом (просадка больше 15% → подайте корректировку сразу, не ждите конца месяца); <b class="text-ink">раз в квартал</b> пересчитывайте проценты по свежему факту.
+      </div>
+
+      <!-- Блок 2: Якорь — цель по выручке из плана продаж -->
+      <section class="card p-5">
+        <div class="metalabel">Якорь расчёта · цель по выручке (из плана продаж)</div>
+        <div class="mt-1 text-[11.5px] text-muted">Отсюда берётся цель по деньгам на месяц. Она задаётся в плане продаж — здесь её менять нельзя, только видно.</div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+          <div class="subcard p-3">
+            <div class="metalabel">Цель выручки, BYN/мес</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="revenueGoalOut">1 200 000</div>
+            <div class="mt-1 text-[11px] text-muted">
+              источник: <span class="font-mono">план продаж</span> ·
+              <a href="rop-planning-preview.html" class="text-brand-600 hover:underline">/crm/deals/planning ↗</a>
+            </div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Средний чек, BYN</div>
+            <input id="avgCheck" type="number" class="field mt-1 w-full text-sm font-semibold" value="20000" />
+            <div class="mt-1 text-[11px] text-muted">авто из данных продаж, факт 90 дн — можно переопределить</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Из готовых лидов становятся сделкой (в среднем), %</div>
+            <input id="winRate" type="number" step="0.5" class="field mt-1 w-full text-sm font-semibold" value="20" />
+            <div class="mt-1 text-[11px] text-muted">авто из данных продаж, факт 90 дн — можно переопределить</div>
+          </div>
+        </div>
+        <label class="mt-3 flex items-start gap-2 text-[12px] text-muted">
+          <input id="overrideCheck" type="checkbox" class="mt-0.5" />
+          <span>Переопределяю средний чек / долю сделок относительно базовой авто-подстановки — обоснование обязательно ниже.</span>
+        </label>
+        <div id="overrideReasonWrap" class="mt-2 hidden">
+          <textarea id="overrideReason" rows="2" class="field w-full text-sm" placeholder="Почему переопределяю: напр. в июле оптовый контракт даёт средний чек выше обычного..."></textarea>
+        </div>
+      </section>
+
+      <!-- Блок 3: Живой калькулятор обратной воронки -->
+      <section class="card p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="metalabel">Обратная воронка — сколько нужно, чтобы выполнить план (сверху вниз)</div>
+          <div class="mt-1 text-[11.5px] text-muted">Считает, сколько обращений нужно на входе, чтобы выйти на цель по деньгам. Поменяйте проценты — числа пересчитаются сами.</div>
+          <span id="calibWarn" class="hidden inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">⚠ проценты не обновляли &gt;90 дн</span>
+        </div>
+        <div class="mt-3 grid gap-4 lg:grid-cols-[300px_1fr]">
+          <div class="space-y-3 text-sm">
+            <label class="block">
+              <span class="font-medium text-ink">Из тёплых обращений становятся готовыми лидами, %</span>
+              <input id="convMqlSql" type="number" step="0.5" class="field mt-1 w-full" value="14" />
+            </label>
+            <label class="block">
+              <span class="font-medium text-ink">Из сырых обращений проходят проверку и становятся тёплыми, %</span>
+              <input id="convRawMql" type="number" step="0.5" class="field mt-1 w-full" value="35" />
+            </label>
+            <label class="block">
+              <span class="font-medium text-ink">Рабочих дней в месяце</span>
+              <input id="workdays" type="number" class="field mt-1 w-full" value="26" />
+            </label>
+            <div class="text-[11px] text-muted">Проценты взяты из своего факта на <span id="calibDate">02.03.2026</span> (окно ≤90 дн)</div>
+          </div>
+          <div>
+            <div class="space-y-2.5" id="ladder"></div>
+            <div class="mt-3 subcard p-3">
+              <div class="metalabel">Требуемая сумма сделок в работе (Σ КП на месяц)</div>
+              <div class="mt-1 text-lg font-bold text-brand-600" id="requiredPipeline">—</div>
+              <div class="text-[11px] text-muted">= цель выручки ÷ доля сделок; запас воронки <span id="coverageX">—</span> к цели (норма 4–7 раз при доле сделок 15–25%)</div>
+            </div>
+          </div>
+        </div>
+        <p class="mt-3 text-[12px] text-muted">
+          Цель по деньгам → сколько сделок → сколько готовых лидов нужно (делим на долю сделок) →
+          сколько тёплых обращений нужно (делим на конверсию тёплое обращение→готовый лид) →
+          сколько сырых лидов нужно (делим на конверсию сырой→тёплое обращение) → делим на рабочие дни = дневная норма.
+        </p>
+      </section>
+
+      <!-- Блок 4: План сырых лидов по каналам (микс 70/20/10) -->
+      <section class="card p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="metalabel">План сырых лидов по каналам · микс 70/20/10</div>
+          <div class="mt-1 text-[11.5px] text-muted">Разложите нужное число обращений по источникам (сайт, реклама, сарафан…): сколько привести и почему. Итог должен сойтись с калькулятором выше.</div>
+          <span id="channelTotalBadge" class="text-[11px] font-semibold"></span>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+          <table class="w-full min-w-[980px] text-sm">
+            <thead>
+              <tr class="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th class="px-2 py-2 font-semibold">Канал / группа</th>
+                <th class="px-2 py-2 text-right font-semibold">План сырых</th>
+                <th class="px-2 py-2 text-right font-semibold">Конв. →КП</th>
+                <th class="px-2 py-2 text-right font-semibold">Норма рынка</th>
+                <th class="px-2 py-2 text-right font-semibold">Δ п.п.</th>
+                <th class="px-2 py-2 text-right font-semibold">Бюджет BYN</th>
+                <th class="px-2 py-2 text-right font-semibold">Стоимость привлечения</th>
+                <th class="px-2 py-2 text-right font-semibold">Доход к затратам</th>
+                <th class="px-2 py-2 font-semibold">Обоснование</th>
+              </tr>
+            </thead>
+            <tbody id="channelRows" class="divide-y divide-slate-100 dark:divide-white/10"></tbody>
+            <tfoot>
+              <tr class="border-t hair font-bold text-ink">
+                <td class="px-2 py-2">Итого</td>
+                <td class="px-2 py-2 text-right tabular-nums" id="chTotalRaw">—</td>
+                <td colspan="7" class="px-2 py-2 text-[11px] font-normal text-muted" id="chTotalNote">—</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="mt-2 text-[11px] text-muted">
+          Конв. «сырой→КП» — факт по каналу за 90 дн; отличается от агрегата калькулятора (там через тёплое обращение/готовый лид) — методики разные, разрыв в 1–3 п.п. ожидаем.
+          Доход с клиента за всё время — из когортного анализа (12 мес), не пересчитывается от объёма; стоимость привлечения клиента — живая (бюджет ÷ ожид. клиентов канала).
+        </p>
+      </section>
+
+      <!-- Блок 5: Bottom-up ёмкость vs top-down потребность -->
+      <section class="card p-5">
+        <div class="metalabel">Ёмкость лидоруба (снизу вверх, от возможностей отдела) против потребности (сверху вниз, от цели по деньгам)</div>
+        <div class="mt-1 text-[11.5px] text-muted">Сколько обращений лидоруб физически успеет обработать против того, сколько нужно по плану. Если нужно больше — виден разрыв и что с ним делать.</div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+          <div class="subcard p-3">
+            <div class="metalabel">Ёмкость, сырых/день</div>
+            <input id="capPerDay" type="number" class="field mt-1 w-full text-sm font-semibold" value="60" />
+            <div class="mt-1 text-[11px] text-muted">физически при графике работы 9–18, вс выходной</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Коэффициент разгона новичка</div>
+            <select id="rampSel" class="field mt-1 w-full text-sm font-semibold">
+              <option value="1">Опытный сотрудник — 100%</option>
+              <option value="0.6">Новый, нед. 1–2 — 60%</option>
+              <option value="0.8">Новый, нед. 3–4 — 80%</option>
+            </select>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Ёмкость/мес (снизу вверх)</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="capMonthOut">—</div>
+            <div class="text-[11px] text-muted">= ёмкость/день × коэфф. разгона новичка × раб. дни</div>
+          </div>
+        </div>
+        <div id="capacityVerdict" class="mt-3 rounded-xl border border-dashed p-3 text-sm"></div>
+      </section>
+
+      <!-- Блок 6: Сезонная корректировка -->
+      <section class="card p-5">
+        <div class="metalabel">Сезонная корректировка месяца</div>
+        <div class="mt-1 text-[11.5px] text-muted">Поправка на сезон: в одни месяцы спрос выше, в другие ниже — план подстраивается под это.</div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+          <div class="subcard p-3">
+            <div class="metalabel">Строительный сезон (апр–окт), %</div>
+            <input id="seasonBuild" type="number" step="1" class="field mt-1 w-full text-sm font-semibold" value="18" />
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Бюджетный цикл конца года, %</div>
+            <input id="seasonBudget" type="number" step="1" class="field mt-1 w-full text-sm font-semibold" value="0" />
+            <div class="mt-1 text-[11px] text-muted">актуально для ноя–дек, для июля 0</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Итоговый множитель</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="seasonMultOut">—</div>
+          </div>
+        </div>
+        <div class="mt-3 subcard p-3 text-[13px]">
+          <div>План ДО сезонной корректировки (среднегодовой): <b id="seasonBeforeOut">—</b> BYN/мес</div>
+          <div class="mt-0.5">→ × множитель → План ПОСЛЕ (июль): <b id="seasonAfterOut">—</b> BYN/мес</div>
+        </div>
+        <label class="mt-2 block text-[12px]">
+          <span class="font-medium text-ink">Обоснование сезонности</span>
+          <input id="seasonReason" type="text" class="field mt-1 w-full text-sm" value="Прошлый год июль +31% к среднемесячному объёму отгрузок (факт 1С)" />
+        </label>
+      </section>
+
+      <!-- Блок 7: Возврат отложенных лидов -->
+      <section class="card p-5">
+        <div class="metalabel">Возврат отложенных лидов («не сейчас») · отдельно от новых</div>
+        <div class="mt-1 text-[11.5px] text-muted">Клиенты, что сказали «не сейчас». Их периодически возвращают — часть дозревает до покупки почти без затрат на привлечение.</div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-4">
+          <div class="subcard p-3">
+            <div class="metalabel">Отложенных лидов в базе</div>
+            <input id="recycleCount" type="number" class="field mt-1 w-full text-sm font-semibold" value="340" />
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Ожид. конверсия за квартал, %</div>
+            <input id="recycleConv" type="number" step="1" class="field mt-1 w-full text-sm font-semibold" value="18" />
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Частота касаний</div>
+            <div class="mt-1 text-sm font-semibold text-ink">2 нед / 6 нед / квартал</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Σ КП с отложенных / квартал</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="recycleOut">—</div>
+            <div class="text-[11px] text-muted" id="recycleMonthOut">—</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Блок 8: показатели опережающие/итоговые -->
+      <section class="card p-5">
+        <div class="metalabel">Показатели · опережающие (обучение) против итоговых (выполнение)</div>
+        <div class="mt-1 text-[11.5px] text-muted">Опережающие — рычаги, на которые влияете прямо сейчас (для обучения). Итоговые — результат, по нему считают выполнение плана.</div>
+        <div class="mt-3 grid gap-4 lg:grid-cols-2">
+          <div>
+            <div class="text-[11px] font-semibold text-brand-600">ОПЕРЕЖАЮЩИЕ — коучинг, не выполнение</div>
+            <div class="mt-2 space-y-2" id="kpiLeading"></div>
+          </div>
+          <div>
+            <div class="text-[11px] font-semibold text-emerald-600">ИТОГОВЫЕ — расчёт выполнения плана</div>
+            <div class="mt-2 space-y-2" id="kpiLagging"></div>
+          </div>
+        </div>
+        <div class="mt-3 rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2 text-[12px] text-muted">
+          «Число созданных лидов» и «число звонков» — намеренно НЕ показатель эффективности: метрики тщеславия без привязки к деньгам собственника.
+        </div>
+      </section>
+
+      <!-- Блок 9: обоснование верхнего уровня + история согласования -->
+      <section class="card p-5">
+        <div class="metalabel">История согласования</div>
+        <div class="mt-1 text-[11.5px] text-muted">Переписка с РОПом: когда отправили план, что ответил, сколько было кругов правок.</div>
+        <div id="approvalHistory" class="mt-3 space-y-2 text-sm"></div>
+        <div id="escalationBox" class="mt-3 hidden rounded-xl border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 p-3 text-sm"></div>
+      </section>
+    </div>
+
+    <!-- ======================= ПАНЕЛЬ РОПА ======================= -->
+    <div id="ropPanel" class="hidden space-y-4">
+      <section class="card p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="metalabel">План лидов на согласовании · <span id="ropPeriodLabel">Июль 2026</span></div>
+          <div class="mt-1 text-[11.5px] text-muted">Что видит РОП: план лидоруба и главные цифры. Свои числа он не переписывает — только утверждает или возвращает с замечанием.</div>
+          <span id="ropStatusBadge"></span>
+        </div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-4">
+          <div class="subcard p-3">
+            <div class="metalabel">Сверху вниз (от цели) нужно сырых</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="ropTopDown">—</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Снизу вверх (от возможностей) ёмкость</div>
+            <div class="mt-1 text-lg font-bold text-ink" id="ropBottomUp">—</div>
+          </div>
+          <div class="subcard p-3 border-red-200 dark:border-red-500/30">
+            <div class="metalabel">Дефицит</div>
+            <div class="mt-1 text-lg font-bold text-red-600" id="ropGap">—</div>
+          </div>
+          <div class="subcard p-3">
+            <div class="metalabel">Требуемая сумма сделок в работе</div>
+            <div class="mt-1 text-lg font-bold text-brand-600" id="ropPipeline">—</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card p-5">
+        <div class="metalabel">Флаги проверки</div>
+        <div id="ropFlags" class="mt-3 space-y-2 text-sm"></div>
+      </section>
+
+      <section class="card p-5">
+        <div class="metalabel">Решение РОПа</div>
+        <p class="mt-1 text-[12px] text-muted">РОП не переписывает цифры лидоруба — только утверждает или возвращает с обязательным комментарием.</p>
+        <textarea id="ropComment" rows="3" class="field mt-3 w-full text-sm" placeholder="Комментарий (обязателен при возврате)"></textarea>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button id="ropApproveBtn" class="rounded-lg bg-emerald-600 px-4 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">Утвердить</button>
+          <button id="ropReturnBtn" class="rounded-lg bg-amber-600 px-4 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">Вернуть с правкой</button>
+        </div>
+        <div id="ropGateNote" class="mt-2 hidden text-[12px] font-medium text-amber-600"></div>
+      </section>
+    </div>
+
+    <!-- Легенда состояний -->
+    <div class="rounded-2xl border border-dashed border-slate-300 dark:border-white/15 bg-surface/60 p-4 text-[12px] text-muted">
+      <div class="font-semibold text-slate-600 dark:text-slate-300">Состояния плана (цикл согласования, максимум 2 круга):</div>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-slate-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">черновик</span> лидоруб собирает</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">на согласовании</span> отправлено РОПу</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">согласован</span> план активен</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[11px] font-semibold text-red-600 dark:text-red-300">возвращён</span> комментарий обязателен</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-600">повторно отправлен</span> круг 2</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-flex items-center rounded-full bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300">передача выше</span> к следующему уровню</span>
+      </div>
+    </div>
+
+    <!-- Тост -->
+    <div id="toast" class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink px-4 py-2 text-[13px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-300"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => isFinite(n) ? new Intl.NumberFormat("ru-RU").format(Math.round(n)) : "—";
+    const fmt1 = (n) => isFinite(n) ? new Intl.NumberFormat("ru-RU", {maximumFractionDigits:1}).format(n) : "—";
+
+    // ================= ТЕМА (C светлая / D тёмная) =================
+    const root = document.documentElement;
+    function applyTheme(t) {
+      root.classList.toggle("dark", t === "dark");
+      $("themeIcon").textContent = t === "dark" ? "☀" : "🌙";
+      $("themeLabel").textContent = t === "dark" ? "Светлая" : "Тёмная";
+    }
+    const savedTheme = localStorage.getItem("leadsPlanningTheme")
+      || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    applyTheme(savedTheme);
+
+    $("themeToggle").addEventListener("click", () => {
+      const next = root.classList.contains("dark") ? "light" : "dark";
+      localStorage.setItem("leadsPlanningTheme", next);
+      applyTheme(next);
+    });
+
+    let toastTimer = null;
+    function toast(msg) {
+      const t = $("toast");
+      t.textContent = msg; t.style.opacity = "1";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { t.style.opacity = "0"; }, 2400);
+    }
+
+    // ================= ДАННЫЕ КАНАЛОВ (метаданные фикс, план/бюджет — редактируемые демо-поля) =================
+    const JUST_OPTIONS = ["Конв. по метке источника (90 дн)", "Средняя скорость ответа канала", "Историческая ёмкость", "Средний по отрасли", "Экспертная оценка РОП"];
+    const CHANNELS = [
+      { id:"organic",  name:"Органический сайт / поисковая выдача", bucket:"70", raw:2200, conv:5.8, bench:5.0, budget:8000,  ltv:6800, just:0, text:"Стабильный факт 90 дн, сезонный рост учтён" },
+      { id:"warmbase", name:"Тёплая база (почта, повторные)", bucket:"70", raw:1285, conv:7.5, bench:4.5, budget:3000,  ltv:9200, just:1, text:"Срок ответа на тёплых короче — конверсия выше нормы" },
+      { id:"referral", name:"Сарафан / рекомендации",         bucket:"70", raw:800,  conv:8.0, bench:5.0, budget:2500,  ltv:9800, just:2, text:"Ёмкость канала растёт вслед за базой клиентов" },
+      { id:"paidsearch", name:"Платная реклама (поиск: Директ/Google)",  bucket:"20", raw:824,  conv:3.6, bench:4.5, budget:18000, ltv:4100, just:0, text:"Конверсия просела за 60 дн — под наблюдением" },
+      { id:"b2bshowcase", name:"Отраслевые витрины (для компаний)",      bucket:"20", raw:400,  conv:4.2, bench:4.5, budget:5500,  ltv:5200, just:3, text:"Ориентир по типу площадки, объём ограничен размещением" },
+      { id:"paidsocial", name:"Платная реклама в соцсетях (VK/Instagram*)",  bucket:"10", raw:380,  conv:2.4, bench:3.5, budget:22000, ltv:2600, just:0, text:"Стоимость привлечения выросла — бюджет под пересмотр, не увеличивать" },
+      { id:"aisearch", name:"Переходы из ИИ-поисковиков",             bucket:"10", raw:232,  conv:5.0, bench:null, budget:2000, ltv:5000, just:4, text:"Новый источник, эталона конверсии ещё нет" },
+    ];
+    const BUCKET_LABEL = { "70":"Проверенный · 70%", "20":"Рост · 20%", "10":"Эксперимент · 10%" };
+    const BUCKET_CLS = { "70":"bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+      "20":"bg-brand-100 text-brand-600", "10":"bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300" };
+
+    function renderChannels() {
+      $("channelRows").innerHTML = CHANNELS.map((c, i) => {
+        const kp = c.raw * c.conv/100;
+        const winRate = parseFloat($("winRate").value) || 0;
+        const customers = kp * winRate/100;
+        const cac = customers > 0 ? c.budget / customers : NaN;
+        const ratio = (cac > 0) ? c.ltv / cac : NaN;
+        const delta = c.bench == null ? null : (c.conv - c.bench);
+        const deltaTxt = delta == null ? '<span class="text-slate-400">н/д</span>'
+          : (delta >= 0 ? `<span class="text-emerald-600 dark:text-emerald-400">+${fmt1(delta)}</span>` : `<span class="text-red-600 dark:text-red-400">${fmt1(delta)}</span>`);
+        const flags = [];
+        if (delta != null && delta < -0.3) flags.push('<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">ниже нормы рынка</span>');
+        if (ratio < 3) flags.push('<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">доход к затратам &lt;3 — обоснуй</span>');
+        if (c.id === "paidsocial") flags.push('<span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">стоимость привлечения ↑ 38% / 2 мес → урезать</span>');
+        return `<tr data-idx="${i}">
+          <td class="px-2 py-2.5 align-top">
+            <div class="font-semibold text-ink">${c.name}</div>
+            <span class="mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${BUCKET_CLS[c.bucket]}">${BUCKET_LABEL[c.bucket]}</span>
+            <div class="mt-1 flex flex-wrap gap-1">${flags.join("")}</div>
+          </td>
+          <td class="px-2 py-2.5 align-top text-right">
+            <input data-f="raw" type="number" class="field w-24 text-right text-sm font-semibold" value="${c.raw}" />
+          </td>
+          <td class="px-2 py-2.5 align-top text-right tabular-nums text-ink">${fmt1(c.conv)}%</td>
+          <td class="px-2 py-2.5 align-top text-right tabular-nums text-muted">${c.bench == null ? "—" : fmt1(c.bench)+"%"}</td>
+          <td class="px-2 py-2.5 align-top text-right tabular-nums">${deltaTxt}</td>
+          <td class="px-2 py-2.5 align-top text-right">
+            <input data-f="budget" type="number" class="field w-24 text-right text-sm font-semibold" value="${c.budget}" />
+          </td>
+          <td class="px-2 py-2.5 align-top text-right tabular-nums text-ink">${fmt(cac)}</td>
+          <td class="px-2 py-2.5 align-top text-right tabular-nums font-semibold ${ratio < 3 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}">${fmt1(ratio)}:1</td>
+          <td class="px-2 py-2.5 align-top">
+            <select data-f="just" class="field w-full text-[12px]">
+              ${JUST_OPTIONS.map((o, oi) => `<option value="${oi}" ${oi===c.just?"selected":""}>${o}</option>`).join("")}
+            </select>
+            <input data-f="text" type="text" class="field mt-1 w-full text-[12px]" value="${c.text}" placeholder="обоснование (обязательно)" />
+          </td>
+        </tr>`;
+      }).join("");
+
+      $("channelRows").querySelectorAll("input, select").forEach(el => {
+        el.addEventListener("input", () => {
+          const idx = parseInt(el.closest("tr").dataset.idx, 10);
+          const f = el.dataset.f;
+          if (f === "raw" || f === "budget") CHANNELS[idx][f] = parseFloat(el.value) || 0;
+          if (f === "just") CHANNELS[idx].just = parseInt(el.value, 10);
+          if (f === "text") CHANNELS[idx].text = el.value;
+          recompute();
+        });
+      });
+    }
+
+    function channelsJustified() {
+      return CHANNELS.every(c => c.text && c.text.trim().length > 0);
+    }
+
+    // ================= РЕВЕРС-ВОРОНКА =================
+    const REVENUE_GOAL = 1200000; // якорь из plan_item, read-only
+
+    function ladderRow(label, val, unit) {
+      return `<div class="flex items-center justify-between gap-3 rounded-xl subcard px-3 py-2">
+        <div class="text-sm font-semibold text-ink">${label}</div>
+        <div class="text-lg font-bold text-brand-600">${fmt(val)} <span class="text-[11px] font-normal text-muted">${unit||""}</span></div>
+      </div>`;
+    }
+
+    function computeFunnel() {
+      const avgCheck = parseFloat($("avgCheck").value) || 1;
+      const winRate = parseFloat($("winRate").value) || 1;
+      const convMqlSql = parseFloat($("convMqlSql").value) || 1;
+      const convRawMql = parseFloat($("convRawMql").value) || 1;
+      const deals = REVENUE_GOAL / avgCheck;
+      const sql = deals / (winRate/100);
+      const mql = sql / (convMqlSql/100);
+      const raw = mql / (convRawMql/100);
+      const requiredPipeline = REVENUE_GOAL / (winRate/100);
+      return { avgCheck, winRate, convMqlSql, convRawMql, deals, sql, mql, raw, requiredPipeline };
+    }
+
+    function recompute() {
+      const f = computeFunnel();
+      const workdays = parseFloat($("workdays").value) || 1;
+
+      $("revenueGoalOut").textContent = fmt(REVENUE_GOAL);
+      $("ladder").innerHTML = [
+        ladderRow("Цель выручки", REVENUE_GOAL, "BYN"),
+        ladderRow("Сделок нужно", f.deals, "шт"),
+        ladderRow("Готовых лидов нужно", f.sql, "шт"),
+        ladderRow("Тёплых обращений нужно", f.mql, "шт"),
+        ladderRow("Сырых лидов нужно / мес", f.raw, "шт"),
+        ladderRow("Сырых лидов нужно / раб. день", f.raw/workdays, "шт"),
+      ].join("");
+      $("requiredPipeline").textContent = fmt(f.requiredPipeline) + " BYN";
+      $("coverageX").textContent = (f.requiredPipeline / REVENUE_GOAL).toFixed(1) + " раз";
+
+      // калибровка > 90 дней
+      const calib = new Date(2026, 2, 2); // 02.03.2026
+      const today = new Date(2026, 6, 13);
+      const days = Math.round((today - calib) / 86400000);
+      $("calibWarn").classList.toggle("hidden", days <= 90);
+
+      // каналы (пересчёт CAC/LTV зависит от winRate — уже внутри render)
+      renderChannels_recalcOnly();
+      const totalRaw = CHANNELS.reduce((s,c) => s+c.raw, 0);
+      $("chTotalRaw").textContent = fmt(totalRaw);
+      const gap = totalRaw - f.raw;
+      const within5 = Math.abs(gap) <= f.raw * 0.05;
+      $("channelTotalBadge").innerHTML = within5
+        ? `<span class="inline-flex items-center rounded-full bg-teal-50 dark:bg-teal-500/15 px-2 py-0.5 text-emerald-700 dark:text-teal-300 font-semibold">сходится с калькулятором</span>`
+        : (gap < 0
+          ? `<span class="inline-flex items-center rounded-full bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-red-600 dark:text-red-300 font-semibold">−${fmt(-gap)} до нормы</span>`
+          : `<span class="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-amber-700 dark:text-amber-300 font-semibold">+${fmt(gap)} запас</span>`);
+      $("chTotalNote").textContent = `нужно по калькулятору: ${fmt(f.raw)} · план по каналам: ${fmt(totalRaw)}`;
+
+      // ёмкость vs потребность
+      const capPerDay = parseFloat($("capPerDay").value) || 0;
+      const ramp = parseFloat($("rampSel").value) || 1;
+      const capMonth = capPerDay * ramp * workdays;
+      $("capMonthOut").textContent = fmt(capMonth);
+      const capGap = f.raw - capMonth;
+      const cv = $("capacityVerdict");
+      if (capGap > f.raw * 0.05) {
+        cv.className = "mt-3 rounded-xl border border-dashed p-3 text-sm border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300";
+        cv.innerHTML = `Дефицит <b>${fmt(capGap)}</b> сырых/мес (нужно ${fmt(f.raw)}, ёмкость ${fmt(capMonth)}). Варианты: (а) поднять конверсию сырой→тёплое обращение (35%→50% снижает потребность до ≈${fmt(f.mql/0.5)}); (б) второй лидоруб (+${fmt(capPerDay*workdays)}/мес); (в) скорректировать план продаж вниз пропорционально ёмкости (≈${fmt(REVENUE_GOAL * capMonth / f.raw)} BYN реалистично при текущей ёмкости).`;
+      } else if (capGap < -f.raw * 0.05) {
+        cv.className = "mt-3 rounded-xl border border-dashed p-3 text-sm border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+        cv.innerHTML = `Запас ёмкости +${fmt(-capGap)} сырых/мес — можно взять больше канала «Рост» или подстраховать план.`;
+      } else {
+        cv.className = "mt-3 rounded-xl border border-dashed p-3 text-sm border-teal-300 dark:border-teal-500/40 bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300";
+        cv.innerHTML = `Ёмкость и потребность сходятся (≈${fmt(capMonth)} ≈ ${fmt(f.raw)}).`;
+      }
+
+      // сезонность
+      const sb = (parseFloat($("seasonBuild").value) || 0) / 100;
+      const sc = (parseFloat($("seasonBudget").value) || 0) / 100;
+      const mult = (1+sb) * (1+sc);
+      $("seasonMultOut").textContent = "×" + mult.toFixed(2);
+      const before = REVENUE_GOAL / mult;
+      $("seasonBeforeOut").textContent = fmt(before);
+      $("seasonAfterOut").textContent = fmt(REVENUE_GOAL);
+
+      // возврат отложенных
+      const rc = parseFloat($("recycleCount").value) || 0;
+      const rconv = (parseFloat($("recycleConv").value) || 0) / 100;
+      const recycleWins = rc * rconv;
+      const recycleBYN = recycleWins * f.avgCheck;
+      $("recycleOut").textContent = fmt(recycleBYN) + " BYN";
+      $("recycleMonthOut").textContent = "≈" + fmt(recycleBYN/3) + " BYN/мес (усреднённо)";
+
+      renderKpis(f);
+      updateSubmitGate();
+      if (state.status !== "draft" || true) syncRopPanel(f);
+    }
+
+    function renderChannels_recalcOnly() { /* значения уже в CHANNELS; таблица перерисуется целиком при явном renderChannels() */ }
+
+    // ================= KPI =================
+    function kpiRow(name, target, tone) {
+      return `<div class="subcard flex items-center justify-between gap-2 p-2.5">
+        <div class="text-[13px] text-ink">${name}</div>
+        <div class="text-[12px] font-semibold ${tone}">${target}</div>
+      </div>`;
+    }
+    function renderKpis(f) {
+      $("kpiLeading").innerHTML = [
+        kpiRow("Скорость первого ответа (норматив реакции)", "&lt;5 мин", "text-brand-600"),
+        kpiRow("Конверсия сырой → готовый лид", `≥${(f.convRawMql*f.convMqlSql/100).toFixed(1)}%`, "text-brand-600"),
+        kpiRow("Запас воронки", "4–7 раз", "text-brand-600"),
+      ].join("");
+      $("kpiLagging").innerHTML = [
+        kpiRow("Σ КП, переданных продавцам", fmt(f.requiredPipeline) + " BYN", "text-emerald-600"),
+        kpiRow("Квалиф. лиды → сделка", fmt(f.deals) + " шт", "text-emerald-600"),
+        kpiRow("Доход к затратам по масштаб. каналам", "≥3:1", "text-emerald-600"),
+        kpiRow("Конверсия отложенных / квартал", $("recycleConv").value + "%", "text-emerald-600"),
+      ].join("");
+    }
+
+    // ================= СОСТОЯНИЕ / APPROVAL-LOOP =================
+    const state = { status: "draft", round: 1, ropComments: [], history: [] };
+    const STATUS_META = {
+      draft:       { label:"черновик",              cls:"bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300" },
+      submitted:   { label:"на согласовании",        cls:"bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+      approved:    { label:"согласован",             cls:"bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+      returned:    { label:"возвращён",              cls:"bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300" },
+      resubmitted: { label:"повторно отправлен",     cls:"bg-brand-100 text-brand-600" },
+      escalated:   { label:"передача выше",          cls:"bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300" },
+    };
+    function badge(status) {
+      const m = STATUS_META[status];
+      return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${m.cls}">${m.label}</span>`;
+    }
+    function nowStr() { return "13 июл, " + new Date().getHours().toString().padStart(2,"0") + ":" + new Date().getMinutes().toString().padStart(2,"0"); }
+
+    function updateSubmitGate() {
+      const justified = channelsJustified();
+      const overrideOk = !$("overrideCheck").checked || $("overrideReason").value.trim().length > 0;
+      const canSubmit = justified && overrideOk && ["draft","returned"].includes(state.status);
+      $("submitBtn").disabled = !canSubmit;
+      $("submitBtn").textContent = state.status === "returned" ? "Отправить повторно" : "Отправить РОПу на согласование";
+      const noteEl = $("gateNote");
+      if (!justified) {
+        noteEl.textContent = "Заполни обоснование по каждому каналу (колонка «Обоснование») — без него отправка заблокирована.";
+        noteEl.classList.remove("hidden");
+      } else if (!overrideOk) {
+        noteEl.textContent = "Ты переопределил средний чек/долю сделок — укажи причину.";
+        noteEl.classList.remove("hidden");
+      } else {
+        noteEl.classList.add("hidden");
+      }
+    }
+
+    function renderStatusUi() {
+      $("statusBadge").innerHTML = badge(state.status);
+      $("roundBadge").classList.toggle("hidden", state.round < 2);
+      $("roundBadge").textContent = state.round >= 2 ? `круг ${state.round} из 2` : "";
+      $("saveDraftBtn").disabled = !["draft","returned"].includes(state.status) && state.status !== "draft";
+
+      const dec = $("ropDecision");
+      let cls = "rounded-2xl border p-4 text-sm ", html = "";
+      if (state.status === "approved") {
+        cls += "border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10";
+        html = `<div class="font-semibold text-emerald-700 dark:text-emerald-300">✓ План согласован РОПом</div>
+          <div class="mt-1 text-[13px] text-emerald-700 dark:text-emerald-300">Дмитрий Волков · ${nowStr()}. Целевые Σ КП/сделки переданы в план продаж.</div>`;
+      } else if (state.status === "returned") {
+        cls += "border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10";
+        const last = state.ropComments[state.ropComments.length-1] || "";
+        html = `<div class="font-semibold text-red-700 dark:text-red-300">↩ Возвращён с правкой (круг ${state.round})</div>
+          <div class="mt-1 text-[13px] text-red-700 dark:text-red-300">Комментарий РОП: «${last}»</div>
+          <div class="mt-1 text-[12px] text-red-600 dark:text-red-400">Осталась 1 повторная подача, дальше — передача выше.</div>`;
+      } else if (state.status === "escalated") {
+        cls += "border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/10";
+        html = `<div class="font-semibold text-violet-700 dark:text-violet-300">⇧ Эскалация: 2 круга без согласия</div>
+          <div class="mt-1 text-[13px] text-violet-700 dark:text-violet-300">Расхождение зафиксировано и вынесено в скорборд передач / кокпит РОП для решения выше.</div>`;
+      } else if (state.status === "submitted" || state.status === "resubmitted") {
+        cls += "border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10";
+        html = `<div class="font-semibold text-amber-700 dark:text-amber-300">⏳ Отправлено РОПу · ждёт решения</div>
+          <div class="mt-1 text-[13px] text-amber-700 dark:text-amber-300">Как только РОП согласует или вернёт — увидишь здесь.</div>`;
+      } else {
+        cls += "border-slate-200 dark:border-white/10 bg-surface";
+        html = `<div class="font-semibold text-slate-600 dark:text-slate-300">Черновик</div>
+          <div class="mt-1 text-[13px] text-muted">Собери план, обоснуй строки и отправь РОПу.</div>`;
+      }
+      dec.className = cls; dec.innerHTML = html;
+
+      $("approvalHistory").innerHTML = state.history.length
+        ? state.history.map(h => `<div class="flex items-start gap-2 border-b hair pb-2 last:border-0">
+            <span class="mt-0.5">${badge(h.status)}</span>
+            <div><div class="text-ink">${h.by} · ${h.when}</div>${h.comment ? `<div class="text-[12px] text-muted">«${h.comment}»</div>` : ""}</div>
+          </div>`).join("")
+        : `<div class="text-muted text-[13px]">Пока пусто — история появится после первой отправки.</div>`;
+
+      $("escalationBox").classList.toggle("hidden", state.status !== "escalated");
+      if (state.status === "escalated") {
+        $("escalationBox").innerHTML = `<div class="font-semibold text-red-700 dark:text-red-300">Позиция лидоруба против РОП</div>
+          <div class="mt-1">Лидоруб: план от факта конверсий 90 дн, дефицит ёмкости честно показан.</div>
+          <div class="mt-1">РОП: план продаж 1 200 000 BYN менять не готов, считает конверсии заниженными.</div>
+          <div class="mt-1 text-[12px] text-muted">Требуется решение следующего уровня (владелец/старший РОП).</div>`;
+      }
+    }
+
+    $("overrideCheck").addEventListener("change", () => {
+      $("overrideReasonWrap").classList.toggle("hidden", !$("overrideCheck").checked);
+      updateSubmitGate();
+    });
+    $("overrideReason").addEventListener("input", updateSubmitGate);
+
+    $("saveDraftBtn").addEventListener("click", () => toast("Черновик сохранён"));
+    $("submitBtn").addEventListener("click", () => {
+      if ($("submitBtn").disabled) return;
+      const wasReturned = state.status === "returned";
+      state.status = wasReturned ? "resubmitted" : "submitted";
+      if (wasReturned) state.round = 2;
+      state.history.push({ status: state.status, by:"Кирилл Мазур", when: nowStr(), comment: wasReturned ? "Ответ на комментарий РОП, обновил обоснование" : "" });
+      renderStatusUi();
+      toast(wasReturned ? "Отправлено повторно · круг 2" : "Отправлено РОПу на согласование");
+    });
+
+    // ================= ПАНЕЛЬ РОПА =================
+    function syncRopPanel(f) {
+      $("ropTopDown").textContent = fmt(f.raw);
+      const capMonth = (parseFloat($("capPerDay").value)||0) * (parseFloat($("rampSel").value)||1) * (parseFloat($("workdays").value)||1);
+      $("ropBottomUp").textContent = fmt(capMonth);
+      $("ropGap").textContent = fmt(f.raw - capMonth);
+      $("ropPipeline").textContent = fmt(f.requiredPipeline) + " BYN";
+      $("ropStatusBadge").innerHTML = badge(state.status);
+
+      const flags = [];
+      const days = Math.round((new Date(2026,6,13) - new Date(2026,2,2)) / 86400000);
+      if (days > 90) flags.push(["amber", "Проценты скоринга не обновляли больше 90 дней (" + days + " дн)"]);
+      if (f.raw - capMonth > f.raw*0.05) flags.push(["red", `Дефицит ёмкости: нужно ${fmt(f.raw)}, физически лидоруб потянет ${fmt(capMonth)} — план либо оптимистичен, либо нужен второй лидоруб`]);
+      CHANNELS.forEach(c => {
+        const kp = c.raw*c.conv/100; const winRate = parseFloat($("winRate").value)||0;
+        const cust = kp*winRate/100; const cac = cust>0? c.budget/cust : NaN; const ratio = c.ltv/cac;
+        if (ratio < 3) flags.push(["red", `«${c.name}»: доход к затратам ${fmt1(ratio)}:1 — ниже порога 3:1`]);
+      });
+      if ($("overrideCheck").checked) flags.push(["amber", "Средний чек/доля сделок переопределены вручную: " + ($("overrideReason").value || "без причины!")]);
+      $("ropFlags").innerHTML = flags.length
+        ? flags.map(([tone,msg]) => `<div class="rounded-r-lg border-l-2 ${tone==="red"?"border-red-500 bg-red-50 dark:bg-red-500/10":"border-amber-500 bg-amber-50 dark:bg-amber-500/10"} px-3 py-2 text-[13px] text-ink">${msg}</div>`).join("")
+        : `<div class="text-[13px] text-muted">Флагов нет — план в пределах нормы.</div>`;
+
+      const gateEnabled = ["submitted","resubmitted"].includes(state.status);
+      $("ropApproveBtn").disabled = !gateEnabled;
+      $("ropReturnBtn").disabled = !gateEnabled;
+      [$("ropApproveBtn"), $("ropReturnBtn")].forEach(b => b.classList.toggle("opacity-40", !gateEnabled));
+    }
+
+    $("ropApproveBtn").addEventListener("click", () => {
+      if ($("ropApproveBtn").disabled) return;
+      state.status = "approved";
+      state.history.push({ status:"approved", by:"Дмитрий Волков", when: nowStr(), comment: $("ropComment").value.trim() || "План принят" });
+      renderStatusUi(); recompute();
+      toast("Согласовано");
+    });
+    $("ropReturnBtn").addEventListener("click", () => {
+      if ($("ropReturnBtn").disabled) return;
+      const comment = $("ropComment").value.trim();
+      const note = $("ropGateNote");
+      if (!comment) { note.textContent = "Комментарий обязателен при возврате."; note.classList.remove("hidden"); return; }
+      note.classList.add("hidden");
+      if (state.round >= 2) {
+        state.status = "escalated";
+        state.history.push({ status:"escalated", by:"Дмитрий Волков", when: nowStr(), comment });
+        toast("Второй возврат — передача выше");
+      } else {
+        state.status = "returned";
+        state.ropComments.push(comment);
+        state.history.push({ status:"returned", by:"Дмитрий Волков", when: nowStr(), comment });
+        toast("Возвращено лидорубу с комментарием");
+      }
+      $("ropComment").value = "";
+      renderStatusUi(); recompute();
+    });
+
+    // ================= ВКЛАДКИ / РОЛЬ =================
+    // Один источник истины (без взаимной рекурсии setTab<->setRole — было переполнение стека).
+    function applyRole(role) {
+      const lead = role === "lead";
+      $("tabBuildBtn").className = "rounded-full px-3 py-1.5 font-semibold " + (lead ? "bg-brand text-white shadow-card" : "bg-surface text-slate-500 dark:text-slate-400 shadow-card hover:text-brand-600");
+      $("tabApproveBtn").className = "rounded-full px-3 py-1.5 font-semibold " + (!lead ? "bg-brand text-white shadow-card" : "bg-surface text-slate-500 dark:text-slate-400 shadow-card hover:text-brand-600");
+      $("leadPanel").classList.toggle("hidden", !lead);
+      $("ropPanel").classList.toggle("hidden", lead);
+      $("roleLeadBtn").className = "rounded-full px-3 py-1.5 text-[13px] font-semibold " + (lead ? "bg-brand text-white shadow-card" : "bg-surface text-slate-600 dark:text-slate-300 shadow-card");
+      $("roleRopBtn").className = "rounded-full px-3 py-1.5 text-[13px] font-semibold " + (!lead ? "bg-brand text-white shadow-card" : "bg-surface text-slate-600 dark:text-slate-300 shadow-card");
+      if (!lead) recompute();
+    }
+    $("tabBuildBtn").textContent = "Собрать";
+    $("tabApproveBtn").textContent = "Согласование";
+    $("tabBuildBtn").addEventListener("click", () => applyRole("lead"));
+    $("tabApproveBtn").addEventListener("click", () => applyRole("rop"));
+    $("roleLeadBtn").addEventListener("click", () => applyRole("lead"));
+    $("roleRopBtn").addEventListener("click", () => applyRole("rop"));
+
+    // ================= ИНИЦИАЛИЗАЦИЯ =================
+    ["avgCheck","winRate","convMqlSql","convRawMql","workdays","capPerDay","rampSel","seasonBuild","seasonBudget","recycleCount","recycleConv"]
+      .forEach(id => $(id).addEventListener("input", recompute));
+    renderChannels();
+    recompute();
+    applyRole("lead");
+  </script>
+</body>
+</html>
