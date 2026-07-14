@@ -8,42 +8,34 @@ import {
   deleteDealItem,
   fetchDealItems,
   fetchSkus,
-  fetchStock,
   type SkuOption,
-  type StockRow,
   updateDealItem,
 } from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
-
-/** Маржа позиции «в наличии» из 1С (правило «в наличии → себес и цена из 1С»). */
-function itemMargin(st?: StockRow): { cost: number; pct: number } | null {
-  if (!st || st.cost == null || !st.price) return null;
-  return { cost: st.cost, pct: ((st.price - st.cost) / st.price) * 100 };
-}
+import { COST_SRC_LABEL, fetchDealMargin, type MarginLine, marginBySku } from "@/lib/margin";
 
 export function DealItems({ dealId }: { dealId: string }) {
   const { fmt } = useCurrency(); // цены/себес в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
   const [items, setItems] = useState<DealItemFull[]>([]);
   const [skus, setSkus] = useState<SkuOption[]>([]);
-  const [stock, setStock] = useState<Record<string, StockRow>>({});
+  // Себес/маржа позиций — из ТОГО ЖЕ фасада, что и карточка метрик (GET /sales/deals/{id}/margin),
+  // чтобы цифры и метка источника («из 1С»/«демо»/«из закупок») на одном экране не расходились.
+  const [margin, setMargin] = useState<Map<string, MarginLine>>(new Map());
   const [skuId, setSkuId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
     setItems(await fetchDealItems(dealId));
+    setMargin(marginBySku(await fetchDealMargin(dealId)));
   }
 
   useEffect(() => {
     void fetchDealItems(dealId).then(setItems);
+    void fetchDealMargin(dealId).then((m) => setMargin(marginBySku(m)));
     void fetchSkus().then((s) => {
       setSkus(s);
       if (s.length) setSkuId(s[0].id);
-    });
-    void fetchStock().then((rows) => {
-      const byCode: Record<string, StockRow> = {};
-      for (const r of rows) if (!byCode[r.sku_code]) byCode[r.sku_code] = r;
-      setStock(byCode);
     });
   }, [dealId]);
 
@@ -58,6 +50,7 @@ export function DealItems({ dealId }: { dealId: string }) {
 
   async function onQty(itemId: number, value: number) {
     if (value <= 0) return;
+    // Себес/маржа — на единицу, от количества не зависят → маржу не перезапрашиваем.
     setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, qty: value } : i)));
     await updateDealItem(itemId, value);
   }
@@ -79,7 +72,8 @@ export function DealItems({ dealId }: { dealId: string }) {
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Позиций пока нет</li>}
         {items.map((item) => {
-          const m = itemMargin(stock[item.code]);
+          const ml = margin.get(item.code);
+          const hasCost = ml != null && ml.unit_landed_cost != null;
           return (
           <li key={item.id} className="flex items-center gap-2 rounded-lg bg-sunken px-3 py-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-line-strong" />
@@ -93,12 +87,18 @@ export function DealItems({ dealId }: { dealId: string }) {
                     : ""}
                 </span>
               )}
-              {m ? (
-                <div className="text-[11px] font-semibold text-money">
-                  себес {fmt(m.cost)} · маржа {Math.round(m.pct)}%
+              {hasCost ? (
+                <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] font-semibold text-money">
+                  <span>
+                    себес {fmt(ml!.unit_landed_cost!)}
+                    {ml!.margin_pct != null ? ` · маржа ${Math.round(ml!.margin_pct)}%` : ""}
+                  </span>
+                  {ml!.cost_source != null && (
+                    <span className="font-normal text-faint">· {COST_SRC_LABEL[ml!.cost_source]}</span>
+                  )}
                 </div>
-              ) : stock[item.code] ? (
-                <div className="text-[11px] text-faint">под заказ · себес из предрасчёта</div>
+              ) : ml != null && ml.status === "no_cost" ? (
+                <div className="text-[11px] text-faint">себестоимость не рассчитана</div>
               ) : null}
             </div>
             <input
@@ -150,9 +150,11 @@ export function DealItems({ dealId }: { dealId: string }) {
           <Plus size={16} /> Добавить
         </button>
       </div>
-      {/* Провенанс справочника — пользователь должен видеть, что SKU = MDM-витрина из 1С. */}
+      {/* Провенанс: SKU = MDM-витрина из 1С; себес/маржа — из фасада цены/себеса (та же цифра,
+          что в метриках сделки), не из отдельного расчёта по остаткам. */}
       <div className="mt-1.5 text-[10px] text-faint">
-        номенклатура · справочник из 1С (через MDM); цены last/min — из истории сделок CRM / Price Engine
+        номенклатура · справочник из 1С (через MDM); себес/маржа — из фасада цены/себеса (как в
+        метриках сделки); цены last/мин — из истории сделок CRM / Price Engine
       </div>
     </div>
   );

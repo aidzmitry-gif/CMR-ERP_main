@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useCurrency } from "@/components/kanban/currency-context";
+import { COST_SRC_LABEL, type CostSource, type DealMargin } from "@/lib/margin";
 import { STAGE_PROBABILITY } from "@/lib/sales-stages";
 
 /**
@@ -20,49 +21,6 @@ import { STAGE_PROBABILITY } from "@/lib/sales-stages";
  * Вероятность (SALES-44)/прогноз — явный override сделки → дефолт по стадии
  * (STAGE_PROBABILITY, канон sales-stages.ts). Взвеш. прогноз = Сумма × вероятность.
  */
-type MarginLineStatus = "priced" | "no_price" | "no_cost";
-
-// Провенанс источника (PC3): откуда себес/цена. cost — 1С / демо-фикстура / закупки (landed);
-// price — согласованный КП клиента либо дефолт из прайса 1С (демо/1С).
-type CostSource = "onec" | "demo" | "landed" | null;
-type PriceSource = "quote" | "onec" | "demo" | null;
-
-type MarginLine = {
-  sku_code: string;
-  title: string;
-  qty: number;
-  unit_price: number | null;
-  revenue: number | null;
-  unit_landed_cost: number | null;
-  cogs: number | null;
-  margin_pct: number | null;
-  status: MarginLineStatus;
-  cost_shipment_id: number | null;
-  cost_fixed_at: string | null;
-  cost_fx_rate: number | null;
-  cost_source: CostSource;
-  price_source: PriceSource;
-};
-
-// Метка источника себестоимости — честная, простыми словами (без жаргона).
-const COST_SRC_LABEL: Record<Exclude<CostSource, null>, string> = {
-  onec: "из 1С",
-  demo: "демо (не 1С)",
-  landed: "из закупок",
-};
-
-type DealMargin = {
-  deal_id: number;
-  revenue: number;
-  cogs_landed: number | null;
-  gross_profit: number | null;
-  margin_pct: number | null;
-  priced_count: number;
-  total_count: number;
-  reason: string | null;
-  lines: MarginLine[];
-};
-
 type Status = "loading" | "error" | "ready";
 
 export function DealMetrics({
