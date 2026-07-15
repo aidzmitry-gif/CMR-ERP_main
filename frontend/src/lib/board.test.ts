@@ -389,7 +389,7 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
     expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
   });
 
-  it("порядок приоритета: просрочено → сегодня → реанимация → без касания (1я стадия) → без шага (остальные)", () => {
+  it("порядок: правее воронки раньше (вероятность стадии), внутри стадии — срочность", () => {
     const stages: Stage[] = [
       stage("new", [deal("notouch", 50, { stageChangedAt: daysAgoISO(2) })]),
       stage("qual", [
@@ -399,8 +399,23 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
       ]),
       stage("cond_lost", [deal("revive", 10, { stageChangedAt: daysAgoISO(REVIVE_AFTER_DAYS) })]),
     ];
+    // qual (вероятность 25%) впереди new (10%) и cond_lost (5%); внутри qual — просрочено→сегодня→без шага.
     const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
-    expect(ids).toEqual(["overdue", "today", "revive", "notouch", "nostep"]);
+    expect(ids).toEqual(["overdue", "today", "nostep", "notouch", "revive"]);
+  });
+
+  it("близость к деньгам бьёт срочность: сделка у счёта (invoice, без шага) впереди просроченной холодной (new)", () => {
+    const stages: Stage[] = [
+      stage("new", [deal("cold-overdue", 100, { nextStepAt: daysAgoISO(5) })]),
+      stage("qual", []),
+      stage("price_req", []),
+      stage("has_price", []),
+      stage("meeting", []),
+      stage("invoice", [deal("hot-nostep", 100, { stageChangedAt: daysAgoISO(1) })]),
+    ];
+    // invoice (70%) обгоняет new (10%), хотя у холодной шаг просрочен, а у горячей его вовсе нет.
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["hot-nostep", "cold-overdue"]);
   });
 
   it("severity: overdue=crit, today=warn, revive=info", () => {
@@ -458,13 +473,14 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
     expect(items[0].reason).toBe("просрочен 1 дн");
   });
 
-  it("«без касания» (1я стадия) всегда впереди «без шага» (остальные), даже при меньшей сумме/днях", () => {
+  it("правее воронки раньше: «без шага» в qual опережает «без касания» в new (близость к деньгам первична)", () => {
     const stages: Stage[] = [
       stage("new", [deal("touch-small", 1, { stageChangedAt: daysAgoISO(1) })]),
       stage("qual", [deal("step-big", 999_999, { stageChangedAt: daysAgoISO(30) })]),
     ];
+    // qual (25%) впереди new (10%) — даже «без касания» новой заявки уступает сделке правее.
     const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
-    expect(ids).toEqual(["touch-small", "step-big"]);
+    expect(ids).toEqual(["step-big", "touch-small"]);
   });
 
   it("внутри «без касания» сортирует по daysInStage DESC, не по деньгам", () => {
