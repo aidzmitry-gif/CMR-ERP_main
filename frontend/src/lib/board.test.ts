@@ -413,9 +413,34 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
       stage("meeting", []),
       stage("invoice", [deal("hot-nostep", 100, { stageChangedAt: daysAgoISO(1) })]),
     ];
-    // invoice (70%) обгоняет new (10%), хотя у холодной шаг просрочен, а у горячей его вовсе нет.
+    // invoice (правее) обгоняет new, хотя у холодной шаг просрочен, а у горячей его вовсе нет.
     const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
     expect(ids).toEqual(["hot-nostep", "cold-overdue"]);
+  });
+
+  it("воронка «Постоянные клиенты» (rp_*, кодов НЕТ в STAGE_PROBABILITY) — правее всё равно раньше", () => {
+    // Регресс-гейт: ключ сортировки — позиция стадии, а не карта вероятностей (та зеркалит
+    // только «Новые клиенты»). На карте эти коды дали бы 0 всем → порядок выродился бы в
+    // исходный (слева направо), и просьба оператора на 2 из 3 живых воронок не работала бы.
+    const stages: Stage[] = [
+      stage("rp_request", [deal("req", 100_000, { stageChangedAt: daysAgoISO(1) })]),
+      stage("rp_invoice", [deal("inv", 100_000, { stageChangedAt: daysAgoISO(1) })]),
+      stage("rp_contract", [deal("con", 100_000, { stageChangedAt: daysAgoISO(1) })]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["con", "inv", "req"]);
+  });
+
+  it("своя стадия из редактора (нет в STAGE_PROBABILITY) не тонет: горячая просроченная ведёт очередь", () => {
+    // Регресс-гейт: неизвестный код по карте дал бы 0 → сделка провалилась бы НИЖЕ «условного
+    // отказа» (5%) и при cap вылетела бы из фокуса совсем. По позиции — ведёт очередь.
+    const stages: Stage[] = [
+      stage("new", [deal("cold", 10_000, { stageChangedAt: daysAgoISO(1) })]),
+      stage("nego_hot", [deal("hot", 500_000, { nextStepAt: daysAgoISO(3) })]),
+      stage("cond_lost", [deal("dead", 10_000, { stageChangedAt: daysAgoISO(10) })]),
+    ];
+    const ids = focusQueue(stages, NOW).items.map((i) => i.deal.id);
+    expect(ids).toEqual(["hot", "cold", "dead"]);
   });
 
   it("severity: overdue=crit, today=warn, revive=info", () => {
