@@ -220,10 +220,11 @@ const PERIODS = [
   { key: "year", label: "Год" },
 ];
 
-/** П1 (решение оператора по сайту вариантов): первичный ряд скорборда — 8 метрик эталонного
- *  макета в его порядке, подписи макетные. Ключи без данных в бэке (расчётные: оплаты, валовая,
- *  новые сделки, конверсия, чек) — честный placeholder «нет данных», НЕ 0, до бэк-расчёта.
- *  Остальные KPI из /sales/kpis — вторым рядом под кнопкой-стрелкой «Ещё N показателей». */
+/** П1 (решение оператора по сайту вариантов): скорборд — 8 метрик эталонного макета в его
+ *  порядке, подписи макетные. Ключи без данных в бэке (расчётные: оплаты, валовая, новые
+ *  сделки, конверсия, чек) — честный placeholder «нет данных», НЕ 0, до бэк-расчёта.
+ *  Свёрнуто видна одна строка — первые {@link KPI_COLLAPSED_COUNT}; остальные (хвост первичных
+ *  + все /sales/kpis) — под кнопкой «Ещё N показателей», ОДНОЙ сплошной сеткой (без пустых дыр). */
 const PRIMARY_CELLS: { key: string; label: string; headline?: boolean }[] = [
   { key: "ship_plan", label: "Выручка (отгрузки)", headline: true },
   { key: "payments_vat", label: "Оплаты с НДС" },
@@ -234,6 +235,9 @@ const PRIMARY_CELLS: { key: string; label: string; headline?: boolean }[] = [
   { key: "calls_all", label: "Звонки (хол.)" },
   { key: "avg_deal", label: "Средний чек" },
 ];
+
+/** Сколько карточек План/Факт видно в свёрнутом виде — ровно одна строка сетки (xl:6). */
+const KPI_COLLAPSED_COUNT = 6;
 
 /** Период в винительном падеже для chip-прогноза («Закроем месяц на ~X% плана»). */
 const PERIOD_ACC: Record<string, string> = {
@@ -1699,6 +1703,8 @@ export function DealsWorkspace({
           const elapsed = now != null ? periodElapsed(now, period) : null;
           const kpiByKey = new Map(kpis.map((k) => [k.id, k]));
           const secondary = kpis.filter((k) => !PRIMARY_CELLS.some((c) => c.key === k.id));
+          // Скрыто в свёрнутом виде: хвост первичных (после первой строки) + все вторичные.
+          const hiddenKpis = PRIMARY_CELLS.length - KPI_COLLAPSED_COUNT + secondary.length;
           // Бейдж темпа (П2): выполнение headline-метрики против прошедшего времени периода.
           const ship = kpiByKey.get("ship_plan");
           const elapsedPct = elapsed != null ? Math.round(elapsed * 100) : null;
@@ -1761,12 +1767,12 @@ export function DealsWorkspace({
                     )}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    {secondary.length > 0 && (
+                    {hiddenKpis > 0 && (
                       <button
                         onClick={toggleMoreKpis}
                         className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-muted hover:text-ink"
                       >
-                        {moreKpis ? "Свернуть ▴" : `Ещё ${secondary.length} показателей ▾`}
+                        {moreKpis ? "Свернуть ▴" : `Ещё ${hiddenKpis} показателей ▾`}
                       </button>
                     )}
                     {/* Период — выпадающий список (решение оператора: раньше группа кнопок). */}
@@ -1827,31 +1833,33 @@ export function DealsWorkspace({
                   {/* overflow-x-auto — страховка на узких/зумленных экранах: если даже две
                       колонки не влезают, появляется горизонтальный скролл, ничего не теряется. */}
                   <div className="overflow-x-auto thin-scroll">
-                    {/* Первичный ряд — 8 метрик макета. Ширину ячейки держим достаточной, чтобы
-                        суммы BYN и строка «идём на» читались без обрезки (2→3→4 колонки). */}
-                    <div className="grid grid-cols-2 gap-px md:grid-cols-3 xl:grid-cols-4">
-                      {PRIMARY_CELLS.map((cell) => {
-                        const kpi = kpiByKey.get(cell.key);
-                        if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
-                        const coldCalls = cell.key === "calls_all" ? kpiByKey.get("calls_cold") : undefined;
-                        return (
-                          <PlanFactCell
-                            key={cell.key}
-                            kpi={kpi}
-                            fmt={fmt}
-                            elapsed={elapsed}
-                            onLog={() => handleLog(kpi.id)}
-                            label={cell.label}
-                            headline={cell.headline}
-                            subnote={coldCalls ? `из них ${coldCalls.value} хол.` : undefined}
-                          />
-                        );
-                      })}
-                    </div>
-                    {/* Второй ряд (П1): тот же вид ячеек, раскрывается стрелкой. */}
-                    {moreKpis && secondary.length > 0 && (
-                      <div className="grid grid-cols-2 gap-px border-t border-dashed border-line md:grid-cols-3 xl:grid-cols-4">
-                        {secondary.map((kpi) => (
+                    {/* Одна сплошная сетка (решение оператора): свёрнуто — ровно одна строка
+                        (KPI_COLLAPSED_COUNT=6 первых метрик), развёрнуто — ВСЕ метрики подряд в
+                        той же сетке, без пустых дыр между первичными и вторичными. Лесенка ширин
+                        2→3→6; ячейка min-w-0 — суммы переносятся, не обрезаются. */}
+                    <div className="grid grid-cols-2 gap-px md:grid-cols-3 xl:grid-cols-6">
+                      {(moreKpis ? PRIMARY_CELLS : PRIMARY_CELLS.slice(0, KPI_COLLAPSED_COUNT)).map(
+                        (cell) => {
+                          const kpi = kpiByKey.get(cell.key);
+                          if (!kpi) return <PlanFactPlaceholder key={cell.key} label={cell.label} />;
+                          const coldCalls =
+                            cell.key === "calls_all" ? kpiByKey.get("calls_cold") : undefined;
+                          return (
+                            <PlanFactCell
+                              key={cell.key}
+                              kpi={kpi}
+                              fmt={fmt}
+                              elapsed={elapsed}
+                              onLog={() => handleLog(kpi.id)}
+                              label={cell.label}
+                              headline={cell.headline}
+                              subnote={coldCalls ? `из них ${coldCalls.value} хол.` : undefined}
+                            />
+                          );
+                        },
+                      )}
+                      {moreKpis &&
+                        secondary.map((kpi) => (
                           <PlanFactCell
                             key={kpi.id}
                             kpi={kpi}
@@ -1860,8 +1868,7 @@ export function DealsWorkspace({
                             onLog={() => handleLog(kpi.id)}
                           />
                         ))}
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               </section>

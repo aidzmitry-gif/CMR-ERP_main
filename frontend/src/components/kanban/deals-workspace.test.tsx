@@ -166,15 +166,15 @@ describe("DealsWorkspace (канбан)", () => {
   });
 
   it("отметка KPI вызывает logActivity и перечитывает показатели", async () => {
-    // id должен совпадать с одним из PRIMARY_CELLS — иначе KPI уходит во вторичный
-    // ряд «Ещё N» (скрыт по умолчанию) и кнопка «Отметить» не видна без раскрытия.
+    // id должен быть среди первых KPI_COLLAPSED_COUNT (6) первичных ячеек — свёрнуто видна
+    // одна строка, остальные под «Ещё N» (скрыты по умолчанию), кнопка «Отметить» не видна.
     const kpis = [
-      { id: "calls_all", label: "Звонки", value: 1, target: 40, percent: 3, icon: "phone" as const, tone: "blue" as const },
+      { id: "new_deals_count", label: "Новые сделки", value: 1, target: 40, percent: 3, icon: "phone" as const, tone: "blue" as const },
     ];
     mock(api.getKpis).mockResolvedValue(kpis);
     render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
     fireEvent.click(screen.getByTitle("Отметить (+1)"));
-    await waitFor(() => expect(api.logActivity).toHaveBeenCalledWith("calls_all"));
+    await waitFor(() => expect(api.logActivity).toHaveBeenCalledWith("new_deals_count"));
     expect(api.getKpis).toHaveBeenCalled();
   });
 
