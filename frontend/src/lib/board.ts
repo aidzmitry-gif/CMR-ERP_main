@@ -225,17 +225,24 @@ export interface FocusQueueResult {
 
 /**
  * Очередь «Фокус дня» (слайс 5): упорядоченный список «что делать сейчас» — вместо
- * сканирования колонок доски. Каждая сделка попадает НЕ БОЛЕЕ чем в одну категорию
- * (приоритет по порядку ниже); закрытые стадии (won/lost, {@link isClosedStageId})
- * исключены целиком. Приоритет:
- *  1. Просроченный шаг (`dateBucketId` → «overdue») — по weighted DESC.
- *  2. Шаг сегодня (bucket «today») — по weighted DESC.
- *  3. Реанимация: «Условный отказ» (id endsWith «cond_lost») старше {@link REVIVE_AFTER_DAYS}
- *     без касания ({@link reviveDays}) — по reviveDays DESC. Единственное правило, где
- *     участвует cond_lost — остальные его не видят (тот же гейт, что у {@link isStuck}).
- *  4. Открытые БЕЗ шага (ни `todo`, ни `nextStep`): сперва ПЕРВАЯ стадия переданного
- *     списка `stages` (стадия новой заявки — первое касание важнее прогрева уже идущей
- *     сделки) по daysInStage DESC, затем остальные открытые без шага — по weighted DESC.
+ * сканирования колонок доски. Каждая сделка попадает НЕ БОЛЕЕ чем в одну категорию;
+ * закрытые стадии (won/lost, {@link isClosedStageId}) исключены целиком.
+ *
+ * Порядок (решение оператора 2026-07-14 — «правее воронки = раньше», фокус ведёт деньгами):
+ *  1. ПЕРВИЧНО — близость к деньгам: вероятность стадии {@link probabilityFor} DESC. Справа
+ *     воронки (счёт 70% / защищён 85% / договор 95%) идёт раньше «холодных» слева; `cond_lost`
+ *     (5%) и новая заявка (10%) естественно тонут вниз. Явная `deal.probability` переопределяет.
+ *  2. При равной стадии — срочность (категория): просрочен → сегодня → реанимация → без шага.
+ *  3. При равной срочности — деньги/возраст (sortKey DESC): weighted-сумма для overdue/today/
+ *     noStep, дни для реанимации и «без касания».
+ *
+ * Категории (задают текст reason, цвет severity и вторичный порядок внутри стадии):
+ *  - Просроченный шаг (`dateBucketId` → «overdue»), severity crit.
+ *  - Шаг сегодня (bucket «today»), severity warn.
+ *  - Реанимация: «Условный отказ» (id endsWith «cond_lost») старше {@link REVIVE_AFTER_DAYS}
+ *    без касания ({@link reviveDays}); единственное правило с cond_lost (тот же гейт, что {@link isStuck}).
+ *  - Открытые БЕЗ шага (ни `todo`, ни `nextStep`): ПЕРВАЯ стадия списка = новая заявка
+ *    («без касания», crit при ≥1 дн), остальные стадии — «без шага».
  * `now == null` (SSR/до маунта) → пустой результат, без прыжка гидрации.
  */
 export function focusQueue(
@@ -245,26 +252,28 @@ export function focusQueue(
 ): FocusQueueResult {
   if (now == null) return { items: [], total: 0 };
 
-  type Ranked = FocusQueueItem & { sortKey: number };
-  const overdue: Ranked[] = [];
-  const dueToday: Ranked[] = [];
-  const revive: Ranked[] = [];
-  const noTouch: Ranked[] = [];
-  const noStep: Ranked[] = [];
+  // Каждый элемент несёт ключи сортировки: prob — близость к деньгам (позиция в воронке =
+  // STAGE_PROBABILITY стадии с учётом явной вероятности сделки), cat — срочность внутри
+  // стадии (0 просрочено · 1 сегодня · 2 реанимация · 3 без шага), sortKey — деньги/возраст.
+  type Ranked = FocusQueueItem & { prob: number; cat: number; sortKey: number };
+  const ranked: Ranked[] = [];
 
   stages.forEach((stage, idx) => {
     const revivable = stage.id.endsWith("cond_lost");
     if (isClosedStageId(stage.id) && !revivable) return; // won/lost — вне очереди целиком
 
     for (const deal of stage.deals) {
+      const prob = probabilityFor(deal, stage.id);
       if (revivable) {
         const days = reviveDays(deal, stage.id, now);
         if (days != null) {
-          revive.push({
+          ranked.push({
             deal,
             stageId: stage.id,
             reason: `реанимировать · ${days} дн`,
             severity: "info",
+            prob,
+            cat: 2,
             sortKey: days,
           });
         }
@@ -282,21 +291,25 @@ export function focusQueue(
         const days = Number.isNaN(dueTs)
           ? 1
           : Math.max(1, Math.ceil((startOfToday.getTime() - dueTs) / DAY_MS));
-        overdue.push({
+        ranked.push({
           deal,
           stageId: stage.id,
           reason: `просрочен ${days} дн`,
           severity: "crit",
+          prob,
+          cat: 0,
           sortKey: weightedAmount(deal, stage.id),
         });
         continue;
       }
       if (bucket === "today") {
-        dueToday.push({
+        ranked.push({
           deal,
           stageId: stage.id,
           reason: "шаг сегодня",
           severity: "warn",
+          prob,
+          cat: 1,
           sortKey: weightedAmount(deal, stage.id),
         });
         continue;
@@ -309,33 +322,42 @@ export function focusQueue(
         // Первая стадия переданного списка = стадия новой заявки (первое касание); для
         // секций «Все вместе» вызывающий код передаёт список стадий КОНКРЕТНОЙ секции —
         // первая стадия там её собственная (см. deals-workspace.tsx: combinedCardExtras).
-        noTouch.push({
+        ranked.push({
           deal,
           stageId: stage.id,
           reason: `без касания ${days} дн`,
           severity: days >= 1 ? "crit" : "warn",
+          prob,
+          cat: 3,
           sortKey: days,
         });
       } else {
-        noStep.push({
+        ranked.push({
           deal,
           stageId: stage.id,
           reason: `без шага · в стадии ${days} дн`,
           severity: "warn",
+          prob,
+          cat: 3,
           sortKey: weightedAmount(deal, stage.id),
         });
       }
     }
   });
 
-  const byKeyDesc = (a: Ranked, b: Ranked) => b.sortKey - a.sortKey;
-  [overdue, dueToday, revive, noTouch, noStep].forEach((bucket) => bucket.sort(byKeyDesc));
+  // Приоритет (решение оператора 2026-07-14 «правее воронки — раньше»): близость к деньгам
+  // ПЕРВИЧНА — выше вероятность стадии → раньше (сделки у счёта/договора ведут очередь, холодные
+  // заявки и cond_lost тонут вниз). При равной стадии — срочность (cat), затем деньги/возраст.
+  ranked.sort((a, b) => {
+    if (a.prob !== b.prob) return b.prob - a.prob;
+    if (a.cat !== b.cat) return a.cat - b.cat;
+    return b.sortKey - a.sortKey;
+  });
 
-  const ordered = [...overdue, ...dueToday, ...revive, ...noTouch, ...noStep];
-  const items: FocusQueueItem[] = ordered
+  const items: FocusQueueItem[] = ranked
     .slice(0, cap)
     .map(({ deal, stageId, reason, severity }) => ({ deal, stageId, reason, severity }));
-  return { items, total: ordered.length };
+  return { items, total: ranked.length };
 }
 
 // ──────────────────────── Цикл 8: единый чип внимания карточки ────────────────────────
