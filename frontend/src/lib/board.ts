@@ -229,9 +229,12 @@ export interface FocusQueueResult {
  * закрытые стадии (won/lost, {@link isClosedStageId}) исключены целиком.
  *
  * Порядок (решение оператора 2026-07-14 — «правее воронки = раньше», фокус ведёт деньгами):
- *  1. ПЕРВИЧНО — близость к деньгам: вероятность стадии {@link probabilityFor} DESC. Справа
- *     воронки (счёт 70% / защищён 85% / договор 95%) идёт раньше «холодных» слева; `cond_lost`
- *     (5%) и новая заявка (10%) естественно тонут вниз. Явная `deal.probability` переопределяет.
+ *  1. ПЕРВИЧНО — «правее воронки»: позиция стадии среди переданных колонок DESC. Сделки у
+ *     счёта/договора ведут очередь, холодные заявки слева тонут. Позиция, а не
+ *     {@link STAGE_PROBABILITY}: та зеркалит ТОЛЬКО воронку «Новые клиенты», а живых воронок
+ *     три («Постоянные» rp_*, «Тендеры» tn_*) плюс стадии из редактора — по ним карта дала бы
+ *     0 всем и первичный ключ выродился бы. «Условный отказ» — карман отказа, не прогрессия:
+ *     ему фиксированный низший ранг (иначе лез бы вперёд, он стоит почти справа списка).
  *  2. При равной стадии — срочность (категория): просрочен → сегодня → реанимация → без шага.
  *  3. При равной срочности — деньги/возраст (sortKey DESC): weighted-сумма для overdue/today/
  *     noStep, дни для реанимации и «без касания».
@@ -252,18 +255,26 @@ export function focusQueue(
 ): FocusQueueResult {
   if (now == null) return { items: [], total: 0 };
 
-  // Каждый элемент несёт ключи сортировки: prob — близость к деньгам (позиция в воронке =
-  // STAGE_PROBABILITY стадии с учётом явной вероятности сделки), cat — срочность внутри
-  // стадии (0 просрочено · 1 сегодня · 2 реанимация · 3 без шага), sortKey — деньги/возраст.
-  type Ranked = FocusQueueItem & { prob: number; cat: number; sortKey: number };
+  // Каждый элемент несёт ключи сортировки: rank — «правее воронки» (позиция стадии в
+  // переданном списке), cat — срочность внутри стадии (0 просрочено · 1 сегодня ·
+  // 2 реанимация · 3 без шага), sortKey — деньги/возраст.
+  type Ranked = FocusQueueItem & { rank: number; cat: number; sortKey: number };
   const ranked: Ranked[] = [];
 
   stages.forEach((stage, idx) => {
     const revivable = stage.id.endsWith("cond_lost");
     if (isClosedStageId(stage.id) && !revivable) return; // won/lost — вне очереди целиком
 
+    // «Правее воронки» = позиция стадии среди колонок доски. Позиция, а НЕ STAGE_PROBABILITY:
+    // та зеркалит только воронку «Новые клиенты», а живых воронок три (ещё «Постоянные» rp_*
+    // и «Тендеры» tn_*) плюс произвольные стадии из редактора — по ним карта дала бы 0 всем,
+    // первичный ключ выродился бы, и горячая сделка у счёта утонула бы (ниже «условного
+    // отказа»). Позиция же приходит с доской для ЛЮБОЙ воронки. «Условный отказ» — не
+    // прогрессия к деньгам, а карман отказа: фиксированный низший ранг, иначе реанимация
+    // лезла бы вперёд сделок у счёта (в списке стадий cond_lost стоит почти справа).
+    const rank = revivable ? -1 : idx;
+
     for (const deal of stage.deals) {
-      const prob = probabilityFor(deal, stage.id);
       if (revivable) {
         const days = reviveDays(deal, stage.id, now);
         if (days != null) {
@@ -272,7 +283,7 @@ export function focusQueue(
             stageId: stage.id,
             reason: `реанимировать · ${days} дн`,
             severity: "info",
-            prob,
+            rank,
             cat: 2,
             sortKey: days,
           });
@@ -296,7 +307,7 @@ export function focusQueue(
           stageId: stage.id,
           reason: `просрочен ${days} дн`,
           severity: "crit",
-          prob,
+          rank,
           cat: 0,
           sortKey: weightedAmount(deal, stage.id),
         });
@@ -308,7 +319,7 @@ export function focusQueue(
           stageId: stage.id,
           reason: "шаг сегодня",
           severity: "warn",
-          prob,
+          rank,
           cat: 1,
           sortKey: weightedAmount(deal, stage.id),
         });
@@ -327,7 +338,7 @@ export function focusQueue(
           stageId: stage.id,
           reason: `без касания ${days} дн`,
           severity: days >= 1 ? "crit" : "warn",
-          prob,
+          rank,
           cat: 3,
           sortKey: days,
         });
@@ -337,7 +348,7 @@ export function focusQueue(
           stageId: stage.id,
           reason: `без шага · в стадии ${days} дн`,
           severity: "warn",
-          prob,
+          rank,
           cat: 3,
           sortKey: weightedAmount(deal, stage.id),
         });
@@ -349,7 +360,7 @@ export function focusQueue(
   // ПЕРВИЧНА — выше вероятность стадии → раньше (сделки у счёта/договора ведут очередь, холодные
   // заявки и cond_lost тонут вниз). При равной стадии — срочность (cat), затем деньги/возраст.
   ranked.sort((a, b) => {
-    if (a.prob !== b.prob) return b.prob - a.prob;
+    if (a.rank !== b.rank) return b.rank - a.rank;
     if (a.cat !== b.cat) return a.cat - b.cat;
     return b.sortKey - a.sortKey;
   });
