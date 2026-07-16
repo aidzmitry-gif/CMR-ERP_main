@@ -1,24 +1,21 @@
-// Заголовки для прокси `/api/[...path]` → backend FastAPI.
-// Вынесено из route.ts: OIDC-задел (Bearer) + dev-роль (X-User-Roles) без правок api.ts.
+// Headers for /api/[...path] -> FastAPI proxy.
+// OIDC-ready Bearer forward + dev X-User-Roles; keep out of api.ts.
 
 export interface BackendProxyHeaderOptions {
-  /** Dev-роль из cookie `aios_role`; backend auth_mode=dev читает X-User-Roles. */
+  /** Dev role from cookie aios_role. */
   devRole?: string;
-  /** Access token из httpOnly cookie (будущий Keycloak login); inject Bearer если нет Authorization. */
+  /** Future Keycloak httpOnly access token. */
   accessToken?: string;
 }
 
-/** Минимальный контракт входящих заголовков (NextRequest.headers, fetch Response, …). */
-export type IncomingHeaderSource = { get(name: string): string | null };
-
 /**
- * Собирает заголовки апстрим-запроса к backend.
- * - Пробрасывает входящий Authorization (если клиент уже шлёт Bearer).
- * - Иначе, при наличии accessToken, ставит Authorization: Bearer (OIDC-скелет).
- * - В dev-режиме дополнительно ставит X-User-Roles (не ломает oidc: backend в oidc игнорирует заголовок).
+ * Build upstream headers for the backend.
+ * - Forward incoming Authorization when present.
+ * - Else inject Bearer from accessToken (OIDC skeleton).
+ * - In dev also set X-User-Roles (ignored when auth_mode=oidc).
  */
 export function buildBackendProxyHeaders(
-  incoming: IncomingHeaderSource & Iterable<[string, string]>,
+  incoming: Headers,
   opts: BackendProxyHeaderOptions = {},
 ): Headers {
   const headers = new Headers(incoming);
@@ -29,7 +26,7 @@ export function buildBackendProxyHeaders(
   if (incomingAuth) {
     headers.set("authorization", incomingAuth);
   } else if (opts.accessToken) {
-    headers.set("authorization", `Bearer ${opts.accessToken}`);
+    headers.set("authorization", Bearer );
   }
 
   if (opts.devRole) {
