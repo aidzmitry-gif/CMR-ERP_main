@@ -63,6 +63,14 @@ class OneCClient:
         self.base_url = (base_url or "").rstrip("/")
         self.username = username or ""
         self.password = password or ""
+        # Basic-auth уходит открытым текстом по http:// (base64 тривиально снимается). Предупреждаем
+        # ровно когда 1С сконфигурирована небезопасно; https не принуждаем — внутренняя файловая ИБ
+        # 1С обычно без TLS, форс сломал бы боевой конфиг. Канал держать в доверенной сети/VPN.
+        if self.base_url.startswith("http://") and self.username:
+            log.warning(
+                "1С OData по http:// с логином — учётные данные уходят открытым текстом; "
+                "используйте https/VPN или держите соединение в доверенной сети."
+            )
 
     def _live(self) -> bool:
         return bool(self.base_url)
