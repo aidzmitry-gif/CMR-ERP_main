@@ -16,6 +16,13 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Идемпотентность: на серверах, где leads уже созданы под старым revision id
+    # ``0044_leads_init`` (потом файл переименован в ``0087``), повторный CREATE падает
+    # DuplicateTable. Пропуск, если таблица уже есть — безопасный re-entry при upgrade.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table("lead", schema="leads"):
+        return
     op.execute("CREATE SCHEMA IF NOT EXISTS leads")
     op.create_table(
         "lead",
