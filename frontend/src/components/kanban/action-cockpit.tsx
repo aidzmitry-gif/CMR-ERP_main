@@ -255,7 +255,9 @@ export function ActionCockpit({
   const tabInfo: Record<CockpitTab, { total: number; crit: boolean }> = {
     now: {
       total: focusResult.total,
-      crit: focusResult.items.some((i) => i.severity === "crit"),
+      // По ПОЛНОЙ очереди (focusQueue считает до обрезки cap) — симметрично `total` рядом.
+      // Из `items` признак слеп: сделки правой стадии вытесняют просроченные из топ-N.
+      crit: focusResult.crit,
     },
     invoices: {
       total: invoiceRiskResult.total,

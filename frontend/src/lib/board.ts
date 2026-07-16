@@ -221,6 +221,12 @@ export interface FocusQueueItem {
 export interface FocusQueueResult {
   items: FocusQueueItem[];
   total: number;
+  /** Есть ли в очереди «горящее» (severity `crit`) — считается по ПОЛНОЙ очереди, ДО обрезки `cap`.
+   *  Не выводить его из `items`: раньше просроченные стояли в голове очереди (бакеты клеились
+   *  overdue-первым), и «crit в топ-N» ≡ «crit есть» держалось даром. Сортировка по позиции стадии
+   *  эту гарантию сняла — 12 несрочных сделок правой стадии вытесняют просроченные из `items`, и
+   *  индикатор «горит» гаснет при живой просрочке (деньги тлеют молча). */
+  crit: boolean;
 }
 
 /**
@@ -253,7 +259,7 @@ export function focusQueue(
   now: number | null,
   cap = 12,
 ): FocusQueueResult {
-  if (now == null) return { items: [], total: 0 };
+  if (now == null) return { items: [], total: 0, crit: false };
 
   // Каждый элемент несёт ключи сортировки: rank — «правее воронки» (позиция стадии в
   // переданном списке), cat — срочность внутри стадии (0 просрочено · 1 сегодня ·
@@ -368,7 +374,8 @@ export function focusQueue(
   const items: FocusQueueItem[] = ranked
     .slice(0, cap)
     .map(({ deal, stageId, reason, severity }) => ({ deal, stageId, reason, severity }));
-  return { items, total: ranked.length };
+  // crit — по `ranked` (до обрезки), см. FocusQueueResult.crit: из `items` он бы слеп.
+  return { items, total: ranked.length, crit: ranked.some((r) => r.severity === "crit") };
 }
 
 // ──────────────────────── Цикл 8: единый чип внимания карточки ────────────────────────

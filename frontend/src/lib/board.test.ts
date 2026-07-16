@@ -381,12 +381,12 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
 
   it("now == null — пустой результат (SSR-гейт)", () => {
     const stages = [stage("new", [deal("1", 100)])];
-    expect(focusQueue(stages, null)).toEqual({ items: [], total: 0 });
+    expect(focusQueue(stages, null)).toEqual({ items: [], total: 0, crit: false });
   });
 
   it("нет квалифицирующих сделок (шаг уже назначен) — пустой результат", () => {
     const stages = [stage("qual", [deal("has-step", 100, { nextStep: "Позвонить" })])];
-    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0, crit: false });
   });
 
   it("порядок: правее воронки раньше (вероятность стадии), внутри стадии — срочность", () => {
@@ -536,7 +536,7 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
       stage("won", [deal("w1", 100, { nextStepAt: daysAgoISO(5) })]),
       stage("lost", [deal("l1", 100, { nextStepAt: daysAgoISO(5) })]),
     ];
-    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0, crit: false });
   });
 
   it("cond_lost участвует ТОЛЬКО в реанимации — ниже порога не попадает никуда, даже если «просрочен»", () => {
@@ -545,7 +545,38 @@ describe("focusQueue — «Фокус дня» (слайс 5)", () => {
         deal("fresh", 100, { nextStepAt: daysAgoISO(5), stageChangedAt: daysAgoISO(2) }),
       ]),
     ];
-    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0 });
+    expect(focusQueue(stages, NOW)).toEqual({ items: [], total: 0, crit: false });
+  });
+
+  it("crit виден, даже когда просроченные вытеснены из items обрезкой cap", () => {
+    // Регресс-гейт: до перевода на позицию стадии просроченные стояли в голове очереди
+    // (бакеты клеились overdue-первым), и «crit в топ-12» ≡ «crit есть» держалось даром.
+    // Теперь 12 несрочных сделок правой стадии вытесняют просрочку из items — и индикатор
+    // «горит» гас бы при живой просрочке. crit обязан считаться по ПОЛНОЙ очереди.
+    const stages: Stage[] = [
+      stage("new", [deal("cold-overdue", 100, { nextStepAt: daysAgoISO(5) })]), // crit, rank 0
+      stage("qual", []),
+      stage("price_req", []),
+      stage("has_price", []),
+      stage("meeting", []),
+      stage("contract", Array.from({ length: 12 }, (_, i) =>
+        deal(`warm${i}`, 1000 + i, { stageChangedAt: daysAgoISO(1) }), // warn, rank 5 — займут весь cap
+      )),
+    ];
+    const res = focusQueue(stages, NOW);
+    expect(res.items).toHaveLength(12);
+    expect(res.items.every((i) => i.severity === "warn")).toBe(true); // просрочка вытеснена
+    expect(res.items.some((i) => i.severity === "crit")).toBe(false); // из items — слепо
+    expect(res.crit).toBe(true); // а по полной очереди — горит
+    expect(res.total).toBe(13);
+  });
+
+  it("crit=false, когда горящего нет вовсе", () => {
+    const stages: Stage[] = [
+      stage("new", []),
+      stage("qual", [deal("calm", 100, { stageChangedAt: daysAgoISO(1) })]), // warn
+    ];
+    expect(focusQueue(stages, NOW).crit).toBe(false);
   });
 
   it("cap ограничивает items (по умолчанию 12), total считает все квалифицирующие", () => {
