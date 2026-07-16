@@ -125,14 +125,16 @@ async def test_carrier_request_unknown_carrier_and_missing_doc(api):
 # --------------------------------------------------------------------------- #
 async def test_on_deal_won_creates_doc_and_dedupes(session):
     ctx = _ctx(session)
-    payload = {"deal_ref": "D-100", "company": "ООО Альфа", "title": "АКБ 60Ач",
+    # payload — как реально эмитит sales/routes.py sales.deal.won (deal_id + number)
+    payload = {"deal_id": 100, "number": "СД-2026-0100", "company": "ООО Альфа", "title": "АКБ 60Ач",
                "amount": 15000, "owner": "Иванов", "region": "Минск"}
     await events.on_deal_won(payload, ctx)
 
     docs = (await session.execute(select(OfficeDoc))).scalars().all()
     assert len(docs) == 1
     doc = docs[0]
-    assert doc.stage == "ready" and doc.sales_ref == "D-100"
+    assert doc.stage == "ready" and doc.sales_ref == "СД-2026-0100"
+    assert doc.deal_id == 100  # целочисленная ручка сохранена — join с финансами по оплате
     assert doc.number.startswith("ДОК-2026-")
     types = await _event_types(session)
     assert {"office.doc.created", "office.reservation.requested", "office.shipment.requested"} <= set(types)
@@ -160,12 +162,37 @@ async def test_on_delivery_delivered_updates_tracking(session):
     assert doc.delivery == "СДЭК" and doc.op_date == "2026-06-12"
 
 
-async def test_on_payment_received_clears_overdue(session):
-    session.add(OfficeDoc(number="ДОК-2026-0052", finance_ref="СЧ-9", stage="await_pay", overdue_days=33))
+async def test_on_payment_received_full_closes_by_deal_id(session):
+    """Реальный контракт finance.payment.received: сопоставление по deal_id, остаток 0 → «Оплачено».
+
+    Раньше тест слал синтетический ``{finance_ref}`` — ключ, которого в событии финансов нет,
+    поэтому шов был мёртв в проде, а тест зелен. Теперь — как эмитит finance/routes.py.
+    """
+    session.add(OfficeDoc(number="ДОК-2026-0052", deal_id=52, stage="await_pay", overdue_days=33))
     await session.flush()
-    await events.on_payment_received({"finance_ref": "СЧ-9"}, _ctx(session))
-    doc = (await session.execute(select(OfficeDoc).where(OfficeDoc.finance_ref == "СЧ-9"))).scalars().one()
+    await events.on_payment_received(
+        {"ref": "СЧ-9", "amount": "15000", "entity_ref": "payment:7",
+         "deal_id": 52, "counterparty_ref": None, "outstanding": "0"},
+        _ctx(session),
+    )
+    doc = (await session.execute(select(OfficeDoc).where(OfficeDoc.deal_id == 52))).scalars().one()
     assert doc.stage == "paid" and doc.overdue_days == 0
+    assert doc.finance_ref == "СЧ-9"  # номер счёта 1С сохранён как провенанс связи
+
+
+async def test_on_payment_received_partial_keeps_open(session):
+    """Частичная оплата (outstanding>0) НЕ закрывает документ — не врём про деньги (PLATFORM #1)."""
+    session.add(OfficeDoc(number="ДОК-2026-0053", deal_id=53, stage="await_pay", overdue_days=10))
+    await session.flush()
+    await events.on_payment_received(
+        {"ref": "СЧ-10", "amount": "5000", "entity_ref": "payment:8",
+         "deal_id": 53, "outstanding": "10000"},
+        _ctx(session),
+    )
+    doc = (await session.execute(select(OfficeDoc).where(OfficeDoc.deal_id == 53))).scalars().one()
+    assert doc.stage == "await_pay"    # ещё не оплачено полностью — стадию не двигаем
+    assert doc.overdue_days == 10      # и просрочку не снимаем
+    assert "10000" in doc.docs_status  # остаток виден офис-менеджеру
 
 
 async def test_handlers_noop_when_doc_not_found(session):

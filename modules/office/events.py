@@ -28,7 +28,7 @@ AI-маршрутизация событий (приоритезация, авт
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select
@@ -150,7 +150,12 @@ def escalate_overdue(bus, session: AsyncSession, doc: OfficeDoc) -> str | None:
     В проде вызывается ежедневным планировщиком по всем неоплаченным документам;
     в прототипе — при переходе в «Ожидают оплаты» по текущему ``overdue_days``.
     Возвращает имя сработавшей ступени либо ``None``.
+
+    Оплаченный документ не эскалируем: планировщик, идущий по всем строкам, не должен
+    слать претензию/иск по уже закрытой оплате (деньги собственника, PLATFORM #1).
     """
+    if doc.stage == "paid":
+        return None
     days = int(doc.overdue_days or 0)
     if days > OVERDUE_ESCALATE_DAYS:
         bus.emit(session, "office.payment.escalated", _doc_payload(doc, overdue_days=days, step="escalation"))
@@ -193,8 +198,42 @@ def _first(payload: dict, *keys: str, default: str = "") -> str:
     return default
 
 
-async def _find_doc(session: AsyncSession, **by: str) -> OfficeDoc | None:
-    """Найти документ по любому из ref-полей (sales/wms/logistics/finance/number)."""
+def _deal_id(payload: dict) -> int | None:
+    """Целочисленная ручка сделки из payload (``deal_id``) — общий ключ с финансами.
+
+    Пусто/не-число → None (документ создан вне сделки/событие без ручки — join не сработает,
+    но и падать не будем).
+    """
+    raw = payload.get("deal_id")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _outstanding(payload: dict) -> Decimal:
+    """Остаток к оплате из события (``outstanding``, строка BYN). Нет/мусор → 0 (=полная оплата).
+
+    Событие без ``outstanding`` (напр. старый формат) трактуем как полную оплату — обратная
+    совместимость: документ закрывается, как и прежде.
+    """
+    raw = payload.get("outstanding")
+    if raw in (None, ""):
+        return Decimal("0")
+    try:
+        return Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+async def _find_doc(session: AsyncSession, **by: Any) -> OfficeDoc | None:
+    """Найти документ по любому из ref-полей (sales/wms/logistics/finance/number/deal_id).
+
+    Значения — строки-ссылки либо целочисленный ``deal_id``; пустые (None/"" /0) пропускаем.
+    Первое совпадение по порядку ключей (deal_id — самый надёжный, ставить первым).
+    """
     for field, value in by.items():
         if not value:
             continue
@@ -224,6 +263,7 @@ async def on_deal_won(payload: dict, ctx) -> None:
         return
 
     doc = OfficeDoc(
+        deal_id=_deal_id(payload),                       # целочисленная ручка для join с финансами
         company=_first(payload, "company", "client", "counterparty"),
         title=_first(payload, "title", "subject", "product"),
         amount=Decimal(str(payload.get("amount") or 0)),
@@ -283,10 +323,21 @@ async def on_delivery_delivered(payload: dict, ctx) -> None:
 
 
 async def on_payment_received(payload: dict, ctx) -> None:
-    """Финансы: оплата получена → двигаем документ в «Оплачено» и снимаем просрочку."""
+    """Финансы: оплата получена → двигаем документ в «Оплачено» и снимаем просрочку.
+
+    Сопоставление с документом — по ``deal_id`` (у финансов нет номера офисного документа;
+    единственный общий ключ — целочисленная ручка сделки). ``ref`` события = номер счёта 1С,
+    сохраняем как ``finance_ref`` (провенанс связи).
+
+    ⚠ Частичная оплата: ``finance.payment.received`` эмитится на КАЖДОЕ поступление, включая
+    частичное (``outstanding`` > 0). Двигать в «Оплачено» при остатке — врать про деньги
+    собственника (PLATFORM #1), поэтому закрываем документ ТОЛЬКО когда остаток = 0; при
+    частичной оплате показываем остаток и оставляем стадию/просрочку как есть.
+    """
     session: AsyncSession = ctx.session
     doc = await _find_doc(
         session,
+        deal_id=_deal_id(payload),
         finance_ref=_first(payload, "finance_ref", "invoice_ref"),
         sales_ref=_first(payload, "sales_ref", "deal_ref"),
         number=_first(payload, "doc_number", "number"),
@@ -294,7 +345,12 @@ async def on_payment_received(payload: dict, ctx) -> None:
     if doc is None:
         logger.warning("office: finance.payment.received — документ не найден (%s)", payload)
         return
-    doc.finance_ref = _first(payload, "finance_ref", "invoice_ref", default=doc.finance_ref)
+    doc.finance_ref = _first(payload, "finance_ref", "invoice_ref", "ref", default=doc.finance_ref)
+
+    if _outstanding(payload) > 0:  # частичная оплата — документ не закрываем
+        doc.docs_status = f"Частичная оплата, остаток {_first(payload, 'outstanding', default='?')} BYN"
+        return
+
     doc.stage = "paid"
     doc.docs_status = "Оплачено"
     doc.overdue_days = 0
