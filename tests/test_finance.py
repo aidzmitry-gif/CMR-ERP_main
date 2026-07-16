@@ -426,13 +426,15 @@ async def test_reconcile_1c_failsoft_on_exception(session):
 async def test_claim_resolved_creates_claim_refund_credit(session):
     from modules.finance.events import on_claim_resolved
 
+    # РЕАЛЬНЫЙ контракт закупок: статус урегулирования — в `status`, а `resolution` — свободный
+    # текст «как урегулировано» (String(500)). Гард обязан сверять `status`, не `resolution`.
     await on_claim_resolved(
         {
             "claim_id": 11,
             "supplier_id": 555,
             "claim_type": "брак",
             "amount_byn": "350.00",  # СТРОКА, УЖЕ в BYN
-            "resolution": "resolved",
+            "resolution": "возврат брака деньгами",  # свободный текст, НЕ 'resolved'
             "status": "resolved",
             "entity_ref": "claim:11",
         },
@@ -443,6 +445,26 @@ async def test_claim_resolved_creates_claim_refund_credit(session):
     assert p.amount == Decimal("350.00")  # AS-IS, без буфера ×1.10
     assert p.status == "pending"
     assert p.counterparty_ref == "555"  # supplier_id строкой
+
+
+async def test_claim_rejected_no_refund(session):
+    """rejected-претензия НЕ создаёт приток, даже если в свободном resolution оказалось 'resolved'."""
+    from modules.finance.events import on_claim_resolved
+
+    await on_claim_resolved(
+        {
+            "claim_id": 12,
+            "supplier_id": 555,
+            "amount_byn": "999.00",
+            "resolution": "resolved",  # ловушка: свободный текст не должен срабатывать
+            "status": "rejected",
+            "entity_ref": "claim:12",
+        },
+        _ctx(session),
+    )
+    await session.commit()
+    n = (await session.execute(select(Payment).where(Payment.kind == "claim_refund"))).scalars().all()
+    assert n == []  # отклонённая претензия → притока нет
 
 
 async def test_claim_rejected_creates_nothing(session):

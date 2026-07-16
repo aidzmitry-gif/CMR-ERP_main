@@ -198,7 +198,11 @@ async def telephony_originate(
 
 
 @router.post("/1c/sync")
-async def sync(core: Core = Depends(get_core), session: AsyncSession = Depends(get_session)) -> dict:
+async def sync(
+    core: Core = Depends(get_core),
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("integrations.sync")),
+) -> dict:
     """Прочитать данные из 1С и синхронизировать в бизнес-память."""
     summary = await sync_1c(session, core.event_bus, core.services.onec)
     await session.commit()
@@ -250,8 +254,16 @@ async def enqueue_out(
 
 
 @router.get("/1c/stock", response_model=list[StockOut])
-async def stock(session: AsyncSession = Depends(get_session)):
-    """Остатки/цены (синхронизированные из 1С)."""
+async def stock(
+    session: AsyncSession = Depends(get_session),
+    _: object = Depends(require_permission("sales.deal.read")),
+):
+    """Остатки/цены (синхронизированные из 1С).
+
+    Под ``sales.deal.read``: несёт ``cost`` (себестоимость) — коммерческая тайна, тот же гейт,
+    что у карточки SKU (core system_routes). Префикс ``/integrations`` не покрыт middleware
+    (пакет без UI-слага), поэтому защита — пообъектно на роуте, иначе аноним читает себес/цены.
+    """
     return (await session.execute(select(StockItem).order_by(StockItem.sku_code))).scalars().all()
 
 
