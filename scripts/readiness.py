@@ -59,8 +59,6 @@ def route_count(pkg: Path) -> int:
 
 
 def migration_count(name: str) -> int:
-    if not MIGR_DIR.exists():
-        return 0
     token = MIGR_TOKENS.get(name, name)
     return sum(1 for f in MIGR_DIR.glob("*.py") if token in f.name)
 
@@ -156,7 +154,9 @@ def _alembic_heads() -> list[str]:
     """
     revs: set[str] = set()
     downs: set[str] = set()
-    for f in sorted(MIGR_DIR.glob("*.py")) if MIGR_DIR.is_dir() else []:
+    # Без гарда существования и без sorted(): glob на отсутствующем пути отдаёт пусто (не бросает),
+    # а порядок обхода не важен — всё складывается в set-ы.
+    for f in MIGR_DIR.glob("*.py"):
         txt = f.read_text(encoding="utf-8", errors="ignore")
         if m := re.search(r'^revision\s*=\s*["\']([^"\']+)', txt, re.M):
             revs.add(m.group(1))
@@ -225,7 +225,7 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
 
     rows = _rows()
-    total_migr = len(list(MIGR_DIR.glob("*.py"))) if MIGR_DIR.exists() else 0
+    total_migr = len(list(MIGR_DIR.glob("*.py")))
 
     print(f"{'module':<12} {'loc':>5} {'routes':>7} {'migr':>5}  ui")
     print("-" * 60)
