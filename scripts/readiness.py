@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,11 @@ FE_APP = ROOT / "frontend" / "src" / "app"
 STATUS_FILE = ROOT / "coordination" / "STATUS.md"
 MARK_START = "<!-- READINESS:AUTO — авто-блок scripts/readiness.py --write, не редактируй вручную -->"
 MARK_END = "<!-- /READINESS:AUTO -->"
+# Второй авто-блок STATUS.md — снимок координации флота (git + голова миграций). Был сиротой:
+# маркеры в файле лежали с 2026-06-30, а писать их было НЕКОМУ → координатор две недели читал
+# протухший HEAD/ahead/голову как свежие. Теперь рендерится здесь же, одной командой.
+COORD_START = "<!-- COORD:AUTO — снимок координации флота, scripts/readiness.py --write -->"
+COORD_END = "<!-- /COORD:AUTO -->"
 
 
 def py_loc(pkg: Path) -> int:
@@ -117,15 +123,87 @@ def _auto_block(rows: list[tuple], total_migr: int, stamp: str) -> str:
     return "\n".join(lines)
 
 
-def _write_status(block: str) -> str:
+def _git(*args: str) -> str:
+    """Вывод git одной строкой; `""` если git недоступен/упал.
+
+    Fail-open намеренно: скрипт гоняется и из хуков/крона, где git может быть недоступен
+    (см. auto-retro). Пустая строка → в блоке честный `?`, а не враньё и не падение.
+
+    ⚠️ `encoding="utf-8"` обязателен: на Windows `text=True` декодирует вывод git локалью
+    (cp1251) → русские сообщения коммитов превращаются в кракозябры прямо в STATUS.md.
+    """
+    try:
+        r = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+    except Exception:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _alembic_heads() -> list[str]:
+    """Головы цепочки Alembic = ревизии, на которые никто не ссылается как `down_revision`.
+
+    >1 головы = форк: `alembic upgrade head` падает в проде (PLATFORM #1-2 — деньги/безопасность),
+    поэтому блок подсвечивает это красным. Та же логика, что у `next_migration.py::_scan/_head`
+    (там она под локом-аллокатором; здесь — только чтение для снимка).
+    """
+    revs: set[str] = set()
+    downs: set[str] = set()
+    for f in sorted(MIGR_DIR.glob("*.py")) if MIGR_DIR.is_dir() else []:
+        txt = f.read_text(encoding="utf-8", errors="ignore")
+        if m := re.search(r'^revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            revs.add(m.group(1))
+        if d := re.search(r'^down_revision\s*=\s*["\']([^"\']+)', txt, re.M):
+            downs.add(d.group(1))
+    return sorted(revs - downs)
+
+
+def _coord_block(stamp: str) -> str:
+    """Снимок координации: git-состояние ветки + голова миграций.
+
+    Хвосты REPORTS/PUSH-LOG/.activity сюда НЕ дублируются — их впрыскивает SessionStart-хук
+    (`claude_awareness_hook.py`) прямо в контекст. Здесь только то, чего больше нигде нет.
+    """
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    head = _git("log", "-1", "--oneline") or "?"
+    dirty = len(_git("status", "--porcelain").splitlines())
+    # `A...B --left-right --count` → "<позади> <впереди>" относительно origin.
+    counts = _git("rev-list", "--left-right", "--count", f"origin/{branch}...HEAD").split()
+    behind, ahead = (counts + ["?", "?"])[:2]
+    heads = _alembic_heads()
+    if not heads:
+        head_line = "?"
+    elif len(heads) == 1:
+        head_line = f"**{heads[0]}**"
+    else:
+        head_line = f"🔴 **ФОРК: {len(heads)} головы** — {', '.join(heads)} (upgrade упадёт)"
+    return "\n".join([
+        COORD_START,
+        f"### Координация флота (авто, {stamp})",
+        "",
+        f"- Ветка `{branch}` · HEAD `{head}`",
+        f"- Против `origin/{branch}`: впереди **{ahead}** · позади **{behind}** · "
+        f"незакоммичено файлов **{dirty}**",
+        f"- Голова миграций (alembic): {head_line}",
+        "",
+        "> Доклады полос / пуши / активность здесь НЕ дублируются — их впрыскивает SessionStart-хук.",
+        "> «Впереди» после cherry-pick-пуша может быть дублями старых хешей: что реально НЕ в origin —",
+        "> `git cherry -v origin/<ветка>` (строки `+`).",
+        COORD_END,
+    ])
+
+
+def _write_status(block: str, start: str, end: str) -> str:
     if not STATUS_FILE.is_file():
         STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATUS_FILE.write_text(block + "\n", encoding="utf-8")
         return "создан"
     text = STATUS_FILE.read_text(encoding="utf-8")
-    if MARK_START in text and MARK_END in text:
-        pre = text[: text.index(MARK_START)]
-        post = text[text.index(MARK_END) + len(MARK_END):]
+    if start in text and end in text:
+        pre = text[: text.index(start)]
+        post = text[text.index(end) + len(end):]
         new, verb = pre + block + post, "обновлён"
     else:
         new, verb = text.rstrip() + "\n\n" + block + "\n", "дописан"
@@ -151,8 +229,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.write:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        verb = _write_status(_auto_block(rows, total_migr, stamp))
+        verb = _write_status(_auto_block(rows, total_migr, stamp), MARK_START, MARK_END)
         print(f"\nSTATUS.md: авто-блок {verb} ({stamp}); курируемые % не тронуты.")
+        cverb = _write_status(_coord_block(stamp), COORD_START, COORD_END)
+        print(f"STATUS.md: блок координации флота {cverb} ({stamp}).")
         try:  # заодно освежаем HTML-кокпит; fail-open — битый рендер не рушит readiness
             import fleet_dashboard  # noqa: PLC0415  — тот же scripts/-каталог
             fleet_dashboard.main()
