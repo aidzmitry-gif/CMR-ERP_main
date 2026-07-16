@@ -87,10 +87,15 @@ class Settings(BaseSettings):
     seller_director: str = ""
     seller_phone: str = "+375 29 635-00-95, +375 (17) 396-23-02"
     seller_email: str = ""
-    # Банковские реквизиты продавца (расчётный счёт в счёте на оплату)
+    # Банковские реквизиты продавца (строка «р/с … в банке … БИК …» в счёте — sales `_req_line`).
+    # 🔴 Источник истины — бланк владельца (`sales-invoice-template.html`, блок `supplier`). НЕ
+    # выдумывать: РБ с 04.07.2017 на IBAN+BIC, банк в платёжке опознаётся SWIFT'ом (`ALFABY2X`), а
+    # НЕ числовым кодом. Числовой код тут уже был неверен — `153001270` принадлежит Беларусбанку
+    # (см. справочник `scripts/seed.py::Bank`), у Альфа-Банка `153001963`; имя одного банка с кодом
+    # другого на платёжном документе = деньги не придут (PLATFORM #1).
     seller_account: str = "BY15ALFA30122190570050270000"
-    seller_bank: str = "ЗАО «Альфа-Банк», код 153001270"
-    seller_bik: str = ""
+    seller_bank: str = "ЗАО «АЛЬФА-БАНК», 220013, г. Минск, ул. Сурганова, 43-47"
+    seller_bik: str = "ALFABY2X"
 
     @model_validator(mode="after")
     def _no_dev_defaults_in_prod(self) -> "Settings":
