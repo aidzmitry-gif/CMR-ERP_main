@@ -1552,19 +1552,17 @@ export function DealsWorkspace({
     void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
 
-  /** Вычислить бейджи/плашки Сделки 2.0 для карточки по её стадии и текущему времени. */
-  function cardExtras(deal: Deal, stageId: string): CardExtras {
+  /** Общая часть бейджей карточки — всё, что считается одинаково на основной доске и в
+   *  секциях «Все вместе». Различия вызывающие дописывают оверрайдами поверх спреда
+   *  (см. cardExtras/combinedCardExtras ниже), поэтому формулы живут здесь в одном месте.
+   *  `stageList` — стадии ТОГО списка, в котором рисуется карточка (вся доска vs одна секция):
+   *  его первая стадия = стадия новой заявки (тот же критерий «первая стадия списка», что и
+   *  focusQueue в board.ts — согласовано намеренно). */
+  function baseExtras(deal: Deal, stageId: string, stageList: Stage[]): Omit<CardExtras, "wonResult"> {
     const code = deal.lostReasonCode;
     const closed = isClosedStageId(stageId);
     const hasNoStep = !closed && !deal.nextStep && !deal.todo;
-    // Слайс 5 (C): первая стадия ТЕКУЩЕГО списка = стадия новой заявки (тот же критерий
-    // «первая стадия списка», что и focusQueue в board.ts — согласовано намеренно).
-    const isFirstStage = filteredStages[0]?.id === stageId;
-    // Слайс 6 (C): статус счёта — из батч-фетча invoiceDocs (только колонка «Счёт», см. эффект выше).
-    const invDoc = invoiceDocs.get(deal.id);
-    const invBadge = invDoc && now != null
-      ? invoiceBadge({ status: invDoc.status, validUntil: invDoc.validUntil }, now)
-      : null;
+    const isFirstStage = stageList[0]?.id === stageId;
     // Цикл 11: сырые unread/missed из батч-фетча (см. эффект выше) — резолвит DealCard.
     const inbound = inboundSignals.get(deal.id);
     return {
@@ -1580,17 +1578,29 @@ export function DealsWorkspace({
       probability: probabilityFor(deal, stageId),
       weighted: weightedAmount(deal, stageId),
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
-      wonResult: stageId === "won",
-      onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
       onCall: () => setCallDeal(deal),
-      onUpdate: (fields) => patchDealFields(deal.id, fields),
       stageId,
-      onNextStep: (patch) => handleNextStep(deal.id, patch),
-      invoiceBadge: invBadge,
       unread: inbound?.unread,
       missed: inbound?.missed,
       waitAgeMs: waitAgeMsFor(inbound?.waitingSince, now),
       approval: approvalBadge(approvals.get(deal.id)),
+    };
+  }
+
+  /** Вычислить бейджи/плашки Сделки 2.0 для карточки по её стадии и текущему времени. */
+  function cardExtras(deal: Deal, stageId: string): CardExtras {
+    // Слайс 6 (C): статус счёта — из батч-фетча invoiceDocs (только колонка «Счёт», см. эффект выше).
+    const invDoc = invoiceDocs.get(deal.id);
+    const invBadge = invDoc && now != null
+      ? invoiceBadge({ status: invDoc.status, validUntil: invDoc.validUntil }, now)
+      : null;
+    return {
+      ...baseExtras(deal, stageId, filteredStages),
+      wonResult: stageId === "won",
+      onLose: stageId === "won" || stageId === "lost" ? undefined : () => openLose(deal.id),
+      onUpdate: (fields) => patchDealFields(deal.id, fields),
+      onNextStep: (patch) => handleNextStep(deal.id, patch),
+      invoiceBadge: invBadge,
     };
   }
   // «Все вместе» + «По датам»/«Список» (см. рендер ниже) сплющивают ВСЕ секции воронок —
@@ -1625,33 +1635,13 @@ export function DealsWorkspace({
    *  доске; в комбинированном виде drag в терминальную колонку двигает сделку напрямую
    *  (ponytail: единый confirmLose-гейт для комбинированного вида — если понадобится). */
   function combinedCardExtras(deal: Deal, stageId: string, sectionStages: Stage[]): CardExtras {
-    const code = deal.lostReasonCode;
+    // Слайс 5 (C): «первая стадия» и все прочие формулы — по стадиям ЭТОЙ секции, не всей доски.
     const wonId = sectionStages.find((s) => s.id.endsWith("won"))?.id;
-    const closed = isClosedStageId(stageId);
-    const hasNoStep = !closed && !deal.nextStep && !deal.todo;
-    // Слайс 5 (C): первая стадия ЭТОЙ секции (не всей доски) — та же семантика, что cardExtras.
-    const isFirstStage = sectionStages[0]?.id === stageId;
-    // Цикл 11: тот же батч-фетч, что и в cardExtras — сигнал не капается по колонке/воронке.
-    const inbound = inboundSignals.get(deal.id);
     return {
-      actBucket: actBucketFor(deal, closed),
-      noStep: hasNoStep,
-      noTouchDays:
-        hasNoStep && isFirstStage && now != null ? (daysInStage(deal.stageChangedAt, now) ?? 0) : null,
-      reviveDays: now != null ? reviveDays(deal, stageId, now) : null,
-      days: now != null ? daysInStage(deal.stageChangedAt, now) : null,
-      // FIX-2: гейт закрытых стадий живёт в самом isStuck — формула та же, что в cardExtras.
-      stuck: now != null && isStuck(deal, stageId, now),
-      probability: probabilityFor(deal, stageId),
-      weighted: weightedAmount(deal, stageId),
-      lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
+      ...baseExtras(deal, stageId, sectionStages),
       wonResult: stageId === wonId,
-      onCall: () => setCallDeal(deal),
-      stageId,
-      unread: inbound?.unread,
-      missed: inbound?.missed,
-      waitAgeMs: waitAgeMsFor(inbound?.waitingSince, now),
-      approval: approvalBadge(approvals.get(deal.id)),
+      // onLose намеренно НЕ задан: в комбинированном виде drag в терминальную колонку
+      // двигает сделку напрямую, без модалки отказа (см. док-комментарий выше).
       // onUpdate/onNextStep добавляет FunnelSection (доска секции — её локальный стейт).
     };
   }
