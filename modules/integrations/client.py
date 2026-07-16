@@ -10,7 +10,7 @@ import asyncio
 import logging
 from datetime import date
 
-import requests
+import httpx
 
 log = logging.getLogger("integrations.onec")
 
@@ -67,19 +67,18 @@ class OneCClient:
     def _live(self) -> bool:
         return bool(self.base_url)
 
-    def _session(self) -> requests.Session:
-        s = requests.Session()
-        if self.username:
-            s.auth = (self.username, self.password)
-        s.headers["Accept"] = "application/json"
-        return s
+    def _client(self) -> httpx.Client:
+        # httpx (уже в requirements) вместо requests: тот НЕ в прод-зависимостях, а этот модуль
+        # грузится на старте (ENABLED_MODULES) → top-level import requests уронил бы прод-образ.
+        auth = (self.username, self.password) if self.username else None
+        return httpx.Client(auth=auth, headers={"Accept": "application/json"}, timeout=60)
 
     def _get(self, entity: str, params: dict | None = None) -> list[dict]:
         """OData GET page (read-only). Без $filter — файловая ИБ ka_copy его запрещает."""
         url = f"{self.base_url}/{entity}"
         q = {"$format": "json", **(params or {})}
-        with self._session() as s:
-            resp = s.get(url, params=q, timeout=60)
+        with self._client() as s:
+            resp = s.get(url, params=q)
             resp.raise_for_status()
             return list(resp.json().get("value") or [])
 
