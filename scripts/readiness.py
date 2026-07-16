@@ -123,11 +123,16 @@ def _auto_block(rows: list[tuple], total_migr: int, stamp: str) -> str:
     return "\n".join(lines)
 
 
-def _git(*args: str) -> str:
-    """Вывод git одной строкой; `""` если git недоступен/упал.
+def _git(*args: str) -> str | None:
+    """Вывод git; `None` = команда НЕ выполнилась (git недоступен/таймаут/ненулевой код).
 
-    Fail-open намеренно: скрипт гоняется и из хуков/крона, где git может быть недоступен
-    (см. auto-retro). Пустая строка → в блоке честный `?`, а не враньё и не падение.
+    Fail-open намеренно: скрипт гоняется из хуков/крона, где git может быть недоступен
+    (см. auto-retro) — тогда в блоке честный `?`, а не враньё и не падение.
+
+    🔴 `None`, а НЕ `""`: у `git status --porcelain` пустой вывод — ЛЕГИТИМНЫЙ результат
+    (чистое дерево). Схлопни сбой и пустоту в `""` — и `len("".splitlines())` даст `0`,
+    т.е. блок соврёт «незакоммичено 0» при упавшем git. Ровно та болезнь, которую этот
+    блок и лечит (протухший экран, рапортующий здоровье). Вызывающий обязан различать.
 
     ⚠️ `encoding="utf-8"` обязателен: на Windows `text=True` декодирует вывод git локалью
     (cp1251) → русские сообщения коммитов превращаются в кракозябры прямо в STATUS.md.
@@ -138,8 +143,8 @@ def _git(*args: str) -> str:
             encoding="utf-8", errors="replace", timeout=10,
         )
     except Exception:
-        return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
 
 
 def _alembic_heads() -> list[str]:
@@ -168,9 +173,11 @@ def _coord_block(stamp: str) -> str:
     """
     branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "?"
     head = _git("log", "-1", "--oneline") or "?"
-    dirty = len(_git("status", "--porcelain").splitlines())
+    # `None` (git упал) → честный `?`; пустой вывод — валидное «дерево чисто», это 0.
+    porcelain = _git("status", "--porcelain")
+    dirty = "?" if porcelain is None else len(porcelain.splitlines())
     # `A...B --left-right --count` → "<позади> <впереди>" относительно origin.
-    counts = _git("rev-list", "--left-right", "--count", f"origin/{branch}...HEAD").split()
+    counts = (_git("rev-list", "--left-right", "--count", f"origin/{branch}...HEAD") or "").split()
     behind, ahead = (counts + ["?", "?"])[:2]
     heads = _alembic_heads()
     if not heads:
