@@ -123,13 +123,19 @@ async def import_counterparties(session: AsyncSession, rows: list[dict], *, sour
     """Пакетный идемпотентный импорт. ``rows``: список ``{unp, name, external_ref|id}``.
 
     Возвращает сводку для предпросмотра/лога адаптера.
+    Строки без УНП пропускаются (в 1С бывают группы/элементы без ИНН) — иначе батч
+    падает на ``upsert_counterparty`` и остатки/SKU не доезжают.
     """
-    created = matched = aliased = 0
+    created = matched = aliased = skipped = 0
     rules = await survivorship.load_rules(session, "counterparty")  # один раз на батч
     for row in rows:
+        unp = (row.get("unp") or "").strip()
+        if not unp:
+            skipped += 1
+            continue
         result = await upsert_counterparty(
             session,
-            unp=row.get("unp"),
+            unp=unp,
             name=row.get("name"),
             source=source,
             external_ref=row.get("external_ref") or row.get("id"),
@@ -141,4 +147,10 @@ async def import_counterparties(session: AsyncSession, rows: list[dict], *, sour
             matched += 1
         if result.alias_added:
             aliased += 1
-    return {"total": len(rows), "created": created, "matched": matched, "aliases_added": aliased}
+    return {
+        "total": len(rows),
+        "created": created,
+        "matched": matched,
+        "aliases_added": aliased,
+        "skipped_no_unp": skipped,
+    }

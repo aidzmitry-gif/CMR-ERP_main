@@ -62,13 +62,32 @@ async def test_batch_import_summary_idempotent(session):
         {"unp": "111", "name": "A", "id": "a1"},  # дубль строки → матч, без новой записи
     ]
     summary = await reference_import.import_counterparties(session, rows)
-    assert summary == {"total": 3, "created": 2, "matched": 1, "aliases_added": 2}
+    assert summary == {
+        "total": 3,
+        "created": 2,
+        "matched": 1,
+        "aliases_added": 2,
+        "skipped_no_unp": 0,
+    }
     assert await _count(session, Counterparty) == 2
 
     # повторный прогон того же батча — всё матчится, ничего не создаётся
     again = await reference_import.import_counterparties(session, rows)
     assert again["created"] == 0
     assert await _count(session, Counterparty) == 2
+
+
+async def test_batch_skips_rows_without_unp(session):
+    rows = [
+        {"unp": "", "name": "Группа без УНП", "id": "g1"},
+        {"unp": None, "name": "Ещё без", "id": "g2"},
+        {"unp": "191000001", "name": "ООО С УНП", "id": "c1"},
+    ]
+    summary = await reference_import.import_counterparties(session, rows)
+    assert summary["skipped_no_unp"] == 2
+    assert summary["created"] == 1
+    assert summary["total"] == 3
+    assert await _count(session, Counterparty) == 1
 
 
 async def test_upsert_requires_unp(session):
