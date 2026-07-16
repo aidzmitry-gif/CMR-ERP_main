@@ -1485,7 +1485,7 @@ export function DealsWorkspace({
   const cockpitAnyCrit =
     invoiceHasCrit ||
     (Boolean(planGap) && closeabilityResult.total > 0) ||
-    focusResult.items.some((i) => i.severity === "crit");
+    focusResult.crit;
   // Дефолтная вкладка при открытии — самая срочная НЕПУСТАЯ очередь: счёт-crit важнее
   // гэпа до плана важнее фокуса (деньги, которые прямо сейчас утекают, — первым делом);
   // если crit нигде нет — первая непустая по тому же приоритету.
