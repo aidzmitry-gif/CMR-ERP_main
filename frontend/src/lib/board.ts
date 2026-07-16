@@ -49,6 +49,19 @@ export function moveDealToStage(stages: Stage[], dealId: string, targetStage: st
   return recomputeStages(next);
 }
 
+/** Патч полей одной сделки во всех стадиях доски (оптимистичный апдейт локального стейта).
+ *
+ * Агрегаты (count/sum) НЕ пересчитывает — в отличие от {@link moveDealToStage}: точечная
+ * правка полей (owner/priority/starred/следующий шаг) не двигает сделки между колонками.
+ * Ключи со значением `undefined` затирают поле — этим пользуется {@link nextStepFields}.
+ */
+export function patchStages(stages: Stage[], dealId: string, fields: Partial<Deal>): Stage[] {
+  return stages.map((s) => ({
+    ...s,
+    deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...fields } : d)),
+  }));
+}
+
 /** Гарантировать колонку «отказ» на доске (SALES-40).
  *
  * Бэкенд уже включает стадию `lost`, но при graceful-fallback на mock её нет —
@@ -174,6 +187,25 @@ export function dealStepText(
   return deal.todo
     ? [deal.todo, deal.actionDate, deal.actionTime].filter(Boolean).join(" · ")
     : deal.nextStep;
+}
+
+/** Патч следующего шага: назначить текст/срок или очистить (`null`). Чистая структура
+ * данных (не React) — живёт рядом с {@link nextStepFields}; NextStepComposer реэкспортирует. */
+export type NextStepPatch = { text: string | null; atISO: string | null };
+
+/** Поля сделки для записи следующего шага (слайс 4) — общий патч для доски, секции и drawer'а.
+ *
+ * Гасит legacy `todo`/`actionDate`/`actionTime`: {@link dealStepText} отдаёт приоритет `todo`,
+ * поэтому без гашения новый шаг не показался бы. Это правило КОРРЕКТНОСТИ — держим в одном месте.
+ */
+export function nextStepFields(patch: NextStepPatch): Partial<Deal> {
+  return {
+    nextStep: patch.text ?? undefined,
+    nextStepAt: patch.atISO ?? undefined,
+    todo: undefined,
+    actionDate: undefined,
+    actionTime: undefined,
+  };
 }
 
 /** Слайс 4 (D, «след. шаг в 2 клика»): при смене стадии стоит авто-подставить дефолтный

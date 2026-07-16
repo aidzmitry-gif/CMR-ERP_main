@@ -27,6 +27,8 @@ import {
   isStuck,
   marginForecastResult,
   moveDealToStage,
+  nextStepFields,
+  patchStages,
   probabilityFor,
   recomputeStages,
   reviveDays,
@@ -77,6 +79,51 @@ describe("moveDealToStage", () => {
 
   it("возвращает прежний массив для несуществующей сделки", () => {
     expect(moveDealToStage(stages, "999", "won")).toBe(stages);
+  });
+});
+
+describe("patchStages", () => {
+  const stages = [stage("new", [deal("1", 100), deal("2", 50)]), stage("won", [deal("3", 70)])];
+
+  it("патчит поля только целевой сделки, в какой бы стадии она ни лежала", () => {
+    const next = patchStages(stages, "3", { owner: "Пётр" });
+    expect(next.find((s) => s.id === "won")!.deals[0].owner).toBe("Пётр");
+    expect(next.find((s) => s.id === "new")!.deals.map((d) => d.owner)).toEqual(["o", "o"]);
+  });
+
+  it("НЕ пересчитывает агрегаты: правка полей не двигает сделки между колонками", () => {
+    const src = [{ ...stage("new", [deal("1", 100)]), count: 99, sum: 777 }];
+    const [s] = patchStages(src, "1", { priority: "Высокий" });
+    expect(s.count).toBe(99);
+    expect(s.sum).toBe(777);
+  });
+
+  it("ключ со значением undefined затирает поле (нужно для гашения legacy)", () => {
+    const src = [stage("new", [deal("1", 100, { todo: "старое" })])];
+    const [s] = patchStages(src, "1", { todo: undefined });
+    expect(s.deals[0].todo).toBeUndefined();
+  });
+});
+
+describe("nextStepFields", () => {
+  it("назначает шаг и гасит legacy todo/actionDate/actionTime — иначе dealStepText показал бы старый todo", () => {
+    const d = deal("1", 100, {
+      todo: "старая задача",
+      actionDate: "01.01",
+      actionTime: "10:00",
+    });
+    const patched = { ...d, ...nextStepFields({ text: "Позвонить", atISO: "2026-07-20T09:00:00" }) };
+    expect(patched.nextStep).toBe("Позвонить");
+    expect(patched.nextStepAt).toBe("2026-07-20T09:00:00");
+    expect(dealStepText(patched)).toBe("Позвонить");
+  });
+
+  it("очищает шаг целиком при patch из null («Выполнен»)", () => {
+    const d = deal("1", 100, { nextStep: "Позвонить", todo: "старая задача" });
+    const patched = { ...d, ...nextStepFields({ text: null, atISO: null }) };
+    expect(patched.nextStep).toBeUndefined();
+    expect(patched.nextStepAt).toBeUndefined();
+    expect(dealStepText(patched)).toBeUndefined();
   });
 });
 

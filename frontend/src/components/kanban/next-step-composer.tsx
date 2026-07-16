@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { useState } from "react";
-import { dealStepText } from "@/lib/board";
+import { dealStepText, type NextStepPatch } from "@/lib/board";
 import {
   nextStepTemplatesFor,
   presetDateISO,
@@ -10,8 +10,9 @@ import {
 } from "@/lib/sales-stages";
 import type { Deal } from "@/lib/types";
 
-/** Патч следующего шага (слайс 4): `text`/`atISO` оба `null` — шаг очищен («Выполнен»). */
-export type NextStepPatch = { text: string | null; atISO: string | null };
+// Единый источник типа — board.ts (рядом с nextStepFields, где живёт правило гашения legacy).
+// Реэкспорт сохраняет существующих импортёров `@/components/kanban/next-step-composer`.
+export type { NextStepPatch };
 
 /** Пресеты срока (мокап sales-board-mockup.html): подпись + сдвиг в днях от `now`. */
 const DATE_PRESETS: { label: string; days: number }[] = [

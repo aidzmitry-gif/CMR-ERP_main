@@ -23,7 +23,6 @@ import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
 import { ActionCockpit, type CockpitTab } from "@/components/kanban/action-cockpit";
 import { LoseDealModal } from "@/components/kanban/lose-deal-modal";
-import type { NextStepPatch } from "@/components/kanban/next-step-composer";
 import {
   createDeal,
   createDealTask,
@@ -54,6 +53,8 @@ import {
   LOSS_REASONS,
   marginForecastResult,
   moveDealToStage,
+  nextStepFields,
+  patchStages,
   probabilityFor,
   recomputeStages,
   reviveDays,
@@ -64,6 +65,7 @@ import {
   type ApprovalBadgeResult,
   type InvoiceBadgeResult,
   type InvoiceRiskEntry,
+  type NextStepPatch,
   weightedAmount,
 } from "@/lib/board";
 import { nextStepPreset, presetDateISO, STAGE_BY_ID } from "@/lib/sales-stages";
@@ -641,37 +643,15 @@ function FunnelSection({
   /** Патч полей из меню карточки (⋯): доска секции живёт в локальном стейте —
    *  оптимистично правим здесь + fire-and-forget PATCH бэку. */
   function patchSectionDeal(dealId: string, fields: DealCardPatch) {
-    setStages((prev) =>
-      prev.map((s) => ({
-        ...s,
-        deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...fields } : d)),
-      })),
-    );
+    setStages((prev) => patchStages(prev, dealId, fields));
     void updateDeal(dealId, fields);
   }
 
   /** Слайс 4: назначить/очистить следующий шаг из композера карточки секции «Все вместе» —
    *  тот же оптимистичный патч + PATCH бэку, что и на основной доске (handleNextStep),
-   *  но пишет в локальный стейт секции. Гасим legacy todo/actionDate/actionTime — иначе
-   *  dealStepText (board.ts) отдал бы приоритет старому todo поверх нового next_step. */
+   *  но пишет в локальный стейт секции. Гашение legacy — в nextStepFields (board.ts). */
   function patchSectionNextStep(dealId: string, patch: NextStepPatch) {
-    setStages((prev) =>
-      prev.map((s) => ({
-        ...s,
-        deals: s.deals.map((d) =>
-          d.id === dealId
-            ? {
-                ...d,
-                nextStep: patch.text ?? undefined,
-                nextStepAt: patch.atISO ?? undefined,
-                todo: undefined,
-                actionDate: undefined,
-                actionTime: undefined,
-              }
-            : d,
-        ),
-      })),
-    );
+    setStages((prev) => patchStages(prev, dealId, nextStepFields(patch)));
     void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
 
@@ -1518,37 +1498,16 @@ export function DealsWorkspace({
   /** Оптимистичный патч полей сделки из меню карточки (⋯) + fire-and-forget PATCH бэку.
    *  Имена полей совпадают с DealUpdate бэка (owner/priority/starred) — шлём как есть. */
   function patchDealFields(dealId: string, fields: DealCardPatch) {
-    setStages((prev) =>
-      prev.map((s) => ({
-        ...s,
-        deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...fields } : d)),
-      })),
-    );
+    setStages((prev) => patchStages(prev, dealId, fields));
     void updateDeal(dealId, fields);
   }
 
   /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг — из композера
    *  карточки (ручной выбор) или авто-назначения при смене стадии (handleDragEnd/drawer).
-   *  Гасим legacy todo/actionDate/actionTime — иначе dealStepText (board.ts) отдал бы
-   *  приоритет старому todo поверх нового next_step. Оптимистично, fire-and-forget PATCH. */
+   *  Гашение legacy todo/actionDate/actionTime — в nextStepFields (board.ts).
+   *  Оптимистично, fire-and-forget PATCH. */
   function handleNextStep(dealId: string, patch: NextStepPatch) {
-    setStages((prev) =>
-      prev.map((s) => ({
-        ...s,
-        deals: s.deals.map((d) =>
-          d.id === dealId
-            ? {
-                ...d,
-                nextStep: patch.text ?? undefined,
-                nextStepAt: patch.atISO ?? undefined,
-                todo: undefined,
-                actionDate: undefined,
-                actionTime: undefined,
-              }
-            : d,
-        ),
-      })),
-    );
+    setStages((prev) => patchStages(prev, dealId, nextStepFields(patch)));
     void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
 
@@ -2305,12 +2264,7 @@ export function DealsWorkspace({
           if ("starred" in fields) camel.starred = Boolean(fields.starred);
           if ("priority" in fields)
             camel.priority = fields.priority as Deal["priority"];
-          setStages((prev) =>
-            prev.map((s) => ({
-              ...s,
-              deals: s.deals.map((d) => (d.id === dealId ? { ...d, ...camel } : d)),
-            })),
-          );
+          setStages((prev) => patchStages(prev, dealId, camel));
           setPreviewDeal((p) => (p && p.id === dealId ? { ...p, ...camel } : p));
           void updateDeal(dealId, fields);
         }}
