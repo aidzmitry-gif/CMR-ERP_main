@@ -26,7 +26,7 @@ export function buildBackendProxyHeaders(
   if (incomingAuth) {
     headers.set("authorization", incomingAuth);
   } else if (opts.accessToken) {
-    headers.set("authorization", Bearer );
+    headers.set("authorization", "Bearer " + opts.accessToken);
   }
 
   if (opts.devRole) {
