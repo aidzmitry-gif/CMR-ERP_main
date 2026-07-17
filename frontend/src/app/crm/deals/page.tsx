@@ -6,7 +6,7 @@ import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FiltersMenu } from "@/components/kanban/filters-menu";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
 import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
-import { currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 /** Переключатель ЮЛ + «Фильтры» + «Стадии»/«Лого» (иконки) — правее хлебных крошек
  *  «CRM / Сделки», в одну строку (решение оператора: раньше жили в тулбаре доски). */
@@ -41,6 +41,7 @@ export default async function DealsPage({
   const { funnel, owner_id } = await searchParams;
   const activeFunnel = funnel ?? "new_clients";
   const role = await currentRole();
+  const token = (await currentAccessToken()) ?? undefined;
   // Владелец плана (dev/демо через ?owner_id=) — «План» скорборда из согласованного PlanTarget.
   // Нет параметра → undefined → доска без изменений (как раньше). ponytail: связать с логином.
   const ownerId = owner_id ? Number.parseInt(owner_id, 10) || undefined : undefined;
@@ -55,12 +56,15 @@ export default async function DealsPage({
   if (activeFunnel === "all") {
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
-    const [funnels, kpis] = await Promise.all([fetchFunnelsServer(role), fetchKpis(role)]);
+    const [funnels, kpis] = await Promise.all([
+      fetchFunnelsServer(role, token),
+      fetchKpis(role, token),
+    ]);
     const sections = await Promise.all(
       funnels.map(async (f) => ({
         code: f.code,
         title: f.title,
-        ...(await fetchBoardResult(role, f.code)),
+        ...(await fetchBoardResult(role, f.code, token)),
       })),
     );
     return (
@@ -80,7 +84,10 @@ export default async function DealsPage({
 
   // SSR: стадии для выбранной воронки + KPI; key прокидывает funnel в DealsWorkspace,
   // чтобы клиентский стейт колонок сбрасывался при переключении воронки.
-  const [board, kpis] = await Promise.all([fetchBoardResult(role, activeFunnel), fetchKpis(role)]);
+  const [board, kpis] = await Promise.all([
+    fetchBoardResult(role, activeFunnel, token),
+    fetchKpis(role, token),
+  ]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
       {/* CurrencyProvider поднят в app/crm/layout.tsx — общий на весь CRM */}

@@ -86,8 +86,12 @@ function mapDeal(d: ApiDeal): Deal {
 
 /** Доска сделок из API; при недоступности бэкенда — fallback на mock.
  * В обоих случаях гарантируем колонку «отказ» (SALES-40) через {@link ensureLostStage}. */
-export async function fetchBoardStages(roles?: string, funnel?: string): Promise<Stage[]> {
-  return (await fetchBoardResult(roles, funnel)).stages;
+export async function fetchBoardStages(
+  roles?: string,
+  funnel?: string,
+  accessToken?: string,
+): Promise<Stage[]> {
+  return (await fetchBoardResult(roles, funnel, accessToken)).stages;
 }
 
 /** Доска + признак фоллбэка: `demo=true` — backend недоступен, отданы мок-стадии
@@ -96,10 +100,14 @@ export async function fetchBoardStages(roles?: string, funnel?: string): Promise
 export async function fetchBoardResult(
   roles?: string,
   funnel?: string,
+  accessToken?: string,
 ): Promise<{ stages: Stage[]; demo: boolean }> {
   try {
     const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
-    const res = await fetch(`${BASE}/sales/board${qs}`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/sales/board${qs}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
     return {
@@ -250,11 +258,11 @@ export async function fetchFunnels(): Promise<FunnelRow[]> {
 
 /** То же для SSR (page.tsx «Все вместе»): относительный `/api/...` на сервере не работает —
  * ходим на BASE напрямую с ручным пробросом роли (как fetchBoardResult/fetchKpis). */
-export async function fetchFunnelsServer(roles?: string): Promise<FunnelRow[]> {
+export async function fetchFunnelsServer(roles?: string, accessToken?: string): Promise<FunnelRow[]> {
   try {
     const res = await fetch(`${BASE}/sales/funnels`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: roleHeaders(roles, accessToken),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as FunnelRow[];
@@ -319,9 +327,16 @@ function dealStage(stageId: string, stageChangedAt?: string | null): DealDetail[
   };
 }
 
-export async function fetchDealDetail(id: string, roles?: string): Promise<DealDetail> {
+export async function fetchDealDetail(
+  id: string,
+  roles?: string,
+  accessToken?: string,
+): Promise<DealDetail> {
   try {
-    const res = await fetch(`${BASE}/sales/deals/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/sales/deals/${id}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
       items?: { title: string; last_price: number | null; min_price: number | null }[];
@@ -790,9 +805,12 @@ function mapKpi(k: ApiKpi): Kpi {
 }
 
 /** KPI «План на сегодня» из API (SSR); fallback на mock. */
-export async function fetchKpis(roles?: string): Promise<Kpi[]> {
+export async function fetchKpis(roles?: string, accessToken?: string): Promise<Kpi[]> {
   try {
-    const res = await fetch(`${BASE}/sales/kpis`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/sales/kpis`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as ApiKpi[];
     return data.length ? data.map(mapKpi) : KPIS;
@@ -1214,9 +1232,12 @@ export async function logLeadAttempt(id: number, callbackAt?: string): Promise<L
 }
 
 /** Лиды на приёме (вход воронки) из API (SSR); fallback — пусто. */
-export async function fetchLeads(roles?: string): Promise<Lead[]> {
+export async function fetchLeads(roles?: string, accessToken?: string): Promise<Lead[]> {
   try {
-    const res = await fetch(`${BASE}/leads`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/leads`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as ApiLead[]).map(mapLead);
   } catch {
@@ -1226,9 +1247,12 @@ export async function fetchLeads(roles?: string): Promise<Lead[]> {
 
 /** Один лид по id (SSR, кокпит /crm/leads/[id]) — точечный GET вместо «скачать все и найти».
  *  null — не найден/сбой. Заодно будит созревший «не сейчас» (wake-on-read на бэке). */
-export async function fetchLead(id: number, roles?: string): Promise<Lead | null> {
+export async function fetchLead(id: number, roles?: string, accessToken?: string): Promise<Lead | null> {
   try {
-    const res = await fetch(`${BASE}/leads/${id}`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/leads/${id}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) return null;
     return mapLead((await res.json()) as ApiLead);
   } catch {
@@ -1844,12 +1868,18 @@ export async function fetchOwnerInsight(): Promise<string | null> {
 }
 
 /** Панель владельца (Control Tower): кросс-модульные метрики + воронка + KPI (SSR). */
-export async function fetchOwnerDashboard(roles?: string): Promise<OwnerDashboard | null> {
+export async function fetchOwnerDashboard(
+  roles?: string,
+  accessToken?: string,
+): Promise<OwnerDashboard | null> {
   try {
     const [metricsRes, stages, kpis] = await Promise.all([
-      fetch(`${BASE}/system/owner`, { cache: "no-store", headers: roleHeaders(roles) }),
-      fetchBoardStages(roles),
-      fetchKpis(roles),
+      fetch(`${BASE}/system/owner`, {
+        cache: "no-store",
+        headers: roleHeaders(roles, accessToken),
+      }),
+      fetchBoardStages(roles, accessToken),
+      fetchKpis(roles, accessToken),
     ]);
     if (!metricsRes.ok) throw new Error(String(metricsRes.status));
     const metrics = (await metricsRes.json()) as OwnerMetrics;

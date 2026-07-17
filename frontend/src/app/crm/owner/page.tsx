@@ -12,7 +12,7 @@ import { AppShell } from "@/components/app-shell";
 import { OwnerAiInsight } from "@/components/owner-ai-insight";
 import { fetchOwnerDashboard } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
-import { currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -41,7 +41,9 @@ function Metric({
 }
 
 export default async function OwnerPage() {
-  const data = await fetchOwnerDashboard(await currentRole());
+  const role = await currentRole();
+  const token = (await currentAccessToken()) ?? undefined;
+  const data = await fetchOwnerDashboard(role, token);
   if (!data) {
     return (
       <AppShell crumbs={["CRM", "Панель владельца"]}>
