@@ -17,6 +17,10 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location -LiteralPath $root
 
+# `powershell -File script.ps1 -Commits a,b` передаёт "a,b" одной строкой (в отличие от
+# вызова через call-оператор). Нормализуем: принимаем и массив, и строку с запятыми.
+if ($Commits) { $Commits = @($Commits | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() }) }
+
 function Fail([string]$msg) { Write-Host "safe-push: $msg" -ForegroundColor Red; exit 1 }
 
 git fetch origin
