@@ -11,8 +11,9 @@
 | FE OIDC start | `307` → Keycloak authorize (PKCE) |
 | FE callback routes | `/api/auth/oidc/callback` в билде |
 | Proxy Bearer | `api-proxy-headers` + `TOKEN_COOKIE` |
-| SSR Bearer (CRM) | deals/leads board+detail передают `accessToken` |
+| SSR Bearer (CRM) | deals/leads/owner передают `accessToken` (`0a8f7d8`, FE rebuild) |
 | App runtime | всё ещё `AIOS_AUTH_MODE=dev` (Bearer alone → Гость — ожидаемо) |
+| FE proxy + cookie | `Cookie: aios_access_token=<jwt>` → `/api/sales/board` **200**, 11 stages |
 
 ## Ручной смоук перед флипом
 
