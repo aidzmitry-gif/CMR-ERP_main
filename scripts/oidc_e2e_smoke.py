@@ -68,10 +68,10 @@ def main() -> None:
         action = rewrite_auth(action)
 
     data = dict(parser.inputs)
-data["username"] = os.environ.get("OIDC_SMOKE_USER", "dima")
-data["password"] = os.environ.get("OIDC_SMOKE_PASSWORD", "")
-if not data["password"]:
-    raise SystemExit("set OIDC_SMOKE_PASSWORD")
+    data["username"] = os.environ.get("OIDC_SMOKE_USER", "dima")
+    data["password"] = os.environ.get("OIDC_SMOKE_PASSWORD", "")
+    if not data["password"]:
+        raise SystemExit("set OIDC_SMOKE_PASSWORD")
     print("login_action", action[:140])
     body = urllib.parse.urlencode(data).encode()
     cur: urllib.request.Request = urllib.request.Request(
