@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { frontendAuthMode, keycloakPublicConfig } from "@/lib/auth-mode";
-import { tokenEndpointIssuer } from "@/lib/keycloak";
+import { tokenEndpointIssuer } from "@/lib/keycloak-token";
 
 describe("frontendAuthMode", () => {
   it("defaults to dev", () => {

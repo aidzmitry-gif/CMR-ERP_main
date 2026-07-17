@@ -7,18 +7,19 @@
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 
-import { ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
+import { ROLE_COOKIE } from "@/lib/access";
 import { buildBackendProxyHeaders } from "@/lib/api-proxy-headers";
+import { ensureFreshAccessToken } from "@/lib/auth-session-server";
 
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const jar = await cookies();
   const role = jar.get(ROLE_COOKIE)?.value;
-  const accessToken = jar.get(TOKEN_COOKIE)?.value;
+  const accessToken = await ensureFreshAccessToken();
   const target = `${BASE}/${segments.join("/")}${req.nextUrl.search}`;
 
-  const headers = buildBackendProxyHeaders(req.headers, { devRole: role, accessToken });
+  const headers = buildBackendProxyHeaders(req.headers, { devRole: role, accessToken: accessToken ?? undefined });
 
   const init: RequestInit = { method: req.method, headers, cache: "no-store" };
   if (req.method !== "GET" && req.method !== "HEAD") {
