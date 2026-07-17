@@ -17,6 +17,12 @@
 | PKCE E2E (local FE) | start→KC login→callback cookies→board **200**→logout (после `/etc/hosts` hairpin fix) |
 | Hairpin | `127.0.0.1 auth.belakb.by` в `/etc/hosts`; иначе token exchange `ECONNREFUSED 93.125.0.131:443` |
 
+## Остатки до комфортного флипа
+
+- **Silent refresh:** `aios_refresh_token` пишется, но роут обновления access ещё нет (сессия ~expires_in, обычно 5 мин).
+- **Браузер через Caddy:** нужен Basic Auth (`dima` / пароль Caddy) + кнопка Keycloak; автосмоук идёт через `:3100` в обход Caddy.
+- Пароль Keycloak-пользователя `dima` — **сменить** после смоука.
+
 ## Ручной смоук перед флипом
 
 1. Открыть `https://belakb.by/login` (Basic Auth Caddy + dev picker).
