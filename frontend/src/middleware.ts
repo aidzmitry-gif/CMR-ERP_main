@@ -34,8 +34,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 export const config = {
   matcher: [
     /*
-     * Skip static assets and the OIDC handshake itself (start/callback own the cookies).
+     * Page navigations only. `/api/*` refreshes inside the proxy / oidc routes
+     * (avoids double refresh-token rotation with middleware).
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/auth/oidc/start|api/auth/oidc/callback).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/).*)",
   ],
 };
