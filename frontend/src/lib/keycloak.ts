@@ -1,12 +1,32 @@
-// Keycloak OIDC helpers (PKCE). Used by /api/auth/oidc/* routes.
+// Re-export token helpers + PKCE (Node crypto) for route handlers.
 
 import { createHash, randomBytes } from "crypto";
 
 import { keycloakPublicConfig } from "@/lib/auth-mode";
+import {
+  type OidcTokens,
+  REFRESH_COOKIE,
+  accessTokenNeedsRefresh,
+  displayNameFromAccessToken,
+  peekJwtPayload,
+  refreshAccessToken,
+  rolesFromAccessToken,
+  tokenEndpointIssuer,
+} from "@/lib/keycloak-token";
+
+export {
+  REFRESH_COOKIE,
+  accessTokenNeedsRefresh,
+  displayNameFromAccessToken,
+  peekJwtPayload,
+  refreshAccessToken,
+  rolesFromAccessToken,
+  tokenEndpointIssuer,
+};
+export type { OidcTokens };
 
 export const OIDC_VERIFIER_COOKIE = "aios_oidc_verifier";
 export const OIDC_STATE_COOKIE = "aios_oidc_state";
-export const REFRESH_COOKIE = "aios_refresh_token";
 
 export function randomUrlSafe(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
@@ -46,29 +66,13 @@ export function authorizeUrl(opts: {
   return u.toString();
 }
 
-/**
- * Issuer base for server-side token/refresh calls.
- * Prefer KEYCLOAK_INTERNAL_ISSUER (e.g. http://127.0.0.1:8080/realms/aios) when the
- * public hostname hairpins (ECONNREFUSED on the box's own public IP).
- * Browser redirects still use the public NEXT_PUBLIC_KEYCLOAK_ISSUER.
- */
-export function tokenEndpointIssuer(publicIssuer: string): string {
-  const internal = (process.env.KEYCLOAK_INTERNAL_ISSUER ?? "").replace(/\/$/, "");
-  return internal || publicIssuer.replace(/\/$/, "");
-}
-
 export async function exchangeCode(opts: {
   issuer: string;
   clientId: string;
   redirectUri: string;
   code: string;
   verifier: string;
-}): Promise<{
-  access_token: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in?: number;
-} | null> {
+}): Promise<OidcTokens | null> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: opts.clientId,
@@ -85,39 +89,8 @@ export async function exchangeCode(opts: {
       cache: "no-store",
     });
     if (!res.ok) return null;
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token?: string;
-      id_token?: string;
-      expires_in?: number;
-    };
+    return (await res.json()) as OidcTokens;
   } catch {
     return null;
   }
-}
-
-/** Decode JWT payload without verifying (roles for UI cookie only; backend verifies Bearer). */
-export function peekJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const part = token.split(".")[1];
-    if (!part) return null;
-    const json = Buffer.from(part, "base64url").toString("utf8");
-    return JSON.parse(json) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-export function rolesFromAccessToken(token: string): string[] {
-  const payload = peekJwtPayload(token);
-  if (!payload) return [];
-  const realm = payload.realm_access as { roles?: string[] } | undefined;
-  return (realm?.roles ?? []).filter((r) => typeof r === "string");
-}
-
-export function displayNameFromAccessToken(token: string): string {
-  const payload = peekJwtPayload(token);
-  if (!payload) return "oidc-user";
-  const name = payload.name ?? payload.preferred_username ?? payload.sub;
-  return typeof name === "string" ? name : "oidc-user";
 }

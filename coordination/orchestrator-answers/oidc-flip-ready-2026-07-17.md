@@ -19,7 +19,7 @@
 
 ## Остатки до комфортного флипа
 
-- **Silent refresh:** `aios_refresh_token` пишется, но роут обновления access ещё нет (сессия ~expires_in, обычно 5 мин).
+- ~~**Silent refresh**~~ — middleware + `/api/[...path]` + `POST /api/auth/oidc/refresh` (`aios_refresh_token`).
 - **Браузер через Caddy:** нужен Basic Auth (`dima` / пароль Caddy) + кнопка Keycloak; автосмоук идёт через `:3100` в обход Caddy.
 - Пароль Keycloak-пользователя `dima` — **сменить** после смоука.
 
