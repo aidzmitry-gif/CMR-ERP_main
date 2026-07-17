@@ -4,11 +4,16 @@
 
 import { cookies } from "next/headers";
 
-import { DEFAULT_ROLE, ROLE_COOKIE, USER_COOKIE } from "@/lib/access";
+import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
 
 /** Текущая роль из cookie `aios_role`; по умолчанию — полный доступ (director). */
 export async function currentRole(): Promise<string> {
   return (await cookies()).get(ROLE_COOKIE)?.value ?? DEFAULT_ROLE;
+}
+
+/** Access token Keycloak (httpOnly), если уже выдан callback'ом. */
+export async function currentAccessToken(): Promise<string | null> {
+  return (await cookies()).get(TOKEN_COOKIE)?.value ?? null;
 }
 
 /** ФИО вошедшего сотрудника из cookie `aios_user` (URL-кодирован при логине). null — не вошёл. */

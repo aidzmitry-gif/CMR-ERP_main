@@ -10,8 +10,12 @@ const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 // SSR-фетчи ходят на BASE напрямую, минуя /api-прокси, поэтому роль надо пробросить
 // заголовком вручную (роль читает серверный хелпер `role-server.ts` из cookie). На клиенте
 // (вызовы через /api/*) роль добавляет прокси `app/api/[...path]/route.ts`.
-function roleHeaders(roles?: string): Record<string, string> | undefined {
-  return roles ? { "X-User-Roles": roles } : undefined;
+// Опциональный accessToken — OIDC Bearer (см. auth-headers-server / TOKEN_COOKIE).
+function roleHeaders(roles?: string, accessToken?: string): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (roles) headers["X-User-Roles"] = roles;
+  if (accessToken) headers.Authorization = "Bearer " + accessToken;
+  return Object.keys(headers).length ? headers : undefined;
 }
 
 interface ApiDeal {

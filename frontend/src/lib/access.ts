@@ -46,12 +46,22 @@ export interface AccessData {
   current_roles: string[];
 }
 
-/** Подтянуть матрицу доступа с backend под конкретную роль (SSR). null — backend недоступен. */
-export async function fetchAccess(role: string): Promise<AccessData | null> {
+/**
+ * Подтянуть матрицу доступа с backend (SSR). null — backend недоступен.
+ * ``authHeaders`` — из ``backendAuthHeaders()`` (Bearer + X-User-Roles); иначе только роль.
+ */
+export async function fetchAccess(
+  role: string,
+  authHeaders?: Record<string, string>,
+): Promise<AccessData | null> {
   try {
+    const headers: Record<string, string> = {
+      "X-User-Roles": role,
+      ...(authHeaders ?? {}),
+    };
     const res = await fetch(`${BASE}/system/access`, {
       cache: "no-store",
-      headers: { "X-User-Roles": role },
+      headers,
     });
     if (!res.ok) return null;
     return (await res.json()) as AccessData;

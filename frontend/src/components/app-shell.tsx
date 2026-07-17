@@ -6,6 +6,7 @@ import { CurrencyProvider } from "@/components/kanban/currency-context";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { fetchAccess } from "@/lib/access";
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
 import { currentRole, currentUserName } from "@/lib/role-server";
 
 export async function AppShell({
@@ -18,13 +19,13 @@ export async function AppShell({
   headerActions?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  // гейт: без dev-логина уводим на /login
+  // гейт: без сессии (dev-cookie или OIDC callback) уводим на /login
   const userName = await currentUserName();
   if (!userName) redirect("/login");
 
   // текущая роль из cookie; матрицу доступных модулей берём с backend
   const role = await currentRole();
-  const access = await fetchAccess(role);
+  const access = await fetchAccess(role, await backendAuthHeaders(role));
   // backend недоступен → не прячем ничего (allowedSlugs=null), чтобы UI не «ослеп»
   const allowedSlugs = access ? access.matrix[role] ?? [] : null;
   const roleTitle = access?.roles.find((r) => r.slug === role)?.title ?? role;
