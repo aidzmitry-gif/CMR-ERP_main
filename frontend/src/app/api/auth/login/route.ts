@@ -22,6 +22,7 @@ export async function POST(req: Request): Promise<Response> {
   const jar = await cookies();
   const opts = { path: "/", httpOnly: true, sameSite: "lax" as const, maxAge: YEAR };
   jar.set(ROLE_COOKIE, user.role, opts);
-  jar.set(USER_COOKIE, encodeURIComponent(user.full_name), opts);
+  // Next cookies().set already encodes; do not encodeURIComponent (else %2520).
+  jar.set(USER_COOKIE, user.full_name, opts);
   return Response.json({ ok: true, user });
 }

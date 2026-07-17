@@ -46,6 +46,17 @@ export function authorizeUrl(opts: {
   return u.toString();
 }
 
+/**
+ * Issuer base for server-side token/refresh calls.
+ * Prefer KEYCLOAK_INTERNAL_ISSUER (e.g. http://127.0.0.1:8080/realms/aios) when the
+ * public hostname hairpins (ECONNREFUSED on the box's own public IP).
+ * Browser redirects still use the public NEXT_PUBLIC_KEYCLOAK_ISSUER.
+ */
+export function tokenEndpointIssuer(publicIssuer: string): string {
+  const internal = (process.env.KEYCLOAK_INTERNAL_ISSUER ?? "").replace(/\/$/, "");
+  return internal || publicIssuer.replace(/\/$/, "");
+}
+
 export async function exchangeCode(opts: {
   issuer: string;
   clientId: string;
@@ -65,19 +76,24 @@ export async function exchangeCode(opts: {
     redirect_uri: opts.redirectUri,
     code_verifier: opts.verifier,
   });
-  const res = await fetch(`${opts.issuer}/protocol/openid-connect/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    id_token?: string;
-    expires_in?: number;
-  };
+  const base = tokenEndpointIssuer(opts.issuer);
+  try {
+    const res = await fetch(`${base}/protocol/openid-connect/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      id_token?: string;
+      expires_in?: number;
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Decode JWT payload without verifying (roles for UI cookie only; backend verifies Bearer). */
