@@ -4,8 +4,8 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "./frontend", "run", "dev"],
-      "port": 3000,
+      "runtimeArgs": ["--prefix", "./frontend", "run", "dev", "--", "-p", "3210"],
+      "port": 3210,
       "autoPort": true
     },
     {
@@ -18,10 +18,7 @@
     {
       "name": "backend",
       "runtimeExecutable": ".venv/Scripts/python.exe",
-      "runtimeArgs": [
-        "-c",
-        "import os; os.environ.setdefault('AIOS_DATABASE_URL', 'sqlite+aiosqlite:///./dev.db'); os.environ.setdefault('AIOS_ENVIRONMENT', 'dev'); import uvicorn; uvicorn.run('main:app', port=8000)"
-      ],
+      "runtimeArgs": ["scripts/dev_backend.py"],
       "port": 8000,
       "autoPort": true
     }

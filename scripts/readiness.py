@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -206,20 +207,28 @@ def _write_status(block: str, start: str, end: str) -> str:
     if not STATUS_FILE.is_file():
         STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATUS_FILE.write_text(block + "\n", encoding="utf-8")
-        return "создан"
+        return "created"
     text = STATUS_FILE.read_text(encoding="utf-8")
     if start in text and end in text:
         pre = text[: text.index(start)]
         post = text[text.index(end) + len(end):]
-        new, verb = pre + block + post, "обновлён"
+        new, verb = pre + block + post, "updated"
     else:
-        new, verb = text.rstrip() + "\n\n" + block + "\n", "дописан"
+        new, verb = text.rstrip() + "\n\n" + block + "\n", "appended"
     STATUS_FILE.write_text(new, encoding="utf-8")
     return verb
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description="Сканер готовности модулей")
+    # Консольный вывод — только ASCII + принудительный utf-8: хук PreCompact декодирует
+    # stdout системной кодовой страницей (cp866/cp1251), кириллица здесь давала mojibake
+    # в каждом /compact. Кириллица в STATUS.md (запись в файл) — не затронута.
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    ap = argparse.ArgumentParser(description="Module readiness scanner")
     ap.add_argument("--write", action="store_true",
                     help="обновить авто-блок в coordination/STATUS.md (курируемое не трогает)")
     args = ap.parse_args(argv)
@@ -232,22 +241,22 @@ def main(argv: list[str] | None = None) -> None:
     for m, loc, routes, migr, ui in rows:
         print(f"{m:<12} {str(loc):>5} {str(routes):>7} {str(migr):>5}  {ui}")
     print("-" * 60)
-    print(f"всего миграций: {total_migr}")
+    print(f"total migrations: {total_migr}")
 
     if args.write:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         verb = _write_status(_auto_block(rows, total_migr, stamp), MARK_START, MARK_END)
-        print(f"\nSTATUS.md: авто-блок {verb} ({stamp}); курируемые % не тронуты.")
+        print(f"\nSTATUS.md: auto-block {verb} ({stamp}); curated % untouched.")
         cverb = _write_status(_coord_block(stamp), COORD_START, COORD_END)
-        print(f"STATUS.md: блок координации флота {cverb} ({stamp}).")
+        print(f"STATUS.md: fleet coordination block {cverb} ({stamp}).")
         try:  # заодно освежаем HTML-кокпит; fail-open — битый рендер не рушит readiness
             import fleet_dashboard  # noqa: PLC0415  — тот же scripts/-каталог
             fleet_dashboard.main()
         except Exception as exc:  # pragma: no cover
-            print(f"(fleet-dashboard пропущен: {exc})")
+            print(f"(fleet-dashboard skipped: {exc})")
     else:
-        print("\n% готовности — см. coordination/STATUS.md (правится вручную). "
-              "Свежий авто-блок: readiness.py --write.")
+        print("\n% readiness -- see coordination/STATUS.md (curated by hand). "
+              "Fresh auto-block: readiness.py --write.")
 
 
 if __name__ == "__main__":
