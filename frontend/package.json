@@ -11,7 +11,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "gates": "npm run typecheck && npm run lint && vitest run --changed",
+    "gates:full": "npm run typecheck && npm run lint && vitest run"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
