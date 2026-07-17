@@ -7,7 +7,6 @@ import {
   addDealItem,
   createPriceQuote,
   fetchLastOrder,
-  fetchSkus,
   fetchStock,
   issueDocument,
   updateDeal,
@@ -49,6 +48,8 @@ export interface PickerRow {
  */
 export function useProductPicker(active: boolean, refetchKey?: string) {
   const [skus, setSkus] = useState<SkuOption[]>([]);
+  /** loading → ready | auth (401/403) | error. Пустой [] больше не маскируем под «Загрузка…». */
+  const [catalogStatus, setCatalogStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [stock, setStock] = useState<Record<string, SkuStock>>({});
   // Per-warehouse разбивка (не агрегат) — попап «Ввод количества и цены»
   // (CatalogPickerModal, catalog-picker-modal.tsx): Остаток/Резерв/Свободно по каждому складу.
@@ -67,13 +68,35 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   useEffect(() => {
     if (!active) return;
     let alive = true;
-    void fetchSkus().then((list) => {
-      if (alive) setSkus(list);
-    });
-    void fetchStock().then((rows) => {
+    setCatalogStatus("loading");
+    setSkus([]);
+    void (async () => {
+      try {
+        const res = await fetch("/api/sales/skus?for_picker=1", { cache: "no-store" });
+        if (!alive) return;
+        if (res.status === 401 || res.status === 403) {
+          setSkus([]);
+          setCatalogStatus("auth");
+          return;
+        }
+        if (!res.ok) {
+          setSkus([]);
+          setCatalogStatus("error");
+          return;
+        }
+        setSkus((await res.json()) as SkuOption[]);
+        setCatalogStatus("ready");
+      } catch {
+        if (alive) {
+          setSkus([]);
+          setCatalogStatus("error");
+        }
+      }
+    })();
+    void fetchStock().then((stockRows) => {
       if (alive) {
-        setStock(aggregateStock(rows));
-        setWarehouseStock(groupStockBySku(rows));
+        setStock(aggregateStock(stockRows));
+        setWarehouseStock(groupStockBySku(stockRows));
       }
     });
     return () => {
@@ -186,6 +209,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
 
   return {
     skus,
+    catalogStatus,
     stock,
     warehouseStock,
     rows,
@@ -213,6 +237,20 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
 
 export type ProductPickerState = ReturnType<typeof useProductPicker>;
 
+/** Текст пустой таблицы каталога (не путать auth/error с «ещё грузится»). */
+export function catalogEmptyMessage(
+  status: ProductPickerState["catalogStatus"],
+  hasSkus: boolean,
+): string {
+  if (hasSkus) return "Ничего не найдено — измените запрос или снимите фильтры";
+  if (status === "loading") return "Загрузка номенклатуры…";
+  if (status === "auth") {
+    return "Нет доступа к номенклатуре — выйдите и войдите через Keycloak (нужен JWT).";
+  }
+  if (status === "error") return "Не удалось загрузить номенклатуру. Обновите страницу.";
+  return "Номенклатура пуста.";
+}
+
 /**
  * Презентационная часть: строки корзины (qty/остаток/срок/маржа) + поиск/кандидаты +
  * итог/маржа заказа. БЕЗ CTA-кнопок (Добавить в сделку/Счёт/Повторить заказ) — их
@@ -226,7 +264,19 @@ export function ProductPicker({
   state: ProductPickerState;
   fmt: (value: number) => string;
 }) {
-  const { rows, stock, query, setQuery, candidates, skus, addSku, setRowQty, toggleRow, removeRow } = state;
+  const {
+    rows,
+    stock,
+    query,
+    setQuery,
+    candidates,
+    skus,
+    catalogStatus,
+    addSku,
+    setRowQty,
+    toggleRow,
+    removeRow,
+  } = state;
 
   return (
     <div>
@@ -336,7 +386,7 @@ export function ProductPicker({
           })}
           {candidates.length === 0 && (
             <div className="px-2 py-1.5 text-[12px] text-faint">
-              {skus.length ? "Ничего не найдено" : "Загрузка номенклатуры…"}
+              {catalogEmptyMessage(catalogStatus, skus.length > 0)}
             </div>
           )}
           {/* Провенанс данных (mdm-1c-data-provenance-ui): подчёркиваем, что остатки/цены —

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
 import { groupStockBySku, marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
-import { type ProductPickerState } from "./product-picker";
+import { catalogEmptyMessage, type ProductPickerState } from "./product-picker";
 
 /**
  * Компактная модалка подбора товара (порт sales-catalog-picker-compact.html —
@@ -57,7 +57,8 @@ export function CatalogPickerModal({
   state: ProductPickerState;
 }) {
   const picker = state;
-  const { skus, stock, warehouseStock, rows, addSkuWithQty, setRowPrice, removeRow } = picker;
+  const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, setRowPrice, removeRow } =
+    picker;
   const { fmt } = useCurrency();
 
   const [query, setQuery] = useState("");
@@ -326,7 +327,14 @@ export function CatalogPickerModal({
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-4 py-9 text-center text-faint">
-                      {skus.length ? "Ничего не найдено — измените запрос или снимите фильтры" : "Загрузка номенклатуры…"}
+                      {catalogEmptyMessage(catalogStatus, skus.length > 0)}
+                      {catalogStatus === "auth" && (
+                        <div className="mt-3">
+                          <a href="/login" className="text-accent-ink underline">
+                            Войти через Keycloak
+                          </a>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}
