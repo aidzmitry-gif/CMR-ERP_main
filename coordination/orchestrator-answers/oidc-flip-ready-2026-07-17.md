@@ -15,6 +15,7 @@
 | App runtime | всё ещё `AIOS_AUTH_MODE=dev` (Bearer alone → Гость — ожидаемо) |
 | FE proxy + cookie | `Cookie: aios_access_token=<jwt>` → `/api/sales/board` **200**, 11 stages |
 | PKCE E2E (local FE) | start→KC login→callback cookies→board **200**→logout (после `/etc/hosts` hairpin fix) |
+| Silent refresh | `POST /api/auth/oidc/refresh` + middleware (pages) + API proxy; smoke **200** + board |
 | Hairpin | `127.0.0.1 auth.belakb.by` в `/etc/hosts`; иначе token exchange `ECONNREFUSED 93.125.0.131:443` |
 
 ## Остатки до комфортного флипа
