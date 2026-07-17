@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { frontendAuthMode, keycloakPublicConfig } from "@/lib/auth-mode";
+import { tokenEndpointIssuer } from "@/lib/keycloak";
 
 describe("frontendAuthMode", () => {
   it("defaults to dev", () => {
@@ -43,5 +44,25 @@ describe("keycloakPublicConfig", () => {
     process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER = a;
     process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID = b;
     process.env.NEXT_PUBLIC_APP_ORIGIN = c;
+  });
+});
+
+describe("tokenEndpointIssuer", () => {
+  it("falls back to public issuer", () => {
+    const prev = process.env.KEYCLOAK_INTERNAL_ISSUER;
+    delete process.env.KEYCLOAK_INTERNAL_ISSUER;
+    expect(tokenEndpointIssuer("https://auth.belakb.by/realms/aios/")).toBe(
+      "https://auth.belakb.by/realms/aios",
+    );
+    process.env.KEYCLOAK_INTERNAL_ISSUER = prev;
+  });
+
+  it("prefers KEYCLOAK_INTERNAL_ISSUER", () => {
+    const prev = process.env.KEYCLOAK_INTERNAL_ISSUER;
+    process.env.KEYCLOAK_INTERNAL_ISSUER = "http://127.0.0.1:8080/realms/aios/";
+    expect(tokenEndpointIssuer("https://auth.belakb.by/realms/aios")).toBe(
+      "http://127.0.0.1:8080/realms/aios",
+    );
+    process.env.KEYCLOAK_INTERNAL_ISSUER = prev;
   });
 });

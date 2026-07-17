@@ -72,7 +72,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     jar.set(REFRESH_COOKIE, tokens.refresh_token, opts);
   }
   jar.set(ROLE_COOKIE, role, opts);
-  jar.set(USER_COOKIE, encodeURIComponent(display), opts);
+  // Next cookies().set already encodes; do not encodeURIComponent (else %2520).
+  jar.set(USER_COOKIE, display, opts);
 
   return NextResponse.redirect(new URL("/crm/deals", req.url));
 }
