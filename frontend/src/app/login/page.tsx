@@ -77,12 +77,15 @@ function LoginForm() {
           </p>
         )}
         {ssoAvailable && (
-          <a
-            href="/api/auth/oidc/start"
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = "/api/auth/oidc/start";
+            }}
             className="block w-full rounded-lg bg-brand px-4 py-2 text-center text-sm font-medium text-white"
           >
             Войти
-          </a>
+          </button>
         )}
       </div>
     );
@@ -127,12 +130,15 @@ function LoginForm() {
       </button>
 
       {ssoAvailable && (
-        <a
-          href="/api/auth/oidc/start"
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = "/api/auth/oidc/start";
+          }}
           className="mt-3 block w-full rounded-lg border border-slate-200 px-4 py-2 text-center text-sm font-medium text-ink"
         >
           Войти через Keycloak
-        </a>
+        </button>
       )}
 
       <p className="mt-4 text-center text-xs text-muted">
