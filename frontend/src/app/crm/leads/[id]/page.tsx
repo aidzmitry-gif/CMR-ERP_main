@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchLead } from "@/lib/api";
-import { currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 /**
  * Полная страница лида (открывается двойным кликом по карточке на канбане).
@@ -20,8 +20,9 @@ export default async function LeadDetailPage({
 }) {
   const { id } = await params;
   const role = await currentRole();
+  const token = (await currentAccessToken()) ?? undefined;
   // Точечный GET /leads/{id} — не тащим всю доску ради одной карточки (переживает объёмы).
-  const lead = Number.isFinite(Number(id)) ? await fetchLead(Number(id), role) : null;
+  const lead = Number.isFinite(Number(id)) ? await fetchLead(Number(id), role, token) : null;
 
   return (
     <AppShell crumbs={["CRM", "Лиды", `ЛИД-${id}`]}>

@@ -23,14 +23,15 @@ import { Money } from "@/components/money";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
 import { formatNextStep } from "@/lib/format";
-import { currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
 
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const roles = await currentRole();
-  const d = await fetchDealDetail(id, roles);
+  const token = (await currentAccessToken()) ?? undefined;
+  const d = await fetchDealDetail(id, roles, token);
   // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 для mock/без стадии.
   const stageIdx = d.stage?.idx ?? 0;
 
