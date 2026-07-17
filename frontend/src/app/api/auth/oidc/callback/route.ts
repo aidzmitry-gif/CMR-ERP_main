@@ -16,22 +16,33 @@ import {
 
 const YEAR = 60 * 60 * 24 * 365;
 
+/** Public site origin for redirects (Caddy→:3100 otherwise becomes localhost). */
+function appOrigin(req: NextRequest): string {
+  const fromEnv = (process.env.NEXT_PUBLIC_APP_ORIGIN ?? "").replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  return new URL(req.url).origin;
+}
+
+function redirectTo(req: NextRequest, path: string): NextResponse {
+  return NextResponse.redirect(new URL(path, appOrigin(req)));
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
   const url = req.nextUrl;
   const err = url.searchParams.get("error");
   if (err) {
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(err)}`, req.url));
+    return redirectTo(req, `/login?error=${encodeURIComponent(err)}`);
   }
 
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   if (!code || !state) {
-    return NextResponse.redirect(new URL("/login?error=missing_code", req.url));
+    return redirectTo(req, "/login?error=missing_code");
   }
 
   const cfg = resolveKeycloakConfig(req.url);
   if (!cfg) {
-    return NextResponse.redirect(new URL("/login?error=kc_unconfigured", req.url));
+    return redirectTo(req, "/login?error=kc_unconfigured");
   }
 
   const jar = await cookies();
@@ -41,7 +52,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   jar.delete(OIDC_VERIFIER_COOKIE);
 
   if (!expectState || !verifier || expectState !== state) {
-    return NextResponse.redirect(new URL("/login?error=state_mismatch", req.url));
+    return redirectTo(req, "/login?error=state_mismatch");
   }
 
   const tokens = await exchangeCode({
@@ -52,7 +63,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     verifier,
   });
   if (!tokens?.access_token) {
-    return NextResponse.redirect(new URL("/login?error=token_exchange", req.url));
+    return redirectTo(req, "/login?error=token_exchange");
   }
 
   const roles = rolesFromAccessToken(tokens.access_token);
@@ -75,5 +86,5 @@ export async function GET(req: NextRequest): Promise<Response> {
   // Next cookies().set already encodes; do not encodeURIComponent (else %2520).
   jar.set(USER_COOKIE, display, opts);
 
-  return NextResponse.redirect(new URL("/crm/deals", req.url));
+  return redirectTo(req, "/crm/deals");
 }
