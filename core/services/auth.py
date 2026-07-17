@@ -36,10 +36,10 @@ class OidcAuthenticator:
     кривой токен, недоступный JWKS) → ``None``, а вызывающий код выдаёт «Гостя».
     """
 
-    def __init__(self, issuer: str, audience: str) -> None:
+    def __init__(self, issuer: str, audience: str, jwks_uri: str = "") -> None:
         self.issuer = issuer.rstrip("/")
         self.audience = audience
-        self.jwks_uri = f"{self.issuer}/protocol/openid-connect/certs"
+        self.jwks_uri = (jwks_uri or f"{self.issuer}/protocol/openid-connect/certs").rstrip("/")
         self._jwk_client = None
 
     def _signing_key(self, token: str):
@@ -83,17 +83,20 @@ _authenticator: OidcAuthenticator | None = None
 
 
 def _get_authenticator(settings) -> OidcAuthenticator | None:
-    """Ленивый singleton OIDC-аутентификатора (пересоздаётся при смене issuer)."""
+    """Ленивый singleton OIDC-аутентификатора (пересоздаётся при смене issuer/jwks)."""
     global _authenticator
     issuer = settings.keycloak_issuer.rstrip("/")
     if not issuer:
         return None
+    jwks = (getattr(settings, "keycloak_jwks_uri", None) or "").rstrip("/")
     if (
         _authenticator is None
         or _authenticator.issuer != issuer
         or _authenticator.audience != settings.keycloak_audience
+        or _authenticator.jwks_uri
+        != (jwks or f"{issuer}/protocol/openid-connect/certs")
     ):
-        _authenticator = OidcAuthenticator(issuer, settings.keycloak_audience)
+        _authenticator = OidcAuthenticator(issuer, settings.keycloak_audience, jwks)
     return _authenticator
 
 

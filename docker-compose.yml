@@ -69,6 +69,7 @@ services:
       AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://redis:6379/0}
       AIOS_KEYCLOAK_ISSUER: ${AIOS_KEYCLOAK_ISSUER:-}
       AIOS_KEYCLOAK_AUDIENCE: ${AIOS_KEYCLOAK_AUDIENCE:-}
+      AIOS_KEYCLOAK_JWKS_URI: ${AIOS_KEYCLOAK_JWKS_URI:-}
       # 1С OData (чтение). Пустые → mock OneCClient. Секреты только в host-.env.
       AIOS_ONEC_BASE_URL: ${AIOS_ONEC_BASE_URL:-}
       AIOS_ONEC_USER: ${AIOS_ONEC_USER:-}

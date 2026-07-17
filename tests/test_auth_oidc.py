@@ -60,7 +60,12 @@ def _oidc_settings(monkeypatch):
     monkeypatch.setattr(
         auth_mod,
         "get_settings",
-        lambda: SimpleNamespace(auth_mode="oidc", keycloak_issuer=ISS, keycloak_audience=AUD),
+        lambda: SimpleNamespace(
+            auth_mode="oidc",
+            keycloak_issuer=ISS,
+            keycloak_audience=AUD,
+            keycloak_jwks_uri="",
+        ),
     )
 
 

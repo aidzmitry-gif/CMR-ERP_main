@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     auth_mode: str = "dev"
     keycloak_issuer: str = ""    # https://<host>/realms/<realm>; пусто → oidc недоступен
     keycloak_audience: str = ""  # ожидаемый aud (client_id) в токене
+    # Опционально: JWKS URL внутри Docker-сети (http://keycloak:8080/.../certs), если
+    # публичный hostname hairpin'ит с контейнера (ECONNREFUSED на свой public IP).
+    # iss/aud по-прежнему сверяются с keycloak_issuer / keycloak_audience.
+    keycloak_jwks_uri: str = ""
 
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False
