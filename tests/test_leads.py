@@ -345,9 +345,7 @@ async def test_lead_route_sets_next_step(session, api):
     assert got["next_step_note"] == "прозвонить, уточнить марку"
 
 
-async def test_lead_convert_creates_deal(session, api, services):
-    from core.services.eventbus import EventContext
-
+async def test_lead_convert_creates_deal(session, api):
     lead = (
         await api.post(
             "/leads",
@@ -363,25 +361,22 @@ async def test_lead_convert_creates_deal(session, api, services):
 
     r = await api.post(f"/leads/{lead['id']}/convert")
     assert r.status_code == 201
-    assert r.json()["status"] == "converted"
-
-    # convert лишь публикует leads.lead.converted; сделку создаёт sales по подписке (cross-module).
-    # relay дважды: leads.lead.converted → sales создаёт сделку (+sales.deal.created),
-    # затем sales.deal.created → on_deal_created_from_lead проставляет лиду deal_id.
-    await services.event_bus.relay_once(session, EventContext(session, services))
-    await services.event_bus.relay_once(session, EventContext(session, services))
-    await session.commit()
+    body = r.json()
+    assert body["status"] == "converted"
+    # convert синхронно relay'ит outbox — deal_id в ответе (денежный путь L4)
+    assert body["deal_id"] is not None
 
     # сделка появилась в воронке, ответственный = назначенный менеджер
     number = f"CRM-LEAD-{lead['id']}"
     deals = (await api.get("/sales/deals")).json()
     deal = next(d for d in deals if d["number"] == number)
+    assert deal["id"] == body["deal_id"]
     assert deal["owner"] == routed["assigned_to"]
     assert deal["stage"] == "new"
 
     # лид ссылается на сделку; повторная конвертация запрещена
     got = (await api.get(f"/leads/{lead['id']}")).json()
-    assert got["deal_id"] is not None
+    assert got["deal_id"] == body["deal_id"]
     assert (await api.post(f"/leads/{lead['id']}/convert")).status_code == 409
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
@@ -679,7 +674,8 @@ async def test_lead_converted_event_carries_items(session, api):
         json=[{"sku_id": 7, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
     )
 
-    await api.post(f"/leads/{lead_id}/convert")
+    converted = (await api.post(f"/leads/{lead_id}/convert")).json()
+    assert converted["deal_id"] is not None
 
     ev = next(
         e for e in (await session.execute(select(OutboxEvent))).scalars().all()
@@ -689,6 +685,13 @@ async def test_lead_converted_event_carries_items(session, api):
     assert len(items) == 1
     assert items[0]["sku_code"] == "6СТ-190"
     assert items[0]["qty"] == 2 and items[0]["price"] == 300 and items[0]["discount_pct"] == 5
+
+    # sales.on_lead_converted перенёс КП в DealItem + amount (2×300×0.95 = 570)
+    deal_items = (await api.get(f"/sales/deals/{converted['deal_id']}/items")).json()
+    assert len(deal_items) == 1
+    assert deal_items[0]["sku_id"] == 7 and float(deal_items[0]["qty"]) == 2
+    deal = (await api.get(f"/sales/deals/{converted['deal_id']}")).json()
+    assert float(deal["amount"]) == 570.0
 
 
 # --- Цикл 4: UTM-атрибуция лида → отчёт качества источников + маркетинг ---
@@ -1904,6 +1907,43 @@ async def test_rbac_sales_reads_and_routes(session, api):
         )
     ).json()
     assert (await api.post(f"/leads/{lead['id']}/route", headers=sales)).status_code == 200
+
+
+async def test_rbac_sales_manager_full_funnel(session, api, services):
+    """Keycloak-роль sales_manager = sales: qualify → route → convert → сделка на доске."""
+    from core.services.eventbus import EventContext
+
+    mgr = {"X-User-Roles": "sales_manager"}
+    assert (await api.get("/leads", headers=mgr)).status_code == 200
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site",
+                "company": "ООО Менеджер",
+                "phone": "+375291230203",
+                "product": "лист",
+                "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 15 т, срочно с доставкой в Минск",
+            },
+            headers=mgr,
+        )
+    ).json()
+    assert (await api.post(f"/leads/{lead['id']}/qualify", headers=mgr)).status_code == 200
+    routed = (await api.post(f"/leads/{lead['id']}/route", headers=mgr)).json()
+    assert routed["status"] == "routed"
+    assert (await api.post(f"/leads/{lead['id']}/convert", headers=mgr)).status_code == 201
+
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    got = (await api.get(f"/leads/{lead['id']}", headers=mgr)).json()
+    assert got["status"] == "converted"
+    assert got["deal_id"] is not None
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.converted" in types and "sales.deal.created" in types
 
 
 async def test_rbac_sales_cli_cannot_route(session, api):

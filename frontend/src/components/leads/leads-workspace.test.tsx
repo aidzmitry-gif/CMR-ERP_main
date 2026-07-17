@@ -47,7 +47,7 @@ vi.mock("@/lib/api", () => ({
   fetchLeadHandoffStats: vi.fn().mockResolvedValue([]),
   // Цикл 15: недозвон — попытка контакта + срок перезвона.
   logLeadAttempt: vi.fn(),
-  // Живой поллинг приёма: null = сетевая ошибка/нет обновления (доску не трогаем).
+  // Живой поллинг приёма: auth/error не затирают доску; ok — обновление.
   fetchLeadsClient: vi.fn().mockResolvedValue(null),
   // Чистая функция (локальное naive-время → naive-UTC) — в тестах passthrough.
   localToNaiveUtc: (s: string) => s,
@@ -231,6 +231,13 @@ describe("LeadsWorkspace", () => {
   it("без лидов показывает подсказку выбрать лид", () => {
     render(<LeadsWorkspace initialLeads={[]} />);
     expect(screen.getByText(/Выберите лид/)).toBeInTheDocument();
+  });
+
+  it("403 на загрузке — сообщение о доступе, не «лидов нет»", () => {
+    render(<LeadsWorkspace initialLeads={[]} initialLoadState="auth" />);
+    expect(screen.getByText(/Нет доступа к лидам/)).toBeInTheDocument();
+    expect(screen.queryByText(/Лидов пока нет/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Войти через Keycloak/ })).toHaveAttribute("href", "/login");
   });
 
   it("отображает статусы «В сделке» и «Отклонён»", async () => {

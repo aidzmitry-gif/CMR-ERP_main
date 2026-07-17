@@ -449,6 +449,12 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByText(/Демо-данные: backend недоступен/)).toBeNull();
   });
 
+  it("authError показывает плашку доступа, не демо-доску", () => {
+    render(<DealsWorkspace initialStages={[]} initialKpis={[]} authError />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Нет доступа к доске сделок/i);
+    expect(screen.queryByText(/Демо-данные/i)).not.toBeInTheDocument();
+  });
+
   // --- Слайс 3 + FIX-2 ---
 
   const condStage: Stage = {

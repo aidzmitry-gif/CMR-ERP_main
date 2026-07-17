@@ -30,6 +30,8 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "assistant": ["home", "procurement", "logistics", "office", "knowledge", "spravochniki"],
     "sales_head": ["home", "crm", "marketing", "service", "knowledge", "analytics", "spravochniki"],
     "sales": ["home", "crm", "service", "knowledge"],
+    # Keycloak realm role (go-live): алиас продавца — те же UI-модули, что у sales.
+    "sales_manager": ["home", "crm", "service", "knowledge"],
     "sales_cli": ["home", "crm", "service", "knowledge"],
     "procurement": ["home", "procurement", "logistics", "knowledge", "spravochniki"],
     "warehouse": ["home", "wms", "logistics", "knowledge"],
@@ -49,6 +51,7 @@ ROLE_TITLES: dict[str, str] = {
     "assistant": "Помощник руководителя",
     "sales_head": "Продажи · РОП",
     "sales": "Продажи",
+    "sales_manager": "Продажи · менеджер",
     "sales_cli": "Продажи · работа с клиентами",
     "procurement": "Закупки",
     "warehouse": "Склад",
@@ -60,7 +63,7 @@ ROLE_TITLES: dict[str, str] = {
 
 # Порядок ролей в переключателе (как в матрице, сверху вниз).
 ROLE_ORDER: list[str] = [
-    "director", "commercial", "assistant", "sales_head", "sales", "sales_cli",
+    "director", "commercial", "assistant", "sales_head", "sales", "sales_manager", "sales_cli",
     "procurement", "warehouse", "logistics", "production", "finance", "hr",
 ]
 
@@ -108,6 +111,8 @@ SLUG_TO_PACKAGE: dict[str, str] = {
 }
 # Обратное сопоставление: пакет модуля → UI-слаг (для backend-ограничения по префиксу роута).
 PACKAGE_TO_SLUG: dict[str, str] = {pkg: slug for slug, pkg in SLUG_TO_PACKAGE.items()}
+# Лиды — часть CRM UI (префикс /leads); пакет не в SLUG_TO_PACKAGE (1:1 crm→sales).
+PACKAGE_TO_SLUG["leads"] = "crm"
 
 # Роли с полным доступом ко всему (минуя матрицу). "admin" — dev-суперюзер (ASCII, HTTP-safe).
 SUPER_ROLES: frozenset[str] = frozenset({"admin", "director", "commercial"})

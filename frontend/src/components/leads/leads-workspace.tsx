@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { CallWindow } from "@/components/calls/call-window";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
+import { loadLeadsClient, type LeadsLoadState } from "@/components/leads/leads-load";
 import {
   commitLeadItemsToDeal,
   convertLead,
@@ -17,7 +18,6 @@ import {
   fetchLeadItems,
   fetchLeadManagers,
   fetchLeadPlan,
-  fetchLeadsClient,
   fetchLeadSourceStats,
   LeadDuplicateError,
   type LeadInput,
@@ -1152,9 +1152,16 @@ function IntakeModal({
   );
 }
 
-export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
+export function LeadsWorkspace({
+  initialLeads,
+  initialLoadState = "ok",
+}: {
+  initialLeads: Lead[];
+  initialLoadState?: LeadsLoadState;
+}) {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
+  const [loadState, setLoadState] = useState<LeadsLoadState>(initialLoadState);
   // selectedId = открыт drawer-preview по этому лиду (1-клик). На заходе НЕ открываем:
   //   у превью-дровера модальный бэкдроп (fixed inset-0 z-40), он перехватывает клики по
   //   всей доске — авто-открытие глушило карточные действия (Экспресс/Квалифицировать/звонок)
@@ -1234,8 +1241,13 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
   }
 
   async function refresh() {
-    const fresh = await fetchLeadsClient();
-    if (fresh === null) return; // сетевая ошибка — НЕ подменяем живую доску пустотой
+    const { state, leads: fresh } = await loadLeadsClient();
+    if (state === "auth") {
+      setLoadState("auth");
+      return;
+    }
+    if (state !== "ok") return; // сетевая ошибка — НЕ подменяем живую доску пустотой
+    setLoadState("ok");
     // aiRationale — клиентское поле (бэк его не отдаёт): сохраняем при обновлении по id,
     // иначе поллинг стирал бы AI-обоснование со всех лидов.
     setLeads((prev) => {
@@ -1681,7 +1693,22 @@ export function LeadsWorkspace({ initialLeads }: { initialLeads: Lead[] }) {
         )}
 
         {/* Канбан-воронка по статусу лида */}
-        {leads.length === 0 ? (
+        {loadState === "auth" ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-10 text-center text-sm text-amber-900 shadow-card dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <p className="font-medium">Нет доступа к лидам (403)</p>
+            <p className="mt-2 text-muted dark:text-amber-200/80">
+              Сессия истекла или роли не хватает на квалификацию и распределение. Перелогиньтесь —
+              пустой инбокс здесь не показываем.
+            </p>
+            <a href="/login" className="mt-4 inline-block text-accent-ink underline">
+              Войти через Keycloak
+            </a>
+          </div>
+        ) : loadState === "error" ? (
+          <div className="rounded-xl bg-surface p-10 text-center text-sm text-muted shadow-card">
+            Не удалось загрузить лиды — проверьте связь с сервером и обновите страницу.
+          </div>
+        ) : leads.length === 0 ? (
           <div className="rounded-xl bg-surface p-10 text-center text-sm text-muted shadow-card">
             Лидов пока нет — примите первый
           </div>
