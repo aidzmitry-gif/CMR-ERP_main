@@ -15,6 +15,8 @@ vi.mock("@/lib/role-server", () => ({
   currentRole: async () => "director",
 }));
 vi.mock("@/lib/access", () => ({ fetchAccess: async () => null }));
+// backendAuthHeaders зовёт cookies() (next/headers) — в vitest нет request store → мокаем шлюз
+vi.mock("@/lib/auth-headers-server", () => ({ backendAuthHeaders: async () => ({}) }));
 
 import { AppShell } from "@/components/app-shell";
 

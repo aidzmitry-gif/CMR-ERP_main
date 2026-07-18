@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 import urllib.error
 import urllib.parse
 import urllib.request
-import http.cookiejar
 from html.parser import HTMLParser
 
 
