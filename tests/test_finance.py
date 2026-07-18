@@ -1326,3 +1326,26 @@ async def test_payment_amount_roundtrip_no_float_error(session, api):
     r = await api.get("/finance/payments")
     row = r.json()[0]
     assert Decimal(row["amount"]) == Decimal(precise), "float-дрейф недопустим для денег собственника"
+
+
+async def test_claim_resolved_is_idempotent_on_redelivery(session):
+    """S1: повторная доставка procurement.claim.resolved (шина at-least-once) НЕ задваивает приток."""
+    from modules.finance.events import on_claim_resolved
+
+    payload = {
+        "claim_id": 21,
+        "supplier_id": 777,
+        "amount_byn": "1200.00",  # СТРОКА, УЖЕ в BYN
+        "resolution": "возврат деньгами",
+        "status": "resolved",
+        "entity_ref": "claim:21",
+    }
+    await on_claim_resolved(payload, _ctx(session))
+    await on_claim_resolved(payload, _ctx(session))  # дубль доставки того же события
+    await session.commit()
+    rows = (
+        await session.execute(select(Payment).where(Payment.kind == "claim_refund"))
+    ).scalars().all()
+    assert len(rows) == 1  # ровно один приток, а не два (задвоение денег собственника)
+    assert rows[0].amount == Decimal("1200.00")
+    assert rows[0].ref == "claim:claim:21"

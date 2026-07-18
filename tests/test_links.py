@@ -362,3 +362,30 @@ async def test_procurement_received_creates_import_shipment(session):
     await on_procurement_received({"item": "X", "qty": 1}, _ctx(session))
     await session.commit()
     assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
+
+
+async def test_payment_paid_fallback_prefers_unpaid_invoice(session):
+    """S4: при привязке оплаты по deal_id (ref не совпал) помечается СТАРЕЙШИЙ
+    НЕОПЛАЧЕННЫЙ счёт, а не слепо новейший — иначе при нескольких счетах оплата
+    ушла бы на уже оплаченный, а реальный долг остался бы висеть (потеря учёта)."""
+    from modules.sales.events import on_payment_paid
+    from modules.sales.models import Deal, DealDocument
+
+    deal = Deal(number="S4-PD", title="t", counterparty="c")
+    session.add(deal)
+    await session.flush()
+    # Старый счёт ещё не оплачен; более новый уже был оплачен ранее.
+    old_inv = DealDocument(deal_id=deal.id, kind="invoice", number="INV-OLD", status="posted")
+    new_inv = DealDocument(deal_id=deal.id, kind="invoice", number="INV-NEW", status="paid")
+    session.add_all([old_inv, new_inv])
+    await session.commit()
+
+    # ref не совпадает ни с одним номером → срабатывает fallback по deal_id.
+    await on_payment_paid({"ref": "НЕТ-ТАКОГО", "deal_id": deal.id}, _ctx(session))
+    await session.commit()
+
+    await session.refresh(old_inv)
+    await session.refresh(new_inv)
+    # Регрессия .desc() выбрала бы новейший (уже paid) → old остался бы posted.
+    assert old_inv.status == "paid"
+    assert new_inv.status == "paid"

@@ -1955,3 +1955,60 @@ async def test_rbac_sales_cli_cannot_route(session, api):
     assert (await api.post(f"/leads/{lead['id']}/qualify", headers=cli)).status_code == 200
     assert (await api.post(f"/leads/{lead['id']}/route", headers=cli)).status_code == 403
     assert (await api.post(f"/leads/{lead['id']}/convert", headers=cli)).status_code == 403
+
+
+async def test_lead_converted_creates_price_quote_for_invoice(session, api):
+    """S3: конвертация лида с КП создаёт PriceQuote → счёт клиенту НЕ с нулями.
+
+    Печать счёта (routes._invoice_items) берёт цену позиции ТОЛЬКО из
+    PriceQuote(sku_code, counterparty). До фикса on_lead_converted писал
+    DealItem+amount, но не PriceQuote → верная сумма сделки, но счёт печатался
+    с нулевой ценой. Цена в котировке — ПОСЛЕ скидки (unit×qty == сумма позиции
+    сделки), иначе счёт (net=qty×price, скидку не применяет) переставил бы
+    клиенту цену выше согласованной в КП.
+    """
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.sales.models import Deal, PriceQuote
+    from modules.sales.routes import _invoice_items
+
+    # Счёт резолвит Sku по DealItem.sku_id → sku.code и по нему ищет PriceQuote:
+    # мастер-данные должны существовать, иначе цена в счёте = 0 независимо от котировки.
+    sku = Sku(code="6СТ-190", title="АКБ 190", unit="шт")
+    session.add(sku)
+    await session.flush()
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Счёт", "region": "Минск", "product": "АКБ"},
+        )
+    ).json()
+    lead_id = lead["id"]
+    await api.post(f"/leads/{lead_id}/qualify")
+    await api.post(f"/leads/{lead_id}/route")
+    await api.put(
+        f"/leads/{lead_id}/items",
+        json=[{"sku_id": sku.id, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
+    )
+
+    converted = (await api.post(f"/leads/{lead_id}/convert")).json()
+    deal_id = converted["deal_id"]
+    assert deal_id is not None
+
+    # PriceQuote создан один, цена ПОСЛЕ скидки: 300 × (1 − 5%) = 285.00
+    quotes = (
+        await session.execute(select(PriceQuote).where(PriceQuote.sku_code == "6СТ-190"))
+    ).scalars().all()
+    assert len(quotes) == 1
+    deal = await session.get(Deal, deal_id)
+    assert quotes[0].counterparty == deal.counterparty
+    assert quotes[0].price == Decimal("285.00")
+
+    # Счёт клиенту печатается с НЕнулевой ценой = котировке, а не с нулями (сам баг)
+    items = await _invoice_items(session, deal_id)
+    assert len(items) == 1
+    assert items[0]["price"] == Decimal("285.00")
+    # позиция счёта (unit×qty) сходится с суммой сделки: 2×285 = 570 = Deal.amount
+    assert Decimal(items[0]["qty"]) * items[0]["price"] == deal.amount == Decimal("570.00")

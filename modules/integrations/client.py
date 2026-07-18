@@ -134,7 +134,7 @@ class OneCClient:
         """
         skus = self._get_all(
             "Catalog_Номенклатура",
-            {"$select": "Ref_Key,Code,Description", "$orderby": "Code"},
+            {"$select": "Ref_Key,Code,Description", "$orderby": "Code,Ref_Key"},
             page_size=500,
         )
         by_ref: dict[str, dict] = {}
@@ -157,7 +157,12 @@ class OneCClient:
         # Цены: корневой набор отдаёт Recorder + RecordSet (строки с Номенклатура_Key, Цена).
         try:
             price_docs = self._get_all(
+                # $orderby обязателен: без него $skip/$top на файловой ИБ 1С не гарантирует
+                # порядок между страницами → пропуск/задвоение записей регистра цен. Period —
+                # хронология (делает «последняя страница ≈ актуальная цена» истинной),
+                # Recorder — тай-брейк для полного детерминированного порядка.
                 "InformationRegister_ЦеныНоменклатуры",
+                {"$orderby": "Period,Recorder"},
                 page_size=200,
             )
         except Exception as exc:  # noqa: BLE001 — fail-soft, цены опциональны
