@@ -952,6 +952,7 @@ export function DealsWorkspace({
   funnelTabs,
   combinedStages,
   demoData = false,
+  authError = false,
   ownerId,
 }: {
   initialStages: Stage[];
@@ -961,6 +962,8 @@ export function DealsWorkspace({
   combinedStages?: { code: string; title: string; stages: Stage[] }[];
   /** SSR-фетч доски упал в mock-fallback (backend недоступен) — показать плашку «демо». */
   demoData?: boolean;
+  /** SSR-фетч доски вернул 401/403 — не показывать пустую/демо-доску без пояснения. */
+  authError?: boolean;
   /** Владелец плана: когда задан, «План» скорборда берётся из согласованного PlanTarget. */
   ownerId?: number;
 }) {
@@ -1613,6 +1616,14 @@ export function DealsWorkspace({
           истинного правого края) — метрики П1 (8 ячеек) упирались в неё последней ячейкой
           «Средний чек». Тот же приём уже применён на /crm/deals/analytics. */}
       <main className="flex-1 overflow-auto p-6 pr-20">
+        {authError && (
+          <div
+            role="alert"
+            className="mb-3 flex items-center gap-2 rounded-lg border border-red-300/60 bg-red-50 px-3 py-2 text-[12.5px] font-semibold text-red-800 dark:bg-red-500/10 dark:text-red-200"
+          >
+            Нет доступа к доске сделок. Проверьте вход в систему или обратитесь к администратору.
+          </div>
+        )}
         {demoData && (
           <div
             role="status"

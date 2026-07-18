@@ -95,19 +95,23 @@ export async function fetchBoardStages(
 }
 
 /** Доска + признак фоллбэка: `demo=true` — backend недоступен, отданы мок-стадии
- * (STAGES из mock-data). Страница доски показывает по нему плашку «демо-данные»,
+ * (STAGES из mock-data). `authError=true` — 401/403, не подменяем демо-доской.
+ * Страница доски показывает по нему плашку «демо-данные»,
  * чтобы фоллбэк не выглядел как реальная воронка. */
 export async function fetchBoardResult(
   roles?: string,
   funnel?: string,
   accessToken?: string,
-): Promise<{ stages: Stage[]; demo: boolean }> {
+): Promise<{ stages: Stage[]; demo: boolean; authError?: boolean }> {
   try {
     const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
     const res = await fetch(`${BASE}/sales/board${qs}`, {
       cache: "no-store",
       headers: roleHeaders(roles, accessToken),
     });
+    if (res.status === 401 || res.status === 403) {
+      return { stages: [], demo: false, authError: true };
+    }
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { stages: ApiStage[] };
     return {

@@ -67,14 +67,24 @@ class OutboxEventBus:
                 await result
 
     async def relay_once(self, session: AsyncSession, ctx: "EventContext | None" = None) -> int:
-        """Доставить необработанные события подписчикам и пометить processed_at."""
-        rows = (
-            await session.execute(
-                select(OutboxEvent)
-                .where(OutboxEvent.processed_at.is_(None))
-                .order_by(OutboxEvent.id)
-            )
-        ).scalars().all()
+        """Доставить необработанные события подписчикам и пометить processed_at.
+
+        Лок строк outbox (B1): без блокировки синхронный ``relay_once`` в
+        ``convert_lead`` и фоновый ``_background_loop`` (поллинг 2с) выбрали бы ОДНИ
+        и те же строки → двойная доставка события (двойная сделка/платёж — деньги
+        собственника). Каноничный outbox-лок — ``SELECT ... FOR UPDATE SKIP LOCKED``:
+        конкурентные релеи берут ДИЗЪЮНКТНЫЕ наборы, лок держится до ``commit`` ниже.
+        SKIP LOCKED — только PostgreSQL; на SQLite (dev/тест — single-writer, гонки
+        нет) деградируем до обычного SELECT.
+        """
+        stmt = (
+            select(OutboxEvent)
+            .where(OutboxEvent.processed_at.is_(None))
+            .order_by(OutboxEvent.id)
+        )
+        if session.get_bind().dialect.name == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+        rows = (await session.execute(stmt)).scalars().all()
         for event in rows:
             logger.info("relay %s#%d -> %d", event.event_type, event.id, len(self._handlers.get(event.event_type, [])))
             await self.dispatch(event.event_type, event.payload, ctx)

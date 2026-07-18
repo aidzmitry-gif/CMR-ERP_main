@@ -90,11 +90,30 @@ class OneCClient:
             resp.raise_for_status()
             return list(resp.json().get("value") or [])
 
+    def _get_all(self, entity: str, params: dict | None = None, *, page_size: int = 500) -> list[dict]:
+        """Постраничный OData GET ($skip/$top) — полный справочник, не только первая страница."""
+        base = dict(params or {})
+        out: list[dict] = []
+        skip = 0
+        while True:
+            page = self._get(
+                entity,
+                {**base, "$top": str(page_size), "$skip": str(skip)},
+            )
+            if not page:
+                break
+            out.extend(page)
+            if len(page) < page_size:
+                break
+            skip += page_size
+        return out
+
     def _fetch_counterparties_sync(self) -> list[dict]:
-        rows = self._get(
+        rows = self._get_all(
             "Catalog_Контрагенты",
-            {"$top": "500", "$select": "Ref_Key,Description,НаименованиеПолное,ИНН",
-             "$orderby": "Description"},
+            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН",
+             "$orderby": "Ref_Key"},
+            page_size=500,
         )
         out: list[dict] = []
         for row in rows:
@@ -113,9 +132,10 @@ class OneCClient:
         ``InformationRegister_ЦеныНоменклатуры``; остатки/себес-регистры — НЕ опубликованы.
         qty_* = 0 (честно), cost = None, price — последняя ненулевая Цена из RecordSet.
         """
-        skus = self._get(
+        skus = self._get_all(
             "Catalog_Номенклатура",
-            {"$top": "1000", "$select": "Ref_Key,Code,Description", "$orderby": "Code"},
+            {"$select": "Ref_Key,Code,Description", "$orderby": "Code,Ref_Key"},
+            page_size=500,
         )
         by_ref: dict[str, dict] = {}
         for row in skus:
@@ -136,7 +156,15 @@ class OneCClient:
 
         # Цены: корневой набор отдаёт Recorder + RecordSet (строки с Номенклатура_Key, Цена).
         try:
-            price_docs = self._get("InformationRegister_ЦеныНоменклатуры", {"$top": "200"})
+            price_docs = self._get_all(
+                # $orderby обязателен: без него $skip/$top на файловой ИБ 1С не гарантирует
+                # порядок между страницами → пропуск/задвоение записей регистра цен. Period —
+                # хронология (делает «последняя страница ≈ актуальная цена» истинной),
+                # Recorder — тай-брейк для полного детерминированного порядка.
+                "InformationRegister_ЦеныНоменклатуры",
+                {"$orderby": "Period,Recorder"},
+                page_size=200,
+            )
         except Exception as exc:  # noqa: BLE001 — fail-soft, цены опциональны
             log.warning("1C prices register unavailable: %s", exc)
             price_docs = []

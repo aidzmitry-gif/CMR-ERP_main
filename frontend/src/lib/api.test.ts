@@ -130,6 +130,14 @@ describe("api client — сделки/доска/KPI", () => {
     expect((await fetchBoardResult()).demo).toBe(false);
   });
 
+  it("fetchBoardResult не маскирует 403 демо-доской", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 403, ok: false }));
+    const r = await fetchBoardResult();
+    expect(r.demo).toBe(false);
+    expect(r.authError).toBe(true);
+    expect(r.stages).toEqual([]);
+  });
+
   it("mapDeal переносит closed_date в closedDate (закрытая сделка)", async () => {
     stubFetch({
       stages: [

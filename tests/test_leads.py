@@ -345,9 +345,7 @@ async def test_lead_route_sets_next_step(session, api):
     assert got["next_step_note"] == "прозвонить, уточнить марку"
 
 
-async def test_lead_convert_creates_deal(session, api, services):
-    from core.services.eventbus import EventContext
-
+async def test_lead_convert_creates_deal(session, api):
     lead = (
         await api.post(
             "/leads",
@@ -363,25 +361,22 @@ async def test_lead_convert_creates_deal(session, api, services):
 
     r = await api.post(f"/leads/{lead['id']}/convert")
     assert r.status_code == 201
-    assert r.json()["status"] == "converted"
-
-    # convert лишь публикует leads.lead.converted; сделку создаёт sales по подписке (cross-module).
-    # relay дважды: leads.lead.converted → sales создаёт сделку (+sales.deal.created),
-    # затем sales.deal.created → on_deal_created_from_lead проставляет лиду deal_id.
-    await services.event_bus.relay_once(session, EventContext(session, services))
-    await services.event_bus.relay_once(session, EventContext(session, services))
-    await session.commit()
+    body = r.json()
+    assert body["status"] == "converted"
+    # convert синхронно relay'ит outbox — deal_id в ответе (денежный путь L4)
+    assert body["deal_id"] is not None
 
     # сделка появилась в воронке, ответственный = назначенный менеджер
     number = f"CRM-LEAD-{lead['id']}"
     deals = (await api.get("/sales/deals")).json()
     deal = next(d for d in deals if d["number"] == number)
+    assert deal["id"] == body["deal_id"]
     assert deal["owner"] == routed["assigned_to"]
     assert deal["stage"] == "new"
 
     # лид ссылается на сделку; повторная конвертация запрещена
     got = (await api.get(f"/leads/{lead['id']}")).json()
-    assert got["deal_id"] is not None
+    assert got["deal_id"] == body["deal_id"]
     assert (await api.post(f"/leads/{lead['id']}/convert")).status_code == 409
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
@@ -679,7 +674,8 @@ async def test_lead_converted_event_carries_items(session, api):
         json=[{"sku_id": 7, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
     )
 
-    await api.post(f"/leads/{lead_id}/convert")
+    converted = (await api.post(f"/leads/{lead_id}/convert")).json()
+    assert converted["deal_id"] is not None
 
     ev = next(
         e for e in (await session.execute(select(OutboxEvent))).scalars().all()
@@ -689,6 +685,13 @@ async def test_lead_converted_event_carries_items(session, api):
     assert len(items) == 1
     assert items[0]["sku_code"] == "6СТ-190"
     assert items[0]["qty"] == 2 and items[0]["price"] == 300 and items[0]["discount_pct"] == 5
+
+    # sales.on_lead_converted перенёс КП в DealItem + amount (2×300×0.95 = 570)
+    deal_items = (await api.get(f"/sales/deals/{converted['deal_id']}/items")).json()
+    assert len(deal_items) == 1
+    assert deal_items[0]["sku_id"] == 7 and float(deal_items[0]["qty"]) == 2
+    deal = (await api.get(f"/sales/deals/{converted['deal_id']}")).json()
+    assert float(deal["amount"]) == 570.0
 
 
 # --- Цикл 4: UTM-атрибуция лида → отчёт качества источников + маркетинг ---
@@ -1906,6 +1909,43 @@ async def test_rbac_sales_reads_and_routes(session, api):
     assert (await api.post(f"/leads/{lead['id']}/route", headers=sales)).status_code == 200
 
 
+async def test_rbac_sales_manager_full_funnel(session, api, services):
+    """Keycloak-роль sales_manager = sales: qualify → route → convert → сделка на доске."""
+    from core.services.eventbus import EventContext
+
+    mgr = {"X-User-Roles": "sales_manager"}
+    assert (await api.get("/leads", headers=mgr)).status_code == 200
+    lead = (
+        await api.post(
+            "/leads",
+            json={
+                "source": "site",
+                "company": "ООО Менеджер",
+                "phone": "+375291230203",
+                "product": "лист",
+                "region": "Минск",
+                "message": "Нужен лист 5 мм, объём 15 т, срочно с доставкой в Минск",
+            },
+            headers=mgr,
+        )
+    ).json()
+    assert (await api.post(f"/leads/{lead['id']}/qualify", headers=mgr)).status_code == 200
+    routed = (await api.post(f"/leads/{lead['id']}/route", headers=mgr)).json()
+    assert routed["status"] == "routed"
+    assert (await api.post(f"/leads/{lead['id']}/convert", headers=mgr)).status_code == 201
+
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await services.event_bus.relay_once(session, EventContext(session, services))
+    await session.commit()
+
+    got = (await api.get(f"/leads/{lead['id']}", headers=mgr)).json()
+    assert got["status"] == "converted"
+    assert got["deal_id"] is not None
+
+    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
+    assert "leads.lead.converted" in types and "sales.deal.created" in types
+
+
 async def test_rbac_sales_cli_cannot_route(session, api):
     """Клиентская работа (sales_cli) — приём/квалификация без раздачи: route → 403, qualify → 200."""
     cli = {"X-User-Roles": "sales_cli"}
@@ -1915,3 +1955,60 @@ async def test_rbac_sales_cli_cannot_route(session, api):
     assert (await api.post(f"/leads/{lead['id']}/qualify", headers=cli)).status_code == 200
     assert (await api.post(f"/leads/{lead['id']}/route", headers=cli)).status_code == 403
     assert (await api.post(f"/leads/{lead['id']}/convert", headers=cli)).status_code == 403
+
+
+async def test_lead_converted_creates_price_quote_for_invoice(session, api):
+    """S3: конвертация лида с КП создаёт PriceQuote → счёт клиенту НЕ с нулями.
+
+    Печать счёта (routes._invoice_items) берёт цену позиции ТОЛЬКО из
+    PriceQuote(sku_code, counterparty). До фикса on_lead_converted писал
+    DealItem+amount, но не PriceQuote → верная сумма сделки, но счёт печатался
+    с нулевой ценой. Цена в котировке — ПОСЛЕ скидки (unit×qty == сумма позиции
+    сделки), иначе счёт (net=qty×price, скидку не применяет) переставил бы
+    клиенту цену выше согласованной в КП.
+    """
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.sales.models import Deal, PriceQuote
+    from modules.sales.routes import _invoice_items
+
+    # Счёт резолвит Sku по DealItem.sku_id → sku.code и по нему ищет PriceQuote:
+    # мастер-данные должны существовать, иначе цена в счёте = 0 независимо от котировки.
+    sku = Sku(code="6СТ-190", title="АКБ 190", unit="шт")
+    session.add(sku)
+    await session.flush()
+
+    lead = (
+        await api.post(
+            "/leads",
+            json={"source": "site", "company": "ООО Счёт", "region": "Минск", "product": "АКБ"},
+        )
+    ).json()
+    lead_id = lead["id"]
+    await api.post(f"/leads/{lead_id}/qualify")
+    await api.post(f"/leads/{lead_id}/route")
+    await api.put(
+        f"/leads/{lead_id}/items",
+        json=[{"sku_id": sku.id, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
+    )
+
+    converted = (await api.post(f"/leads/{lead_id}/convert")).json()
+    deal_id = converted["deal_id"]
+    assert deal_id is not None
+
+    # PriceQuote создан один, цена ПОСЛЕ скидки: 300 × (1 − 5%) = 285.00
+    quotes = (
+        await session.execute(select(PriceQuote).where(PriceQuote.sku_code == "6СТ-190"))
+    ).scalars().all()
+    assert len(quotes) == 1
+    deal = await session.get(Deal, deal_id)
+    assert quotes[0].counterparty == deal.counterparty
+    assert quotes[0].price == Decimal("285.00")
+
+    # Счёт клиенту печатается с НЕнулевой ценой = котировке, а не с нулями (сам баг)
+    items = await _invoice_items(session, deal_id)
+    assert len(items) == 1
+    assert items[0]["price"] == Decimal("285.00")
+    # позиция счёта (unit×qty) сходится с суммой сделки: 2×285 = 570 = Deal.amount
+    assert Decimal(items[0]["qty"]) * items[0]["price"] == deal.amount == Decimal("570.00")
