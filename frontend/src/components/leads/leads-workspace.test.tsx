@@ -441,8 +441,9 @@ describe("LeadsWorkspace", () => {
     expect(calledOpts.nextStepNote).toBe("Позвонить");
     expect(calledOpts.nextStepAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
 
-    // после успеха лид ушёл в «Распределение» — поповер закрылся
-    expect(screen.queryByText("Кому")).not.toBeInTheDocument();
+    // после успеха лид ушёл в «Распределение» — поповер закрылся (закрытие асинхронно,
+    // после резолва expressLead → ждём снятия из DOM, а не синхронная проверка)
+    await waitFor(() => expect(screen.queryByText("Кому")).not.toBeInTheDocument());
   });
 
   it("экспресс — выбор другого пресета передаёт его note/at вместо дефолтного", async () => {
