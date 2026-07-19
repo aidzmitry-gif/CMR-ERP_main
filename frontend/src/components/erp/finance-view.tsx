@@ -107,10 +107,13 @@ interface BankAccount {
 interface MarginRow {
   key: number | string | null;
   revenue: string;
-  landed: string;
+  // landed/gross = null, когда себестоимость не атрибутирована к группе (cogs_known=false):
+  // показываем «—», а не завышенную прибыль как COGS=0.
+  landed: string | null;
   freight: string;
-  gross: string;
+  gross: string | null;
   pct: number | null;
+  cogs_known?: boolean;
 }
 interface MarginResp {
   currency: string;
@@ -729,18 +732,31 @@ function MarginTab() {
                   {formatByn(parseFloat(row.revenue))}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">
-                  {formatByn(parseFloat(row.landed))}
+                  {row.landed != null ? (
+                    formatByn(parseFloat(row.landed))
+                  ) : (
+                    <span title="Себестоимость не привязана к сделке — маржа неизвестна">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {formatByn(parseFloat(row.freight))}
                 </td>
-                <td
-                  className={`px-4 py-2.5 text-right tabular-nums ${
-                    parseFloat(row.gross) >= 0 ? "text-emerald-600" : "text-rose-600"
-                  }`}
-                >
-                  {formatByn(parseFloat(row.gross))}
-                </td>
+                {row.gross != null ? (
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums ${
+                      parseFloat(row.gross) >= 0 ? "text-emerald-600" : "text-rose-600"
+                    }`}
+                  >
+                    {formatByn(parseFloat(row.gross))}
+                  </td>
+                ) : (
+                  <td
+                    className="px-4 py-2.5 text-right tabular-nums text-muted"
+                    title="Себестоимость не атрибутирована к сделке — валовая прибыль неизвестна"
+                  >
+                    —
+                  </td>
+                )}
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted">
                   {row.pct != null ? `${row.pct.toFixed(1)}%` : "—"}
                 </td>

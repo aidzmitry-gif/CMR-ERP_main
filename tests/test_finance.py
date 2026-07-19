@@ -353,6 +353,26 @@ async def test_margin_by_deal_ranks_and_isolates_unattributed(session):
     assert r["items"][-1]["gross"] == "999.00"
 
 
+async def test_margin_by_deal_hides_gross_when_cogs_unattributed(session):
+    """Себестоимость приходит без deal_id (контракт «PO обслуживает много сделок») → landed по
+    сделке структурно 0. Маржа сделки НЕ показывает завышенную прибыль как COGS=0, а честно
+    отдаёт cogs_known=False + gross/pct/landed=None (PLATFORM #1)."""
+    from modules.finance.margin import margin_by_deal
+
+    session.add_all([
+        Payment(ref="r-d7", amount=Decimal("10000"), kind="receivable", status="paid", deal_id=7),
+        Payment(ref="f-d7", amount=Decimal("500"), kind="freight", status="pending", deal_id=7),
+        # landed без deal_id — не привязан к сделке 7
+        Payment(ref="l-na7", amount=Decimal("6000"), kind="landed", status="pending"),
+    ])
+    await session.commit()
+    r = await margin_by_deal(session)
+    row = {x["key"]: x for x in r["items"]}[7]
+    assert row["cogs_known"] is False
+    assert row["gross"] is None and row["pct"] is None and row["landed"] is None
+    assert row["revenue"] == "10000.00"  # выручка честно есть, скрыт только COGS-зависимый gross
+
+
 async def test_margin_by_counterparty_groups(session):
     from modules.finance.margin import margin_by_counterparty
 
