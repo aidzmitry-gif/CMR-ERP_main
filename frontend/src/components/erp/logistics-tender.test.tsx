@@ -137,23 +137,36 @@ describe("LogisticsTender", () => {
     expect(await screen.findByText(/Ставок ещё нет/)).toBeInTheDocument();
   });
 
-  it("«По цене» присуждает по стратегии cheapest, «По соотношению» — best_value", async () => {
+  // Каждая стратегия — отдельным рендером: после присуждения тендер переходит в
+  // состояние «awarded» и кнопки стратегий исчезают, поэтому два клика в одном
+  // рендере — гонка. Проверяем изолированно, свежий маунт на каждый кейс.
+  const awarded = {
+    rfq_id: 1,
+    status: "awarded",
+    carrier_code: "ALFA",
+    carrier: "Альфа Транс",
+    price: 800,
+    shipment_id: 5,
+    shipment_number: "SHP-5",
+  };
+
+  it("«По цене» присуждает по стратегии cheapest", async () => {
     m(api.fetchRankedBids).mockResolvedValue(bids);
-    m(api.awardRfq).mockResolvedValue({
-      rfq_id: 1,
-      status: "awarded",
-      carrier_code: "ALFA",
-      carrier: "Альфа Транс",
-      price: 800,
-      shipment_id: 5,
-      shipment_number: "SHP-5",
-    });
+    m(api.awardRfq).mockResolvedValue(awarded);
     render(<LogisticsTender />);
     fireEvent.click(await screen.findByText("RFQ-001"));
     await screen.findByText("Бета Логистик");
 
     fireEvent.click(screen.getByRole("button", { name: "По цене" }));
     await waitFor(() => expect(api.awardRfq).toHaveBeenCalledWith(1, undefined, "cheapest"));
+  });
+
+  it("«По соотношению» присуждает по стратегии best_value", async () => {
+    m(api.fetchRankedBids).mockResolvedValue(bids);
+    m(api.awardRfq).mockResolvedValue(awarded);
+    render(<LogisticsTender />);
+    fireEvent.click(await screen.findByText("RFQ-001"));
+    await screen.findByText("Бета Логистик");
 
     fireEvent.click(screen.getByRole("button", { name: "По соотношению" }));
     await waitFor(() => expect(api.awardRfq).toHaveBeenCalledWith(1, undefined, "best_value"));
