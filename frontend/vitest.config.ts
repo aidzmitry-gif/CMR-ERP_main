@@ -10,6 +10,9 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Запас под CI-нагрузкой: тяжёлые RTL-файлы с десятками async-ожиданий (deals-workspace,
+    // leads-workspace) при контеншене превышали дефолтные 5с → редкий флейк.
+    testTimeout: 15000,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     css: false,

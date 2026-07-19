@@ -88,7 +88,24 @@ function stubWinFetch(status = 200) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  try {
+    localStorage.clear();
+  } catch {}
 });
+
+/** Роутер по URL для тестов, где нужны РАЗНЫЕ ответы fetch (margin-forecast/chats/win) —
+ *  а не единый статус, как в stubWinFetch. Незнакомые URL — честный 404 (все вызывающие
+ *  сайты graceful-деградируют на !ok). */
+function stubFetchRouter(handlers: Record<string, () => Promise<{ ok: boolean; json?: () => Promise<unknown> }>>) {
+  const fetchMock = vi.fn((url: string) => {
+    for (const key of Object.keys(handlers)) {
+      if (String(url).includes(key)) return handlers[key]();
+    }
+    return Promise.resolve({ ok: false, json: async () => ({}) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
 
 const stages: Stage[] = [
   {
@@ -687,5 +704,210 @@ describe("DealsWorkspace (канбан)", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /Дожать/ }));
     expect(within(panel).getByText(/До плана:/)).toBeInTheDocument();
     expect(within(panel).getByText("ООО Доска")).toBeInTheDocument(); // открытая сделка стадии "new"
+  });
+
+  // --- Цикл 15: прогноз маржи воронки (PipelineRow) ---
+
+  it("цикл 15: прогноз маржи показывает РЕАЛЬНУЮ сумму из margin-forecast, с чипом «оценено по N из M» при частичном охвате", async () => {
+    stubFetchRouter({
+      "margin-forecast": () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ gross_weighted: 123.6, deals_priced: 2, deals_total: 3, reason: null }),
+        }),
+    });
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    const marginEl = await screen.findByText("≈ 124 ₽"); // Math.round(123.6)
+    expect(marginEl).toHaveAttribute("title", "оценено по 2 из 3 сделок");
+  });
+
+  it("цикл 15: без реального прогноза (fetch не даёт данных) — честное «маржа не рассчитана», не демо-ставка/0", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    expect(await screen.findByText("маржа не рассчитана")).toBeInTheDocument();
+    expect(screen.queryByText(/≈ \d+ ₽/, { selector: "b.text-money" })).toBeNull();
+  });
+
+  // --- SALES-43: «Висяки» в строке pipeline ---
+
+  it("PipelineRow «Висяки» считает открытые сделки старше порога STUCK_DAYS", async () => {
+    const stuckStages: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 1,
+        sum: 100,
+        deals: [
+          { id: "s1", number: "CRM-S1", company: "ООО Завис", description: "", amount: 100, priority: "Средний", owner: "И", stageChangedAt: "2020-01-01T00:00:00" },
+        ],
+      },
+    ];
+    render(<DealsWorkspace initialStages={stuckStages} initialKpis={[]} />);
+    // «1» рендерится в отдельном <b> — getByText(regex) сверяет только прямые текстовые
+    // узлы элемента, поэтому число проверяем через toHaveTextContent (рекурсивно).
+    const label = await screen.findByText(/Висяки:/);
+    expect(label.closest("span")).toHaveTextContent("Висяки: 1");
+  });
+
+  // --- Слайс 3 (D): гэп до плана в строке pipeline ---
+
+  it("PipelineRow «До плана» считает разницу плана и факта + число сделок по среднему чеку", async () => {
+    const kpis = [
+      { id: "ship_plan", label: "Выручка", value: 100, target: 1000, percent: 10, icon: "ruble" as const, tone: "blue" as const, money: true },
+      { id: "avg_deal", label: "Средний чек", value: 200, target: 200, percent: 100, icon: "ruble" as const, tone: "blue" as const, money: true },
+    ];
+    render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
+    // gap = 1000-100=900; deals = ceil(900/200)=5; avg=200. Сумма в <b> — прямой текст
+    // элемента её не содержит (см. комментарий у теста «Висяки»), сверяем toHaveTextContent.
+    const label = await screen.findByText(/До плана:/);
+    expect(label).toHaveTextContent("До плана: 900 ₽ · ≈5 сделок со ср. чеком 200 ₽");
+  });
+
+  // --- Режим «Список»: вероятность/взвешенная сумма/висяк/причина отказа ---
+
+  it("список: показывает вероятность, взвешенную сумму и маркер «висяк» для зависшей открытой сделки", async () => {
+    const listStages: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 1,
+        sum: 100,
+        deals: [
+          { id: "s1", number: "CRM-S1", company: "ООО Завис", description: "", amount: 100, priority: "Средний", owner: "И", stageChangedAt: "2020-01-01T00:00:00" },
+        ],
+      },
+    ];
+    render(<DealsWorkspace initialStages={listStages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("Список"));
+    const row = (await screen.findByText("ООО Завис")).closest("tr")!;
+    expect(within(row).getByText("10%")).toBeInTheDocument(); // STAGE_PROBABILITY.new
+    expect(within(row).getByText("≈ 10 ₽")).toBeInTheDocument(); // 100 × 10%
+    expect(within(row).getByText(/· \d+ дн · висяк/)).toBeInTheDocument();
+  });
+
+  it("список: показывает причину отказа сделки (SALES-40)", () => {
+    const lostReasonStages: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 1,
+        sum: 100,
+        deals: [
+          { id: "s1", number: "CRM-S1", company: "ООО Отказник", description: "", amount: 100, priority: "Средний", owner: "И", lostReasonCode: "competitor" },
+        ],
+      },
+    ];
+    render(<DealsWorkspace initialStages={lostReasonStages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("Список"));
+    expect(screen.getByText(/Причина: Ушёл к конкуренту/)).toBeInTheDocument();
+  });
+
+  // --- П4: кап карточек и в группировке «По датам действий» (DateColumn) ---
+
+  it("группа «По датам действий»: бакет капает на 50 карточек, «Показать ещё» раскрывает остальные", async () => {
+    const todayIso = new Date().toISOString();
+    const many: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 60,
+        sum: 60,
+        deals: Array.from({ length: 60 }, (_, i) => ({
+          id: `t${i}`,
+          number: `CRM-T${i}`,
+          company: `Комп ${i}`,
+          description: "",
+          amount: 1,
+          priority: "Средний" as const,
+          owner: "И",
+          nextStep: "Позвонить",
+          nextStepAt: todayIso,
+        })),
+      },
+    ];
+    render(<DealsWorkspace initialStages={many} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("По датам действий"));
+    // Бакеты гейтятся гидрационным `now` — ждём появления карточек, а не заголовка бакета
+    // «Сегодня» (тот неоднозначен: совпадает с чипом срочности на каждой карточке).
+    await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(50));
+    fireEvent.click(screen.getByRole("button", { name: "Показать ещё 10 (из 60)" }));
+    expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60);
+  });
+
+  // --- «Все вместе»: свой обработчик drag&drop секции (FunnelSection.handleDragEnd) ---
+
+  it("«Все вместе»: dnd в won ВНУТРИ секции зовёт канонический POST /win (свой путь FunnelSection, не общий handleDragEnd)", async () => {
+    const fetchMock = stubWinFetch(200);
+    render(
+      <DealsWorkspace
+        initialStages={stages}
+        initialKpis={[]}
+        combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("dnd-start"));
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/sales/deals/1/win",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(api.updateDealStage).not.toHaveBeenCalled();
+  });
+
+  it("«Все вместе»: сбой /win внутри секции откатывает карточку и всплывает общим boardMsg-баннером (onError)", async () => {
+    const fetchMock = stubWinFetch(500);
+    render(
+      <DealsWorkspace
+        initialStages={stages}
+        initialKpis={[]}
+        combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("dnd-start"));
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(await screen.findByText(/Не удалось закрыть сделку как выигранную/)).toBeInTheDocument();
+  });
+
+  // --- П1: развернуть/свернуть вторичные метрики скорборда + восстановление из localStorage ---
+
+  it("«Ещё N показателей» разворачивает вторичные метрики; повторный клик сворачивает", () => {
+    const kpis = [
+      { id: "ship_plan", label: "Выручка", value: 10, target: 100, percent: 10, icon: "ruble" as const, tone: "blue" as const, money: true },
+      { id: "extra_metric", label: "Доп. метрика", value: 5, target: 10, percent: 50, icon: "ruble" as const, tone: "blue" as const },
+    ];
+    render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
+    expect(screen.queryByText("Доп. метрика")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Ещё \d+ показателей/ }));
+    expect(screen.getByText("Доп. метрика")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Свернуть/ }));
+    expect(screen.queryByText("Доп. метрика")).toBeNull();
+  });
+
+  // ponytail: восстановление moreKpis из localStorage не тестируем здесь — в этом окружении
+  // (Node 22 + vitest/jsdom без --localstorage-file) глобальный `localStorage` недоступен даже
+  // как `window.localStorage`; компонент это уже переживает (try/catch), но тест не смог бы
+  // реально управлять хранилищем.
+
+  // --- Произвольный месяц (input type=month) + подзаголовок периода ---
+
+  it("выбор произвольного месяца (input[type=month]) зовёт getKpis с period=YYYY-MM и меняет подзаголовок", async () => {
+    mock(api.getKpis).mockResolvedValue([]);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.change(screen.getByLabelText("Выбрать месяц и год"), { target: { value: "2026-03" } });
+    await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("2026-03"));
+    expect(await screen.findByText(/Март 2026 · выбранный месяц/)).toBeInTheDocument();
+  });
+
+  // --- ownerId: доска владельца стартует с периода «месяц» ---
+
+  it("с заданным ownerId скорборд стартует с периода «месяц» (не «день»)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} ownerId={7} />);
+    expect(screen.getByRole("combobox", { name: "Период" })).toHaveValue("month");
   });
 });

@@ -51,6 +51,17 @@ vi.mock("@/lib/api", () => ({
   fetchLeadsClient: vi.fn().mockResolvedValue(null),
   // Чистая функция (локальное naive-время → naive-UTC) — в тестах passthrough.
   localToNaiveUtc: (s: string) => s,
+  // Демо-кнопки «Заявка с сайта» / «Письмо» — публичные коннекторы.
+  submitWebLead: vi.fn().mockResolvedValue(true),
+  submitEmailLead: vi.fn().mockResolvedValue(true),
+  // Дубль по телефону/e-mail (409) — реальный класс, чтобы instanceof работал в компоненте.
+  LeadDuplicateError: class LeadDuplicateError extends Error {
+    duplicateOf: number;
+    constructor(duplicateOf: number) {
+      super(`Дубль лида #${duplicateOf}`);
+      this.duplicateOf = duplicateOf;
+    }
+  },
 }));
 
 import { LeadsWorkspace } from "@/components/leads/leads-workspace";
@@ -788,5 +799,148 @@ describe("LeadsWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Скрыть/ }));
     fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
     expect(api.fetchLeadSourceStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("ошибка загрузки лидов — сообщение о сбое сети, а не «лидов нет»", () => {
+    render(<LeadsWorkspace initialLeads={[]} initialLoadState="error" />);
+    expect(
+      screen.getByText(/Не удалось загрузить лиды — проверьте связь с сервером/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Лидов пока нет/)).not.toBeInTheDocument();
+  });
+
+  it("«Передачи продавцам» — пусто, когда за 30 дней никому не передавали", async () => {
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    expect(api.fetchLeadHandoffStats).not.toHaveBeenCalled(); // ленивая загрузка, не на маунте
+    fireEvent.click(screen.getByRole("button", { name: /Передачи продавцам/ }));
+    expect(
+      await screen.findByText(/Пока никому не передавали лиды за 30 дней/),
+    ).toBeInTheDocument();
+    expect(api.fetchLeadHandoffStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("«Передачи продавцам» рендерит строку продавца с суммами и итогом пайплайна", async () => {
+    (api.fetchLeadHandoffStats as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        manager: "Иванов И.И.",
+        assigned: 5,
+        converted: 2,
+        conversionPct: 40,
+        pipeline: 1500,
+        pending: 1,
+        pendingPipeline: 300,
+        stale: 1,
+      },
+    ]);
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Передачи продавцам/ }));
+    expect(await screen.findByText("Иванов И.И.")).toBeInTheDocument();
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    // Σ КП передал (строка продавца) + «Всего в пайплайн продавцам» (итог) — оба formatByn(1500)
+    // (сравниваем через regex: Intl.NumberFormat вставляет неразрывный пробел-разделитель разряда)
+    expect(screen.getAllByText(/^1.500.BYN$/)).toHaveLength(2);
+    expect(screen.getByText(/⚠ 1/)).toBeInTheDocument(); // висит >24ч
+  });
+
+  it("сбой квалификации показывает сообщение об ошибке и не меняет статус лида", async () => {
+    (api.qualifyLead as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    fireEvent.click(screen.getByRole("button", { name: "✅ Квалифицировать" }));
+    await waitFor(() => expect(api.qualifyLead).toHaveBeenCalledWith(1));
+    expect(await screen.findByText(/Не удалось квалифицировать ЛИД-1/)).toBeInTheDocument();
+    expect(screen.getByText("Новый")).toBeInTheDocument(); // статус не сдвинулся
+  });
+
+  it("«Разобрать целевых» вызывает expressBulkLeads и показывает итог с пропущенными", async () => {
+    (api.expressBulkLeads as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expressed: [1, 2],
+      skippedNonTarget: 1,
+    });
+    render(
+      <LeadsWorkspace
+        initialLeads={[
+          { ...lead, id: 1, score: 70, qualification: "target" },
+          { ...lead, id: 2, score: 80, qualification: "target", company: "ООО Второй" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Разобрать целевых \(2\)/ }));
+    await waitFor(() => expect(api.expressBulkLeads).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Разобрано целевых: 2/)).toBeInTheDocument();
+    expect(screen.getByText(/1 нецелевых оставлено вручную/)).toBeInTheDocument();
+  });
+
+  it("сбой «Разобрать целевых» показывает сообщение об ошибке", async () => {
+    (api.expressBulkLeads as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Разобрать целевых \(1\)/ }));
+    expect(await screen.findByText(/Не удалось разобрать лиды/)).toBeInTheDocument();
+  });
+
+  it("горячая клавиша E без целевых новых лидов — подсказка, API не дёргается", async () => {
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, score: 10, qualification: "non-target" }]}
+      />,
+    );
+    fireEvent.keyDown(document, { code: "KeyE" });
+    expect(
+      await screen.findByText(/Целевых новых лидов нет — разбирать нечего/),
+    ).toBeInTheDocument();
+    expect(api.expressBulkLeads).not.toHaveBeenCalled();
+  });
+
+  it("горячая клавиша E разбирает целевых так же, как кнопка «Разобрать целевых»", async () => {
+    (api.expressBulkLeads as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expressed: [1],
+      skippedNonTarget: 0,
+    });
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]}
+      />,
+    );
+    fireEvent.keyDown(document, { code: "KeyE" });
+    await waitFor(() => expect(api.expressBulkLeads).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Разобрано целевых: 1/)).toBeInTheDocument();
+  });
+
+  it("«Заявка с сайта» шлёт демо-заявку через submitWebLead и показывает уведомление", async () => {
+    render(<LeadsWorkspace initialLeads={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Заявка с сайта/ }));
+    await waitFor(() =>
+      expect(api.submitWebLead).toHaveBeenCalledWith(
+        expect.objectContaining({ company: "ООО СтройКуб", region: "Брест" }),
+      ),
+    );
+    expect(await screen.findByText(/Заявка с сайта принята/)).toBeInTheDocument();
+  });
+
+  it("«Письмо» шлёт демо-заявку через submitEmailLead и показывает уведомление", async () => {
+    render(<LeadsWorkspace initialLeads={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Письмо/ }));
+    await waitFor(() =>
+      expect(api.submitEmailLead).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: "Запрос цены на арматуру" }),
+      ),
+    );
+    expect(await screen.findByText(/Письмо принято/)).toBeInTheDocument();
+  });
+
+  it("дубль лида (409) открывает существующий лид вместо создания нового и закрывает форму", async () => {
+    (api.createLead as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new (api.LeadDuplicateError as unknown as new (id: number) => Error)(7),
+    );
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 7, company: "ООО Существующий" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Принять лид/ }));
+    const form = screen.getByText("Принять лид", { selector: "h3" }).closest("form") as HTMLElement;
+    fireEvent.click(within(form).getByRole("button", { name: "Принять" }));
+    await waitFor(() => expect(api.createLead).toHaveBeenCalled());
+    expect(await screen.findByText(/Дубль лида #7/)).toBeInTheDocument();
+    expect(screen.queryByText("Принять лид", { selector: "h3" })).not.toBeInTheDocument();
   });
 });

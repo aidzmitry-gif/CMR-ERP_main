@@ -1,6 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fmtByn, fmtNh, fmtPct, kpiTone } from "@/lib/production-analytics";
+import {
+  type AnalyticsData,
+  fetchAnalytics,
+  fetchAnalyticsServer,
+  fmtByn,
+  fmtNh,
+  fmtPct,
+  kpiTone,
+} from "@/lib/production-analytics";
+
+function jsonResponse(data: unknown, ok = true): Response {
+  return { ok, json: async () => data } as Response;
+}
+
+const SAMPLE: AnalyticsData = {
+  vyrabotka_fact_nh: 100,
+  vyrabotka_plan_nh: 120,
+  efficiency_pct: 83.3,
+  fpy_pct: 95,
+  pass_rate_pct: 98,
+  scrap_pct: 2,
+  premium_fot_byn: 500,
+  plan_fact_by_month: [{ month: 1, plan_nh: 10, fact_nh: 8 }],
+  scrap_reasons: [{ reason: "брак литья", count: 3 }],
+  team_contribution: [{ name: "Иванов", nh_output: 10, share_pct: 10 }],
+  top_products: [{ product: "Аккумулятор", fact_nh: 20 }],
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("production-analytics", () => {
   describe("fmtNh", () => {
@@ -57,5 +88,95 @@ describe("production-analytics", () => {
       expect(kpiTone("low", 16)).toBe("text-red-600");
       expect(kpiTone("low", 100)).toBe("text-red-600");
     });
+  });
+});
+
+describe("fetchAnalyticsServer", () => {
+  it("зовёт BASE/production/analytics с годом, no-store, без ролей", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(SAMPLE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAnalyticsServer(2025);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/production/analytics?year=2025",
+      { cache: "no-store", headers: undefined },
+    );
+    expect(result).toEqual(SAMPLE);
+  });
+
+  it("передаёт X-User-Roles, если роли переданы", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(SAMPLE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAnalyticsServer(2024, "director,rop");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/production/analytics?year=2024",
+      { cache: "no-store", headers: { "X-User-Roles": "director,rop" } },
+    );
+  });
+
+  it("использует текущий год, если год не передан", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-18T00:00:00Z"));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(SAMPLE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAnalyticsServer();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/production/analytics?year=2026",
+      { cache: "no-store", headers: undefined },
+    );
+    vi.useRealTimers();
+  });
+
+  it("возвращает null при ok:false", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, false)));
+    expect(await fetchAnalyticsServer(2025)).toBeNull();
+  });
+
+  it("возвращает null при исключении fetch", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    expect(await fetchAnalyticsServer(2025)).toBeNull();
+  });
+});
+
+describe("fetchAnalytics", () => {
+  it("зовёт /api/production/analytics с годом и no-store, возвращает данные", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(SAMPLE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAnalytics(2023);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/production/analytics?year=2023", {
+      cache: "no-store",
+    });
+    expect(result).toEqual(SAMPLE);
+  });
+
+  it("использует текущий год, если год не передан", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-18T00:00:00Z"));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(SAMPLE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAnalytics();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/production/analytics?year=2026", {
+      cache: "no-store",
+    });
+    vi.useRealTimers();
+  });
+
+  it("возвращает null при ok:false", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, false)));
+    expect(await fetchAnalytics(2025)).toBeNull();
+  });
+
+  it("возвращает null при исключении fetch", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
+    expect(await fetchAnalytics(2025)).toBeNull();
   });
 });
