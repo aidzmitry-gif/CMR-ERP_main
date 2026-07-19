@@ -230,6 +230,13 @@ describe("api client — сделки/доска/KPI", () => {
     stubFetch({ ok: true });
     expect(await logActivity("calls")).toBe(true);
   });
+
+  it("fetchKpis не маскирует 401/403 демо-деньгами (пусто, не мок-KPI)", async () => {
+    for (const status of [401, 403]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status, ok: false }));
+      expect(await fetchKpis()).toEqual([]);
+    }
+  });
 });
 
 describe("api client — документы/сообщения/согласования", () => {

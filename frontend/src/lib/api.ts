@@ -808,13 +808,16 @@ function mapKpi(k: ApiKpi): Kpi {
   };
 }
 
-/** KPI «План на сегодня» из API (SSR); fallback на mock. */
+/** KPI «План на сегодня» из API (SSR); fallback на mock при недоступности backend, пусто при 401/403. */
 export async function fetchKpis(roles?: string, accessToken?: string): Promise<Kpi[]> {
   try {
     const res = await fetch(`${BASE}/sales/kpis`, {
       cache: "no-store",
       headers: roleHeaders(roles, accessToken),
     });
+    // 401/403 — нет доступа/истёкшая сессия: НЕ подменяем демо-деньгами (как fetchBoardResult),
+    // иначе фейковый «План по сумме» рисуется как реальные деньги (PLATFORM #1). Пусто = явно нет данных.
+    if (res.status === 401 || res.status === 403) return [];
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as ApiKpi[];
     return data.length ? data.map(mapKpi) : KPIS;
