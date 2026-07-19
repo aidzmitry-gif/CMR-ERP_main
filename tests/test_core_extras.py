@@ -134,3 +134,17 @@ async def test_system_events_and_audit(api):
     assert isinstance((await api.get("/system/events")).json(), list)
     assert isinstance((await api.get("/system/audit")).json(), list)
     assert (await api.get("/health")).json() == {"status": "ok"}
+
+
+async def test_anonymous_denied_on_sensitive_reads(api):
+    """PLATFORM #2: гостевая роль (пустой X-User-Roles) НЕ читает согласования/аудит/панель
+    владельца/журнал событий/карточку ЕГР — 403, без утечки контрагентов/планов/аудита."""
+    guest = {"X-User-Roles": ""}
+    for path in (
+        "/approvals",
+        "/system/audit",
+        "/system/owner",
+        "/system/events",
+        "/integrations/egr/191234567",
+    ):
+        assert (await api.get(path, headers=guest)).status_code == 403, path

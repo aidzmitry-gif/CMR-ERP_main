@@ -268,7 +268,11 @@ async def stock(
 
 
 @router.get("/egr/{unp}", response_model=RegistryOut)
-async def egr_lookup(unp: str, core: Core = Depends(get_core)):
+async def egr_lookup(
+    unp: str,
+    core: Core = Depends(get_core),
+    _: object = Depends(require_permission("sales.deal.read")),
+):
     """Подтянуть контрагента по УНП из реестра ЕГР РБ (sales-28)."""
     if core.services.registry is None:
         raise HTTPException(status_code=503, detail="Реестр ЕГР не подключён")

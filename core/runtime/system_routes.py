@@ -662,7 +662,10 @@ async def _sku_sync_link(session: AsyncSession, sku_id: int) -> dict | None:
 
 
 @router.get("/system/events")
-async def system_events(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def system_events(
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> list[dict]:
     """Последние доменные события — журнал outbox (единый event log, часть 3)."""
     rows = (
         await session.execute(select(OutboxEvent).order_by(OutboxEvent.id.desc()).limit(20))
@@ -680,7 +683,10 @@ async def system_events(session: AsyncSession = Depends(get_session)) -> list[di
 
 
 @router.get("/system/audit")
-async def system_audit(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def system_audit(
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> list[dict]:
     """Неизменяемый журнал аудита (проекция событий, часть 5)."""
     rows = (
         await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(50))
@@ -692,7 +698,11 @@ async def system_audit(session: AsyncSession = Depends(get_session)) -> list[dic
 
 
 @router.get("/system/owner")
-async def system_owner(request: Request, session: AsyncSession = Depends(get_session)) -> dict:
+async def system_owner(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("refs.view")),
+) -> dict:
     """Панель владельца — AI Control Tower без AI (core-8, часть 11).
 
     Здоровье бизнеса одним взглядом: согласования (ожидают/всего), активность
