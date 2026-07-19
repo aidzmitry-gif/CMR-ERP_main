@@ -5,7 +5,7 @@ import { CompanySwitcher } from "@/components/kanban/company-switcher";
 import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FiltersMenu } from "@/components/kanban/filters-menu";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
-import { fetchBoardResult, fetchFunnelsServer, fetchKpis } from "@/lib/api";
+import { fetchBoardResult, fetchFunnelsServer, fetchKpisResult } from "@/lib/api";
 import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 /** Переключатель ЮЛ + «Фильтры» + «Стадии»/«Лого» (иконки) — правее хлебных крошек
@@ -56,9 +56,9 @@ export default async function DealsPage({
   if (activeFunnel === "all") {
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
-    const [funnels, kpis] = await Promise.all([
+    const [funnels, kpisRes] = await Promise.all([
       fetchFunnelsServer(role, token),
-      fetchKpis(role, token),
+      fetchKpisResult(role, token),
     ]);
     const sections = await Promise.all(
       funnels.map(async (f) => ({
@@ -67,15 +67,15 @@ export default async function DealsPage({
         ...(await fetchBoardResult(role, f.code, token)),
       })),
     );
-    const authError = sections.some((s) => s.authError);
+    const authError = sections.some((s) => s.authError) || Boolean(kpisRes.authError);
     return (
       <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
         <DealsWorkspace
           key="all"
           initialStages={sections[0]?.stages ?? []}
-          initialKpis={kpis}
+          initialKpis={kpisRes.kpis}
           combinedStages={sections}
-          demoData={sections.some((r) => r.demo)}
+          demoData={sections.some((r) => r.demo) || kpisRes.demo}
           authError={authError}
           funnelTabs={funnelTabs}
           ownerId={ownerId}
@@ -86,9 +86,9 @@ export default async function DealsPage({
 
   // SSR: стадии для выбранной воронки + KPI; key прокидывает funnel в DealsWorkspace,
   // чтобы клиентский стейт колонок сбрасывался при переключении воронки.
-  const [board, kpis] = await Promise.all([
+  const [board, kpisRes] = await Promise.all([
     fetchBoardResult(role, activeFunnel, token),
-    fetchKpis(role, token),
+    fetchKpisResult(role, token),
   ]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
@@ -96,9 +96,9 @@ export default async function DealsPage({
       <DealsWorkspace
         key={activeFunnel}
         initialStages={board.stages}
-        initialKpis={kpis}
-        demoData={board.demo}
-        authError={board.authError}
+        initialKpis={kpisRes.kpis}
+        demoData={board.demo || kpisRes.demo}
+        authError={board.authError || kpisRes.authError}
         funnelTabs={funnelTabs}
         ownerId={ownerId}
       />

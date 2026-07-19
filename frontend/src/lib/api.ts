@@ -808,22 +808,34 @@ function mapKpi(k: ApiKpi): Kpi {
   };
 }
 
-/** KPI «План на сегодня» из API (SSR); fallback на mock при недоступности backend, пусто при 401/403. */
-export async function fetchKpis(roles?: string, accessToken?: string): Promise<Kpi[]> {
+/** KPI + признак фоллбэка (как fetchBoardResult): `demo=true` — backend недоступен, отданы мок-KPI;
+ * `authError=true` — 401/403, пусто (НЕ подменяем демо-деньгами, иначе фейковый «План по сумме»
+ * рисуется как реальные деньги — PLATFORM #1). Страница обязана свести demo/authError во флаги,
+ * иначе мок-деньги отрисуются как настоящие без пометки. */
+export async function fetchKpisResult(
+  roles?: string,
+  accessToken?: string,
+): Promise<{ kpis: Kpi[]; demo: boolean; authError?: boolean }> {
   try {
     const res = await fetch(`${BASE}/sales/kpis`, {
       cache: "no-store",
       headers: roleHeaders(roles, accessToken),
     });
-    // 401/403 — нет доступа/истёкшая сессия: НЕ подменяем демо-деньгами (как fetchBoardResult),
-    // иначе фейковый «План по сумме» рисуется как реальные деньги (PLATFORM #1). Пусто = явно нет данных.
-    if (res.status === 401 || res.status === 403) return [];
+    if (res.status === 401 || res.status === 403) {
+      return { kpis: [], demo: false, authError: true };
+    }
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as ApiKpi[];
-    return data.length ? data.map(mapKpi) : KPIS;
+    return { kpis: data.map(mapKpi), demo: false };
   } catch {
-    return KPIS;
+    return { kpis: KPIS, demo: true };
   }
+}
+
+/** KPI «План на сегодня» (SSR), только массив — для потребителей, которым флаг не нужен
+ * (напр. Control Tower рядом с fetchBoardStages). Денежный экран сделок берёт fetchKpisResult. */
+export async function fetchKpis(roles?: string, accessToken?: string): Promise<Kpi[]> {
+  return (await fetchKpisResult(roles, accessToken)).kpis;
 }
 
 /** Перечитать KPI с клиента за период (после отметки активности / смены периода). */

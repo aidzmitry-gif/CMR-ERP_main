@@ -40,6 +40,7 @@ import {
   fetchFunnels,
   fetchFunnelsServer,
   fetchKpis,
+  fetchKpisResult,
   fetchLastOrder,
   fetchLead,
   fetchLeadAttachments,
@@ -236,6 +237,28 @@ describe("api client — сделки/доска/KPI", () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status, ok: false }));
       expect(await fetchKpis()).toEqual([]);
     }
+  });
+
+  it("fetchKpisResult помечает demo/authError, чтобы страница не рисовала мок как реальные деньги", async () => {
+    const apiKpi = { key: "calls", title: "Звонки", target: 40, actual: 24, percent: 60, unit: "count", icon: "phone", tone: "blue" };
+    stubFetch([apiKpi]);
+    const ok = await fetchKpisResult();
+    expect(ok.demo).toBe(false);
+    expect(ok.authError).toBeUndefined();
+    expect(ok.kpis[0].label).toBe("Звонки");
+    // 401/403 — пусто + authError, НЕ демо-деньги
+    for (const status of [401, 403]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status, ok: false }));
+      const r = await fetchKpisResult();
+      expect(r.kpis).toEqual([]);
+      expect(r.authError).toBe(true);
+      expect(r.demo).toBe(false);
+    }
+    // сетевой сбой — мок-KPI, но с явным demo=true (страница покажет плашку)
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
+    const down = await fetchKpisResult();
+    expect(down.kpis.length).toBeGreaterThan(0);
+    expect(down.demo).toBe(true);
   });
 });
 
