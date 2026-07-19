@@ -346,3 +346,18 @@ async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
     r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
     assert r.status_code == 200, r.text
     assert '<div class="logo">' not in r.text
+
+
+def test_render_contract_escapes_untrusted_ctx_values():
+    """Stored-XSS-гард (PLATFORM #2): значения ctx (свободный текст — условия оплаты/доставки,
+    реквизиты покупателя) экранируются, тело шаблона доверенное. <script> в payment_terms/
+    counterparty не исполнится в сессии согласующего при открытии договора."""
+    from modules.sales.routes import _render_contract
+
+    body = "Оплата: {{payment_terms}}. Покупатель: {{buyer.name}}."
+    ctx = {"payment_terms": "<script>steal()</script>", "buyer.name": 'ООО "<b>Р</b>"'}
+    out = _render_contract(body, ctx, facsimile="<div class='fx'>подпись</div>")
+    assert "<script>steal()</script>" not in out  # сырой скрипт не попал
+    assert "&lt;script&gt;steal()&lt;/script&gt;" in out  # экранирован
+    assert "&lt;b&gt;" in out
+    assert "<div class='fx'>подпись</div>" in out  # facsimile доверенный — как есть
