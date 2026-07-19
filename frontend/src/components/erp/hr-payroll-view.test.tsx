@@ -47,7 +47,7 @@ type FetchOverrides = {
 };
 
 function installFetch(overrides: FetchOverrides = {}) {
-  const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  const mock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith("/api/hr/payroll/summary")) return jsonResponse(summaries);
     if (url.startsWith("/api/hr/payroll/accrue")) {
