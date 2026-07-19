@@ -418,6 +418,39 @@ async def test_deal_margin_priced_no_price_no_cost(api, session):
     assert statuses == {"SKU1": "priced", "SKU2": "no_cost", "SKU3": "no_price"}
 
 
+async def test_invoice_document_amount_includes_vat(api, session):
+    """Счёт клиенту — С НДС: сумма документа (→ дебиторка/1С/KPI «Оплаты с НДС») = грандтотал
+    печатной формы (нетто+НДС 20%), а не нетто. Решение оператора «с НДС» (PLATFORM #1)."""
+    from decimal import Decimal
+
+    from modules.sales.models import DealItem, PriceQuote
+    from modules.sales.routes import _invoice_gross, _invoice_items, _invoice_line
+
+    # чистая математика строки: 10×100 → нетто 1000, НДС 200, всего 1200
+    assert _invoice_line(Decimal("10"), Decimal("100")) == (
+        Decimal("1000.00"),
+        Decimal("200.00"),
+        Decimal("1200.00"),
+    )
+
+    sku1 = await _seed_sku(session, "VAT1")
+    sku2 = await _seed_sku(session, "VAT2")
+    deal = await _new_deal(api, "VAT-1", counterparty="ООО V")
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),  # 5×15 = 75 нетто → 90 с НДС
+        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),  # 3×20 = 60 нетто → 72 с НДС
+        PriceQuote(sku_code="VAT1", counterparty="ООО V", price=15),
+        PriceQuote(sku_code="VAT2", counterparty="ООО V", price=20),
+    ])
+    await session.commit()
+
+    items = await _invoice_items(session, deal["id"])
+    assert _invoice_gross(items) == Decimal("162.00")  # (75+15)+(60+12); нетто было бы 135
+
+    doc = (await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})).json()
+    assert doc["amount"] == 162.0  # С НДС, не 135.0 нетто
+
+
 async def test_deal_margin_facade_missing(api, session):
     """П1: фасад landed_cost None → cogs/gross_profit/margin_pct = None + reason."""
     from modules.sales.models import DealItem, PriceQuote
