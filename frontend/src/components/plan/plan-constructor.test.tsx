@@ -203,4 +203,117 @@ describe("PlanConstructor", () => {
     expect(await screen.findByText(/Не удалось сохранить план/)).toBeInTheDocument();
     expect(upsertPlanMock).not.toHaveBeenCalled();
   });
+
+  it("правка суммы прибыли сделки месяца пересчитывает собранный итог", async () => {
+    await renderReady();
+    const collected = screen.getByText("Собрано из источников").parentElement as HTMLElement;
+
+    fireEvent.change(screen.getByLabelText("План прибыли Сделка Альфа"), { target: { value: "3000" } });
+    // committed 3000 (было 8000) + постоянный в месяце 4000 = 7000
+    await waitFor(() => expect(collected).toHaveTextContent("7 000 BYN"));
+  });
+
+  it("включение постоянного клиента «вне месяца» добавляет его в собранный итог", async () => {
+    await renderReady();
+    const collected = screen.getByText("Собрано из источников").parentElement as HTMLElement;
+    expect(collected).toHaveTextContent("12 000 BYN");
+
+    // ООО Позже — вне месяца, изначально выключен (in_month: false)
+    expect(screen.getByText("подтянуть раньше")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Учитывать ООО Позже"));
+    // 12000 + 2500 (gross ООО Позже) = 14500
+    await waitFor(() => expect(collected).toHaveTextContent("14 500 BYN"));
+  });
+
+  it("сохранённый черновик показывает баннер и применяет его enabled/gross; «пересобрать» возвращает исходные значения", async () => {
+    installFetch(async (u) => {
+      if (u.includes("/api/sales/plan-sources")) {
+        return jsonResponse({
+          ...SOURCES,
+          saved_items: [
+            {
+              source: "committed",
+              ref: "D-1",
+              title: "Сделка Альфа",
+              when_label: "20.08",
+              revenue: 10000,
+              gross: 1000,
+              probability: 100,
+              enabled: false,
+              id: 1,
+              owner_id: 7,
+              period_key: "2026-08",
+              created_at: "2026-07-01",
+            },
+          ],
+        });
+      }
+      return jsonResponse({ ok: true });
+    });
+    await renderReady();
+
+    // баннер с датой снапшота (01.07)
+    expect(screen.getByText(/Сохранён черновик/)).toBeInTheDocument();
+    expect(screen.getByText(/от 01\.07/)).toBeInTheDocument();
+    // снапшот применён: строка выключена, сумма 1000 → собрано только 4000 (постоянный)
+    const collected = screen.getByText("Собрано из источников").parentElement as HTMLElement;
+    expect(collected).toHaveTextContent("4 000 BYN");
+    expect(screen.getByLabelText("Учитывать Сделка Альфа")).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /пересобрать из источников/ }));
+    // после пересборки — снова исходные committed (включена, 8000) → итог 12000
+    await waitFor(() => expect(collected).toHaveTextContent("12 000 BYN"));
+    expect(screen.getByLabelText("Учитывать Сделка Альфа")).toBeChecked();
+    expect(screen.queryByText(/Сохранён черновик/)).not.toBeInTheDocument();
+  });
+
+  it("обратный счёт по умолчанию считает нужное число новых сделок для закрытия дефицита", async () => {
+    await renderReady();
+    // deficit 38000, ср.чек 5000 × маржа 20% = 1000 прибыли/сделку → 38 сделок; конверсии нулевые → без заявок/звонков
+    expect(screen.getByText(/~38 новых сделок/)).toBeInTheDocument();
+    // покрытие воронки: leads=0 → коэффициент 0 → «мало, не хватит»
+    expect(screen.getByText("заявок на входе мало — на эту цель не хватит")).toBeInTheDocument();
+  });
+
+  it("взвешенный прогноз и полоса уверенности считают приход с дисконтом 90% и постоянных по вероятности", async () => {
+    await renderReady();
+    // взвешенный = committed 8000×0.9=7200 + regular 4000×80%=3200 = 10400
+    const weightedBlock = screen.getByText("Взвешенный прогноз").parentElement as HTMLElement;
+    expect(weightedBlock).toHaveTextContent("10 400 BYN");
+
+    const bandRow = screen.getByText(/Почти наверняка/);
+    expect(bandRow).toHaveTextContent("8 000 BYN"); // guaranteed = s1
+    expect(bandRow).toHaveTextContent("10 400 BYN"); // probable = max(s1, weighted)
+    expect(bandRow).toHaveTextContent("12 000 BYN"); // ceiling = max(probable, total)
+  });
+
+  it("показывает концентрацию плана на доминирующем источнике «Сделки месяца»", async () => {
+    await renderReady();
+    // s1=8000 из total=12000 → 67%, источник и сделка совпадают по доле → побеждает источник
+    expect(screen.getByText(/план на одной ноге: источник «Сделки месяца» — 67%/)).toBeInTheDocument();
+  });
+
+  it("без заданной базы РОПа и введённой вручную меньше собранного — вердикт «План набран»", async () => {
+    installFetch(async (u) => {
+      if (u.includes("/api/sales/plan-sources")) return jsonResponse({ ...SOURCES, base_gross: null });
+      return jsonResponse({ ok: true });
+    });
+    render(<PlanConstructor ownerId={7} />);
+    await screen.findByText("База — согласовано с РОПом");
+
+    // база не задана → сначала бейдж «База не задана»
+    expect(screen.getByText("База не задана")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("база не задана — впишите"), { target: { value: "5000" } });
+    // собрано 12000 ≥ база 5000 → «План набран», перекрытие на 7000
+    await waitFor(() => expect(screen.getByText("План набран")).toBeInTheDocument());
+    expect(screen.getByText(/перекрывают базу на 7 000 BYN/)).toBeInTheDocument();
+  });
+
+  it("шапка источника «Сделки месяца» показывает долю плана от базы", async () => {
+    await renderReady();
+    // 8000 / 50000 = 16% (первый источник — «Сделки месяца»)
+    const shareLabel = screen.getAllByText("доля плана")[0];
+    expect(shareLabel.parentElement).toHaveTextContent("16%");
+  });
 });

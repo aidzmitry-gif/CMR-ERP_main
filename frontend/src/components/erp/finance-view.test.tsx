@@ -266,4 +266,243 @@ describe("FinanceView", () => {
     // подпись критических корзин присутствует
     expect(screen.getAllByText("90+ дн.").length).toBeGreaterThan(0);
   });
+
+  it("сводка: компенсация по претензии показывает уменьшение себестоимости, а платёж-отток рендерится с минусом", async () => {
+    responders["finance/summary"] = {
+      ...SUMMARY,
+      margin: { ...SUMMARY.margin, claim_refund: "500.00" },
+    };
+    responders["finance/payments"] = [
+      {
+        id: 9,
+        ref: "Фрахт №3",
+        amount: "-300.00",
+        status: "paid",
+        kind: "freight",
+        due_date: null,
+        paid_at: "2026-07-01",
+        deal_id: null,
+        counterparty_ref: null,
+        outstanding: null,
+        is_overdue: null,
+      },
+    ];
+    render(<FinanceView />);
+    expect(await screen.findByText(/Компенсация по претензии/)).toBeInTheDocument();
+    expect(screen.getByText(byn("500"))).toBeInTheDocument();
+    // freight — отток (isInflow=false для не-receivable) → минус-строка и сумма 300 в таблице движения платежей
+    expect(await screen.findByText("Фрахт №3")).toBeInTheDocument();
+    expect(screen.getByText(byn("300"))).toBeInTheDocument();
+  });
+
+  it("вкладка «Cash-flow» с данными рендерит недели и «не датировано»", async () => {
+    responders["finance/cashflow-forecast"] = {
+      as_of: "2026-07-19",
+      currency: "BYN",
+      opening_balance: "1000.00",
+      weeks: [
+        { week_start: "2026-07-14", inflow: "2000.00", outflow: "500.00", net: "1500.00", cumulative: "2500.00" },
+      ],
+      not_dated: { inflow: "100.00", outflow: "50.00" },
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Cash-flow" }));
+
+    expect(await screen.findByText("2026-07-14")).toBeInTheDocument();
+    expect(screen.getByText(byn("1000"))).toBeInTheDocument(); // opening_balance
+    expect(screen.getByText(/\+.*2\s?000.*BYN/)).toBeInTheDocument(); // inflow week
+    expect(screen.getByText(byn("2500"))).toBeInTheDocument(); // cumulative
+  });
+
+  it("вкладка «Маржа» рендерит строки по сделкам и «не атрибутировано» для контрагентов", async () => {
+    responders["finance/margin/by-deal"] = {
+      currency: "BYN",
+      items: [{ key: 42, revenue: "10000.00", landed: "6000.00", freight: "300.00", gross: "3700.00", pct: 37 }],
+    };
+    responders["finance/margin/by-counterparty"] = {
+      currency: "BYN",
+      items: [{ key: null, revenue: "500.00", landed: "200.00", freight: "0.00", gross: "300.00", pct: null }],
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Маржа" }));
+
+    expect(await screen.findByText("Маржа по сделкам")).toBeInTheDocument();
+    expect(screen.getByText("#42")).toBeInTheDocument();
+    expect(screen.getByText(byn("10000"))).toBeInTheDocument();
+    expect(screen.getByText(/37\.0%/)).toBeInTheDocument();
+
+    expect(screen.getByText("Маржа по контрагентам")).toBeInTheDocument();
+    expect(screen.getByText("Не атрибутировано")).toBeInTheDocument();
+  });
+
+  it("сходимость маржи (ReconcileDealCard): проверка совпадает и показывает «совпадает»", async () => {
+    responders["finance/margin/reconcile-deal"] = {
+      deal_id: 42,
+      finance_landed: "6000.00",
+      facade_landed: "6000.00",
+      delta: "0.00",
+      revenue: "10000.00",
+      gross_finance: "3700.00",
+      level: "sku",
+      source_facade_available: true,
+      currency: "BYN",
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Маржа" }));
+    await screen.findByText("Сходимость маржи finance ↔ landed-фасад");
+
+    const dealInput = screen.getByPlaceholderText("42");
+    fireEvent.change(dealInput, { target: { value: "42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+
+    expect(await screen.findByText(/Совпадает: проводки finance/)).toBeInTheDocument();
+    // finance_landed И facade_landed оба 6000 (равны) → два совпадающих узла
+    expect(screen.getAllByText(byn("6000")).length).toBe(2);
+  });
+
+  it("сходимость маржи: расхождение Δ≠0 показывает предупреждение о перепосчёте", async () => {
+    responders["finance/margin/reconcile-deal"] = {
+      deal_id: 7,
+      finance_landed: "6000.00",
+      facade_landed: "6500.00",
+      delta: "500.00",
+      revenue: "10000.00",
+      gross_finance: "3700.00",
+      level: "sku",
+      source_facade_available: true,
+      currency: "BYN",
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Маржа" }));
+    fireEvent.change(await screen.findByPlaceholderText("42"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+
+    expect(await screen.findByText(/Δ ≠ 0. Перепосчитать landed/)).toBeInTheDocument();
+  });
+
+  it("сходимость маржи: ошибка сети показывает «не удалось получить сверку»", async () => {
+    responders["finance/margin/reconcile-deal"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Маржа" }));
+    fireEvent.change(await screen.findByPlaceholderText("42"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+
+    expect(await screen.findByText(/Не удалось получить сверку/)).toBeInTheDocument();
+  });
+
+  it("вкладка «ДДС» рендерит KPI-карточки, разбивку и «нет связи с 1С» для остатка", async () => {
+    responders["finance/cashflow"] = {
+      period_from: "2026-01-01",
+      period_to: "2026-07-19",
+      currency: "BYN",
+      inflows: "12000.00",
+      outflows: "5000.00",
+      net_cashflow: "7000.00",
+      bank_balance: null,
+      breakdown: { receivable: "12000.00", payroll: "3000.00" },
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
+
+    expect(await screen.findByText("Остаток на счёте")).toBeInTheDocument();
+    expect(screen.getByText("нет связи с 1С")).toBeInTheDocument();
+    expect(screen.getByText("Поступления (счета)")).toBeInTheDocument();
+    expect(screen.getByText("ФОТ")).toBeInTheDocument();
+    expect(screen.getByText(byn("7000"))).toBeInTheDocument(); // net
+  });
+
+  it("вкладка «Сверка 1С» с источником показывает совпавшие и расхождения по сторонам", async () => {
+    responders["finance/reconcile-1c"] = {
+      as_of: "2026-07-19",
+      source: "1c",
+      source_available: true,
+      matched: [{ ref: "П-1", amount: "100.00", counterparty_ref: "192766048" }],
+      only_in_erp: [{ ref: "П-2", amount: "50.00", counterparty_ref: null }],
+      only_in_1c: [{ ref: null, amount: "75.00", counterparty_ref: null }],
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Сверка 1С" }));
+
+    expect(await screen.findByText("П-1")).toBeInTheDocument();
+    expect(screen.getByText("П-2")).toBeInTheDocument();
+    expect(screen.getByText(/Совпало · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Только в ERP · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Только в 1С · 1/)).toBeInTheDocument();
+  });
+
+  it("вкладка «Календарь» позволяет завести счёт и показывает пустой горизонт без платежей", async () => {
+    responders["finance/bank-accounts"] = [
+      { id: 1, code: "main", title: "Расчётный", currency: "BYN", opening_balance: "0.00", opening_at: null, is_active: true },
+    ];
+    responders["finance/cashflow-forecast"] = {
+      as_of: "2026-07-19",
+      currency: "BYN",
+      mode: "day",
+      opening_balance: "0.00",
+      weeks: [],
+      buckets: [],
+      not_dated: { inflow: "0.00", outflow: "0.00" },
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Календарь" }));
+
+    expect(await screen.findByText(/main · Расчётный/)).toBeInTheDocument();
+    expect(await screen.findByText("На горизонте нет ни одного датированного платежа.")).toBeInTheDocument();
+
+    // Открываем форму заведения счёта и постим
+    fireEvent.click(screen.getByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "alfa" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Альфа BYN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      const posted = fetchMock.mock.calls.find(
+        ([url, opts]) =>
+          String(url).includes("/bank-accounts") &&
+          (opts as RequestInit | undefined)?.method === "POST",
+      );
+      expect(posted).toBeTruthy();
+      expect(String((posted?.[1] as RequestInit).body)).toContain("alfa");
+    });
+  });
+
+  it("форма счёта: пустые код/название не постятся и показывают ошибку валидации", async () => {
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Календарь" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    expect(await screen.findByText("Код и название обязательны")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/bank-accounts") && String(url).includes("POST")),
+    ).toBe(false);
+  });
+
+  it("вкладка «P&L» показывает ошибку при сбое сети", async () => {
+    responders["finance/pnl"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "P&L" }));
+
+    expect(await screen.findByText(/Нет данных P&L/)).toBeInTheDocument();
+  });
+
+  it("вкладка «Баланс» показывает ошибку при сбое сети", async () => {
+    responders["finance/balance-sheet"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
+
+    expect(await screen.findByText(/Нет данных баланса/)).toBeInTheDocument();
+  });
 });

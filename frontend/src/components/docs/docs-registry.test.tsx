@@ -128,4 +128,126 @@ describe("DocsRegistry", () => {
     ).toMatch(/red/);
     expect(screen.queryByTitle("Отправить")).not.toBeInTheDocument();
   });
+
+  it("фильтр по типу «Счёт» оставляет только 3 счёта (роль директор)", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const kindSelect = screen.getAllByRole("combobox")[1];
+    fireEvent.change(kindSelect, { target: { value: "Счёт" } });
+    expect(scoreCard("документов видно")).toHaveTextContent("3");
+    expect(screen.getByText("Счёт СЧ-0461")).toBeInTheDocument();
+    expect(screen.getByText("Счёт СЧ-0420")).toBeInTheDocument();
+    expect(screen.getByText("Счёт СЧ-0455")).toBeInTheDocument();
+    expect(screen.queryByText("Договор ДГ-0118")).not.toBeInTheDocument();
+  });
+
+  it("фильтр по статусу «оплачен» оставляет ровно 2 документа (роль директор)", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const statusSelect = screen.getAllByRole("combobox")[4];
+    fireEvent.change(statusSelect, { target: { value: "оплачен" } });
+    expect(scoreCard("документов видно")).toHaveTextContent("2");
+    expect(screen.getByText("Счёт СЧ-0420")).toBeInTheDocument();
+    expect(screen.getByText("Счёт СЧ-0455")).toBeInTheDocument();
+  });
+
+  it("фильтр по контрагенту «Белтранс» оставляет 2 документа его сделки (роль директор)", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const clientSelect = screen.getAllByRole("combobox")[0];
+    fireEvent.change(clientSelect, { target: { value: "Белтранс" } });
+    expect(scoreCard("документов видно")).toHaveTextContent("2");
+    expect(screen.getByText("Договор ДГ-0118")).toBeInTheDocument();
+    expect(screen.getByText("Счёт СЧ-0420")).toBeInTheDocument();
+  });
+
+  it("период «с 13.06.2026» сужает до 4 документов, «Сбросить» возвращает все 10 (роль директор)", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    fireEvent.change(screen.getByTitle("дата с"), { target: { value: "2026-06-13" } });
+    expect(scoreCard("документов видно")).toHaveTextContent("4");
+
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    expect(scoreCard("документов видно")).toHaveTextContent("10");
+    expect(screen.getByTitle("дата с")).toHaveValue("");
+  });
+
+  it("чекбокс «только помеченные» оставляет единственный помеченный документ (роль директор)", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(scoreCard("документов видно")).toHaveTextContent("1");
+    expect(screen.getByText("КП-0288")).toBeInTheDocument();
+  });
+
+  it("группировка «плоско» рисует одну группу «Все документы» с полным счётом и суммой", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const groupSelect = screen.getAllByRole("combobox")[5];
+    fireEvent.change(groupSelect, { target: { value: "flat" } });
+    expect(screen.getByText("Все документы")).toBeInTheDocument();
+    const header = screen.getByText("Все документы").closest("div")?.parentElement as HTMLElement;
+    expect(within(header).getByText("10")).toBeInTheDocument();
+  });
+
+  it("группировка «по типу» рисует отдельные заголовки-группы для каждого вида документа", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const groupSelect = screen.getAllByRole("combobox")[5];
+    fireEvent.change(groupSelect, { target: { value: "kind" } });
+    // заголовки групп = названия видов документов (не отделов); "Заказ-наряд"
+    // встречается дважды — заголовок группы и бейдж вида в строке документа
+    const headers = screen.getAllByText("Заказ-наряд");
+    expect(headers.length).toBeGreaterThanOrEqual(2);
+    expect(headers.some((el) => el.closest("div")?.className.includes("border-b"))).toBe(true);
+  });
+
+  it("смена роли на «Менеджер» сбрасывает активный фильтр по менеджеру, выставленный директором", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    const mgrSelect = screen.getAllByRole("combobox")[3];
+    fireEvent.change(mgrSelect, { target: { value: "Морозов Д." } });
+    expect(scoreCard("документов видно")).toHaveTextContent("2");
+
+    fireEvent.click(screen.getByRole("button", { name: /Менеджер/ }));
+    expect(screen.getAllByRole("combobox")[3]).toHaveValue("");
+    // видимость снова сузилась до 3 документов Сидорова К.
+    expect(scoreCard("документов видно")).toHaveTextContent("3");
+  });
+
+  it("«Снять пометку» возвращает помеченный документ в обычный статус", () => {
+    render(<DocsRegistry />);
+    fireEvent.click(screen.getByRole("button", { name: /Директор/ }));
+    fireEvent.change(screen.getByPlaceholderText("номер / сделка / клиент"), {
+      target: { value: "КП-0288" },
+    });
+    expect(scoreCard("помечено на удаление")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTitle("Снять пометку"));
+
+    expect(screen.getByText(/Пометка снята: КП-0288/)).toBeInTheDocument();
+    expect(screen.queryByText(/на удалении/)).not.toBeInTheDocument();
+    expect(scoreCard("помечено на удаление")).toHaveTextContent("0");
+  });
+
+  it("оплаченный, но не подписанный документ тоже считается замороженным (правка запрещена)", () => {
+    render(<DocsRegistry />);
+    fireEvent.change(screen.getByPlaceholderText("номер / сделка / клиент"), {
+      target: { value: "СЧ-0420" },
+    });
+    expect(screen.getByTitle("Заморожен (юр. сила) — правка запрещена")).toBeInTheDocument();
+    expect(screen.queryByTitle("Изменить (новая версия)")).not.toBeInTheDocument();
+  });
+
+  it("«Просмотр» и «Отправить» шлют тосты с номером конкретного документа", () => {
+    render(<DocsRegistry />);
+    fireEvent.change(screen.getByPlaceholderText("номер / сделка / клиент"), {
+      target: { value: "СЧ-0461" },
+    });
+    fireEvent.click(screen.getByTitle("Просмотр"));
+    expect(screen.getByText("Предпросмотр: Счёт СЧ-0461")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Отправить"));
+    expect(screen.getByText("Отправка: Счёт СЧ-0461")).toBeInTheDocument();
+  });
 });

@@ -51,6 +51,7 @@ beforeEach(() => {
   asMock(refData.fetchRefRowsByEndpoint).mockResolvedValue([]);
   asMock(refData.fetchSkusByCategory).mockResolvedValue([]);
   asMock(refData.createNomenclatureGroup).mockResolvedValue(true);
+  asMock(refData.patchNomenclatureGroup).mockResolvedValue(true);
   asMock(refData.archiveNomenclatureGroup).mockResolvedValue(true);
   // refetchGroups() внутри компонента ходит в глобальный fetch — возвращаем свежий список.
   global.fetch = vi.fn().mockResolvedValue({
@@ -181,5 +182,256 @@ describe("SpravCategories", () => {
       expect(refData.archiveNomenclatureGroup).toHaveBeenCalledWith("CAT-0100"),
     );
     expect(await screen.findByText("Группа архивирована")).toBeInTheDocument();
+  });
+
+  it("не удалось добавить группу — показывает ошибку и не закрывает форму", async () => {
+    asMock(refData.createNomenclatureGroup).mockResolvedValue(false);
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByRole("button", { name: /Добавить категорию/ }));
+
+    const form = (await screen.findByText("Наименование")).closest("form") as HTMLElement;
+    fireEvent.change(within(form).getByPlaceholderText("Например: Конденсаторы"), {
+      target: { value: "Резисторы" },
+    });
+    fireEvent.change(within(form).getByPlaceholderText("CAT-0200"), {
+      target: { value: "CAT-0500" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Добавить" }));
+
+    expect(await screen.findByText("Ошибка: не удалось добавить группу")).toBeInTheDocument();
+    // форма осталась открытой (не сброшена)
+    expect(screen.getByText("Наименование")).toBeInTheDocument();
+  });
+
+  it("переименование зовёт patchNomenclatureGroup с кодом узла и новым именем", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переименовать" }));
+
+    const input = await screen.findByDisplayValue("Электроника");
+    fireEvent.change(input, { target: { value: "Электротовары" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(refData.patchNomenclatureGroup).toHaveBeenCalledWith("CAT-0100", {
+        name: "Электротовары",
+      }),
+    );
+    expect(await screen.findByText("Переименовано")).toBeInTheDocument();
+  });
+
+  it("ошибка переименования показывает соответствующий тост", async () => {
+    asMock(refData.patchNomenclatureGroup).mockResolvedValue(false);
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переименовать" }));
+
+    const input = await screen.findByDisplayValue("Электроника");
+    fireEvent.change(input, { target: { value: "Электротовары" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByText("Ошибка: не удалось переименовать")).toBeInTheDocument();
+  });
+
+  it("отмена переименования закрывает форму без вызова API", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переименовать" }));
+    await screen.findByDisplayValue("Электроника");
+
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    expect(screen.queryByDisplayValue("Электроника")).not.toBeInTheDocument();
+    expect(refData.patchNomenclatureGroup).not.toHaveBeenCalled();
+  });
+
+  it("форма переноса скрывает архивных и потомков узла из списка кандидатов", async () => {
+    render(<SpravCategories initial={groups} />);
+    const row = screen.getByText("Электроника").closest("div") as HTMLElement;
+    fireEvent.click(row.querySelector("span.w-4") as HTMLElement); // раскрыть родителя
+    fireEvent.click(screen.getByText("Конденсаторы"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переместить…" }));
+
+    const select = (await screen.findByText("Новый родитель")).closest("div")!
+      .querySelector("select") as HTMLSelectElement;
+    const optionTexts = Array.from(select.options).map((o) => o.textContent);
+    expect(optionTexts).toContain("— корень —");
+    expect(optionTexts).toContain("Электроника"); // допустимый родитель
+    expect(optionTexts).toContain("Электроника › Реле"); // допустимый родитель
+    expect(optionTexts).not.toContain("Старьё"); // архивный — исключён
+  });
+
+  it("перенос узла зовёт patchNomenclatureGroup с новым parent_id", async () => {
+    render(<SpravCategories initial={groups} />);
+    const row = screen.getByText("Электроника").closest("div") as HTMLElement;
+    fireEvent.click(row.querySelector("span.w-4") as HTMLElement); // раскрыть родителя
+    fireEvent.click(screen.getByText("Конденсаторы"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переместить…" }));
+
+    const select = (await screen.findByText("Новый родитель")).closest("div")!
+      .querySelector("select") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Переместить" }));
+
+    await waitFor(() =>
+      expect(refData.patchNomenclatureGroup).toHaveBeenCalledWith("CAT-0200", { parent_id: 3 }),
+    );
+    expect(await screen.findByText("Перемещено")).toBeInTheDocument();
+  });
+
+  it("ошибка переноса показывает соответствующий тост", async () => {
+    asMock(refData.patchNomenclatureGroup).mockResolvedValue(false);
+    render(<SpravCategories initial={groups} />);
+    const row = screen.getByText("Электроника").closest("div") as HTMLElement;
+    fireEvent.click(row.querySelector("span.w-4") as HTMLElement); // раскрыть родителя
+    fireEvent.click(screen.getByText("Конденсаторы"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переместить…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Переместить" }));
+
+    expect(await screen.findByText("Ошибка: не удалось переместить")).toBeInTheDocument();
+  });
+
+  it("сохранение общих данных группы зовёт patchNomenclatureGroup с введёнными полями", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Изменить" }));
+
+    const tnvedInput = await screen.findByPlaceholderText(
+      "напр. 8506108000 (пусто — наследовать)",
+    );
+    fireEvent.change(tnvedInput, { target: { value: "1234567890" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(refData.patchNomenclatureGroup).toHaveBeenCalledWith(
+        "CAT-0100",
+        expect.objectContaining({
+          tnved_code: "1234567890",
+          vat_code: null,
+          unit: null,
+          country: null,
+          attributes: expect.objectContaining({ Производитель: "Omron" }),
+        }),
+      ),
+    );
+    expect(await screen.findByText("Общие данные группы сохранены")).toBeInTheDocument();
+  });
+
+  it("очистка поля ТН ВЭД в форме общих данных передаёт null (не наследовать)", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Изменить" }));
+
+    const tnvedInput = await screen.findByPlaceholderText(
+      "напр. 8506108000 (пусто — наследовать)",
+    );
+    fireEvent.change(tnvedInput, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(refData.patchNomenclatureGroup).toHaveBeenCalledWith(
+        "CAT-0100",
+        expect.objectContaining({ tnved_code: null }),
+      ),
+    );
+  });
+
+  it("ошибка сохранения общих данных группы показывает тост", async () => {
+    asMock(refData.patchNomenclatureGroup).mockResolvedValue(false);
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Изменить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByText("Ошибка: не удалось сохранить")).toBeInTheDocument();
+  });
+
+  it("отмена архивирования закрывает подтверждение без вызова API", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: /В архив/ }));
+    expect(await screen.findByText(/Архивировать группу/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    expect(screen.queryByText(/Архивировать группу/)).not.toBeInTheDocument();
+    expect(refData.archiveNomenclatureGroup).not.toHaveBeenCalled();
+  });
+
+  it("ошибка архивирования показывает тост и НЕ сбрасывает выбранный узел", async () => {
+    asMock(refData.archiveNomenclatureGroup).mockResolvedValue(false);
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: /В архив/ }));
+    const confirm = screen
+      .getAllByRole("button", { name: "Архивировать" })
+      .find((b) => b.className.includes("bg-red-500")) as HTMLElement;
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText("Ошибка: не удалось архивировать")).toBeInTheDocument();
+  });
+
+  it("клик по шеврону раскрывает и сворачивает узел без выбора его в панели", () => {
+    render(<SpravCategories initial={groups} />);
+    const row = screen.getByText("Электроника").closest("div") as HTMLElement;
+    const toggle = row.querySelector("span.w-4") as HTMLElement;
+
+    fireEvent.click(toggle);
+    expect(screen.getByText("Конденсаторы")).toBeInTheDocument();
+    // выбор в панели не произошёл — правая панель по-прежнему пуста
+    expect(screen.getByText("Выберите категорию в дереве")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Конденсаторы")).not.toBeInTheDocument();
+  });
+
+  it("во время загрузки товаров группы показывает «Загрузка…», затем сменяется списком", async () => {
+    let resolveFn: (rows: SkuRow[]) => void = () => {};
+    asMock(refData.fetchSkusByCategory).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFn = resolve;
+        }),
+    );
+
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+
+    expect(await screen.findByText("Загрузка…")).toBeInTheDocument();
+    resolveFn([]);
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).not.toBeInTheDocument());
+    expect(screen.getByText(/Нет товаров в этой группе/)).toBeInTheDocument();
+  });
+
+  it("выбор дочернего узла показывает имя родителя, уровень вложенности и хлебные крошки", async () => {
+    render(<SpravCategories initial={groups} />);
+    const row = screen.getByText("Электроника").closest("div") as HTMLElement;
+    fireEvent.click(row.querySelector("span.w-4") as HTMLElement); // раскрыть родителя
+    fireEvent.click(screen.getByText("Конденсаторы"));
+
+    expect(await screen.findByText("Электроника › Конденсаторы")).toBeInTheDocument(); // путь
+    // родитель дублирует имя узла дерева — есть хотя бы 2 вхождения (в дереве и в реквизитах)
+    expect(screen.getAllByText("Электроника").length).toBeGreaterThan(1);
+    expect(screen.getByText("2")).toBeInTheDocument(); // уровень вложенности (глубина 2 — дочерний узел)
+  });
+
+  it("после reload удалённый (более не существующий) выбранный узел сбрасывает выбор", async () => {
+    render(<SpravCategories initial={groups} />);
+    fireEvent.click(screen.getByText("Электроника"));
+    fireEvent.click(await screen.findByRole("button", { name: "Переименовать" }));
+
+    // сервер вернул список уже без переименованного узла (id 1) — имитируем гонку/удаление
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => groups.filter((g) => g.id !== 1),
+    }) as unknown as typeof fetch;
+
+    const input = await screen.findByDisplayValue("Электроника");
+    fireEvent.change(input, { target: { value: "Электротовары" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Выберите категорию в дереве")).toBeInTheDocument(),
+    );
   });
 });

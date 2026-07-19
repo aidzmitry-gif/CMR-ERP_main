@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Компонент чисто клиентский и работает на статичном снимке (lib/access-admin-data.ts) —
 // внешних data-fetch/router-зависимостей нет, мокать нечего.
@@ -113,5 +113,116 @@ describe("AccessAdmin", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выдать" }));
     expect(screen.getByText(/Макаров/)).toBeInTheDocument();
     expect(screen.getByText(/из них 1 — персонально/)).toBeInTheDocument();
+  });
+
+  it("клик по ячейке матрицы переключает доступ конкретной незаблокированной роли к модулю", () => {
+    render(<AccessAdmin />);
+    const row = screen.getAllByText(/Контролёр/).find((e) => e.closest("tr"))!.closest("tr") as HTMLElement;
+    expect(row.textContent).toContain("· 10");
+
+    // столбец "Финансы" — у controller его нет по умолчанию (DEFAULT_MATRIX);
+    // ячейки без доступного имени — берём по индексу столбца через заголовки таблицы
+    const headers = screen.getAllByRole("columnheader");
+    const financeIdx = headers.findIndex((h) => h.textContent === "Финансы");
+    const cells = within(row).getAllByRole("cell");
+    // первая ячейка — название роли, далее по одному на модуль (индекс совпадает с MODULES)
+    const targetCell = cells[financeIdx];
+
+    fireEvent.click(targetCell);
+    expect(row.textContent).toContain("· 11"); // добавили модуль
+
+    fireEvent.click(targetCell);
+    expect(row.textContent).toContain("· 10"); // вернули как было
+  });
+
+  it("«Директор» (заблокированная роль): клик по ячейке модуля не меняет счётчик", () => {
+    render(<AccessAdmin />);
+    const row = screen.getAllByText(/Директор/).find((e) => e.closest("tr"))!.closest("tr") as HTMLElement;
+    expect(row.textContent).toContain("· 15");
+    const cells = within(row).getAllByRole("cell");
+    fireEvent.click(cells[1]); // первая ячейка после названия роли
+    expect(row.textContent).toContain("· 15"); // без изменений — locked
+  });
+
+  it("логин можно править вручную — дальнейшая правка ФИО его больше не перегенерирует", () => {
+    render(<AccessAdmin />);
+    const loginInput = screen.getByPlaceholderText("ivanov_i") as HTMLInputElement;
+    fireEvent.change(loginInput, { target: { value: "custom_login" } });
+    expect(loginInput.value).toBe("custom_login");
+
+    fireEvent.change(screen.getByPlaceholderText("Иванов И.И."), {
+      target: { value: "Петров Пётр" },
+    });
+    // логин не перезаписан автогенерацией, т.к. поле уже правили руками
+    expect(loginInput.value).toBe("custom_login");
+  });
+
+  it("кнопка «Добавить» заблокирована, пока не заполнены ФИО и логин", () => {
+    render(<AccessAdmin />);
+    const addBtn = screen.getByRole("button", { name: "Добавить" });
+    expect(addBtn).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Иванов И.И."), {
+      target: { value: "Тестов Т." },
+    });
+    expect(addBtn).not.toBeDisabled();
+  });
+
+  it("«Копировать» в снимке матрицы модулей пишет JSON в буфер обмена и показывает тост", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<AccessAdmin />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Сохранить снимок/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText.mock.calls[0][0]).toContain('"director"');
+  });
+
+  it("Системные функции: выдача роли (не-админ) переключается и учитывается в счётчике «имеют функцию»", () => {
+    render(<AccessAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Системные функции/ }));
+
+    // изначально функцию имеют только 2 админа (director + commercial)
+    expect(screen.getByText(/Сейчас функцию имеют:/).textContent).toContain("2");
+
+    const controllerBtn = screen.getByRole("button", { name: "Контролёр" });
+    fireEvent.click(controllerBtn);
+    expect(controllerBtn.textContent).toContain("✓");
+    // ни одного сотрудника с ролью controller в demo-данных нет → счётчик остаётся 2
+    expect(screen.getByText(/Сейчас функцию имеют:/).textContent).toContain("2");
+
+    fireEvent.click(controllerBtn);
+    expect(controllerBtn.textContent).not.toContain("✓");
+  });
+
+  it("Системные функции: отзыв персональной выдачи (✕) убирает сотрудника из держателей", () => {
+    render(<AccessAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Системные функции/ }));
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "makarov" } });
+    fireEvent.click(screen.getByRole("button", { name: "Выдать" }));
+    expect(screen.getByText(/из них 1 — персонально/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Забрать функцию"));
+    // персональный чип (и его кнопка отзыва) исчез — сотрудник больше не держатель функции лично
+    expect(screen.queryByTitle("Забрать функцию")).toBeNull();
+    expect(screen.queryByText(/персонально/)).toBeNull();
+  });
+
+  it("Системные функции: «Сохранить снимок» отдаёт JSON с выданными ролями/пользователями", () => {
+    render(<AccessAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Системные функции/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Контролёр" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "makarov" } });
+    fireEvent.click(screen.getByRole("button", { name: "Выдать" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Сохранить снимок/ }));
+    const pre = document.querySelector("pre") as HTMLElement;
+    const parsed = JSON.parse(pre.textContent ?? "{}");
+    expect(parsed.purge_marked.roles).toEqual(expect.arrayContaining(["director", "commercial", "controller"]));
+    expect(parsed.purge_marked.users).toEqual(["makarov"]);
   });
 });
