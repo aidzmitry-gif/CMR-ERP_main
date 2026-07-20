@@ -99,13 +99,36 @@ async def test_resolve_owner_by_active_deal(session):
     session.add(cp)
     await session.flush()
     session.add(Contact(counterparty_id=cp.id, full_name="Клиент", phone="+375291112233", is_primary=True))
-    session.add(Deal(number="RSLV-1", title="t", counterparty="ООО Резолв", owner="Иванов И.И.", stage="new"))
+    deal = Deal(number="RSLV-1", title="t", counterparty="ООО Резолв", owner="Иванов И.И.", stage="new")
+    session.add(deal)
     await session.commit()
 
     res = await resolve_owner(session, "+375291112233")
     assert res["owner"] == "Иванов И.И."
     assert res["counterparty_id"] == cp.id
     assert res["contact_id"] is not None
+    assert res["deal_id"] == deal.id
+
+
+async def test_resolve_owner_closed_deal_no_deal_id(session):
+    """Только закрытые сделки — owner для screen-pop есть, deal_id нет (история → КП)."""
+    from core.domain.models import Contact, Counterparty
+    from modules.sales.calls import resolve_owner
+    from modules.sales.models import Deal
+
+    cp = Counterparty(name="ООО Закрыт", unp="190000778")
+    session.add(cp)
+    await session.flush()
+    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291112244", is_primary=True))
+    session.add(
+        Deal(number="CLS-1", title="t", counterparty="ООО Закрыт", owner="Петров П.П.", stage="won")
+    )
+    await session.commit()
+
+    res = await resolve_owner(session, "+375291112244")
+    assert res["owner"] == "Петров П.П."
+    assert res["counterparty_id"] == cp.id
+    assert res["deal_id"] is None
 
 
 async def test_resolve_owner_no_lead_fallback(session):
@@ -126,7 +149,13 @@ async def test_resolve_owner_unknown_number(session):
     from modules.sales.calls import resolve_owner
 
     res = await resolve_owner(session, "+375290000000")
-    assert res == {"owner": "", "owner_id": None, "counterparty_id": None, "contact_id": None}
+    assert res == {
+        "owner": "",
+        "owner_id": None,
+        "counterparty_id": None,
+        "contact_id": None,
+        "deal_id": None,
+    }
 
 
 # --- Обработчик: журнал + идемпотентность + push карточки -------------------------
@@ -162,11 +191,14 @@ async def test_incoming_logs_resolves_and_pushes(session):
     assert len(rows) == 1
     assert rows[0].owner == "Сидоров С.С."
     assert rows[0].status == "ringing"
+    assert rows[0].deal_id is not None
+    assert rows[0].counterparty_id is not None
 
     # карточка доставлена в очередь подписки продавца
     card = queue.get_nowait()
     assert card["call_id"] == "CALL-1"
     assert card["owner"] == "Сидоров С.С."
+    assert card["deal_id"] == rows[0].deal_id
     calls_mod.unsubscribe("Сидоров С.С.", queue)
 
     # событие sales.call.logged ушло в шину
@@ -325,6 +357,39 @@ async def test_calls_journal_and_actions(session, api):
     assert linked.json()["deal_id"] is not None
 
     assert (await api.get("/sales/calls/999999")).status_code == 404
+
+
+async def test_list_calls_filter_by_deal_id(session, api):
+    """Лента карточки сделки: GET /sales/calls?deal_id=…"""
+    from core.domain.models import Contact, Counterparty
+    from modules.sales.models import Deal
+
+    cp = Counterparty(name="ООО Фильтр", unp="190000779")
+    session.add(cp)
+    await session.flush()
+    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291230111", is_primary=True))
+    deal = Deal(number="FLT-1", title="t", counterparty="ООО Фильтр", owner="Орлов О.О.", stage="prop")
+    session.add(deal)
+    await session.commit()
+
+    r = await api.post(
+        "/sales/telephony/incoming",
+        json={
+            "event_type": "telephony.call.incoming",
+            "call_id": "FLT-CALL",
+            "direction": "in",
+            "phone_e164": "+375291230111",
+        },
+    )
+    assert r.status_code == 200
+
+    by_deal = (await api.get(f"/sales/calls?deal_id={deal.id}")).json()
+    assert len(by_deal) == 1
+    assert by_deal[0]["call_id"] == "FLT-CALL"
+    assert by_deal[0]["deal_id"] == deal.id
+
+    empty = (await api.get("/sales/calls?deal_id=999999")).json()
+    assert empty == []
 
 
 async def test_originate_not_configured(api):

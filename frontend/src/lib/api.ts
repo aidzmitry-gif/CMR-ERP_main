@@ -1078,6 +1078,7 @@ export interface CallRow {
   comment?: string | null;
   deal_id?: number | null;
   duration_sec?: number | null;
+  recording_url?: string | null;
   started_at: string;
 }
 
@@ -1118,13 +1119,34 @@ async function postCall(url: string, body: unknown): Promise<boolean> {
 
 /** Журнал звонков с фильтрами (клиент, через /api). */
 export async function fetchCalls(
-  params: { status?: string; owner?: string; date?: string } = {},
+  params: { status?: string; owner?: string; date?: string; deal_id?: number | string } = {},
 ): Promise<CallRow[]> {
   try {
-    const q = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => Boolean(v)) as [string, string][],
-    ).toString();
-    const res = await fetch(`/api/sales/calls${q ? `?${q}` : ""}`, { cache: "no-store" });
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.owner) q.set("owner", params.owner);
+    if (params.date) q.set("date", params.date);
+    if (params.deal_id != null && params.deal_id !== "") q.set("deal_id", String(params.deal_id));
+    const qs = q.toString();
+    const res = await fetch(`/api/sales/calls${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as CallRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Звонки сделки (SSR → backend напрямую; для ленты карточки сделки). */
+export async function fetchDealCalls(
+  dealId: string | number,
+  roles?: string,
+  accessToken?: string,
+): Promise<CallRow[]> {
+  try {
+    const res = await fetch(`${BASE}/sales/calls?deal_id=${encodeURIComponent(String(dealId))}`, {
+      cache: "no-store",
+      headers: roleHeaders(roles, accessToken),
+    });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as CallRow[];
   } catch {
