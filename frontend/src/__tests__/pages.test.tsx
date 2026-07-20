@@ -64,6 +64,7 @@ vi.mock("@/lib/api", () => ({
   }),
   fetchFunnelsServer: vi.fn().mockResolvedValue([]),
   fetchKpis: vi.fn().mockResolvedValue([]),
+  fetchKpisResult: vi.fn().mockResolvedValue({ kpis: [], demo: false, authError: false }),
   fetchLeads: vi.fn().mockResolvedValue([]),
   fetchDealDetail: vi.fn().mockResolvedValue({
     number: "CRM-1", company: "ООО Карточка", description: "d", amount: 100, priority: "Средний",
