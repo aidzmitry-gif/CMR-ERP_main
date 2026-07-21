@@ -5,6 +5,7 @@ import { ChannelButtons } from "@/components/channels";
 import { DealActions } from "@/components/deal-actions";
 import { DealAiAssistant } from "@/components/deal-ai-assistant";
 import { DealApprovals } from "@/components/deal-approvals";
+import { DealCalls } from "@/components/deal-calls";
 import { DealClient360 } from "@/components/deal-client-360";
 import { DealContacts } from "@/components/deal-contacts";
 import { DealLinkedDeals } from "@/components/deal-linked-deals";
@@ -145,7 +146,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DealAiAssistant dealId={id} />
             <NextStepStub nextStep={d.nextStep} datetime={d.datetime} contact={d.contact} />
             <ShipStub />
-            <CallsStub />
+            <DealCalls dealId={id} roles={roles} accessToken={token} />
             <PayStub amount={d.amount} />
             <DeliveryStub />
             <DealItems dealId={id} />
@@ -319,27 +320,6 @@ function ShipStub() {
           подключим, когда бэкенд начнёт отдавать{" "}
           <code>ship.{`{tripId, eta, route, reserve1cDocId, warehouseStatus, cargoTripDealIds}`}</code>{" "}
           в DealDetail.
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}
-
-function CallsStub() {
-  // STUB: «📞 Звонки и транскрибация» — отдельный фид (не часть DealDetail).
-  // Источник: Bitrix24-коннектор + faster-whisper large-v3 → comm_call
-  // (memory: bitrix-connector-call-kb, controller-op-hr-spec).
-  return (
-    <Card>
-      <PanelHeader icon="📞" title="Звонки и транскрибация" />
-      <CardBody className="space-y-2">
-        <div className="text-[12px] text-muted">
-          плеер · авто-теги (сигналы, возражения) · sentiment · извлечённые договорённости ·
-          построчная транскрипция.
-        </div>
-        <StubNote>
-          импорт из Bitrix24 (исторические звонки), транскрипция локально faster-whisper large-v3 →{" "}
-          <code>comm_call</code>; подключим отдельным фидом по сделке (не через DealDetail).
         </StubNote>
       </CardBody>
     </Card>
