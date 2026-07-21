@@ -33,6 +33,9 @@ vi.mock("@/components/channels", () => ({ ChannelButtons: () => <div>channels</d
 vi.mock("@/components/deal-actions", () => ({ DealActions: () => <div>actions</div> }));
 vi.mock("@/components/deal-ai-assistant", () => ({ DealAiAssistant: () => <div>ai</div> }));
 vi.mock("@/components/deal-approvals", () => ({ DealApprovals: () => <div>approvals</div> }));
+// DealCalls — async server component; мокаем, как и остальные server-блоки карточки,
+// чтобы синхронный RTL-render проверял композицию страницы, а не транспорт API.
+vi.mock("@/components/deal-calls", () => ({ DealCalls: () => <div>deal-calls</div> }));
 vi.mock("@/components/deal-contacts", () => ({ DealContacts: () => <div>contacts</div> }));
 vi.mock("@/components/deal-documents", () => ({ DealDocuments: () => <div>documents</div> }));
 vi.mock("@/components/deal-edit-button", () => ({ DealEditButton: () => <div>edit</div> }));
@@ -64,6 +67,7 @@ vi.mock("@/lib/api", () => ({
   }),
   fetchFunnelsServer: vi.fn().mockResolvedValue([]),
   fetchKpis: vi.fn().mockResolvedValue([]),
+  fetchKpisResult: vi.fn().mockResolvedValue({ kpis: [], demo: false, authError: false }),
   fetchLeads: vi.fn().mockResolvedValue([]),
   fetchDealDetail: vi.fn().mockResolvedValue({
     number: "CRM-1", company: "ООО Карточка", description: "d", amount: 100, priority: "Средний",
@@ -126,6 +130,7 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText("ООО Карточка")).toBeInTheDocument();
     expect(screen.getByText("messages")).toBeInTheDocument();
     expect(screen.getByText("documents")).toBeInTheDocument();
+    expect(screen.getByText("deal-calls")).toBeInTheDocument();
   });
 
   it("OwnerPage показывает метрики при наличии данных", async () => {
