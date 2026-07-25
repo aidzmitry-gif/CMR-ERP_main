@@ -16,7 +16,7 @@ headless-автоном) в отдельном git-worktree. Ты держишь
 
 ## Как устроены воркеры (знай это)
 
-- Воркер = headless `claude --print --verbose --permission-mode bypassPermissions`
+- Воркер = headless `claude --print --verbose --permission-mode auto`
   в собственном worktree `..\crm-worker-<name>` на ветке `<name>` от `main`.
 - **Автоном**: воркер не ждёт Enter и не задаёт вопросов вживую. Если упёрся —
   пишет `STATE: NEEDS-ORCHESTRATOR-ANSWER` (или `BLOCKED`) в `coordination/<name>-status.md`
@@ -31,8 +31,13 @@ headless-автоном) в отдельном git-worktree. Ты держишь
   - Audit-first, six-layer в теле коммита, STR для нетривиальной отладки.
   - Финальный баннер `STATE: COMPLETE` только когда всё зелёное (`pytest` = 0, импорты ок).
 - **Наблюдение** — через JSONL-транскрипт (`~/.claude/projects/...`), его читают `status`/`tail`.
-- ⚠️ **bypassPermissions** — осознанное решение оператора (воркер выполняет любые команды;
-  worktree НЕ песочница). См. `coordination/README.md` §Безопасность. Понизить: `--perm acceptEdits`.
+- ⚠️ **Права: `auto` (деф. с 25.07.2026)** — воркер не выполняет опасное самовольно: вызов
+  отклоняется, воркер доводит остальное и докладывает. Проверено живыми прогонами — он при этом
+  НЕ виснет и НЕ падает. Гард `claude_guard_hook.py` остаётся вторым слоем: режет катастрофу и
+  текстом велит доложить `КООРД: BLOCKED`. Значит **часть задач штатно вернётся с «нужно
+  разрешение»** — это не сбой воркера, а вопрос к оператору. Прежнее поведение (воркер выполняет
+  любые команды, worktree НЕ песочница) — `--perm bypassPermissions`. См. `coordination/README.md`
+  §Безопасность.
 
 ## Когда воркер, а когда нативный фоновый сабагент
 

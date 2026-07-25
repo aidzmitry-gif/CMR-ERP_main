@@ -77,11 +77,20 @@ PITFALLS_FILE = MEMORY_DIR / "pitfalls.md"
 VENV_PY = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
-# Permission mode for unattended workers. Workers run HEADLESS (claude --print):
-# there's no human to approve tool calls, so they must never block on a
-# permission prompt -> "bypassPermissions". Workers are isolated in their own
-# git worktree. Override with --perm or $WORKER_PERMISSION_MODE.
-DEFAULT_PERMISSION_MODE = os.environ.get("WORKER_PERMISSION_MODE", "bypassPermissions")
+# Permission mode for unattended workers. Workers run HEADLESS (claude --print).
+#
+# Раньше здесь стоял "bypassPermissions" из опасения, что headless-воркер «повиснет» на
+# запросе разрешения. ПРОВЕРЕНО на живых прогонах 25.07.2026 (CC 2.1.219): в `auto` воркер
+# НЕ виснет и НЕ падает — вызов отклоняется, агент получает отказ, доводит остальную работу
+# и словами докладывает, чего ему не хватило. Проверены обе формы: запись файла за пределами
+# рабочего каталога и сетевая команда (`curl`). Это ровно требуемое поведение: решение об
+# опасном шаге принимает оператор, а не воркер.
+#
+# Слои защиты теперь такие: `auto` ловит неизвестное (в т.ч. то, о чём гард не знает),
+# claude_guard_hook.py режет катастрофу и текстом отправляет воркера доложить координатору.
+# Цена — часть задач вернётся не сделанной, а с «нужно разрешение»; это осознанный размен.
+# Вернуть прежнее поведение: --perm bypassPermissions или $WORKER_PERMISSION_MODE.
+DEFAULT_PERMISSION_MODE = os.environ.get("WORKER_PERMISSION_MODE", "auto")
 
 # Soft cap on concurrently-live workers (every concurrent claude draws the same
 # account quota). Overridable with --max-concurrent / --allow-over-cap.
@@ -91,7 +100,15 @@ DEFAULT_MAX_CONCURRENT = int(os.environ.get("WORKER_MAX_CONCURRENT", "5"))
 # расход под bypassPermissions ничем не ограничен, а с CC 2.1.219 воркер сам может
 # спавнить вложенных сабагентов (глубина до 3). "0"/"off" — выключить флаг вовсе.
 # Override: --budget-usd / $WORKER_BUDGET_USD, per-worker — `budget: / max_usd:` в scope.
-DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "3")
+#
+# ⚠️ Лимит НЕ спасает работу: по достижении потолка воркер обрывается на полуслове —
+# деньги потрачены, результата нет. Поэтому потолок ставится ВЫШЕ типовой задачи, а не
+# «поэкономнее». Замер по 29 прошлым воркерам (scripts/session_costs.py, 25.07.2026):
+# медиана $4.5, 90-й перцентиль $27.6, максимум $117.8 (тот был на Opus 4.8 — $15/$75).
+# На нынешнем дефолте Sonnet 5 самый дорогой воркер стоил $17. Стоявшие здесь "3"
+# обрывали бы примерно каждого второго. 20 закрывает практически всех и при этом
+# режет разгон вроде того $117 на четверти пути.
+DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "20")
 
 # Model for workers. Workers do scoped, well-specified implementation work
 # (write a screen, a migration by the `sales` exemplar, tests) — Sonnet 5 handles
@@ -796,7 +813,9 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
         else:
             note = "команды НЕ блокируются (WORKER_GUARD=0); worktree — НЕ песочница"
         print(f"⚠️  SECURITY: воркеры под --permission-mode bypassPermissions: {note}. "
-              "Ограничить: --perm acceptEdits/manual или изолировать хост.", file=sys.stderr)
+              "Это НЕ дефолт с 25.07.2026 — дефолт `auto` (воркер докладывает вместо "
+              "самовольного запуска). Вернуть штатное: убрать --perm/$WORKER_PERMISSION_MODE.",
+              file=sys.stderr)
 
     # model=="inherit" тихо снимает --model -> воркер берёт то, что зарезолвит CLI/аккаунт
     # (настройка сессии, settings.json, дефолт версии). Это НЕ обязательно Sonnet: в проектном
