@@ -41,8 +41,21 @@ CMD_TIMEOUT = 600
 
 
 def _project_dir() -> Path:
+    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
+    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
+    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
+    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
+    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
-    return Path(env) if env else Path(__file__).resolve().parent
+    if env:
+        p = Path(env)
+        try:
+            if p.resolve() == here or (p / "coordination").is_dir():
+                return p
+        except OSError:
+            pass
+    return here
 
 
 def _utf8_stdio() -> None:

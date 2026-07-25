@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """claude_quality_hook.py — PostToolUse: мгновенный лят-гейт качества на изменённый файл.
 
-Срабатывает после Edit/Write/NotebookEdit. Делает две вещи:
+Срабатывает после Edit/Write. Делает две вещи:
 
   1) На .py-файл: ruff --fix (тихо чинит импорты/формат/isort), затем ruff check —
      если остались ошибки, печатает их в stderr и выходит кодом 2, чтобы Claude увидел
@@ -15,14 +15,14 @@
      Сабагенты наследуют sessionId родителя (их бывает до 20 одновременно, фоновые) —
      если их писать в один файл с родителем, Stop-хук родителя удалит реестр под
      работающим сабагентом. Поэтому файл сабагента — .touched-<session>-<agent>.txt
-     (agent — из payload agent_id/agentId, иначе имя транскрипта); главный цикл
-     (агент не определён) пишет в прежний .touched-<session>.txt без суффикса.
+     (agent — ТОЛЬКО из payload agent_id/agentId); главный цикл (поля нет) пишет
+     в прежний .touched-<session>.txt без суффикса.
 
 TS/TSX здесь tsc НЕ запускаем (медленно на каждый правёж) — это делает Stop-хук.
 Философия: fail-open. Любая ошибка/таймаут → exit 0 (хук не ломает работу). ruff
 вызывается тем же python, что запустил хук (венв с ruff); конфиг — из pyproject.toml.
 
-Регистрация — в .claude/settings.json, событие PostToolUse, matcher Edit|Write|NotebookEdit.
+Регистрация — в .claude/settings.json, событие PostToolUse, matcher Edit|Write.
 """
 
 from __future__ import annotations
@@ -39,8 +39,21 @@ CODE_EXT = {".py", ".ts", ".tsx"}
 
 
 def _project_dir() -> Path:
+    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
+    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
+    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
+    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
+    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
-    return Path(env) if env else Path(__file__).resolve().parent
+    if env:
+        p = Path(env)
+        try:
+            if p.resolve() == here or (p / "coordination").is_dir():
+                return p
+        except OSError:
+            pass
+    return here
 
 
 def _read_stdin() -> str:
