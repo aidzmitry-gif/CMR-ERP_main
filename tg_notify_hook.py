@@ -6,11 +6,11 @@
 coordination/.tg-events.jsonl. Бот (tg_bridge.py) пересылает её в топик «💬 VSCode».
 
 Путь очереди резолвится от расположения ЭТОГО файла, поэтому хук работает и когда
-он прописан в пользовательском ~/.claude/settings.json и срабатывает из сессий
-других проектов: события всё равно лягут в очередь этого репо.
+срабатывает из сессий других проектов: события всё равно лягут в очередь этого репо.
 
 Хук обязан отработать быстро и завершиться кодом 0 (не блокировать сессию).
-Регистрация — в .claude/settings.json, см. coordination/TG-BRIDGE.md.
+Регистрация — ТОЛЬКО в проектном .claude/settings.json (проверено: в пользовательском
+~/.claude/settings.json хук не прописан). См. coordination/TG-BRIDGE.md.
 """
 
 from __future__ import annotations
@@ -20,20 +20,35 @@ import sys
 import time
 from pathlib import Path
 
+# utf-8 на stdout/stderr — на всякий случай, если хук что-то печатает в консоль Windows
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 QUEUE = Path(__file__).resolve().parent / "coordination" / ".tg-events.jsonl"
 
 
 def main() -> int:
-    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    # stdin читаем БАЙТАМИ и декодируем как utf-8-sig: sys.stdin.read() берёт
+    # кодек локали и на Windows падает UnicodeDecodeError на кириллице (как в
+    # остальных хуках проекта) — теряли бы уведомление молча.
+    raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace") if not sys.stdin.isatty() else ""
     try:
         data = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
         data = {"raw": raw[:500]}
 
+    # Сабагенты наследуют session_id родителя, а фоновые тоже умеют ждать ввод —
+    # без agent/transcript несколько сессий одного чата неотличимы в очереди.
+    transcript_path = data.get("transcript_path") or ""
     rec = {
         "ts": time.time(),
         "event": data.get("hook_event_name") or "Notification",
         "session": (data.get("session_id") or "")[:8],
+        "agent": (data.get("agent_id") or data.get("agentId") or "")[:12],
+        "transcript": Path(transcript_path).stem[:16] if transcript_path else "",
         "cwd": data.get("cwd") or "",
         "message": data.get("message") or "",
     }
@@ -47,4 +62,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception:
+        # правка 4: глобальный fail-open — баг хука не должен блокировать сессию
+        raise SystemExit(0)

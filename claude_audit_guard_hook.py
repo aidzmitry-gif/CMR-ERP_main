@@ -8,15 +8,17 @@
    сигнатурой в причине. Память модели тут доказанно не работает — работает хук.
 2) **Правка чужих файлов в общем дереве** (~100 forensics-проверок «не подхватил ли
    чужое»/нед): deny, если file_path числится в свежем (<8ч) реестре другой сессии
-   `coordination/.touched-<sid>.txt` (реестр уже ведёт claude_quality_hook.py).
-   Обход при осознанной необходимости: env AIOS_ALLOW_FOREIGN_EDIT=1.
+   `coordination/.touched-<sid>.txt` или `.touched-<sid>-<agent>.txt` (реестр уже ведёт
+   claude_quality_hook.py; agent-суффикс — сабагенты сессии, владелец «свой», если
+   реестр начинается с текущего sid, — иначе сессия блокировала бы сама себя/свои
+   сабагенты). Обход при осознанной необходимости: env AIOS_ALLOW_FOREIGN_EDIT=1.
 3) **Advisory** (не блокирует): Edit, добавляющий в .py только import-строки (ruff-хук
    откатит их как F401 — 11 циклов/нед) и Edit файлов авто-памяти (append-only, Read
    непосредственно перед Edit).
 
 Философия — fail-open: любая внутренняя ошибка → exit 0 без вывода. Deny — только по
 точному совпадению с известным классом потерь. Регистрация — .claude/settings.json,
-PreToolUse, matcher Edit|Write|MultiEdit|Workflow|TaskUpdate|TaskCreate|Monitor|SendUserFile.
+PreToolUse, matcher Edit|Write|NotebookEdit|Workflow|TaskUpdate|TaskCreate|Monitor|SendUserFile.
 """
 
 from __future__ import annotations
@@ -120,7 +122,9 @@ def _check_foreign_touched(proj: Path, sid: str, file_path: str) -> None:
     for ledger in ledgers:
         try:
             owner = ledger.stem.replace(".touched-", "")
-            if owner == sid:
+            # владелец — либо сама сессия (owner == sid), либо её сабагент
+            # (owner == "<sid>-<agent>"): в обоих случаях это НЕ чужой файл
+            if owner == sid or owner.startswith(f"{sid}-"):
                 continue
             if (now - ledger.stat().st_mtime) > TOUCHED_FRESH_HOURS * 3600:
                 continue
@@ -146,7 +150,7 @@ def _added_lines(old: str, new: str) -> list[str]:
 
 def _advisories(tool: str, tool_input: dict) -> list[str]:
     out: list[str] = []
-    fp = str(tool_input.get("file_path") or "")
+    fp = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     low = fp.lower().replace("\\", "/")
     if "/memory/" in low or low.endswith("memory.md"):
         out.append("[audit-guard] Это файл авто-памяти, общий для параллельных сессий: "
@@ -178,9 +182,10 @@ def main() -> int:
         _check_send_user_file(tool_input)
         return 0
 
-    if tool in ("Edit", "Write", "MultiEdit"):
+    if tool in ("Edit", "Write", "NotebookEdit"):
         proj = _project_dir()
-        fp = str(tool_input.get("file_path") or "")
+        # NotebookEdit кладёт путь в notebook_path, а не file_path
+        fp = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
         if fp:
             _check_foreign_touched(proj, _session_id(data), fp)
         notes = _advisories(tool, tool_input)

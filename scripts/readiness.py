@@ -208,7 +208,9 @@ def _write_status(block: str, start: str, end: str) -> str:
         STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATUS_FILE.write_text(block + "\n", encoding="utf-8")
         return "created"
-    text = STATUS_FILE.read_text(encoding="utf-8")
+    # utf-8-sig+replace: STATUS.md правят параллельные сессии, один битый байт не должен
+    # ронять PreCompact-хук (единственное чтение файла без errors= в проекте до этой правки).
+    text = STATUS_FILE.read_text(encoding="utf-8-sig", errors="replace")
     if start in text and end in text:
         pre = text[: text.index(start)]
         post = text[text.index(end) + len(end):]
@@ -260,4 +262,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        sys.exit(0)  # fail-open: скрипт висит на PreCompact, не должен ронять каждую компакцию

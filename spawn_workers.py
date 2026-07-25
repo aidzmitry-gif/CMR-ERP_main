@@ -86,13 +86,28 @@ DEFAULT_PERMISSION_MODE = os.environ.get("WORKER_PERMISSION_MODE", "bypassPermis
 # account quota). Overridable with --max-concurrent / --allow-over-cap.
 DEFAULT_MAX_CONCURRENT = int(os.environ.get("WORKER_MAX_CONCURRENT", "5"))
 
+# Денежный предохранитель на ОДНОГО headless-воркера (--max-budget-usd). Без него
+# расход под bypassPermissions ничем не ограничен, а с CC 2.1.219 воркер сам может
+# спавнить вложенных сабагентов (глубина до 3). "0"/"off" — выключить флаг вовсе.
+# Override: --budget-usd / $WORKER_BUDGET_USD, per-worker — `budget: / max_usd:` в scope.
+DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "3")
+
 # Model for workers. Workers do scoped, well-specified implementation work
-# (write a screen, a migration by the `sales` exemplar, tests) — Sonnet handles
-# this at a fraction of Opus's token cost. Keep the orchestrator (this driver +
-# the lead session you run by hand) on Opus where the planning judgement lives.
+# (write a screen, a migration by the `sales` exemplar, tests) — Sonnet 5 handles
+# this at a fraction of Opus 5's token cost. Keep the orchestrator (this driver +
+# the lead session you run by hand) on Opus 5 where the planning judgement lives.
 # Override per-run with --model, or globally with $WORKER_MODEL. Use "inherit"
-# to drop the flag and let the worker use the account default.
+# to drop the flag and let the worker use whatever default the CLI/account resolves —
+# see the model=="inherit" warning in cmd_spawn. NB: Opus 5 is the default *Opus*
+# (the `opus` alias resolves to it); it is NOT documented as the overall CLI default.
 DEFAULT_WORKER_MODEL = os.environ.get("WORKER_MODEL", "sonnet")
+
+# Effort — ось, ОРТОГОНАЛЬНАЯ модели (coordination/MODEL-TIERING.md). У Sonnet 5 и
+# Opus 5 дефолт CLI-эффорта = high, поэтому механический воркер без явного effort
+# молча работает в самом дорогом режиме. "medium" — разумный дефолт для скоуп-фичи.
+# Override: $WORKER_EFFORT, per-worker — `effort:` в scope (см. _effort_for_worker).
+DEFAULT_WORKER_EFFORT = os.environ.get("WORKER_EFFORT", "medium")
+_VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 # How long to wait for a worker's JSONL transcript to appear after launch.
 TRANSCRIPT_TIMEOUT_SEC = 75.0
@@ -170,9 +185,50 @@ def _model_for_worker(name: str, default: str) -> str:
         text = _scope_path(name).read_text(encoding="utf-8-sig")
     except OSError:
         return default
-    for m in re.finditer(r"(?im)^\s*model:\s*([A-Za-z0-9._-]+)\s*$", text):
+    # `(?:#.*)?$` — канонический шаблон LOOP CONTRACT в worker-engineering-standards.md
+    # кладёт ХВОСТОВОЙ комментарий после значения (`model: sonnet   # тир: ...`). Без этого
+    # допуска scope, скопированный из шаблона дословно, молча проваливался в дефолт — то есть
+    # тиринг и денежный предохранитель не работали ни у одного воркера, написанного по образцу.
+    for m in re.finditer(r"(?im)^\s*model:\s*([A-Za-z0-9._-]+)\s*(?:#.*)?$", text):
         val = m.group(1).strip().lower()
+        # Fable — флагман $10/$50 ВНЕ тиринга воркеров (canon MODEL-TIERING.md):
+        # отклонить и упасть на дефолт, а не уронить воркера ошибкой.
+        if val == "fable" or val.startswith("fable-") or val.startswith("claude-fable"):
+            print(f"[spawn:{name}] scope просит model: {val} — Fable воркерам не положен "
+                  f"($10/$50, канон MODEL-TIERING.md), отклонено. Использую дефолт '{default}'.",
+                  file=sys.stderr)
+            continue
         if val in {"inherit", "haiku", "sonnet", "opus"} or val.startswith("claude-"):
+            return val
+    return default
+
+
+def _budget_for_worker(name: str, default: str) -> str:
+    """Per-worker денежный предохранитель из scope LOOP CONTRACT (блок
+    `budget: / max_usd: <N>`), по образцу _model_for_worker. Фолбэк — дефолт
+    спавна (--budget-usd / $WORKER_BUDGET_USD)."""
+    try:
+        text = _scope_path(name).read_text(encoding="utf-8-sig")
+    except OSError:
+        return default
+    m = re.search(r"(?im)^[ \t]*budget:[ \t]*$\n((?:^[ \t]+\S.*$\n?)*)", text)
+    if m:
+        mm = re.search(r"(?im)^\s*max_usd:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:#.*)?$", m.group(1))
+        if mm:
+            return mm.group(1)
+    return default
+
+
+def _effort_for_worker(name: str, default: str) -> str:
+    """Per-worker effort из scope LOOP CONTRACT (`effort: low|medium|high|xhigh|max`),
+    по образцу _model_for_worker. Фолбэк — дефолт спавна ($WORKER_EFFORT)."""
+    try:
+        text = _scope_path(name).read_text(encoding="utf-8-sig")
+    except OSError:
+        return default
+    for m in re.finditer(r"(?im)^\s*effort:\s*([A-Za-z]+)\s*(?:#.*)?$", text):
+        val = m.group(1).strip().lower()
+        if val in _VALID_EFFORTS:
             return val
     return default
 
@@ -216,7 +272,7 @@ def _ensure_guard_settings() -> str | None:
         return None
     cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
     cfg = {"hooks": {"PreToolUse": [{
-        "matcher": "Bash|Edit|Write|MultiEdit|Read|NotebookEdit",
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|Read|NotebookEdit",
         "hooks": [{"type": "command", "command": cmd}],
     }]}}
     try:
@@ -518,7 +574,7 @@ def _active_worker_count() -> int:
 
 
 def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
-                    perm: str, model: str) -> Path:
+                    perm: str, model: str, budget: str, effort: str) -> Path:
     """Write the per-worker prompt + PowerShell launcher. The launcher reads
     the (multi-line) prompt from a file and passes it as a single argv to
     claude — avoids all wt.exe / shell quoting hell."""
@@ -539,6 +595,10 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
 
     # "inherit" => no --model flag => worker uses the account default model.
     model_flag = "" if model == "inherit" else f"--model {psq(model)} "
+    # Денежный предохранитель на воркера. "0"/"off" — не ставить флаг вовсе.
+    budget_flag = "" if str(budget).strip().lower() in ("", "0", "off") else f"--max-budget-usd {psq(budget)} "
+    # Effort — ось, ортогональная модели (см. DEFAULT_WORKER_EFFORT).
+    effort_flag = f"--effort {psq(effort)} " if effort else ""
     # Per-worker MCP: пусто по умолчанию; serena — только если scope это запросил.
     mcp_cfg = _mcp_config_for_worker(name)
     # PreToolUse deny-гард в сессию воркера (--settings) + строгий тир. Хардненинг под
@@ -546,6 +606,16 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
     guard = _ensure_guard_settings()
     guard_flag = f"--settings {psq(guard)} " if guard else ""
     strict_line = "$env:CLAUDE_GUARD_STRICT = '1'\n" if guard else ""
+    # Кап на вложенность/параллелизм сабагентов ВНУТРИ воркера. Внешний --max-concurrent
+    # считает окна-процессы, а не сабагентов; без этого 5 окон × дерево глубины 3 =
+    # непредсказуемый расход. DEPTH=1 по смыслу апстрима = «вложенность запрещена» (дефолт
+    # платформы — 3). Override: $WORKER_SUBAGENT_DEPTH и $WORKER_MAX_SUBAGENTS.
+    subagent_depth = os.environ.get("WORKER_SUBAGENT_DEPTH", "1")
+    subagent_width = os.environ.get("WORKER_MAX_SUBAGENTS", "4")
+    subagent_lines = (
+        f"$env:CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = {psq(subagent_depth)}\n"
+        f"$env:CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = {psq(subagent_width)}\n"
+    )
 
     # NOTES on encoding (hard-won — Russian-locale Windows):
     #   * The .ps1 is written utf-8-SIG (BOM). Windows PowerShell 5.1 reads
@@ -574,6 +644,7 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"Set-Location -LiteralPath {psq(str(wt))}\n"
         f"Write-Host '=== worker:{name} — claude (auto mode) starting ===' -ForegroundColor Cyan\n"
         f"{strict_line}"
+        f"{subagent_lines}"
         # Промпт подаём claude через STDIN (пайп файла), НЕ позиционным argv.
         # Большая многострочная строка в `-- $prompt` рвалась PowerShell'ом по переносам →
         # claude получал только первую строку (заголовок стандартов), тело терялось →
@@ -582,6 +653,8 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"& {psq(claude_cli)} --print --verbose --permission-mode {perm} "
         f"{guard_flag}"
         f"{model_flag}"
+        f"{budget_flag}"
+        f"{effort_flag}"
         f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
         f"--add-dir {psq(str(REPO_ROOT))}\n"
         "Write-Host ''\n"
@@ -626,7 +699,8 @@ def _launch_window(name: str, launcher: Path) -> str:
 
 
 def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
-              allow_over_cap: bool, perm: str, model: str) -> int:
+              allow_over_cap: bool, perm: str, model: str,
+              budget: str = DEFAULT_WORKER_BUDGET_USD) -> int:
     claude_cli = _find_claude_cli()
     if not claude_cli:
         print("[spawn] claude CLI not found. Set $CLAUDE_CLI or install Claude Code.",
@@ -645,7 +719,17 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
         else:
             note = "команды НЕ блокируются (WORKER_GUARD=0); worktree — НЕ песочница"
         print(f"⚠️  SECURITY: воркеры под --permission-mode bypassPermissions: {note}. "
-              "Ограничить: --perm acceptEdits/default или изолировать хост.", file=sys.stderr)
+              "Ограничить: --perm acceptEdits/manual или изолировать хост.", file=sys.stderr)
+
+    # model=="inherit" тихо снимает --model -> воркер берёт то, что зарезолвит CLI/аккаунт
+    # (настройка сессии, settings.json, дефолт версии). Это НЕ обязательно Sonnet: в проектном
+    # .claude/settings.json стоит "model": "opus", а алиас opus резолвится в Opus 5 ($5/$25
+    # против $3/$15 у Sonnet 5). Несколько воркеров под inherit = непредсказуемая цена прогона.
+    if model == "inherit":
+        print("⚠️  model=inherit → модель воркера не зафиксирована: её выберет CLI/аккаунт "
+              "(в этом проекте settings.json пиннит 'opus' → Opus 5, $5/$25 против $3/$15 "
+              "у Sonnet 5). Укажи --model явно, если нужна предсказуемая цена прогона.",
+              file=sys.stderr)
 
     # Soft concurrency cap (quota guard).
     if not dry_run and not allow_over_cap:
@@ -674,9 +758,11 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
                 wt = _worktree_path(name)
                 exists = "exists" if wt.is_dir() else f"would create from {BASE_BRANCH}"
                 wm = _model_for_worker(name, model)
+                wb = _budget_for_worker(name, budget)
+                we = _effort_for_worker(name, DEFAULT_WORKER_EFFORT)
                 print(f"[dry-run:spawn:{name}] worktree {wt} ({exists}); "
                       f"prompt {len(message)} chars (pitfalls {len(mem)}); "
-                      f"perm={perm}; model={wm}; "
+                      f"perm={perm}; model={wm}; budget=${wb}; effort={we}; "
                       f"mcp={_mcp_config_for_worker(name).name}; "
                       f"guard={'on' if _guard_enabled() else 'off'}; cli={claude_cli}")
                 continue
@@ -690,7 +776,10 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
             _commit_scaffold(name, wt)
             _prime_trust(wt)
             worker_model = _model_for_worker(name, model)
-            launcher = _write_launcher(name, wt, message, claude_cli, perm, worker_model)
+            worker_budget = _budget_for_worker(name, budget)
+            worker_effort = _effort_for_worker(name, DEFAULT_WORKER_EFFORT)
+            launcher = _write_launcher(name, wt, message, claude_cli, perm, worker_model,
+                                       worker_budget, worker_effort)
             method = _launch_window(name, launcher)
             _set_worker_state(
                 name,
@@ -1013,8 +1102,11 @@ def cmd_status(names: list[str]) -> int:
     print(header)
     print("-" * len(header))
     counts: dict[str, int] = {}
-    for name in names:
-        r = _status_row(name)
+    # Один _status_row на воркера (каждый сканит до 80 JSONL-транскриптов) — раньше
+    # звали дважды на воркера ради "done" ниже, на 10 воркерах = 20 полных сканов каталога.
+    rows = [_status_row(name) for name in names]
+    for r in rows:
+        name = r["name"]
         g, s, state = r["git"], r["summary"], r["state"]
         counts[state] = counts.get(state, 0) + 1
         activity = _human_age(s.last_activity_ts) if (s and s.last_activity_ts) else "—"
@@ -1027,8 +1119,8 @@ def cmd_status(names: list[str]) -> int:
     print("Total: " + str(len(names)) + "  |  "
           + "  ".join(f"{k}:{v}" for k, v in sorted(counts.items())))
     # LOUD reminder: COMPLETE workers not yet integrated.
-    done = [n for n in names if "COMPLETE" in _status_row(n)["state"]
-            and _worktree_path(n).is_dir()]
+    done = [r["name"] for r in rows if "COMPLETE" in r["state"]
+            and _worktree_path(r["name"]).is_dir()]
     if done:
         print("\n⚠️  COMPLETE и не интегрированы: " + ", ".join(done))
         print("    integrate: python spawn_workers.py integrate <name>")
@@ -1300,6 +1392,7 @@ def cmd_integrate(name: str, dry_run: bool) -> int:
         gate = subprocess.run(
             [sys.executable, str(REPO_ROOT / "acceptance_gate.py"), "check", name],
             cwd=str(REPO_ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",  # вывод гейта русский и его тут же печатают
         )
         if gate.stdout:
             print(gate.stdout.rstrip())
@@ -1482,6 +1575,25 @@ def cmd_health() -> int:
     checks: list[tuple[str, bool, str]] = []
     cli = _find_claude_cli()
     checks.append(("claude CLI", bool(cli), cli or "NOT FOUND — set $CLAUDE_CLI"))
+    # Версия резолвнутого бинаря: на машине есть ВТОРОЙ, устаревший claude.exe
+    # (C:/Users/aidzm/.local/bin/claude.exe, 2.1.173) — если PATH подхватит его вместо
+    # актуального, manual/--forward-subagent-text на вложенных сабагентах не заработают.
+    cli_version = ""
+    version_ok = False
+    if cli:
+        try:
+            vproc = subprocess.run([cli, "--version"], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", check=False, timeout=10)
+            cli_version = (vproc.stdout or vproc.stderr).strip()
+            # bool(cli_version) недостаточно: except ниже тоже кладёт непустую строку,
+            # и реальный сбой получения версии показывался бы зелёной галочкой.
+            version_ok = vproc.returncode == 0 and bool(cli_version)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            cli_version = f"err: {e}"
+    checks.append(("claude --version", version_ok,
+                   f"{cli_version} (режим manual — с 2.1.200; проброс текста ВЛОЖЕННЫХ "
+                   f"сабагентов через --forward-subagent-text — с 2.1.219)"
+                   if version_ok else (cli_version or "не удалось получить версию")))
     gw = _git_run(["worktree", "list"], cwd=REPO_ROOT)
     checks.append(("git worktree", gw.returncode == 0,
                    f"{len(gw.stdout.splitlines())} worktree(s)" if gw.returncode == 0 else gw.stderr.strip()))
@@ -1508,8 +1620,9 @@ def cmd_health() -> int:
     print("=== spawn_workers HEALTH (Windows) ===")
     all_ok = True
     for label, ok, detail in checks:
-        # wt.exe + .venv are non-fatal
-        fatal = label not in ("wt.exe (Windows Terminal)", ".venv python", f"on {BASE_BRANCH}")
+        # wt.exe + .venv + version-lookup are non-fatal
+        fatal = label not in ("wt.exe (Windows Terminal)", ".venv python", f"on {BASE_BRANCH}",
+                              "claude --version")
         print(f"  {'✓' if ok else '✗'}  {label:30s}  {detail}")
         if not ok and fatal:
             all_ok = False
@@ -1539,11 +1652,20 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--all", action="store_true", help="spawn every worker with a first-msg")
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--perm", default=DEFAULT_PERMISSION_MODE,
-                    choices=["auto", "acceptEdits", "bypassPermissions", "default"],
+                    # CC 2.1.200 переименовал режим "default" в "manual". Старое имя
+                    # ПРОДОЛЖАЕТ приниматься CLI как алиас (проверено на 2.1.219: оно просто
+                    # не показывается в --help), поэтому оставляем его в choices ради обратной
+                    # совместимости со старыми скриптами и текстами — но нормализуем в manual,
+                    # чтобы в лаунчер и в логи уходило одно каноническое имя.
+                    choices=["auto", "acceptEdits", "bypassPermissions", "manual", "default",
+                             "dontAsk", "plan"],
                     help=f"claude --permission-mode (default {DEFAULT_PERMISSION_MODE})")
     sp.add_argument("--model", default=DEFAULT_WORKER_MODEL,
                     help=f"claude --model for workers (default {DEFAULT_WORKER_MODEL}; "
                          f"use 'inherit' for the account default)")
+    sp.add_argument("--budget-usd", default=DEFAULT_WORKER_BUDGET_USD, dest="budget_usd",
+                    help=f"claude --max-budget-usd per worker (default {DEFAULT_WORKER_BUDGET_USD}; "
+                         f"'0'/'off' disables the flag)")
     sp.add_argument("--max-concurrent", type=int, default=DEFAULT_MAX_CONCURRENT)
     sp.add_argument("--allow-over-cap", action="store_true")
 
@@ -1578,7 +1700,7 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("answer", help="the orchestrator's answer/clarification text")
     rs.add_argument("--dry-run", action="store_true")
     rs.add_argument("--perm", default=DEFAULT_PERMISSION_MODE,
-                    choices=["auto", "acceptEdits", "bypassPermissions", "default"])
+                    choices=["auto", "acceptEdits", "bypassPermissions", "manual", "dontAsk", "plan"])
     rs.add_argument("--model", default=DEFAULT_WORKER_MODEL,
                     help=f"claude --model for the re-spawned worker (default {DEFAULT_WORKER_MODEL})")
 
@@ -1589,6 +1711,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd is None:
         p.print_help()
         return 1
+    # "default" -> "manual": CLI принимает оба, но каноническое имя с CC 2.1.200 — manual.
+    # Нормализуем в одной точке, чтобы в лаунчер, логи и state уходило одно значение.
+    if getattr(args, "perm", None) == "default":
+        args.perm = "manual"
     if args.cmd == "list":
         for n in _list_available():
             print(n)
@@ -1620,7 +1746,7 @@ def main(argv: list[str] | None = None) -> int:
             print("spawn: provide worker name(s) or --all", file=sys.stderr)
             return 1
         return cmd_spawn(names, args.dry_run, args.max_concurrent,
-                         args.allow_over_cap, args.perm, args.model)
+                         args.allow_over_cap, args.perm, args.model, args.budget_usd)
     p.print_help()
     return 1
 
