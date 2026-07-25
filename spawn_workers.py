@@ -40,6 +40,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,28 +77,69 @@ PITFALLS_FILE = MEMORY_DIR / "pitfalls.md"
 VENV_PY = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
-# Permission mode for unattended workers. Workers run HEADLESS (claude --print):
-# there's no human to approve tool calls, so they must never block on a
-# permission prompt -> "bypassPermissions". Workers are isolated in their own
-# git worktree. Override with --perm or $WORKER_PERMISSION_MODE.
-DEFAULT_PERMISSION_MODE = os.environ.get("WORKER_PERMISSION_MODE", "bypassPermissions")
+# Permission mode for unattended workers. Workers run HEADLESS (claude --print).
+#
+# Раньше здесь стоял "bypassPermissions" из опасения, что headless-воркер «повиснет» на
+# запросе разрешения. ПРОВЕРЕНО на живых прогонах 25.07.2026 (CC 2.1.219): в `auto` воркер
+# НЕ виснет и НЕ падает — вызов отклоняется, агент получает отказ, доводит остальную работу
+# и словами докладывает, чего ему не хватило. Проверены обе формы: запись файла за пределами
+# рабочего каталога и сетевая команда (`curl`). Это ровно требуемое поведение: решение об
+# опасном шаге принимает оператор, а не воркер.
+#
+# Слои защиты теперь такие: `auto` ловит неизвестное (в т.ч. то, о чём гард не знает),
+# claude_guard_hook.py режет катастрофу и текстом отправляет воркера доложить координатору.
+# Цена — часть задач вернётся не сделанной, а с «нужно разрешение»; это осознанный размен.
+# Вернуть прежнее поведение: --perm bypassPermissions или $WORKER_PERMISSION_MODE.
+DEFAULT_PERMISSION_MODE = os.environ.get("WORKER_PERMISSION_MODE", "auto")
 
 # Soft cap on concurrently-live workers (every concurrent claude draws the same
 # account quota). Overridable with --max-concurrent / --allow-over-cap.
 DEFAULT_MAX_CONCURRENT = int(os.environ.get("WORKER_MAX_CONCURRENT", "5"))
 
+# Денежный предохранитель на ОДНОГО headless-воркера (--max-budget-usd). Без него
+# расход под bypassPermissions ничем не ограничен, а с CC 2.1.219 воркер сам может
+# спавнить вложенных сабагентов (глубина до 3). "0"/"off" — выключить флаг вовсе.
+# Override: --budget-usd / $WORKER_BUDGET_USD, per-worker — `budget: / max_usd:` в scope.
+#
+# ⚠️ Лимит НЕ спасает работу: по достижении потолка воркер обрывается на полуслове —
+# деньги потрачены, результата нет. Поэтому потолок ставится ВЫШЕ типовой задачи, а не
+# «поэкономнее». Замер по 29 прошлым воркерам (scripts/session_costs.py, 25.07.2026):
+# медиана $4.8, 90-й перцентиль $33.0, максимум $127.3 (тот был на Opus 4.8 — $15/$75).
+# На нынешнем дефолте Sonnet самый дорогой воркер стоил $19.8 — поэтому 20 мало (обрывало бы
+# ровно на последнем шаге), а стоявшие тут изначально "3" рубили бы каждого второго.
+# 25 закрывает всех наблюдённых Sonnet-воркеров и режет разгон вроде того $127 на пятой части.
+DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "25")
+
 # Model for workers. Workers do scoped, well-specified implementation work
-# (write a screen, a migration by the `sales` exemplar, tests) — Sonnet handles
-# this at a fraction of Opus's token cost. Keep the orchestrator (this driver +
-# the lead session you run by hand) on Opus where the planning judgement lives.
+# (write a screen, a migration by the `sales` exemplar, tests) — Sonnet 5 handles
+# this at a fraction of Opus 5's token cost. Keep the orchestrator (this driver +
+# the lead session you run by hand) on Opus 5 where the planning judgement lives.
 # Override per-run with --model, or globally with $WORKER_MODEL. Use "inherit"
-# to drop the flag and let the worker use the account default.
+# to drop the flag and let the worker use whatever default the CLI/account resolves —
+# see the model=="inherit" warning in cmd_spawn. NB: Opus 5 is the default *Opus*
+# (the `opus` alias resolves to it); it is NOT documented as the overall CLI default.
 DEFAULT_WORKER_MODEL = os.environ.get("WORKER_MODEL", "sonnet")
+
+# Effort — ось, ОРТОГОНАЛЬНАЯ модели (coordination/MODEL-TIERING.md). У Sonnet 5 и
+# Opus 5 дефолт CLI-эффорта = high, поэтому механический воркер без явного effort
+# молча работает в самом дорогом режиме. "medium" — разумный дефолт для скоуп-фичи.
+# Override: $WORKER_EFFORT, per-worker — `effort:` в scope (см. _effort_for_worker).
+DEFAULT_WORKER_EFFORT = os.environ.get("WORKER_EFFORT", "medium")
+_VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 # How long to wait for a worker's JSONL transcript to appear after launch.
 TRANSCRIPT_TIMEOUT_SEC = 75.0
-# Cap how many transcripts we scan when discovering a worker session.
+# Cap how many transcripts we scan when discovering a worker session (FALLBACK-скан;
+# основной путь к транскрипту — детерминированный, см. _find_worker_transcript).
 MAX_TRANSCRIPTS_TO_SCAN = 80
+
+# Опциональный машиночитаемый вывод воркера. По умолчанию ВЫКЛ: окно воркера смотрит
+# человек, а stream-json — это поток JSON-строк, нечитаемый глазами. Включённый режим
+# добавляет --output-format stream-json --forward-subagent-text (текст ВЛОЖЕННЫХ
+# сабагентов пробрасывается наверх с CC 2.1.219; оба флага работают ТОЛЬКО с --print)
+# и складывает поток в LOG_DIR/<name>.jsonl — единственный способ увидеть, что делали
+# сабагенты воркера. Включить: env WORKER_STREAM_JSON=1 перед spawn/respond.
+WORKER_STREAM_JSON = os.environ.get("WORKER_STREAM_JSON", "0") in ("1", "true", "True")
 
 
 # ─── claude CLI discovery ──────────────────────────────────────────────────────
@@ -162,17 +204,63 @@ def _status_path_in_worktree(name: str, wt: Path) -> Path:
     return wt / "coordination" / f"{name}-status.md"
 
 
+def _scope_text(name: str) -> str:
+    """Текст scope-файла воркера; пусто, если файла нет.
+
+    Четыре парсера полей LOOP CONTRACT (model/budget/effort/mcp) раньше несли по своей копии
+    `try: read_text except OSError: return default` — объединено здесь. Валидация у полей
+    осознанно разная и остаётся у каждого своя.
+
+    Без кэша намеренно: файл маленький, а `lru_cache` по имени воркера отдавал бы устаревший
+    текст, если scope успели поправить в том же процессе (на этом сразу споткнулись тесты).
+    """
+    try:
+        return _scope_path(name).read_text(encoding="utf-8-sig")
+    except OSError:
+        return ""
+
+
 def _model_for_worker(name: str, default: str) -> str:
     """Per-worker модель из scope LOOP CONTRACT (`model: haiku|sonnet|opus|inherit`).
     Механическая работа → haiku, основной код → sonnet, архитектура → opus (cost-гайд
     Anthropic). Фолбэк — дефолт спавна (--model / $WORKER_MODEL)."""
-    try:
-        text = _scope_path(name).read_text(encoding="utf-8-sig")
-    except OSError:
-        return default
-    for m in re.finditer(r"(?im)^\s*model:\s*([A-Za-z0-9._-]+)\s*$", text):
+    text = _scope_text(name)
+    # `(?:#.*)?$` — канонический шаблон LOOP CONTRACT в worker-engineering-standards.md
+    # кладёт ХВОСТОВОЙ комментарий после значения (`model: sonnet   # тир: ...`). Без этого
+    # допуска scope, скопированный из шаблона дословно, молча проваливался в дефолт — то есть
+    # тиринг и денежный предохранитель не работали ни у одного воркера, написанного по образцу.
+    for m in re.finditer(r"(?im)^\s*model:\s*([A-Za-z0-9._-]+)\s*(?:#.*)?$", text):
         val = m.group(1).strip().lower()
+        # Fable — флагман $10/$50 ВНЕ тиринга воркеров (canon MODEL-TIERING.md):
+        # отклонить и упасть на дефолт, а не уронить воркера ошибкой.
+        if val == "fable" or val.startswith("fable-") or val.startswith("claude-fable"):
+            print(f"[spawn:{name}] scope просит model: {val} — Fable воркерам не положен "
+                  f"($10/$50, канон MODEL-TIERING.md), отклонено. Использую дефолт '{default}'.",
+                  file=sys.stderr)
+            continue
         if val in {"inherit", "haiku", "sonnet", "opus"} or val.startswith("claude-"):
+            return val
+    return default
+
+
+def _budget_for_worker(name: str, default: str) -> str:
+    """Per-worker денежный предохранитель из scope LOOP CONTRACT (блок
+    `budget: / max_usd: <N>`), по образцу _model_for_worker. Фолбэк — дефолт
+    спавна (--budget-usd / $WORKER_BUDGET_USD)."""
+    m = re.search(r"(?im)^[ \t]*budget:[ \t]*$\n((?:^[ \t]+\S.*$\n?)*)", _scope_text(name))
+    if m:
+        mm = re.search(r"(?im)^\s*max_usd:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:#.*)?$", m.group(1))
+        if mm:
+            return mm.group(1)
+    return default
+
+
+def _effort_for_worker(name: str, default: str) -> str:
+    """Per-worker effort из scope LOOP CONTRACT (`effort: low|medium|high|xhigh|max`),
+    по образцу _model_for_worker. Фолбэк — дефолт спавна ($WORKER_EFFORT)."""
+    for m in re.finditer(r"(?im)^\s*effort:\s*([A-Za-z]+)\s*(?:#.*)?$", _scope_text(name)):
+        val = m.group(1).strip().lower()
+        if val in _VALID_EFFORTS:
             return val
     return default
 
@@ -181,11 +269,7 @@ def _mcp_config_for_worker(name: str) -> Path:
     """По умолчанию воркер стартует с ПУСТЫМ MCP (grep-first дефолт Anthropic, без
     оверхеда MCP-определений). Если scope содержит `mcp: serena` И есть конфиг
     coordination/mcp-serena.json — отдаём его (семантическая навигация по символам)."""
-    try:
-        text = _scope_path(name).read_text(encoding="utf-8-sig")
-    except OSError:
-        return EMPTY_MCP_FILE
-    if re.search(r"(?im)^\s*mcp:\s*serena\s*$", text):
+    if re.search(r"(?im)^\s*mcp:\s*serena\s*$", _scope_text(name)):
         serena = COORD_DIR / "mcp-serena.json"
         if serena.is_file():
             return serena
@@ -209,16 +293,66 @@ def _guard_enabled() -> bool:
     return WORKER_GUARD and GUARD_HOOK.is_file()
 
 
-def _ensure_guard_settings() -> str | None:
-    """Записать settings-файл с PreToolUse-гардом (АБСОЛЮТНЫЕ пути к main-venv-python и
-    хуку — чтобы работало из любого worktree) и вернуть путь. None, если гард выключен."""
-    if not _guard_enabled():
-        return None
-    cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
-    cfg = {"hooks": {"PreToolUse": [{
-        "matcher": "Bash|Edit|Write|MultiEdit|Read|NotebookEdit",
-        "hooks": [{"type": "command", "command": cmd}],
-    }]}}
+_GUARD_MATCHER_FALLBACK = "Bash|PowerShell|Edit|Write|MultiEdit|Read|NotebookEdit"
+
+
+def _guard_matcher() -> str:
+    """Список инструментов для PreToolUse-гарда — из самого гарда, а не копией.
+
+    Строка жила четырьмя копиями (.claude/settings.json, settings.json.example, здесь и
+    tg_sessions.py). Когда в покрытие добавили PowerShell, копия в tg_sessions отстала, и
+    удалённые B-сессии исполняли PowerShell вообще без гарда. Фолбэк на случай, если модуль
+    гарда не импортируется: лучше повесить гард по устаревшему списку, чем не повесить вовсе.
+    """
+    try:
+        import claude_guard_hook
+        return str(claude_guard_hook.GUARD_MATCHER)
+    except Exception:
+        return _GUARD_MATCHER_FALLBACK
+
+
+# Рабочий инструментарий воркера — то, без чего он не может СДАТЬ работу.
+#
+# Под `auto` (дефолт с 25.07.2026) `git add/commit/push` требуют одобрения, а одобрять в
+# headless некому: проверено живым прогоном — воркер отвечает «ожидаю подтверждения» и
+# возвращается с пустыми руками. Разрешающих правил ему взять неоткуда: `.claude/settings.json`
+# и `settings.local.json` в .gitignore, значит в свежий worktree не попадают. Поэтому список
+# едет вместе с гардом в том же --settings.
+#
+# Тут ТОЛЬКО довести задачу и отдать ветку. Всё прочее (сеть, установка пакетов, запись за
+# пределами worktree, любая незнакомая команда) остаётся под вопросом у `auto`, а катастрофа —
+# под гардом. `git push` разрешён намеренно: воркер пушит свою полосу, а `push --force` режет
+# гард отдельным правилом.
+WORKER_ALLOW = [
+    # git — чтение состояния
+    "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+    "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git rev-list:*)",
+    "Bash(git show-ref:*)", "Bash(git remote:*)",
+    # git — сдача работы
+    "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)", "Bash(git fetch:*)",
+    "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git restore:*)", "Bash(git stash:*)",
+    # гейты качества
+    "Bash(pytest:*)", "Bash(python -m pytest:*)", "Bash(ruff check:*)",
+    "Bash(python -m ruff:*)", "Bash(alembic:*)",
+    "Bash(./.venv/Scripts/python.exe:*)", 'Bash(& ".\\.venv\\Scripts\\python.exe":*)',
+    "Bash(npm run:*)", "Bash(npx tsc:*)",
+]
+
+
+def _ensure_worker_settings() -> str | None:
+    """Settings-файл воркера: разрешающий список + PreToolUse-гард (АБСОЛЮТНЫЕ пути к
+    main-venv-python и хуку — чтобы работало из любого worktree). Возвращает путь.
+
+    Файл пишется ВСЕГДА, даже при WORKER_GUARD=0: без него воркер под `auto` не сможет
+    закоммитить и запушить. При выключенном гарде остаётся только разрешающая часть.
+    """
+    cfg: dict = {"permissions": {"allow": WORKER_ALLOW}}
+    if _guard_enabled():
+        cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
+        cfg["hooks"] = {"PreToolUse": [{
+            "matcher": _guard_matcher(),
+            "hooks": [{"type": "command", "command": cmd}],
+        }]}
     try:
         GUARD_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         GUARD_SETTINGS.write_text(
@@ -517,35 +651,109 @@ def _active_worker_count() -> int:
     return n
 
 
+def _psq(s: object) -> str:
+    """Single-quote a PowerShell literal; escape embedded single quotes by doubling."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _claude_cmdline(name: str, claude_cli: str, perm: str, model: str, budget: str,
+                    effort: str, session_id: str | None = None,
+                    resume: bool = False) -> str:
+    """ЕДИНЫЙ генератор строки запуска claude (PowerShell-инвокация без пайпов).
+    Один источник правды по флагам для spawn и respond --resume: раньше respond
+    переспавнивал воркера через cmd_spawn целиком, и любой флаг, добавленный в
+    лаунчер, надо было держать в голове дважды. Собираем список токенов и join'им —
+    так физически невозможны двойные пробелы и пустые флаги."""
+    parts = [f"& {_psq(claude_cli)}", "--print", "--verbose", "--permission-mode", perm]
+    # Детерминированный id сессии: при спавне мы его НАЗНАЧАЕМ (--session-id), при
+    # ответе — ПОДНИМАЕМ ту же сессию (--resume), сохраняя контекст и не переплачивая
+    # за повторную отправку преамбулы/pitfalls/задачи.
+    if session_id:
+        parts += ["--resume" if resume else "--session-id", _psq(session_id)]
+    # Settings воркера (--settings): разрешающий список рабочего инструментария + PreToolUse
+    # deny-гард. Список ОБЯЗАТЕЛЕН под `auto` — иначе воркер не сможет закоммитить и запушить
+    # (см. WORKER_ALLOW). Гард режет катастрофу до выполнения; отключить — env WORKER_GUARD=0.
+    worker_settings = _ensure_worker_settings()
+    if worker_settings:
+        parts += ["--settings", _psq(worker_settings)]
+    # "inherit" => no --model flag => worker uses the account default model.
+    if model != "inherit":
+        parts += ["--model", _psq(model)]
+    # Денежный предохранитель на воркера. "0"/"off" — не ставить флаг вовсе.
+    if str(budget).strip().lower() not in ("", "0", "off"):
+        parts += ["--max-budget-usd", _psq(budget)]
+    # Effort — ось, ортогональная модели (см. DEFAULT_WORKER_EFFORT).
+    if effort:
+        parts += ["--effort", _psq(effort)]
+    # Опциональный машиночитаемый поток (см. WORKER_STREAM_JSON). --forward-subagent-text
+    # без stream-json CLI не принимает, поэтому флаги ставятся только парой.
+    if WORKER_STREAM_JSON:
+        parts += ["--output-format", "stream-json", "--forward-subagent-text"]
+    # Per-worker MCP: пусто по умолчанию; serena — только если scope это запросил.
+    parts += ["--strict-mcp-config", "--mcp-config", _psq(_mcp_config_for_worker(name))]
+    parts += ["--add-dir", _psq(REPO_ROOT)]
+    return " ".join(parts)
+
+
 def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
-                    perm: str, model: str) -> Path:
+                    perm: str, model: str, budget: str, effort: str,
+                    session_id: str | None = None, resume: bool = False) -> Path:
     """Write the per-worker prompt + PowerShell launcher. The launcher reads
     the (multi-line) prompt from a file and passes it as a single argv to
-    claude — avoids all wt.exe / shell quoting hell."""
+    claude — avoids all wt.exe / shell quoting hell.
+    resume=True -> та же функция поднимает УЖЕ существующую сессию (--resume),
+    а `message` играет роль не первого промпта, а очередной реплики оркестратора."""
     PROMPT_DIR.mkdir(parents=True, exist_ok=True)
     LAUNCHER_DIR.mkdir(parents=True, exist_ok=True)
     PID_DIR.mkdir(parents=True, exist_ok=True)
     if not EMPTY_MCP_FILE.exists():
         EMPTY_MCP_FILE.write_text('{"mcpServers": {}}\n', encoding="utf-8")
 
-    prompt_file = PROMPT_DIR / f"{name}.txt"
+    # Промпт resume'а держим в отдельном файле: перезапись <name>.txt стёрла бы
+    # исходный промпт спавна, по которому потом разбирают, что воркеру вообще прислали.
+    prompt_file = PROMPT_DIR / (f"{name}.resume.txt" if resume else f"{name}.txt")
     prompt_file.write_text(message, encoding="utf-8")
     launcher = LAUNCHER_DIR / f"{name}.ps1"
     pid_file = PID_DIR / f"{name}.pid"
 
-    # Single-quote PowerShell literals; escape embedded single quotes by doubling.
-    def psq(s: str) -> str:
-        return "'" + str(s).replace("'", "''") + "'"
+    # Локальный алиас модульного _psq (тот же цитатник PowerShell, что и в _claude_cmdline) —
+    # чтобы не тащить подчёркивание в каждую из шести подстановок шаблона ниже.
+    psq = _psq
+    strict_line = "$env:CLAUDE_GUARD_STRICT = '1'\n" if _guard_enabled() else ""
+    # Кап на вложенность/параллелизм сабагентов ВНУТРИ воркера. Внешний --max-concurrent
+    # считает окна-процессы, а не сабагентов; без этого 5 окон × дерево глубины 3 =
+    # непредсказуемый расход. DEPTH=1 по смыслу апстрима = «вложенность запрещена» (дефолт
+    # платформы — 3). Override: $WORKER_SUBAGENT_DEPTH и $WORKER_MAX_SUBAGENTS.
+    subagent_depth = os.environ.get("WORKER_SUBAGENT_DEPTH", "1")
+    subagent_width = os.environ.get("WORKER_MAX_SUBAGENTS", "4")
+    subagent_lines = (
+        f"$env:CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = {psq(subagent_depth)}\n"
+        f"$env:CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = {psq(subagent_width)}\n"
+    )
 
-    # "inherit" => no --model flag => worker uses the account default model.
-    model_flag = "" if model == "inherit" else f"--model {psq(model)} "
-    # Per-worker MCP: пусто по умолчанию; serena — только если scope это запросил.
-    mcp_cfg = _mcp_config_for_worker(name)
-    # PreToolUse deny-гард в сессию воркера (--settings) + строгий тир. Хардненинг под
-    # bypassPermissions: катастрофа режется до выполнения. Отключить — env WORKER_GUARD=0.
-    guard = _ensure_guard_settings()
-    guard_flag = f"--settings {psq(guard)} " if guard else ""
-    strict_line = "$env:CLAUDE_GUARD_STRICT = '1'\n" if guard else ""
+    # Промпт подаём claude через STDIN (пайп файла), НЕ позиционным argv.
+    # Большая многострочная строка в `-- $prompt` рвалась PowerShell'ом по переносам →
+    # claude получал только первую строку (заголовок стандартов), тело терялось →
+    # воркер вставал «прислали пустоту». Пайп файла в stdin переносит любой размер целиком.
+    invoke = (f"Get-Content -Raw -Encoding UTF8 -LiteralPath {psq(prompt_file)} | "
+              + _claude_cmdline(name, claude_cli, perm, model, budget, effort,
+                                session_id=session_id, resume=resume))
+    if WORKER_STREAM_JSON:
+        # stream-json пишем в LOG_DIR/<name>.jsonl. Пишем через StreamWriter, а НЕ через
+        # Out-File/Tee-Object: в Windows PowerShell 5.1 они кладут BOM (а Tee — вообще
+        # UTF-16LE), и первая строка перестаёт парситься как JSON. `$_` в конце блока
+        # прокидывает строку дальше в консоль — окно не выглядит зависшим.
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = LOG_DIR / f"{name}.jsonl"
+        run_lines = (
+            f"$log = New-Object IO.StreamWriter({psq(log_file)}, $false, "
+            f"(New-Object Text.UTF8Encoding($false)))\n"
+            f"Write-Host '(WORKER_STREAM_JSON=1 -> {log_file.name})' -ForegroundColor DarkGray\n"
+            f"try {{ {invoke} | ForEach-Object {{ $log.WriteLine($_); $log.Flush(); $_ }} }}\n"
+            f"finally {{ $log.Dispose() }}\n"
+        )
+    else:
+        run_lines = invoke + "\n"
 
     # NOTES on encoding (hard-won — Russian-locale Windows):
     #   * The .ps1 is written utf-8-SIG (BOM). Windows PowerShell 5.1 reads
@@ -574,16 +782,8 @@ def _write_launcher(name: str, wt: Path, message: str, claude_cli: str,
         f"Set-Location -LiteralPath {psq(str(wt))}\n"
         f"Write-Host '=== worker:{name} — claude (auto mode) starting ===' -ForegroundColor Cyan\n"
         f"{strict_line}"
-        # Промпт подаём claude через STDIN (пайп файла), НЕ позиционным argv.
-        # Большая многострочная строка в `-- $prompt` рвалась PowerShell'ом по переносам →
-        # claude получал только первую строку (заголовок стандартов), тело терялось →
-        # воркер вставал «прислали пустоту». Пайп файла в stdin переносит любой размер целиком.
-        f"Get-Content -Raw -Encoding UTF8 -LiteralPath {psq(str(prompt_file))} | "
-        f"& {psq(claude_cli)} --print --verbose --permission-mode {perm} "
-        f"{guard_flag}"
-        f"{model_flag}"
-        f"--strict-mcp-config --mcp-config {psq(str(mcp_cfg))} "
-        f"--add-dir {psq(str(REPO_ROOT))}\n"
+        f"{subagent_lines}"
+        f"{run_lines}"
         "Write-Host ''\n"
         f"Write-Host '=== worker:{name} — claude finished ===' -ForegroundColor Yellow\n"
         # Окно воркера больше НЕ нужно после завершения claude → закрываем СРАЗУ (просьба оператора
@@ -626,7 +826,8 @@ def _launch_window(name: str, launcher: Path) -> str:
 
 
 def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
-              allow_over_cap: bool, perm: str, model: str) -> int:
+              allow_over_cap: bool, perm: str, model: str,
+              budget: str = DEFAULT_WORKER_BUDGET_USD) -> int:
     claude_cli = _find_claude_cli()
     if not claude_cli:
         print("[spawn] claude CLI not found. Set $CLAUDE_CLI or install Claude Code.",
@@ -645,7 +846,19 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
         else:
             note = "команды НЕ блокируются (WORKER_GUARD=0); worktree — НЕ песочница"
         print(f"⚠️  SECURITY: воркеры под --permission-mode bypassPermissions: {note}. "
-              "Ограничить: --perm acceptEdits/default или изолировать хост.", file=sys.stderr)
+              "Это НЕ дефолт с 25.07.2026 — дефолт `auto` (воркер докладывает вместо "
+              "самовольного запуска). Вернуть штатное: убрать --perm/$WORKER_PERMISSION_MODE.",
+              file=sys.stderr)
+
+    # model=="inherit" тихо снимает --model -> воркер берёт то, что зарезолвит CLI/аккаунт
+    # (настройка сессии, settings.json, дефолт версии). Это НЕ обязательно Sonnet: в проектном
+    # .claude/settings.json стоит "model": "opus", а алиас opus резолвится в Opus 5 ($5/$25
+    # против $3/$15 у Sonnet 5). Несколько воркеров под inherit = непредсказуемая цена прогона.
+    if model == "inherit":
+        print("⚠️  model=inherit → модель воркера не зафиксирована: её выберет CLI/аккаунт "
+              "(в этом проекте settings.json пиннит 'opus' → Opus 5, $5/$25 против $3/$15 "
+              "у Sonnet 5). Укажи --model явно, если нужна предсказуемая цена прогона.",
+              file=sys.stderr)
 
     # Soft concurrency cap (quota guard).
     if not dry_run and not allow_over_cap:
@@ -670,15 +883,24 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
             raw = _validate_first_msg(name)
             mem = _memory_block()
             message = _PREAMBLE + mem + _TASK_HEADER + raw
+            # Id сессии назначаем МЫ, а не CLI: тогда транскрипт лежит по вычислимому пути
+            # ~/.claude/projects/<slug(worktree)>/<session-id>.jsonl (см. _find_worker_transcript)
+            # и его же можно поднять через --resume в respond — без скана чужих транскриптов.
+            session_id = str(uuid.uuid4())
             if dry_run:
                 wt = _worktree_path(name)
                 exists = "exists" if wt.is_dir() else f"would create from {BASE_BRANCH}"
                 wm = _model_for_worker(name, model)
+                wb = _budget_for_worker(name, budget)
+                we = _effort_for_worker(name, DEFAULT_WORKER_EFFORT)
                 print(f"[dry-run:spawn:{name}] worktree {wt} ({exists}); "
                       f"prompt {len(message)} chars (pitfalls {len(mem)}); "
-                      f"perm={perm}; model={wm}; "
+                      f"perm={perm}; model={wm}; budget=${wb}; effort={we}; "
                       f"mcp={_mcp_config_for_worker(name).name}; "
                       f"guard={'on' if _guard_enabled() else 'off'}; cli={claude_cli}")
+                print(f"[dry-run:spawn:{name}] launch: "
+                      + _claude_cmdline(name, claude_cli, perm, wm, wb, we,
+                                        session_id=session_id))
                 continue
             if mem:
                 print(f"[spawn:{name}] memory: pitfalls injected ({len(mem)} chars) "
@@ -690,7 +912,10 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
             _commit_scaffold(name, wt)
             _prime_trust(wt)
             worker_model = _model_for_worker(name, model)
-            launcher = _write_launcher(name, wt, message, claude_cli, perm, worker_model)
+            worker_budget = _budget_for_worker(name, budget)
+            worker_effort = _effort_for_worker(name, DEFAULT_WORKER_EFFORT)
+            launcher = _write_launcher(name, wt, message, claude_cli, perm, worker_model,
+                                       worker_budget, worker_effort, session_id=session_id)
             method = _launch_window(name, launcher)
             _set_worker_state(
                 name,
@@ -700,6 +925,9 @@ def cmd_spawn(names: list[str], dry_run: bool, max_concurrent: int,
                 prompt_chars=len(message),
                 launcher=str(launcher),
                 pid_file=str(PID_DIR / f"{name}.pid"),
+                # Ключ и к транскрипту, и к --resume в respond. Переспавн выдаёт НОВЫЙ id
+                # (старую сессию продолжать уже нечем) — поле перезаписывается осознанно.
+                session_id=session_id,
             )
             print(f"[spawn:{name}] launched ({method}). Watch its window, or run "
                   f"`status`/`tail {name}`.")
@@ -765,24 +993,90 @@ def cmd_stop(name: str) -> int:
 # ─── respond (answer a NEEDS-ORCHESTRATOR-ANSWER worker) ───────────────────────
 
 
+def _archive_answer(name: str, answer: str, ts: str) -> Path | None:
+    """Аудит-копия ответа оркестратора в coordination/orchestrator-answers/."""
+    try:
+        ans_dir = COORD_DIR / "orchestrator-answers"
+        ans_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        path = ans_dir / f"{stamp}_{name}.md"
+        path.write_text(f"# Answer to {name} @ {ts}\n\n{answer}\n", encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
 def cmd_respond(name: str, answer: str, dry_run: bool, perm: str, model: str) -> int:
-    """Answer a worker that wrote NEEDS-ORCHESTRATOR-ANSWER. Headless workers
-    exit when they need a decision, so 'answering' = append the orchestrator's
-    answer to the worker's first-message and re-spawn it in the SAME worktree
-    (its prior commits are preserved on the branch). The worker resumes with
-    the answer + a pointer to its own status file."""
+    """Answer a worker that wrote NEEDS-ORCHESTRATOR-ANSWER. Headless workers exit
+    when they need a decision, so 'answering' = поднять ТУ ЖЕ сессию воркера через
+    `claude --resume <session-id>` и подать ответ очередной репликой: контекст сессии
+    (что уже прочитано/сделано) сохраняется, а преамбула + pitfalls + задача НЕ
+    отправляются и НЕ оплачиваются второй раз.
+    Фолбэк для воркеров, спавненных до появления session_id в состоянии, — прежнее
+    поведение: дописать ответ в first-msg и переспавнить с нуля."""
     msg_path = _first_msg_path(name)
     if not msg_path.is_file():
         print(f"[respond:{name}] no first-message at {msg_path}", file=sys.stderr)
         return 1
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
-    block = (
-        f"\n\n## Ответ оркестратора ({ts})\n"
-        f"{answer}\n\n"
-        f"Продолжи с того места, где остановился: прочитай свой "
-        f"coordination/{name}-status.md, учти ответ выше и доведи задачу до "
-        f"STATE: COMPLETE.\n"
-    )
+    tail = (f"Продолжи с того места, где остановился: прочитай свой "
+            f"coordination/{name}-status.md, учти ответ выше и доведи задачу до "
+            f"STATE: COMPLETE.\n")
+    st = _get_worker_state(name)
+    session_id = st.get("session_id")
+    wt = _worktree_path(name)
+    if session_id and not wt.is_dir():
+        print(f"[respond:{name}] session_id есть, но worktree {wt} отсутствует — "
+              f"resume невозможен, переспавниваю.", file=sys.stderr)
+        session_id = None
+
+    if session_id:
+        claude_cli = _find_claude_cli()
+        if not claude_cli:
+            print("[respond] claude CLI not found. Set $CLAUDE_CLI or install Claude Code.",
+                  file=sys.stderr)
+            return 1
+        prompt = f"Ответ оркестратора ({ts}):\n\n{answer}\n\n{tail}"
+        if dry_run:
+            print(f"[dry-run:respond:{name}] would resume session {session_id} "
+                  f"with a {len(prompt)}-char reply (first-msg НЕ трогаем).")
+            print(f"[dry-run:respond:{name}] launch: "
+                  + _claude_cmdline(name, claude_cli, perm,
+                                    _model_for_worker(name, model),
+                                    _budget_for_worker(name, DEFAULT_WORKER_BUDGET_USD),
+                                    _effort_for_worker(name, DEFAULT_WORKER_EFFORT),
+                                    session_id=session_id, resume=True))
+            return 0
+        # Старый процесс/окно надо погасить: сессию нельзя вести из двух claude сразу.
+        _stop_worker(name)
+        audit = _archive_answer(name, answer, ts)
+        launcher = _write_launcher(
+            name, wt, prompt, claude_cli, perm,
+            _model_for_worker(name, model),
+            _budget_for_worker(name, DEFAULT_WORKER_BUDGET_USD),
+            _effort_for_worker(name, DEFAULT_WORKER_EFFORT),
+            session_id=session_id, resume=True)
+        method = _launch_window(name, launcher)
+        # ЖУРНАЛ ответа при resume ведём в состоянии воркера + аудит-файле, а НЕ в first-msg:
+        # first-msg — это промпт СПАВНА, и дописанный туда ответ уехал бы в контекст ещё раз
+        # при любом будущем переспавне (ровно та переплата, которую resume и убирает).
+        _set_worker_state(
+            name,
+            resumed_at=datetime.now(timezone.utc).isoformat(),
+            resume_count=int(st.get("resume_count", 0)) + 1,
+            answers=list(st.get("answers", [])) + [
+                {"at": ts, "chars": len(answer), "audit": str(audit) if audit else None}],
+            spawn_method=method,
+            launcher=str(launcher),
+        )
+        print(f"[respond:{name}] resumed session {session_id} ({method}) — "
+              f"контекст сохранён, промпт спавна не переотправлялся.")
+        return 0
+
+    # ── фолбэк: воркер без session_id (спавнен до этой правки) ──
+    print(f"[respond:{name}] в состоянии нет session_id — resume невозможен, "
+          f"полный переспавн (промпт спавна оплачивается заново).", file=sys.stderr)
+    block = f"\n\n## Ответ оркестратора ({ts})\n{answer}\n\n{tail}"
     if dry_run:
         print(f"[dry-run:respond:{name}] would append {len(block)} chars to "
               f"{msg_path.name} and re-spawn.")
@@ -791,15 +1085,7 @@ def cmd_respond(name: str, answer: str, dry_run: bool, perm: str, model: str) ->
     _stop_worker(name)
     with msg_path.open("a", encoding="utf-8") as f:
         f.write(block)
-    # Record the answer for audit.
-    try:
-        ans_dir = COORD_DIR / "orchestrator-answers"
-        ans_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        (ans_dir / f"{stamp}_{name}.md").write_text(
-            f"# Answer to {name} @ {ts}\n\n{answer}\n", encoding="utf-8")
-    except OSError:
-        pass
+    _archive_answer(name, answer, ts)
     print(f"[respond:{name}] answer appended; re-spawning worker...")
     return cmd_spawn([name], dry_run=False, max_concurrent=DEFAULT_MAX_CONCURRENT,
                      allow_over_cap=True, perm=perm, model=model)
@@ -809,9 +1095,21 @@ def cmd_respond(name: str, answer: str, dry_run: bool, perm: str, model: str) ->
 
 
 def _find_worker_transcript(name: str) -> Path | None:
-    """Find this worker's JSONL by matching the `cwd` field (== worktree) or the
-    unique scope-marker in the first user message. Scans ALL project dirs since
-    the Windows project-slug is hard to predict from the path."""
+    """Путь к JSONL воркера. Сначала — ДЕТЕРМИНИРОВАННО: мы сами назначили сессии uuid при
+    спавне (--session-id), а CLI кладёт транскрипт файлом `<session-id>.jsonl`. Имя файла
+    уникально, поэтому ищем ОДНИМ glob по каталогам проектов — без вычисления имени каталога.
+
+    Правило слага каталога (как CLI превращает путь в имя папки) не документировано; выводить
+    его реверс-инжинирингом значило бы построить «детерминированный» путь на самом хрупком
+    звене: смена правила молча вернула бы нас к сканированию десятков чужих транскриптов.
+
+    Фолбэк-скан ниже — только для воркеров, спавненных до появления session_id: матчим по полю
+    `cwd` (== worktree) или по уникальному scope-маркеру в первом user-сообщении."""
+    session_id = _get_worker_state(name).get("session_id")
+    if session_id:
+        direct = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
+        if direct is not None:
+            return direct
     wt_key = _norm(_worktree_path(name))
     scope_marker = f"coordination/{name}-scope.md"
     if not CLAUDE_PROJECTS_DIR.is_dir():
@@ -1013,8 +1311,11 @@ def cmd_status(names: list[str]) -> int:
     print(header)
     print("-" * len(header))
     counts: dict[str, int] = {}
-    for name in names:
-        r = _status_row(name)
+    # Один _status_row на воркера (каждый сканит до 80 JSONL-транскриптов) — раньше
+    # звали дважды на воркера ради "done" ниже, на 10 воркерах = 20 полных сканов каталога.
+    rows = [_status_row(name) for name in names]
+    for r in rows:
+        name = r["name"]
         g, s, state = r["git"], r["summary"], r["state"]
         counts[state] = counts.get(state, 0) + 1
         activity = _human_age(s.last_activity_ts) if (s and s.last_activity_ts) else "—"
@@ -1027,8 +1328,8 @@ def cmd_status(names: list[str]) -> int:
     print("Total: " + str(len(names)) + "  |  "
           + "  ".join(f"{k}:{v}" for k, v in sorted(counts.items())))
     # LOUD reminder: COMPLETE workers not yet integrated.
-    done = [n for n in names if "COMPLETE" in _status_row(n)["state"]
-            and _worktree_path(n).is_dir()]
+    done = [r["name"] for r in rows if "COMPLETE" in r["state"]
+            and _worktree_path(r["name"]).is_dir()]
     if done:
         print("\n⚠️  COMPLETE и не интегрированы: " + ", ".join(done))
         print("    integrate: python spawn_workers.py integrate <name>")
@@ -1300,6 +1601,7 @@ def cmd_integrate(name: str, dry_run: bool) -> int:
         gate = subprocess.run(
             [sys.executable, str(REPO_ROOT / "acceptance_gate.py"), "check", name],
             cwd=str(REPO_ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",  # вывод гейта русский и его тут же печатают
         )
         if gate.stdout:
             print(gate.stdout.rstrip())
@@ -1482,6 +1784,25 @@ def cmd_health() -> int:
     checks: list[tuple[str, bool, str]] = []
     cli = _find_claude_cli()
     checks.append(("claude CLI", bool(cli), cli or "NOT FOUND — set $CLAUDE_CLI"))
+    # Версия резолвнутого бинаря: на машине есть ВТОРОЙ, устаревший claude.exe
+    # (C:/Users/aidzm/.local/bin/claude.exe, 2.1.173) — если PATH подхватит его вместо
+    # актуального, manual/--forward-subagent-text на вложенных сабагентах не заработают.
+    cli_version = ""
+    version_ok = False
+    if cli:
+        try:
+            vproc = subprocess.run([cli, "--version"], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", check=False, timeout=10)
+            cli_version = (vproc.stdout or vproc.stderr).strip()
+            # bool(cli_version) недостаточно: except ниже тоже кладёт непустую строку,
+            # и реальный сбой получения версии показывался бы зелёной галочкой.
+            version_ok = vproc.returncode == 0 and bool(cli_version)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            cli_version = f"err: {e}"
+    checks.append(("claude --version", version_ok,
+                   f"{cli_version} (режим manual — с 2.1.200; проброс текста ВЛОЖЕННЫХ "
+                   f"сабагентов через --forward-subagent-text — с 2.1.219)"
+                   if version_ok else (cli_version or "не удалось получить версию")))
     gw = _git_run(["worktree", "list"], cwd=REPO_ROOT)
     checks.append(("git worktree", gw.returncode == 0,
                    f"{len(gw.stdout.splitlines())} worktree(s)" if gw.returncode == 0 else gw.stderr.strip()))
@@ -1508,8 +1829,9 @@ def cmd_health() -> int:
     print("=== spawn_workers HEALTH (Windows) ===")
     all_ok = True
     for label, ok, detail in checks:
-        # wt.exe + .venv are non-fatal
-        fatal = label not in ("wt.exe (Windows Terminal)", ".venv python", f"on {BASE_BRANCH}")
+        # wt.exe + .venv + version-lookup are non-fatal
+        fatal = label not in ("wt.exe (Windows Terminal)", ".venv python", f"on {BASE_BRANCH}",
+                              "claude --version")
         print(f"  {'✓' if ok else '✗'}  {label:30s}  {detail}")
         if not ok and fatal:
             all_ok = False
@@ -1539,11 +1861,20 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--all", action="store_true", help="spawn every worker with a first-msg")
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--perm", default=DEFAULT_PERMISSION_MODE,
-                    choices=["auto", "acceptEdits", "bypassPermissions", "default"],
+                    # CC 2.1.200 переименовал режим "default" в "manual". Старое имя
+                    # ПРОДОЛЖАЕТ приниматься CLI как алиас (проверено на 2.1.219: оно просто
+                    # не показывается в --help), поэтому оставляем его в choices ради обратной
+                    # совместимости со старыми скриптами и текстами — но нормализуем в manual,
+                    # чтобы в лаунчер и в логи уходило одно каноническое имя.
+                    choices=["auto", "acceptEdits", "bypassPermissions", "manual", "default",
+                             "dontAsk", "plan"],
                     help=f"claude --permission-mode (default {DEFAULT_PERMISSION_MODE})")
     sp.add_argument("--model", default=DEFAULT_WORKER_MODEL,
                     help=f"claude --model for workers (default {DEFAULT_WORKER_MODEL}; "
                          f"use 'inherit' for the account default)")
+    sp.add_argument("--budget-usd", default=DEFAULT_WORKER_BUDGET_USD, dest="budget_usd",
+                    help=f"claude --max-budget-usd per worker (default {DEFAULT_WORKER_BUDGET_USD}; "
+                         f"'0'/'off' disables the flag)")
     sp.add_argument("--max-concurrent", type=int, default=DEFAULT_MAX_CONCURRENT)
     sp.add_argument("--allow-over-cap", action="store_true")
 
@@ -1573,14 +1904,15 @@ def main(argv: list[str] | None = None) -> int:
     so = sub.add_parser("stop", help="kill a worker's process tree + close its window (keeps worktree+branch)")
     so.add_argument("name")
 
-    rs = sub.add_parser("respond", help="answer a NEEDS-ORCHESTRATOR-ANSWER worker: append answer to its first-msg + re-spawn")
+    rs = sub.add_parser("respond", help="answer a NEEDS-ORCHESTRATOR-ANSWER worker: resume its session (fallback: re-spawn)")
     rs.add_argument("name")
     rs.add_argument("answer", help="the orchestrator's answer/clarification text")
     rs.add_argument("--dry-run", action="store_true")
     rs.add_argument("--perm", default=DEFAULT_PERMISSION_MODE,
-                    choices=["auto", "acceptEdits", "bypassPermissions", "default"])
+                    choices=["auto", "acceptEdits", "bypassPermissions", "manual", "dontAsk", "plan"])
     rs.add_argument("--model", default=DEFAULT_WORKER_MODEL,
-                    help=f"claude --model for the re-spawned worker (default {DEFAULT_WORKER_MODEL})")
+                    help=f"claude --model for the resumed/re-spawned worker "
+                         f"(default {DEFAULT_WORKER_MODEL})")
 
     sub.add_parser("health", help="preflight check")
     sub.add_parser("list", help="list known workers")
@@ -1589,6 +1921,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd is None:
         p.print_help()
         return 1
+    # "default" -> "manual": CLI принимает оба, но каноническое имя с CC 2.1.200 — manual.
+    # Нормализуем в одной точке, чтобы в лаунчер, логи и state уходило одно значение.
+    if getattr(args, "perm", None) == "default":
+        args.perm = "manual"
     if args.cmd == "list":
         for n in _list_available():
             print(n)
@@ -1620,7 +1956,7 @@ def main(argv: list[str] | None = None) -> int:
             print("spawn: provide worker name(s) or --all", file=sys.stderr)
             return 1
         return cmd_spawn(names, args.dry_run, args.max_concurrent,
-                         args.allow_over_cap, args.perm, args.model)
+                         args.allow_over_cap, args.perm, args.model, args.budget_usd)
     p.print_help()
     return 1
 

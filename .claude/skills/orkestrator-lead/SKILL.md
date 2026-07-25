@@ -16,11 +16,13 @@ headless-автоном) в отдельном git-worktree. Ты держишь
 
 ## Как устроены воркеры (знай это)
 
-- Воркер = headless `claude --print --verbose --permission-mode bypassPermissions`
+- Воркер = headless `claude --print --verbose --permission-mode auto`
   в собственном worktree `..\crm-worker-<name>` на ветке `<name>` от `main`.
 - **Автоном**: воркер не ждёт Enter и не задаёт вопросов вживую. Если упёрся —
   пишет `STATE: NEEDS-ORCHESTRATOR-ANSWER` (или `BLOCKED`) в `coordination/<name>-status.md`
-  и завершается. Никогда не вызывает AskUserQuestion.
+  и завершается. Никогда не вызывает AskUserQuestion — в headless-режиме (`--print`) инструмент
+  НЕДОСТУПЕН и возвращает «This tool requires user approval and is unavailable in unsupervised
+  mode»: воркер зависает (за 45 дней поймано 23 раза).
 - **Контракт воркера** — `coordination/worker-engineering-standards.md` (копируется в
   каждый worktree, вшивается в первое сообщение). Принципы:
   - **Karpathy 5-step LOOP**: Think → Test → Validate → Wire → Review → (если RED) назад.
@@ -29,8 +31,20 @@ headless-автоном) в отдельном git-worktree. Ты держишь
   - Audit-first, six-layer в теле коммита, STR для нетривиальной отладки.
   - Финальный баннер `STATE: COMPLETE` только когда всё зелёное (`pytest` = 0, импорты ок).
 - **Наблюдение** — через JSONL-транскрипт (`~/.claude/projects/...`), его читают `status`/`tail`.
-- ⚠️ **bypassPermissions** — осознанное решение оператора (воркер выполняет любые команды;
-  worktree НЕ песочница). См. `coordination/README.md` §Безопасность. Понизить: `--perm acceptEdits`.
+- ⚠️ **Права: `auto` (деф. с 25.07.2026)** — воркер не выполняет опасное самовольно: вызов
+  отклоняется, воркер доводит остальное и докладывает. Проверено живыми прогонами — он при этом
+  НЕ виснет и НЕ падает. Гард `claude_guard_hook.py` остаётся вторым слоем: режет катастрофу и
+  текстом велит доложить `КООРД: BLOCKED`. Значит **часть задач штатно вернётся с «нужно
+  разрешение»** — это не сбой воркера, а вопрос к оператору. Прежнее поведение (воркер выполняет
+  любые команды, worktree НЕ песочница) — `--perm bypassPermissions`. См. `coordination/README.md`
+  §Безопасность.
+
+## Когда воркер, а когда нативный фоновый сабагент
+
+Развилка уже расписана в `coordination/README.md` (раздел «Что выбрать») — сверяйся туда.
+Коротко: scoped-задача на одну сессию → нативный `Agent(run_in_background, isolation:"worktree")`
++ `SendMessage`/`TaskGet`/`TaskStop`, без отдельного окна. Многочасовая полоса, отдельное окно,
+переживание смерти координатора, pitfalls-инъекция, интеграция через boot-smoke → `spawn_workers.py`.
 
 ## Твой цикл оркестрации
 
@@ -116,4 +130,11 @@ headless-автоном) в отдельном git-worktree. Ты держишь
 - Не оставляй COMPLETE-воркеров неинтегрированными — `status` подсвечивает это.
 - 🔴 STALE: глянь `tail`, реши — `respond` (если ждёт), либо `stop`+пере-`spawn`.
 - Не повышай конкурентность бездумно — каждый воркер жрёт ту же квоту аккаунта.
+- ⚠️ С CC 2.1.219 сабагенты по умолчанию спавнят вложенных до глубины 3 — каждый воркер может
+  развернуть своё дерево агентов, поэтому расход на N воркеров выше наивной оценки;
+  `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` ЗАПРЕЩАЕТ воркеру вложенный спавн — `spawn_workers.py`
+  выставляет это воркерам ПО УМОЛЧАНИЮ (переопределяется `WORKER_SUBAGENT_DEPTH`), ширину задаёт
+  `WORKER_MAX_SUBAGENTS` (по умолчанию 4). Внутрисессионный лимит одновременных сабагентов — 20
+  (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`). «Лимит 5» из §3 считает ОКНА-процессы воркеров, а не
+  сабагентов.
 - Доказательства, не «вроде работает»: смотри `tail`/`status`/boot-smoke, прежде чем закрывать задачу.

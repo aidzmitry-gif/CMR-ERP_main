@@ -21,7 +21,8 @@
 - `pytest` (или `pytest tests/<твой-скоуп> -x`) возвращает 0;
 - импорты резолвятся (`import main` не падает);
 - six-layer присутствует в теле коммита;
-- роли STR задокументированы (для нетривиальной отладки).
+- роли STR задокументированы (для нетривиальной отладки);
+- прогнан ЯВНО `/code-review` (фоновый сабагент — дождаться findings) → `/simplify`, потому что Claude сам эти команды не запускает с 2.1.215.
 
 Single-pass РЕДЖЕКТ. Лечи болезнь, а не симптом: если Review показал симптом-патч — вернись к Think с более глубокой причиной.
 
@@ -41,6 +42,7 @@ Single-pass РЕДЖЕКТ. Лечи болезнь, а не симптом: е�
 
 Ты запущен в собственном окне Windows Terminal. Работай **автономно**, не жди ввода от пользователя.
 Нужен ответ оркестратора — напиши `NEEDS-ORCHESTRATOR-ANSWER` в status-файле. **Никогда не вызывай AskUserQuestion.**
+В headless-режиме (`claude --print`) этот инструмент НЕДОСТУПЕН и возвращает «This tool requires user approval and is unavailable in unsupervised mode» — воркер зависает. За 45 дней это ловилось 23 раза.
 
 ---
 
@@ -61,13 +63,16 @@ permissions:
   repo: write-branch       # read-only / write-branch / write-main (ЗАПРЕЩЕНО)
   db: read-only            # read-only / write
   llm: enabled
-model: sonnet              # тир: haiku=механика / sonnet=код / opus=архитектура / inherit
+model: sonnet              # тир: haiku 4.5=механика / sonnet 5=код / opus 5=архитектура-деньги-схема / inherit
+effort: medium             # low механика / medium фича / high ревью-деньги / xhigh архитектура. ⚠ дефолт Claude Code для sonnet 5 и opus 5 = high — на механике понижать ЯВНО
 mcp: none                  # none (по умолчанию) / serena — семантич. навигация по символам
 budget:
   max_iterations: 5
   max_runtime_minutes: 30
   max_files_changed: 10
   max_consecutive_test_failures: 3
+  max_usd: 3                # прокидывается в --max-budget-usd, реально останавливает в т.ч. фоновых сабагентов (CC 2.1.217)
+  max_subagent_spawn_depth: 1  # =1 ЗАПРЕЩАЕТ воркеру спавнить вложенных сабагентов (дефолт платформы — глубина 3, CC 2.1.219); spawn_workers.py выставляет это воркерам ПО УМОЛЧАНИЮ (переопределяется env WORKER_SUBAGENT_DEPTH), ширину задаёт WORKER_MAX_SUBAGENTS (по умолчанию 4)
 stop:                      # обязательные условия остановки
   - same_failure_seen_twice
   - acceptance_gate_red_after_3_iters

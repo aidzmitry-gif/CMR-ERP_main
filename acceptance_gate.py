@@ -41,8 +41,18 @@ CMD_TIMEOUT = 600
 
 
 def _project_dir() -> Path:
+    """Каталог проекта: расположение самого хука, а не CLAUDE_PROJECT_DIR на веру.
+    Полное обоснование — в claude_pushlog_hook.py (там цена ошибки нагляднее всего)."""
+    here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
-    return Path(env) if env else Path(__file__).resolve().parent
+    if env:
+        p = Path(env)
+        try:
+            if p.resolve() == here or (p / "coordination").is_dir():
+                return p
+        except OSError:
+            pass
+    return here
 
 
 def _utf8_stdio() -> None:

@@ -47,12 +47,17 @@ B_GUARD = os.environ.get("TG_B_GUARD", "1") not in ("0", "false", "False")
 
 
 def _ensure_guard_settings() -> str | None:
-    """Записать (один раз) settings-файл с PreToolUse-гардом и вернуть путь."""
+    """Записать (один раз) settings-файл с PreToolUse-гардом и вернуть путь.
+
+    Список инструментов берём из claude_guard_hook.GUARD_MATCHER, а не копируем: копия здесь
+    отстала на PowerShell, и удалённые B-сессии (Telegram, headless, STRICT-тир) исполняли
+    PowerShell вообще без гарда — при том, что именно ради «удалённого шелла» гард и писался.
+    """
     if not (B_GUARD and GUARD_HOOK.is_file()):
         return None
     cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
     cfg = {"hooks": {"PreToolUse": [{
-        "matcher": "Bash|Edit|Write|MultiEdit|Read|NotebookEdit",
+        "matcher": sw._guard_matcher(),
         "hooks": [{"type": "command", "command": cmd}],
     }]}}
     try:
