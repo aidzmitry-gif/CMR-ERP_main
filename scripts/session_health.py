@@ -26,6 +26,7 @@ import re
 import socket
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 STALE_MARKS_DAYS = 3.0   # авто-метки старше — считаем протухшими
@@ -33,11 +34,8 @@ STALE_ACTIVE_DAYS = 1.0  # ACTIVE-SESSIONS.md старше — флот-обзо
 
 
 def _project_dir() -> Path:
-    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
-    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
-    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
-    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
-    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    """Каталог проекта: расположение самого хука, а не CLAUDE_PROJECT_DIR на веру.
+    Полное обоснование — в claude_pushlog_hook.py (там цена ошибки нагляднее всего)."""
     here = Path(__file__).resolve().parent.parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
@@ -79,8 +77,12 @@ def main() -> int:
     lines: list[str] = []
     stale: list[str] = []
 
-    be = _port_open(8000)
-    fe = _port_open(3210)
+    # Две независимые пробы — параллельно: это SessionStart, задержка видна оператору.
+    # Последовательно верхняя граница складывалась (0.4с + 0.4с), когда порт не отвечает
+    # отказом сразу, а молчит (фаервол/зависший биндинг).
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        be_f, fe_f = pool.submit(_port_open, 8000), pool.submit(_port_open, 3210)
+        be, fe = be_f.result(), fe_f.result()
     lines.append(
         f"dev-серверы: backend :8000 {'OK' if be else 'DOWN'} · frontend :3210 {'OK' if fe else 'DOWN'}"
         + ("" if be and fe else " (поднять: конфигурации из .claude/launch.json)")

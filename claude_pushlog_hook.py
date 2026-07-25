@@ -166,20 +166,23 @@ def main() -> int:
     if pushed_sha and _git(git_cwd, "rev-parse", "--verify", "--quiet", pushed_sha + "^{commit}"):
         ref = pushed_sha  # коммит есть в локальном репо — логируем именно его
 
-    head = _git(git_cwd, "log", "-1", "--format=%h\t%s", ref)
+    # hash + subject + дата одним вызовом: раньше на тот же ref шло два отдельных `git log -1`,
+    # различавшихся только --format (лишний спавн процесса на каждый пуш).
+    # Дату берём из git — в хуке нет надёжного локального времени без побочек.
+    head = _git(git_cwd, "log", "-1", "--format=%h\t%s\t%ci", ref)
     if not head:
         return 0  # нечего записать — не шумим
     files = _git(git_cwd, "show", "--name-only", "--format=", ref)
     branch = pushed_branch or _git(git_cwd, "rev-parse", "--abbrev-ref", "HEAD")
 
-    h, _, subj = head.partition("\t")
+    h, _, rest = head.partition("\t")
+    subj, _, iso = rest.rpartition("\t")  # subject может содержать \t — режем справа
+    when = iso[:16] or "—"
     flist = [f for f in files.splitlines() if f.strip()]
     shown = ", ".join(flist[:MAX_FILES])
     if len(flist) > MAX_FILES:
         shown += f" … (+{len(flist) - MAX_FILES})"
 
-    # дату берём из git (в хуке нет надёжного локального времени без побочек), иначе — пусто
-    when = _git(git_cwd, "log", "-1", "--format=%ci", ref)[:16] or "—"
     sid = _session_id(data)
     line = f"- `{when}` · сессия `{sid}` · ветка `{branch or '?'}` · **{h}** {subj}\n  файлы: {shown or '—'}\n"
 

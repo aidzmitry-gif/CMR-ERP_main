@@ -57,18 +57,11 @@ from pathlib import Path
 STRICT = os.environ.get("CLAUDE_GUARD_STRICT", "") not in ("", "0", "false", "False")
 DENY_LOG = Path(__file__).resolve().parent / "coordination" / ".tg-guard-denied.jsonl"
 
-# Имя секретных путей: .env (но не .env.example/.sample/.template), приватные ключи,
-# токен подписки Claude, сервис-аккаунты. Эти ссылки в shell/файл-инструменте = стоп.
-_SECRET_FILE = re.compile(
-    r"""(?ix)
-    (^|[\\/\s'"=@(])\.env(?!\.(example|sample|template|dist))(\b|['"]|$)
-    | id_rsa | id_ed25519 | id_ecdsa
-    | [\\/]\.ssh(?![\w.])          # и сам каталог (`scp -r ~/.ssh`), и файлы в нём
-    | \.claude\.json
-    | service[-_]account | [-_]credentials\.json
-    | \.(pem|p12|pfx)(\b|['"]|$)
-    """,
-)
+# Инструменты, на которые вешается гард. ОДИН источник истины: строку читают генераторы
+# settings-файлов для воркеров (spawn_workers.py) и для удалённых B-сессий (tg_sessions.py).
+# Раньше список жил четырьмя копиями, и PowerShell доехал не во все — самый рискованный
+# путь (Telegram, headless, STRICT) оставался без покрытия при докстринге, обещавшем обратное.
+GUARD_MATCHER = "Bash|PowerShell|Edit|Write|MultiEdit|Read|NotebookEdit"
 
 # Имена защищаемых файлов (для файл-инструментов Edit/Write/MultiEdit — это путь цели,
 # поэтому достаточно совпадения подстрокой). Для Bash используется узкий _GUARD_WRITE.
@@ -173,6 +166,11 @@ _SECRET_PATH = r"""
       | service[-_]account | [-_]credentials\.json
       | \.(pem|p12|pfx)(\b|['"]|$) )
 """
+
+# Тот же список путей — для файловых инструментов (Read/Edit/Write). ОДНА декларация:
+# раньше здесь и у шапки лежали две дословные копии, и любой новый секрет рисковал
+# попасть только в одну из них.
+_SECRET_FILE = re.compile(r"(?ix)" + _SECRET_PATH)
 
 _SECRET_READ = re.compile(
     r"""(?ix)

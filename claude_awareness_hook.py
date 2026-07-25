@@ -35,11 +35,8 @@ PUSHLOG_TAIL_PUSH = 8  # строк PUSH-LOG перед push/commit
 
 
 def _project_dir() -> Path:
-    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
-    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
-    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
-    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
-    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    """Каталог проекта: расположение самого хука, а не CLAUDE_PROJECT_DIR на веру.
+    Полное обоснование — в claude_pushlog_hook.py (там цена ошибки нагляднее всего)."""
     here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:

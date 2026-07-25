@@ -55,11 +55,8 @@ def _read_stdin() -> dict:
 
 
 def _project_dir() -> Path:
-    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
-    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
-    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
-    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
-    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    """Каталог проекта: расположение самого хука, а не CLAUDE_PROJECT_DIR на веру.
+    Полное обоснование — в claude_pushlog_hook.py (там цена ошибки нагляднее всего)."""
     here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
@@ -129,16 +126,17 @@ def _check_foreign_touched(proj: Path, sid: str, file_path: str) -> None:
     now = time.time()
     coord = proj / "coordination"
     try:
-        ledgers = list(coord.glob(".touched-*.txt"))
+        # СВОИ реестры — теми же двумя точными шаблонами, что и в claude_stop_hook.py
+        # (`_all_ledgers`): свой + сабагентские `<sid>-<agent>`. Схемы имён обязаны
+        # совпадать, поэтому и техника одинаковая — рассинхрон тут не шумит, а тихо
+        # блокирует правку собственных файлов или, наоборот, пропускает чужие.
+        own = set(coord.glob(f".touched-{sid}.txt")) | set(coord.glob(f".touched-{sid}-*.txt"))
+        ledgers = [lg for lg in coord.glob(".touched-*.txt") if lg not in own]
     except Exception:
         return
     for ledger in ledgers:
         try:
-            owner = ledger.stem.replace(".touched-", "")
-            # владелец — либо сама сессия (owner == sid), либо её сабагент
-            # (owner == "<sid>-<agent>"): в обоих случаях это НЕ чужой файл
-            if owner == sid or owner.startswith(f"{sid}-"):
-                continue
+            owner = ledger.stem[len(".touched-"):]
             if (now - ledger.stat().st_mtime) > TOUCHED_FRESH_HOURS * 3600:
                 continue
             lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()

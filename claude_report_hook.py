@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -32,12 +33,8 @@ MARKER = re.compile(
 
 
 def _project_dir() -> Path:
-    import os
-    """Каталог проекта. Хук ЛЕЖИТ в проекте, который обслуживает, поэтому его собственное
-    расположение — источник истины. CLAUDE_PROJECT_DIR принимаем, только если он указывает на
-    проект (есть coordination/) — это случай worktree воркера. Сессия, запущенная из
-    каталога-родителя, отдаёт в этой переменной путь родителя: раньше хуки искали бы там
-    coordination/ и не находили, а pushlog писал бы PUSH-LOG.md в чужой каталог."""
+    """Каталог проекта: расположение самого хука, а не CLAUDE_PROJECT_DIR на веру.
+    Полное обоснование — в claude_pushlog_hook.py (там цена ошибки нагляднее всего)."""
     here = Path(__file__).resolve().parent
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
@@ -60,12 +57,20 @@ def _read_stdin() -> dict:
         return {}
 
 
-def _last_assistant_text(transcript: Path) -> str:
-    """Текст последнего сообщения ассистента из jsonl-транскрипта."""
+def _recent_assistant_texts(transcript: Path, n: int = 6) -> list[str]:
+    """Тексты последних n сообщений ассистента, новейшие первыми.
+
+    Один проход файла на всё: раньше рядом жила ещё `_last_assistant_text`, читавшая ТОТ ЖЕ
+    транскрипт вторым чтением. Хук висит на Stop, транскрипт длинной сессии — многие мегабайты,
+    а fallback «последний ход был tooling, маркер выше по истории» — обычный случай, не редкий:
+    второе чтение случалось на большинстве ходов. Первый элемент списка = бывший
+    `_last_assistant_text`, поэтому поведение не изменилось.
+    """
     try:
         lines = transcript.read_text(encoding="utf-8-sig", errors="replace").splitlines()
     except OSError:
-        return ""
+        return []
+    out: list[str] = []
     for ln in reversed(lines):  # с конца — первое assistant-сообщение и есть последнее
         ln = ln.strip()
         if not ln:
@@ -77,38 +82,6 @@ def _last_assistant_text(transcript: Path) -> str:
         if obj.get("type") != "assistant":
             continue
         if obj.get("isSidechain") is True:  # сабагент (--forward-subagent-text) — не доклад полосы
-            continue
-        msg = obj.get("message") or {}
-        content = msg.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts = [b.get("text", "") for b in content
-                     if isinstance(b, dict) and b.get("type") == "text"]
-            return "\n".join(p for p in parts if p)
-        return ""
-    return ""
-
-
-def _recent_assistant_texts(transcript: Path, n: int = 6) -> list[str]:
-    """Тексты последних n сообщений ассистента (новейшие первыми) — fallback, если
-    последний ход = tooling (assistant без text-блока), а маркер КООРД: выше по истории."""
-    try:
-        lines = transcript.read_text(encoding="utf-8-sig", errors="replace").splitlines()
-    except OSError:
-        return []
-    out: list[str] = []
-    for ln in reversed(lines):
-        ln = ln.strip()
-        if not ln:
-            continue
-        try:
-            obj = json.loads(ln)
-        except json.JSONDecodeError:
-            continue
-        if obj.get("type") != "assistant":
-            continue
-        if obj.get("isSidechain") is True:  # сабагент — не доклад полосы
             continue
         content = (obj.get("message") or {}).get("content")
         if isinstance(content, str):
@@ -144,11 +117,12 @@ def main() -> int:
     def _extract(t: str) -> list[str]:
         return [f"{m.group(1)} {m.group(2).strip()}".strip() for m in MARKER.finditer(t)]
 
-    markers = _extract(_last_assistant_text(Path(tpath)) or "")
-    if not markers:  # fallback: последний ход мог быть tooling (без text) — ищем выше по истории
-        for t in _recent_assistant_texts(Path(tpath), 6):
-            if (markers := _extract(t)):
-                break
+    # Одно чтение транскрипта: последнее assistant-сообщение идёт первым, и если в нём маркера
+    # нет (ход закончился вызовом инструмента), продолжаем вверх по истории тем же списком.
+    markers: list[str] = []
+    for t in _recent_assistant_texts(Path(tpath), 6):
+        if (markers := _extract(t)):
+            break
     if not markers:
         return 0
 
