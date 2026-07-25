@@ -104,11 +104,11 @@ DEFAULT_MAX_CONCURRENT = int(os.environ.get("WORKER_MAX_CONCURRENT", "5"))
 # ⚠️ Лимит НЕ спасает работу: по достижении потолка воркер обрывается на полуслове —
 # деньги потрачены, результата нет. Поэтому потолок ставится ВЫШЕ типовой задачи, а не
 # «поэкономнее». Замер по 29 прошлым воркерам (scripts/session_costs.py, 25.07.2026):
-# медиана $4.5, 90-й перцентиль $27.6, максимум $117.8 (тот был на Opus 4.8 — $15/$75).
-# На нынешнем дефолте Sonnet 5 самый дорогой воркер стоил $17. Стоявшие здесь "3"
-# обрывали бы примерно каждого второго. 20 закрывает практически всех и при этом
-# режет разгон вроде того $117 на четверти пути.
-DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "20")
+# медиана $4.8, 90-й перцентиль $33.0, максимум $127.3 (тот был на Opus 4.8 — $15/$75).
+# На нынешнем дефолте Sonnet самый дорогой воркер стоил $19.8 — поэтому 20 мало (обрывало бы
+# ровно на последнем шаге), а стоявшие тут изначально "3" рубили бы каждого второго.
+# 25 закрывает всех наблюдённых Sonnet-воркеров и режет разгон вроде того $127 на пятой части.
+DEFAULT_WORKER_BUDGET_USD = os.environ.get("WORKER_BUDGET_USD", "25")
 
 # Model for workers. Workers do scoped, well-specified implementation work
 # (write a screen, a migration by the `sales` exemplar, tests) — Sonnet 5 handles
@@ -311,16 +311,48 @@ def _guard_matcher() -> str:
         return _GUARD_MATCHER_FALLBACK
 
 
-def _ensure_guard_settings() -> str | None:
-    """Записать settings-файл с PreToolUse-гардом (АБСОЛЮТНЫЕ пути к main-venv-python и
-    хуку — чтобы работало из любого worktree) и вернуть путь. None, если гард выключен."""
-    if not _guard_enabled():
-        return None
-    cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
-    cfg = {"hooks": {"PreToolUse": [{
-        "matcher": _guard_matcher(),
-        "hooks": [{"type": "command", "command": cmd}],
-    }]}}
+# Рабочий инструментарий воркера — то, без чего он не может СДАТЬ работу.
+#
+# Под `auto` (дефолт с 25.07.2026) `git add/commit/push` требуют одобрения, а одобрять в
+# headless некому: проверено живым прогоном — воркер отвечает «ожидаю подтверждения» и
+# возвращается с пустыми руками. Разрешающих правил ему взять неоткуда: `.claude/settings.json`
+# и `settings.local.json` в .gitignore, значит в свежий worktree не попадают. Поэтому список
+# едет вместе с гардом в том же --settings.
+#
+# Тут ТОЛЬКО довести задачу и отдать ветку. Всё прочее (сеть, установка пакетов, запись за
+# пределами worktree, любая незнакомая команда) остаётся под вопросом у `auto`, а катастрофа —
+# под гардом. `git push` разрешён намеренно: воркер пушит свою полосу, а `push --force` режет
+# гард отдельным правилом.
+WORKER_ALLOW = [
+    # git — чтение состояния
+    "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+    "Bash(git branch:*)", "Bash(git rev-parse:*)", "Bash(git rev-list:*)",
+    "Bash(git show-ref:*)", "Bash(git remote:*)",
+    # git — сдача работы
+    "Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)", "Bash(git fetch:*)",
+    "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git restore:*)", "Bash(git stash:*)",
+    # гейты качества
+    "Bash(pytest:*)", "Bash(python -m pytest:*)", "Bash(ruff check:*)",
+    "Bash(python -m ruff:*)", "Bash(alembic:*)",
+    "Bash(./.venv/Scripts/python.exe:*)", 'Bash(& ".\\.venv\\Scripts\\python.exe":*)',
+    "Bash(npm run:*)", "Bash(npx tsc:*)",
+]
+
+
+def _ensure_worker_settings() -> str | None:
+    """Settings-файл воркера: разрешающий список + PreToolUse-гард (АБСОЛЮТНЫЕ пути к
+    main-venv-python и хуку — чтобы работало из любого worktree). Возвращает путь.
+
+    Файл пишется ВСЕГДА, даже при WORKER_GUARD=0: без него воркер под `auto` не сможет
+    закоммитить и запушить. При выключенном гарде остаётся только разрешающая часть.
+    """
+    cfg: dict = {"permissions": {"allow": WORKER_ALLOW}}
+    if _guard_enabled():
+        cmd = f'"{sys.executable}" "{GUARD_HOOK}"'
+        cfg["hooks"] = {"PreToolUse": [{
+            "matcher": _guard_matcher(),
+            "hooks": [{"type": "command", "command": cmd}],
+        }]}
     try:
         GUARD_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         GUARD_SETTINGS.write_text(
@@ -638,11 +670,12 @@ def _claude_cmdline(name: str, claude_cli: str, perm: str, model: str, budget: s
     # за повторную отправку преамбулы/pitfalls/задачи.
     if session_id:
         parts += ["--resume" if resume else "--session-id", _psq(session_id)]
-    # PreToolUse deny-гард в сессию воркера (--settings) + строгий тир. Хардненинг под
-    # bypassPermissions: катастрофа режется до выполнения. Отключить — env WORKER_GUARD=0.
-    guard = _ensure_guard_settings()
-    if guard:
-        parts += ["--settings", _psq(guard)]
+    # Settings воркера (--settings): разрешающий список рабочего инструментария + PreToolUse
+    # deny-гард. Список ОБЯЗАТЕЛЕН под `auto` — иначе воркер не сможет закоммитить и запушить
+    # (см. WORKER_ALLOW). Гард режет катастрофу до выполнения; отключить — env WORKER_GUARD=0.
+    worker_settings = _ensure_worker_settings()
+    if worker_settings:
+        parts += ["--settings", _psq(worker_settings)]
     # "inherit" => no --model flag => worker uses the account default model.
     if model != "inherit":
         parts += ["--model", _psq(model)]

@@ -23,7 +23,10 @@ if hasattr(sys.stdout, "reconfigure"):
 _cfg = os.environ.get("CLAUDE_CONFIG_DIR")
 ROOT = (Path(_cfg) if _cfg else Path.home() / ".claude") / "projects"
 
-# $/Мтокен (вход, выход). Кэш-запись = 1.25× входа, кэш-чтение = 0.1× входа.
+# $/Мтокен (вход, выход). Кэш-чтение = 0.1× входа. Кэш-ЗАПИСЬ зависит от срока хранения:
+# 5-минутный = 1.25× входа, часовой = 2×. Разбивку даёт `usage.cache_creation`
+# (`ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`). Плоские 1.25× занижали расход:
+# сессии этого проекта идут с ЧАСОВЫМ кэшем, а это самая крупная статья в длинном диалоге.
 # Порядок важен: ключи проверяются подстрокой, "opus-5" должен идти раньше "opus-4".
 PRICES = {
     "opus-5": (5.0, 25.0), "fable-5": (10.0, 50.0),
@@ -33,12 +36,18 @@ PRICES = {
 WORKER_MARK = "crm-worker-"   # каталоги воркеров, поднятых spawn_workers.py
 
 
-def price(model: str) -> tuple[float, float]:
+UNKNOWN = "неизвестно"
+
+
+def model_key(model: str) -> str:
+    """Ключ прайса по имени модели из транскрипта; UNKNOWN, если не распознали."""
     m = (model or "").lower()
-    for key, val in PRICES.items():
-        if key in m:
-            return val
-    return (3.0, 15.0)  # неизвестная модель — считаем как Sonnet, чтобы не занижать
+    return next((k for k in PRICES if k in m), UNKNOWN)
+
+
+def price(model: str) -> tuple[float, float]:
+    # неизвестную модель считаем как Sonnet, чтобы не занижать расход
+    return PRICES.get(model_key(model), (3.0, 15.0))
 
 
 def session_cost(path: Path) -> tuple[float, str]:
@@ -57,8 +66,14 @@ def session_cost(path: Path) -> tuple[float, str]:
                     continue
                 pin, pout = price(msg.get("model", ""))
                 model_seen = msg.get("model", "") or model_seen
+                cc = u.get("cache_creation")
+                if isinstance(cc, dict):
+                    write = (cc.get("ephemeral_5m_input_tokens", 0) * 1.25
+                             + cc.get("ephemeral_1h_input_tokens", 0) * 2.0)
+                else:  # старые транскрипты без разбивки — считаем по 5-минутной ставке
+                    write = u.get("cache_creation_input_tokens", 0) * 1.25
                 total += (u.get("input_tokens", 0) * pin
-                          + u.get("cache_creation_input_tokens", 0) * pin * 1.25
+                          + write * pin
                           + u.get("cache_read_input_tokens", 0) * pin * 0.10
                           + u.get("output_tokens", 0) * pout) / 1_000_000
     except OSError:
@@ -101,7 +116,7 @@ def main() -> int:
 
     by_model: dict[str, float] = {}
     for cost, model, *_ in workers + manual:
-        key = next((k for k in PRICES if k in (model or "").lower()), "неизвестно")
+        key = model_key(model)
         by_model[key] = by_model.get(key, 0.0) + cost
     grand = sum(by_model.values()) or 1.0
     print("\n=== Расход по моделям (все сессии)")
