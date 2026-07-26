@@ -86,3 +86,6 @@ coordination/.tg-events.jsonl
 coordination/.tg-guard-denied.jsonl
 coordination/.guard-settings.json
 coordination/.guard-test-settings.json
+
+# Реестры тронутых файлов (claude_quality_hook.py -> claude_stop_hook.py), runtime
+coordination/.touched-*.txt
