@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     auth_mode: str = "dev"
     keycloak_issuer: str = ""    # https://<host>/realms/<realm>; пусто → oidc недоступен
     keycloak_audience: str = ""  # ожидаемый aud (client_id) в токене
+    # Keycloak Admin API для приглашений сотрудников. Используется service account
+    # отдельного confidential-client с realm-management правами; пароль bootstrap-admin
+    # приложению не передаём. Пустой набор → endpoint приглашений честно отвечает 503.
+    keycloak_admin_base_url: str = ""
+    keycloak_admin_realm: str = "aios"
+    keycloak_admin_client_id: str = ""
+    keycloak_admin_client_secret: str = ""
+    keycloak_invite_client_id: str = "aios-backend"
+    keycloak_invite_redirect_uri: str = ""
+    keycloak_invite_lifespan_seconds: int = 43_200
 
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False
