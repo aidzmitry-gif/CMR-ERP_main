@@ -9,6 +9,8 @@ const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 export const ROLE_COOKIE = "aios_role";
 /** Имя cookie с логином вошедшего сотрудника (dev-логин). */
 export const USER_COOKIE = "aios_user";
+/** Зарезервировано под httpOnly access token Keycloak; пока не ставится (часть 5 OIDC). */
+export const TOKEN_COOKIE = "aios_access_token";
 /** Роль по умолчанию (полный доступ) — fallback, если роль в cookie отсутствует. */
 export const DEFAULT_ROLE = "director";
 
