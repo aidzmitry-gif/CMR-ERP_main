@@ -12,6 +12,7 @@ from types import ModuleType
 from core.services import sku_master
 from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
+from core.services.bank import BankGateway
 from core.services.config import Settings, get_settings
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
@@ -45,6 +46,9 @@ class Services:
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None
     telephony: TelephonyGateway | None = None
+    # банковский шлюз (Альфа host-to-host): входящие зачисления клиентов → авто-проводка
+    # оплат в finance. Наполняет integrations; None — модуль не подключён.
+    bank: BankGateway | None = None
     # себестоимость партии (landed cost) — наполняет модуль procurement; None — не подключён
     landed_cost: LandedCostGateway | None = None
     # цена продажи + себестоимость из учётной системы (1С) — reference-backed (справочник/MDM,

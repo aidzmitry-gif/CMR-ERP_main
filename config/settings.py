@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     onec_base_url: str = ""
     # базовый URL сервиса ЕГР РБ (lookup реквизитов по УНП); пусто — mock-справочник
     egr_base_url: str = ""
+    # Альфа-Банк (host-to-host): входящие зачисления клиентов для авто-проводки оплат.
+    # Пусто → шлюз отдаёт [] (честная деградация, не выдумываем оплаты). Реальные вызовы —
+    # слайс 3 (нужны договор + сертификат/токен от банка). Секреты — только через env/.env.
+    alfa_base_url: str = ""
+    alfa_token: str = ""
+    alfa_account: str = ""
 
     # AuthN (SECURITY.md P1 — Keycloak/OIDC). ``auth_mode``:
     #   "dev"  — доверять заголовку X-User-Roles (текущее поведение dev и прода, пока realm
