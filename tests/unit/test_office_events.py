@@ -51,6 +51,14 @@ def test_escalation_ladder_steps():
             assert bus.events[0][1]["overdue_days"] == days
 
 
+def test_escalation_skipped_when_paid():
+    # оплаченный документ не эскалируем даже при большой просрочке — планировщик по всем
+    # строкам не должен слать претензию/иск по уже закрытой оплате (PLATFORM #1)
+    bus = FakeBus()
+    assert events.escalate_overdue(bus, None, _doc(stage="paid", overdue_days=90)) is None
+    assert bus.events == []
+
+
 def test_escalation_zero_and_none_overdue():
     # overdue_days = 0 и None → ниже первого порога, ничего не эмитим
     bus = FakeBus()

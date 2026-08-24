@@ -40,7 +40,8 @@ class OfficeDoc(Base):
     address: Mapped[str] = mapped_column(String(255), default="", server_default="")    # адрес выдачи
 
     # --- следы связей с отделами (event-driven) ---
-    sales_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")       # ← CRM (sales.deal.won)
+    deal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)                     # ← CRM: целочисленная ручка сделки (join с финансами)
+    sales_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")       # ← CRM (sales.deal.won): НОМЕР сделки (строка, эхо-ключ для Склада/Логистики)
     wms_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")          # ↔ Склад (приёмка/сборка/отгрузка)
     logistics_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")    # → Логистика (заявка перевозчику)
     finance_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")       # ↔ Финансы (счёт/оплата)
