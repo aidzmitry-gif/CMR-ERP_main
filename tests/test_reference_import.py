@@ -62,7 +62,13 @@ async def test_batch_import_summary_idempotent(session):
         {"unp": "111", "name": "A", "id": "a1"},  # дубль строки → матч, без новой записи
     ]
     summary = await reference_import.import_counterparties(session, rows)
-    assert summary == {"total": 3, "created": 2, "matched": 1, "aliases_added": 2}
+    assert summary == {
+        "total": 3,
+        "created": 2,
+        "matched": 1,
+        "aliases_added": 2,
+        "skipped_no_unp": 0,
+    }
     assert await _count(session, Counterparty) == 2
 
     # повторный прогон того же батча — всё матчится, ничего не создаётся
@@ -74,3 +80,21 @@ async def test_batch_import_summary_idempotent(session):
 async def test_upsert_requires_unp(session):
     with pytest.raises(ValueError):
         await reference_import.upsert_counterparty(session, unp="", name="без УНП")
+
+
+async def test_batch_import_skips_rows_without_unp(session):
+    summary = await reference_import.import_counterparties(
+        session,
+        [
+            {"unp": "", "name": "Группа 1С", "id": "group-1"},
+            {"unp": "191234567", "name": "ООО Ромашка", "id": "cp-1"},
+        ],
+    )
+    assert summary == {
+        "total": 2,
+        "created": 1,
+        "matched": 0,
+        "aliases_added": 1,
+        "skipped_no_unp": 1,
+    }
+    assert await _count(session, Counterparty) == 1
