@@ -5,7 +5,7 @@ import { RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
-import { groupStockBySku, marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
+import { marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
 import { type ProductPickerState } from "./product-picker";
 
@@ -174,7 +174,6 @@ export function CatalogPickerModal({
   // чтобы «Да, перенести» не сработало вслепую против уже другой (пересчитанной) маржи.
   useEffect(() => {
     setConfirmingDiscount(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
