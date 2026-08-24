@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
     intake_webhook_token: str = ""
 
+    # Google Sheets — экспорт строк в таблицу через сервис-аккаунт. ``credentials_file`` —
+    # путь к JSON-ключу сервис-аккаунта (Google Cloud, включён Sheets API, email аккаунта —
+    # «Редактор» таблицы). Пусто → Services.gsheets = None (экспорт недоступен, честная
+    # деградация). ``spreadsheet_id`` — таблица по умолчанию (ключ из URL .../d/<ID>/edit).
+    gsheets_credentials_file: str = ""
+    gsheets_spreadsheet_id: str = ""
+
     # SEO/GEO Growth Platform: входящий webhook от SEO-сервиса (HMAC в X-SEO-Signature).
     # Прод публичен → задавать обязательно (AIOS_SEO_WEBHOOK_SECRET).
     seo_webhook_secret: str = ""

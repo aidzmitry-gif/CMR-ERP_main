@@ -78,6 +78,8 @@ services:
       AIOS_ALFA_BASE_URL: ${AIOS_ALFA_BASE_URL:-}
       AIOS_ALFA_TOKEN: ${AIOS_ALFA_TOKEN:-}
       AIOS_ALFA_ACCOUNT: ${AIOS_ALFA_ACCOUNT:-}
+      AIOS_GSHEETS_CREDENTIALS_FILE: ${AIOS_GSHEETS_CREDENTIALS_FILE:-}
+      AIOS_GSHEETS_SPREADSHEET_ID: ${AIOS_GSHEETS_SPREADSHEET_ID:-}
       # Телефония zruchna — задаётся на хосте через /opt/cmr-erp/.env (compose автозагрузка).
       # Пустые → коннектор отключён (graceful). См. coordination/belakb-golive-plan.md §Фаза-2.
       AIOS_TELEPHONY_WEBHOOK_TOKEN: ${AIOS_TELEPHONY_WEBHOOK_TOKEN:-}
