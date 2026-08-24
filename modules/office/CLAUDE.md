@@ -31,6 +31,15 @@
 **Входящие** (подписки): `sales.deal.won` (CRM → завести документ), `wms.shipment.completed`
 (Склад → «Отгружено»), `logistics.delivery.delivered` (Логистика → трекинг),
 `finance.payment.received` (Финансы → «Оплачено»).
+- **Сопоставление с финансами — по `deal_id`** (мигр. 0105): документ хранит `sales_ref` =
+  НОМЕР сделки (строка, эхо-ключ Склада/Логистики), а `finance.payment.received` несёт
+  целочисленный `deal_id` — это единственный общий ключ. До 0105 их сравнивали строкой →
+  никогда не совпадало, оплата не двигала документ (мёртвый шов; тест был зелен на
+  синтетическом `{finance_ref}`, которого в событии финансов нет).
+- **Частичная оплата:** `finance.payment.received` эмитится на КАЖДОЕ поступление; документ
+  закрываем в «Оплачено» ТОЛЬКО при `outstanding == 0`, иначе показываем остаток и оставляем
+  стадию/просрочку (не врём про деньги, PLATFORM #1). Оплаченный документ лестница эскалации
+  не трогает (гард `stage == "paid"`).
 **Исходящие** (emit): `office.doc.created`, `office.shipment.requested` (→Склад),
 `logistics.delivery.requested` (→Логистика, заявка перевозчику), `office.docs.collected`
 (→Финансы), `office.payment.awaiting` (→Финансы, флаг `needs_approval` при сумме > 10 000 BYN),
@@ -41,7 +50,8 @@
 - `office_doc` (`OfficeDoc`): number, company, title, amount(Numeric), delivery, docs_status,
   priority(`Средний`), owner, **stage**(`ready`), next_step, op_date, created_at;
   **+ доставка:** region, weight, address;
-  **+ следы связей:** sales_ref, wms_ref, logistics_ref, finance_ref, legal_ref, overdue_days.
+  **+ следы связей:** deal_id (int, ручка сделки — join с финансами), sales_ref, wms_ref,
+  logistics_ref, finance_ref, legal_ref, overdue_days.
   Все новые колонки — аддитивные, с `server_default` (миграция безопасна).
 
 ## API-эндпоинты
