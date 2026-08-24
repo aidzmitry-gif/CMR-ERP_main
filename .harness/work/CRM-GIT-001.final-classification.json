@@ -1,0 +1,2504 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-GIT-001",
+  "records": [
+    {
+      "status": "??",
+      "path": ".claude/cloude-code-toolbox-mcp-skills-awareness.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 8761,
+      "sha256": "56e91ff45ff5c218137331c606e9f8c7c7a5f6e3ca3c5b0c14cad104f9d089b0"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/build_dirty_manifest.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 9270,
+      "sha256": "7d27a3977b068461170167964d1b108acd7fe8069c48d9297baa5b43aad9d8d0"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/classify_remaining.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 5527,
+      "sha256": "6ab728b054ccf1776ec4f0fcc2b42628bca60c0c75111e1b4692b68e62e76b66"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/complete_keycloak_invite.mjs",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 4051,
+      "sha256": "d8f3243759d6bf872085c8ba222c7340fb19ab458b04764fb35a084844ab4b0e"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/install_local_excludes.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 3560,
+      "sha256": "c1011d50210e5efda2fe1d1c61416152ed46d055f5eaeb6ab0c52b5d13442402"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/provision_keycloak_mailpit.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 5790,
+      "sha256": "298a845cc7fdf99eadf00ed097b5f9ebae09a3d6725de88ab952d7f5109ec716"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/scan_sensitive_candidates.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 3369,
+      "sha256": "89ff5e280291eda27292f847425a23eba215b51d753c882bcefef3c4ab6b29bb"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/smoke_keycloak_invite.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 2480,
+      "sha256": "bc84a33db7111a743aae9b0b77b9f88735f4a682bd7fb60dedc46b6e79f72096"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/verify_dirty_manifest.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 1236,
+      "sha256": "ab53e39d36ae923927ab7830559b59569a29ddaf0775cd8cdad0f01e6b82cd54"
+    },
+    {
+      "status": "??",
+      "path": ".harness/tools/verify_final_state.py",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 2113,
+      "sha256": "823e64b5c66bc87a3b7cf96a95a9063600acc013c535f471d66e0f3103fe2910"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.G06-settings.patch",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 1231,
+      "sha256": "24b8404a1aa1ce36a3d00f288e1075223573b5b0577d787ea0877cca9dcb45a3"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.G08-bank-services.patch",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 1307,
+      "sha256": "601a9be21386f0d90b9c7e78eca6614f1c31a42615eeccf7a8477c2106c215e1"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.G08-bank-settings.patch",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 1088,
+      "sha256": "1bbd8378e83b1122a7fe469ee9957ef55ba3f9bd75a51253a8d44efca86af86b"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.bundles.md",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 3694,
+      "sha256": "73a08eb2b0fff699026f1f0938d4d251b55f357931297b632ef194abaee2cee9"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.final-classification.json",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 94920,
+      "sha256": "7fae1f29037321acf0e9bd14ae52bc8ea81d84cc4b99ad8699074854376edd56"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.final-report.md",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 4013,
+      "sha256": "14c21e256ae81fb81e3d4a2efe28f4e2747346f0fde4db7bda0770a85fe8865d"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.finance.git-info-exclude.before",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 246,
+      "sha256": "5d90cc320b758f9dfadb7368ae1344b4d43260feec5ab4f6e14396e7181b559b"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.git-info-exclude.before",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 578,
+      "sha256": "76190b3291dc8b92e74a74aa3ed10ef81cc50c9bf40808c7c90113b5df791f77"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.hygiene.md",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 1647,
+      "sha256": "5c2cb3a441a12ca4f53445bc526e75ea7cc34644fddbcd1e6ed82f1775aaaf26"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.inventory.json",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 501654,
+      "sha256": "019166a8a2e1bb4519093a68f0b152c2ee7de67cef508fded412a54e29f3f032"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.keycloak-email.compose.yml",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 128,
+      "sha256": "a7993aac33dfe99e54cbde10d99d3b298f0154e4adc9ecbf97467dfae6e5bd98"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.marketing.git-info-exclude.before",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 246,
+      "sha256": "5d90cc320b758f9dfadb7368ae1344b4d43260feec5ab4f6e14396e7181b559b"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.md",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 13927,
+      "sha256": "0a2c94cd7e56b1a45653b1459e4f8c141704f1a525f0652cd84f7dbc79510b35"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.passport.json",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 8711,
+      "sha256": "a941d33eda24e25da28ae87250cce62632567ae02e964989ca132619053edb85"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.procurement.git-info-exclude.before",
+      "action": "retain-local",
+      "bundle": "local-goal-backups",
+      "reason": "rollback or staging scratch; not repository source",
+      "size": 246,
+      "sha256": "5d90cc320b758f9dfadb7368ae1344b4d43260feec5ab4f6e14396e7181b559b"
+    },
+    {
+      "status": "??",
+      "path": ".harness/work/CRM-GIT-001.sensitive-scan.json",
+      "action": "commit",
+      "bundle": "goal-evidence",
+      "reason": "reproducible Goal passport, evidence, and local acceptance tools",
+      "size": 11354,
+      "sha256": "79b11587271f3088939737e0a7c14c46f2501dcfc5c10fc2751e0155753b32c8"
+    },
+    {
+      "status": "??",
+      "path": "1c-cost-price-plan.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 12544,
+      "sha256": "14d7bd8c26997fa20ff90be1358306453b7d09a452636a8aaf3daa99237c5783"
+    },
+    {
+      "status": "??",
+      "path": "1c-live-connect-tz.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 13076,
+      "sha256": "b9f9ca3757f8dd144ef367db075e8c1cbe0629785b0ad9490901b499e5ea8050"
+    },
+    {
+      "status": "??",
+      "path": "1c-office-checklist.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 5599,
+      "sha256": "ba08a89ab8e7462983815fa0f77d82bd1dc187ac0e3154c1f426652ac06814a3"
+    },
+    {
+      "status": "??",
+      "path": "_deploy_mockups.sh",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 1281,
+      "sha256": "d2feffcc75711a1be079963929d70c8a53100ec2347c63e14d142061eb300aec"
+    },
+    {
+      "status": "??",
+      "path": "_map.txt",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 9998,
+      "sha256": "fcbf15502e8d5189a3c6b89008e779e04b296a175217649159755edcd89659e7"
+    },
+    {
+      "status": "??",
+      "path": "_page_login.html.snip",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 2565,
+      "sha256": "a701d73f08c5df75ca9300de231fe9e9298ecdeff678f96fda171b32ee8a8682"
+    },
+    {
+      "status": "??",
+      "path": "_pr9_ci_handoff.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 4630,
+      "sha256": "c8925d109dd1c3fe1973d3b59160d2306844f3872ceb571805b2cf0449fdad8d"
+    },
+    {
+      "status": "??",
+      "path": "_theme_tokens.mjs",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 3734,
+      "sha256": "67c848bbbb659408926346318d235c40507d17b83c0fe982c0d00dfa331574b4"
+    },
+    {
+      "status": "??",
+      "path": "claude_guard_hook.py.bak3",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 9665,
+      "sha256": "e863e14512814ba8e0f18111549d6371e759a6a9bb7efaae17856af1ffa94c21"
+    },
+    {
+      "status": "??",
+      "path": "coordination/.daily-review-launcher.ps1",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "fleet operating source or approved schedule record",
+      "size": 1943,
+      "sha256": "5da719a563105e08bc4b347b23933a5fabd4645f96d74b95fd1997071bf6fc15"
+    },
+    {
+      "status": "??",
+      "path": "coordination/.mockup-shot.png",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 440641,
+      "sha256": "2155cbf7fcebfc4165a96e01da391071ead516611c5a4c74f0376626993a4b49"
+    },
+    {
+      "status": "??",
+      "path": "coordination/.quality-log.jsonl",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 42305,
+      "sha256": "b7fe37fbbf5e80c238dd6fd1fc9a24c6522359871f99a3dde282e19e9348d2eb"
+    },
+    {
+      "status": "??",
+      "path": "coordination/.shot-mockup.mjs",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 772,
+      "sha256": "60ddce2d6eab134b228b4a403c5c3f163242ad366313223aa11de7aa2030b94f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/ACTIVE-SESSIONS.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 55814,
+      "sha256": "add92490656d80c322977afcbe43dd83f11b4b9c010f3dd370e6ab7e895d7ba9"
+    },
+    {
+      "status": "??",
+      "path": "coordination/CHAT-ONBOARDING.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 5737,
+      "sha256": "3ddbdea396c03061b0a64605b311867ce1a2318f02c56b129ea406581b38aa7c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/FLEET.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 1934,
+      "sha256": "641633f9d351af9f3e4999a846cfc58caae29be03070f2a27e3a4fcebafd547b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/METRICS.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 6051,
+      "sha256": "7066df7ab9b76ee3baa8051579f82293c69cd93d8057d207d0702f29c00c2e82"
+    },
+    {
+      "status": "??",
+      "path": "coordination/PUSH-LOG.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 39121,
+      "sha256": "4b580093a6ce67ae81faa60b4477bc1f825de603dc9acaff9a457cf03e87c91e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/REPORTS.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 149673,
+      "sha256": "a948f13349446bcadf55089e3eb158a16c5ce33d2311cb698f7d5101688c377e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/SHIFT-PLAN-2026-07-01-night.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "fleet operating source or approved schedule record",
+      "size": 16486,
+      "sha256": "e16bf4dc74b29f56ad0df2b26323fce03110e67cf751f3743f7501e2f71e7e16"
+    },
+    {
+      "status": " M",
+      "path": "coordination/STATUS.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 10486,
+      "sha256": "45150f710292fe5c744140bf1dbcbd9986389afc85b75f8b0fc12680984230cf"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_doc_err.txt",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 229,
+      "sha256": "9b1117015d9f40608635b77998e5df0b89a3f22071f8a070eb711358e315ebfa"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_doc_fields.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 6307,
+      "sha256": "d54e8ce687014be942a774c0633bb2911e6fbe640e00d62efbe04349c61c7fd8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_prod_security_handoff.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 13855,
+      "sha256": "c75e4fc309f826bd57222937f421968e8ab3f893642f8baac57891e8e9b17594"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_1c.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 397,
+      "sha256": "3648b66b19488cbb7e3c927f362e478b10a84e8037939c56171167d8c2e0bbe2"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_1c_history.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 1594,
+      "sha256": "eb78eddc538a29337efc50498b04bcd0f64e1038a792ff541993113c53f8e557"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_bitrix.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 3693,
+      "sha256": "c9d5efcab67f592d37af310b55de9545d81e6202d3880aafb9e3c4b1b2da3d3e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_calls.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 69113,
+      "sha256": "f2f4f39f63c3f9d015444038cbd919c0a3a7454490ed15a7a3fc19d85a23e370"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_calls_downloaded.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 9137,
+      "sha256": "a314480f86230d52c38e8a0a4f1ff2d0239ee6bf8328bd1c508d6c0cbc23b5b9"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_contacts.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 445,
+      "sha256": "bcc0ebbb605245aa606ff7dcda6982375816ec9a61847318d36023a5f3fb2ce3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_riftek_transcripts.json",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 15096,
+      "sha256": "7c289d99997bd953a1c8caf2372c7be7a0f74fbba20396bb252d2e6f0da8de47"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_all.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 99963,
+      "sha256": "fc70d72c4b8d99a5f12311849ad280c98888d05c69d362dda1fce4956728c332"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_finance.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 15263,
+      "sha256": "eb38acbc588a48bf6992260d6ceceac00e4f6d40a792375eafca38828191e600"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_finance_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 13066,
+      "sha256": "1c861dfdb6744da4f53a476fcacf92607786f77df92e0b4c6da520b03aa3684f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_finance_r4.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 3478,
+      "sha256": "c30e090e14a3f3f730e6bde18cf75a0de9032ecf6352cf1adabcd56e7f173fb0"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_finance_r5.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 6125,
+      "sha256": "e5829500eb8ff734ba8a74679a647d9842922fc58866d8c46e9e2aea3309640a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_leads_adoption.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 6343,
+      "sha256": "75f1ffd1e7585c24f95d9c78acc5ce265f6e2e44dac48efe31ab8590ca02af21"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_logistics.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 12353,
+      "sha256": "9b2f3d044d8976408321c155a75896039d5aae3b8399a4675de4a3cef55114bc"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_logistics_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 11170,
+      "sha256": "9eded5af5a32028239622d6922af285105d504a8bf1f1e92f7deb3176b7919bf"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_procurement.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 15421,
+      "sha256": "07b76d2b577337bfd7e3eaa003ce4d7834a6d6a02e19e79a964ca3eda96af211"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_procurement_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 11395,
+      "sha256": "72f5c3e9b2e01e7f8f60bfc9be89ac35548ac7d1099d40b7acd1b361d854240b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_procurement_r4.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 2889,
+      "sha256": "22329afa2052bddaf2da4c0afee45e07f55912a925f3e01be08cd3cd3ab93edc"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_reference.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 21278,
+      "sha256": "bb1d2331584f581e4ea440f33dd02b54e7f0f9c0a5c768aca90bd7562e5feb16"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_reference_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 14071,
+      "sha256": "8389ad7539c53002cae10dd5d020b5b344de8982ceb2d823a3809f047d2176cf"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_reference_r4.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 4287,
+      "sha256": "308b361bfa768d92a2b68b4eadb6da6cd0f8c7d6d1740dcf53bff722be892ccd"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_round5_hardening.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 8802,
+      "sha256": "34740e805015ca2258c319142c978b7efd24189062fc711fd2c6416ae909a010"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_sales.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 17631,
+      "sha256": "fb4f26f3dbf3367d45b54c3e9c781ff73463a35fe74d150b9495236abb57497c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_sales_plan_fact_ui.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 8001,
+      "sha256": "a57fd45b84ba17fbb62ea8ee54075803d62f728001c8a3b14810a7b0a602a3b7"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_sales_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 8496,
+      "sha256": "ee03f03eae93aa010f676656b022234d82e07277958a2d6d8c9cc85b7318ee48"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_wms.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 17649,
+      "sha256": "ae9d77a3f2a98708190171db39ed7663d50fe4ac2d3df1c655af4a042432cf17"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_tz_wms_r3.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 11914,
+      "sha256": "c442e7436e4fddf802d0a61d2082777289fb5b4aa910a3a0d9b2a1f7cf496d14"
+    },
+    {
+      "status": "??",
+      "path": "coordination/_wave-a-packet-spec.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 4217,
+      "sha256": "390d1fb060863b18b6cb8c2133536a1a64d2b957a007224c87c71e5b74e50b5f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/assistant-stack-research.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5081,
+      "sha256": "a1f7543aae68e3a9eb1545073a60d24e5607cea862113c4dfae6648ec93416c8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/automation-handoff.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4287,
+      "sha256": "e648be89aa691f126eebc418028f8562ad220985927632b7c52b6fc3e29738ae"
+    },
+    {
+      "status": "??",
+      "path": "coordination/belakb-golive-plan.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5684,
+      "sha256": "78dc8fb16d235a76bf750293c4ae4923ba291a08881118e270c1993f6e3218e1"
+    },
+    {
+      "status": "??",
+      "path": "coordination/board-stage-move-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2694,
+      "sha256": "d31b6c48c226c2b9d55b7dab30fb91444ccc8c6238be1afa66af4020a273bf36"
+    },
+    {
+      "status": "??",
+      "path": "coordination/calls-ai-architecture.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 9309,
+      "sha256": "74eece1778b029643f2c1d413d986716df3d481d5441c9f51800550d8b346211"
+    },
+    {
+      "status": "??",
+      "path": "coordination/chats-panel-fe-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4600,
+      "sha256": "367d6e378119654719b88881612bb6966457b028a717e947e7462125c644673e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-bitrix-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5430,
+      "sha256": "dae54fe199c4ce3429396ea144fe57e2b2feccf120c07d074afe49f1c1f16e68"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-bitrix-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6044,
+      "sha256": "5d63d08dea4614ce11e9ccb9321b2efe88fb9c1b97061f67f6cfa56a01caeef9"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-google-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4784,
+      "sha256": "563e0cb7bfeac0ac1750222a1ef308a29977bf7353522a78dbf5ba85581b2579"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-google-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6887,
+      "sha256": "e36ef2476c39420393c0d3df581002634812696a59d934e2157200e8c60a4244"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-onec-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4465,
+      "sha256": "d7ffcb1f0bc75c2924c88757d95b6e885b3757514aa4e3a08f45028bba3c0f9e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/conn-tests-onec-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7306,
+      "sha256": "6301490fe1c674f62cdcb729dbd9f02ea963444985ccd876a3866c424e5fb347"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-15.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 12367,
+      "sha256": "c1657bb5bedbb1d791f20a3b30cabbdbd32ad2912c3d64ce6850486e05142a27"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-20.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 8981,
+      "sha256": "e8f0895108435c4e54093675502f5fbb3a778cdfc3406b51f29eb6dad41326a4"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-22.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 12382,
+      "sha256": "85d94b02e719dc887f04c707db7c9571f241770473bae29e9df9a53a32a38e0a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-25.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 9169,
+      "sha256": "120acb16152aa8bd627e940e43c7ebbf13521fa6c3e32a832eb9ff20d05300ea"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-26.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 12446,
+      "sha256": "7aa2756b18c230069154d9a5ec98d95197912906a94f1468a648e0e23471b6b5"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-06-29.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 13655,
+      "sha256": "d66defc97c96a3df22c39b4ac426a8ecce3dd71dc687d00cfa538f56fcb7927b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/daily-review/2026-07-02.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 19092,
+      "sha256": "615c5351ae02b7c115872f650389b35be60e0152a123257d9d3685bc0ed2c39c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/deals-board-fe-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7050,
+      "sha256": "747269e8fef87fa5d0b32a481fde92b521aaad62550a36efc858d4c27889bc12"
+    },
+    {
+      "status": "??",
+      "path": "coordination/deals-demo-fallback-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6325,
+      "sha256": "25c1d207e452dbd1b364935ebe3661e2baac0406029430f09ac7697b4c5acc55"
+    },
+    {
+      "status": "??",
+      "path": "coordination/docs-trash-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2696,
+      "sha256": "73bc7437ba79f28d99e7b25632c6f61560d35cc600804d6f0869cf0457be6c21"
+    },
+    {
+      "status": "??",
+      "path": "coordination/erp-replace-bitrix-1c-strategy.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 33839,
+      "sha256": "75dc750a89ec8ea1764466c82f68ee1a622ffeacd902b9d050008e6f33a98b2f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/example-healthcheck-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1668,
+      "sha256": "44dd98cc6f9d131ada0c3be64c32198e5709592289d15199a9a899b1d0cbeaff"
+    },
+    {
+      "status": "??",
+      "path": "coordination/finance-money-str-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1840,
+      "sha256": "08c26ff4ab4ee6c489b02efd2f0eacb1e99a87faa8512e0222d81535867c2c40"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/board-stage-move.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3929,
+      "sha256": "4607efc764e0d92a33080a1a094aeaae468512089e75eddb5ed0d27717643853"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/chats-panel-fe.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2744,
+      "sha256": "2782742a34aecb8432883853f033a48c15d07db68ff63e3f6762d311ce7e97f1"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/conn-tests-bitrix.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1445,
+      "sha256": "87f086984f31ebac9cbc6700439ee0f4ce43d7c4c97fad7455debf0ffc7473da"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/conn-tests-google.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1272,
+      "sha256": "15686a461bd27e80b508fb22748e369328816e81e7885f07c274b49db17b41d8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/conn-tests-onec.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1241,
+      "sha256": "aada7721ffc8ee25e53b6397dd64caba359f3ea6880fa7676db6bdd187aaeb26"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/deals-board-fe.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3573,
+      "sha256": "40f80938878a26b177d21c6a1a56ce365b3264e03d69c9c66b32feb4e7d48372"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/docs-trash.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3766,
+      "sha256": "23979d54144985a0daa49a5ac2de3c397e8f4f75850920b52ece71849daa7b2e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/example-healthcheck.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 825,
+      "sha256": "78c0ef0dfa3b234a5f96ef66000bf5e8a5a64e45e36d9d66698fec0488f8d944"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/finance-money-str.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 12311,
+      "sha256": "c6c6516abe80f2c83c2c96f33b38fd99deeecfe647b9ab4881760ec0bb6dac02"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hooks-refs.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1014,
+      "sha256": "9c673ea449a8b5a8e26e709528546d96e1b220dfd5e76ec8e1c14f84728192c5"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hooks-setstate.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1144,
+      "sha256": "30e11ed75156ee46d1db5f33d5b65f77a53d4a4da270a5d944c8bc35e203428b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hooks-structure.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1016,
+      "sha256": "617f1cf470424340b9b78569f8520efaec22d9e3a5f30390a120ee4caaedac73"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hr-okk.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4553,
+      "sha256": "162d96e18864c4d71da7c51b0c60e058ec794b7a2d3767779d89dc691ab7efe0"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hr-payroll-ui.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 10485,
+      "sha256": "a51bb72520349743e6895138bbabbbfaf035b4d433551f251eb425c224fd7368"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hr-worktime-fe.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5669,
+      "sha256": "c7dba99c6f68956eb2b76279449dc5531c5d861a32bb46c5bb74cdd5aa297f2a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hr-worktime-mockup.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5884,
+      "sha256": "d1ee828af0bbd6555f896d60b44410982b09d51056f40a708977721190e17225"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/hr-worktime-mockup2.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5884,
+      "sha256": "d1ee828af0bbd6555f896d60b44410982b09d51056f40a708977721190e17225"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/landed-duty-fact.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 8305,
+      "sha256": "17702e0fd5ba232ce01d19b11945933fff12c1cb27ef1ce05e86d411273c709a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/legal-knowledge.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 15461,
+      "sha256": "22719b383a26db0db5222138ddaec3d9bbb4eda6d7f171979a9639831396695f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/logistics-frontend.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6718,
+      "sha256": "711adc9d6a7e4fbb8dc5b26c1f95be0ac3b5b52e47fdd3a2887af350f65a198b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/marketing-phase-e.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 11404,
+      "sha256": "24180fa79733ae807ca8a2154bad6a55f30796b40c6d7a98f9100937a280846d"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/office-frontend.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6812,
+      "sha256": "617115e15903cc3e888bb502f1609e66bf5ce8f29717a24d267570c1c59d2727"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/office-legal.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3339,
+      "sha256": "92b7464f41623a8c752d6cde0a506b8727a985141bfe4e0b586c41f7533adf8d"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-events.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3318,
+      "sha256": "d6de59077294ba50cc7fc187a4ed902859fd7a20113098c1bde7de666564bb41"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-fe-analytics.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 8911,
+      "sha256": "4c7b7f397f76089c98b6d32d813d8b45599528f5fbaaeac3ddcb4565e291037a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-fe-bom.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1638,
+      "sha256": "fdd866a667463cdbf76ae5109a9b43486a66dcbe2b85e378ab5ffc7a95a37274"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-fe-norms.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1842,
+      "sha256": "0877c0bbe616860b225beb31c8cbbe1b8fa363ffcf0f70eac561cce241385852"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-fe-planning.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 8343,
+      "sha256": "c17b46fecf642831883d5ce020fcad6b3c809330cd2c168755b26cabee034b59"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/prod-fe-zayavki.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1895,
+      "sha256": "48bf8e0752cc5163ac6a3d5972bb9a91572534c41a1b44d4583a0081e0165716"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/redesign-board.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2449,
+      "sha256": "fd3adf15552e0cbfaa34745bbaac4f0870932852d6786e666e8d12b3f5dcde4d"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/reference-showcase-visual.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1548,
+      "sha256": "28f2cbafc345d515ba79fc93f6f2eb0865a6d4effd90c97891149f563344b2f4"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/rop-activity.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5368,
+      "sha256": "b8d20df759a321c370842a2ff1d359dab59575b066a28469cac0d2c16fefddaf"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/rop-stages.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 5704,
+      "sha256": "16867bf6160952298cc2e0e14bc314827b19fd5c4d29d554cf8a77f4e53b0a43"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/sales-board-visual-finish.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1297,
+      "sha256": "2d16cfb56b2d888318aa4c20a1f35ae4e144cf2bede1a960b8471f469a026e9e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/sales-e2e-board.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 14313,
+      "sha256": "7ccc137171845358ae11c9727ddf4da94f48ad3299dd7e18e9e75560a77aba7b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/sales-rop-plan.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2477,
+      "sha256": "e382827f667762d75146afcde5eadac74955b2ab3c9f55528ca80d88a883257c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/sales-ux-nextstep.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 11398,
+      "sha256": "a603e95424014b4638da5b6747bc7638f1ae704653a7e918352612e92b165c1e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/scd2-partial-unique.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 10770,
+      "sha256": "51993b30719da318b6e4ff546daf27ac2b2f5c0cfe525e609e601a7e2ce373fb"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/security-p1-2-rbac.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6320,
+      "sha256": "370b266fa150ca899abd3909c831ed1fc669117cf6b00d45ef4af46c5178b886"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/service-intake.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 11280,
+      "sha256": "cc4d7b4627f8615a29b1330b9446e1e737110984188c7e66c02cf1fd66527fe6"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/wms-fe-inv.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2797,
+      "sha256": "38c91d17e0fa11767dedfe773aaa3e07ffe161c225415bd1cbe41e5be19ba8e3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/wms-inventory-tests.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4078,
+      "sha256": "9099d496d8b7f37cf738236d56bcd04231d1040a49939d9c27dc502e62b1f79a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/zak-cost-fe.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2725,
+      "sha256": "51fab9382fd0446cec6f5e562c1b8bb0612bc954afd02eaa8e4d95d1e6a72bff"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/zak-fe-ai.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 8744,
+      "sha256": "9a00442d6945d19c0d96e73848e35459547ced0a9379e12bf1342d0cd4aabc0c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/zak-fe-logistics.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 9787,
+      "sha256": "cc74459f4bd2bea1d3725111824a518de81f7dd5050ff0dbe1947fea51475b21"
+    },
+    {
+      "status": "??",
+      "path": "coordination/first-msgs/zak-fe-process.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7947,
+      "sha256": "33c85e07b9dfc8b0289ac1d6aa1c9585352a016c064c87f2759c9c087d90dcbe"
+    },
+    {
+      "status": "??",
+      "path": "coordination/handoff-2026-07-25/README.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1850,
+      "sha256": "a9b6f110384164d9349533365bbc5c6a407307a2b9b8822736073c3bdeff64cd"
+    },
+    {
+      "status": "??",
+      "path": "coordination/handoff-2026-07-25/planning.py",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7398,
+      "sha256": "e736c8b20a64f78e809d41739592cdbd8a9a80f261427ec91c2969813dd60323"
+    },
+    {
+      "status": "??",
+      "path": "coordination/handoff-2026-07-25/test_leads_planning.py",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4801,
+      "sha256": "ffe078b0a413258d6315b4b42bfdb5cfc2de31a113afd6c5b781f95a26dfcfb6"
+    },
+    {
+      "status": "??",
+      "path": "coordination/handoff-merge-infra-2026-07-25.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6458,
+      "sha256": "aa6f740f08d8b4d15c707072444275c3859d3535cf323c196fe89ed503c38bc4"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-okk-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 966,
+      "sha256": "46a088795a2a8a3ddd5d1b5c3cd3974ce7775f7b2fd5723b94ec8a0e95092f75"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-payroll-ui-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1383,
+      "sha256": "9432787193d33e97750358bf8c90fd1d3de4a52df57549b2c095618c5956a756"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-payroll-ui-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4511,
+      "sha256": "9885f888dbefb4bc11d7ad55a433ca48d17157fd2724f978155b12dfdba0c764"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-worktime-fe-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1736,
+      "sha256": "60371dba4565ef81e2f4b88a30148c37bd691af49dd8433c0dedfae0e91e9f87"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-worktime-mockup-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1691,
+      "sha256": "8eb8afd2e984d7886e40b8556593558482dccceda24b466b398f3be0d94ff9dc"
+    },
+    {
+      "status": "??",
+      "path": "coordination/hr-worktime-mockup2-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1691,
+      "sha256": "8eb8afd2e984d7886e40b8556593558482dccceda24b466b398f3be0d94ff9dc"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T155407Z_sprav-card.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 434,
+      "sha256": "5b30c8dbeedec7ca6ea301edc31a1e1b53b6cc2553ac0c746f059efba25c5591"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T155435Z_sprav-merge.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 474,
+      "sha256": "81d1a162c1c7c6a0325b9dcdb323460f1b6cdb43459957146e24171ec7768b18"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T193708Z_sprav-ai.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 407,
+      "sha256": "15d994875c80c02a5af96c1581d8f959ca78e8d6be54353bc8a487394a0414f5"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T193724Z_sprav-catalog.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 434,
+      "sha256": "84e9925fb24a9e67e5d46b59adf63289dcd25bb9681d60d2ab3ea868ebbdb5d8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T193739Z_sprav-categories.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 514,
+      "sha256": "d79d33f1477f0123c11a924b7235dd965a70288369f282da8f355116b9e56aaa"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T193753Z_sprav-rates.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 428,
+      "sha256": "de3449479745cd7ae3608edb7938fcc12ccfee2f5131a422f3d7aae44c2f8d12"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260615T193854Z_sprav-import.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 482,
+      "sha256": "f162377b15864b080ec46db0e0286e3d5b0fb8003b85a34045fbac96c3978d24"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260618T212954Z_hooks-refs.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 313,
+      "sha256": "662316b443d6e8017187d28cb262007e3ff9b32d67102584e65daf2b76ba9f94"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260618T213006Z_hooks-structure.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 374,
+      "sha256": "13282a828c231fbffedba4af3062b3bfdaa041dd252668d92548f9edf1bcde22"
+    },
+    {
+      "status": "??",
+      "path": "coordination/integration-reports/20260618T213054Z_hooks-setstate.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1379,
+      "sha256": "c9c46b6dbf3dce4afc89974f519e77c8f2a10bc01e11de6dcda1b3694b45ee77"
+    },
+    {
+      "status": "??",
+      "path": "coordination/landed-duty-fact-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1985,
+      "sha256": "6e92fafda8c81e3c71fa30930e35bada0a03a50b4bc7a3141e03376808aea6dd"
+    },
+    {
+      "status": "??",
+      "path": "coordination/leads-sales-working-dod.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5741,
+      "sha256": "d2b5b794a55b5bb2b5e26f4d08486699cbfb3ebe237c5e50f039b36e7b379daa"
+    },
+    {
+      "status": "??",
+      "path": "coordination/legal-knowledge-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2686,
+      "sha256": "88096a91b1f8aa6894948d5d9148427689fdd525fa08ee0df00c20b3f5d9466c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/lmstudio-models-decision.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 3012,
+      "sha256": "28e78fb10cb44196f6b282ce32361f75e0a0ecaa456e83924f828ce64119b80f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/logistics-frontend-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7272,
+      "sha256": "658cd1ddb399e01445cb37a7c6ea6806f845b25103f39b6978eab926975eeb29"
+    },
+    {
+      "status": "??",
+      "path": "coordination/marketing-phase-e-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1714,
+      "sha256": "99b2fe30ae1fdd621e5a6689aded7492cf532e6f7188b5c1245d5f5db5c6ee52"
+    },
+    {
+      "status": "??",
+      "path": "coordination/marketing-phase-e-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4646,
+      "sha256": "b7821cbc5d2b3c6bf470520ad11027e47440f035518f8b1774212011709e28b0"
+    },
+    {
+      "status": " M",
+      "path": "coordination/memory/pitfalls.md",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 9253,
+      "sha256": "c91e87bec8220e2930e8685f6c3d99d25df22404a4100413f0fb6799f2481c01"
+    },
+    {
+      "status": "??",
+      "path": "coordination/office-frontend-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3597,
+      "sha256": "37141b079d6ce28eae019e26f4a7fcd15e346e972e1fc18814439164c674c6ec"
+    },
+    {
+      "status": "??",
+      "path": "coordination/office-legal-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 705,
+      "sha256": "50692f41a9502295d86c905778bd9343db186f4385bdac88572de7ab9645f537"
+    },
+    {
+      "status": "??",
+      "path": "coordination/office-legal-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1974,
+      "sha256": "71731d97212dd2775dcc303b07891eeaddfc5b83d49d6df4e2ca92de49e6ab78"
+    },
+    {
+      "status": "??",
+      "path": "coordination/office-process-backlog.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 12178,
+      "sha256": "89bedc7277f58731e86743a8f35e7c77d8ef7f3c4364cb913add07fd61705646"
+    },
+    {
+      "status": "??",
+      "path": "coordination/onec-bidirectional-sync-plan.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 8879,
+      "sha256": "a6debfba9824071049e1c6dbfbff7fb79d3b3657663d509592c9eddcde9d8057"
+    },
+    {
+      "status": "??",
+      "path": "coordination/onec-contractors-audit.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4911,
+      "sha256": "8500d1c6cbb7760cffa3509f0115d140f2fc9540ba1f4e8497d2cd37df713016"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-8h-2026-07-16.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3500,
+      "sha256": "9e2ffb45bcbdb4dd7894012bb95a0e03ceee587359c8b0ab9312f3edf1d0eb2b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260612T214559Z_zak-fe-logistics.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 901,
+      "sha256": "40965c1296756336256a25a7d13d88ada4e0a02209df7a15f21d934065d71a66"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260612T214624Z_zak-fe-ai.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 801,
+      "sha256": "101f516c52caee48d18e41df4f81b777944baf59f527a1d0efbfc2645f6a8760"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260613T160138Z_rop-stages.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 120,
+      "sha256": "2259caf26cee3325729afd1bd17bd9f97402cba60844968df3d9e9f5354bc3fc"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260615T150429Z_sprav-catalog.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 822,
+      "sha256": "9ac63ffd2d3b4d66d29d4c2f2d2b0a661bbee0f7c8393d1c2863e9a6069633a3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260615T150505Z_sprav-rates.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 635,
+      "sha256": "f86f3285bdbeaeec89a922a85ce7ff73339ef0527b0893be2257f46b34d323e7"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260615T150550Z_sprav-merge.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 551,
+      "sha256": "829f22e3510d4c43fa1e6e76e9aad7249e3f6fb2659bcc73e4db56137e21b9b8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260615T150612Z_sprav-ai.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 539,
+      "sha256": "133bb5293add1329cb8db9b1bcf235b1bd868c84a030d0c43198a880c40fd1d6"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260615T193653Z_sprav-import.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 838,
+      "sha256": "945793db7d326e5b2da91a0338547302d1243b2548defe6d0531352d652f25d3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/20260725T151851Z_wms-inventory-tests.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2129,
+      "sha256": "0735ed3557ce8286f29694ad1aa59375ab2c2c86270fe82a8c60b67183c3c336"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/8h-report-2026-07-16.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3001,
+      "sha256": "2ae1e31a46a1ed24b439d865db95c62ac00b40ff8f95dc3f1c96e603dab54aae"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/fe-oidc-ready-2026-07-16.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 9903,
+      "sha256": "0217346868162abf0ab2fc3c5c3af79d2acc724b5e4281ca0ae840b0225bc8d8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/orchestrator-answers/secure-env-flip-checklist-2026-07-16.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2579,
+      "sha256": "e32bfce1511bb6ff4dd330670c8bc61685d717bb214e7248da61b077473e1469"
+    },
+    {
+      "status": "??",
+      "path": "coordination/plan-safe-export-1c-bitrix.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 35435,
+      "sha256": "2f0ad1b0bceb17bad854e685d23161154492c216a1eb12305efcbb0b1ea2d8b3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/pricing-methodology.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 14355,
+      "sha256": "4451d98276b3cf7b7baa56600fd56f603f0a075b4da6560bec01042a7ed0ac45"
+    },
+    {
+      "status": "??",
+      "path": "coordination/pricing_reference/quote_line.py",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4702,
+      "sha256": "4ff2fa45d2b4ad9f64649b89466cb8118e0c828f12e0f500063d9b3b537185f2"
+    },
+    {
+      "status": "??",
+      "path": "coordination/pricing_reference/test_quote_line.py",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4232,
+      "sha256": "a15109bd4235dfc5e652bf9ef756414cae301349f728d6ca450b4cafa6b3f499"
+    },
+    {
+      "status": "??",
+      "path": "coordination/procurement-costing-handoff.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 18031,
+      "sha256": "b09fd414b777bafa43f0e2c465b4902473589ca46808eaea4656934ed1f85234"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-events-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 742,
+      "sha256": "c41f31ad0813105f95e9627df1174573b96a0a441bb04776852e006e3b641d1f"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-fe-analytics-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2893,
+      "sha256": "cb334f8f444412ca78c54343f534689c00bf5edb4ca002123a2862a56e7425c6"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-fe-bom-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7434,
+      "sha256": "dd956c74b942df4c1e82309a507f2237dd990bd477e1d5370b11743a05e0f14d"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-fe-norms-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7899,
+      "sha256": "f28ec0ef1676de026f7e871b7423389082ff434d93f4c6781f5a9d9044903eb7"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-fe-planning-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2801,
+      "sha256": "9e4c5cb950eb42f3b0b88759ebce50ff19d12f84a98f1a73b53208f66dbfae86"
+    },
+    {
+      "status": "??",
+      "path": "coordination/prod-fe-zayavki-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 7688,
+      "sha256": "de5460d47e312e392eaa58bb7d0a0e9b6af372d5fba13ecdce1485ee9ed35875"
+    },
+    {
+      "status": "??",
+      "path": "coordination/production-planning-contract.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 18941,
+      "sha256": "a0ea2cf2ed1acd86a3d8154ea006506144764588e940011757e8cab5669bc5c6"
+    },
+    {
+      "status": " M",
+      "path": "coordination/readiness.json",
+      "action": "commit",
+      "bundle": "fleet-governance",
+      "reason": "canonical fleet readiness or operating guidance",
+      "size": 7595,
+      "sha256": "4fe10552af09124973232ad5d015dcb57b58ec808e8e78c3284df86b77d5d401"
+    },
+    {
+      "status": "??",
+      "path": "coordination/reference-showcase-visual-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4061,
+      "sha256": "033f982add112b7067628ddc34064f7b3147b7d68702aae258fc2d374e8e62b5"
+    },
+    {
+      "status": "??",
+      "path": "coordination/riftek-360.md",
+      "action": "retain-local",
+      "bundle": "local-coordination",
+      "reason": "runtime/raw/sensitive coordination material retained on disk",
+      "size": 3282,
+      "sha256": "a359c336d8c7d2e19eddb7a359b78b600ac161961508ca97e88f826266643854"
+    },
+    {
+      "status": "??",
+      "path": "coordination/rop-activity-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3076,
+      "sha256": "3a3e6bac29d34e8d64a14fe72ded6c608ba24905c4baef4363a5414b5f9f07af"
+    },
+    {
+      "status": "??",
+      "path": "coordination/rop-stages-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2842,
+      "sha256": "85e3739268f63dcae4a23f618c21b7266b724a5fe671ca53946631ecfc2954b3"
+    },
+    {
+      "status": "??",
+      "path": "coordination/sales-board-visual-finish-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3764,
+      "sha256": "5baa51a7a26c9490899d3e96b0f2e65f7d3fc3bf9a74bd68030f1a81ac62a8e8"
+    },
+    {
+      "status": "??",
+      "path": "coordination/sales-e2e-board-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 2292,
+      "sha256": "d16ff2208605c5f3fd93ca1a7e73f5830f152fd3bdfc98126232c801b170a34a"
+    },
+    {
+      "status": "??",
+      "path": "coordination/sales-rop-plan-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 703,
+      "sha256": "6972eb9972f6eaf7492d3787261046dea51e0ec266edfedeb706774203df9648"
+    },
+    {
+      "status": "??",
+      "path": "coordination/sales-ux-nextstep-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1473,
+      "sha256": "9edbb7513cf86979ba6f64256590dded3dbf474c2ba44dad0df5f5bf43ba14ec"
+    },
+    {
+      "status": "??",
+      "path": "coordination/sales-ux-nextstep-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4453,
+      "sha256": "a41c2eef25c59aaeaf75d4e9dd80702e7e4172f839a971b33d31837ea77a5091"
+    },
+    {
+      "status": "??",
+      "path": "coordination/scd2-partial-unique-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1771,
+      "sha256": "306eac75d29cbea76594a1198d0b3476b3b7270927b9fbdd72a7a40b9db43031"
+    },
+    {
+      "status": "??",
+      "path": "coordination/secure-env-prep.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 11928,
+      "sha256": "734c11c2aad252d56f271a1f79a31f4b96e9418ce1378e333835c564be1d3a63"
+    },
+    {
+      "status": "??",
+      "path": "coordination/security-p1-2-rbac-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 3536,
+      "sha256": "d7bd58c02367edc67d931627c413f153a0630f593c18b9f967ab81f6f9290a68"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-crm.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 6050,
+      "sha256": "cb0f27ccd7027549f0d9a4c762394cd5957a171a1adab5482a40e847623a8b21"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-finance.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5120,
+      "sha256": "e301fc4747a1e60cf8d515041ac75606032c14ed0174c39eed1a4b63920feb1b"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-hr.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5985,
+      "sha256": "f8c9832493b162114d9be83db3bbed80961ae729c7dcdebb6c1a18a6ae3124fd"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-logistics.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5325,
+      "sha256": "8546adc09ca16a0eb9eee8c8b04cb3193cbdc9bfb59f00f05dc9acaf70eab5a4"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-procurement.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4894,
+      "sha256": "3efa6b7db9835c5dbeb8a1136f6d8cf3e9b008b7149ee8fb197ee93de4cdcea6"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-reference.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 4891,
+      "sha256": "a2cf0922cc7c27ed49a77648af35f06a8ba380a65220eb933a7f98e3c29b5fbb"
+    },
+    {
+      "status": "??",
+      "path": "coordination/seed-wms.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 5512,
+      "sha256": "f42df0df45ad4145379c39c1fd9a48ea415089f45512c59a22a52e84f9d6a763"
+    },
+    {
+      "status": "??",
+      "path": "coordination/service-intake-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1319,
+      "sha256": "fe389b1ded3591f05176ec6cea2a5abb9d68c85ebcd75fb0bba75476a949f71c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/service-intake-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4661,
+      "sha256": "044e8d39b7d26af28645286d0ed14c97ac5da50f9d921823f0e371e458725f6c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/spec-hr-worktime-tabel.md",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 9072,
+      "sha256": "02e639e784272e828516f924b5ec8f9bccbd935335626d809f66e3138175a9d0"
+    },
+    {
+      "status": "??",
+      "path": "coordination/task-cursor-leads-sales-working.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 6556,
+      "sha256": "e0c455bfc83f7cc9b65c864eb8b6d654eaee2f9f4bb70415132ff08475d4c1d4"
+    },
+    {
+      "status": "??",
+      "path": "coordination/task-cursor-night-2026-07-25.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 17047,
+      "sha256": "e7ffcf749bae496d60fe161079d48bc99074ae5e1aea97b63790ac7d9940df9e"
+    },
+    {
+      "status": "??",
+      "path": "coordination/theme-review-findings.json",
+      "action": "commit",
+      "bundle": "project-design-records",
+      "reason": "project architecture, process, or implementation record",
+      "size": 3482,
+      "sha256": "5290dc3241b82d194a3c789e08bb7a2d0e73663d08bf840c05e40ed83e613f67"
+    },
+    {
+      "status": "??",
+      "path": "coordination/wms-fe-inv-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 532,
+      "sha256": "72fbc8abf5e3078b2678cd15e91335d0878f4894bae4806e1c001f7057ae7e26"
+    },
+    {
+      "status": "??",
+      "path": "coordination/wms-fe-inv-status.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 1747,
+      "sha256": "f3f8d2bdcd4c7b45677942d77222f52be95fd97755e862bde8b062ac07f5b4cf"
+    },
+    {
+      "status": "??",
+      "path": "coordination/wms-inventory-tests-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4398,
+      "sha256": "5dd98b09bed026f7091b3472ecad45dbae1be7c7dbbdb0bf6f0bfe6d4b6fb332"
+    },
+    {
+      "status": "??",
+      "path": "coordination/zak-cost-fe-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 487,
+      "sha256": "306c95be59a3ecb026a35d32d9886720a1017b802d00307091fd38c83248df2c"
+    },
+    {
+      "status": "??",
+      "path": "coordination/zak-fe-ai-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4285,
+      "sha256": "dce29e942ba4d2f7c0e28361e84f3a2b3cd1f89d83b5c9c06848c32b9e522db9"
+    },
+    {
+      "status": "??",
+      "path": "coordination/zak-fe-logistics-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4553,
+      "sha256": "878b44f37cba1d7feab5245e846f7942354ac3783de18632a32696e96fb2c468"
+    },
+    {
+      "status": "??",
+      "path": "coordination/zak-fe-process-scope.md",
+      "action": "commit",
+      "bundle": "fleet-task-records",
+      "reason": "bounded task scope, handoff, status, or acceptance record",
+      "size": 4358,
+      "sha256": "a407776de9aebd724a3d1be7b6075e18c495a7098dad39631635ca7ce22433e1"
+    },
+    {
+      "status": "??",
+      "path": "frontend/.shot-mockup.mjs",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 616,
+      "sha256": "20a2a67483ca13394b4725b843173894af17c260951f67e9107fa73b6295dcaf"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/agents.html",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 23035,
+      "sha256": "5957aed2a2276e19832159a72c5f4e36c9764f18d5c6ddd0dbe7754ca4aca5e0"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/attribution.html",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 18188,
+      "sha256": "5b6d62d7368264c7904673475a2475b6509e374f0d90fa1acb2d47e83ccc1a03"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/cockpit.html",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 17808,
+      "sha256": "7487c2b95d422f1118ab511463d69cb39986513d09deeef6bf7ad0f13e342b90"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/geofactory.html",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 17694,
+      "sha256": "3a8970163792cb5ca44134a8ea9508572e533aacea7c8816a262da2d64e6350a"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/leadgen.html",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 22011,
+      "sha256": "ebfdf958214347e31f23a5b1e5e7018f1faa1b88c63b87dd91f37b208b914438"
+    },
+    {
+      "status": "??",
+      "path": "marketing-prototype/КОНЦЕПЦИЯ.md",
+      "action": "commit",
+      "bundle": "marketing-prototype",
+      "reason": "coherent local marketing UI prototype",
+      "size": 68113,
+      "sha256": "5d29dde52ea7c5c4ec432de4a484d97430e412d90c1d56bc46a03c12cfec9cf1"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/.obsidian/app.json",
+      "action": "retain-local",
+      "bundle": "local-obsidian",
+      "reason": "local Obsidian application preferences",
+      "size": 589,
+      "sha256": "56d835f19875637016717f427b2c7ae7755f519cf43371195cccd1563deb34c2"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/.obsidian/appearance.json",
+      "action": "retain-local",
+      "bundle": "local-obsidian",
+      "reason": "local Obsidian application preferences",
+      "size": 46,
+      "sha256": "920fff844ce903b160ae7ff2830e35c8961875bed48d2d834faf6568afec7d52"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/.obsidian/core-plugins.json",
+      "action": "retain-local",
+      "bundle": "local-obsidian",
+      "reason": "local Obsidian application preferences",
+      "size": 485,
+      "sha256": "565de46b0c27f263821584ed30c4c4acef07cfb399e962a861006953ec165dad"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/.obsidian/graph.json",
+      "action": "retain-local",
+      "bundle": "local-obsidian",
+      "reason": "local Obsidian application preferences",
+      "size": 479,
+      "sha256": "69fd3223685a8160edba5236a2d4c1acdfbe99fe6d424340b44767d5ad858878"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/README.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 1021,
+      "sha256": "86d273432d8453532a4d7239de156e8fbcc57aeceb23eb60951f5f2457463b20"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/notes/# CMR-ERP — AI-First Business OS.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 2340,
+      "sha256": "1b2bfc66ecb2a5c3327c6e8ddb5060b8442c9b359d7a813467a9cd384d690ccd"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/notes/plan-export-summary.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 967,
+      "sha256": "5047e73df013f357e5b84dc64564548cbc03b47e7d4cc40aa6a5a0db676fc273"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/notes/sales-regular-clients.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 1201,
+      "sha256": "7c09ecd26cd52887ce047cfeb3ac38830f8459f11780c2822e701514d1b2115b"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/project/CLAUDE.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 12956,
+      "sha256": "568575a99232a9efa67cc7c50925332242d8bd01fd69e01878bd57b6cbb7fe9a"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/project/PLATFORM.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 6113,
+      "sha256": "ec57b7de11fbd39ec9538a557d8f8a78c174f30d1fa9a03881b1bdeb3ad74429"
+    },
+    {
+      "status": "??",
+      "path": "obsidian/project/README.md",
+      "action": "commit",
+      "bundle": "knowledge-vault",
+      "reason": "canonical project knowledge note",
+      "size": 5175,
+      "sha256": "36f167a14939154cc513a612f6aa4d98304f6245d9a193b1a700f91036ffce62"
+    },
+    {
+      "status": "??",
+      "path": "rop-plan-real.json",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 43814,
+      "sha256": "4e459a0d68a91c0ec50ea13f5f3d449bbe97e298b8ed9a90d6abee2ae02227a8"
+    },
+    {
+      "status": "??",
+      "path": "scripts/_odata_entities.txt",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 2983,
+      "sha256": "4019fd35924d865ec80c49eca9933bb947ce5a6fbdc89020ae8a0964df4f591d"
+    },
+    {
+      "status": "??",
+      "path": "scripts/_probe_1c_entities.py",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 1081,
+      "sha256": "12b594ed78afbdcc44ad3899d084bdbb7a6990ba1dfb07872011fef01a81653a"
+    },
+    {
+      "status": "??",
+      "path": "scripts/_probe_1c_samples.py",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 2186,
+      "sha256": "7379978c63ff3859f2bdf03ee2a27e08b736a153dbff07b39fca9b9ee70c3c95"
+    },
+    {
+      "status": "??",
+      "path": "snap-leads.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 13185,
+      "sha256": "159dc2f5e4003d9bf8825ca3cf98e43c0e22211607b15c1d0da2b1095574e49d"
+    },
+    {
+      "status": "??",
+      "path": "snap2.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 15459,
+      "sha256": "d717384460c4d8d3f2fa3d6fdaa8494102964aaae13cd90df0eba089e513626c"
+    },
+    {
+      "status": "??",
+      "path": "snap3.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 18676,
+      "sha256": "f1d1922625dd479e7d6ca0555f1931dfd104f1c8a966f5442184881821154a45"
+    },
+    {
+      "status": "??",
+      "path": "snap4.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 21931,
+      "sha256": "35f5f4b2a16f5d0dab88afcb5164c84ae067d1f2151bb5acc0b204e53b119e19"
+    },
+    {
+      "status": "??",
+      "path": "snap5.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 13640,
+      "sha256": "d36fffca8c6c269d06d0aadad7d7e126d6c21e4390a5ce1f45d2844c635c7113"
+    },
+    {
+      "status": "??",
+      "path": "snap6.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 20304,
+      "sha256": "66fc6da21ec16f87d2c951ee1a85e5bb09f0d751c9160b2310f738fc85747825"
+    },
+    {
+      "status": "??",
+      "path": "snap7.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 20304,
+      "sha256": "66fc6da21ec16f87d2c951ee1a85e5bb09f0d751c9160b2310f738fc85747825"
+    },
+    {
+      "status": "??",
+      "path": "snap8.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 21395,
+      "sha256": "38f0e98b8e65d83d2a1d78c64b4c7d1255f5356877af0ddf00fa51a927ee4bac"
+    },
+    {
+      "status": "??",
+      "path": "snap9.md",
+      "action": "retain-local",
+      "bundle": "local-artifacts",
+      "reason": "raw data, browser snapshot, local probe, backup, or helper",
+      "size": 23125,
+      "sha256": "20bc290239a38b8d7b48880801a7e8434a81046e8663bacff422a4c2ae4441c9"
+    },
+    {
+      "status": "??",
+      "path": "Концепция_Личный_AI_Ассистент.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 55347,
+      "sha256": "7ddc9c49f6a6fd003aebae9017368c6ba73a13588ce0a3d122d1b4ea0ecccd73"
+    },
+    {
+      "status": "??",
+      "path": "ТЗ_Внутренний_чат_мессенджер.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 11648,
+      "sha256": "c77ebd44440d66881014adef61a876eba4376700180c2b6bc7ab7dae7cea0a52"
+    },
+    {
+      "status": "??",
+      "path": "ТЗ_Личный_AI_Ассистент_Шаг1.md",
+      "action": "commit",
+      "bundle": "project-plans",
+      "reason": "project specification, checklist, or historical handoff",
+      "size": 18977,
+      "sha256": "73cb70f89d5a9f9f17e3e387ba06ae5778a9c32bf48cc8e8938d88ab4c0810e5"
+    }
+  ],
+  "coverage": {
+    "visibleStatusEntries": 18,
+    "protectedEntries": 275,
+    "classifiedEntries": 275,
+    "complete": true
+  },
+  "actionCounts": {
+    "commit": 207,
+    "retain-local": 68
+  },
+  "bundleCounts": {
+    "fleet-governance": 8,
+    "fleet-task-records": 134,
+    "goal-evidence": 18,
+    "knowledge-vault": 7,
+    "local-artifacts": 19,
+    "local-coordination": 38,
+    "local-goal-backups": 7,
+    "local-obsidian": 4,
+    "marketing-prototype": 6,
+    "project-design-records": 26,
+    "project-plans": 8
+  }
+}
