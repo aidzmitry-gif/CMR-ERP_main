@@ -3,7 +3,7 @@
 ## Boundary
 
 - Branch: `chore/cc-2119-revision`.
-- Baseline: `683ec5e`; current integration range contains 35 root commits before this evidence commit.
+- Baseline: `683ec5e`; the integration range contains 36 root commits through evidence commit `1809146`, before the closing status commit.
 - Performed: local inspection, exact-path/hunk staging, edits, tests, Docker-isolated acceptance, and local commits.
 - Not performed: push, merge, deploy, production writes, real email, deletion, or movement of retained files.
 
@@ -35,7 +35,7 @@
 ## Preservation and classification
 
 - Initial protected inventory: 1396 root/submodule status entries and 1391 files.
-- Final classification ledger: 274 protected entries, all classified.
+- Final classification ledger: 275 protected entries, all classified.
 - Repository bundles: 189 non-Goal files tracked through atomic commits; Goal evidence is a separate final bundle.
 - Local retention: 68 raw, private, runtime, backup, browser-snapshot, probe, and user-settings files remain byte-identical by size and SHA-256.
 - Local hygiene: 448 exact reversible entries in `.git/info/exclude`; no project `.gitignore` change.

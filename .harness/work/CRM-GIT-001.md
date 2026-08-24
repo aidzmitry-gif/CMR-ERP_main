@@ -25,7 +25,7 @@
 - Risk class: high
 - External-side-effect boundary: local inspection, edits, tests, and atomic local commits only; no push, merge, deploy, production writes, real email, or deletion without separate approval
 - Parent outcome: classified and preserved dirty state, tested atomic local commits, coherent submodule pointers and migrations, and no unknown residue
-- Status: running
+- Status: complete
 - Plan revision: 1
 - Approved passport revision: 1
 - Approval provenance: task `019f88eb-66f2-7661-8818-42ba100ebaf9`; user message on 2026-08-24: `Утверждаю CRM-GIT-001 revision 1`
@@ -34,12 +34,12 @@
 - Checkout/worktree policy: primary is the only writer in the dirty base checkout; no worker worktrees until the base is classified and checkpointed
 - Commit policy: primary-only
 - Integration branch/worktree: `chore/cc-2119-revision` / base checkout
-- Last accepted commit: `895a672`
+- Last accepted commit: `1809146`
 - Current laziness-ladder rung: 2, Python standard library for a deterministic read-only manifest
 - Rejected lower rungs: rung 1 cannot prove that every dirty path is preserved and assigned
 - Retained exceptions / ponytail triggers: preserve all user and fleet artifacts; historical migration 0087; mixed Bank/GSheets hunks; dirty finance submodule
-- Current verified subgoal: G11
-- Next minimal slice and acceptance check: G12; recheck classification, preservation hashes, commit history, Goal evidence, and the no-push/no-deploy boundary
+- Current verified subgoal: G12
+- Next minimal slice and acceptance check: none; revision 1 is complete locally and awaits separate authorization for push/merge/deploy/production work
 - Executable plan snapshot: `.harness/work/CRM-GIT-001.passport.json`
 - Last validated plan snapshot/hash: `.harness/work/CRM-GIT-001.passport.json` / `c6671fb4fe645a0f7405143ac36e5fcebd5f65ee`
 - Measurement treatment IDs: baseline `CRM-GIT-001-baseline-v1` | treatment `CRM-GIT-001-treatment-v1`
@@ -69,7 +69,7 @@
 | G09 | Sales touch history и Leads planning доведены до атомарных пакетов | G03,G04 | 5 | sales-leads | medium | primary | sol | done | Commits `3d63901` (sales `aaf899c`) and `d81e877` (leads `a04feb0`); 23 focused tests + Ruff PASS; inner statuses clean before parent gitlinks |
 | G10 | Frontend auth/UI и тестовое покрытие собраны без случайного UX-сдвига | G04,G06 | 6 | frontend | medium | primary | sol | done | Commits `f963a0e` and `3bce82a`; focused 157 tests and full 80-file/934-test Vitest suite PASS; typecheck and lint PASS; manual diff review found no UX behavior change |
 | G11 | Все пакеты имеют атомарные локальные коммиты и общую матрицу тестов | G02,G05,G06,G07,G08,G09,G10 | 7 | integration | high | primary | sol | done | 178 affected backend tests, 934 frontend tests, production build, Ruff, py_compile, Compose and Alembic PASS; five gitlinks match clean inner trees; index empty; commits through `895a672` |
-| G12 | Независимая финальная проверка и пакет к push/deploy готовы | G11 | 8 | acceptance | high | primary | sol | running | Нет неклассифицированных изменений; итоговый test report и commit list записаны; push/deploy не выполнены |
+| G12 | Независимая финальная проверка и пакет к push/deploy готовы | G11 | 8 | acceptance | high | primary | sol | done | Commit `1809146`; 275/275 entries classified; 68 retained files rehashed unchanged and locally excluded; 189 non-Goal files tracked; index and visible status clean; no push/deploy/production write/real email |
 
 ## Agent registry
 
@@ -100,6 +100,7 @@
 | 1 / 2026-08-25 | commits `3d63901`, `d81e877`; sales/leads inner commits and 23 focused tests | G09 accepted; submodule changes precede and match their parent gitlinks | unlocked final frontend composition G10 |
 | 1 / 2026-08-25 | commits `f963a0e`, `3bce82a`; 157 focused and 934 full frontend tests, typecheck, lint, manual diff review | G10 accepted; frontend coverage is separate from no-behavior lint cleanup | started final integration matrix G11 |
 | 1 / 2026-08-25 | commits `22920a6`..`895a672`; 178 affected backend tests, 934 frontend tests, production build, Ruff, py_compile, Compose, Alembic and five clean gitlinks | G11 accepted; all repository bundles are atomic and the index is empty; redundant full pytest stopped after its documented 10-minute budget | started final classification and evidence gate G12 |
+| 1 / 2026-08-25 | commit `1809146`; final report, 275-entry classification, 68 retained-file hash checks, clean index/status and validated passport | G12 accepted; revision 1 complete locally with the external-effect boundary intact | no push, merge, deploy, production write, real email or deletion performed |
 
 ## Автономный режим после утверждения
 

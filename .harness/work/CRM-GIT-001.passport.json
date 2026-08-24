@@ -7,12 +7,12 @@
     "riskClass": "high",
     "externalSideEffectBoundary": "Local inspection, edits, tests, and atomic local commits only; no push, merge, deploy, production writes, real email, or deletion without separate approval.",
     "parentOutcome": "Classified and preserved dirty state, tested atomic local commits, coherent submodule pointers and migrations, and no unknown residue.",
-    "status": "running",
+    "status": "complete",
     "planRevision": 1,
     "approvedPassportRevision": 1,
     "approvalProvenance": "Task 019f88eb-66f2-7661-8818-42ba100ebaf9; user message on 2026-08-24: Утверждаю CRM-GIT-001 revision 1.",
     "checkoutWorktreePolicy": "Primary is the only writer in the dirty base checkout; no worker worktrees until the base is classified and checkpointed; exact-path and hunk staging only.",
-    "nextMinimalSliceAcceptance": "G12 rechecks classification, preservation hashes, commit history, Goal evidence, and the no-push/no-deploy boundary.",
+    "nextMinimalSliceAcceptance": "None; revision 1 is complete locally and awaits separate authorization for any push, merge, deploy, production write, or real email.",
     "canonicalWorkItemPath": ".harness/work/CRM-GIT-001.md",
     "baselineId": "CRM-GIT-001-baseline-v1",
     "treatmentId": "CRM-GIT-001-treatment-v1",
@@ -20,7 +20,7 @@
     "metricsSchemaVersion": 1,
     "globalAgentCap": 4,
     "delegationDepthCap": 1,
-    "currentVerifiedSubgoal": "G11",
+    "currentVerifiedSubgoal": "G12",
     "standingChainAuthorization": "approved",
     "standingAuthorizationScope": "both"
   },
@@ -203,7 +203,7 @@
       "acceptance": "No unclassified change remains, final test report and commit list are recorded, and no push or deploy was performed.",
       "execution": "primary",
       "model": "sol",
-      "status": "running",
+      "status": "done",
       "worktree": null,
       "ownedPaths": [".harness/work"]
     }
