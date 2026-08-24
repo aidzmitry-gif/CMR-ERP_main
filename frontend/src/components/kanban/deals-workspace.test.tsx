@@ -682,4 +682,84 @@ describe("DealsWorkspace (канбан)", () => {
     expect(within(panel).getByText(/До плана:/)).toBeInTheDocument();
     expect(within(panel).getByText("ООО Доска")).toBeInTheDocument(); // открытая сделка стадии "new"
   });
+
+  // --- Непокрытые ветки: список-пустой, скорборд «Ещё показателей», сброс фильтров,
+  // произвольный месяц, согласованный план, фильтр «Висяки» ---
+
+  it("список под несовпадающим поиском рисует строку «Сделок не найдено», а не баннер канбана (цикл 10)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTitle("Список"));
+    fireEvent.change(screen.getByPlaceholderText("Поиск сделок..."), {
+      target: { value: "нет-такой-сделки" },
+    });
+    // Пустое тело таблицы (view === "list") даёт свою строку…
+    expect(screen.getByText("Сделок не найдено")).toBeInTheDocument();
+    // …а баннер канбана «Под текущие фильтры…» в списке НЕ рисуется (гейт view !== "list").
+    expect(screen.queryByText(/Под текущие фильтры не попала ни одна сделка/)).toBeNull();
+  });
+
+  it("«Ещё N показателей» раскрывает вторичные метрики скорборда и «Свернуть» их прячет", () => {
+    // id вне PRIMARY_CELLS → вторичная метрика: свёрнуто скрыта, видна только под кнопкой.
+    const kpis = [
+      { id: "meetings", label: "Встречи проведено", value: 3, target: 10, percent: 30, icon: "phone" as const, tone: "blue" as const },
+    ];
+    render(<DealsWorkspace initialStages={stages} initialKpis={kpis} />);
+    expect(screen.queryByText("Встречи проведено")).toBeNull(); // свёрнуто — не в первой строке сетки
+    fireEvent.click(screen.getByRole("button", { name: /Ещё \d+ показателей/ }));
+    expect(screen.getByText("Встречи проведено")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Свернуть/ }));
+    expect(screen.queryByText("Встречи проведено")).toBeNull();
+  });
+
+  it("«Сбросить фильтры» очищает поиск и возвращает карточки на доску (цикл 10)", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.change(screen.getByPlaceholderText("Поиск сделок..."), {
+      target: { value: "нет-такой-сделки" },
+    });
+    expect(screen.queryByText("ООО Доска")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Поиск сделок...")).toHaveValue("");
+  });
+
+  it("выбор произвольного месяца (input type=month) перечитывает KPI за этот период", async () => {
+    mock(api.getKpis).mockResolvedValue([]);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.change(screen.getByLabelText("Выбрать месяц и год"), {
+      target: { value: "2026-03" },
+    });
+    await waitFor(() => expect(api.getKpis).toHaveBeenCalledWith("2026-03"));
+  });
+
+  it("согласованный план текущего месяца показывает пометку «согласован РОПом» в подзаголовке (П2)", async () => {
+    mock(api.fetchPlans).mockResolvedValue([{ status: "approved" }]);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    // Подзаголовок появляется после тика now (queueMicrotask), пометка — после resolve fetchPlans.
+    await waitFor(() =>
+      expect(screen.getByText(/согласован РОПом/)).toBeInTheDocument(),
+    );
+  });
+
+  it("фильтр «Висяки» оставляет только застрявшие открытые сделки (SALES-43)", async () => {
+    const old = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(); // 10 дней > порога STUCK_DAYS
+    const mixed: Stage[] = [
+      {
+        id: "new",
+        title: "Новая заявка",
+        color: "#000",
+        count: 2,
+        sum: 2,
+        deals: [
+          { id: "s1", number: "CRM-S1", company: "ООО Застряла", description: "", amount: 1, priority: "Средний", owner: "И", stageChangedAt: old },
+          { id: "s2", number: "CRM-S2", company: "ООО Свежая", description: "", amount: 1, priority: "Средний", owner: "И" },
+        ],
+      },
+    ];
+    render(<DealsWorkspace initialStages={mixed} initialKpis={[]} />);
+    // Счётчик «застряло» гейтится гидрационным now — ждём его появления.
+    await waitFor(() => expect(screen.getByText(/застряло:/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Висяки/ }));
+    expect(screen.getByText("ООО Застряла")).toBeInTheDocument();
+    expect(screen.queryByText("ООО Свежая")).toBeNull(); // без stageChangedAt — не висяк, скрыта
+  });
 });

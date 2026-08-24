@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -88,6 +88,12 @@ beforeEach(() => {
     "open",
     vi.fn(() => ({ location: { href: "" }, close: vi.fn() })),
   );
+});
+
+// Некоторые кейсы ниже подменяют global fetch (факт-маржа) — снимаем подмену после каждого,
+// чтобы стаб не протёк в другие тесты (open заново ставится в beforeEach выше).
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("DealDrawerPreview — слайс 6 (A): авто-шаг после счёта", () => {
@@ -618,5 +624,296 @@ describe("DealDrawerPreview — цикл 14 (B): «Повторить заказ
 
     expect(await screen.findByText("Прошлых заказов нет")).toBeInTheDocument();
     expect(api.addDealItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("DealDrawerPreview — шапка: ★ закрепить", () => {
+  it("не закреплённая сделка → aria-label «Закрепить», клик ставит starred=true", () => {
+    const onUpdateFields = vi.fn();
+    renderDrawer(onUpdateFields);
+    fireEvent.click(screen.getByRole("button", { name: "Закрепить" }));
+    expect(onUpdateFields).toHaveBeenCalledWith("1", { starred: true });
+  });
+
+  it("закреплённая сделка → aria-label «Снять закрепление», клик ставит starred=false", () => {
+    const onUpdateFields = vi.fn();
+    renderDrawer(onUpdateFields, { ...deal, starred: true });
+    fireEvent.click(screen.getByRole("button", { name: "Снять закрепление" }));
+    expect(onUpdateFields).toHaveBeenCalledWith("1", { starred: false });
+  });
+});
+
+describe("DealDrawerPreview — Esc закрывает превью", () => {
+  it("нажатие Escape по документу зовёт onClose", () => {
+    const onClose = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={stages}
+        onClose={onClose}
+        onMoveStage={() => {}}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={() => {}}
+        onLose={() => {}}
+        now={Date.now()}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DealDrawerPreview — inline-редактор «Следующий шаг»", () => {
+  it("правка текста + «Сохранить» → onUpdateFields({ next_step })", () => {
+    const onUpdateFields = vi.fn();
+    renderDrawer(onUpdateFields);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    const input = screen.getByPlaceholderText("Опишите следующий шаг…");
+    fireEvent.change(input, { target: { value: "Позвонить клиенту" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(onUpdateFields).toHaveBeenCalledWith("1", { next_step: "Позвонить клиенту" });
+  });
+
+  it("Enter в поле коммитит шаг", () => {
+    const onUpdateFields = vi.fn();
+    renderDrawer(onUpdateFields);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    const input = screen.getByPlaceholderText("Опишите следующий шаг…");
+    fireEvent.change(input, { target: { value: "Отправить КП" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUpdateFields).toHaveBeenCalledWith("1", { next_step: "Отправить КП" });
+  });
+
+  it("текст не изменился → «Сохранить» закрывает редактор без onUpdateFields", () => {
+    const onUpdateFields = vi.fn();
+    renderDrawer(onUpdateFields, { ...deal, nextStep: "Дожать оплату" });
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    // поле предзаполнено текущим шагом — сохраняем как есть
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(onUpdateFields).not.toHaveBeenCalled();
+    // редактор закрылся — поля больше нет
+    expect(screen.queryByPlaceholderText("Опишите следующий шаг…")).toBeNull();
+  });
+});
+
+describe("DealDrawerPreview — быстрая задача", () => {
+  it("«Добавить» disabled при пустом поле, активна после ввода", () => {
+    renderDrawer();
+    const btn = screen.getByRole("button", { name: "Добавить" });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("Позвонить, отправить КП, …"), {
+      target: { value: "Перезвонить" },
+    });
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("Enter в поле задачи → onAddTask(id, текст)", () => {
+    const onAddTask = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={stages}
+        onClose={() => {}}
+        onMoveStage={() => {}}
+        onUpdateFields={() => {}}
+        onAddTask={onAddTask}
+        onWin={() => {}}
+        onLose={() => {}}
+        now={Date.now()}
+      />,
+    );
+    const input = screen.getByPlaceholderText("Позвонить, отправить КП, …");
+    fireEvent.change(input, { target: { value: "Перезвонить в 15:00" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAddTask).toHaveBeenCalledWith("1", "Перезвонить в 15:00");
+  });
+});
+
+describe("DealDrawerPreview — движение по стадиям", () => {
+  const twoStages: Stage[] = [
+    { id: "invoice", title: "Счёт отправлен", color: "#000", count: 1, sum: 1000, deals: [deal] },
+    { id: "paid", title: "Оплата получена", color: "#000", count: 0, sum: 0, deals: [] },
+  ];
+
+  it("выбор стадии в select → onMoveStage(id, stageId)", () => {
+    const onMoveStage = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={twoStages}
+        onClose={() => {}}
+        onMoveStage={onMoveStage}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={() => {}}
+        onLose={() => {}}
+        now={Date.now()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Стадия сделки"), { target: { value: "paid" } });
+    expect(onMoveStage).toHaveBeenCalledWith("1", "paid");
+  });
+
+  it("кнопка следующей стадии видна и двигает сделку", () => {
+    const onMoveStage = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={twoStages}
+        onClose={() => {}}
+        onMoveStage={onMoveStage}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={() => {}}
+        onLose={() => {}}
+        now={Date.now()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Оплата получена" }));
+    expect(onMoveStage).toHaveBeenCalledWith("1", "paid");
+  });
+
+  it("на последней стадии кнопки следующей стадии нет", () => {
+    // deal в единственной стадии `stages` — nextStage === null
+    renderDrawer();
+    // единственная кнопка перемещения отсутствует: остаётся только select
+    expect(screen.getByLabelText("Стадия сделки")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Счёт отправлен" })).toBeNull();
+  });
+});
+
+describe("DealDrawerPreview — исход сделки", () => {
+  it("«Выиграна» → onWin(id), «Отказ» → onLose(id)", () => {
+    const onWin = vi.fn();
+    const onLose = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={stages}
+        onClose={() => {}}
+        onMoveStage={() => {}}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={onWin}
+        onLose={onLose}
+        now={Date.now()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Выиграна" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отказ" }));
+    expect(onWin).toHaveBeenCalledWith("1");
+    expect(onLose).toHaveBeenCalledWith("1");
+  });
+
+  it("терминальная стадия lost — кнопки исхода скрыты, показана причина отказа (reasonByCode)", () => {
+    const lostStages: Stage[] = [
+      {
+        id: "lost",
+        title: "Проиграна",
+        color: "#000",
+        count: 1,
+        sum: 0,
+        deals: [{ ...deal, lostReasonCode: "price", lostComment: "Ушли к конкуренту" }],
+      },
+    ];
+    render(
+      <DealDrawerPreview
+        deal={{ ...deal, lostReasonCode: "price", lostComment: "Ушли к конкуренту" }}
+        stages={lostStages}
+        onClose={() => {}}
+        onMoveStage={() => {}}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={() => {}}
+        onLose={() => {}}
+        now={Date.now()}
+        reasonByCode={new Map([["price", "Дорого"]])}
+      />,
+    );
+    expect(screen.getByText("Причина отказа: Дорого")).toBeInTheDocument();
+    expect(screen.getByText("Ушли к конкуренту")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Выиграна" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отказ" })).toBeNull();
+  });
+});
+
+describe("DealDrawerPreview — кнопка звонка (onCall)", () => {
+  it("onCall передан → кнопка есть, клик зовёт onCall(deal)", () => {
+    const onCall = vi.fn();
+    render(
+      <DealDrawerPreview
+        deal={deal}
+        stages={stages}
+        onClose={() => {}}
+        onMoveStage={() => {}}
+        onUpdateFields={() => {}}
+        onAddTask={() => {}}
+        onWin={() => {}}
+        onLose={() => {}}
+        onCall={onCall}
+        now={Date.now()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Позвонить — окно звонка/ }));
+    expect(onCall).toHaveBeenCalledWith(expect.objectContaining({ id: "1" }));
+  });
+
+  it("onCall не передан → кнопки звонка нет", () => {
+    renderDrawer();
+    expect(screen.queryByRole("button", { name: /Позвонить — окно звонка/ })).toBeNull();
+  });
+});
+
+describe("DealDrawerPreview — факт-маржа в скидочном гейте", () => {
+  const itemBelowMin = {
+    id: 1,
+    sku_id: 10,
+    code: "A1",
+    title: "Товар А",
+    unit: "шт",
+    qty: 10,
+    last_price: 150,
+    min_price: 150, // Σ = 1500 > 1000 → гейт активен
+  };
+
+  it("маржа доступна → показываем «маржа N%»", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ margin_pct: 23, priced_count: 2, total_count: 3, reason: null }),
+      })),
+    );
+    renderDrawer();
+    expect(await screen.findByText("маржа 23%")).toBeInTheDocument();
+  });
+
+  it("маржа недоступна (fetch падает) → «маржа не рассчитана»", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([itemBelowMin]);
+    renderDrawer();
+    // гейт виден → внутри показан честный fallback, т.к. фетч маржи в тест-среде не резолвит
+    expect(await screen.findByText("маржа не рассчитана")).toBeInTheDocument();
+  });
+});
+
+describe("DealDrawerPreview — срок действия счёта (будущий)", () => {
+  it("valid_until в будущем → бейдж «истекает через N дн»", async () => {
+    const future = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+    mock(api.fetchDocuments).mockResolvedValue([
+      {
+        id: 9,
+        kind: "invoice",
+        number: "СЧ-7",
+        status: "posted",
+        onec_ref: null,
+        amount: 5000,
+        valid_until: future,
+        reserve_status: "none",
+      },
+    ]);
+    renderDrawer();
+    expect(await screen.findByText(/истекает через \d+ дн/)).toBeInTheDocument();
   });
 });

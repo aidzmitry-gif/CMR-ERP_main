@@ -781,4 +781,104 @@ describe("LeadsWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
     expect(api.fetchLeadSourceStats).toHaveBeenCalledTimes(1);
   });
+
+  it("Цикл 6: «Разобрать целевых» зовёт expressBulkLeads и показывает итог разбора", async () => {
+    (api.expressBulkLeads as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expressed: [1],
+      skippedNonTarget: 0,
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]} />);
+
+    // счётчик в кнопке = число целевых новых лидов
+    fireEvent.click(screen.getByRole("button", { name: /Разобрать целевых \(1\)/ }));
+
+    await waitFor(() => expect(api.expressBulkLeads).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Разобрано целевых: 1/)).toBeInTheDocument();
+  });
+
+  it("Цикл 6: кнопка «Разобрать целевых» заблокирована, когда целевых новых лидов нет", () => {
+    // низкий балл (< EXPRESS_SCORE_THRESHOLD) → не кандидат на конвейер
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 20, qualification: "non-target" }]} />);
+    const btn = screen.getByRole("button", { name: /Разобрать целевых \(0\)/ });
+    expect(btn).toBeDisabled();
+  });
+
+  it("Цикл 6: горячая клавиша E запускает конвейер разбора целевых", async () => {
+    (api.expressBulkLeads as ReturnType<typeof vi.fn>).mockResolvedValue({
+      expressed: [1],
+      skippedNonTarget: 0,
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, score: 70, qualification: "target" }]} />);
+
+    // фокус вне полей ввода → обработчик keydown срабатывает
+    fireEvent.keyDown(document.body, { code: "KeyE" });
+
+    await waitFor(() => expect(api.expressBulkLeads).toHaveBeenCalledTimes(1));
+  });
+
+  it("скорборд «Передачи продавцам» грузится лениво и рендерит зависших >24ч", async () => {
+    (api.fetchLeadHandoffStats as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        manager: "Иванов И.И.", assigned: 5, converted: 2, pipeline: 10000,
+        conversionPct: 40, pending: 2, pendingPipeline: 3000, stale: 1,
+      },
+    ]);
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    expect(api.fetchLeadHandoffStats).not.toHaveBeenCalled(); // не на маунте
+
+    fireEvent.click(screen.getByRole("button", { name: /Передачи продавцам/ }));
+    expect(await screen.findByText("Иванов И.И.")).toBeInTheDocument();
+    expect(screen.getByText("⚠ 1")).toBeInTheDocument(); // зависший >24ч
+    expect(api.fetchLeadHandoffStats).toHaveBeenCalledTimes(1);
+
+    // повторное открытие не дёргает API заново
+    fireEvent.click(screen.getByRole("button", { name: /Скрыть/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Передачи продавцам/ }));
+    expect(api.fetchLeadHandoffStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("Цикл 5: панель плана рендерится и «Сохранить норму» шлёт правки в saveLeadPlan", async () => {
+    (api.fetchLeadPlan as ReturnType<typeof vi.fn>).mockResolvedValue({
+      leadsTarget: 30, qualifiedTarget: 10, convertedTarget: 3, reactionTargetMin: 15,
+      leadsFact: 5, qualifiedFact: 2, convertedFact: 0, reactionFactMin: 8,
+    });
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+
+    expect(await screen.findByText("Мой план на сегодня")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Норма/ })); // войти в редактирование
+    fireEvent.change(screen.getByLabelText("Обработать"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить норму" }));
+
+    await waitFor(() =>
+      expect(api.saveLeadPlan).toHaveBeenCalledWith(
+        expect.objectContaining({ leadsTarget: 50, qualifiedTarget: 10, convertedTarget: 3, reactionTargetMin: 15 }),
+      ),
+    );
+  });
+
+  it("Цикл 8: умная маршрутизация показывает обоснование выбора менеджера (rationale)", async () => {
+    (api.routeLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 1, status: "routed", assigned_to: "Иванов И.И.", funnel: "new",
+      rationale: "Иванов — лучшая конверсия по региону",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, status: "qualified", score: 70, qualification: "target" }]} />);
+
+    // распределение прямо с карточки канбана
+    fireEvent.click(screen.getByRole("button", { name: "🤝 Распределить" }));
+
+    await waitFor(() => expect(api.routeLead).toHaveBeenCalledWith(1, undefined));
+    expect(await screen.findByText(/Распределён → Иванов/)).toBeInTheDocument();
+  });
+
+  it("сбой квалификации с карточки показывает флеш-ошибку, лид остаётся новым", async () => {
+    (api.qualifyLead as ReturnType<typeof vi.fn>).mockResolvedValue(null); // сетевой сбой
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1 }]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "✅ Квалифицировать" }));
+
+    await waitFor(() => expect(api.qualifyLead).toHaveBeenCalledWith(1));
+    expect(await screen.findByText(/Не удалось квалифицировать ЛИД-1/)).toBeInTheDocument();
+    // не переехал в квалификацию — балл-бейдж «целевой» не появился
+    expect(screen.queryByText(/целевой/)).not.toBeInTheDocument();
+  });
 });
