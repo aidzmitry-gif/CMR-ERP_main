@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Кокпит руководителя маркетинга — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --pop:0 8px 24px rgba(16,24,40,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+
+  /* ——— Top bar + tabs ——— */
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px}
+  .crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .back:hover{color:var(--ink);border-color:#CBD5E1}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .tab .soon{font-size:9px;vertical-align:super;color:var(--slate-400);margin-left:3px}
+  .tab.dim{color:#C7CDD6;cursor:default}
+
+  /* ——— Layout ——— */
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}
+  .sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .stack{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .card.tight{padding:0}
+  .card.lv{border-left:4px solid var(--violet-500)}
+
+  /* ——— KPI strip ——— */
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr)}
+  @media(min-width:640px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:1040px){.kpis{grid-template-columns:repeat(6,1fr)}}
+  .kpi{padding:16px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .kpi .v{font-size:19px;font-weight:700}
+  .kpi .l{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.25}
+  .kpi .s{font-size:10px;color:var(--slate-400)}
+
+  /* ——— bits ——— */
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)} .t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)} .t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .d-green{background:var(--green-500)} .d-amber{background:var(--amber-500)} .d-red{background:var(--red-500)}
+  .d-violet{background:var(--violet-500)} .d-teal{background:var(--teal-500)} .d-slate{background:var(--slate-400)} .d-brand{background:var(--brand)}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px;background:var(--brand)}
+  .bar.h6{height:6px}
+  .f-green{background:var(--green-500)!important} .f-amber{background:var(--amber-500)!important} .f-red{background:var(--red-500)!important}
+  .f-violet{background:var(--violet-500)!important} .f-teal{background:var(--teal-500)!important} .f-slate{background:var(--slate-400)!important}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .strong{font-weight:700}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .note{font-size:12px;color:var(--slate-400);margin-top:12px}
+  .hl-amber{background:var(--amber-bg);color:#92400E;border-radius:12px;padding:12px;font-size:13px;line-height:1.4}
+  .btn{border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn-pri{background:var(--teal);color:#fff} .btn-ghost{background:#fff;border:1px solid #E5E7EB;color:var(--slate)}
+  .att{border-left:2px solid;border-radius:0 8px 8px 0;padding-left:12px}
+  .att.green{border-color:var(--green-500)} .att.amber{border-color:var(--amber-500)} .att.red{border-color:var(--red-500)} .att.slate{border-color:var(--slate-400)} .att.violet{border-color:var(--violet-500)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .lever{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+  .lever:first-of-type{border-top:none}
+  .lever .nm{font-size:13px}
+  .lever .ag{font-size:11px;color:var(--slate-400)}
+  .lever .vals{font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+  .lever .vals b{color:var(--green)}
+  .chev{color:var(--slate-400)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Маркетинг</b></span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab active" href="cockpit.html">Кокпит руководителя</a>
+    <a class="tab" href="leadgen.html">Движок заявок</a>
+    <a class="tab" href="attribution.html">Атрибуция и прибыль</a>
+    <a class="tab" href="agents.html">AI-агенты</a>
+    <a class="tab" href="geofactory.html">Гео-фабрика / pSEO</a>
+    <span class="tab dim">База и сегменты<span class="soon">скоро</span></span>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Кокпит руководителя маркетинга</h1>
+      <p class="sub">Заявки → квалификация → передача в продажи. Мерило — деньги, а не клики: вклад в выручку и прибыль.</p>
+    </div>
+    <span class="tag t-violet">Демо · BYN</span>
+  </div>
+
+  <div class="stack">
+    <div class="caption">Июнь 2026 · Отдел маркетинга · валюта — бел. руб. (BYN)</div>
+
+    <!-- KPI -->
+    <div class="card tight">
+      <div class="kpis">
+        <div class="kpi"><div class="v">318</div><div class="l">Заявки за месяц</div><div class="s">план 350 · 91%</div></div>
+        <div class="kpi"><div class="v" style="color:var(--teal)">84</div><div class="l">Качественные (SQL)</div><div class="s">план 95 · 88%</div></div>
+        <div class="kpi"><div class="v">115 BYN</div><div class="l">CPL средний</div><div class="s">cost/SQL — 436 BYN</div></div>
+        <div class="kpi"><div class="v">310 000</div><div class="l">Вклад в выручку (sourced)</div><div class="s">закрыто в июне, BYN</div></div>
+        <div class="kpi"><div class="v" style="color:var(--green)">71 000</div><div class="l">Вклад в прибыль (маржа)</div><div class="s">≈23% маржа, BYN</div></div>
+        <div class="kpi"><div class="v" style="color:var(--green)">94%</div><div class="l">ROMI</div><div class="s">бюджет 36 600 BYN</div></div>
+      </div>
+    </div>
+
+    <!-- Levers + movement -->
+    <div class="grid g2">
+      <div class="card">
+        <div class="row-between"><span class="caption">Кратный рост — где рычаги</span><span class="tag t-brand">факт → цель</span></div>
+        <div style="margin-top:10px">
+          <div class="lever">
+            <div><div class="nm">Поток заявок / мес</div><div class="ag">Агент привлечения · Разведка (тендеры)</div></div>
+            <div class="vals">318 → <b>420</b></div>
+          </div>
+          <div class="lever">
+            <div><div class="nm">Конверсия визит → заявка</div><div class="ag">Контент / SEO-агент</div></div>
+            <div class="vals">2.6% → <b>3.4%</b></div>
+          </div>
+          <div class="lever">
+            <div><div class="nm">Качество MQL → SQL</div><div class="ag">Агент скоринга и квалификации</div></div>
+            <div class="vals">44% → <b>55%</b></div>
+          </div>
+          <div class="lever">
+            <div><div class="nm">Дозревание базы / мес</div><div class="ag">Агент реактивации и nurture</div></div>
+            <div class="vals">18 → <b>60</b></div>
+          </div>
+          <div class="lever">
+            <div><div class="nm">ROMI</div><div class="ag">Агент оптимизации каналов</div></div>
+            <div class="vals">94% → <b>180%</b></div>
+          </div>
+        </div>
+        <p class="note">Каждый рычаг закреплён за агентом. Рост — произведение множителей, а не «ещё бюджет на Директ».</p>
+      </div>
+
+      <div class="card">
+        <span class="caption">Движение за неделю</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:9px">
+          <div class="row-between"><span><span class="dot d-green"></span> Новые заявки</span><span class="strong" style="color:var(--green)">+74</span></div>
+          <div class="row-between"><span><span class="dot d-teal"></span> Разбужено из базы</span><span class="strong" style="color:var(--teal)">+18</span></div>
+          <div class="row-between"><span><span class="dot d-brand"></span> Передано в продажи (SQL)</span><span class="strong" style="color:var(--brand)">+21</span></div>
+          <div class="row-between"><span><span class="dot d-red"></span> Отписки / брак</span><span class="strong" style="color:var(--red)">−9</span></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:14px 0"/>
+        <div class="row-between"><span class="caption">Sourced pipeline</span><span class="strong">843 000 BYN</span></div>
+        <div class="row-between" style="margin-top:6px"><span class="caption">Influenced pipeline</span><span class="strong muted">1 240 000 BYN</span></div>
+        <p class="note">Чистое движение: <b style="color:var(--green)">+83</b> заявки в работе.</p>
+      </div>
+    </div>
+
+    <!-- Channels + attention -->
+    <div class="grid g2">
+      <div class="card">
+        <span class="caption">Каналы — вклад и окупаемость</span>
+        <table style="margin-top:10px">
+          <thead><tr><th>Канал</th><th class="num">Заявки</th><th class="num">CPL</th><th class="num">MQL→SQL</th><th class="num">ROMI</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>Рефералы / партнёры</td><td class="num">24</td><td class="num">18</td><td class="num">46%</td><td class="num strong" style="color:var(--green)">480%</td><td><span class="tag t-green">↑</span></td></tr>
+            <tr><td>Тендеры (ICETRADE)</td><td class="num">18</td><td class="num">120</td><td class="num">52%</td><td class="num strong" style="color:var(--green)">310%</td><td><span class="tag t-green">↑</span></td></tr>
+            <tr><td>SEO / экспертный контент</td><td class="num">96</td><td class="num">41</td><td class="num">24%</td><td class="num strong" style="color:var(--teal)">190%</td><td><span class="tag t-teal">↑</span></td></tr>
+            <tr><td>Холодный outbound / ABM</td><td class="num">38</td><td class="num">140</td><td class="num">31%</td><td class="num strong">95%</td><td><span class="tag">→</span></td></tr>
+            <tr><td>Яндекс.Директ</td><td class="num">88</td><td class="num">165</td><td class="num">19%</td><td class="num strong" style="color:var(--amber)">40%</td><td><span class="tag t-amber">↓</span></td></tr>
+            <tr><td>Выставки / отраслевые</td><td class="num">12</td><td class="num">520</td><td class="num">42%</td><td class="num strong">60%</td><td><span class="tag">→</span></td></tr>
+            <tr><td>VK / Telegram Ads</td><td class="num">42</td><td class="num">95</td><td class="num">11%</td><td class="num strong" style="color:var(--red)">−20%</td><td><span class="tag t-red">↓</span></td></tr>
+          </tbody>
+        </table>
+        <p class="note">Прибыль делают рефералы, тендеры и контент. <a href="attribution.html" style="color:var(--brand);font-weight:600">Разбор по деньгам →</a></p>
+      </div>
+
+      <div class="card">
+        <span class="caption">Требует внимания РОМ · 4</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:11px">
+          <div class="att red">
+            <div class="row-between"><span class="strong small">VK / Telegram Ads</span><span class="tag t-red">ROMI −20%</span></div>
+            <div class="small muted" style="margin-top:3px">Качество лида 11%. Агент оптимизации предлагает срезать бюджет −4 000 BYN.</div>
+          </div>
+          <div class="att amber">
+            <div class="row-between"><span class="strong small">Яндекс.Директ</span><span class="tag t-amber">CPL +38%</span></div>
+            <div class="small muted" style="margin-top:3px">Стоимость заявки выросла за 2 недели — проверить ставки и минус-слова.</div>
+          </div>
+          <div class="att amber">
+            <div class="row-between"><span class="strong small">Тендеры ICETRADE</span><button class="btn btn-pri">Разобрать</button></div>
+            <div class="small muted" style="margin-top:3px">9 новых лотов по нашим SKU не разобраны (агент разведки).</div>
+          </div>
+          <div class="att slate">
+            <div class="row-between"><span class="strong small">Спящая база</span><span class="tag">240 контактов</span></div>
+            <div class="small muted" style="margin-top:3px">С сигналами интереса — реактивация ещё не запущена.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agents summary -->
+    <div class="card lv">
+      <div class="row-between"><span class="caption" style="color:var(--violet)">Агенты маркетинга · сегодня</span><span class="tag t-violet">7 агентов · 6 активны</span></div>
+      <div class="grid g3" style="margin-top:12px">
+        <div><div class="strong" style="font-size:18px">47</div><div class="small muted">заявок оценено скорингом</div></div>
+        <div><div class="strong" style="font-size:18px;color:var(--brand)">21</div><div class="small muted">SQL передано в продажи (handoff)</div></div>
+        <div><div class="strong" style="font-size:18px;color:var(--amber)">4</div><div class="small muted">действия ждут визы (HITL)</div></div>
+      </div>
+      <p class="note">Высокорисковые действия (КП, бюджет, передача дорогой сделки) — только через подтверждение человека. <a href="agents.html" style="color:var(--violet);font-weight:600">Открыть парк агентов →</a></p>
+    </div>
+
+    <p class="note">Данные демонстрационные (как витрина концепта). Скоринг и ROMI на старте — эвристики по правилам, не модель. Валюта — BYN. Денежные бенчмарки калибруются под локальный рынок.</p>
+  </div>
+</div>
+
+</body>
+</html>

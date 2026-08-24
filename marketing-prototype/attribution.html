@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Атрибуция и прибыль — Маркетинг — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px}.crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .back:hover{color:var(--ink);border-color:#CBD5E1}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}.tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .tab .soon{font-size:9px;vertical-align:super;color:var(--slate-400);margin-left:3px}.tab.dim{color:#C7CDD6;cursor:default}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .stack{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)}.t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)}.t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)}.t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}.bar>i{display:block;height:100%;border-radius:999px;background:var(--brand)}
+  .f-green{background:var(--green-500)!important}.f-amber{background:var(--amber-500)!important}.f-red{background:var(--red-500)!important}
+  .f-violet{background:var(--violet-500)!important}.f-teal{background:var(--teal-500)!important}.f-slate{background:var(--slate-400)!important}.f-brand{background:var(--brand)!important}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}.strong{font-weight:700}
+  .muted{color:var(--muted)}.small{font-size:12px}
+  .note{font-size:12px;color:var(--slate-400);margin-top:12px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .hl{border-radius:12px;padding:12px;font-size:13px;line-height:1.45}
+  .hl-amber{background:var(--amber-bg);color:#92400E}.hl-violet{background:var(--violet-bg);color:#5B21B6}
+
+  .level{border-left:3px solid;padding:12px 14px;border-radius:0 12px 12px 0;background:#FAFBFC}
+  .level.t1{border-color:var(--brand)}.level.t2{border-color:var(--teal-500)}.level.t3{border-color:var(--green-500)}
+  .level .lt{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate-400)}
+  .level .big{font-size:22px;font-weight:700;margin-top:4px}
+
+  /* journey */
+  .touch{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+  .touch:first-child{border-top:none}
+  .touch .ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;background:var(--brand-50)}
+  .touch .body{flex:1}
+  .touch .credit{font-weight:700;font-variant-numeric:tabular-nums;align-self:center}
+  .funnelconn{font-size:11px;color:var(--slate-400)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Маркетинг</b> / Атрибуция и прибыль</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит руководителя</a>
+    <a class="tab" href="leadgen.html">Движок заявок</a>
+    <a class="tab active" href="attribution.html">Атрибуция и прибыль</a>
+    <a class="tab" href="agents.html">AI-агенты</a>
+    <a class="tab" href="geofactory.html">Гео-фабрика / pSEO</a>
+    <span class="tab dim">База и сегменты<span class="soon">скоро</span></span>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Атрибуция и прибыль — деньги, а не клики</h1>
+      <p class="sub">Сколько маркетинг принёс выручки и маржи. Multi-touch + sourced/influenced pipeline. ROI на трёх уровнях.</p>
+    </div>
+    <span class="tag t-violet">Демо · BYN</span>
+  </div>
+
+  <div class="stack">
+    <!-- Three levels of ROI -->
+    <div class="card">
+      <div class="row-between"><span class="caption">ROI на трёх уровнях</span><span class="tag t-teal">так делают лишь 15% — мы делаем все три</span></div>
+      <div class="grid g3" style="margin-top:12px">
+        <div class="level t1">
+          <div class="lt">1 · Тактика</div>
+          <div class="big" style="color:var(--brand)">+38 000</div>
+          <div class="small muted">Статья «Стальной прокат: как выбрать марку»</div>
+          <div class="small" style="margin-top:6px">14 заявок · 4 SQL · 1 закрыта · затраты 180 BYN</div>
+        </div>
+        <div class="level t2">
+          <div class="lt">2 · Программа / канал</div>
+          <div class="big" style="color:var(--teal)">190–480%</div>
+          <div class="small muted">ROMI по каналам</div>
+          <div class="small" style="margin-top:6px">Лидеры: рефералы 480% · тендеры 310% · SEO 190%</div>
+        </div>
+        <div class="level t3">
+          <div class="lt">3 · Общий вклад</div>
+          <div class="big" style="color:var(--green)">94%</div>
+          <div class="small muted">ROMI всего маркетинга</div>
+          <div class="small" style="margin-top:6px">Прибыль 71 000 − затраты 36 600 BYN</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unit economics on margin -->
+    <div class="card">
+      <div class="row-between"><span class="caption">Юнит-экономика — на марже, не на выручке</span><span class="tag t-teal">методика подтверждена</span></div>
+      <div class="grid g3" style="margin-top:12px">
+        <div class="level t1" style="border-color:var(--teal-500)">
+          <div class="lt">CAC payback</div>
+          <div class="big" style="color:var(--teal)">≈ 11 мес</div>
+          <div class="small muted">CAC / маржа с клиента в мес · при цикле 6–12 мес критично</div>
+        </div>
+        <div class="level t2">
+          <div class="lt">LTV : CAC</div>
+          <div class="big">3.4 : 1</div>
+          <div class="small muted">норма 3–5:1, где «3» = валовая прибыль, не выручка</div>
+        </div>
+        <div class="level t3">
+          <div class="lt">Break-even ROAS</div>
+          <div class="big">× 3.6</div>
+          <div class="small muted">= 1 / маржа 28% · ниже — канал в минусе несмотря на «плюсовой» ROAS</div>
+        </div>
+      </div>
+      <p class="note">Маржа берётся по сделке из ERP (FIFO/средневзвешенная — LIFO в РБ запрещён). Пороги калибруем под наш цикл, не трансплантируем из SaaS.</p>
+    </div>
+
+    <div class="grid g2">
+      <!-- Sourced vs influenced -->
+      <div class="card">
+        <div class="row-between"><span class="caption">Sourced vs Influenced pipeline</span><span class="tag t-brand">обе метрики · стандарт 57%</span></div>
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:16px">
+          <div>
+            <div class="row-between small"><span><span class="dot" style="background:var(--brand)"></span> <b>Sourced</b> — маркетинг создал заявку</div></span><span class="strong">843 000 BYN</span></div>
+            <div class="bar" style="margin-top:6px"><i class="f-brand" style="width:68%"></i></div>
+            <div class="small muted" style="margin-top:4px">Закрыто в июне: <b style="color:var(--ink)">310 000 BYN</b></div>
+          </div>
+          <div>
+            <div class="row-between small"><span><span class="dot" style="background:var(--violet-500)"></span> <b>Influenced</b> — маркетинг коснулся в пути</div></span><span class="strong">1 240 000 BYN</span></div>
+            <div class="bar" style="margin-top:6px"><i class="f-violet" style="width:100%"></i></div>
+            <div class="small muted" style="margin-top:4px">Закрыто в июне: <b style="color:var(--ink)">520 000 BYN</b></div>
+          </div>
+        </div>
+        <div class="hl hl-violet" style="margin-top:16px">При длинном цикле sourced недооценивает вклад: маркетинг «касается» в 1.5–2× большего числа сделок, чем создаёт сам. Поэтому считаем <b>обе</b> метрики, как 57% B2B-команд.</div>
+      </div>
+
+      <!-- Profit contribution by channel -->
+      <div class="card">
+        <span class="caption">Вклад в прибыль по каналам</span>
+        <div style="overflow-x:auto">
+        <table style="margin-top:10px;min-width:520px">
+          <thead><tr><th>Канал</th><th class="num">Sourced выручка</th><th class="num">Маржа*</th><th class="num">Вал. прибыль</th><th class="num">ROMI</th></tr></thead>
+          <tbody>
+            <tr><td>Яндекс.Директ</td><td class="num">92 000</td><td class="num">23%</td><td class="num strong">21 200</td><td class="num" style="color:var(--amber)">40%</td></tr>
+            <tr><td>SEO / контент</td><td class="num">60 000</td><td class="num">24%</td><td class="num strong">14 400</td><td class="num" style="color:var(--teal)">190%</td></tr>
+            <tr><td>Outbound / ABM</td><td class="num">48 000</td><td class="num">22%</td><td class="num strong">10 600</td><td class="num">95%</td></tr>
+            <tr><td>Выставки</td><td class="num">45 000</td><td class="num">22%</td><td class="num strong">9 900</td><td class="num">60%</td></tr>
+            <tr><td>Тендеры (ICETRADE)</td><td class="num">38 000</td><td class="num">24%</td><td class="num strong">9 100</td><td class="num" style="color:var(--green)">310%</td></tr>
+            <tr><td>VK / Telegram</td><td class="num">15 000</td><td class="num">21%</td><td class="num strong">3 150</td><td class="num" style="color:var(--red)">−20%</td></tr>
+            <tr><td>Рефералы / партнёры</td><td class="num">12 000</td><td class="num">26%</td><td class="num strong">3 120</td><td class="num" style="color:var(--green)">480%</td></tr>
+          </tbody>
+          <tfoot><tr style="border-top:2px solid #E5E7EB"><td class="strong">Итого</td><td class="num strong">310 000</td><td class="num strong">23%</td><td class="num strong" style="color:var(--green)">71 000</td><td class="num strong">94%</td></tr></tfoot>
+        </table>
+        </div>
+        <p class="note">* Маржа — оценка по категории товара. Точная профит-атрибуция подключается после методики ценообразования (наценка от landed cost из закупок) — это уже зафиксированный TODO проекта.</p>
+      </div>
+    </div>
+
+    <!-- Multi-touch journey -->
+    <div class="card">
+      <div class="row-between"><span class="caption">Путь клиента — multi-touch атрибуция</span><span class="tag">пример сделки</span></div>
+      <div class="row-between" style="margin-top:8px">
+        <div><span class="strong" style="font-size:15px">ОАО «БМЗ-Прокат»</span> <span class="muted small">· в работе у продаж · цикл 4 мес</span></div>
+        <span class="strong" style="color:var(--teal)">1 200 000 BYN</span>
+      </div>
+      <div class="grid g2" style="margin-top:14px;gap:24px">
+        <div>
+          <div class="caption" style="margin-bottom:6px">6 касаний маркетинга</div>
+          <div class="touch"><div class="ic">📄</div><div class="body"><div class="small strong">SEO-статья «Марки стали для проката»</div><div class="funnelconn">первое касание · органика</div></div><div class="credit" style="color:var(--brand)">25%</div></div>
+          <div class="touch"><div class="ic">⬇️</div><div class="body"><div class="small strong">Скачал каталог (lead magnet)</div><div class="funnelconn">конверсия в заявку</div></div><div class="credit">15%</div></div>
+          <div class="touch"><div class="ic">🎯</div><div class="body"><div class="small strong">Ретаргет Яндекс.Директ</div><div class="funnelconn">возврат на сайт</div></div><div class="credit">10%</div></div>
+          <div class="touch"><div class="ic">🎓</div><div class="body"><div class="small strong">Вебинар «Снижение брака проката»</div><div class="funnelconn">прогрев экспертизой</div></div><div class="credit">20%</div></div>
+          <div class="touch"><div class="ic">✉️</div><div class="body"><div class="small strong">Персональное ABM-письмо</div><div class="funnelconn">агент ABM · ЛПР главный инженер</div></div><div class="credit">20%</div></div>
+          <div class="touch"><div class="ic">🏭</div><div class="body"><div class="small strong">Уведомление о профильном тендере</div><div class="funnelconn">агент разведки · последнее касание</div></div><div class="credit">10%</div></div>
+        </div>
+        <div>
+          <div class="caption" style="margin-bottom:8px">Как модель меняет картину</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="hl" style="background:#FAFBFC;border:1px solid var(--line)">
+              <div class="small"><b>First-touch:</b> вся заслуга → <b>SEO-статья (100%)</b></div>
+              <div class="small" style="margin-top:4px"><b>Last-touch:</b> вся заслуга → <b>тендер (100%)</b></div>
+              <div class="small muted" style="margin-top:6px">Оба врут: переоценивают один канал, обнуляют остальные.</div>
+            </div>
+            <div class="hl hl-violet">
+              <b>Multi-touch (наша модель):</b> заслуга делится по реальному вкладу касаний. Видно, что прибыль создаёт <b>связка</b> контент → вебинар → ABM, а не один канал. Бюджет распределяем по этой связке.
+            </div>
+          </div>
+          <div class="note">Multi-touch предпочтительнее first-/last-touch — консенсус B2B-рынка (6sense, 2025).</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">Данные демонстрационные (BYN). Денежные величины — иллюстрация концепта; абсолютные суммы калибруются под локальный рынок, надёжна относительная картина.</p>
+  </div>
+</div>
+
+</body>
+</html>
