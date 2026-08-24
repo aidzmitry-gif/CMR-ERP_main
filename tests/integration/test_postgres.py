@@ -4,6 +4,7 @@
 Postgres (``db.connect``), схемы ``sales.*`` из миграций, фоновый relay в lifespan.
 """
 import asyncio
+from uuid import uuid4
 
 from httpx import ASGITransport, AsyncClient
 
@@ -88,5 +89,73 @@ async def test_lifespan_background_relay_on_postgres(postgres_url, monkeypatch):
                         projected = True
                         break
                 assert projected, "фоновый relay не спроецировал событие в audit"
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_microchips_and_email_intake_on_postgres(postgres_url, monkeypatch):
+    """Публичный intake: token → relay → PostgreSQL, включая dedupe сайта."""
+    marker = uuid4().hex[:10]
+    phone = f"+37529{str(int(marker, 16)).zfill(10)[-7:]}"
+    email = f"mail-{marker}@client.example"
+    token = f"intake-{marker}"
+    monkeypatch.setenv("AIOS_DATABASE_URL", postgres_url)
+    monkeypatch.setenv("AIOS_INTAKE_WEBHOOK_TOKEN", token)
+    get_settings.cache_clear()
+    from core.runtime.app import create_app
+
+    app = create_app()
+    try:
+        async with app.router.lifespan_context(app):
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+                headers={"X-User-Roles": "director"},
+            ) as client:
+                rejected = await client.post(
+                    "/integrations/web/lead?token=wrong", json={"phone": phone}
+                )
+                assert rejected.status_code == 403
+
+                payload = {
+                    "company": f"ООО Microchips {marker}",
+                    "phone": phone,
+                    "product": "Аккумулятор",
+                    "message": "Первая заявка",
+                    "landing_url": "https://microchips.by/?utm_source=google&utm_campaign=battery",
+                }
+                first = await client.post(
+                    f"/integrations/web/lead?token={token}", json=payload
+                )
+                repeat = await client.post(
+                    f"/integrations/web/lead?token={token}",
+                    json={**payload, "message": "Повторная заявка"},
+                )
+                inbound = await client.post(
+                    f"/integrations/email/inbound?token={token}",
+                    json={
+                        "from": f"Закупщик <{email}>",
+                        "subject": "Запрос с почты",
+                        "text": "Нужна цена",
+                    },
+                )
+                assert first.status_code == repeat.status_code == inbound.status_code == 200
+
+                matched = []
+                for _ in range(15):
+                    await asyncio.sleep(1)
+                    rows = (await client.get("/leads")).json()
+                    matched = [
+                        row for row in rows if row.get("phone") == phone or row.get("email") == email
+                    ]
+                    if len(matched) == 2:
+                        break
+                assert len(matched) == 2
+                site = next(row for row in matched if row["source"] == "site")
+                mail = next(row for row in matched if row["source"] == "email")
+                assert "Первая заявка" in site["message"]
+                assert "Повторная заявка" in site["message"]
+                assert site["utm_source"] == "google"
+                assert mail["email"] == email
     finally:
         get_settings.cache_clear()
