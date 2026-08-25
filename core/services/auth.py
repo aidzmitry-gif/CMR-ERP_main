@@ -137,10 +137,16 @@ def has_permission(core, user: CurrentUser, permission: str) -> bool:
     (модульный доступ и право на действие) не расходились. Прочие роли получают права
     из ролей, объявленных модулями (``core.roles``).
     """
-    from config.access import is_super
+    from config.access import (
+        IDENTITY_PROVISIONER_PERMISSIONS,
+        IDENTITY_PROVISIONER_ROLE,
+        is_super,
+    )
 
     if is_super(user.roles):
         return True
+    if IDENTITY_PROVISIONER_ROLE in user.roles:
+        return permission in IDENTITY_PROVISIONER_PERMISSIONS
     granted: set[str] = set()
     for role in core.roles:
         if role.name in user.roles:

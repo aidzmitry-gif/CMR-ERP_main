@@ -17,6 +17,10 @@ from collections.abc import Iterable
 
 # --- Финальная матрица: роль → модули (UI-слаги). Источник — согласованная матрица доступа. ---
 ACCESS_MATRIX: dict[str, list[str]] = {
+    # Машинная роль приглашений. Не показывается в UI и не назначается сотрудникам:
+    # нужна только service account Keycloak, чтобы создать HR-карточку и отправить
+    # приглашение без выдачи широкого ``system.write`` или супер-роли.
+    "identity_provisioner": ["hr"],
     "director": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge",
@@ -134,6 +138,12 @@ PACKAGE_TO_SLUG["leads"] = "crm"
 
 # Роли с полным доступом ко всему (минуя матрицу). "admin" — dev-суперюзер (ASCII, HTTP-safe).
 SUPER_ROLES: frozenset[str] = frozenset({"admin", "director", "commercial"})
+
+# Внемодульные права для технических субъектов. Они намеренно не выводятся из
+# ACCESS_MATRIX: доступ к HR-модулю сам по себе не должен разрешать создание
+# пользователей или изменение системных настроек.
+IDENTITY_PROVISIONER_ROLE = "identity_provisioner"
+IDENTITY_PROVISIONER_PERMISSIONS: frozenset[str] = frozenset({"identity.invite"})
 
 
 def allowed_slugs(roles: Iterable[str]) -> set[str]:

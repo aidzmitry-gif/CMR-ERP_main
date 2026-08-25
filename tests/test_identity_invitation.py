@@ -14,6 +14,7 @@ from core.domain.models import AuditLog, User
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.runtime.identity_routes import get_identity_gateway
+from core.services.auth import CurrentUser, has_permission
 from core.services.keycloak_admin import KeycloakAdminClient, KeycloakInvitation
 from modules.hr.models import Employee
 
@@ -118,7 +119,7 @@ async def test_invite_rejects_role_from_another_department(session, identity_api
 
 
 @pytest.mark.asyncio
-async def test_invite_requires_system_write(session, identity_api):
+async def test_invite_requires_identity_permission(session, identity_api):
     api, gateway = identity_api
     employee = Employee(full_name="Сотрудник", department="Продажи")
     session.add(employee)
@@ -137,6 +138,33 @@ async def test_invite_requires_system_write(session, identity_api):
     )
     assert response.status_code == 403
     assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_identity_provisioner_can_invite_but_has_no_system_write(session, identity_api):
+    api, gateway = identity_api
+    employee = Employee(full_name="Сервисный сотрудник", department="")
+    session.add(employee)
+    await session.commit()
+    await session.refresh(employee)
+
+    response = await api.post(
+        "/system/users/invite",
+        headers={"X-User": "service-account-aios-inviter", "X-User-Roles": "identity_provisioner"},
+        json={
+            "employee_id": employee.id,
+            "email": "service.employee@example.by",
+            "department": "Продажи",
+            "role": "sales",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert gateway.calls[0]["username"] == "service.employee"
+    core = api._transport.app.state.core
+    service_user = CurrentUser("service-account-aios-inviter", ["identity_provisioner"])
+    assert has_permission(core, service_user, "identity.invite") is True
+    assert has_permission(core, service_user, "system.write") is False
 
 
 @pytest.mark.asyncio
