@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PlanSources } from "@/lib/plan-constructor";
+import { nextMonthKey, type PlanSources } from "@/lib/plan-constructor";
 
 // Продавцы грузятся из общего кэша карточек сделок — мок, чтобы не тащить весь deal-card.
 vi.mock("@/components/kanban/deal-card", () => ({
@@ -175,7 +175,12 @@ describe("PlanConstructor", () => {
     await waitFor(() => expect(screen.getByText(/Отправлено РОПу \(5 метрик\)/)).toBeInTheDocument());
     // gross_profit улетает с целевым значением плана (= собранный итог 12000)
     expect(upsertPlanMock).toHaveBeenCalledWith(
-      expect.objectContaining({ owner_id: 7, metric: "gross_profit", period_key: "2026-08", target: 12000 }),
+      expect.objectContaining({
+        owner_id: 7,
+        metric: "gross_profit",
+        period_key: nextMonthKey(new Date()),
+        target: 12000,
+      }),
     );
     expect(submitPlanMock).toHaveBeenCalledTimes(5);
   });

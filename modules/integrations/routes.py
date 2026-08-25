@@ -77,13 +77,15 @@ async def telephony_webhook(
 
 
 def _check_intake_token(core: Core, params: dict) -> None:
-    """Проверить общий секрет приёма (?token=), если он задан в настройках."""
+    """Проверить общий секрет приёма; без секрета production закрыт."""
     expected = core.config.intake_webhook_token
-    if expected:
-        if not hmac.compare_digest(str(params.get("token", "")).encode(), expected.encode()):
-            raise HTTPException(status_code=403, detail="Неверный токен приёма")
-    else:
+    if not expected:
+        if not core.config.environment.lower().startswith("dev"):
+            raise HTTPException(status_code=403, detail="Токен приёма не настроен")
         logger.warning("intake: приём без AIOS_INTAKE_WEBHOOK_TOKEN — открыт")
+        return
+    if not hmac.compare_digest(str(params.get("token", "")).encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Неверный токен приёма")
 
 
 def _extract_utm(params: dict) -> dict[str, str]:

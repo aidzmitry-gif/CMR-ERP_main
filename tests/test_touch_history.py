@@ -36,13 +36,14 @@ async def test_card_without_gateway_has_empty_touches(api, session):
     session.add(cp)
     await session.commit()
     core = api._transport.app.state.core
+    previous = core.services.touch_history
     core.services.touch_history = None
     try:
         card = (await api.get(f"/system/mdm/counterparty/{cp.id}")).json()
         assert card["touches"] == []
         assert card["touch_summary"] is None
     finally:
-        core.services.touch_history = None
+        core.services.touch_history = previous
 
 
 async def test_card_reads_touches_via_gateway(api, session):

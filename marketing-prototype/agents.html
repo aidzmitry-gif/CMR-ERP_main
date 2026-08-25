@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI-агенты маркетинга — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px}.crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .back:hover{color:var(--ink);border-color:#CBD5E1}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}.tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .tab .soon{font-size:9px;vertical-align:super;color:var(--slate-400);margin-left:3px}.tab.dim{color:#C7CDD6;cursor:default}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .stack{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:760px){.g2{grid-template-columns:1fr 1fr}}
+  @media(min-width:960px){.g3{grid-template-columns:1fr 1fr 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)}.t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)}.t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)}.t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .live{width:8px;height:8px;border-radius:50%;background:var(--green-500);box-shadow:0 0 0 3px var(--green-bg);display:inline-block}
+  .paused{width:8px;height:8px;border-radius:50%;background:var(--amber-500);box-shadow:0 0 0 3px var(--amber-bg);display:inline-block}
+  .muted{color:var(--muted)}.small{font-size:12px}.strong{font-weight:700}
+  .note{font-size:12px;color:var(--slate-400);margin-top:12px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .btn{border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn-pri{background:var(--teal);color:#fff}.btn-ghost{background:#fff;border:1px solid #E5E7EB;color:var(--slate)}
+
+  /* orchestration strip */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .fbox{background:#FAFBFC;border:1px solid var(--line);border-radius:12px;padding:12px 14px;flex:1;min-width:150px}
+  .fbox .ft{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate-400)}
+  .fbox .fb{font-size:13px;margin-top:5px}
+  .farrow{display:flex;align-items:center;color:var(--slate-400);font-size:20px;padding:0 8px}
+  .fbox.mgr{background:var(--brand-50);border-color:#C9DBFF}
+  .fbox.gr{background:var(--violet-bg);border-color:#E2D6FB}
+  .fbox.ho{background:var(--green-bg);border-color:#C6EFD9}
+
+  /* agent card */
+  .agent{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px;display:flex;flex-direction:column;gap:9px}
+  .agent .top{display:flex;gap:10px;align-items:flex-start}
+  .agent .ic{width:34px;height:34px;border-radius:9px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;font-size:17px;flex:none}
+  .agent .nm{font-size:14px;font-weight:700;line-height:1.15}
+  .agent .job{font-size:12px;color:var(--muted);margin-top:2px}
+  .agent .acts{font-size:12px;display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:9px}
+  .agent .acts .a{display:flex;gap:6px;align-items:baseline}
+  .agent .acts .a b{color:var(--ink)}
+  .agent .foot{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:auto;padding-top:4px}
+  .tier{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:6px;padding:2px 7px}
+  .tier.sup{background:var(--amber-bg);color:var(--amber)}
+  .tier.bnd{background:var(--brand-100);color:var(--brand)}
+  .tier.aut{background:var(--slate-bg);color:var(--slate)}
+
+  /* hitl queue */
+  .hitl{border:1px solid var(--line);border-left-width:3px;border-radius:0 10px 10px 0;padding:11px 13px;display:flex;flex-direction:column;gap:8px}
+  .hitl.high{border-left-color:var(--red-500);background:#FFFBFB}
+  .hitl.med{border-left-color:var(--amber-500)}
+  .hitl.low{border-left-color:var(--green-500)}
+  .risk{font-size:10px;font-weight:700;text-transform:uppercase;border-radius:6px;padding:2px 7px}
+  .risk.high{background:var(--red-bg);color:var(--red)}.risk.med{background:var(--amber-bg);color:var(--amber)}.risk.low{background:var(--green-bg);color:var(--green)}
+
+  /* guardrails */
+  .gr{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}
+  .gr:first-child{border-top:none}
+  .gr .gn{font-size:13px;font-weight:600}
+  .gr .gd{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .gr .on{margin-left:auto;font-size:10px;font-weight:700;color:var(--green);background:var(--green-bg);border-radius:6px;padding:2px 7px;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Маркетинг</b> / AI-агенты</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит руководителя</a>
+    <a class="tab" href="leadgen.html">Движок заявок</a>
+    <a class="tab" href="attribution.html">Атрибуция и прибыль</a>
+    <a class="tab active" href="agents.html">AI-агенты</a>
+    <a class="tab" href="geofactory.html">Гео-фабрика / pSEO</a>
+    <span class="tab dim">База и сегменты<span class="soon">скоро</span></span>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>AI-агенты маркетинга — оркестр под надзором человека</h1>
+      <p class="sub">Не «один большой ИИ», а парк узких агентов. Высокорисковые действия — только через визу. Каждое действие в аудите.</p>
+    </div>
+    <span class="tag t-violet">Демо · Итерация 1</span>
+  </div>
+
+  <div class="stack">
+    <!-- Orchestration flow -->
+    <div class="card">
+      <span class="caption">Архитектура: оркестратор (Manager) → агенты → guardrails → handoff в продажи</span>
+      <div class="flow" style="margin-top:12px">
+        <div class="fbox mgr"><div class="ft">Оркестратор</div><div class="fb">Планирует и распределяет задачи 7 суб-агентам как инструменты</div></div>
+        <div class="farrow">→</div>
+        <div class="fbox"><div class="ft">7 агентов</div><div class="fb">Привлечение · Скоринг · Контент · Реактивация · ABM · Оптимизация · Разведка</div></div>
+        <div class="farrow">→</div>
+        <div class="fbox gr"><div class="ft">Guardrails</div><div class="fb">7 слоёв защиты + виза человека на риск-действия (HITL)</div></div>
+        <div class="farrow">→</div>
+        <div class="fbox ho"><div class="ft">Handoff → Продажи</div><div class="fb">SQL → событие <b>marketing.lead.qualified</b> → sales</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+        <span class="tag">Single-agent-first · дробим по перекрытию инструментов, не по их числу</span>
+        <span class="tag">Масштаб под сложность · 1 агент → 10+ субагентов</span>
+        <span class="tag t-amber">Стоимость · агент ~4× / мультиагент ~15× токенов → дорогие разборы только для ценных задач</span>
+      </div>
+      <div class="row-between" style="margin-top:12px;flex-wrap:wrap;gap:10px">
+        <div class="small muted">Каждое действие агента → <b>outbox → AuditLog</b>. Риск «сделать неправильно» под контролем governance.</div>
+        <div style="display:flex;gap:8px">
+          <span class="tag t-green">6 активны</span><span class="tag t-amber">1 на паузе</span><span class="tag t-violet">4 на визе</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent fleet -->
+    <div>
+      <div class="caption" style="margin-bottom:10px">Парк агентов · сегодня</div>
+      <div class="grid g3">
+
+        <div class="agent">
+          <div class="top"><div class="ic">🧲</div><div><div class="nm">Привлечение / каналы</div><div class="job">Черновики объявлений, лендингов, медиапланов</div></div><span class="live" title="активен"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>6</b> черновиков объявлений</span></div>
+            <div class="a">• <span><b>3</b> лендинга под кампании</span></div>
+          </div>
+          <div class="foot"><span class="tier bnd">Bounded</span><span class="tag t-amber">2 на визе</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">🎚️</div><div><div class="nm">Скоринг и квалификация</div><div class="job">Fit + Engagement-скоринг (старт на правилах); SQL — после приёма продажами</div></div><span class="live"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>47</b> заявок оценено</span></div>
+            <div class="a">• <span><b>21</b> SQL → продажи · <b>48</b> отсеяно</span></div>
+          </div>
+          <div class="foot"><span class="tier bnd">Bounded</span><span class="tag">3 на проверке</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">✍️</div><div><div class="nm">Контент / SEO</div><div class="job">Статьи, карточки товара, SEO-брифы</div></div><span class="live"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>4</b> статьи-черновика</span></div>
+            <div class="a">• <span><b>12</b> SEO-брифов</span></div>
+          </div>
+          <div class="foot"><span class="tier sup">Supervised</span><span class="tag t-amber">4 на визе</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">🔄</div><div><div class="nm">Реактивация / nurture</div><div class="job">Будит спящую базу, многомесячные цепочки</div></div><span class="live"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>3</b> цепочки на <b>240</b> контактов</span></div>
+            <div class="a">• <span>разбужено <b>11</b></span></div>
+          </div>
+          <div class="foot"><span class="tier bnd">Bounded</span><span class="tag t-green">в работе</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">🎯</div><div><div class="nm">ABM / целевые аккаунты</div><div class="job">Мониторит заводы, персонализирует аутрич</div></div><span class="live"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>28</b> целевых заводов</span></div>
+            <div class="a">• <span><b>5</b> сигналов покупки</span></div>
+          </div>
+          <div class="foot"><span class="tier bnd">Bounded</span><span class="tag t-amber">2 на визе</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">📊</div><div><div class="nm">Оптимизация каналов и ставок</div><div class="job">Перераспределяет бюджет по ROMI/марже</div></div><span class="paused" title="ждёт визы"></span></div>
+          <div class="acts">
+            <div class="a">• <span>рекоменд.: <b>−4 000</b> VK → <b>+4 000</b> тендеры</span></div>
+            <div class="a">• <span>прогноз ROMI <b>94% → 180%</b></span></div>
+          </div>
+          <div class="foot"><span class="tier sup">Supervised · high-risk</span><span class="tag t-red">ждёт визы</span></div>
+        </div>
+
+        <div class="agent">
+          <div class="top"><div class="ic">🛰️</div><div><div class="nm">Разведка (рынок / тендеры)</div><div class="job">Тендеры ICETRADE, цены конкурентов, сигналы</div></div><span class="live"></span></div>
+          <div class="acts">
+            <div class="a">• <span><b>9</b> тендеров по нашим SKU</span></div>
+            <div class="a">• <span><b>3</b> изменения цен конкурентов</span></div>
+          </div>
+          <div class="foot"><span class="tier aut">Autonomous · read-only</span><span class="tag">только предлагает</span></div>
+        </div>
+
+        <div class="agent" style="border-style:dashed;align-items:center;justify-content:center;color:var(--slate-400);min-height:150px">
+          <div style="text-align:center"><div style="font-size:24px">＋</div><div class="small" style="margin-top:6px">Добавить агента</div><div class="small">из библиотеки</div></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- HITL queue + Guardrails -->
+    <div class="grid g2">
+      <div class="card">
+        <div class="row-between"><span class="caption">Очередь на подтверждение (HITL) · 4</span><span class="tag t-violet">человек в петле</span></div>
+        <p class="small muted" style="margin:8px 0 12px">Два триггера эскалации: высокорисковое/необратимое действие и превышение порога сбоев агента.</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div class="hitl high">
+            <div class="row-between"><span class="strong small">Изменить рекламный бюджет</span><span class="risk high">риск high</span></div>
+            <div class="small muted">−4 000 BYN из VK → +4 000 в тендеры · Агент оптимизации</div>
+            <div style="display:flex;gap:8px"><button class="btn btn-pri">Согласовать</button><button class="btn btn-ghost">Отклонить</button></div>
+          </div>
+          <div class="hitl high">
+            <div class="row-between"><span class="strong small">Передать дорогую сделку в продажи</span><span class="risk high">риск high</span></div>
+            <div class="small muted">SQL «ОАО БМЗ-Прокат» — 1 200 000 BYN · Агент скоринга</div>
+            <div style="display:flex;gap:8px"><button class="btn btn-pri">Согласовать</button><button class="btn btn-ghost">На уточнение</button></div>
+          </div>
+          <div class="hitl med">
+            <div class="row-between"><span class="strong small">Отправить персональное КП</span><span class="risk med">риск medium</span></div>
+            <div class="small muted">Завод «Гомсельмаш», главный инженер · Агент ABM</div>
+            <div style="display:flex;gap:8px"><button class="btn btn-pri">Согласовать</button><button class="btn btn-ghost">Править</button></div>
+          </div>
+          <div class="hitl low">
+            <div class="row-between"><span class="strong small">Опубликовать статью</span><span class="risk low">риск low</span></div>
+            <div class="small muted">«Выбор стального проката» · фактчек и бренд-проверка пройдены · Контент-агент</div>
+            <div style="display:flex;gap:8px"><button class="btn btn-pri">Опубликовать</button><button class="btn btn-ghost">Править</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between"><span class="caption">Guardrails — слоёная защита (7 типов)</span><span class="tag t-green">все активны</span></div>
+        <div style="margin-top:10px">
+          <div class="gr"><div><div class="gn">1 · Релевантность</div><div class="gd">агент отвечает в рамках маркетинга, не уходит в сторону</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">2 · Безопасность</div><div class="gd">защита от jailbreak / prompt-injection во входящих заявках и письмах</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">3 · PII-фильтр</div><div class="gd">не раскрывает персональные данные в исходящих коммуникациях</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">4 · Модерация</div><div class="gd">фильтр вредного / неуместного контента</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">5 · Tool-safeguards</div><div class="gd">рекламные API и CRM помечены риском low / medium / high</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">6 · Правила</div><div class="gd">blocklists, лимиты частоты рассылок, потолки бюджета</div></div><span class="on">on</span></div>
+          <div class="gr"><div><div class="gn">7 · Валидация вывода</div><div class="gd">контент проходит факт-чек, проверку бренда и обещаний</div></div><span class="on">on</span></div>
+        </div>
+        <p class="note">Один guardrail недостаточен — устойчивость даёт комбинация слоёв (OpenAI, 2025).</p>
+      </div>
+    </div>
+
+    <!-- Autonomy / governance -->
+    <div class="card">
+      <span class="caption">Уровни автономии и governance</span>
+      <div class="grid g3" style="margin-top:12px">
+        <div style="border-left:3px solid var(--amber-500);padding-left:12px">
+          <div class="strong">Supervised · 2 агента</div>
+          <div class="small muted" style="margin-top:3px">Контент, Оптимизация каналов. Каждое действие — через визу человека.</div>
+        </div>
+        <div style="border-left:3px solid var(--brand);padding-left:12px">
+          <div class="strong">Bounded · 4 агента</div>
+          <div class="small muted" style="margin-top:3px">Привлечение, Скоринг, Реактивация, ABM. Действуют в лимитах; риск-действия — на визу.</div>
+        </div>
+        <div style="border-left:3px solid var(--slate-400);padding-left:12px">
+          <div class="strong">Autonomous (read-only) · 1 агент</div>
+          <div class="small muted" style="margin-top:3px">Разведка. Только наблюдает и предлагает, ничего не меняет.</div>
+        </div>
+      </div>
+      <p class="note">Governance: у каждого агента — явный уровень автономии, границы (какие таблицы/каналы/бюджеты он трогает) и полный лог действий в аудит. Начинаем узко и ROI-first: каждый агент включается с измеримой целью и правом «отключить». ИИ — за флагом <b>AIOS_AI_ENABLED</b> (mock-режим по умолчанию).</p>
+    </div>
+
+    <p class="note">Данные демонстрационные. Архитектура опирается на проверенные источники (OpenAI «Building Agents», McKinsey, Deloitte/Gartner) — детали и оговорки в КОНЦЕПЦИЯ.md.</p>
+  </div>
+</div>
+
+</body>
+</html>

@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from config.modules import ENABLED_MODULES
-from core.runtime import approval_routes, system_routes, telegram_routes
+from core.runtime import approval_routes, identity_routes, system_routes, telegram_routes
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
@@ -106,6 +106,8 @@ def create_app() -> FastAPI:
 
     # системные роуты ядра (/health, /system/modules, /system/events, /system/owner)
     app.include_router(system_routes.router)
+    # Управляемые identity-операции (приглашение сотрудника через Keycloak Admin API).
+    app.include_router(identity_routes.router)
     # CRUD системных справочников ядра под /system/refs/* (см. каталог /system/references)
     app.include_router(build_reference_router())
     # согласования (human-in-the-loop)

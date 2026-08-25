@@ -12,9 +12,11 @@ from types import ModuleType
 from core.services import sku_master
 from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
+from core.services.bank import BankGateway
 from core.services.config import Settings, get_settings
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
+from core.services.gsheets import GSheetsClient, GSheetsGateway
 from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
@@ -45,6 +47,12 @@ class Services:
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None
     telephony: TelephonyGateway | None = None
+    # банковский шлюз (Альфа host-to-host): входящие зачисления клиентов → авто-проводка
+    # оплат в finance. Наполняет integrations; None — модуль не подключён.
+    bank: BankGateway | None = None
+    # экспорт строк в Google-таблицу (сервис-аккаунт) — core-native, за конфигом;
+    # None, пока не задан AIOS_GSHEETS_CREDENTIALS_FILE (честная деградация)
+    gsheets: GSheetsGateway | None = None
     # себестоимость партии (landed cost) — наполняет модуль procurement; None — не подключён
     landed_cost: LandedCostGateway | None = None
     # цена продажи + себестоимость из учётной системы (1С) — reference-backed (справочник/MDM,
@@ -72,4 +80,5 @@ def build_services() -> Services:
         db=Database(settings),
         auth=AuthService(),
         llm=LLMGateway(settings),
+        gsheets=GSheetsClient(settings) if settings.gsheets_credentials_file else None,
     )

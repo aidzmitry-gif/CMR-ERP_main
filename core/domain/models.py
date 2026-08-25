@@ -143,13 +143,21 @@ class Sku(Base):
 
 
 class User(Base):
-    """Пользователь системы (сотрудник). Роли/права — в части 5 (RBAC)."""
+    """Пользователь системы, связанный с сотрудником HR и identity в Keycloak."""
 
     __tablename__ = "app_user"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True)
     full_name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # Мягкая ссылка: ядро не должно иметь FK-зависимость от опционального HR-модуля.
+    employee_id: Mapped[int | None] = mapped_column(unique=True)
+    department: Mapped[str | None] = mapped_column(String(128))
+    role: Mapped[str | None] = mapped_column(String(64))
+    keycloak_user_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", server_default="active")
+    invited_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class OutboxEvent(Base):

@@ -1,0 +1,50 @@
+[
+  {
+    "file": "frontend/src/components/ui/input.tsx",
+    "line": 21,
+    "summary": "Boolean prop `invalid` shadows the module-const `invalid` (the error className string), so `invalid ? invalid : normal` emits class=\"true\" and the error state never styles.",
+    "failure_scenario": "Render <Input invalid /> → cn(field, true, ...) appends literal 'true' as a class and the error border #F2C4C4 / red focus ring NEVER applies. The error-state styling (the whole point of the prop) is dead code; affects Input, Textarea, Select (lines 21,24,31,38)."
+  },
+  {
+    "file": "frontend/src/components/funnel/funnel-board.tsx",
+    "line": 460,
+    "summary": "Drop-zone ring is invisible: `bg-accent-soft ring-2 ring-accent-soft` makes ring color == fill color (was bg-brand-100/60 ring-brand-100, distinct).",
+    "failure_scenario": "Drag a card over a funnel column → fill and ring are identical color, no visible outline. DnD 'drop here' affordance disappears in both themes. Same at deals-workspace.tsx:115."
+  },
+  {
+    "file": "frontend/src/components/ui/badge.tsx",
+    "line": 13,
+    "summary": "Default Badge tone `slate` hardcodes `bg-[#F0F0F3]` (literal hex, not a token), so it stays light-gray in dark theme.",
+    "failure_scenario": "Any <Badge> without explicit tone (the default) shows a light-gray pill on dark surfaces, clashing; should be bg-sunken text-muted like the rest of the tokenized swap."
+  },
+  {
+    "file": "frontend/src/components/erp/module-board.tsx",
+    "line": 191,
+    "summary": "Cross-theme hover light-on-light: `text-accent-ink hover:bg-blue-50` — dark-theme accent-ink (#8AA0FF, light) over kept near-white bg-blue-50.",
+    "failure_scenario": "In dark theme, hovering the outlined action button → light-blue text on near-white bg, nearly unreadable. Same at create-deal-modal.tsx:107."
+  },
+  {
+    "file": "frontend/src/components/funnel/funnel-board.tsx",
+    "line": 347,
+    "summary": "Inverted hover: rest bg-accent-soft (alpha 1) vs hover bg-accent-soft/70 (alpha .7) — hover fades the button lighter/more transparent instead of intensifying.",
+    "failure_scenario": "Hovering the card action button fades it toward the page background instead of highlighting; reversed hover affordance."
+  },
+  {
+    "file": "frontend/tailwind.config.ts",
+    "line": 55,
+    "summary": "shadow-card has hardcoded white inset glow `inset 0 1px 0 rgba(255,255,255,.22)`, theme-agnostic, so it renders a white top hairline on dark surfaces (377 usages / 70 files).",
+    "failure_scenario": "Every card in dark theme (kanban deal-card etc.) gets a faint white top line on near-black #171B22 — out-of-place on dark; needs a dark-aware override."
+  },
+  {
+    "file": "frontend/src/app/globals.css",
+    "line": 62,
+    "summary": "Scrollbar thumb hardcoded `#d8dce3` (.thin-scroll) not tokenized — stays light-gray in dark theme.",
+    "failure_scenario": "Kanban column scrollbars show a light-gray thumb on dark #0E1116 canvas — bright mismatch in the dark theme this PR ships."
+  },
+  {
+    "file": "frontend/tailwind.config.ts",
+    "line": 38,
+    "summary": "borderRadius `lg: 10px` overrides Tailwind default (8px), silently bumping all 222 `rounded-lg` usages across 56 files app-wide.",
+    "failure_scenario": "Unintended +2px radius on hundreds of unrelated elements (ERP forms, modals, buttons) outside the PR scope; rode in via shared token, unreviewed."
+  }
+]

@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-GIT-001",
+  "redacted": true,
+  "scannedTextFiles": 249,
+  "skipped": {
+    "binary-suffix": 1,
+    "goal-control": 20
+  },
+  "findingCounts": {
+    "belarus-phone": 83,
+    "credential-assignment": 1,
+    "email": 10
+  },
+  "findings": [
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 6,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 37,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 68,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 99,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 130,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 161,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 192,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 223,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 254,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 285,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 316,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 347,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 378,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 409,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 440,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 471,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 502,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 533,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 564,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 595,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 626,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 657,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 688,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 719,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 750,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 781,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 812,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 843,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 905,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 936,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 967,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 998,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1029,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1060,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1091,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1122,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1153,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1184,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1215,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1246,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1277,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1308,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1339,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1370,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1401,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1432,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1463,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1494,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1525,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1556,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1587,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1618,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1649,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1680,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1711,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1742,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1773,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1804,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1835,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1866,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1897,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1928,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1959,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 1990,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2021,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2052,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2083,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2114,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2145,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2176,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2207,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_calls.json",
+      "line": 2238,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_contacts.json",
+      "line": 7,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_contacts.json",
+      "line": 8,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_contacts.json",
+      "line": 11,
+      "indicator": "email"
+    },
+    {
+      "path": "coordination/_riftek_contacts.json",
+      "line": 19,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/_riftek_contacts.json",
+      "line": 22,
+      "indicator": "email"
+    },
+    {
+      "path": "coordination/_tz_all.md",
+      "line": 338,
+      "indicator": "email"
+    },
+    {
+      "path": "coordination/_tz_reference.md",
+      "line": 68,
+      "indicator": "email"
+    },
+    {
+      "path": "coordination/daily-review/2026-06-26.md",
+      "line": 79,
+      "indicator": "credential-assignment"
+    },
+    {
+      "path": "coordination/riftek-360.md",
+      "line": 7,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "coordination/riftek-360.md",
+      "line": 8,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap3.md",
+      "line": 302,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap3.md",
+      "line": 305,
+      "indicator": "email"
+    },
+    {
+      "path": "snap4.md",
+      "line": 302,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap4.md",
+      "line": 305,
+      "indicator": "email"
+    },
+    {
+      "path": "snap6.md",
+      "line": 247,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap6.md",
+      "line": 250,
+      "indicator": "email"
+    },
+    {
+      "path": "snap7.md",
+      "line": 247,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap7.md",
+      "line": 250,
+      "indicator": "email"
+    },
+    {
+      "path": "snap8.md",
+      "line": 247,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap8.md",
+      "line": 250,
+      "indicator": "email"
+    },
+    {
+      "path": "snap9.md",
+      "line": 247,
+      "indicator": "belarus-phone"
+    },
+    {
+      "path": "snap9.md",
+      "line": 250,
+      "indicator": "email"
+    }
+  ]
+}
