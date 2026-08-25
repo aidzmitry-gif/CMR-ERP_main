@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     onec_password: str = ""
     # базовый URL сервиса ЕГР РБ (lookup реквизитов по УНП); пусто — mock-справочник
     egr_base_url: str = ""
+    # Альфа-Банк (host-to-host): входящие зачисления клиентов для авто-проводки оплат.
+    # Пусто → шлюз отдаёт [] (честная деградация, не выдумываем оплаты). Реальные вызовы —
+    # слайс 3 (нужны договор + сертификат/токен от банка). Секреты — только через env/.env.
+    alfa_base_url: str = ""
+    alfa_token: str = ""
+    alfa_account: str = ""
 
     # AuthN (SECURITY.md P1 — Keycloak/OIDC). ``auth_mode``:
     #   "dev"  — доверять заголовку X-User-Roles (текущее поведение dev и прода, пока realm
@@ -44,6 +50,16 @@ class Settings(BaseSettings):
     # публичный hostname hairpin'ит с контейнера (ECONNREFUSED на свой public IP).
     # iss/aud по-прежнему сверяются с keycloak_issuer / keycloak_audience.
     keycloak_jwks_uri: str = ""
+    # Keycloak Admin API для приглашений сотрудников. Используется service account
+    # отдельного confidential-client с realm-management правами; пароль bootstrap-admin
+    # приложению не передаём. Пустой набор → endpoint приглашений честно отвечает 503.
+    keycloak_admin_base_url: str = ""
+    keycloak_admin_realm: str = "aios"
+    keycloak_admin_client_id: str = ""
+    keycloak_admin_client_secret: str = ""
+    keycloak_invite_client_id: str = "aios-backend"
+    keycloak_invite_redirect_uri: str = ""
+    keycloak_invite_lifespan_seconds: int = 43_200
 
     # AI-слой (Итерация 1) — за feature-flag; в прототипе выключен
     ai_enabled: bool = False
@@ -78,6 +94,13 @@ class Settings(BaseSettings):
     # integrations, аутентификация общим секретом ?token= — если задан, входящие без
     # совпадающего токена отбиваются 403 (прод публичен → задавать обязательно).
     intake_webhook_token: str = ""
+
+    # Google Sheets — экспорт строк в таблицу через сервис-аккаунт. ``credentials_file`` —
+    # путь к JSON-ключу сервис-аккаунта (Google Cloud, включён Sheets API, email аккаунта —
+    # «Редактор» таблицы). Пусто → Services.gsheets = None (экспорт недоступен, честная
+    # деградация). ``spreadsheet_id`` — таблица по умолчанию (ключ из URL .../d/<ID>/edit).
+    gsheets_credentials_file: str = ""
+    gsheets_spreadsheet_id: str = ""
 
     # SEO/GEO Growth Platform: входящий webhook от SEO-сервиса (HMAC в X-SEO-Signature).
     # Прод публичен → задавать обязательно (AIOS_SEO_WEBHOOK_SECRET).

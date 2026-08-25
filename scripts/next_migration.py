@@ -73,10 +73,19 @@ def _reservations() -> list[tuple[int, str]]:
 
 
 def _head(revs: set[str], downs: set[str], reservations: list[tuple[int, str]]) -> str:
-    """Tip цепочки: последний резерв ИЛИ alembic-head (revision без ссылок)."""
-    if reservations:
-        return f"{max(n for n, _ in reservations):04d}"
+    """Tip цепочки: САМЫЙ СТАРШИЙ номер среди реальных ревизий И резервов.
+
+    Резерв НЕ имеет права перебивать файлы: `.migration-reservations.local` локальный и
+    отстаёт, как только полоса закоммитила миграцию в обход скрипта. Раньше при непустом
+    резерве возвращался `max(резерв)` — при реальном head 0106 и последней записи резерва
+    0090 выдавалось `revision=0107, down_revision=0090`, то есть форк на 16 ревизий и два
+    head в проде. Ровно та болезнь, которую скрипт лечит (деньги/безопасность #1-2).
+    """
     heads = sorted(revs - downs)
+    nums = _nums(heads) + [n for n, _ in reservations]
+    if nums:
+        return f"{max(nums):04d}"
+    # нечисловые revision id — фолбэк на alembic-head
     return heads[-1] if heads else "0000"
 
 
@@ -124,12 +133,19 @@ def main(argv: list[str] | None = None) -> int:
         revs, downs = _scan()
         resv = _reservations()
         head = _head(revs, downs, resv)
+        heads = sorted(revs - downs)
         taken = _nums(revs) + [n for n, _ in resv]
         nxt = (max(taken) + 1) if taken else 1
         rev = f"{nxt:04d}"
 
+        if len(heads) > 1:  # цепь уже разошлась — номер брать поверх форка бессмысленно
+            print(
+                f"ВНИМАНИЕ: alembic head-ов уже {len(heads)} ({', '.join(heads)}) — "
+                "сначала сведи цепь, иначе upgrade падает в проде",
+                file=sys.stderr,
+            )
+
         if args.peek or not args.lane:
-            heads = sorted(revs - downs)
             print(f"alembic head(ы): {', '.join(heads) or '—'}")
             print(f"резервы: {', '.join(f'{n:04d}' for n, _ in resv) or '—'}")
             print(f"следующий свободный: {rev} (down_revision={head})")

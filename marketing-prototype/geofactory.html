@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Гео-фабрика / pSEO — Маркетинг — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px}.crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .back:hover{color:var(--ink);border-color:#CBD5E1}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}.tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .tab .soon{font-size:9px;vertical-align:super;color:var(--slate-400);margin-left:3px}.tab.dim{color:#C7CDD6;cursor:default}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .stack{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.gcity{grid-template-columns:1fr 360px}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .card.tight{padding:0}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)}.t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)}.t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)}.t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .muted{color:var(--muted)}.small{font-size:12px}.strong{font-weight:700}
+  .note{font-size:12px;color:var(--slate-400);margin-top:12px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr)}
+  @media(min-width:640px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:1040px){.kpis{grid-template-columns:repeat(6,1fr)}}
+  .kpi{padding:16px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .kpi .v{font-size:19px;font-weight:700}.kpi .l{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.25}.kpi .s{font-size:10px;color:var(--slate-400)}
+  .st{font-size:10px;font-weight:700;text-transform:uppercase;border-radius:6px;padding:2px 7px}
+  .st.pub{background:var(--green-bg);color:var(--green)}.st.gen{background:var(--amber-bg);color:var(--amber)}.st.q{background:var(--slate-bg);color:var(--slate)}
+  .step{display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--line)}.step:first-child{border-top:none}
+  .step .n{width:24px;height:24px;border-radius:7px;background:var(--violet-bg);color:var(--violet);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none}
+  .step .b{flex:1}.step .b .t{font-size:13px;font-weight:600}.step .b .d{font-size:11px;color:var(--muted)}
+  .step .c{align-self:center;font-weight:700;font-size:13px;font-variant-numeric:tabular-nums}
+  .ok{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}.ok:first-child{border-top:none}
+  .ok .ic{color:var(--green);font-weight:700;flex:none}
+  .hl-amber{background:var(--amber-bg);color:#92400E;border-radius:12px;padding:12px;font-size:12.5px;line-height:1.45}
+  .qitem{border:1px solid var(--line);border-left-width:3px;border-radius:0 10px 10px 0;padding:10px 12px}
+  .qitem.v{border-left-color:var(--violet-500)}.qitem.a{border-left-color:var(--amber-500)}
+  .btn{border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn-pri{background:var(--teal);color:#fff}.btn-ghost{background:#fff;border:1px solid #E5E7EB;color:var(--slate)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Маркетинг</b> / Гео-фабрика · pSEO</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит руководителя</a>
+    <a class="tab" href="leadgen.html">Движок заявок</a>
+    <a class="tab" href="attribution.html">Атрибуция и прибыль</a>
+    <a class="tab" href="agents.html">AI-агенты</a>
+    <a class="tab active" href="geofactory.html">Гео-фабрика / pSEO</a>
+    <span class="tab dim">База и сегменты<span class="soon">скоро</span></span>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Гео-фабрика / pSEO — сайты под города СНГ</h1>
+      <p class="sub">microchips.by → много гео-страниц под города-миллионники, авто-SEO. Каждая страница — реальная ценность, не дорвей.</p>
+    </div>
+    <span class="tag t-violet">Демо · pSEO</span>
+  </div>
+
+  <div class="stack">
+    <div class="caption">Июнь 2026 · своя гео-экспансия (single-tenant) · рынок СНГ · RU · Яндекс + Google</div>
+
+    <!-- KPI -->
+    <div class="card tight">
+      <div class="kpis">
+        <div class="kpi"><div class="v">1 240</div><div class="l">Гео-страниц</div><div class="s">город × категория</div></div>
+        <div class="kpi"><div class="v">24</div><div class="l">Города охвачены</div><div class="s">+14 в очереди</div></div>
+        <div class="kpi"><div class="v" style="color:var(--teal)">312</div><div class="l">Запросов в топ-10</div><div class="s">Яндекс + Google</div></div>
+        <div class="kpi"><div class="v">86</div><div class="l">Заявок с гео-страниц</div><div class="s">за месяц</div></div>
+        <div class="kpi"><div class="v" style="color:var(--green)">≈14 BYN</div><div class="l">CPL органики</div><div class="s">демо-ориентир</div></div>
+        <div class="kpi"><div class="v" style="color:var(--amber)">9</div><div class="l">На визе (публикация)</div><div class="s">HITL</div></div>
+      </div>
+    </div>
+
+    <!-- Compliance bar (verified) -->
+    <div class="card" style="border-left:4px solid var(--green-500)">
+      <div class="row-between"><span class="caption" style="color:var(--green)">Комплаенс-планка — чтобы не попасть под фильтр</span><span class="tag t-green">Google · первоисточник</span></div>
+      <div class="grid g3" style="margin-top:10px">
+        <div class="ok"><span class="ic">✓</span><div><div class="small strong">Не дорвей</div><div class="small muted">каждая страница — самостоятельная ценность, а не сгон на одну</div></div></div>
+        <div class="ok" style="border:none"><span class="ic">✓</span><div><div class="small strong">Не scaled content abuse</div><div class="small muted">ценность на город, не масса страниц ради ранжирования</div></div></div>
+        <div class="ok" style="border:none"><span class="ic">✓</span><div><div class="small strong">ИИ-контент легитимен</div><div class="small muted">при уникальной, проверенной ценности — «independently of how it's created»</div></div></div>
+      </div>
+      <p class="note">Правило фабрики: наличие/цены/сроки по городу, локальная доставка, реальные кейсы — а не подмена названия города в шаблоне.</p>
+    </div>
+
+    <!-- Cities + agent loop -->
+    <div class="grid gcity">
+      <div class="card">
+        <div class="row-between"><span class="caption">Города — страницы и позиции</span><span class="small muted">сорт. по охвату</span></div>
+        <div style="overflow-x:auto">
+        <table style="margin-top:10px;min-width:520px">
+          <thead><tr><th>Город</th><th class="num">Гео-страниц</th><th class="num">В топ-10</th><th class="num">Тренд</th><th>Статус</th></tr></thead>
+          <tbody>
+            <tr><td>Москва</td><td class="num">180</td><td class="num">64</td><td class="num" style="color:var(--green)">↑</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Санкт-Петербург</td><td class="num">140</td><td class="num">41</td><td class="num" style="color:var(--green)">↑</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Минск</td><td class="num">48</td><td class="num">22</td><td class="num" style="color:var(--green)">↑</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Екатеринбург</td><td class="num">58</td><td class="num">14</td><td class="num" style="color:var(--green)">↑</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Новосибирск</td><td class="num">60</td><td class="num">12</td><td class="num">→</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Казань</td><td class="num">54</td><td class="num">9</td><td class="num" style="color:var(--green)">↑</td><td><span class="st pub">опубл</span></td></tr>
+            <tr><td>Алматы</td><td class="num">40</td><td class="num">6</td><td class="num" style="color:var(--green)">↑</td><td><span class="st gen">генерируется</span></td></tr>
+            <tr><td>Астана</td><td class="num">36</td><td class="num">4</td><td class="num">→</td><td><span class="st gen">генерируется</span></td></tr>
+            <tr><td>Челябинск · Самара · Омск · Уфа</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td><span class="st q">в очереди</span></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p class="note">Города-миллионники СНГ. Сначала богатый контент по приоритетным городам, расширение — когда есть что сказать уникального по городу.</p>
+      </div>
+
+      <div class="card">
+        <span class="caption">Агентная петля фабрики</span>
+        <div style="margin-top:8px">
+          <div class="step"><span class="n">1</span><div class="b"><div class="t">Генерация страниц</div><div class="d">шаблон × город × категория</div></div><span class="c">1 240</span></div>
+          <div class="step"><span class="n">2</span><div class="b"><div class="t">ИИ-контент</div><div class="d">уникальный, факты из каталога/ERP</div></div><span class="c">86</span></div>
+          <div class="step"><span class="n">3</span><div class="b"><div class="t">Тех-SEO / индексация</div><div class="d">sitemap, schema, перелинковка, IndexNow</div></div><span class="c">авто</span></div>
+          <div class="step"><span class="n">4</span><div class="b"><div class="t">Мониторинг позиций</div><div class="d">по городам и запросам</div></div><span class="c">312</span></div>
+          <div class="step"><span class="n">5</span><div class="b"><div class="t">Автоправки просевших</div><div class="d">агент переписывает / усиливает</div></div><span class="c" style="color:var(--amber)">14</span></div>
+        </div>
+        <p class="note">Стек: CMS-шаблонизатор + pgvector (RAG по каталогу) + LiteLLM/Ollama (контент) + event bus. Публикация — через визу.</p>
+      </div>
+    </div>
+
+    <!-- Queue + honest gaps -->
+    <div class="grid g2">
+      <div class="card">
+        <span class="caption">Очередь действий</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+          <div class="qitem v">
+            <div class="row-between"><span class="strong small">Публикация гео-страниц</span><span class="tag t-violet">9 на визе</span></div>
+            <div class="small muted" style="margin-top:3px">Фактчек и проверка уникальности пройдены (контент-агент).</div>
+            <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-pri">Опубликовать</button><button class="btn btn-ghost">Открыть</button></div>
+          </div>
+          <div class="qitem a">
+            <div class="row-between"><span class="strong small">Автоправки просевших</span><span class="tag t-amber">14 страниц</span></div>
+            <div class="small muted" style="margin-top:3px">Позиции упали — агент усиливает контент/ценность по городу.</div>
+            <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-pri">Запустить</button><button class="btn btn-ghost">Список</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="border-left:4px solid var(--teal-500)">
+        <div class="row-between"><span class="caption" style="color:var(--teal)">Архитектура — подтверждено (Яндекс + Google)</span><span class="tag t-teal">research чистый · 23/25</span></div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <div class="ok"><span class="ic">✓</span><div class="small"><b>Один сайт + гео-папки</b> (/msk/, /spb/…) + регионы в Яндекс.Вебмастере — не сеть доменов/поддоменов</div></div>
+          <div class="ok" style="border:none"><span class="ic">✓</span><div class="small"><b>Один сайт ранжируется в нескольких городах</b> — отдельные домены под город не нужны (миф опровергнут)</div></div>
+          <div class="ok" style="border:none"><span class="ic">✓</span><div class="small"><b>IndexNow → Bing/Яндекс</b>; Google — sitemap + краул; без IP-подмены контента (явная URL-структура)</div></div>
+        </div>
+        <div class="hl-amber" style="margin-top:12px">
+          Остаётся отдельным research: тулинг фабрики (трекеры позиций, n8n) и <b>СММ-реклама + мессенджеры</b> (VK/Telegram Ads, боты, атрибуция). Цифры на экране — демо.
+        </div>
+      </div>
+    </div>
+
+    <p class="note">Данные демонстрационные. Комплаенс-планка — по первоисточнику Google (spam policies + gen-AI guidance). Архитектура и тулинг — инженерный дизайн, требует отдельной верификации.</p>
+  </div>
+</div>
+
+</body>
+</html>

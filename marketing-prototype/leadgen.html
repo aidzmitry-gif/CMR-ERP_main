@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Движок заявок — Маркетинг — CRM/ERP</title>
+<style>
+  :root{
+    --canvas:#F4F5F7; --ink:#1F2937; --muted:#6B7280; --line:#EEF0F3;
+    --brand:#2563EB; --brand-50:#EFF5FF; --brand-100:#EAF1FF;
+    --green:#059669; --green-bg:#ECFDF5; --green-500:#10B981;
+    --amber:#D97706; --amber-bg:#FFFBEB; --amber-500:#F59E0B;
+    --red:#DC2626; --red-bg:#FEF2F2; --red-500:#EF4444;
+    --violet:#7C3AED; --violet-bg:#F5F3FF; --violet-500:#8B5CF6;
+    --teal:#0D9488; --teal-bg:#F0FDFA; --teal-500:#14B8A6;
+    --slate:#64748B; --slate-bg:#F1F5F9; --slate-400:#94A3B8;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #E5E7EB}
+  .topbar .row{max-width:1220px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .crumb{color:var(--muted);font-size:13px}.crumb b{color:var(--ink)}
+  .back{margin-left:auto;color:var(--muted);font-size:13px;border:1px solid #E5E7EB;border-radius:8px;padding:6px 12px}
+  .back:hover{color:var(--ink);border-color:#CBD5E1}
+  .tabs{max-width:1220px;margin:0 auto;padding:0 24px;display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;padding:11px 14px;font-size:14px;color:var(--slate);white-space:nowrap}
+  .tab:hover{color:var(--ink)}.tab.active{color:var(--brand);font-weight:600}
+  .tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--brand)}
+  .tab .soon{font-size:9px;vertical-align:super;color:var(--slate-400);margin-left:3px}.tab.dim{color:#C7CDD6;cursor:default}
+  .wrap{max-width:1220px;margin:0 auto;padding:22px 24px 70px}
+  h1{font-size:21px;font-weight:700;margin:0}.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+  .caption{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--slate-400)}
+  .stack{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.gfun{grid-template-columns:420px 1fr}}
+  .card{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:20px}
+  .tag{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;background:var(--slate-bg);color:var(--slate)}
+  .t-green{background:var(--green-bg);color:var(--green)}.t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-red{background:var(--red-bg);color:var(--red)}.t-violet{background:var(--violet-bg);color:var(--violet)}
+  .t-teal{background:var(--teal-bg);color:var(--teal)}.t-brand{background:var(--brand-100);color:var(--brand)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .bar{height:8px;border-radius:999px;background:#F1F5F9;overflow:hidden}.bar>i{display:block;height:100%;border-radius:999px;background:var(--brand)}
+  .f-green{background:var(--green-500)!important}.f-amber{background:var(--amber-500)!important}.f-red{background:var(--red-500)!important}
+  .f-violet{background:var(--violet-500)!important}.f-teal{background:var(--teal-500)!important}.f-slate{background:var(--slate-400)!important}.f-brand{background:var(--brand)!important}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate-400);font-weight:600;text-align:left;padding-bottom:8px}
+  td{padding:9px 0;border-top:1px solid var(--line)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}.strong{font-weight:700}
+  .muted{color:var(--muted)}.small{font-size:12px}
+  .note{font-size:12px;color:var(--slate-400);margin-top:12px}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .hl-amber{background:var(--amber-bg);color:#92400E;border-radius:12px;padding:12px;font-size:13px;line-height:1.45}
+
+  /* funnel */
+  .fstage{padding:11px 0;border-top:1px solid var(--line)}.fstage:first-child{border-top:none}
+  .fhead{display:flex;align-items:baseline;justify-content:space-between}
+  .fhead .nm{font-size:13px;font-weight:600}.fhead .ct{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  .fconv{font-size:11px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px}
+  .bottleneck{background:var(--red-bg)}
+  .recpill{display:inline-flex;gap:5px;align-items:center;font-size:11px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <span class="logo"><span class="mark">◆</span> ERP</span>
+    <span class="crumb">ERP / <b>Маркетинг</b> / Движок заявок</span>
+    <a class="back" href="cockpit.html">← В приложение</a>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="cockpit.html">Кокпит руководителя</a>
+    <a class="tab active" href="leadgen.html">Движок заявок</a>
+    <a class="tab" href="attribution.html">Атрибуция и прибыль</a>
+    <a class="tab" href="agents.html">AI-агенты</a>
+    <a class="tab" href="geofactory.html">Гео-фабрика / pSEO</a>
+    <span class="tab dim">База и сегменты<span class="soon">скоро</span></span>
+  </nav>
+</div>
+
+<div class="wrap">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <h1>Движок заявок — каналы и воронка привлечения</h1>
+      <p class="sub">Где рождаются заявки, сколько стоят и какого качества. Узкие места — кандидаты на усиление агентами.</p>
+    </div>
+    <span class="tag t-violet">Демо · BYN</span>
+  </div>
+
+  <div class="stack">
+    <div class="caption">Июнь 2026 · бюджет 36 600 BYN · 318 заявок · 84 квалифицированных (SQL)</div>
+
+    <div class="grid gfun">
+      <!-- Funnel -->
+      <div class="card">
+        <span class="caption">Воронка привлечения</span>
+        <div style="margin-top:6px">
+          <div class="fstage">
+            <div class="fhead"><span class="nm">Охват / показы</span><span class="ct">420 000</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-slate" style="width:100%"></i></div>
+            <div class="fconv">→ в визиты <b style="color:var(--ink)">2.95%</b></div>
+          </div>
+          <div class="fstage">
+            <div class="fhead"><span class="nm">Визиты (сайт / лендинг)</span><span class="ct">12 400</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-brand" style="width:74%"></i></div>
+            <div class="fconv">→ в заявку <b style="color:var(--ink)">2.6%</b> <span class="tag t-amber">узкое место</span></div>
+          </div>
+          <div class="fstage bottleneck" style="border-radius:10px;padding:11px 10px;margin:0 -10px">
+            <div class="fhead"><span class="nm">Заявки</span><span class="ct">318</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-brand" style="width:48%"></i></div>
+            <div class="fconv">→ в MQL <b style="color:var(--ink)">60%</b></div>
+          </div>
+          <div class="fstage">
+            <div class="fhead"><span class="nm">MQL (маркетинг-квалиф.)</span><span class="ct">190</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-teal" style="width:34%"></i></div>
+            <div class="fconv">→ в SQL <b style="color:var(--ink)">44%</b> <span class="tag t-amber">рычаг роста</span></div>
+          </div>
+          <div class="fstage">
+            <div class="fhead"><span class="nm">SQL (готовы к продажам)</span><span class="ct" style="color:var(--teal)">84</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-teal" style="width:22%"></i></div>
+            <div class="fconv">→ передано <b style="color:var(--ink)">100%</b></div>
+          </div>
+          <div class="fstage">
+            <div class="fhead"><span class="nm">Передано в продажи (handoff)</span><span class="ct" style="color:var(--green)">84</span></div>
+            <div class="bar h6" style="margin-top:7px"><i class="f-green" style="width:22%"></i></div>
+            <div class="fconv">событие <b style="color:var(--ink)">marketing.lead.qualified</b> → sales</div>
+          </div>
+        </div>
+        <p class="note">Конверсия визит→заявка 2.6% — норма для B2B-промышленности (медиана рынка ~2.9%). Главный рычаг прибыли при длинном цикле — качество MQL→SQL и дозревание базы, а не разовый трафик.</p>
+      </div>
+
+      <!-- Channels detailed -->
+      <div class="card">
+        <div class="row-between"><span class="caption">Каналы привлечения — экономика</span><span class="small muted">сорт. по ROMI</span></div>
+        <div style="overflow-x:auto">
+        <table style="margin-top:10px;min-width:640px">
+          <thead><tr>
+            <th>Канал</th><th class="num">Бюджет</th><th class="num">Заявки</th><th class="num">CPL</th><th class="num">MQL→SQL</th><th class="num">Pipeline</th><th class="num">ROMI</th><th>Реком.</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><span class="dot" style="background:var(--green-500)"></span> Рефералы / партнёры</td><td class="num">432</td><td class="num">24</td><td class="num">18</td><td class="num">46%</td><td class="num">210 000</td><td class="num strong" style="color:var(--green)">480%</td><td><span class="recpill" style="color:var(--green)">▲ масштаб</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--green-500)"></span> Тендеры (ICETRADE)</td><td class="num">2 160</td><td class="num">18</td><td class="num">120</td><td class="num">52%</td><td class="num">240 000</td><td class="num strong" style="color:var(--green)">310%</td><td><span class="recpill" style="color:var(--green)">▲ разведка</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--teal-500)"></span> SEO / контент</td><td class="num">3 936</td><td class="num">96</td><td class="num">41</td><td class="num">24%</td><td class="num">150 000</td><td class="num strong" style="color:var(--teal)">190%</td><td><span class="recpill" style="color:var(--teal)">▲ темы</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--slate-400)"></span> Холодный outbound / ABM</td><td class="num">5 320</td><td class="num">38</td><td class="num">140</td><td class="num">31%</td><td class="num">95 000</td><td class="num strong">95%</td><td><span class="recpill muted">→ точечно</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--amber-500)"></span> Яндекс.Директ</td><td class="num">14 520</td><td class="num">88</td><td class="num">165</td><td class="num">19%</td><td class="num">88 000</td><td class="num strong" style="color:var(--amber)">40%</td><td><span class="recpill" style="color:var(--amber)">▼ чистить</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--slate-400)"></span> Выставки / отраслевые</td><td class="num">6 240</td><td class="num">12</td><td class="num">520</td><td class="num">42%</td><td class="num">42 000</td><td class="num strong">60%</td><td><span class="recpill muted">→ точечно</span></td></tr>
+            <tr><td><span class="dot" style="background:var(--red-500)"></span> VK / Telegram Ads</td><td class="num">3 990</td><td class="num">42</td><td class="num">95</td><td class="num">11%</td><td class="num">18 000</td><td class="num strong" style="color:var(--red)">−20%</td><td><span class="recpill" style="color:var(--red)">▼ срезать</span></td></tr>
+          </tbody>
+          <tfoot><tr style="border-top:2px solid #E5E7EB"><td class="strong">Итого</td><td class="num strong">36 600</td><td class="num strong">318</td><td class="num strong">115</td><td class="num strong">44%</td><td class="num strong">843 000</td><td class="num strong" style="color:var(--green)">94%</td><td></td></tr></tfoot>
+        </table>
+        </div>
+        <div class="hl-amber" style="margin-top:14px">
+          <b>Рекомендация агента оптимизации:</b> 80% бюджета в Директ/VK даёт лишь 13% pipeline. Сместить −4 000 BYN из VK и часть Директа в тендеры, рефералку и контент → прогноз ROMI <b>94% → 180%</b> без роста бюджета. Изменение бюджета — через визу человека.
+        </div>
+      </div>
+    </div>
+
+    <!-- bottom row: budget mix + quality + sources -->
+    <div class="grid g3">
+      <div class="card">
+        <span class="caption">Где бюджет сейчас</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+          <div><div class="row-between small"><span>Яндекс.Директ</span><span class="strong">40%</span></div><div class="bar" style="margin-top:4px"><i class="f-amber" style="width:40%"></i></div></div>
+          <div><div class="row-between small"><span>Выставки</span><span class="strong">17%</span></div><div class="bar" style="margin-top:4px"><i class="f-slate" style="width:17%"></i></div></div>
+          <div><div class="row-between small"><span>Outbound / ABM</span><span class="strong">15%</span></div><div class="bar" style="margin-top:4px"><i class="f-slate" style="width:15%"></i></div></div>
+          <div><div class="row-between small"><span>VK / Telegram</span><span class="strong">11%</span></div><div class="bar" style="margin-top:4px"><i class="f-red" style="width:11%"></i></div></div>
+          <div><div class="row-between small"><span>SEO / контент</span><span class="strong">11%</span></div><div class="bar" style="margin-top:4px"><i class="f-teal" style="width:11%"></i></div></div>
+          <div><div class="row-between small"><span>Тендеры + рефералы</span><span class="strong">6%</span></div><div class="bar" style="margin-top:4px"><i class="f-green" style="width:6%"></i></div></div>
+        </div>
+        <p class="note">Бюджет перекошен в дорогой Директ. Самые прибыльные каналы недофинансированы.</p>
+      </div>
+
+      <div class="card">
+        <span class="caption">Качество заявок</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:11px">
+          <div class="row-between"><span class="small"><span class="dot" style="background:var(--green-500)"></span> Целевые (ICP — наш профиль)</span><span class="strong">58%</span></div>
+          <div class="row-between"><span class="small"><span class="dot" style="background:var(--amber-500)"></span> Частично целевые</span><span class="strong">27%</span></div>
+          <div class="row-between"><span class="small"><span class="dot" style="background:var(--red-500)"></span> Нецелевые / спам</span><span class="strong">15%</span></div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:4px 0"/>
+          <div class="row-between"><span class="small muted">Скоринг отсеял (агент)</span><span class="strong" style="color:var(--violet)">48 заявок</span></div>
+          <div class="row-between"><span class="small muted">Среднее время до квалификации</span><span class="strong">7 ч</span></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:10px 0 2px"/>
+        <div class="caption" style="margin-bottom:7px">Модель скоринга — два балла</div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          <div><div class="row-between small"><span><b>Fit</b> — кто это (роль, отрасль, размер, ICP)</span><span class="strong">правила</span></div><div class="bar" style="margin-top:4px"><i class="f-brand" style="width:72%"></i></div></div>
+          <div><div class="row-between small"><span><b>Engagement</b> — что делает (заявка, визиты, письма)</span><span class="strong">правила → ML</span></div><div class="bar" style="margin-top:4px"><i class="f-teal" style="width:54%"></i></div></div>
+        </div>
+        <p class="note">Старт на правилах (ML — после 200+ закрытых сделок). Порог MQL — из своей истории конверсии; SQL фиксируется только после приёма продажами.</p>
+      </div>
+
+      <div class="card">
+        <span class="caption">Сигналы для роста (агенты)</span>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:11px">
+          <div class="row-between"><span class="small">🏭 Новых тендеров по нашим SKU</span><span class="tag t-green">9</span></div>
+          <div class="row-between"><span class="small">🎯 Целевых заводов с сигналом покупки</span><span class="tag t-teal">5</span></div>
+          <div class="small">😴 Спящих контактов с интересом — <b>240</b>, реактивация не запущена</div>
+          <div class="small">📝 SEO-тем с трафиком, но без статьи — <b>12</b></div>
+        </div>
+        <p class="note"><a href="agents.html" style="color:var(--violet);font-weight:600">Запустить агентов на эти сигналы →</a></p>
+      </div>
+    </div>
+
+    <!-- Free / organic channels (research 6) -->
+    <div class="card">
+      <div class="row-between"><span class="caption">Бесплатные / органические каналы</span><span class="tag t-teal">research-проверено</span></div>
+      <div class="grid g3" style="margin-top:12px">
+        <div style="border-left:3px solid var(--green-500);padding-left:12px">
+          <div class="small strong" style="color:var(--green)">✓ Работает</div>
+          <ul class="small muted" style="margin:6px 0 0;padding-left:16px;line-height:1.5">
+            <li>Гео-сервисы: Яндекс Бизнес / GBP / 2ГИС — полная+верифиц. карточка, отзывы + ответы 24 ч</li>
+            <li>Answer-First — ответ в первых 2–5 предложениях → попадание в ИИ-ответы</li>
+            <li>Экспертный контент (Habr/Дзен/Cossa) — только при реальной пользе</li>
+            <li>Тендеры ICETRADE.by — бесплатно</li>
+          </ul>
+        </div>
+        <div style="border-left:3px solid var(--amber-500);padding-left:12px">
+          <div class="small strong" style="color:var(--amber)">⚠ Хайп / не верить</div>
+          <ul class="small muted" style="margin:6px 0 0;padding-left:16px;line-height:1.5">
+            <li>Агентские GEO-ROI (×7.5 трафика) — самозаявлены</li>
+            <li>«Schema +40% цитируемости в ИИ» — не подтверждено</li>
+            <li>Каталоги (Flagma / Пульс цен / all.biz) — бесплатных лидов почти нет</li>
+            <li>VC.ru без Pro (~50к/мес) не индексируется</li>
+          </ul>
+        </div>
+        <div style="border-left:3px solid var(--slate-400);padding-left:12px">
+          <div class="small strong" style="color:var(--slate)">○ Пробел — данных нет</div>
+          <ul class="small muted" style="margin:6px 0 0;padding-left:16px;line-height:1.5">
+            <li>Органический Telegram / VK, отраслевые чаты</li>
+            <li>UGC, реферальные / партнёрские схемы</li>
+            <li>Email-реактивация спящих по своей базе</li>
+          </ul>
+        </div>
+      </div>
+      <p class="note">Подтверждено первоисточниками (Google / Яндекс / площадки). Источник — research 6; детали и оговорки в КОНЦЕПЦИЯ.md §10.</p>
+    </div>
+
+    <p class="note">Данные демонстрационные. Конверсии и стоимости — для иллюстрации концепта; абсолютные значения калибруются под локальный рынок (BYN), надёжна относительная картина по каналам.</p>
+  </div>
+</div>
+
+</body>
+</html>

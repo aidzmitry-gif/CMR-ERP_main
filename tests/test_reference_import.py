@@ -93,3 +93,21 @@ async def test_batch_skips_rows_without_unp(session):
 async def test_upsert_requires_unp(session):
     with pytest.raises(ValueError):
         await reference_import.upsert_counterparty(session, unp="", name="без УНП")
+
+
+async def test_batch_import_skips_rows_without_unp(session):
+    summary = await reference_import.import_counterparties(
+        session,
+        [
+            {"unp": "", "name": "Группа 1С", "id": "group-1"},
+            {"unp": "191234567", "name": "ООО Ромашка", "id": "cp-1"},
+        ],
+    )
+    assert summary == {
+        "total": 2,
+        "created": 1,
+        "matched": 0,
+        "aliases_added": 1,
+        "skipped_no_unp": 1,
+    }
+    assert await _count(session, Counterparty) == 1

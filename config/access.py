@@ -67,6 +67,24 @@ ROLE_ORDER: list[str] = [
     "procurement", "warehouse", "logistics", "production", "finance", "hr",
 ]
 
+# Допустимые роли по отделам для управляемого приглашения сотрудника. Это гейт от
+# случайной выдачи роли чужого отдела; сама роль остаётся источником backend RBAC.
+DEPARTMENT_ROLES: dict[str, tuple[str, ...]] = {
+    "Руководство": ("director", "commercial", "assistant"),
+    "Продажи": ("sales_head", "sales", "sales_cli"),
+    "Закупки": ("procurement",),
+    "Склад": ("warehouse",),
+    "Логистика": ("logistics",),
+    "Производство": ("production",),
+    "Финансы / офис": ("finance",),
+    "Кадры (HR)": ("hr",),
+}
+
+
+def is_role_allowed_for_department(department: str, role: str) -> bool:
+    """Можно ли назначить роль сотруднику выбранного отдела."""
+    return role in DEPARTMENT_ROLES.get(department, ())
+
 # Сотрудники компании (dev-логин). Единый источник: логин (ASCII) → ФИО + роль.
 # Реальные люди из согласованной матрицы доступа. Пароля нет — это dev-вход (смена личности,
 # не защита): настоящая аутентификация (Keycloak OIDC/MFA) — часть 5.

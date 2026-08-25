@@ -13,6 +13,7 @@ import json
 import pytest
 
 from connectors import run
+from connectors import state as state_module
 from connectors.models import RawRecord
 from connectors.state import NullStateStore, StateStore
 
@@ -109,3 +110,25 @@ def test_statestore_flush_is_atomic_no_tmp_left(tmp_path):
     # mkstemp-файлы подменяются через os.replace — мусора в каталоге нет
     leftovers = [p for p in tmp_path.iterdir() if p.name != "state.json"]
     assert leftovers == []
+
+
+def test_statestore_retries_transient_windows_replace_lock(tmp_path, monkeypatch):
+    """Антивирус может кратко удерживать только что созданный файл на Windows."""
+    path = tmp_path / "state.json"
+    original_replace = state_module.os.replace
+    attempts = 0
+
+    def transient_lock(source, target):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporary file lock")
+        original_replace(source, target)
+
+    monkeypatch.setattr(state_module.os, "name", "nt")
+    monkeypatch.setattr(state_module.os, "replace", transient_lock)
+
+    StateStore(str(path)).set("cursor", "value")
+
+    assert attempts == 3
+    assert json.loads(path.read_text(encoding="utf-8")) == {"cursor": "value"}

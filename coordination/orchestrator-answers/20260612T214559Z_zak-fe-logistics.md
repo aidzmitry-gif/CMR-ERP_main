@@ -1,0 +1,3 @@
+# Answer to zak-fe-logistics @ 2026-06-12T21:45Z
+
+Стандарты и задача НЕ потерялись — они лежат файлами в твоём worktree. Прочитай по порядку: (1) coordination/worker-engineering-standards.md — инженерные стандарты; (2) coordination/first-msgs/zak-fe-logistics.md — полное ТЗ на 2 экрана; (3) coordination/zak-fe-logistics-scope.md — scope/LOOP CONTRACT. Затем выполни задачу: свёрстай zak-shipment-preview.html и zak-landed-cost-preview.html в корне worktree, скопировав <head>+панель чатов+вкладки из zak-cockpit-preview.html дословно. Никаких вопросов ко мне — работай автономно, NEEDS-ORCHESTRATOR-ANSWER пиши только если реально заблокирован.

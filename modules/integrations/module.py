@@ -4,6 +4,7 @@ from __future__ import annotations
 from core.runtime.contract import ModuleContract, Permission
 from core.runtime.core import Core
 from modules.integrations import routes
+from modules.integrations.alfa import AlfaBankClient
 from modules.integrations.client import OneCClient
 from modules.integrations.registry import RegistryClient
 from modules.integrations.stock import StockService
@@ -41,6 +42,13 @@ class IntegrationsModule(ModuleContract):
         # телефонный шлюз: исходящий звонок через облачную АТС zruchna. Входящие
         # события идут не через шлюз, а webhook'ом → шина (см. routes/telephony).
         core.services.telephony = ZruchnaClient(core.config.telephony_originate_url)
+        # банковский шлюз (Альфа host-to-host): входящие зачисления клиентов → авто-проводка
+        # оплат в finance. Пустые креды → пусто (честная деградация, не выдумываем оплаты).
+        core.services.bank = AlfaBankClient(
+            getattr(cfg, "alfa_base_url", "") or "",
+            getattr(cfg, "alfa_token", "") or "",
+            getattr(cfg, "alfa_account", "") or "",
+        )
         # M3: фоновый шаг исходящей выгрузки ERP → 1С (очередь sync_link → post_document)
         core.on_tick(tick_sync_out)
 

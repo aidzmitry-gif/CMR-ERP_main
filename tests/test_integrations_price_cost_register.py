@@ -43,3 +43,16 @@ def test_integrations_leaves_price_cost_none_without_onec():
     core = _FakeCore(onec_base_url="")
     IntegrationsModule().register(core)  # type: ignore[arg-type]
     assert core.services.price_cost is None
+
+
+def test_integrations_preserves_configured_alfa_credentials():
+    core = _FakeCore()
+    core.config.alfa_base_url = "https://bank.example/api/"
+    core.config.alfa_token = "token"
+    core.config.alfa_account = "BY00TEST"
+
+    IntegrationsModule().register(core)  # type: ignore[arg-type]
+
+    assert core.services.bank.base_url == "https://bank.example/api"
+    assert core.services.bank.token == "token"
+    assert core.services.bank.account == "BY00TEST"

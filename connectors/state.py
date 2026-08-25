@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from typing import Any
 
 
@@ -51,7 +52,17 @@ class StateStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, self.path)  # атомарная подмена
+            # Windows Defender/индексатор иногда держит только что созданный файл.
+            # Не теряем атомарность: повторяем именно replace до 0,45 с и затем
+            # возвращаем исходную ошибку, не маскируя постоянный отказ доступа.
+            for attempt in range(10):
+                try:
+                    os.replace(tmp, self.path)  # атомарная подмена
+                    break
+                except PermissionError:
+                    if os.name != "nt" or attempt == 9:
+                        raise
+                    time.sleep(0.05)
         except Exception:
             if os.path.exists(tmp):
                 os.remove(tmp)
