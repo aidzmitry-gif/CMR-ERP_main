@@ -24,7 +24,10 @@ from core.services.keycloak_admin import (
 from modules.hr.models import Employee
 
 router = APIRouter(prefix="/system/users", tags=["identity"])
-SYSTEM_WRITE = "system.write"
+# Не ``system.write``: сервис приглашений не должен получать право менять всю
+# системную конфигурацию. Директор и коммерческий директор сохраняют доступ как
+# супер-роли; Keycloak service account получает только это право.
+IDENTITY_INVITE = "identity.invite"
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _USERNAME_RE = re.compile(r"[^a-z0-9._-]+")
 
@@ -85,7 +88,7 @@ def _username(payload: InviteEmployeeIn) -> str:
 
 @router.get("/departments")
 async def identity_departments(
-    _: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE)),
 ) -> dict:
     """Справочник допустимых ролей по отделам для формы приглашения."""
     return {"departments": {name: list(roles) for name, roles in DEPARTMENT_ROLES.items()}}
@@ -93,7 +96,7 @@ async def identity_departments(
 
 @router.get("/invitations", response_model=list[InvitedEmployeeOut])
 async def list_invitations(
-    _: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE)),
     session: AsyncSession = Depends(get_session),
 ):
     return (
@@ -106,7 +109,7 @@ async def list_invitations(
 @router.post("/invite", response_model=InvitedEmployeeOut, status_code=201)
 async def invite_employee(
     payload: InviteEmployeeIn,
-    actor: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE)),
     session: AsyncSession = Depends(get_session),
     identity: IdentityGateway = Depends(get_identity_gateway),
 ):
