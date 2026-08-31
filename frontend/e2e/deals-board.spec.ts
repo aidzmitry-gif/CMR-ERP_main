@@ -10,6 +10,8 @@ test.describe("deals board", () => {
     // Ждём отрисовки канбана (SSR — колонки приходят сразу, SSE не блокирует)
     const newDropzone = page.locator('[data-testid="stage-column-new"]');
     await expect(newDropzone).toBeVisible();
+    // Колонка SSR-видима раньше, чем React подключит onClick; ждём границу гидрации.
+    await expect(page.getByTestId("deals-client-ready")).toBeVisible();
 
     // Создаём сделку для самодостаточности на пустой CI-базе.
     // Если БД накопила карточки — DRAG берём с ПЕРВОЙ карточки (вверх колонки),
