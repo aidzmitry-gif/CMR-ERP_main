@@ -4,6 +4,8 @@ import { expect, test } from "@playwright/test";
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
 test("карточка сделки: формирование счёта → запись в 1С", async ({ page }) => {
   await page.goto("/crm/deals");
+  // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
+  await expect(page.getByTestId("deals-client-ready")).toBeVisible();
 
   await page.getByRole("button", { name: /Создать сделку/ }).click();
   const form = page.locator("form.shadow-pop");

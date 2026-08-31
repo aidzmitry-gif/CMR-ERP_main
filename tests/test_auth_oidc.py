@@ -134,6 +134,20 @@ def test_oidc_mode_no_token_is_guest(monkeypatch, authn):
     assert user.roles == [GUEST]
 
 
+def test_oidc_mode_ignores_spoofed_role_headers(monkeypatch, authn):
+    _oidc_settings(monkeypatch)
+    monkeypatch.setattr(auth_mod, "_get_authenticator", lambda settings: authn)
+    user = get_current_user(
+        SimpleNamespace(
+            headers={
+                "X-User": "service-account-aios-inviter",
+                "X-User-Roles": "identity_provisioner",
+            }
+        )
+    )
+    assert user.roles == [GUEST] and user.username == "anonymous"
+
+
 def test_oidc_mode_invalid_token_is_guest(monkeypatch, authn):
     _oidc_settings(monkeypatch)
     monkeypatch.setattr(auth_mod, "_get_authenticator", lambda settings: authn)

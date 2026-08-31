@@ -1,15 +1,17 @@
 """Узкий Keycloak Admin API gateway для приглашения сотрудников.
 
-Приложение использует service-account client, создаёт/переиспользует пользователя,
+Приложение использует service-account client, создаёт нового пользователя,
 назначает одну realm-role и просит Keycloak отправить одноразовое письмо с действиями
 ``VERIFY_EMAIL`` + ``UPDATE_PASSWORD``. Пароль через CRM не проходит и не хранится.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
+
+from config.access import ONBOARDING_ROLE
 
 
 class KeycloakAdminError(RuntimeError):
@@ -37,6 +39,12 @@ class KeycloakInvitation:
     role: str
     actions: tuple[str, ...]
     reused: bool
+
+
+@dataclass(frozen=True)
+class KeycloakActivation:
+    user_id: str
+    role: str
 
 
 class KeycloakAdminClient:
@@ -68,31 +76,42 @@ class KeycloakAdminClient:
         )
 
     async def invite_user(
-        self, *, username: str, full_name: str, email: str, department: str, role: str
+        self,
+        *,
+        username: str,
+        full_name: str,
+        email: str,
+        expected_department: str,
+        expected_role: str,
     ) -> KeycloakInvitation:
         if not self.configured:
             raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        if not self._safe_redirect_uri():
+            raise KeycloakAdminNotConfigured("keycloak_invite_redirect_uri_invalid")
         if self.lifespan < 300:
             raise KeycloakAdminNotConfigured("keycloak_invite_lifespan_too_short")
 
-        if self._client is not None:
-            return await self._invite(
-                self._client,
-                username=username,
-                full_name=full_name,
-                email=email,
-                department=department,
-                role=role,
-            )
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            return await self._invite(
-                client,
-                username=username,
-                full_name=full_name,
-                email=email,
-                department=department,
-                role=role,
-            )
+        try:
+            if self._client is not None:
+                return await self._invite(
+                    self._client,
+                    username=username,
+                    full_name=full_name,
+                    email=email,
+                    expected_department=expected_department,
+                    expected_role=expected_role,
+                )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                return await self._invite(
+                    client,
+                    username=username,
+                    full_name=full_name,
+                    email=email,
+                    expected_department=expected_department,
+                    expected_role=expected_role,
+                )
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_invite_transport_failed") from exc
 
     async def _invite(
         self,
@@ -101,8 +120,8 @@ class KeycloakAdminClient:
         username: str,
         full_name: str,
         email: str,
-        department: str,
-        role: str,
+        expected_department: str,
+        expected_role: str,
     ) -> KeycloakInvitation:
         token = await self._service_token(client)
         headers = {"Authorization": f"Bearer {token}"}
@@ -115,11 +134,12 @@ class KeycloakAdminClient:
             username=username,
             full_name=full_name,
             email=email,
-            department=department,
+            expected_department=expected_department,
+            expected_role=expected_role,
         )
 
         role_response = await client.get(
-            f"{admin}/roles/{quote(role, safe='')}", headers=headers
+            f"{admin}/roles/{quote(ONBOARDING_ROLE, safe='')}", headers=headers
         )
         self._expect(role_response, {200}, "keycloak_role_lookup_failed")
         role_representation = role_response.json()
@@ -145,9 +165,101 @@ class KeycloakAdminClient:
             user_id=user_id,
             username=username,
             email=email,
-            role=role,
+            role=ONBOARDING_ROLE,
             actions=self.ACTIONS,
             reused=reused,
+        )
+
+    async def stage_activation_target(
+        self, *, user_id: str, expected_role: str
+    ) -> KeycloakActivation:
+        """Добавить будущую рабочую роль, не снимая ``onboarding``.
+
+        Пока realm-role ``onboarding`` остаётся в токене, middleware приложения
+        fail-closed и не пропускает бизнес-данные. Это позволяет сначала
+        надёжно записать локальное pending-cleanup состояние.
+        """
+
+        if not self.configured:
+            raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        if not user_id or expected_role == ONBOARDING_ROLE:
+            raise KeycloakAdminError("keycloak_activation_state_invalid")
+        try:
+            if self._client is not None:
+                return await self._stage_activation_target(
+                    self._client, user_id=user_id, expected_role=expected_role
+                )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                return await self._stage_activation_target(
+                    client, user_id=user_id, expected_role=expected_role
+                )
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_activation_transport_failed") from exc
+
+    async def _stage_activation_target(
+        self, client: httpx.AsyncClient, *, user_id: str, expected_role: str
+    ) -> KeycloakActivation:
+        token = await self._service_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        admin = f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}"
+        user_path = f"{admin}/users/{quote(user_id, safe='')}/role-mappings/realm"
+
+        expected = await self._realm_role(client, admin, headers, expected_role)
+        mapping_response = await client.post(user_path, headers=headers, json=[expected])
+        self._expect(mapping_response, {204}, "keycloak_expected_role_assignment_failed")
+        return KeycloakActivation(user_id=user_id, role=expected_role)
+
+    async def remove_onboarding_role(self, *, user_id: str) -> None:
+        """Финально снять onboarding после durable local pending-cleanup commit.
+
+        Здесь принципиально нет автоматического rollback/retry: ошибка внешнего
+        DELETE остаётся для ручной сверки, а вызывающий маршрут не выполняет
+        дополнительную локальную запись после потенциально успешного DELETE.
+        """
+
+        if not self.configured:
+            raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        if not user_id:
+            raise KeycloakAdminError("keycloak_activation_state_invalid")
+        try:
+            if self._client is not None:
+                await self._remove_onboarding_role(self._client, user_id=user_id)
+                return
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                await self._remove_onboarding_role(client, user_id=user_id)
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_activation_cleanup_transport_failed") from exc
+
+    async def _remove_onboarding_role(self, client: httpx.AsyncClient, *, user_id: str) -> None:
+        token = await self._service_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        admin = f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}"
+        onboarding = await self._realm_role(client, admin, headers, ONBOARDING_ROLE)
+        response = await client.request(
+            "DELETE",
+            f"{admin}/users/{quote(user_id, safe='')}/role-mappings/realm",
+            headers=headers,
+            json=[onboarding],
+        )
+        self._expect(response, {204}, "keycloak_onboarding_role_remove_failed")
+
+    async def _realm_role(
+        self, client: httpx.AsyncClient, admin: str, headers: dict[str, str], name: str
+    ) -> dict:
+        response = await client.get(f"{admin}/roles/{quote(name, safe='')}", headers=headers)
+        self._expect(response, {200}, "keycloak_role_lookup_failed")
+        return response.json()
+
+    def _safe_redirect_uri(self) -> bool:
+        """Keycloak также обязан allowlist'ить URI, но CRM не принимает HTTP/opaque URI."""
+
+        parsed = urlparse(self.redirect_uri)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and not parsed.username
+            and not parsed.password
+            and not parsed.fragment
         )
 
     async def _service_token(self, client: httpx.AsyncClient) -> str:
@@ -174,7 +286,8 @@ class KeycloakAdminClient:
         username: str,
         full_name: str,
         email: str,
-        department: str,
+        expected_department: str,
+        expected_role: str,
     ) -> tuple[str, bool]:
         first_name, last_name = self._keycloak_names(full_name)
         user_payload = {
@@ -184,7 +297,13 @@ class KeycloakAdminClient:
             "lastName": last_name,
             "enabled": True,
             "emailVerified": False,
-            "attributes": {"department": [department]},
+            # Это не рабочие атрибуты и не назначение роли: они только
+            # фиксируют ожидание до явного решения руководителя.
+            "attributes": {
+                "access_state": ["onboarding"],
+                "expected_department": [expected_department],
+                "expected_role": [expected_role],
+            },
             "requiredActions": list(self.ACTIONS),
         }
         response = await client.post(
@@ -200,29 +319,10 @@ class KeycloakAdminClient:
             return user_id, False
         if response.status_code != 409:
             self._expect(response, {201}, "keycloak_user_create_failed")
-
-        lookup = await client.get(
-            f"{admin}/users",
-            headers=headers,
-            params={"username": username, "exact": "true"},
-        )
-        self._expect(lookup, {200}, "keycloak_user_lookup_failed")
-        matches = [u for u in lookup.json() if u.get("username") == username]
-        if len(matches) != 1:
-            raise KeycloakAdminConflict("keycloak_username_conflict")
-        existing = matches[0]
-        if str(existing.get("email", "")).lower() != email.lower():
-            raise KeycloakAdminConflict("keycloak_username_email_conflict")
-        user_id = str(existing.get("id", ""))
-        if not user_id:
-            raise KeycloakAdminError("keycloak_existing_user_id_missing")
-        update = await client.put(
-            f"{admin}/users/{quote(user_id, safe='')}",
-            headers=headers,
-            json=user_payload,
-        )
-        self._expect(update, {204}, "keycloak_user_update_failed")
-        return user_id, True
+        # Автоматический inviter не редактирует существующего Keycloak-пользователя:
+        # нельзя молча добавить новую роль к старым правам или переслать письмо
+        # неизвестному владельцу адреса. Сверка/повтор — отдельная ручная операция.
+        raise KeycloakAdminConflict("keycloak_user_already_exists")
 
     @staticmethod
     def _keycloak_names(full_name: str) -> tuple[str, str]:

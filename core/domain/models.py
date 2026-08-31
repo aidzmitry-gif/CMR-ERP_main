@@ -155,9 +155,76 @@ class User(Base):
     employee_id: Mapped[int | None] = mapped_column(unique=True)
     department: Mapped[str | None] = mapped_column(String(128))
     role: Mapped[str | None] = mapped_column(String(64))
+    # При первичном приглашении здесь не ставятся рабочие отдел/роль. Они
+    # остаются ожидаемыми до отдельного подтверждения руководителя; реальная
+    # роль пользователя в этот момент — только ``onboarding``.
+    expected_department: Mapped[str | None] = mapped_column(String(128))
+    expected_role: Mapped[str | None] = mapped_column(String(64))
     keycloak_user_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     status: Mapped[str] = mapped_column(String(24), default="active", server_default="active")
     invited_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class IdentityInvitationRequest(Base):
+    """Надёжный журнал однократной отправки приглашения сотруднику.
+
+    Запись создаётся и фиксируется *до* вызова Keycloak. Поэтому после сетевой
+    ошибки автоматизация не повторяет потенциально уже отправленное письмо:
+    запрос остаётся в состоянии ``sending``/``failed`` до отдельной сверки.
+    Один сотрудник может иметь только одну автоматическую заявку; явная
+    повторная отправка будет отдельной контролируемой операцией.
+    """
+
+    __tablename__ = "identity_invitation_request"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    # Мягкие ссылки: shared kernel не создаёт зависимость от HR-модуля.
+    employee_id: Mapped[int] = mapped_column(unique=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"), unique=True)
+    username: Mapped[str] = mapped_column(String(128))
+    email: Mapped[str] = mapped_column(String(255))
+    department: Mapped[str] = mapped_column(String(128))
+    role: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(128))
+    # sending — внешний эффект возможен, повторять автоматически нельзя;
+    # sent — CRM и Keycloak согласованы; failed — требуется ручная сверка.
+    status: Mapped[str] = mapped_column(String(24), default="sending", server_default="sending")
+    keycloak_user_id: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class IdentityAccessActivationRequest(Base):
+    """Неавтоматическая активация рабочего доступа после onboarding.
+
+    Как и приглашение, намерение фиксируется до вызова Keycloak. Любой
+    неоднозначный внешний результат остаётся для ручной сверки: endpoint не
+    повторяет изменение ролей автоматически.
+    """
+
+    __tablename__ = "identity_access_activation_request"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"), unique=True)
+    employee_id: Mapped[int] = mapped_column(unique=True)
+    expected_department: Mapped[str] = mapped_column(String(128))
+    expected_role: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(128))
+    # sending — внешнее изменение ролей могло начаться; failed — нужна ручная
+    # сверка Keycloak, succeeded — local и Keycloak подтверждённо согласованы.
+    status: Mapped[str] = mapped_column(String(24), default="sending", server_default="sending")
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class OutboxEvent(Base):

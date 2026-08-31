@@ -3,7 +3,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { defaultPathForRole, resolveAppRole } from "@/lib/app-role";
 import {
   OIDC_STATE_COOKIE,
   OIDC_VERIFIER_COOKIE,
@@ -67,11 +68,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const roles = rolesFromAccessToken(tokens.access_token);
-  const role = roles.includes("director")
-    ? "director"
-    : roles[0] && !roles[0].startsWith("default-") && roles[0] !== "offline_access"
-      ? roles[0]
-      : DEFAULT_ROLE;
+  const role = resolveAppRole(roles);
   const display = displayNameFromAccessToken(tokens.access_token);
 
   const opts = { path: "/", httpOnly: true, sameSite: "lax" as const, maxAge: YEAR };
@@ -86,5 +83,5 @@ export async function GET(req: NextRequest): Promise<Response> {
   // Next cookies().set already encodes; do not encodeURIComponent (else %2520).
   jar.set(USER_COOKIE, display, opts);
 
-  return redirectTo(req, "/crm/deals");
+  return redirectTo(req, defaultPathForRole(role));
 }

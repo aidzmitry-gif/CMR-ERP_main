@@ -1,6 +1,7 @@
 // Apply refreshed OIDC cookies (shared by middleware + route handlers). No next/headers.
 
-import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { resolveAppRole } from "@/lib/app-role";
 import {
   REFRESH_COOKIE,
   type OidcTokens,
@@ -23,11 +24,7 @@ export function applyOidcTokenCookies(tokens: OidcTokens, set: CookieSetter): vo
     set(REFRESH_COOKIE, tokens.refresh_token, { ...base, maxAge: YEAR });
   }
   const roles = rolesFromAccessToken(tokens.access_token);
-  const role = roles.includes("director")
-    ? "director"
-    : roles[0] && !roles[0].startsWith("default-") && roles[0] !== "offline_access"
-      ? roles[0]
-      : DEFAULT_ROLE;
+  const role = resolveAppRole(roles);
   set(ROLE_COOKIE, role, { ...base, maxAge: YEAR });
   set(USER_COOKIE, displayNameFromAccessToken(tokens.access_token), { ...base, maxAge: YEAR });
 }

@@ -20,7 +20,15 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     # Машинная роль приглашений. Не показывается в UI и не назначается сотрудникам:
     # нужна только service account Keycloak, чтобы создать HR-карточку и отправить
     # приглашение без выдачи широкого ``system.write`` или супер-роли.
-    "identity_provisioner": ["hr"],
+    # У сервисной учётной записи нет доступа ни к одному модулю. Операции
+    # приглашения живут под /system/users и защищаются отдельными permissions;
+    # иначе доступ к HR-модулю дал бы ей чтение и изменение кадровых данных.
+    "identity_provisioner": [],
+    # Единственная роль, выдаваемая новому сотруднику при первом входе. Она
+    # намеренно не даёт доступ ни к одному бизнес-модулю: ``home`` — только
+    # статический экран знакомства с ERP. Рабочие роль и отдел хранятся как
+    # ожидающие подтверждения руководителя и назначаются отдельной операцией.
+    "onboarding": ["home"],
     "director": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge",
@@ -50,6 +58,7 @@ ACCESS_MATRIX: dict[str, list[str]] = {
 
 # --- Человекочитаемые названия ролей (для dev-переключателя и подвала сайдбара). ---
 ROLE_TITLES: dict[str, str] = {
+    "onboarding": "Ознакомление с системой",
     "director": "Директор",
     "commercial": "Коммерческий директор",
     "assistant": "Помощник руководителя",
@@ -67,7 +76,7 @@ ROLE_TITLES: dict[str, str] = {
 
 # Порядок ролей в переключателе (как в матрице, сверху вниз).
 ROLE_ORDER: list[str] = [
-    "director", "commercial", "assistant", "sales_head", "sales", "sales_manager", "sales_cli",
+    "onboarding", "director", "commercial", "assistant", "sales_head", "sales", "sales_manager", "sales_cli",
     "procurement", "warehouse", "logistics", "production", "finance", "hr",
 ]
 
@@ -143,7 +152,10 @@ SUPER_ROLES: frozenset[str] = frozenset({"admin", "director", "commercial"})
 # ACCESS_MATRIX: доступ к HR-модулю сам по себе не должен разрешать создание
 # пользователей или изменение системных настроек.
 IDENTITY_PROVISIONER_ROLE = "identity_provisioner"
-IDENTITY_PROVISIONER_PERMISSIONS: frozenset[str] = frozenset({"identity.invite"})
+ONBOARDING_ROLE = "onboarding"
+IDENTITY_PROVISIONER_PERMISSIONS: frozenset[str] = frozenset(
+    {"identity.invite.prepare", "identity.invite.send"}
+)
 
 
 def allowed_slugs(roles: Iterable[str]) -> set[str]:

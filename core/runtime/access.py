@@ -14,12 +14,36 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from config.access import PACKAGE_TO_SLUG, is_package_allowed
+from config.access import (
+    IDENTITY_PROVISIONER_ROLE,
+    ONBOARDING_ROLE,
+    PACKAGE_TO_SLUG,
+    is_package_allowed,
+)
 
 # Префиксы, открытые всегда (системные/инфраструктурные роуты и dev-доки).
 OPEN_PREFIXES: tuple[str, ...] = (
     "/health", "/system", "/approvals", "/telegram", "/docs", "/redoc", "/openapi.json",
     "/marketing/seo/webhook",
+)
+
+# Сотрудник до подтверждения руководителя может открыть только сведения о
+# собственном onboarding-доступе. Даже если ошибочно к токену будет добавлена
+# ещё какая-то роль, presence onboarding остаётся fail-closed до явной смены
+# набора ролей при подтверждении.
+ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access"})
+
+# Технический service-account приглашений не получает общего системного доступа:
+# ``/system`` содержит и маршруты без собственной permission dependency. Presence
+# этой роли намеренно ограничивает смешанный токен тем же набором, чтобы ошибочная
+# выдача дополнительной application-role не открыла CRM/HR или owner-insight.
+IDENTITY_PROVISIONER_OPEN_PATHS: frozenset[str] = frozenset(
+    {
+        "/health",
+        "/system/users/departments",
+        "/system/users/preflight",
+        "/system/users/invite",
+    }
 )
 
 
@@ -58,10 +82,23 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        roles = roles_from_request(request)
+        if ONBOARDING_ROLE in roles and path not in ONBOARDING_OPEN_PATHS:
+            return JSONResponse(
+                {"detail": "Доступ ограничен режимом ознакомления с системой"},
+                status_code=403,
+            )
+        if (
+            IDENTITY_PROVISIONER_ROLE in roles
+            and path not in IDENTITY_PROVISIONER_OPEN_PATHS
+        ):
+            return JSONResponse(
+                {"detail": "Технической identity-роли доступен только workflow приглашений"},
+                status_code=403,
+            )
         if path.startswith(OPEN_PREFIXES):
             return await call_next(request)
 
-        roles = roles_from_request(request)
         for prefix, package in self.prefixes:
             if path == prefix or path.startswith(prefix + "/"):
                 if not is_package_allowed(package, roles):

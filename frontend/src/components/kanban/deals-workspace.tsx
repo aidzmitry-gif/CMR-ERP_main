@@ -970,6 +970,9 @@ export function DealsWorkspace({
   const router = useRouter();
   const pathname = usePathname();
   const { fmt } = useCurrency();
+  // SSR может показать доску раньше, чем React подключит обработчики кликов.
+  // Этот маркер даёт E2E надёжную границу гидрации без искусственных задержек.
+  const [clientReady, setClientReady] = useState(false);
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [kpis, setKpis] = useState<Kpi[]>(initialKpis);
   // Доска по владельцу (owner-план) стартует с «месяца»: оверрайд согласованным планом на бэке
@@ -992,6 +995,11 @@ export function DealsWorkspace({
   // воронки в модалке, а не дефолтные new_clients (`stages`) — храним стадии секции-источника.
   const [modalStages, setModalStages] = useState<Stage[] | null>(null);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
+
   // Фильтры шапки — не локальный state: кнопка «Фильтры» живёт в шапке страницы (FiltersMenu,
   // решение оператора), отдельное поддерево React от доски. Тот же URL-паттерн, что у `funnel`:
   // ?priority= (приоритет), ?owner= (ответственный), ?attn= (внимание: overdue | no_step).
@@ -1610,6 +1618,7 @@ export function DealsWorkspace({
 
   return (
     <>
+      {clientReady && <span data-testid="deals-client-ready" className="sr-only" />}
       {/* pr увеличен против стандартных p-6: плавающая рейка чатов/уведомлений (AppShell,
           absolute right-0, w-[68px], во ВСЮ высоту экрана, не резервирует место в layout)
           перекрывает крайние ~44px контента на ЛЮБОЙ ширине окна (main всегда тянется до
