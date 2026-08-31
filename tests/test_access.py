@@ -4,6 +4,8 @@
 получает 403 на чужой модуль. Ограничение — ASGI-middleware до выполнения роута, поэтому
 доступ к чужому модулю отсекается даже на несуществующем пути под его префиксом.
 """
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from config.access import (
@@ -28,6 +30,16 @@ def test_system_access_exposes_matrix_and_roles():
     titles = {role["slug"]: role["title"] for role in data["roles"]}
     assert titles["director"] == "Директор"
     assert titles["sales_head"] == "Продажи · РОП"
+
+
+def test_onboarding_role_exposes_only_its_own_minimal_access_contract():
+    r = client.get("/system/access", headers={"X-User-Roles": "onboarding"})
+    assert r.status_code == 200
+    assert r.json() == {
+        "matrix": {"onboarding": ["home"]},
+        "roles": [{"slug": "onboarding", "title": "Ознакомление с системой"}],
+        "current_roles": ["onboarding"],
+    }
 
 
 def test_helpers_map_slug_to_package():
@@ -67,6 +79,28 @@ def test_role_without_module_gets_403():
     r = client.get("/sales/ping", headers={"X-User-Roles": "procurement"})
     assert r.status_code == 403
     assert "crm" in r.json()["detail"]
+
+
+def test_onboarding_role_is_denied_everything_except_health_and_own_access_contract():
+    headers = {"X-User-Roles": "onboarding"}
+    assert client.get("/health", headers=headers).status_code == 200
+    assert client.get("/system/access", headers=headers).status_code == 200
+    assert client.get("/system/users", headers=headers).status_code == 403
+    assert client.get("/system/modules", headers=headers).status_code == 403
+    assert client.get("/sales/ping", headers=headers).status_code == 403
+    # Во время двухфазной активации Keycloak кратко содержит обе роли:
+    # presence onboarding должна перевесить целевую sales и сохранить no-data.
+    assert client.get("/sales/ping", headers={"X-User-Roles": "onboarding,sales"}).status_code == 403
+
+
+def test_identity_provisioner_is_limited_to_exact_invitation_workflow_paths():
+    headers = {"X-User-Roles": "identity_provisioner"}
+    assert client.get("/health", headers=headers).status_code == 200
+    assert client.get("/system/users/departments", headers=headers).status_code == 200
+    for path in ("/system/modules", "/system/owner/insight", "/sales/ping", "/hr/ping"):
+        assert client.get(path, headers=headers).status_code == 403, path
+    # presence технической роли сильнее ошибочно добавленной business-role.
+    assert client.get("/sales/ping", headers={"X-User-Roles": "identity_provisioner,sales"}).status_code == 403
 
 
 # --- RBAC-права действий (require_permission), а не только доступ к модулю ---
@@ -127,6 +161,15 @@ def test_system_users_endpoint():
     assert director["role_title"] == "Директор"
     # у каждого сотрудника есть ФИО и название роли
     assert all(u.get("full_name") and u.get("role_title") for u in users)
+
+
+def test_system_users_is_not_available_outside_dev(monkeypatch):
+    """В OIDC/prod нельзя использовать старый реестр dev-входа как каталог коллег."""
+    from core.runtime import system_routes
+
+    monkeypatch.setattr(system_routes, "get_settings", lambda: SimpleNamespace(environment="prod"))
+    response = client.get("/system/users")
+    assert response.status_code == 404
 
 
 # --- dev-логин: сотрудники → роль ---

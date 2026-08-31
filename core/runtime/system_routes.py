@@ -7,7 +7,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.access import ACCESS_MATRIX, ROLE_ORDER, ROLE_TITLES, users_with_titles
+from config.access import ACCESS_MATRIX, ONBOARDING_ROLE, ROLE_ORDER, ROLE_TITLES, users_with_titles
+from config.settings import get_settings
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
@@ -56,16 +57,31 @@ async def system_access(request: Request) -> dict:
     dev-переключатель роли. ``current_roles`` — роли текущего запроса (заголовок
     ``X-User-Roles``); по ним фронт считает доступные модули без знания матрицы.
     """
+    current_roles = roles_from_request(request)
+    # Не раскрываем приглашаемому сотруднику полную матрицу должностей и
+    # модулей. Фронту для onboarding достаточно одной его роли и ``home``.
+    if ONBOARDING_ROLE in current_roles:
+        return {
+            "matrix": {ONBOARDING_ROLE: ACCESS_MATRIX[ONBOARDING_ROLE]},
+            "roles": [{"slug": ONBOARDING_ROLE, "title": ROLE_TITLES[ONBOARDING_ROLE]}],
+            "current_roles": [ONBOARDING_ROLE],
+        }
     return {
         "matrix": ACCESS_MATRIX,
         "roles": [{"slug": s, "title": ROLE_TITLES.get(s, s)} for s in ROLE_ORDER],
-        "current_roles": roles_from_request(request),
+        "current_roles": current_roles,
     }
 
 
 @router.get("/system/users")
 async def system_users() -> dict:
-    """Список сотрудников для dev-логина (логин → ФИО + роль). Единый источник — config/access.py."""
+    """Список сотрудников для dev-логина; вне dev намеренно не существует.
+
+    Экран dev-входа использует этот статический реестр только локально. В OIDC/prod
+    даже открытый ``/system`` не должен раскрывать логины, ФИО и роли коллег.
+    """
+    if not get_settings().environment.lower().startswith("dev"):
+        raise HTTPException(status_code=404, detail="Маршрут dev-входа отключён")
     return {"users": users_with_titles()}
 
 

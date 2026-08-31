@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import type { UserInfo } from "@/lib/access";
+import { defaultPathForRole } from "@/lib/app-role";
 import { frontendAuthMode, keycloakPublicConfig } from "@/lib/auth-mode";
 
 function LoginForm() {
@@ -50,7 +51,8 @@ function LoginForm() {
         setBusy(false);
         return;
       }
-      router.push("/crm/deals");
+      const body = (await res.json()) as { user?: UserInfo };
+      router.push(defaultPathForRole(body.user?.role));
       router.refresh();
     } catch {
       setError("Сеть недоступна.");

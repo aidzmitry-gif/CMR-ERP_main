@@ -14,7 +14,7 @@ vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", clas
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
-vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null }));
+vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест" }));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
@@ -106,8 +106,8 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 afterEach(() => vi.clearAllMocks());
 
 describe("страницы (src/app)", () => {
-  it("Home редиректит на доску сделок", () => {
-    Home();
+  it("Home редиректит на доску сделок", async () => {
+    await Home();
     expect(redirect).toHaveBeenCalledWith("/crm/deals");
   });
 
