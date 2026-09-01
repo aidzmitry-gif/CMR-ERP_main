@@ -1,4 +1,5 @@
 """Приглашение сотрудника: HR-связь, department-role gate и Keycloak Admin API."""
+
 from __future__ import annotations
 
 import json
@@ -218,7 +219,9 @@ async def test_invitation_preflight_and_send_reject_inactive_hr_employee(session
 
 
 @pytest.mark.asyncio
-async def test_invitations_list_excludes_legacy_active_users_with_no_expected_access(session, identity_api):
+async def test_invitations_list_excludes_legacy_active_users_with_no_expected_access(
+    session, identity_api
+):
     api, _ = identity_api
     session.add(
         User(
@@ -236,6 +239,128 @@ async def test_invitations_list_excludes_legacy_active_users_with_no_expected_ac
     response = await api.get("/system/users/invitations")
     assert response.status_code == 200, response.text
     assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_invitation_operations_requires_read_permission(session, identity_api):
+    api, _ = identity_api
+
+    response = await api.get(
+        "/system/users/invitation-operations", headers={"X-User-Roles": "sales"}
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_invitation_operations_exposes_failed_request_without_technical_or_unrelated_pii(
+    session, identity_api
+):
+    api, _ = identity_api
+    employee = Employee(full_name="Видимый сотрудник", department="Продажи")
+    unrelated = Employee(full_name="Чужой сотрудник", department="Продажи")
+    session.add_all([employee, unrelated])
+    await session.commit()
+    await session.refresh(employee)
+    await session.refresh(unrelated)
+    session.add(
+        IdentityInvitationRequest(
+            idempotency_key="private-idempotency-key-0001",
+            employee_id=employee.id,
+            username="visible.employee",
+            email="visible.employee@example.by",
+            department="Продажи",
+            role="sales",
+            actor="hidden-operator",
+            status="failed",
+            keycloak_user_id="keycloak-secret-id",
+            error_code="keycloak_invite_email_failed",
+        )
+    )
+    await session.commit()
+
+    response = await api.get("/system/users/invitation-operations")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 1
+    assert body[0] == {
+        "operation_kind": "invite",
+        "request_id": body[0]["request_id"],
+        "employee_id": employee.id,
+        "full_name": "Видимый сотрудник",
+        "email": "visible.employee@example.by",
+        "username": "visible.employee",
+        "target_department": "Продажи",
+        "target_role": "sales",
+        "status": "failed",
+        "error_code": "keycloak_invite_email_failed",
+        "created_at": body[0]["created_at"],
+        "completed_at": None,
+        "requires_reconciliation": True,
+    }
+    serialized = response.text
+    assert "private-idempotency-key-0001" not in serialized
+    assert "keycloak-secret-id" not in serialized
+    assert "hidden-operator" not in serialized
+    assert "Чужой сотрудник" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_invitation_operations_marks_cleanup_pending_activation_for_reconciliation(
+    session, identity_api
+):
+    api, _ = identity_api
+    employee = Employee(full_name="Сотрудник активации", department="Продажи")
+    session.add(employee)
+    await session.commit()
+    await session.refresh(employee)
+    user = User(
+        username="activation.employee",
+        full_name="Сотрудник активации",
+        email="activation.employee@example.by",
+        employee_id=employee.id,
+        department="Продажи",
+        role="sales",
+        expected_department="Продажи",
+        expected_role="sales",
+        status="active_pending_cleanup",
+    )
+    session.add(user)
+    await session.flush()
+    session.add(
+        IdentityAccessActivationRequest(
+            idempotency_key="activation-cleanup-pending-0001",
+            user_id=user.id,
+            employee_id=employee.id,
+            expected_department="Продажи",
+            expected_role="sales",
+            actor="hidden-operator",
+            status="cleanup_pending",
+        )
+    )
+    await session.commit()
+
+    response = await api.get("/system/users/invitation-operations")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 1
+    assert body[0] == {
+        "operation_kind": "activation",
+        "request_id": body[0]["request_id"],
+        "employee_id": employee.id,
+        "full_name": "Сотрудник активации",
+        "email": "activation.employee@example.by",
+        "username": "activation.employee",
+        "target_department": "Продажи",
+        "target_role": "sales",
+        "status": "cleanup_pending",
+        "error_code": None,
+        "created_at": body[0]["created_at"],
+        "completed_at": None,
+        "requires_reconciliation": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -258,6 +383,51 @@ async def test_invite_requires_identity_permission(session, identity_api):
     )
     assert response.status_code == 403
     assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_existing_onboarding_user_with_new_idempotency_key_never_resends_invitation(
+    session, identity_api
+):
+    api, gateway = identity_api
+    employee = Employee(full_name="Повторный сотрудник", department="Продажи")
+    session.add(employee)
+    await session.commit()
+    await session.refresh(employee)
+    payload = {
+        "employee_id": employee.id,
+        "email": "repeat.employee@example.by",
+        "department": "Продажи",
+        "role": "sales",
+    }
+
+    first = await api.post(
+        "/system/users/invite",
+        headers={"Idempotency-Key": "repeat-invite-first-key-001"},
+        json=payload,
+    )
+    second = await api.post(
+        "/system/users/invite",
+        headers={"Idempotency-Key": "repeat-invite-new-key-002"},
+        json=payload,
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert second.json() == first.json()
+    assert len(gateway.calls) == 1
+    requests = (
+        (
+            await session.execute(
+                select(IdentityInvitationRequest).where(
+                    IdentityInvitationRequest.employee_id == employee.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(requests) == 1
 
 
 @pytest.mark.asyncio
@@ -380,7 +550,9 @@ async def test_invite_replay_with_same_idempotency_key_calls_gateway_once(sessio
 
 
 @pytest.mark.asyncio
-async def test_invite_rejects_reuse_of_idempotency_key_with_different_payload(session, identity_api):
+async def test_invite_rejects_reuse_of_idempotency_key_with_different_payload(
+    session, identity_api
+):
     api, gateway = identity_api
     employee = Employee(full_name="Сотрудник", department="Продажи")
     session.add(employee)
@@ -565,7 +737,9 @@ async def test_activation_commit_failure_keeps_onboarding_role_and_requires_reco
 
 
 @pytest.mark.asyncio
-async def test_activation_is_supervisor_only_and_keycloak_failure_stays_onboarding(session, identity_api):
+async def test_activation_is_supervisor_only_and_keycloak_failure_stays_onboarding(
+    session, identity_api
+):
     api, gateway = identity_api
     employee = Employee(full_name="Сотрудник", department="Продажи")
     session.add(employee)
@@ -606,6 +780,58 @@ async def test_activation_is_supervisor_only_and_keycloak_failure_stays_onboardi
     user = (await session.execute(select(User).where(User.employee_id == employee.id))).scalar_one()
     assert user.status == "onboarding" and user.role == "onboarding"
     assert user.expected_department == "Продажи" and user.expected_role == "sales"
+
+
+@pytest.mark.asyncio
+async def test_activation_role_cleanup_error_keeps_fail_closed_state_for_reconciliation(
+    session, identity_api
+):
+    api, _ = identity_api
+    employee = Employee(full_name="Сотрудник cleanup", department="Продажи")
+    session.add(employee)
+    await session.commit()
+    await session.refresh(employee)
+    invited = await api.post(
+        "/system/users/invite",
+        headers={"Idempotency-Key": "cleanup-error-invite-001"},
+        json={
+            "employee_id": employee.id,
+            "email": "cleanup.error@example.by",
+            "department": "Продажи",
+            "role": "sales",
+        },
+    )
+    assert invited.status_code == 201, invited.text
+
+    class FailingCleanupGateway(FakeIdentityGateway):
+        async def remove_onboarding_role(self, **kwargs) -> None:
+            self.onboarding_removal_calls.append(kwargs)
+            raise KeycloakAdminError("keycloak_onboarding_cleanup_failed")
+
+    failing = FailingCleanupGateway()
+    api._transport.app.dependency_overrides[get_identity_gateway] = lambda: failing
+    response = await api.post(
+        f"/system/users/{employee.id}/activate",
+        headers={"Idempotency-Key": "cleanup-error-activation-001"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "keycloak_onboarding_cleanup_failed"
+    assert failing.activation_stage_calls == [{"user_id": "kc-user-42", "expected_role": "sales"}]
+    assert failing.onboarding_removal_calls == [{"user_id": "kc-user-42"}]
+    user = (await session.execute(select(User).where(User.employee_id == employee.id))).scalar_one()
+    assert user.status == "active_pending_cleanup"
+    assert user.department == "Продажи" and user.role == "sales"
+    assert user.expected_department == "Продажи" and user.expected_role == "sales"
+    activation = (
+        await session.execute(
+            select(IdentityAccessActivationRequest).where(
+                IdentityAccessActivationRequest.employee_id == employee.id
+            )
+        )
+    ).scalar_one()
+    assert activation.status == "failed"
+    assert activation.error_code == "keycloak_onboarding_cleanup_failed"
 
 
 @pytest.mark.asyncio
@@ -694,7 +920,9 @@ async def test_activation_rechecks_hr_after_target_stage_and_keeps_onboarding_on
             )
         )
     ).scalar_one()
-    assert activation.status == "failed" and activation.error_code == "identity_activation_state_drift"
+    assert (
+        activation.status == "failed" and activation.error_code == "identity_activation_state_drift"
+    )
 
 
 @pytest.mark.asyncio
@@ -766,7 +994,10 @@ async def test_keycloak_activation_assigns_target_before_removing_onboarding():
             return httpx.Response(200, json={"id": "onboarding-id", "name": "onboarding"})
         if path.endswith("/roles/sales"):
             return httpx.Response(200, json={"id": "sales-id", "name": "sales"})
-        if path.endswith("/users/user-1/role-mappings/realm") and request.method in {"DELETE", "POST"}:
+        if path.endswith("/users/user-1/role-mappings/realm") and request.method in {
+            "DELETE",
+            "POST",
+        }:
             return httpx.Response(204)
         return httpx.Response(404)
 
@@ -781,9 +1012,7 @@ async def test_keycloak_activation_assigns_target_before_removing_onboarding():
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = KeycloakAdminClient(settings, client=http)
-        result = await client.stage_activation_target(
-            user_id="user-1", expected_role="sales"
-        )
+        result = await client.stage_activation_target(user_id="user-1", expected_role="sales")
         await client.remove_onboarding_role(user_id="user-1")
 
     assert result == KeycloakActivation(user_id="user-1", role="sales")
