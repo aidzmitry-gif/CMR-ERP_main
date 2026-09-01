@@ -14,6 +14,13 @@
 ## 1. Предварительные гейты — без них стоп
 
 - Релиз собран с одним Alembic head и с проверенными `upgrade → downgrade -1 → upgrade`; применяется общий [RELEASE checklist](../coordination/RELEASE.md).
+- До deploy запустить локальный offline-гейт исходников (он не читает `.env`, не обращается к сети и не выводит значения секретов):
+
+  ```sh
+  python scripts/invitation_release_gate.py
+  ```
+
+  Он проверяет один Alembic head, миграции `0108`–`0110` с реальным `downgrade`, обязательные имена переменных в этом runbook и статические production-guards настроек. Успех этого гейта не заменяет проверку работающего контейнера ниже.
 - Серверное дерево `/opt/cmr-erp` чистое, известны текущий SHA и точка rollback.
 - Прод-контейнер работает именно в `AIOS_ENVIRONMENT=prod` и `AIOS_AUTH_MODE=oidc`; `dev`/header-trust не является приемлемым режимом для приглашений.
 - У Keycloak есть постоянный публичный issuer, доступный пользователям и приложению; Keycloak не работает в одноразовом `start-dev` без persistence.

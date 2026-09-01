@@ -39,6 +39,8 @@ jobs:
           python-version: "3.12"
       - name: Install deps
         run: pip install -r requirements-dev.txt
+      - name: Invitation release gate (offline, secret-safe)
+        run: python scripts/invitation_release_gate.py
       - name: Lint (ruff)
         run: ruff check .
       - name: Apply migrations (Postgres)

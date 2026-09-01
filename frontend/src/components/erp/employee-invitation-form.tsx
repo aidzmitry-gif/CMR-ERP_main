@@ -1,6 +1,7 @@
 "use client";
 
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 export interface InvitationCatalog {
   departments: Record<string, string[]>;
@@ -14,6 +15,22 @@ export interface PendingInvitation {
   role: string;
   expected_department: string;
   expected_role: string;
+}
+
+export interface InvitationOperation {
+  operation_kind: "invite" | "activation" | string;
+  request_id: number;
+  employee_id: number;
+  full_name: string | null;
+  email: string | null;
+  username: string | null;
+  target_department: string;
+  target_role: string;
+  status: string;
+  error_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+  requires_reconciliation: boolean;
 }
 
 interface InvitePayload {
@@ -41,14 +58,31 @@ interface InviteResult {
   status: string;
 }
 
-function errorDetail(body: unknown, fallback: string): string {
-  if (!body || typeof body !== "object") return fallback;
+function errorDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
   const detail = (body as { detail?: unknown }).detail;
-  return typeof detail === "string" && detail.trim() ? detail : fallback;
+  return typeof detail === "string" && detail.trim() ? detail : null;
 }
 
-async function responseError(response: Response, fallback: string): Promise<string> {
-  return errorDetail(await response.json().catch(() => null), fallback);
+function knownErrorMessage(detail: string | null, action: "invite" | "activate" | "preflight"): string {
+  const messages: Record<string, string> = {
+    identity_invite_reconciliation_required: "Статус приглашения требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
+    identity_activation_reconciliation_required: "Статус активации требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
+    identity_activation_state_drift: "Данные сотрудника изменились во время активации. Проверьте журнал операций и данные HR.",
+    keycloak_invite_email_failed: "Письмо-приглашение не было подтверждено. Проверьте журнал операций перед новой попыткой.",
+    keycloak_invite_transport_failed: "Сервис учётных записей временно недоступен. Письмо не отправлялось автоматически повторно.",
+    keycloak_invite_redirect_uri_invalid: "Настройка ссылки возврата для приглашений требует проверки администратором.",
+    keycloak_invite_lifespan_too_short: "Срок действия приглашения настроен слишком коротко. Обратитесь к администратору.",
+  };
+  if (detail && messages[detail]) return messages[detail];
+  if (action === "preflight") return "Не удалось проверить данные приглашения. Проверьте ID, email и соответствие данным HR.";
+  return action === "invite"
+    ? "Не удалось подтвердить отправку приглашения. Повтор автоматически не выполнялся."
+    : "Не удалось подтвердить активацию. Повтор автоматически не выполнялся.";
+}
+
+async function responseError(response: Response, action: "invite" | "activate" | "preflight"): Promise<string> {
+  return knownErrorMessage(errorDetail(await response.json().catch(() => null)), action);
 }
 
 function newIdempotencyKey(prefix: "invite" | "activate"): string {
@@ -66,8 +100,14 @@ function newIdempotencyKey(prefix: "invite" | "activate"): string {
 export function EmployeeInvitationForm({
   departments,
   pendingInvitations = [],
+  invitationOperations = [],
   canActivate = false,
-}: InvitationCatalog & { pendingInvitations?: PendingInvitation[]; canActivate?: boolean }) {
+}: InvitationCatalog & {
+  pendingInvitations?: PendingInvitation[];
+  invitationOperations?: InvitationOperation[];
+  canActivate?: boolean;
+}) {
+  const router = useRouter();
   const departmentNames = useMemo(() => Object.keys(departments), [departments]);
   const [employeeId, setEmployeeId] = useState("");
   const [email, setEmail] = useState("");
@@ -82,9 +122,42 @@ export function EmployeeInvitationForm({
   const [activationBusy, setActivationBusy] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activatedEmployeeId, setActivatedEmployeeId] = useState<number | null>(null);
+  const [locallyActivatedEmployeeIds, setLocallyActivatedEmployeeIds] = useState<Set<number>>(() => new Set());
   const idempotencyKey = useRef<string | null>(null);
+  const inviteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const activateTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const inviteConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const activateConfirmRef = useRef<HTMLButtonElement | null>(null);
 
   const roles = department ? departments[department] ?? [] : [];
+  const visiblePendingInvitations = pendingInvitations.filter(
+    (item) => item.status === "onboarding" && item.role === "onboarding" && item.expected_role && !locallyActivatedEmployeeIds.has(item.employee_id),
+  );
+
+  useEffect(() => {
+    if (!preflight && !activationCandidate) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || busy || activationBusy) return;
+      event.preventDefault();
+      if (preflight) {
+        inviteTriggerRef.current?.focus();
+        setPreflight(null);
+      } else if (activationCandidate) {
+        activateTriggerRef.current?.focus();
+        setActivationCandidate(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activationBusy, activationCandidate, busy, preflight]);
+
+  useEffect(() => {
+    if (preflight) inviteConfirmRef.current?.focus();
+  }, [preflight]);
+
+  useEffect(() => {
+    if (activationCandidate) activateConfirmRef.current?.focus();
+  }, [activationCandidate]);
 
   function changeDepartment(nextDepartment: string) {
     setDepartment(nextDepartment);
@@ -125,7 +198,7 @@ export function EmployeeInvitationForm({
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        setError(await responseError(response, "Не удалось проверить данные приглашения."));
+        setError(await responseError(response, "preflight"));
         return;
       }
       const checked = (await response.json()) as Preflight;
@@ -165,12 +238,13 @@ export function EmployeeInvitationForm({
       if (!response.ok) {
         setPreflight(null);
         setError(
-          `${await responseError(response, "Статус отправки требует ручной сверки.")} Повтор автоматически не выполнялся.`,
+          await responseError(response, "invite"),
         );
         return;
       }
       setResult((await response.json()) as InviteResult);
       setPreflight(null);
+      router.refresh();
     } catch {
       // Не делаем retry: внешний эффект мог уже начаться, а ключ остаётся в журнале backend.
       setPreflight(null);
@@ -193,12 +267,14 @@ export function EmployeeInvitationForm({
       if (!response.ok) {
         setActivationCandidate(null);
         setActivationError(
-          `${await responseError(response, "Активация требует ручной сверки.")} Повтор автоматически не выполнялся.`,
+          await responseError(response, "activate"),
         );
         return;
       }
       setActivatedEmployeeId(activationCandidate.employee_id);
+      setLocallyActivatedEmployeeIds((current) => new Set(current).add(activationCandidate.employee_id));
       setActivationCandidate(null);
+      router.refresh();
     } catch {
       setActivationCandidate(null);
       setActivationError("Статус активации неизвестен. Повтор не выполнен: проверьте журнал приглашений.");
@@ -228,7 +304,7 @@ export function EmployeeInvitationForm({
             подключение к ERP.
           </section>
         ) : (
-          <form onSubmit={runPreflight} className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
+          <form onSubmit={runPreflight} aria-busy={busy} className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted">ID сотрудника из HR</span>
@@ -296,6 +372,7 @@ export function EmployeeInvitationForm({
               <button
                 type="submit"
                 disabled={busy}
+                ref={inviteTriggerRef}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? "Проверка…" : "Проверить и продолжить"}
@@ -305,7 +382,7 @@ export function EmployeeInvitationForm({
           </form>
         )}
 
-        <p aria-live="polite" className="mt-4 text-sm text-rose-700">{error}</p>
+        {error && <p role="alert" className="mt-4 text-sm text-rose-700">{error}</p>}
 
         {result && (
           <section className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
@@ -325,19 +402,17 @@ export function EmployeeInvitationForm({
         )}
 
         {canActivate && (
-          <section className="mt-8 rounded-2xl bg-surface p-5 shadow-card">
+          <section aria-busy={activationBusy} className="mt-8 rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="text-base font-bold text-ink">Ожидают активации</h2>
             <p className="mt-1 text-sm text-muted">
               Активация выдаёт только зафиксированные при приглашении отдел и целевую роль.
               Менять их в этой форме нельзя.
             </p>
-            {pendingInvitations.filter((item) => item.status === "onboarding" && item.role === "onboarding" && item.expected_role).length === 0 ? (
+            {visiblePendingInvitations.length === 0 ? (
               <p className="mt-4 text-sm text-muted">Нет сотрудников, ожидающих активации.</p>
             ) : (
               <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
-                {pendingInvitations
-                  .filter((item) => item.status === "onboarding" && item.role === "onboarding" && item.expected_role)
-                  .map((item) => (
+                {visiblePendingInvitations.map((item) => (
                     <li key={item.employee_id} className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
                       <div>
                         <p className="font-medium text-ink">{item.full_name} · {item.email}</p>
@@ -345,7 +420,11 @@ export function EmployeeInvitationForm({
                       </div>
                       <button
                         type="button"
-                        onClick={() => { setActivationCandidate(item); setActivationError(null); }}
+                        onClick={(event) => {
+                          activateTriggerRef.current = event.currentTarget;
+                          setActivationCandidate(item);
+                          setActivationError(null);
+                        }}
                         className="rounded-lg border border-accent px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent hover:text-white"
                       >
                         Активировать
@@ -354,9 +433,34 @@ export function EmployeeInvitationForm({
                   ))}
               </ul>
             )}
-            <p aria-live="polite" className="mt-3 text-sm text-rose-700">{activationError}</p>
+            {activationError && <p role="alert" className="mt-3 text-sm text-rose-700">{activationError}</p>}
             {activatedEmployeeId !== null && (
-              <p className="mt-3 text-sm text-emerald-700">Рабочий доступ сотрудника #{activatedEmployeeId} активирован.</p>
+              <p role="status" aria-live="polite" className="mt-3 text-sm text-emerald-700">Рабочий доступ сотрудника #{activatedEmployeeId} активирован.</p>
+            )}
+          </section>
+        )}
+
+        {canActivate && (
+          <section className="mt-8 rounded-2xl bg-surface p-5 shadow-card">
+            <h2 className="text-base font-bold text-ink">Журнал операций приглашений</h2>
+            <p className="mt-1 text-sm text-muted">Только для просмотра. В журнале нет технических ключей и секретов.</p>
+            {invitationOperations.length === 0 ? (
+              <p className="mt-4 text-sm text-muted">Операций пока нет.</p>
+            ) : (
+              <ul className="mt-4 divide-y divide-line rounded-xl border border-line" aria-label="Журнал операций приглашений">
+                {invitationOperations.map((operation) => (
+                  <li key={`${operation.operation_kind}-${operation.request_id}`} className="p-4 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium text-ink">{operation.operation_kind === "activation" ? "Активация" : "Приглашение"} · {operation.full_name ?? "—"}</p>
+                      <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-muted">{operation.status}</span>
+                    </div>
+                    <p className="mt-1 text-muted">{operation.email ?? "—"} · {operation.target_department} · {operation.target_role}</p>
+                    <p className="mt-1 text-xs text-muted">Создана: {new Date(operation.created_at).toLocaleString("ru-RU")}{operation.completed_at ? ` · завершена: ${new Date(operation.completed_at).toLocaleString("ru-RU")}` : ""}</p>
+                    {operation.requires_reconciliation && <p role="status" className="mt-2 text-amber-800">Требуется ручная сверка статуса. Новую отправку или активацию не выполняйте автоматически.</p>}
+                    {operation.error_code && <p className="mt-1 text-xs text-muted">Причина: {knownErrorMessage(operation.error_code, operation.operation_kind === "activation" ? "activate" : "invite")}</p>}
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
         )}
@@ -367,6 +471,8 @@ export function EmployeeInvitationForm({
               role="dialog"
               aria-modal="true"
               aria-labelledby="invite-confirm-title"
+              aria-describedby="invite-confirm-description"
+              aria-busy={busy}
               className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-pop"
             >
               <h2 id="invite-confirm-title" className="text-lg font-bold text-ink">Подтвердите отправку</h2>
@@ -376,7 +482,7 @@ export function EmployeeInvitationForm({
                 <dt className="text-muted">Отдел</dt><dd className="font-medium text-ink">{preflight.department}</dd>
                 <dt className="text-muted">Целевая рабочая роль</dt><dd className="font-medium text-ink">{preflight.role}</dd>
               </dl>
-              <p className="mt-4 rounded-xl bg-sunken p-3 text-sm text-muted">
+              <p id="invite-confirm-description" className="mt-4 rounded-xl bg-sunken p-3 text-sm text-muted">
                 После регистрации будет только роль <b className="text-ink">onboarding</b>:
                 ознакомление без данных коллег и рабочих модулей. Целевая роль выше включается
                 отдельно.
@@ -385,7 +491,10 @@ export function EmployeeInvitationForm({
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setPreflight(null)}
+                  onClick={() => {
+                    inviteTriggerRef.current?.focus();
+                    setPreflight(null);
+                  }}
                   className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink hover:border-accent disabled:opacity-50"
                 >
                   Отмена
@@ -393,6 +502,7 @@ export function EmployeeInvitationForm({
                 <button
                   type="button"
                   disabled={busy}
+                  ref={inviteConfirmRef}
                   onClick={() => void sendInvitation()}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
                 >
@@ -405,17 +515,17 @@ export function EmployeeInvitationForm({
 
         {activationCandidate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-            <section role="dialog" aria-modal="true" aria-labelledby="activate-confirm-title" className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-pop">
+            <section role="dialog" aria-modal="true" aria-labelledby="activate-confirm-title" aria-describedby="activate-confirm-description" aria-busy={activationBusy} className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-pop">
               <h2 id="activate-confirm-title" className="text-lg font-bold text-ink">Подтвердите активацию</h2>
-              <p className="mt-3 text-sm text-muted">
+              <p id="activate-confirm-description" className="mt-3 text-sm text-muted">
                 {activationCandidate.full_name} получит рабочий доступ: <b className="text-ink">{activationCandidate.expected_department} · {activationCandidate.expected_role}</b>.
               </p>
               <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">
                 Сейчас активна только роль onboarding. После подтверждения доступ к рабочим данным станет доступен согласно целевой роли.
               </p>
               <div className="mt-5 flex justify-end gap-3">
-                <button type="button" disabled={activationBusy} onClick={() => setActivationCandidate(null)} className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink disabled:opacity-50">Отмена</button>
-                <button type="button" disabled={activationBusy} onClick={() => void activateEmployee()} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                <button type="button" disabled={activationBusy} onClick={() => { activateTriggerRef.current?.focus(); setActivationCandidate(null); }} className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink disabled:opacity-50">Отмена</button>
+                <button type="button" disabled={activationBusy} ref={activateConfirmRef} onClick={() => void activateEmployee()} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                   {activationBusy ? "Активация…" : "Подтвердить активацию"}
                 </button>
               </div>

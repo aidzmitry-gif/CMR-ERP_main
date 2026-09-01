@@ -1,10 +1,11 @@
 """Управляемые identity-операции: безопасное приглашение сотрудника в Keycloak."""
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -126,6 +127,28 @@ class ActivatedEmployeeOut(BaseModel):
     status: str
 
 
+class IdentityOperationOut(BaseModel):
+    """Безопасная операторская проекция журнала identity-изменений.
+
+    В ответ намеренно не попадают технические идентификаторы Keycloak,
+    idempotency-ключи и иные значения, позволяющие повторить внешний эффект.
+    """
+
+    operation_kind: Literal["invite", "activation"]
+    request_id: int
+    employee_id: int
+    full_name: str | None
+    email: str | None
+    username: str | None
+    target_department: str
+    target_role: str
+    status: str
+    error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
+    requires_reconciliation: bool
+
+
 @dataclass(frozen=True)
 class _ResolvedInvitation:
     employee: Employee
@@ -208,16 +231,20 @@ async def _resolve_invitation(
 
     username = _username(payload)
     matches = (
-        await session.execute(
-            select(User).where(
-                or_(
-                    User.employee_id == employee.id,
-                    User.username == username,
-                    func.lower(User.email) == payload.email,
+        (
+            await session.execute(
+                select(User).where(
+                    or_(
+                        User.employee_id == employee.id,
+                        User.username == username,
+                        func.lower(User.email) == payload.email,
+                    )
                 )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     current = next((user for user in matches if user.employee_id == employee.id), None)
     if any(user.employee_id != employee.id for user in matches):
         raise HTTPException(status_code=409, detail="Логин или email уже занят")
@@ -255,9 +282,7 @@ async def _failed_request(
     await session.commit()
 
 
-async def _request_result_user(
-    session: AsyncSession, invite: IdentityInvitationRequest
-) -> User:
+async def _request_result_user(session: AsyncSession, invite: IdentityInvitationRequest) -> User:
     if invite.status != "sent" or invite.user_id is None:
         raise HTTPException(
             status_code=409,
@@ -272,9 +297,7 @@ async def _request_result_user(
     return user
 
 
-def _same_activation_request(
-    activation: IdentityAccessActivationRequest, user: User
-) -> bool:
+def _same_activation_request(activation: IdentityAccessActivationRequest, user: User) -> bool:
     return (
         activation.user_id == user.id
         and activation.employee_id == user.employee_id
@@ -323,13 +346,86 @@ async def list_invitations(
     session: AsyncSession = Depends(get_session),
 ):
     return (
-        await session.execute(
-            # Это экран только ожидающих onboarding-приглашений. Legacy active
-            # users may have NULL expected_* and не соответствуют контракту
-            # InvitedEmployeeOut.
-            select(User).where(User.status == "onboarding").order_by(User.id.desc())
+        (
+            await session.execute(
+                # Это экран только ожидающих onboarding-приглашений. Legacy active
+                # users may have NULL expected_* and не соответствуют контракту
+                # InvitedEmployeeOut.
+                select(User).where(User.status == "onboarding").order_by(User.id.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+
+
+@router.get("/invitation-operations", response_model=list[IdentityOperationOut])
+async def list_invitation_operations(
+    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE_READ)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Показать до 100 последних безопасных записей пригласительных операций.
+
+    ``sending``, ``failed`` и ``cleanup_pending`` означают возможный внешний
+    эффект без окончательной локальной сверки, поэтому оператору явно
+    возвращается ``requires_reconciliation``.
+    """
+
+    invitations = (
+        await session.execute(
+            select(IdentityInvitationRequest, Employee.full_name)
+            .outerjoin(Employee, Employee.id == IdentityInvitationRequest.employee_id)
+            .order_by(IdentityInvitationRequest.created_at.desc())
+            .limit(100)
+        )
+    ).all()
+    activations = (
+        await session.execute(
+            select(IdentityAccessActivationRequest, User)
+            .join(User, User.id == IdentityAccessActivationRequest.user_id)
+            .order_by(IdentityAccessActivationRequest.created_at.desc())
+            .limit(100)
+        )
+    ).all()
+
+    reconciliation_statuses = {"sending", "failed", "cleanup_pending"}
+    operations = [
+        IdentityOperationOut(
+            operation_kind="invite",
+            request_id=invite.id,
+            employee_id=invite.employee_id,
+            full_name=full_name,
+            email=invite.email,
+            username=invite.username,
+            target_department=invite.department,
+            target_role=invite.role,
+            status=invite.status,
+            error_code=invite.error_code,
+            created_at=invite.created_at,
+            completed_at=invite.sent_at,
+            requires_reconciliation=invite.status in reconciliation_statuses,
+        )
+        for invite, full_name in invitations
+    ]
+    operations.extend(
+        IdentityOperationOut(
+            operation_kind="activation",
+            request_id=activation.id,
+            employee_id=activation.employee_id,
+            full_name=user.full_name,
+            email=user.email,
+            username=user.username,
+            target_department=activation.expected_department,
+            target_role=activation.expected_role,
+            status=activation.status,
+            error_code=activation.error_code,
+            created_at=activation.created_at,
+            completed_at=activation.activated_at,
+            requires_reconciliation=activation.status in reconciliation_statuses,
+        )
+        for activation, user in activations
+    )
+    return sorted(operations, key=lambda operation: operation.created_at, reverse=True)[:100]
 
 
 @router.post("/preflight", response_model=InvitationPreflightOut)
@@ -522,9 +618,7 @@ async def activate_employee(
 
     idempotency_key = _idempotency_key(request)
     user = (
-        await session.execute(
-            select(User).where(User.employee_id == employee_id).with_for_update()
-        )
+        await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())
     ).scalar_one_or_none()
     if user is None or user.employee_id is None:
         raise HTTPException(status_code=404, detail="Onboarding-пользователь не найден")
