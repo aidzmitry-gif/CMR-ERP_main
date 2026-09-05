@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({ lookupCounterparty: vi.fn() }));
+vi.mock("@/lib/api", () => ({ lookupCounterparty: vi.fn(), fetchCrmStaff: vi.fn() }));
 
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import * as api from "@/lib/api";
@@ -48,17 +48,28 @@ describe("CreateDealModal", () => {
     expect(await screen.findByText(/ничего не найдено/i)).toBeInTheDocument();
   });
 
-  it("меняет приоритет, стадию, ответственного и сумму", async () => {
+  it("обычному сотруднику не показывает реестр и не запрашивает его", async () => {
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
+    expect(screen.queryByRole("combobox", { name: "Ответственный" })).toBeNull();
+    expect(screen.getByText(/будет назначен автоматически/i)).toBeInTheDocument();
+    expect(api.fetchCrmStaff).not.toHaveBeenCalled();
+  });
+
+  it("супер-роль передаёт только числовой owner_id из активного CRM-реестра", async () => {
     const onCreate = vi.fn().mockResolvedValue(true);
+    mock(api.fetchCrmStaff).mockResolvedValue([{
+      employee_id: 17, full_name: "Сидоров", department: "Продажи", employee_status: "active",
+      user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }],
+    }]);
     const twoStages = [
       stages[0],
       { id: "won", title: "Закрыто", color: "#000", count: 0, sum: 0, deals: [] },
     ];
-    render(<CreateDealModal stages={twoStages} defaultStage="new" onClose={() => {}} onCreate={onCreate} />);
+    render(<CreateDealModal stages={twoStages} defaultStage="new" onClose={() => {}} onCreate={onCreate} canAssignOwner />);
     fireEvent.change(screen.getByPlaceholderText("CRM-2024-0200"), { target: { value: "CRM-F" } });
     fireEvent.change(screen.getByPlaceholderText("ООО ..."), { target: { value: "ООО Ф" } });
     fireEvent.change(screen.getByPlaceholderText("Поставка ..."), { target: { value: "Тест" } });
-    fireEvent.change(screen.getByPlaceholderText("Иванов И.И."), { target: { value: "Сидоров" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Ответственный" }), { target: { value: "17" } });
     const [amount] = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     fireEvent.change(amount, { target: { value: "7000" } });
     const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
@@ -68,7 +79,7 @@ describe("CreateDealModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
     await waitFor(() =>
       expect(onCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ owner: "Сидоров", amount: 7000, priority: "Высокий", stage: "won" }),
+        expect.objectContaining({ owner: "", owner_id: 17, amount: 7000, priority: "Высокий", stage: "won" }),
       ),
     );
   });

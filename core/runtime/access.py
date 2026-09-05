@@ -46,6 +46,14 @@ IDENTITY_PROVISIONER_OPEN_PATHS: frozenset[str] = frozenset(
     }
 )
 
+# These neighboring APIs can return/modify foreign deal data but do not yet
+# implement numeric-owner scoping. Block them before the open system-prefix
+# bypass. Shared SKU/reference endpoints remain available for normal deal work.
+OWN_DEAL_UNSCOPED_PREFIXES: tuple[str, ...] = (
+    "/leads", "/service", "/system/mdm/counterparty",
+)
+CRM_ROLES: frozenset[str] = frozenset({"sales_head", "sales", "sales_manager", "sales_cli"})
+
 
 def roles_from_request(request: Request) -> list[str]:
     """Роли текущего пользователя — единый источник identity (``core.services.auth``).
@@ -82,7 +90,66 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        # Health is intentionally dependency-free, including when the identity
+        # database is degraded.  Every other route derives an effective user
+        # before its first authorization decision.
+        if path == "/health":
+            return await call_next(request)
+
+        from core.services.auth import (
+            GUEST,
+            EffectiveIdentityLookupError,
+            get_current_user,
+            resolve_effective_oidc_user,
+        )
+
+        claimed_user = get_current_user(request)
+        if claimed_user.keycloak_user_id:
+            db = request.app.state.core.services.db
+            try:
+                if db.session_factory is None:
+                    db.init_engine()
+                assert db.session_factory is not None
+                async with db.session_factory() as session:
+                    request.state.effective_current_user = await resolve_effective_oidc_user(
+                        claimed_user, session
+                    )
+            except EffectiveIdentityLookupError:
+                # Do not turn an unavailable local revocation/status store into
+                # acceptance of an old JWT or disclose database details.
+                return JSONResponse(
+                    {"detail": "Проверка текущего доступа временно недоступна"},
+                    status_code=403,
+                )
+            except Exception:
+                return JSONResponse(
+                    {"detail": "Проверка текущего доступа временно недоступна"},
+                    status_code=403,
+                )
+        else:
+            request.state.effective_current_user = claimed_user
+
+        effective_user = request.state.effective_current_user
+        if effective_user.local_status is not None and (
+            effective_user.local_status not in {"active", "onboarding"}
+            or GUEST in effective_user.roles
+        ):
+            if path != "/system/access":
+                return JSONResponse(
+                    {"detail": "Доступ сотрудника временно ограничен"}, status_code=403
+                )
+
         roles = roles_from_request(request)
+        if (
+            effective_user.deal_visibility == "own"
+            and CRM_ROLES.intersection(roles)
+            and any(path == prefix or path.startswith(prefix + "/")
+                    for prefix in OWN_DEAL_UNSCOPED_PREFIXES)
+        ):
+            return JSONResponse(
+                {"detail": "Этот раздел недоступен при личной видимости сделок"},
+                status_code=403,
+            )
         if ONBOARDING_ROLE in roles and path not in ONBOARDING_OPEN_PATHS:
             return JSONResponse(
                 {"detail": "Доступ ограничен режимом ознакомления с системой"},

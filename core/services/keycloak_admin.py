@@ -47,10 +47,23 @@ class KeycloakActivation:
     role: str
 
 
+@dataclass(frozen=True)
+class KeycloakRoleChange:
+    """Подтверждённая Keycloak смена одной из рабочих CRM-ролей."""
+
+    user_id: str
+    role: str
+    effective_roles: tuple[str, ...]
+
+
 class KeycloakAdminClient:
     """Минимальный async-клиент Admin REST; injectable ``httpx`` для тестов."""
 
     ACTIONS = ("VERIFY_EMAIL", "UPDATE_PASSWORD")
+    # Изменение доступа сотрудника никогда не трогает произвольные realm-roles.
+    # Эти три роли являются единственным allow-list CRM, который может менять
+    # данный узкий gateway.
+    CRM_ROLES = frozenset({"sales_head", "sales", "sales_cli"})
 
     def __init__(self, settings, *, client: httpx.AsyncClient | None = None) -> None:
         self.base_url = settings.keycloak_admin_base_url.rstrip("/")
@@ -229,6 +242,114 @@ class KeycloakAdminClient:
                 await self._remove_onboarding_role(client, user_id=user_id)
         except httpx.HTTPError as exc:
             raise KeycloakAdminError("keycloak_activation_cleanup_transport_failed") from exc
+
+    async def change_crm_role(
+        self, *, user_id: str, current_role: str, target_role: str
+    ) -> KeycloakRoleChange:
+        """Заменить только CRM realm-role и подтвердить итоговую карту ролей.
+
+        Внешняя операция намеренно не выполняет компенсационный retry: сетевой
+        сбой после POST/DELETE оставляет локальный журнал в состоянии ручной
+        сверки.  Другие realm-роли субъекта не читаются в API CRM и не меняются.
+        """
+
+        if not self.configured:
+            raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        if not user_id or current_role not in self.CRM_ROLES or target_role not in self.CRM_ROLES:
+            raise KeycloakAdminError("keycloak_crm_role_change_invalid")
+        try:
+            if self._client is not None:
+                return await self._change_crm_role(
+                    self._client,
+                    user_id=user_id,
+                    current_role=current_role,
+                    target_role=target_role,
+                )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                return await self._change_crm_role(
+                    client,
+                    user_id=user_id,
+                    current_role=current_role,
+                    target_role=target_role,
+                )
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_crm_role_change_transport_failed") from exc
+
+    async def _change_crm_role(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        user_id: str,
+        current_role: str,
+        target_role: str,
+    ) -> KeycloakRoleChange:
+        token = await self._service_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        admin = f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}"
+        user_path = f"{admin}/users/{quote(user_id, safe='')}/role-mappings/realm"
+        before_response = await client.get(user_path, headers=headers)
+        self._expect(before_response, {200}, "keycloak_crm_role_map_lookup_failed")
+        before = before_response.json()
+        before_names = {str(role.get("name", "")) for role in before if isinstance(role, dict)}
+        # A local active role without the corresponding external role is a drift,
+        # not a reason to silently add another privilege.
+        if current_role not in before_names or ONBOARDING_ROLE in before_names:
+            raise KeycloakAdminConflict("keycloak_crm_role_state_drift")
+
+        by_name = {str(role.get("name", "")): role for role in before if isinstance(role, dict)}
+        if target_role not in before_names:
+            target = await self._realm_role(client, admin, headers, target_role)
+            response = await client.post(user_path, headers=headers, json=[target])
+            self._expect(response, {204}, "keycloak_crm_role_assignment_failed")
+
+        # Revoke only prior CRM roles; preserve every unrelated realm role.
+        revoke = [by_name[name] for name in self.CRM_ROLES.intersection(before_names) if name != target_role]
+        if revoke:
+            response = await client.request("DELETE", user_path, headers=headers, json=revoke)
+            self._expect(response, {204}, "keycloak_crm_role_revoke_failed")
+
+        after_response = await client.get(user_path, headers=headers)
+        self._expect(after_response, {200}, "keycloak_crm_role_verify_failed")
+        after = after_response.json()
+        direct_roles = {str(role.get("name", "")) for role in after if isinstance(role, dict)}
+        if target_role not in direct_roles or self.CRM_ROLES.intersection(direct_roles) != {target_role}:
+            raise KeycloakAdminError("keycloak_crm_role_verify_mismatch")
+
+        # Direct mappings are insufficient: a composite realm-role could carry
+        # an additional business/super role.  Ask Keycloak for effective
+        # mappings and permit only this exact working CRM role plus standard
+        # realm defaults.  Unknown future defaults deliberately fail closed.
+        effective_response = await client.get(f"{user_path}/composite", headers=headers)
+        self._expect(effective_response, {200}, "keycloak_crm_role_effective_lookup_failed")
+        effective_roles = {
+            str(role.get("name", ""))
+            for role in effective_response.json()
+            if isinstance(role, dict)
+        }
+        safe_system_roles = {
+            "offline_access",
+            "uma_authorization",
+            f"default-roles-{self.realm}",
+        }
+        disallowed = effective_roles - safe_system_roles - {target_role}
+        if (
+            target_role not in effective_roles
+            or ONBOARDING_ROLE in effective_roles
+            or "identity_provisioner" in effective_roles
+            or bool(disallowed)
+        ):
+            raise KeycloakAdminError("keycloak_crm_role_effective_verify_mismatch")
+
+        # Existing client credentials normally have this standard Keycloak Admin
+        # permission.  A failure is treated as reconciliation-required because
+        # the role effect may already be live with an old user session.
+        logout_response = await client.post(f"{admin}/users/{quote(user_id, safe='')}/logout", headers=headers)
+        self._expect(logout_response, {204}, "keycloak_crm_role_logout_failed")
+        return KeycloakRoleChange(
+            user_id=user_id,
+            role=target_role,
+            effective_roles=tuple(sorted(effective_roles)),
+        )
 
     async def _remove_onboarding_role(self, client: httpx.AsyncClient, *, user_id: str) -> None:
         token = await self._service_token(client)

@@ -9,6 +9,12 @@ vi.mock("next/link", () => ({
 // Регрессия A2: если кто-то вернёт ChannelRow на карточку — мок отрендерит testid и тест упадёт.
 vi.mock("@/components/channels", () => ({ ChannelRow: () => <div data-testid="channels" /> }));
 vi.mock("@/lib/api", () => ({
+  fetchCrmStaff: vi.fn().mockResolvedValue([
+    {
+      employee_id: 12, full_name: "Орлов И.", department: "Продажи", employee_status: "active",
+      user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }],
+    },
+  ]),
   fetchLeadManagers: vi
     .fn()
     .mockResolvedValue([{ name: "Орлов И.", regions: [], products: [], load: 1 }]),
@@ -184,22 +190,30 @@ describe("DealCard", () => {
     expect(onUpdate).toHaveBeenCalledWith({ priority: "Средний" });
   });
 
-  it("меню ⋯: подсписок «Ответственный» грузит менеджеров и зовёт onUpdate({owner})", async () => {
+  it("обычному сотруднику меню не показывает reassignment и не читает CRM-реестр", () => {
     const onUpdate = vi.fn();
     render(<DealCard deal={deal} onUpdate={onUpdate} />);
     fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ответственный" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Орлов И\./ }));
-    expect(onUpdate).toHaveBeenCalledWith({ owner: "Орлов И." });
+    expect(screen.queryByRole("button", { name: "Ответственный" })).toBeNull();
+    expect(api.fetchCrmStaff).not.toHaveBeenCalled();
   });
 
-  it("кэш менеджеров общий: вторая карточка видит список без второго fetch (FIX-1)", async () => {
-    const { fetchLeadManagers } = await import("@/lib/api");
-    const before = (fetchLeadManagers as ReturnType<typeof vi.fn>).mock.calls.length;
+  it("супер-роль выбирает сотрудника по числовому owner_id", async () => {
+    const onUpdate = vi.fn();
+    render(<DealCard deal={deal} onUpdate={onUpdate} canAssignOwner />);
+    fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ответственный" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Орлов И\./ }));
+    expect(onUpdate).toHaveBeenCalledWith({ owner_id: 12 });
+  });
+
+  it("кэш CRM-реестра общий: вторая карточка видит список без второго fetch", async () => {
+    const { fetchCrmStaff } = await import("@/lib/api");
+    const before = (fetchCrmStaff as ReturnType<typeof vi.fn>).mock.calls.length;
     render(
       <>
-        <DealCard deal={deal} onUpdate={vi.fn()} />
-        <DealCard deal={{ ...deal, id: "2", number: "CRM-2" }} onUpdate={vi.fn()} />
+        <DealCard deal={deal} onUpdate={vi.fn()} canAssignOwner />
+        <DealCard deal={{ ...deal, id: "2", number: "CRM-2" }} onUpdate={vi.fn()} canAssignOwner />
       </>,
     );
     const [menuA, menuB] = screen.getAllByRole("button", { name: "Меню карточки" });
@@ -216,7 +230,7 @@ describe("DealCard", () => {
     expect(await within(boxB).findByRole("button", { name: /Орлов И\./ })).toBeInTheDocument();
     expect(within(boxB).queryByText("Загрузка…")).toBeNull();
     // ≤1: модульный кэш мог прогреть предыдущий тест файла; ключевое — B не делает второй fetch.
-    expect((fetchLeadManagers as ReturnType<typeof vi.fn>).mock.calls.length - before).toBeLessThanOrEqual(1);
+    expect((fetchCrmStaff as ReturnType<typeof vi.fn>).mock.calls.length - before).toBeLessThanOrEqual(1);
   });
 
   it("без onUpdate меню не рендерится (декоративная иконка ⋯)", () => {

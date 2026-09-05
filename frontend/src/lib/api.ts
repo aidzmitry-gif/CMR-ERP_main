@@ -27,6 +27,8 @@ interface ApiDeal {
   priority: string;
   stage: string;
   owner: string;
+  /** Канонический владелец сделки — ID сотрудника HR. Текст owner остаётся только display-полем. */
+  owner_id?: number | null;
   next_step: string | null;
   next_step_at?: string | null;
   deal_date: string | null;
@@ -414,7 +416,51 @@ export interface DealInput {
   priority: string;
   stage: string;
   owner: string;
+  /** Канонический владелец сделки. Передавать можно только ID из CRM-реестра. */
+  owner_id?: number | null;
   next_step?: string;
+}
+
+/** Минимальная запись CRM-реестра, безопасная для выбора владельца сделки. */
+export interface CrmStaffMember {
+  employee_id: number;
+  full_name: string;
+  department: string;
+  employee_status: string | null;
+  user_status: string | null;
+  role: string | null;
+  allowed_roles: { slug: string }[];
+}
+
+const CRM_OWNER_ROLES = new Set(["sales_head", "sales", "sales_cli"]);
+
+/** Строгий клиентский предикат: неизвестный статус/роль не становятся кандидатом владельца. */
+export function isActiveCrmOwner(value: unknown): value is CrmStaffMember {
+  if (!value || typeof value !== "object") return false;
+  const staff = value as Partial<CrmStaffMember>;
+  return Number.isInteger(staff.employee_id)
+    && (staff.employee_id as number) > 0
+    && typeof staff.full_name === "string"
+    && staff.full_name.trim().length > 0
+    && staff.department === "Продажи"
+    && staff.employee_status === "active"
+    && staff.user_status === "active"
+    && typeof staff.role === "string"
+    && CRM_OWNER_ROLES.has(staff.role)
+    && Array.isArray(staff.allowed_roles)
+    && staff.allowed_roles.some((option) => option && typeof option.slug === "string" && option.slug === staff.role);
+}
+
+/** Реестр доступен только супер-ролям на сервере; дополнительно отбрасываем небезопасные строки. */
+export async function fetchCrmStaff(): Promise<CrmStaffMember[]> {
+  try {
+    const res = await fetch("/api/system/users/crm-staff", { cache: "no-store" });
+    if (!res.ok) return [];
+    const body: unknown = await res.json();
+    return Array.isArray(body) ? body.filter(isActiveCrmOwner) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface SkuOption {

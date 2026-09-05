@@ -96,6 +96,8 @@ type CardExtras = {
   onCall?: () => void;
   /** Меню карточки (⋯): ответственный/приоритет/избранное → оптимистичный патч + PATCH бэку. */
   onUpdate?: (fields: DealCardPatch) => void;
+  /** Визуальный gate: сервер остаётся источником истины для CRM-реестра и PATCH owner_id. */
+  canAssignOwner?: boolean;
   /** Стадия сделки — композер «след. шаг» подбирает пресеты по ней (слайс 4). */
   stageId?: string;
   /** Слайс 4 («след. шаг в 2 клика»): назначить/очистить следующий шаг из композера
@@ -954,6 +956,7 @@ export function DealsWorkspace({
   demoData = false,
   authError = false,
   ownerId,
+  canAssignOwner = false,
 }: {
   initialStages: Stage[];
   initialKpis: Kpi[];
@@ -966,6 +969,8 @@ export function DealsWorkspace({
   authError?: boolean;
   /** Владелец плана: когда задан, «План» скорборда берётся из согласованного PlanTarget. */
   ownerId?: number;
+  /** Только admin/director/commercial получают UI выбора owner_id. */
+  canAssignOwner?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1549,6 +1554,7 @@ export function DealsWorkspace({
       weighted: weightedAmount(deal, stageId),
       lostReasonTitle: code ? (reasonByCode.get(code) ?? code) : undefined,
       onCall: () => setCallDeal(deal),
+      canAssignOwner,
       stageId,
       unread: inbound?.unread,
       missed: inbound?.missed,
@@ -2182,6 +2188,7 @@ export function DealsWorkspace({
           defaultStage={modalStage}
           onClose={() => setModalOpen(false)}
           onCreate={handleCreate}
+          canAssignOwner={canAssignOwner}
         />
       )}
 

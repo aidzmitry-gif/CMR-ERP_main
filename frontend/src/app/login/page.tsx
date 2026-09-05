@@ -18,7 +18,9 @@ function LoginForm() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(params.get("error"));
+  const [error, setError] = useState<string | null>(
+    params.get("error") === "session_expired" ? "Сессия завершилась. Войдите снова." : params.get("error"),
+  );
 
   useEffect(() => {
     if (mode === "oidc" && ssoAvailable) {

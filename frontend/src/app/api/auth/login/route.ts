@@ -5,11 +5,15 @@
 import { cookies } from "next/headers";
 
 import { ROLE_COOKIE, USER_COOKIE, type UserInfo } from "@/lib/access";
+import { frontendAuthMode } from "@/lib/auth-mode";
 
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 const YEAR = 60 * 60 * 24 * 365;
 
 export async function POST(req: Request): Promise<Response> {
+  if (frontendAuthMode() === "oidc") {
+    return Response.json({ error: "Используйте корпоративный вход" }, { status: 403 });
+  }
   const { username } = (await req.json()) as { username?: string };
   if (!username) return Response.json({ error: "username обязателен" }, { status: 400 });
 

@@ -33,6 +33,23 @@ export interface InvitationOperation {
   requires_reconciliation: boolean;
 }
 
+export interface CrmStaffMember {
+  employee_id: number;
+  full_name: string;
+  department: string;
+  position?: string | null;
+  email?: string | null;
+  user_status?: string | null;
+  role?: string | null;
+  allowed_roles?: { slug: string; label: string; capabilities?: string[] }[];
+}
+
+const CRM_ROLE_OPTIONS = [
+  { slug: "sales_head", label: "Продажи · РОП" },
+  { slug: "sales", label: "Продажи" },
+  { slug: "sales_cli", label: "Продажи · работа с клиентами" },
+];
+
 interface InvitePayload {
   employee_id: number;
   email: string;
@@ -102,14 +119,20 @@ export function EmployeeInvitationForm({
   pendingInvitations = [],
   invitationOperations = [],
   canActivate = false,
+  crmStaff = [],
+  crmFlow = false,
 }: InvitationCatalog & {
   pendingInvitations?: PendingInvitation[];
   invitationOperations?: InvitationOperation[];
   canActivate?: boolean;
+  crmStaff?: CrmStaffMember[];
+  crmFlow?: boolean;
 }) {
   const router = useRouter();
   const departmentNames = useMemo(() => Object.keys(departments), [departments]);
   const [employeeId, setEmployeeId] = useState("");
+  const [newEmployeeName, setNewEmployeeName] = useState("");
+  const [newEmployeePosition, setNewEmployeePosition] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [department, setDepartment] = useState("");
@@ -130,6 +153,9 @@ export function EmployeeInvitationForm({
   const activateConfirmRef = useRef<HTMLButtonElement | null>(null);
 
   const roles = department ? departments[department] ?? [] : [];
+  const roleOptions = crmFlow
+    ? CRM_ROLE_OPTIONS
+    : roles.map((name) => ({ slug: name, label: name }));
   const visiblePendingInvitations = pendingInvitations.filter(
     (item) => item.status === "onboarding" && item.role === "onboarding" && item.expected_role && !locallyActivatedEmployeeIds.has(item.employee_id),
   );
@@ -159,6 +185,10 @@ export function EmployeeInvitationForm({
     if (activationCandidate) activateConfirmRef.current?.focus();
   }, [activationCandidate]);
 
+  useEffect(() => {
+    if (crmFlow && !department) setDepartment("Продажи");
+  }, [crmFlow, department]);
+
   function changeDepartment(nextDepartment: string) {
     setDepartment(nextDepartment);
     setRole("");
@@ -177,10 +207,44 @@ export function EmployeeInvitationForm({
     event.preventDefault();
     clearResult();
 
-    const id = Number(employeeId);
-    if (!Number.isInteger(id) || id <= 0 || !email.trim() || !department || !role) {
-      setError("Заполните ID сотрудника, email, отдел и целевую рабочую роль.");
+    let id = Number(employeeId);
+    if ((!crmFlow && (!Number.isInteger(id) || id <= 0)) || !email.trim() || !department || !role) {
+      setError(crmFlow
+        ? "Выберите сотрудника или укажите ФИО нового сотрудника, email и роль."
+        : "Заполните ID сотрудника, email, отдел и целевую рабочую роль.");
       return;
+    }
+
+    if (crmFlow && (!Number.isInteger(id) || id <= 0)) {
+      if (!newEmployeeName.trim()) {
+        setError("Выберите сотрудника или укажите ФИО нового сотрудника.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const response = await fetch("/api/system/users/crm-staff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ full_name: newEmployeeName.trim(), ...(newEmployeePosition.trim() ? { position: newEmployeePosition.trim() } : {}) }),
+        });
+        if (!response.ok) {
+          setError(await responseError(response, "preflight"));
+          return;
+        }
+        const created = (await response.json()) as { employee_id?: number; id?: number };
+        id = created.employee_id ?? created.id ?? 0;
+        if (!Number.isInteger(id) || id <= 0) {
+          setError("ERP не вернула ID созданного сотрудника. Приглашение не отправлялось.");
+          return;
+        }
+        setEmployeeId(String(id));
+        router.refresh();
+      } catch {
+        setError("Не удалось создать карточку сотрудника в ERP. Приглашение не отправлялось.");
+        return;
+      } finally {
+        setBusy(false);
+      }
     }
     const payload: InvitePayload = {
       employee_id: id,
@@ -288,8 +352,9 @@ export function EmployeeInvitationForm({
       <div className="mx-auto max-w-3xl">
         <h1 className="text-xl font-bold text-ink">Пригласить сотрудника</h1>
         <p className="mt-1 text-sm text-muted">
-          Укажите ID уже созданного сотрудника из HR. Форма не показывает реестр сотрудников и
-          сначала только проверяет выбранные данные.
+          {crmFlow
+            ? "Отдел CRM: выберите сотрудника по имени или создайте карточку, затем проверьте данные до отправки письма."
+            : "Укажите ID уже созданного сотрудника из HR. Форма не показывает реестр сотрудников и сначала только проверяет выбранные данные."}
         </p>
 
         <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
@@ -298,7 +363,7 @@ export function EmployeeInvitationForm({
           будет активирована отдельно ответственным руководителем.
         </section>
 
-        {departmentNames.length === 0 ? (
+        {departmentNames.length === 0 && !crmFlow ? (
           <section className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">
             Справочник отделов недоступен. Проверьте право <code>identity.invite.prepare</code> и
             подключение к ERP.
@@ -306,16 +371,49 @@ export function EmployeeInvitationForm({
         ) : (
           <form onSubmit={runPreflight} aria-busy={busy} className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted">ID сотрудника из HR</span>
-                <input
-                  inputMode="numeric"
-                  value={employeeId}
-                  onChange={(event) => setEmployeeId(event.target.value)}
-                  placeholder="1350585"
-                  className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                />
-              </label>
+              {crmFlow ? (
+                <>
+                  <label className="flex flex-col gap-1 sm:col-span-2">
+                    <span className="text-xs font-medium text-muted">Сотрудник отдела CRM</span>
+                    <select
+                      value={employeeId}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setEmployeeId(value);
+                        const employee = crmStaff.find((item) => item.employee_id === Number(value));
+                        if (employee?.email) setEmail(employee.email);
+                        setPreflight(null);
+                        setError(null);
+                      }}
+                      className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                    >
+                      <option value="">— новый сотрудник —</option>
+                      {crmStaff.map((employee) => (
+                        <option key={employee.employee_id} value={employee.employee_id}>
+                          {employee.full_name}{employee.position ? ` · ${employee.position}` : ""}{employee.role ? ` · ${employee.role}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!employeeId && (
+                    <>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-muted">ФИО нового сотрудника</span>
+                        <input value={newEmployeeName} onChange={(event) => setNewEmployeeName(event.target.value)} placeholder="Иванов Иван Иванович" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-muted">Должность (необязательно)</span>
+                        <input value={newEmployeePosition} onChange={(event) => setNewEmployeePosition(event.target.value)} placeholder="Менеджер по продажам" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+                      </label>
+                    </>
+                  )}
+                </>
+              ) : (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-muted">ID сотрудника из HR</span>
+                  <input inputMode="numeric" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} placeholder="1350585" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+                </label>
+              )}
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted">Рабочий email</span>
                 <input
@@ -326,19 +424,17 @@ export function EmployeeInvitationForm({
                   className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                 />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted">Отдел из HR</span>
-                <select
-                  value={department}
-                  onChange={(event) => changeDepartment(event.target.value)}
-                  className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                >
-                  <option value="">— выберите отдел —</option>
-                  {departmentNames.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              </label>
+              {crmFlow ? (
+                <label className="flex flex-col gap-1"><span className="text-xs font-medium text-muted">Отдел</span><input value="CRM · Продажи" readOnly className="rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-muted" /></label>
+              ) : (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-muted">Отдел из HR</span>
+                  <select value={department} onChange={(event) => changeDepartment(event.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent">
+                    <option value="">— выберите отдел —</option>
+                    {departmentNames.map((name) => (<option key={name} value={name}>{name}</option>))}
+                  </select>
+                </label>
+              )}
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted">Целевая рабочая роль</span>
                 <select
@@ -352,8 +448,8 @@ export function EmployeeInvitationForm({
                   className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">— выберите роль —</option>
-                  {roles.map((name) => (
-                    <option key={name} value={name}>{name}</option>
+                  {roleOptions.map((option) => (
+                    <option key={option.slug} value={option.slug}>{option.label}</option>
                   ))}
                 </select>
               </label>

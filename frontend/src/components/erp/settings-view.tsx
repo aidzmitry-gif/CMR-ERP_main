@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { UserPlus } from "lucide-react";
+import { ShieldCheck, UserPlus } from "lucide-react";
 
 interface SystemInfo {
   loaded_modules: string[];
@@ -32,13 +32,16 @@ export function SettingsView() {
             переменной AIOS_AI_ENABLED.
           </p>
         </div>
-        <Link
-          href="/erp/settings/invitations"
-          className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-accent/40"
-        >
-          <UserPlus size={16} aria-hidden="true" />
-          Приглашения сотрудников
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/erp/settings/access" className="inline-flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-accent">
+            <ShieldCheck size={16} aria-hidden="true" />
+            Сотрудники CRM и роли
+          </Link>
+          <Link href="/erp/settings/invitations" className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <UserPlus size={16} aria-hidden="true" />
+            Приглашения сотрудников
+          </Link>
+        </div>
       </div>
       {!sys && <p className="mt-5 text-sm text-muted">Загрузка…</p>}
       {sys && (

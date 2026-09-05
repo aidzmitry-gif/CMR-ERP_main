@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
 import { isOnboardingRole, resolveAppRole } from "@/lib/app-role";
-import { keycloakPublicConfig } from "@/lib/auth-mode";
+import { frontendAuthMode, keycloakPublicConfig } from "@/lib/auth-mode";
 import {
   REFRESH_COOKIE,
   accessTokenNeedsRefresh,
@@ -14,7 +14,13 @@ import {
 import { applyOidcTokenCookies } from "@/lib/oidc-cookies";
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
-  const res = NextResponse.next();
+  let res = NextResponse.next();
+  const redirect = (path: string) => {
+    const redirected = NextResponse.redirect(new URL(path, req.url));
+    // A redirect must also persist rotated refresh/access cookies.
+    for (const cookie of res.cookies.getAll()) redirected.cookies.set(cookie);
+    return redirected;
+  };
   const access = req.cookies.get(TOKEN_COOKIE)?.value;
   const refresh = req.cookies.get(REFRESH_COOKIE)?.value;
   let role = req.cookies.get(ROLE_COOKIE)?.value;
@@ -27,6 +33,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
         refreshToken: refresh,
       });
       if (tokens?.access_token) {
+        // SSR must receive the refreshed token in THIS request. Setting only
+        // response cookies leaves the page fetching with an expired token.
+        applyOidcTokenCookies(tokens, (name, value) => req.cookies.set(name, value));
+        res = NextResponse.next({ request: { headers: req.headers } });
         applyOidcTokenCookies(tokens, (name, value, opts) => res.cookies.set(name, value, opts));
         role = resolveAppRole(rolesFromAccessToken(tokens.access_token));
       }
@@ -36,11 +46,18 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // Не даём приглашённому обойти onboarding прямым URL к CRM/ERP. API защищён
   // backend-RBAC отдельно; этот редирект исключает загрузку data-oriented UI.
   const path = req.nextUrl.pathname;
+  if (
+    frontendAuthMode() === "oidc" &&
+    (path.startsWith("/erp") || path.startsWith("/crm") || path === "/onboarding") &&
+    accessTokenNeedsRefresh(req.cookies.get(TOKEN_COOKIE)?.value, 0)
+  ) {
+    return redirect("/login?error=session_expired");
+  }
   if (isOnboardingRole(role) && path !== "/onboarding") {
-    return NextResponse.redirect(new URL("/onboarding", req.url));
+    return redirect("/onboarding");
   }
   if (!isOnboardingRole(role) && path === "/onboarding" && role !== undefined) {
-    return NextResponse.redirect(new URL("/", req.url));
+    return redirect("/");
   }
   return res;
 }
