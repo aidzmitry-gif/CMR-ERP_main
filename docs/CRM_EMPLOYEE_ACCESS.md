@@ -2,10 +2,10 @@
 
 ## Статус реализации
 
-Изменения подготовлены в ветке `agent/crm-invitations-access-20260905`.
-Коммиты `71793bc6` (приложение) и `f0ca9aaa` (миграция `0111`) уже отправлены
-в GitHub; это не подтверждение production-деплоя. Миграция проверена на временной
-PostgreSQL-базе циклом `upgrade → downgrade -1 → upgrade`.
+Изменения подготовлены в ветке `agent/crm-invitations-access-20260905` и вошли в
+`main` merge-коммитом `b8058bf4`. Production запущен из отдельного release-worktree
+`/opt/cmr-erp-releases/b8058bf4`; текущий контейнер `aios-app-1` использует образ
+`aios-app:release-b8058bf4`.
 
 ## Работа руководителя
 
@@ -83,7 +83,9 @@ Keycloak logout сопровождается локальной проверко
 Проверено локально 2026-09-05: production frontend build, TypeScript,
 полный frontend Vitest (2272 теста), 82 auth/identity/RBAC/visibility-теста, lint в рамках принятого
 порогового значения (46 существующих предупреждений при лимите 47).
-Миграция и production-проверка новой функциональности пока не выполнены.
+На production 2026-09-05: `alembic heads` показывает единственный head `0111`,
+`alembic_version=0111`, `/health` возвращает `{"status":"ok"}`, контейнеры
+PostgreSQL/Redis healthy или Up.
 
 Дополнительная независимая проверка 2026-09-05: 35 целевых тестов
 `test_sales_visibility`, `test_identity_effective_access`, `test_crm_staff`,
@@ -93,31 +95,25 @@ Sales не выявил обхода через чат, документы, AI �
 
 ## Фактическая готовность production (2026-09-05)
 
-- ERP caller `aios-inviter` получает токен с `identity_provisioner` и без
-  `realm-management` ролей. `/system/users/departments` возвращает 200,
-  `/system/modules` и `/sales/deals` — 403. Его узкие ERP-права работают.
-- Этот же клиент сейчас указан как внутренний Keycloak Admin gateway.
-  GET определений `onboarding`, `sales`, `sales_head`, `sales_cli` возвращает
-  403; отдельного gateway-клиента в realm нет. Нельзя исправлять это расширением
-  прав ERP caller. Создание отдельного ограниченного gateway ожидает согласования.
-- Существующий административный вход Keycloak проверен без изменения учётных
-  записей: выдача токена и чтение realm `aios` — 200. Повторный ручной вход
-  администратора не является текущим блокером.
-- SMTP в realm `aios` не настроен: Admin REST возвращает пустой `smtpServer`,
-  таблица SMTP-конфигурации realm не содержит записей. Успешное подтверждение
-  отправителя в SendPulse не означает, что SMTP сохранён в Keycloak.
-- В открытой вкладке SendPulse переход к SMTP-настройкам перенаправил на форму
-  входа. Нужен вход пользователя в существующий аккаунт с `invites@belakb.by`.
-  Секреты в документации, выводе команд и чате не фиксировались.
-- В 14:40 +03:00 внутренние backend health, frontend login и OIDC discovery
-  вернули 200. `cmr-frontend` и Caddy активны; frontend работает из релиза
-  `537342b`. Серверное имя `auth.belakb.by` разрешается в `127.0.0.1`, поэтому
-  этот discovery-запрос не доказывает доступность извне. Публичный вход ещё
-  требует отдельного подтверждения; приглашение сотруднику не отправлено.
+- Production работает из `/opt/cmr-erp-releases/b8058bf4` в режиме `prod/oidc`.
+  `AIOS_KEYCLOAK_ISSUER`, audience и внутренний JWKS заданы; запросы к
+  `/system/users/departments` без Bearer и с поддельным `X-User-Roles` получают
+  403, а `/health` — 200. Header-trust в проде не активен.
+- Создан отдельный confidential-client `aios-keycloak-admin` с service account.
+  Его прямые client-роли `realm-management`: только `manage-users`,
+  `view-users`, `view-realm`. В OIDC-токене Keycloak также видны наследуемые
+  `query-users`/`query-groups` — это дочерние роли стандартного composite
+  `view-users`, а не отдельная выдача gateway. Роли `aios-inviter` не изменялись:
+  `default-roles-aios`, `identity_provisioner`.
+- SMTP SendPulse проверен через STARTTLS на `smtp-pulse.com:2525` и сохранён в
+  realm `aios` с отправителем `invites@belakb.by`; секреты в документации, выводе
+  команд и чате не фиксировались.
+- Миграция `0111` применена автоматически при старте; `alembic heads` показывает
+  один head `0111`, `alembic_version=0111`. Старый release-worktree и volumes
+  сохранены для отката.
+- Реальное приглашение сотруднику ещё не отправлялось: для него требуется явно
+  указать HR-сотрудника и его корпоративный email. До этого разрешены только
+  preflight и проверка gateway без создания учётных записей.
 
-Локальные тесты используют подменный Keycloak и не доказывают production-права
-gateway. Права существующей CRM service-account не расширялись.
-
-До настройки отдельного gateway, SMTP, CI и production-проверок новый релиз ещё
-не выкатан. Рабочий frontend восстановлен на `/opt/cmr-erp-releases/537342b/frontend`;
-ошибочные drop-in overrides релиза `434a19c` отключены переименованием, не удалены.
+Локальные тесты используют подменный Keycloak и дополняются указанными выше
+production-проверками; права существующей CRM service-account не расширялись.
