@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { PriorityBadge } from "@/components/priority-badge";
 import { NextStepComposer, type NextStepPatch } from "@/components/kanban/next-step-composer";
-import { fetchLeadManagers, issueDocument } from "@/lib/api";
+import { fetchCrmStaff, fetchLeadManagers, issueDocument, type CrmStaffMember } from "@/lib/api";
 import {
   cardAttention,
   dealStepText,
@@ -67,11 +67,12 @@ function formatShortDate(iso: string): string {
 
 const PRIORITIES: Priority[] = ["Высокий", "Средний", "Низкий"];
 
-/** Кэш списка менеджеров на модуль: меню открывается на сотнях карточек — грузим один раз. */
+/** Кэш проверенного CRM-реестра: пустой ответ не кэшируем, чтобы разрешённый повторный клик мог восстановиться. */
+let crmStaffCache: CrmStaffMember[] | null = null;
+
+/** Legacy lead-routing roster, retained for filters and plan tooling. It must not be used for deal ownership. */
 let managersCache: Manager[] | null = null;
 
-/** Менеджеры с общим кэшем модуля (меню карточки, переключатель «Чья доска», FiltersMenu).
- * Пустой ответ (бэк недоступен) не кэшируется — следующий вызов попробует снова. */
 export async function fetchManagersCached(): Promise<Manager[]> {
   if (managersCache) return managersCache;
   const list = await fetchLeadManagers();
@@ -79,11 +80,18 @@ export async function fetchManagersCached(): Promise<Manager[]> {
   return list;
 }
 
-/** Поля сделки, редактируемые из меню карточки (⋯). Имена совпадают с PATCH-полями
- * бэкенда (DealUpdate: owner/priority/starred) — вызывающий шлёт их в updateDeal как есть. */
-export type DealCardPatch = { owner?: string; priority?: Priority; starred?: boolean };
+export async function fetchCrmStaffCached(): Promise<CrmStaffMember[]> {
+  if (crmStaffCache) return crmStaffCache;
+  const list = await fetchCrmStaff();
+  if (list.length) crmStaffCache = list;
+  return list;
+}
 
-/** Меню карточки (⋯): «Ответственный →» (менеджеры из fetchLeadManagers), «Приоритет →»,
+/** Поля сделки, редактируемые из меню карточки (⋯). Для владельца используем только
+ * канонический DealUpdate.owner_id, а legacy owner не отправляем. */
+export type DealCardPatch = { owner_id?: number | null; priority?: Priority; starred?: boolean };
+
+/** Меню карточки (⋯): super-only «Ответственный →» (проверенный CRM-реестр), «Приоритет →»,
  * «В избранное». Popover по образцу FiltersMenu; drag глушится onPointerDown stopPropagation,
  * а клик-превью доски — атрибутом data-card-menu (DraggableDeal/StaticDealCard его пропускают). */
 function CardMenu({
@@ -92,6 +100,7 @@ function CardMenu({
   onOpenNextStep,
   canIssueInvoice,
   onNextStep,
+  canAssignOwner,
 }: {
   deal: Deal;
   onUpdate: (fields: DealCardPatch) => void;
@@ -101,10 +110,11 @@ function CardMenu({
   canIssueInvoice: boolean;
   /** Авто-шаг «Проверить оплату» после успешного счёта (как в drawer-preview, слайс 6 A). */
   onNextStep?: (patch: NextStepPatch) => void;
+  canAssignOwner: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<"owner" | "priority" | null>(null);
-  const [managers, setManagers] = useState<Manager[] | null>(managersCache);
+  const [staff, setStaff] = useState<CrmStaffMember[] | null>(crmStaffCache);
   const [invoiceBusy, setInvoiceBusy] = useState(false);
 
   function stop(e: React.SyntheticEvent) {
@@ -123,13 +133,13 @@ function CardMenu({
 
   function toggleOwners() {
     setSection((s) => (s === "owner" ? null : "owner"));
-    if (managersCache) {
+    if (crmStaffCache) {
       // FIX-1: карточка могла смонтироваться ДО заполнения кэша (useState(null) на mount) —
       // синхронизируем стейт из кэша, иначе её меню навсегда застревает в «Загрузка…».
-      setManagers(managersCache);
+      setStaff(crmStaffCache);
       return;
     }
-    void fetchManagersCached().then(setManagers);
+    void fetchCrmStaffCached().then(setStaff);
   }
 
   /** Слайс 6 (D): «Выставить счёт» прямо из меню карточки — та же цепочка, что в
@@ -194,29 +204,26 @@ function CardMenu({
             }}
           />
           <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-line bg-surface p-1 shadow-pop">
-            <button type="button" onClick={toggleOwners} className={itemCls}>
+            {canAssignOwner && <button type="button" onClick={toggleOwners} className={itemCls}>
               Ответственный
-              <ChevronRight
-                size={13}
-                className={clsx("transition-transform", section === "owner" && "rotate-90")}
-              />
-            </button>
-            {section === "owner" && (
+              <ChevronRight size={13} className={clsx("transition-transform", section === "owner" && "rotate-90")} />
+            </button>}
+            {canAssignOwner && section === "owner" && (
               <div className="max-h-44 overflow-y-auto border-b border-line pb-1 pl-2">
-                {managers == null ? (
+                {staff == null ? (
                   <div className="px-2.5 py-1.5 text-xs text-faint">Загрузка…</div>
-                ) : managers.length === 0 ? (
+                ) : staff.length === 0 ? (
                   <div className="px-2.5 py-1.5 text-xs text-faint">Список недоступен</div>
                 ) : (
-                  managers.map((m) => (
+                  staff.map((member) => (
                     <button
-                      key={m.name}
+                      key={member.employee_id}
                       type="button"
-                      onClick={() => act({ owner: m.name })}
-                      className={subItemCls(deal.owner === m.name)}
+                      onClick={() => act({ owner_id: member.employee_id })}
+                      className={subItemCls(deal.owner === member.full_name)}
                     >
-                      {m.name}
-                      {deal.owner === m.name && " ✓"}
+                      {member.full_name}
+                      {deal.owner === member.full_name && " ✓"}
                     </button>
                   ))
                 )}
@@ -310,6 +317,7 @@ export function DealCard({
   onUpdate,
   onNextStep,
   stageId,
+  canAssignOwner = false,
   invoiceBadge,
   unread,
   missed,
@@ -346,6 +354,8 @@ export function DealCard({
    * (клик по строке шага или пункт CardMenu «След. шаг…»). Без обработчика строка шага
    * остаётся статичным текстом (как раньше). */
   onNextStep?: (patch: NextStepPatch) => void;
+  /** Супер-роль может менять owner_id из проверенного CRM-реестра. */
+  canAssignOwner?: boolean;
   /** Стадия сделки — пресеты композера подбираются по ней (sales-stages.ts) и решают,
    *  показывать ли пункт CardMenu «Выставить счёт» (только открытые нетерминальные). */
   stageId?: string;
@@ -467,6 +477,7 @@ export function DealCard({
               onOpenNextStep={onNextStep ? () => setNextStepOpen(true) : undefined}
               canIssueInvoice={!(stageId != null && isClosedStageId(stageId))}
               onNextStep={onNextStep}
+              canAssignOwner={canAssignOwner}
             />
           ) : (
             <MoreHorizontal size={15} className="text-faint" />

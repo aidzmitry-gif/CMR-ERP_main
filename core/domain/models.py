@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -146,6 +146,9 @@ class User(Base):
     """Пользователь системы, связанный с сотрудником HR и identity в Keycloak."""
 
     __tablename__ = "app_user"
+    __table_args__ = (
+        CheckConstraint("deal_visibility IN ('all', 'own')", name="deal_visibility"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True)
@@ -155,6 +158,8 @@ class User(Base):
     employee_id: Mapped[int | None] = mapped_column(unique=True)
     department: Mapped[str | None] = mapped_column(String(128))
     role: Mapped[str | None] = mapped_column(String(64))
+    # Независимо от рабочей роли: сервер читает актуальный scope на каждом запросе.
+    deal_visibility: Mapped[str] = mapped_column(String(8), default="all", server_default="all")
     # При первичном приглашении здесь не ставятся рабочие отдел/роль. Они
     # остаются ожидаемыми до отдельного подтверждения руководителя; реальная
     # роль пользователя в этот момент — только ``onboarding``.

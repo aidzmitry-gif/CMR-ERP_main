@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import {
   EmployeeInvitationForm,
+  type CrmStaffMember,
   type InvitationCatalog,
   type InvitationOperation,
   type PendingInvitation,
@@ -53,12 +54,23 @@ async function invitationOperations(role: string): Promise<InvitationOperation[]
   }
 }
 
+async function crmStaff(role: string): Promise<CrmStaffMember[]> {
+  if (!SUPER_ROLES.has(role)) return [];
+  try {
+    const response = await fetch(`${BASE}/system/users/crm-staff`, { cache: "no-store", headers: await backendAuthHeaders(role) });
+    return response.ok ? await response.json() as CrmStaffMember[] : [];
+  } catch {
+    return [];
+  }
+}
+
 export default async function EmployeeInvitationsPage() {
   const role = await currentRole();
-  const [catalog, invitations, operations] = await Promise.all([
+  const [catalog, invitations, operations, staff] = await Promise.all([
     invitationCatalog(role),
     pendingInvitations(role),
     invitationOperations(role),
+    crmStaff(role),
   ]);
   return (
     <AppShell crumbs={["ERP", "IT и настройки", "Приглашения сотрудников"]}>
@@ -67,6 +79,8 @@ export default async function EmployeeInvitationsPage() {
         pendingInvitations={invitations}
         invitationOperations={operations}
         canActivate={SUPER_ROLES.has(role)}
+        crmStaff={staff}
+        crmFlow={SUPER_ROLES.has(role)}
       />
     </AppShell>
   );

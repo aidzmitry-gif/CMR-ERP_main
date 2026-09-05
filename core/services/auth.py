@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 
@@ -21,11 +22,28 @@ logger = logging.getLogger("aios.auth")
 
 GUEST = "Гость"
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 
 @dataclass
 class CurrentUser:
     username: str
     roles: list[str]
+    # ``sub`` is the stable Keycloak subject.  It is intentionally distinct
+    # from ``preferred_username``: a username can be renamed, while app_user
+    # binds a managed employee to this immutable identity.
+    keycloak_user_id: str | None = None
+    # Set only after a successful app_user lookup.  Middleware uses it to keep
+    # suspended/transitioning linked accounts out of otherwise open system
+    # endpoints, while still rendering their sanitized access page.
+    local_status: str | None = None
+    # Read from the local account on each request; never from JWT/client input.
+    deal_visibility: str | None = None
+
+
+class EffectiveIdentityLookupError(RuntimeError):
+    """The local identity check was unavailable; callers must fail closed."""
 
 
 class OidcAuthenticator:
@@ -60,7 +78,7 @@ class OidcAuthenticator:
                 issuer=self.issuer,
                 audience=self.audience,  # пусто → реальный токен не пройдёт (fail-closed)
                 leeway=30,  # допуск на рассинхрон часов app ↔ Keycloak
-                options={"require": ["exp", "iss", "aud"]},
+                options={"require": ["exp", "iss", "aud", "sub"]},
             )
         except jwt.InvalidTokenError as exc:
             logger.warning("OIDC: токен отклонён (%s)", type(exc).__name__)
@@ -68,9 +86,18 @@ class OidcAuthenticator:
         except Exception as exc:  # JWKS недоступен / неизвестный kid — тоже fail-closed, но логируем
             logger.warning("OIDC: ошибка валидации (%s)", type(exc).__name__)
             return None
-        username = claims.get("preferred_username") or claims.get("sub") or "oidc-user"
+        subject = claims.get("sub")
+        if not isinstance(subject, str) or not subject.strip():
+            logger.warning("OIDC: токен отклонён (invalid_sub)")
+            return None
+        subject = subject.strip()
+        username = claims.get("preferred_username") or subject or "oidc-user"
         roles = [r for r in (claims.get("realm_access") or {}).get("roles", []) if r]
-        return CurrentUser(username=username, roles=roles or [GUEST])
+        return CurrentUser(
+            username=str(username),
+            roles=roles or [GUEST],
+            keycloak_user_id=subject,
+        )
 
 
 class AuthService:
@@ -114,12 +141,65 @@ def _roles_from_header(request: Request) -> CurrentUser:
     return CurrentUser(username=username, roles=roles or [GUEST])
 
 
+async def resolve_effective_oidc_user(
+    user: CurrentUser, session: "AsyncSession"
+) -> CurrentUser:
+    """Constrain a linked Keycloak subject to its current local access state.
+
+    Users not managed in ``app_user`` deliberately retain their verified OIDC
+    claims.  This keeps the existing unlinked director/commercial accounts
+    working while making a locally managed employee's current role and status
+    authoritative on every protected request.
+    """
+    if not user.keycloak_user_id:
+        return user
+
+    try:
+        from sqlalchemy import select
+
+        from config.access import ONBOARDING_ROLE
+        from core.domain.models import User
+
+        linked = (
+            await session.execute(
+                select(User).where(User.keycloak_user_id == user.keycloak_user_id)
+            )
+        ).scalar_one_or_none()
+    except Exception as exc:
+        raise EffectiveIdentityLookupError("effective_identity_lookup_failed") from exc
+
+    if linked is None:
+        return user
+    if linked.status != "active" and linked.status != "onboarding":
+        return CurrentUser(
+            user.username, [GUEST], user.keycloak_user_id, linked.status or "unknown"
+        )
+    # Claim presence remains fail-closed even if a concurrent local update has
+    # already marked the row active: Keycloak has not yet removed onboarding,
+    # so this token cannot open business data.
+    if ONBOARDING_ROLE in user.roles or linked.status == "onboarding":
+        return CurrentUser(user.username, [ONBOARDING_ROLE], user.keycloak_user_id, linked.status)
+    if linked.status == "active" and linked.role and linked.role in user.roles:
+        # Never elevate a signed token from a local row: the current persisted
+        # role must also be present in this token.  A stale/contaminated token
+        # therefore loses access instead of retaining a former extra role.
+        return CurrentUser(
+            user.username, [linked.role], user.keycloak_user_id, linked.status,
+            deal_visibility=linked.deal_visibility,
+        )
+    return CurrentUser(user.username, [GUEST], user.keycloak_user_id, linked.status)
+
+
 def get_current_user(request: Request) -> CurrentUser:
     """Текущий пользователь по ``settings.auth_mode`` (dev=заголовок, oidc=JWT). Fail-closed «Гость».
 
     Fail-closed (SECURITY.md P0-1/P1): без заголовка/валидного токена — бесправный «Гость»,
     видит только публичные/системные роуты, на защищённые модули получает 403.
     """
+    effective = getattr(getattr(request, "state", None), "effective_current_user", None)
+    if isinstance(effective, CurrentUser):
+        return effective
+
     settings = get_settings()
     if settings.auth_mode == "oidc":
         token = _bearer_token(request)

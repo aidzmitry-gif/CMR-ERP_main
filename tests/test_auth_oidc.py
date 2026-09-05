@@ -41,6 +41,7 @@ def _token(priv_pem, **overrides):
         "iss": ISS,
         "aud": AUD,
         "exp": now + 3600,
+        "sub": "kc-ivanov-uuid",
         "preferred_username": "ivanov",
         "realm_access": {"roles": ["sales", "Менеджер"]},
     }
@@ -102,6 +103,12 @@ def test_token_without_roles_is_guest(authn, keys):
     priv_pem, _ = keys
     user = authn.validate(_token(priv_pem, realm_access={"roles": []}))
     assert user is not None and user.roles == [GUEST]
+
+
+@pytest.mark.parametrize("subject", [None, "", "   "])
+def test_token_without_nonempty_string_subject_is_rejected(authn, keys, subject):
+    priv_pem, _ = keys
+    assert authn.validate(_token(priv_pem, sub=subject)) is None
 
 
 # --- ветки get_current_user ---

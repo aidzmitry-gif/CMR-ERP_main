@@ -7,6 +7,8 @@ import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { fetchAccess } from "@/lib/access";
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
+import { frontendAuthMode } from "@/lib/auth-mode";
+import { resolveAppRole } from "@/lib/app-role";
 import { currentRole, currentUserName } from "@/lib/role-server";
 
 export async function AppShell({
@@ -24,10 +26,14 @@ export async function AppShell({
   if (!userName) redirect("/login");
 
   // текущая роль из cookie; матрицу доступных модулей берём с backend
-  const role = await currentRole();
-  const access = await fetchAccess(role, await backendAuthHeaders(role));
-  // backend недоступен → не прячем ничего (allowedSlugs=null), чтобы UI не «ослеп»
-  const allowedSlugs = access ? access.matrix[role] ?? [] : null;
+  const cookieRole = await currentRole();
+  const access = await fetchAccess(cookieRole, await backendAuthHeaders(cookieRole));
+  const oidc = frontendAuthMode() === "oidc";
+  if (oidc && access?.current_roles.includes("Гость")) redirect("/login?error=session_expired");
+  // The backend verifies the token. A stale display cookie must not advertise
+  // director navigation after the authenticated role changed.
+  const role = oidc && access ? resolveAppRole(access.current_roles) : cookieRole;
+  const allowedSlugs = access ? access.matrix[role] ?? [] : oidc ? [] : null;
   const roleTitle = access?.roles.find((r) => r.slug === role)?.title ?? role;
 
   return (

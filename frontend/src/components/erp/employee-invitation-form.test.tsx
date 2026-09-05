@@ -6,7 +6,7 @@ import { EmployeeInvitationForm } from "@/components/erp/employee-invitation-for
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
-const catalog = { departments: { "Продажи": ["sales", "sales_head"] } };
+const catalog = { departments: { "Продажи": ["sales", "sales_head", "sales_cli"] } };
 
 function response(ok: boolean, body: unknown, status = ok ? 200 : 422) {
   return { ok, status, json: async () => body };
@@ -77,6 +77,64 @@ describe("EmployeeInvitationForm", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Не удалось проверить данные приглашения"));
     expect(screen.getByRole("alert")).not.toHaveTextContent("Отдел не совпадает с HR");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("в CRM-режиме выбирает сотрудника по имени и не создаёт новую HR-карточку", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(true, {
+      employee_id: 7,
+      full_name: "Иванов Иван",
+      username: "ivanov",
+      email: "ivanov@belakb.by",
+      department: "Продажи",
+      role: "sales",
+      ready: true,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <EmployeeInvitationForm
+        departments={catalog.departments}
+        crmFlow
+        crmStaff={[{ employee_id: 7, full_name: "Иванов Иван", department: "Продажи", position: "Менеджер", email: "ivanov@belakb.by" }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Сотрудник отдела CRM"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "sales" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+
+    await screen.findByRole("dialog", { name: "Подтвердите отправку" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/system/users/preflight");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ employee_id: 7, email: "ivanov@belakb.by", department: "Продажи", role: "sales" });
+  });
+
+  it("в CRM-режиме создаёт HR-карточку только при проверке, затем выполняет preflight без отправки письма", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(true, { employee_id: 12, full_name: "Петров Пётр" }, 201))
+      .mockResolvedValueOnce(response(true, {
+        employee_id: 12,
+        full_name: "Петров Пётр",
+        username: "petrov",
+        email: "petrov@belakb.by",
+        department: "Продажи",
+        role: "sales_cli",
+        ready: true,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EmployeeInvitationForm departments={{}} crmFlow />);
+
+    fireEvent.change(screen.getByLabelText("ФИО нового сотрудника"), { target: { value: "Петров Пётр" } });
+    fireEvent.change(screen.getByLabelText("Рабочий email"), { target: { value: "petrov@belakb.by" } });
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "sales_cli" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+
+    await screen.findByRole("dialog", { name: "Подтвердите отправку" });
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/system/users/crm-staff",
+      "/api/system/users/preflight",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ full_name: "Петров Пётр" });
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("/api/system/users/invite");
   });
 
   it("активирует только зафиксированную onboarding-заявку после отдельного подтверждения", async () => {

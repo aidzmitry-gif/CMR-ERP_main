@@ -29,6 +29,7 @@ import {
   fetchBoardStages,
   fetchBranding,
   fetchCalls,
+  fetchCrmStaff,
   fetchChats,
   fetchContacts,
   fetchDealDetail,
@@ -212,6 +213,20 @@ describe("api client — сделки/доска/KPI", () => {
     expect((await createDeal({ number: "CRM-9", title: "t", counterparty: "c", amount: 1, priority: "Средний", stage: "new", owner: "" }))?.number).toBe("CRM-9");
     stubFetch({}, false);
     expect(await createDeal({ number: "x", title: "t", counterparty: "c", amount: 1, priority: "Средний", stage: "new", owner: "" })).toBeNull();
+  });
+
+  it("fetchCrmStaff оставляет только активных сотрудников/пользователей отдела Продажи с разрешённой CRM-ролью", async () => {
+    stubFetch([
+      { employee_id: 7, full_name: "Иванов И.И.", department: "Продажи", employee_status: "active", user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }] },
+      { employee_id: 8, full_name: "Петров П.П.", department: "Продажи", employee_status: "inactive", user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }] },
+      { employee_id: 9, full_name: "Сидоров С.С.", department: "Продажи", employee_status: "active", user_status: "onboarding", role: "sales", allowed_roles: [{ slug: "sales" }] },
+      { employee_id: 10, full_name: "Кузнецов К.К.", department: "Финансы", employee_status: "active", user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }] },
+      { employee_id: 11, full_name: "Неизвестный", department: "Продажи", employee_status: "active", user_status: "active", role: "sales", allowed_roles: [] },
+    ]);
+    expect(await fetchCrmStaff()).toEqual([
+      { employee_id: 7, full_name: "Иванов И.И.", department: "Продажи", employee_status: "active", user_status: "active", role: "sales", allowed_roles: [{ slug: "sales" }] },
+    ]);
+    expect(fetch).toHaveBeenCalledWith("/api/system/users/crm-staff", { cache: "no-store" });
   });
 
   it("updateDealStage / updateDeal возвращают булев успех", async () => {

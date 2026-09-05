@@ -41,6 +41,8 @@ export default async function DealsPage({
   const { funnel, owner_id } = await searchParams;
   const activeFunnel = funnel ?? "new_clients";
   const role = await currentRole();
+  // Только визуальный gate: сам CRM-реестр и PATCH owner_id дополнительно проверяются API.
+  const canAssignOwner = ["admin", "director", "commercial"].includes(role);
   const token = (await currentAccessToken()) ?? undefined;
   // Владелец плана (dev/демо через ?owner_id=) — «План» скорборда из согласованного PlanTarget.
   // Нет параметра → undefined → доска без изменений (как раньше). ponytail: связать с логином.
@@ -79,6 +81,7 @@ export default async function DealsPage({
           authError={authError}
           funnelTabs={funnelTabs}
           ownerId={ownerId}
+          canAssignOwner={canAssignOwner}
         />
       </AppShell>
     );
@@ -101,6 +104,7 @@ export default async function DealsPage({
         authError={board.authError || kpisRes.authError}
         funnelTabs={funnelTabs}
         ownerId={ownerId}
+        canAssignOwner={canAssignOwner}
       />
     </AppShell>
   );

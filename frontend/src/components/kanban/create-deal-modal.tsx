@@ -1,8 +1,8 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import { useState } from "react";
-import { type DealInput, lookupCounterparty } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { fetchCrmStaff, type CrmStaffMember, type DealInput, lookupCounterparty } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
@@ -22,11 +22,14 @@ export function CreateDealModal({
   defaultStage,
   onClose,
   onCreate,
+  canAssignOwner = false,
 }: {
   stages: Stage[];
   defaultStage: string;
   onClose: () => void;
   onCreate: (input: DealInput) => Promise<boolean>;
+  /** Только admin/director/commercial: право подтверждает сервер, UI лишь не показывает реестр остальным. */
+  canAssignOwner?: boolean;
 }) {
   const [form, setForm] = useState<DealInput>({
     number: "",
@@ -43,6 +46,16 @@ export function CreateDealModal({
   const [unp, setUnp] = useState("");
   const [looking, setLooking] = useState(false);
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+  const [owners, setOwners] = useState<CrmStaffMember[] | null>(null);
+
+  useEffect(() => {
+    if (!canAssignOwner) return;
+    let live = true;
+    void fetchCrmStaff().then((staff) => {
+      if (live) setOwners(staff);
+    });
+    return () => { live = false; };
+  }, [canAssignOwner]);
 
   function set<K extends keyof DealInput>(key: K, value: DealInput[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -139,9 +152,30 @@ export function CreateDealModal({
                 ))}
               </select>
             </Field>
-            <Field label="Ответственный">
-              <input value={form.owner} onChange={(e) => set("owner", e.target.value)} placeholder="Иванов И.И." className={INPUT} />
-            </Field>
+            {canAssignOwner ? (
+              <Field label="Ответственный">
+                <select
+                  aria-label="Ответственный"
+                  value={form.owner_id ?? ""}
+                  onChange={(e) => set("owner_id", e.target.value ? Number(e.target.value) : null)}
+                  className={INPUT}
+                >
+                  <option value="">Не назначен</option>
+                  {(owners ?? []).map((staff) => (
+                    <option key={staff.employee_id} value={staff.employee_id}>{staff.full_name}</option>
+                  ))}
+                </select>
+                {owners !== null && owners.length === 0 && (
+                  <span className="mt-1 block text-xs text-faint">Список сотрудников недоступен</span>
+                )}
+              </Field>
+            ) : (
+              <Field label="Ответственный">
+                <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-muted">
+                  Будет назначен автоматически после создания
+                </p>
+              </Field>
+            )}
           </div>
         </div>
 
