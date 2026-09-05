@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { UserPlus } from "lucide-react";
 
 interface SystemInfo {
   loaded_modules: string[];
@@ -22,11 +24,22 @@ export function SettingsView() {
 
   return (
     <main className="flex-1 overflow-auto p-6">
-      <h1 className="text-xl font-bold text-ink">IT и настройки</h1>
-      <p className="mt-1 text-sm text-muted">
-        Реестр подключённых модулей ядра (модульный монолит). AI-слой включается
-        переменной AIOS_AI_ENABLED.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-ink">IT и настройки</h1>
+          <p className="mt-1 text-sm text-muted">
+            Реестр подключённых модулей ядра (модульный монолит). AI-слой включается
+            переменной AIOS_AI_ENABLED.
+          </p>
+        </div>
+        <Link
+          href="/erp/settings/invitations"
+          className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-accent/40"
+        >
+          <UserPlus size={16} aria-hidden="true" />
+          Приглашения сотрудников
+        </Link>
+      </div>
       {!sys && <p className="mt-5 text-sm text-muted">Загрузка…</p>}
       {sys && (
         <>
