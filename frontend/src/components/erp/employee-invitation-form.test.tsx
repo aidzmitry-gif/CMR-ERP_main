@@ -137,6 +137,28 @@ describe("EmployeeInvitationForm", () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("/api/system/users/invite");
   });
 
+  it("не продолжает приглашение после отказа в создании CRM-сотрудника", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(false, { detail: "forbidden" }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EmployeeInvitationForm departments={{}} crmFlow />);
+
+    fireEvent.change(screen.getByLabelText("ФИО нового сотрудника"), { target: { value: "Петров Пётр" } });
+    fireEvent.change(screen.getByLabelText("Рабочий email"), { target: { value: "petrov@belakb.by" } });
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "sales" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("нет прав для создания или проверки приглашения"));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/system/users/crm-staff"]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("скрывает форму, если сервер не подтвердил доступ к приглашениям", () => {
+    render(<EmployeeInvitationForm departments={catalog.departments} accessError="Недостаточно прав для приглашений." />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Недостаточно прав для приглашений.");
+    expect(screen.queryByRole("button", { name: "Проверить и продолжить" })).not.toBeInTheDocument();
+  });
+
   it("активирует только зафиксированную onboarding-заявку после отдельного подтверждения", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(true, { employee_id: 1350585, role: "sales_head", status: "active" }));
     vi.stubGlobal("fetch", fetchMock);

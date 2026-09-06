@@ -152,6 +152,15 @@ SUPER_ROLES: frozenset[str] = frozenset({"admin", "director", "commercial"})
 # ACCESS_MATRIX: доступ к HR-модулю сам по себе не должен разрешать создание
 # пользователей или изменение системных настроек.
 IDENTITY_PROVISIONER_ROLE = "identity_provisioner"
+# Explicit, separately assigned human capability. Existing HR/business roles
+# receive no additional rights merely by deploying this workflow.
+CRM_INVITATION_OPERATOR_ROLE = "crm_invitation_operator"
+CRM_INVITATION_OPERATOR_PERMISSIONS: frozenset[str] = frozenset(
+    {"identity.invite.prepare", "identity.invite.send", "identity.invite.read"}
+)
+ACCESS_MATRIX[CRM_INVITATION_OPERATOR_ROLE] = ["home", "it"]
+ROLE_TITLES[CRM_INVITATION_OPERATOR_ROLE] = "Подготовка приглашений CRM"
+ROLE_ORDER.append(CRM_INVITATION_OPERATOR_ROLE)
 ONBOARDING_ROLE = "onboarding"
 IDENTITY_PROVISIONER_PERMISSIONS: frozenset[str] = frozenset(
     {"identity.invite.prepare", "identity.invite.send"}

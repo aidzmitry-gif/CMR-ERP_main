@@ -1,12 +1,14 @@
 """Contract for DB-backed effective access of linked OIDC identities."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.domain.models import User
+from core.domain.models import AuditLog, User
 from core.runtime.app import create_app
 from core.services import auth as auth_mod
 from core.services.auth import (
@@ -15,6 +17,37 @@ from core.services.auth import (
     EffectiveIdentityLookupError,
     resolve_effective_oidc_user,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,status", [("sales", "active"), ("onboarding", "onboarding")])
+@pytest.mark.parametrize("event", ["identity.user.crm_access_requested", "identity.user.crm_role_change_requested"])
+async def test_restoring_access_never_revives_pre_revocation_jwt(session, role, status, event):
+    cutoff = datetime(2026, 9, 6, 12, 0, 0)
+    issued = int(cutoff.replace(tzinfo=UTC).timestamp())
+    session.add(User(username="restored", full_name="Synthetic restored", employee_id=77,
+                    keycloak_user_id="kc-restored", role=role, status=status))
+    session.add(AuditLog(actor="director", action=event, entity_ref="employee:77", ts=cutoff,
+                        detail={"enabled": False}))
+    await session.commit()
+    for timestamp in [None, issued - 1, issued]:
+        old = CurrentUser("restored", [role], "kc-restored", issued_at=timestamp)
+        assert (await resolve_effective_oidc_user(old, session)).roles == [GUEST]
+    fresh = CurrentUser("restored", [role], "kc-restored", issued_at=issued + 1)
+    assert (await resolve_effective_oidc_user(fresh, session)).roles == [role]
+
+
+@pytest.mark.asyncio
+async def test_visibility_and_other_employee_events_do_not_require_fresh_login(session):
+    session.add(User(username="current", full_name="Synthetic current", employee_id=77,
+                    keycloak_user_id="kc-current", role="sales", status="active", deal_visibility="own"))
+    session.add_all([
+        AuditLog(actor="director", action="identity.user.crm_access_requested", entity_ref="employee:88", detail={}),
+        AuditLog(actor="director", action="identity.user.crm_visibility_changed", entity_ref="employee:77", detail={}),
+    ])
+    await session.commit()
+    effective = await resolve_effective_oidc_user(CurrentUser("current", ["sales"], "kc-current"), session)
+    assert effective.roles == ["sales"] and effective.deal_visibility == "own"
 
 
 @pytest.mark.asyncio
@@ -84,6 +117,44 @@ async def test_unlinked_director_keeps_verified_claims(session):
     claimed = CurrentUser("legacy-director", ["director"], "kc-legacy-director")
 
     assert await resolve_effective_oidc_user(claimed, session) == claimed
+
+
+@pytest.mark.asyncio
+async def test_managed_crm_identity_is_restricted_without_changing_legacy_role_matrix(session, monkeypatch):
+    from config.access import ACCESS_MATRIX
+
+    session.add(User(username="managed-crm", full_name="Synthetic CRM", keycloak_user_id="kc-managed-crm",
+                     role="sales_head", status="active", expected_department="Продажи", expected_role="sales_head"))
+    await session.commit()
+    claimed = CurrentUser("managed-crm", ["sales_head", "director"], "kc-managed-crm")
+    effective = await resolve_effective_oidc_user(claimed, session)
+    assert effective.roles == ["sales_head"]
+    assert effective.crm_restricted is True
+    assert "marketing" in ACCESS_MATRIX["sales_head"]
+    async with await _effective_access_client(session, monkeypatch, claimed) as api:
+        access = await api.get("/system/access")
+        assert access.status_code == 200
+        assert access.json()["matrix"] == {"sales_head": ["home", "crm"]}
+        deals = await api.get("/sales/deals")
+        assert deals.status_code == 200, deals.text
+        created = await api.post("/sales/deals", json={"number": "SYNTHETIC-CRM-ONLY-1", "title": "Synthetic deal", "counterparty": "Synthetic client"})
+        assert created.status_code == 201, created.text
+        updated = await api.patch(f"/sales/deals/{created.json()['id']}", json={"title": "Updated synthetic deal"})
+        assert updated.status_code == 200, updated.text
+        for path in ["/hr/employees", "/finance", "/marketing", "/knowledge", "/system/users/crm-staff", "/system/reference/skus"]:
+            assert (await api.get(path)).status_code == 403
+        assert (await api.delete("/sales/deal-items/1")).status_code == 403
+        assert (await api.post("/sales/stages", json={})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_legacy_linked_crm_without_invitation_metadata_keeps_existing_scope(session):
+    session.add(User(username="legacy-crm", full_name="Legacy CRM", keycloak_user_id="kc-legacy-crm",
+                     role="sales_head", status="active"))
+    await session.commit()
+    effective = await resolve_effective_oidc_user(CurrentUser("legacy-crm", ["sales_head"], "kc-legacy-crm"), session)
+    assert effective.roles == ["sales_head"]
+    assert effective.crm_restricted is False
 
 
 @pytest.mark.asyncio

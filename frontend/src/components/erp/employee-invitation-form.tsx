@@ -86,6 +86,7 @@ function knownErrorMessage(detail: string | null, action: "invite" | "activate" 
     identity_invite_reconciliation_required: "Статус приглашения требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
     identity_activation_reconciliation_required: "Статус активации требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
     identity_activation_state_drift: "Данные сотрудника изменились во время активации. Проверьте журнал операций и данные HR.",
+    keycloak_activation_first_login_required: "Сотрудник должен подтвердить email, завершить настройку пароля и войти в ERP до активации рабочих прав.",
     keycloak_invite_email_failed: "Письмо-приглашение не было подтверждено. Проверьте журнал операций перед новой попыткой.",
     keycloak_invite_transport_failed: "Сервис учётных записей временно недоступен. Письмо не отправлялось автоматически повторно.",
     keycloak_invite_redirect_uri_invalid: "Настройка ссылки возврата для приглашений требует проверки администратором.",
@@ -99,6 +100,11 @@ function knownErrorMessage(detail: string | null, action: "invite" | "activate" 
 }
 
 async function responseError(response: Response, action: "invite" | "activate" | "preflight"): Promise<string> {
+  if (response.status === 401 || response.status === 403) {
+    return action === "activate"
+      ? "У текущей учётной записи нет прав для активации сотрудника. Войдите как директор или коммерческий директор и обновите страницу."
+      : "У текущей учётной записи нет прав для создания или проверки приглашения. Войдите как директор или коммерческий директор и обновите страницу.";
+  }
   return knownErrorMessage(errorDetail(await response.json().catch(() => null)), action);
 }
 
@@ -119,14 +125,18 @@ export function EmployeeInvitationForm({
   pendingInvitations = [],
   invitationOperations = [],
   canActivate = false,
+  canReadOperations = canActivate,
   crmStaff = [],
   crmFlow = false,
+  accessError = null,
 }: InvitationCatalog & {
   pendingInvitations?: PendingInvitation[];
   invitationOperations?: InvitationOperation[];
   canActivate?: boolean;
+  canReadOperations?: boolean;
   crmStaff?: CrmStaffMember[];
   crmFlow?: boolean;
+  accessError?: string | null;
 }) {
   const router = useRouter();
   const departmentNames = useMemo(() => Object.keys(departments), [departments]);
@@ -135,7 +145,8 @@ export function EmployeeInvitationForm({
   const [newEmployeePosition, setNewEmployeePosition] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
-  const [department, setDepartment] = useState("");
+  const [selectedDepartment, setDepartment] = useState("");
+  const department = crmFlow ? "Продажи" : selectedDepartment;
   const [role, setRole] = useState("");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [busy, setBusy] = useState(false);
@@ -184,10 +195,6 @@ export function EmployeeInvitationForm({
   useEffect(() => {
     if (activationCandidate) activateConfirmRef.current?.focus();
   }, [activationCandidate]);
-
-  useEffect(() => {
-    if (crmFlow && !department) setDepartment("Продажи");
-  }, [crmFlow, department]);
 
   function changeDepartment(nextDepartment: string) {
     setDepartment(nextDepartment);
@@ -345,6 +352,20 @@ export function EmployeeInvitationForm({
     } finally {
       setActivationBusy(false);
     }
+  }
+
+  if (accessError) {
+    return (
+      <main className="flex-1 overflow-auto bg-canvas p-6">
+        <div className="mx-auto max-w-3xl">
+          <h1 className="text-xl font-bold text-ink">Пригласить сотрудника</h1>
+          <section role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">
+            <p>{accessError}</p>
+            <p className="mt-2">После смены роли выйдите из ERP, войдите снова и обновите страницу.</p>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -536,7 +557,7 @@ export function EmployeeInvitationForm({
           </section>
         )}
 
-        {canActivate && (
+        {canReadOperations && (
           <section className="mt-8 rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="text-base font-bold text-ink">Журнал операций приглашений</h2>
             <p className="mt-1 text-sm text-muted">Только для просмотра. В журнале нет технических ключей и секретов.</p>
