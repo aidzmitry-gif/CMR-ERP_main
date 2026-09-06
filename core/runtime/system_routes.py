@@ -7,7 +7,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.access import ACCESS_MATRIX, ONBOARDING_ROLE, ROLE_ORDER, ROLE_TITLES, users_with_titles
+from config.access import (
+    ACCESS_MATRIX,
+    CRM_INVITATION_OPERATOR_ROLE,
+    ONBOARDING_ROLE,
+    ROLE_ORDER,
+    ROLE_TITLES,
+    users_with_titles,
+)
 from config.settings import get_settings
 from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
@@ -58,6 +65,19 @@ async def system_access(request: Request) -> dict:
     ``X-User-Roles``); по ним фронт считает доступные модули без знания матрицы.
     """
     current_roles = roles_from_request(request)
+    if CRM_INVITATION_OPERATOR_ROLE in current_roles and ONBOARDING_ROLE not in current_roles:
+        return {
+            "matrix": {CRM_INVITATION_OPERATOR_ROLE: ["home", "it"]},
+            "roles": [{"slug": CRM_INVITATION_OPERATOR_ROLE, "title": ROLE_TITLES[CRM_INVITATION_OPERATOR_ROLE]}],
+            "current_roles": [CRM_INVITATION_OPERATOR_ROLE],
+        }
+    effective = getattr(request.state, "effective_current_user", None)
+    if effective is not None and effective.crm_restricted:
+        return {
+            "matrix": {role: ["home", "crm"] for role in current_roles},
+            "roles": [{"slug": role, "title": ROLE_TITLES.get(role, role)} for role in current_roles],
+            "current_roles": current_roles,
+        }
     # Не раскрываем приглашаемому сотруднику полную матрицу должностей и
     # модулей. Фронту для onboarding достаточно одной его роли и ``home``.
     if ONBOARDING_ROLE in current_roles:

@@ -34,6 +34,9 @@ from modules.hr.models import Employee
 
 
 class FakeIdentityGateway:
+    async def validate_activation_ready(self, **kwargs) -> None:
+        return None
+
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.activation_stage_calls: list[dict] = []
@@ -56,6 +59,79 @@ class FakeIdentityGateway:
 
     async def remove_onboarding_role(self, **kwargs) -> None:
         self.onboarding_removal_calls.append(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_separately_assigned_crm_operator_can_prepare_send_but_never_activate(session, identity_api):
+    api, gateway = identity_api
+    headers = {"X-User-Roles": "crm_invitation_operator"}
+    catalog = await api.get("/system/users/departments", headers=headers)
+    assert catalog.json() == {"departments": {"Продажи": ["sales_head", "sales", "sales_cli"]}}
+    created = await api.post("/system/users/crm-staff", headers=headers, json={"full_name": "Synthetic CRM operator test"})
+    assert created.status_code == 201, created.text
+    employee_id = created.json()["employee_id"]
+    payload = {"employee_id": employee_id, "email": "operator-pilot@example.invalid", "department": "Продажи", "role": "sales_head"}
+    preflight = await api.post("/system/users/preflight", headers=headers, json=payload)
+    assert preflight.status_code == 200, preflight.text
+    assert gateway.calls == []
+    sent = await api.post("/system/users/invite", headers={**headers, "Idempotency-Key": "operator-invite-001"}, json=payload)
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["status"] == sent.json()["role"] == "onboarding"
+    assert len(gateway.calls) == 1
+    pending = await api.get("/system/users/invitations", headers=headers)
+    assert [row["employee_id"] for row in pending.json()] == [employee_id]
+    operations = await api.get("/system/users/invitation-operations", headers=headers)
+    assert [row["employee_id"] for row in operations.json()] == [employee_id]
+    denied = await api.post(f"/system/users/{employee_id}/activate", headers={**headers, "Idempotency-Key": "operator-activate-001"})
+    assert denied.status_code == 403
+    assert gateway.activation_stage_calls == []
+    for path in ["/system/users", "/hr/employees", "/sales/deals", "/system/owner-insight"]:
+        assert (await api.get(path, headers=headers)).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roles", ["crm_invitation_operator", "crm_invitation_operator,director"])
+async def test_crm_operator_cannot_prepare_foreign_department_or_privileged_role(session, identity_api, roles):
+    api, gateway = identity_api
+    employee = Employee(full_name="Synthetic foreign employee", department="Руководство", status="active")
+    session.add(employee)
+    await session.commit()
+    for path in ["/system/users/preflight", "/system/users/invite"]:
+        response = await api.post(path, headers={"X-User-Roles": roles, "Idempotency-Key": "operator-forbidden-001"}, json={
+            "employee_id": employee.id, "email": "foreign@example.invalid", "department": "Руководство", "role": "director",
+        })
+        assert response.status_code == 403
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_crm_operator_cannot_spoof_hr_department_or_read_foreign_pending(session, identity_api):
+    api, gateway = identity_api
+    employee = Employee(full_name="Synthetic finance", department="Финансы / офис", status="active")
+    session.add(employee)
+    await session.flush()
+    session.add(User(username="synthetic-finance", full_name=employee.full_name, employee_id=employee.id,
+                     email="finance@example.invalid", role="onboarding", status="onboarding",
+                     expected_department="Финансы / офис", expected_role="finance"))
+    await session.commit()
+    headers = {"X-User-Roles": "crm_invitation_operator"}
+    response = await api.post("/system/users/preflight", headers=headers, json={
+        "employee_id": employee.id, "email": "foreign@example.invalid", "department": "Продажи", "role": "sales",
+    })
+    assert response.status_code in {409, 422}
+    assert (await api.get("/system/users/invitations", headers=headers)).json() == []
+    assert (await api.get("/system/users/crm-staff", headers=headers)).json() == []
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roles", ["hr", "sales_head", "sales", "onboarding"])
+async def test_existing_business_roles_gain_no_invitation_permissions(identity_api, roles):
+    api, gateway = identity_api
+    headers = {"X-User-Roles": roles}
+    assert (await api.get("/system/users/departments", headers=headers)).status_code == 403
+    assert (await api.post("/system/users/crm-staff", headers=headers, json={"full_name": "Forbidden"})).status_code == 403
+    assert gateway.calls == []
 
 
 @pytest_asyncio.fixture
@@ -663,6 +739,9 @@ async def test_activation_applies_only_persisted_expected_access_after_superviso
     assert user.status == "active"
     assert user.department == "Продажи" and user.role == "sales"
     assert user.expected_department is None and user.expected_role is None
+    from core.services.auth import resolve_effective_oidc_user
+    effective = await resolve_effective_oidc_user(CurrentUser(user.username, ["sales"], user.keycloak_user_id), session)
+    assert effective.crm_restricted is True
     audit = (
         await session.execute(
             select(AuditLog).where(AuditLog.action == "identity.user.activation_target_assigned")
@@ -990,6 +1069,12 @@ async def test_keycloak_activation_assigns_target_before_removing_onboarding():
         path = request.url.path
         if path.endswith("/protocol/openid-connect/token"):
             return httpx.Response(200, json={"access_token": "service-token"})
+        if path.endswith("/users/user-1"):
+            return httpx.Response(200, json={"id": "user-1", "enabled": True, "emailVerified": True, "requiredActions": [], "attributes": {"expected_role": ["sales"]}})
+        if path.endswith("/sessions"):
+            return httpx.Response(200, json=[{"id": "synthetic-session"}])
+        if path.endswith("/composite"):
+            return httpx.Response(200, json=[{"name": "onboarding"}])
         if path.endswith("/roles/onboarding"):
             return httpx.Response(200, json={"id": "onboarding-id", "name": "onboarding"})
         if path.endswith("/roles/sales"):
@@ -1018,12 +1103,41 @@ async def test_keycloak_activation_assigns_target_before_removing_onboarding():
     assert result == KeycloakActivation(user_id="user-1", role="sales")
     assert [(r.method, r.url.path.rsplit("/", 1)[-1]) for r in seen] == [
         ("POST", "token"),
+        ("GET", "user-1"),
+        ("GET", "sessions"),
+        ("GET", "composite"),
         ("GET", "sales"),
         ("POST", "realm"),
         ("POST", "token"),
         ("GET", "onboarding"),
         ("DELETE", "realm"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_activation_before_first_login_has_no_durable_request_or_role_effect(session, identity_api):
+    api, gateway = identity_api
+    employee = Employee(full_name="Synthetic first login", department="Продажи", status="active")
+    session.add(employee)
+    await session.commit()
+    invited = await api.post("/system/users/invite", headers={"Idempotency-Key": "first-login-invite-001"}, json={
+        "employee_id": employee.id, "email": "first-login@example.invalid", "department": "Продажи", "role": "sales",
+    })
+    assert invited.status_code == 201
+    original = gateway.validate_activation_ready
+
+    async def not_ready(**kwargs):
+        raise KeycloakAdminConflict("keycloak_activation_first_login_required")
+
+    gateway.validate_activation_ready = not_ready
+    headers = {"Idempotency-Key": "first-login-activate-001"}
+    rejected = await api.post(f"/system/users/{employee.id}/activate", headers=headers)
+    assert rejected.status_code == 409
+    assert gateway.activation_stage_calls == []
+    assert (await session.execute(select(IdentityAccessActivationRequest))).scalars().all() == []
+    gateway.validate_activation_ready = original
+    accepted = await api.post(f"/system/users/{employee.id}/activate", headers=headers)
+    assert accepted.status_code == 200, accepted.text
 
 
 @pytest.mark.asyncio

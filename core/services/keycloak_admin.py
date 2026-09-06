@@ -56,6 +56,13 @@ class KeycloakRoleChange:
     effective_roles: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class KeycloakUserAccess:
+    user_id: str
+    enabled: bool
+    role: str
+
+
 class KeycloakAdminClient:
     """Минимальный async-клиент Admin REST; injectable ``httpx`` для тестов."""
 
@@ -64,6 +71,57 @@ class KeycloakAdminClient:
     # Эти три роли являются единственным allow-list CRM, который может менять
     # данный узкий gateway.
     CRM_ROLES = frozenset({"sales_head", "sales", "sales_cli"})
+
+    async def set_user_enabled(self, *, user_id: str, enabled: bool, expected_role: str) -> KeycloakUserAccess:
+        """Change only enabled; never assign a role or reset a password.
+
+        The caller must durably block the local account before entering this
+        method. Unknown results are reconciled explicitly, never retried here.
+        """
+        if not self.configured:
+            raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        if not user_id or expected_role not in self.CRM_ROLES | {ONBOARDING_ROLE}:
+            raise KeycloakAdminError("keycloak_access_change_invalid")
+        try:
+            if self._client is not None:
+                return await self._set_user_enabled(self._client, user_id, enabled, expected_role)
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                return await self._set_user_enabled(client, user_id, enabled, expected_role)
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_access_change_transport_failed") from exc
+
+    async def _set_user_enabled(self, client: httpx.AsyncClient, user_id: str, enabled: bool, expected_role: str) -> KeycloakUserAccess:
+        token = await self._service_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        path = f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}/users/{quote(user_id, safe='')}"
+        before = await client.get(path, headers=headers)
+        self._expect(before, {200}, "keycloak_access_user_lookup_failed")
+        if before.json().get("id") != user_id or (enabled and before.json().get("enabled") is not False):
+            raise KeycloakAdminConflict("keycloak_access_state_drift")
+        await self._verify_access_role(client, path, headers, expected_role)
+        changed = await client.put(path, headers=headers, json={"enabled": enabled})
+        self._expect(changed, {204}, "keycloak_access_update_failed")
+        # This removes refresh sessions; app_user blocks already issued JWTs.
+        logout = await client.post(f"{path}/logout", headers=headers)
+        self._expect(logout, {204}, "keycloak_access_logout_failed")
+        after = await client.get(path, headers=headers)
+        self._expect(after, {200}, "keycloak_access_verify_failed")
+        if after.json().get("id") != user_id or after.json().get("enabled") is not enabled:
+            raise KeycloakAdminError("keycloak_access_verify_mismatch")
+        if enabled:
+            await self._verify_access_role(client, path, headers, expected_role)
+        return KeycloakUserAccess(user_id=user_id, enabled=enabled, role=expected_role)
+
+    async def _verify_access_role(self, client: httpx.AsyncClient, path: str, headers: dict[str, str], expected_role: str) -> None:
+        response = await client.get(f"{path}/role-mappings/realm/composite", headers=headers)
+        self._expect(response, {200}, "keycloak_access_role_lookup_failed")
+        body = response.json()
+        if not isinstance(body, list) or not all(isinstance(role, dict) and isinstance(role.get("name"), str) for role in body):
+            raise KeycloakAdminError("keycloak_access_role_verify_mismatch")
+        roles = {role["name"] for role in body}
+        allowed = {expected_role, "offline_access", "uma_authorization", f"default-roles-{self.realm}"}
+        if expected_role not in roles or roles - allowed:
+            raise KeycloakAdminConflict("keycloak_access_role_state_drift")
 
     def __init__(self, settings, *, client: httpx.AsyncClient | None = None) -> None:
         self.base_url = settings.keycloak_admin_base_url.rstrip("/")
@@ -217,10 +275,47 @@ class KeycloakAdminClient:
         admin = f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}"
         user_path = f"{admin}/users/{quote(user_id, safe='')}/role-mappings/realm"
 
+        await self._activation_ready(client, admin, headers, user_id, expected_role)
+
         expected = await self._realm_role(client, admin, headers, expected_role)
         mapping_response = await client.post(user_path, headers=headers, json=[expected])
         self._expect(mapping_response, {204}, "keycloak_expected_role_assignment_failed")
         return KeycloakActivation(user_id=user_id, role=expected_role)
+
+    async def validate_activation_ready(self, *, user_id: str, expected_role: str) -> None:
+        """Read-only prerequisite check before persisting an activation request."""
+        if not self.configured:
+            raise KeycloakAdminNotConfigured("keycloak_admin_not_configured")
+        try:
+            if self._client is not None:
+                client = self._client
+                token = await self._service_token(client)
+                await self._activation_ready(client, f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}",
+                                             {"Authorization": f"Bearer {token}"}, user_id, expected_role)
+                return
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                token = await self._service_token(client)
+                await self._activation_ready(client, f"{self.base_url}/admin/realms/{quote(self.realm, safe='')}",
+                                             {"Authorization": f"Bearer {token}"}, user_id, expected_role)
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError("keycloak_activation_readiness_transport_failed") from exc
+
+    async def _activation_ready(self, client: httpx.AsyncClient, admin: str, headers: dict[str, str], user_id: str, expected_role: str) -> None:
+        path = f"{admin}/users/{quote(user_id, safe='')}"
+        response = await client.get(path, headers=headers)
+        self._expect(response, {200}, "keycloak_activation_user_lookup_failed")
+        user = response.json()
+        if (not isinstance(user, dict) or user.get("id") != user_id or user.get("enabled") is not True
+                or user.get("emailVerified") is not True or user.get("requiredActions") != []):
+            raise KeycloakAdminConflict("keycloak_activation_first_login_required")
+        attributes = user.get("attributes")
+        if not isinstance(attributes, dict) or attributes.get("expected_role") != [expected_role]:
+            raise KeycloakAdminConflict("keycloak_activation_state_drift")
+        sessions = await client.get(f"{path}/sessions", headers=headers)
+        self._expect(sessions, {200}, "keycloak_activation_sessions_lookup_failed")
+        if not isinstance(sessions.json(), list) or not sessions.json():
+            raise KeycloakAdminConflict("keycloak_activation_first_login_required")
+        await self._verify_access_role(client, path, headers, ONBOARDING_ROLE)
 
     async def remove_onboarding_role(self, *, user_id: str) -> None:
         """Финально снять onboarding после durable local pending-cleanup commit.

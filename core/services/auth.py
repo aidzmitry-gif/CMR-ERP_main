@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
@@ -40,6 +41,10 @@ class CurrentUser:
     local_status: str | None = None
     # Read from the local account on each request; never from JWT/client input.
     deal_visibility: str | None = None
+    # Only persisted metadata of the managed invitation workflow sets this.
+    crm_restricted: bool = False
+    # Signed issuance time; a restored account must not revive revoked JWTs.
+    issued_at: int | None = None
 
 
 class EffectiveIdentityLookupError(RuntimeError):
@@ -97,6 +102,7 @@ class OidcAuthenticator:
             username=str(username),
             roles=roles or [GUEST],
             keycloak_user_id=subject,
+            issued_at=claims.get("iat") if type(claims.get("iat")) is int else None,
         )
 
 
@@ -155,25 +161,46 @@ async def resolve_effective_oidc_user(
         return user
 
     try:
-        from sqlalchemy import select
+        from sqlalchemy import func, select
 
         from config.access import ONBOARDING_ROLE
-        from core.domain.models import User
+        from core.domain.models import AuditLog, IdentityInvitationRequest, User
 
-        linked = (
+        managed_crm_invitation = select(IdentityInvitationRequest.id).where(
+            IdentityInvitationRequest.employee_id == User.employee_id,
+            IdentityInvitationRequest.user_id == User.id,
+            IdentityInvitationRequest.status == "sent",
+            IdentityInvitationRequest.department == "Продажи",
+            IdentityInvitationRequest.role.in_(["sales", "sales_head", "sales_cli"]),
+        ).exists()
+        row = (
             await session.execute(
-                select(User).where(User.keycloak_user_id == user.keycloak_user_id)
+                select(User, managed_crm_invitation).where(User.keycloak_user_id == user.keycloak_user_id)
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
+        revoked_at = None
+        if row is not None and row[0].employee_id is not None:
+            revoked_at = await session.scalar(select(func.max(AuditLog.ts)).where(
+                AuditLog.entity_ref == f"employee:{row[0].employee_id}",
+                AuditLog.action.in_([
+                    "identity.user.crm_access_requested", "identity.user.crm_role_change_requested",
+                ]),
+            ))
     except Exception as exc:
         raise EffectiveIdentityLookupError("effective_identity_lookup_failed") from exc
 
-    if linked is None:
+    if row is None:
         return user
+    linked, managed_crm = row
     if linked.status != "active" and linked.status != "onboarding":
         return CurrentUser(
             user.username, [GUEST], user.keycloak_user_id, linked.status or "unknown"
         )
+    if revoked_at is not None and (
+        user.issued_at is None
+        or user.issued_at <= int(revoked_at.replace(tzinfo=UTC).timestamp())
+    ):
+        return CurrentUser(user.username, [GUEST], user.keycloak_user_id, linked.status)
     # Claim presence remains fail-closed even if a concurrent local update has
     # already marked the row active: Keycloak has not yet removed onboarding,
     # so this token cannot open business data.
@@ -186,6 +213,14 @@ async def resolve_effective_oidc_user(
         return CurrentUser(
             user.username, [linked.role], user.keycloak_user_id, linked.status,
             deal_visibility=linked.deal_visibility,
+            crm_restricted=(
+                (managed_crm or (
+                    linked.expected_department == "Продажи"
+                    and linked.expected_role in {"sales", "sales_head", "sales_cli"}
+                ))
+                and linked.role in {"sales", "sales_head", "sales_cli"}
+            ),
+            issued_at=user.issued_at,
         )
     return CurrentUser(user.username, [GUEST], user.keycloak_user_id, linked.status)
 
@@ -218,11 +253,20 @@ def has_permission(core, user: CurrentUser, permission: str) -> bool:
     из ролей, объявленных модулями (``core.roles``).
     """
     from config.access import (
+        CRM_INVITATION_OPERATOR_PERMISSIONS,
+        CRM_INVITATION_OPERATOR_ROLE,
         IDENTITY_PROVISIONER_PERMISSIONS,
         IDENTITY_PROVISIONER_ROLE,
         is_super,
     )
 
+    if CRM_INVITATION_OPERATOR_ROLE in user.roles:
+        return permission in CRM_INVITATION_OPERATOR_PERMISSIONS
+    if user.crm_restricted and permission not in {
+        "sales.deal.read", "sales.deal.write", "sales.deal.approve",
+        "leads.lead.read", "leads.lead.write", "leads.lead.route",
+    }:
+        return False
     if is_super(user.roles):
         return True
     if IDENTITY_PROVISIONER_ROLE in user.roles:

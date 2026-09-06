@@ -8,6 +8,7 @@ export const ONBOARDING_ROLE = "onboarding";
 // onboarding и рабочая роль, сотрудник остаётся в изолированном ознакомлении.
 const APP_ROLE_PRIORITY = [
   ONBOARDING_ROLE,
+  "crm_invitation_operator",
   "admin",
   "director",
   "commercial",
@@ -38,5 +39,6 @@ export function isOnboardingRole(role: string | null | undefined): boolean {
 
 /** Единственная стартовая страница для роли без данных. */
 export function defaultPathForRole(role: string | null | undefined): string {
+  if (role === "crm_invitation_operator") return "/erp/settings/invitations";
   return isOnboardingRole(role) ? "/onboarding" : "/crm/deals";
 }

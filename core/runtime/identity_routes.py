@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.access import (
     ACCESS_MATRIX,
+    CRM_INVITATION_OPERATOR_ROLE,
     DEPARTMENT_ROLES,
     ONBOARDING_ROLE,
     ROLE_TITLES,
@@ -30,6 +31,7 @@ from core.domain.models import (
 )
 from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, require_permission
+from core.services.config import get_settings
 from core.services.keycloak_admin import (
     KeycloakAdminClient,
     KeycloakAdminConflict,
@@ -37,6 +39,7 @@ from core.services.keycloak_admin import (
     KeycloakAdminNotConfigured,
     KeycloakInvitation,
     KeycloakRoleChange,
+    KeycloakUserAccess,
 )
 from modules.hr.models import Employee
 
@@ -57,7 +60,18 @@ CRM_DEPARTMENT = "Продажи"
 CRM_STAFF_ROLES: tuple[str, ...] = ("sales_head", "sales", "sales_cli")
 
 
+def _check_crm_invitation_scope(actor: CurrentUser, payload: InviteEmployeeIn) -> None:
+    if CRM_INVITATION_OPERATOR_ROLE in actor.roles and (
+        payload.department != CRM_DEPARTMENT or payload.role not in CRM_STAFF_ROLES
+    ):
+        raise HTTPException(status_code=403, detail="Оператор может приглашать только сотрудников CRM")
+
+
 class IdentityGateway(Protocol):
+    async def validate_activation_ready(self, *, user_id: str, expected_role: str) -> None: ...
+
+    async def set_user_enabled(self, *, user_id: str, enabled: bool, expected_role: str) -> KeycloakUserAccess: ...
+
     async def invite_user(
         self,
         *,
@@ -216,6 +230,19 @@ class CrmVisibilityChangeOut(BaseModel):
     employee_id: int
     previous_visibility: Literal["all", "own"]
     deal_visibility: Literal["all", "own"]
+    status: str
+    operation_id: int
+
+
+class CrmAccessChangeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(strict=True)
+    expected_current_status: Literal["active", "onboarding", "suspended"]
+
+
+class CrmAccessChangeOut(BaseModel):
+    employee_id: int
+    enabled: bool
     status: str
     operation_id: int
 
@@ -446,7 +473,8 @@ def _crm_role_options() -> list[CrmRoleOptionOut]:
 def _has_unsafe_effective_crm_roles(effective_roles: tuple[str, ...], target_role: str) -> bool:
     """Defence in depth for gateway fakes and future client implementations."""
 
-    system_roles = {"offline_access", "uma_authorization", "default-roles-aios"}
+    realm = get_settings().keycloak_admin_realm.strip()
+    system_roles = {"offline_access", "uma_authorization", f"default-roles-{realm}"}
     roles = set(effective_roles)
     return (
         target_role not in roles
@@ -487,7 +515,7 @@ async def _role_change_outcome(
                 AuditLog.action.in_(
                     {"identity.user.crm_role_changed", "identity.user.crm_role_change_failed"}
                 ),
-            )
+            ).order_by(AuditLog.id.desc())
         )
     ).scalars()
     return next(
@@ -545,10 +573,13 @@ async def _lock_crm_staff_name(session: AsyncSession, full_name: str) -> None:
 
 @router.get("/departments")
 async def identity_departments(
-    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE_PREPARE)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_PREPARE)),
 ) -> dict:
     """Справочник допустимых ролей по отделам для preflight клиента."""
-    return {"departments": {name: list(roles) for name, roles in DEPARTMENT_ROLES.items()}}
+    departments = DEPARTMENT_ROLES
+    if CRM_INVITATION_OPERATOR_ROLE in actor.roles:
+        departments = {CRM_DEPARTMENT: CRM_STAFF_ROLES}
+    return {"departments": {name: list(roles) for name, roles in departments.items()}}
 
 
 @router.get("/crm-staff", response_model=list[CrmStaffOut])
@@ -562,7 +593,7 @@ async def list_crm_staff(
     получает кадровый реестр и не может читать e-mail других сотрудников.
     """
 
-    if not is_super(actor.roles):
+    if not is_super(actor.roles) and CRM_INVITATION_OPERATOR_ROLE not in actor.roles:
         raise HTTPException(status_code=403, detail="CRM-реестр доступен только руководителю доступа")
     rows = (
         await session.execute(
@@ -578,7 +609,7 @@ async def list_crm_staff(
 @router.post("/crm-staff", response_model=CrmStaffOut, status_code=201)
 async def create_crm_staff(
     payload: CrmStaffCreateIn,
-    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_ACTIVATE)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_PREPARE)),
     session: AsyncSession = Depends(get_session),
 ):
     """Создать только HR-карточку активного сотрудника отдела CRM.
@@ -587,7 +618,7 @@ async def create_crm_staff(
     создаёт учётную запись и может быть безопасно исправлена до preflight.
     """
 
-    if not is_super(actor.roles):
+    if not is_super(actor.roles) and CRM_INVITATION_OPERATOR_ROLE not in actor.roles:
         raise HTTPException(status_code=403, detail="Создание CRM-сотрудника доступно только руководителю доступа")
     await _lock_crm_staff_name(session, payload.full_name)
     # Сравнение после выборки намеренно casefold(), а не DB-specific lower():
@@ -948,18 +979,125 @@ async def change_crm_visibility(
     )
 
 
+@router.post("/{employee_id}/crm-access", response_model=CrmAccessChangeOut)
+async def change_crm_access(
+    employee_id: int,
+    payload: CrmAccessChangeIn,
+    request: Request,
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_ACTIVATE)),
+    session: AsyncSession = Depends(get_session),
+    identity: IdentityGateway = Depends(get_identity_gateway),
+):
+    """Suspend/restore one CRM identity using durable intent and verified state."""
+    if not is_super(actor.roles):
+        raise HTTPException(status_code=403, detail="Изменять доступ может только руководитель доступа")
+    key = _idempotency_key(request)
+    user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Связанный CRM-пользователь не найден")
+    if user.username == actor.username or (actor.keycloak_user_id and user.keycloak_user_id == actor.keycloak_user_id):
+        raise HTTPException(status_code=403, detail="Нельзя менять собственный доступ")
+    if not user.keycloak_user_id or user.role not in (*CRM_STAFF_ROLES, ONBOARDING_ROLE):
+        raise HTTPException(status_code=403, detail="Операция разрешена только для непривилегированной CRM-записи")
+    if (user.department or user.expected_department) != CRM_DEPARTMENT:
+        raise HTTPException(status_code=403, detail="Операция ограничена отделом CRM")
+    employee = (await session.execute(select(Employee).where(Employee.id == employee_id).with_for_update())).scalar_one_or_none()
+    if employee is None or employee.department != CRM_DEPARTMENT:
+        raise HTTPException(status_code=409, detail="Связь с CRM-карточкой требует сверки")
+    if payload.enabled and (employee.status or "").lower() != "active":
+        raise HTTPException(status_code=409, detail="Нельзя восстановить неактивного сотрудника HR")
+    events = (await session.execute(select(AuditLog).where(
+        AuditLog.entity_ref == f"employee:{employee_id}",
+        AuditLog.action.in_(["identity.user.crm_access_requested", "identity.user.crm_access_changed", "identity.user.crm_access_failed"]),
+    ).order_by(AuditLog.id.desc()))).scalars().all()
+    previous = next((event for event in events if event.action == "identity.user.crm_access_requested"
+                     and isinstance(event.detail, dict) and event.detail.get("idempotency_key") == key), None)
+    if previous is not None:
+        if previous.detail.get("enabled") is not payload.enabled or previous.detail.get("previous_status") != payload.expected_current_status:
+            raise HTTPException(status_code=409, detail="Idempotency-Key уже использован с другими данными")
+        outcome = next((event for event in events if event.action == "identity.user.crm_access_changed"
+                        and event.detail.get("request_id") == previous.id), None)
+        if outcome is None or outcome.detail.get("status") != user.status or previous.detail.get("subject") != user.keycloak_user_id:
+            raise HTTPException(status_code=409, detail="Изменение доступа требует сверки; повтор не выполнен")
+        return CrmAccessChangeOut(employee_id=employee_id, enabled=payload.enabled, status=user.status, operation_id=previous.id)
+    if user.status != payload.expected_current_status:
+        raise HTTPException(status_code=409, detail="Состояние доступа изменилось; обновите карточку")
+    if payload.enabled:
+        suspension = next((event for event in events if event.action == "identity.user.crm_access_changed"
+                           and event.detail.get("status") == "suspended"), None)
+        if user.status != "suspended" or suspension is None:
+            raise HTTPException(status_code=409, detail="Нет подтверждённой блокировки для восстановления")
+        if suspension.detail.get("subject") != user.keycloak_user_id or suspension.detail.get("role") != user.role:
+            raise HTTPException(status_code=409, detail="Identity или роль изменились после блокировки")
+        target_status = suspension.detail.get("previous_status")
+        if target_status not in {"active", "onboarding"}:
+            raise HTTPException(status_code=409, detail="Исходный доступ не подтверждён")
+    else:
+        if user.status not in {"active", "onboarding"}:
+            raise HTTPException(status_code=409, detail="Доступ уже заблокирован или требует сверки")
+        target_status = "suspended"
+    subject, role, previous_status = user.keycloak_user_id, user.role, user.status
+    operation = AuditLog(actor=actor.username, action="identity.user.crm_access_requested",
+                         entity_ref=f"employee:{employee_id}", detail={
+                             "idempotency_key": key, "enabled": payload.enabled, "previous_status": previous_status,
+                             "target_status": target_status, "subject": subject, "role": role,
+                         })
+    user.status = "access_changing"
+    session.add(operation)
+    await session.commit()
+    operation_id = operation.id
+    try:
+        changed = await identity.set_user_enabled(user_id=subject, enabled=payload.enabled, expected_role=role)
+        if changed.user_id != subject or changed.enabled is not payload.enabled or changed.role != role:
+            raise KeycloakAdminError("keycloak_access_verify_mismatch")
+        user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update()
+                                      .execution_options(populate_existing=True))).scalar_one_or_none()
+        employee = (await session.execute(select(Employee).where(Employee.id == employee_id).with_for_update()
+                                          .execution_options(populate_existing=True))).scalar_one_or_none()
+        if (user is None or user.status != "access_changing" or user.keycloak_user_id != subject or user.role != role
+                or employee is None or employee.department != CRM_DEPARTMENT
+                or (payload.enabled and (employee.status or "").lower() != "active")):
+            raise KeycloakAdminError("identity_access_state_drift")
+        user.status = target_status
+        session.add(AuditLog(actor=actor.username, action="identity.user.crm_access_changed",
+                            entity_ref=f"employee:{employee_id}", detail={
+                                "request_id": operation_id, "enabled": payload.enabled, "status": target_status,
+                                "previous_status": previous_status, "subject": subject, "role": role,
+                            }))
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        failed_user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update()
+                                             .execution_options(populate_existing=True))).scalar_one_or_none()
+        if failed_user is not None and failed_user.status == "access_changing":
+            failed_user.status = "access_change_failed"
+        error_code = exc.code if isinstance(exc, KeycloakAdminError) else "identity_access_reconciliation_required"
+        session.add(AuditLog(actor=actor.username, action="identity.user.crm_access_failed",
+                            entity_ref=f"employee:{employee_id}", detail={"request_id": operation_id, "error_code": error_code}))
+        await session.commit()
+        raise HTTPException(status_code=502, detail="identity_access_reconciliation_required") from exc
+    return CrmAccessChangeOut(employee_id=employee_id, enabled=payload.enabled, status=target_status, operation_id=operation_id)
+
+
 @router.get("/invitations", response_model=list[InvitedEmployeeOut])
 async def list_invitations(
-    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE_READ)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_READ)),
     session: AsyncSession = Depends(get_session),
 ):
+    query = select(User).where(User.status == "onboarding")
+    if CRM_INVITATION_OPERATOR_ROLE in actor.roles:
+        query = query.join(Employee, Employee.id == User.employee_id).where(
+            User.expected_department == CRM_DEPARTMENT,
+            User.expected_role.in_(CRM_STAFF_ROLES),
+            Employee.department == CRM_DEPARTMENT,
+        )
     return (
         (
             await session.execute(
                 # Это экран только ожидающих onboarding-приглашений. Legacy active
                 # users may have NULL expected_* and не соответствуют контракту
                 # InvitedEmployeeOut.
-                select(User).where(User.status == "onboarding").order_by(User.id.desc())
+                query.order_by(User.id.desc())
             )
         )
         .scalars()
@@ -969,7 +1107,7 @@ async def list_invitations(
 
 @router.get("/invitation-operations", response_model=list[IdentityOperationOut])
 async def list_invitation_operations(
-    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE_READ)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_READ)),
     session: AsyncSession = Depends(get_session),
 ):
     """Показать до 100 последних безопасных записей пригласительных операций.
@@ -979,18 +1117,35 @@ async def list_invitation_operations(
     возвращается ``requires_reconciliation``.
     """
 
+    invitation_query = select(IdentityInvitationRequest, Employee.full_name).outerjoin(
+        Employee, Employee.id == IdentityInvitationRequest.employee_id
+    )
+    activation_query = select(IdentityAccessActivationRequest, User).join(
+        User, User.id == IdentityAccessActivationRequest.user_id
+    )
+    if CRM_INVITATION_OPERATOR_ROLE in actor.roles:
+        invitation_query = invitation_query.where(
+            IdentityInvitationRequest.department == CRM_DEPARTMENT,
+            IdentityInvitationRequest.role.in_(CRM_STAFF_ROLES),
+            Employee.department == CRM_DEPARTMENT,
+        )
+        activation_query = activation_query.join(
+            Employee, Employee.id == IdentityAccessActivationRequest.employee_id
+        ).where(
+            IdentityAccessActivationRequest.expected_department == CRM_DEPARTMENT,
+            IdentityAccessActivationRequest.expected_role.in_(CRM_STAFF_ROLES),
+            Employee.department == CRM_DEPARTMENT,
+        )
     invitations = (
         await session.execute(
-            select(IdentityInvitationRequest, Employee.full_name)
-            .outerjoin(Employee, Employee.id == IdentityInvitationRequest.employee_id)
+            invitation_query
             .order_by(IdentityInvitationRequest.created_at.desc())
             .limit(100)
         )
     ).all()
     activations = (
         await session.execute(
-            select(IdentityAccessActivationRequest, User)
-            .join(User, User.id == IdentityAccessActivationRequest.user_id)
+            activation_query
             .order_by(IdentityAccessActivationRequest.created_at.desc())
             .limit(100)
         )
@@ -1039,11 +1194,12 @@ async def list_invitation_operations(
 @router.post("/preflight", response_model=InvitationPreflightOut)
 async def preflight_invitation(
     payload: InviteEmployeeIn,
-    _: CurrentUser = Depends(require_permission(IDENTITY_INVITE_PREPARE)),
+    actor: CurrentUser = Depends(require_permission(IDENTITY_INVITE_PREPARE)),
     session: AsyncSession = Depends(get_session),
 ):
     """Проверка пригласительного payload без записи в БД и без Keycloak-вызова."""
 
+    _check_crm_invitation_scope(actor, payload)
     resolved = await _resolve_invitation(session, payload)
     return InvitationPreflightOut(
         employee_id=resolved.employee.id,
@@ -1071,6 +1227,7 @@ async def invite_employee(
     а неопределённый сетевой исход блокируется до ручной сверки.
     """
 
+    _check_crm_invitation_scope(actor, payload)
     idempotency_key = _idempotency_key(request)
     resolved = await _resolve_invitation(session, payload, lock_employee=True)
 
@@ -1296,6 +1453,14 @@ async def activate_employee(
     expected_department = user.expected_department
     expected_role = user.expected_role
     staged_keycloak_user_id = user.keycloak_user_id
+    try:
+        await identity.validate_activation_ready(user_id=staged_keycloak_user_id, expected_role=expected_role)
+    except KeycloakAdminConflict as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    except KeycloakAdminNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=exc.code) from exc
+    except KeycloakAdminError as exc:
+        raise HTTPException(status_code=502, detail=exc.code) from exc
     activation = IdentityAccessActivationRequest(
         idempotency_key=idempotency_key,
         user_id=user.id,

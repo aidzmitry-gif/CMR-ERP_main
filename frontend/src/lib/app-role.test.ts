@@ -24,4 +24,11 @@ describe("resolveAppRole", () => {
     expect(defaultPathForRole("onboarding")).toBe("/onboarding");
     expect(defaultPathForRole("sales")).toBe("/crm/deals");
   });
+
+  it("ведёт ограниченного оператора в приглашения, сохраняя приоритет onboarding", () => {
+    const role = resolveAppRole(["director", "crm_invitation_operator"]);
+    expect(role).toBe("crm_invitation_operator");
+    expect(defaultPathForRole(role)).toBe("/erp/settings/invitations");
+    expect(resolveAppRole(["onboarding", role])).toBe("onboarding");
+  });
 });

@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from config.access import (
+    CRM_INVITATION_OPERATOR_ROLE,
     IDENTITY_PROVISIONER_ROLE,
     ONBOARDING_ROLE,
     PACKAGE_TO_SLUG,
@@ -44,6 +45,16 @@ IDENTITY_PROVISIONER_OPEN_PATHS: frozenset[str] = frozenset(
         "/system/users/preflight",
         "/system/users/invite",
     }
+)
+
+CRM_INVITATION_OPERATOR_PATHS: frozenset[str] = frozenset({
+    "/health", "/system/access", "/system/users/departments",
+    "/system/users/crm-staff", "/system/users/preflight", "/system/users/invite",
+    "/system/users/invitations", "/system/users/invitation-operations",
+})
+CRM_CONFIGURATION_PREFIXES = (
+    "/sales/stages", "/sales/branding", "/sales/contract-templates", "/sales/prices",
+    "/sales/plan-items", "/sales/plans", "/sales/telephony",
 )
 
 # These neighboring APIs can return/modify foreign deal data but do not yet
@@ -140,6 +151,15 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
                 )
 
         roles = roles_from_request(request)
+        if CRM_INVITATION_OPERATOR_ROLE in roles and path not in CRM_INVITATION_OPERATOR_PATHS:
+            return JSONResponse({"detail": "Доступна только подготовка приглашений CRM"}, status_code=403)
+        if effective_user.crm_restricted and path not in {"/health", "/system/access"}:
+            crm_path = any(path == prefix or path.startswith(prefix + "/") for prefix in ("/sales", "/leads"))
+            configuration_write = request.method not in {"GET", "HEAD", "OPTIONS"} and any(
+                path == prefix or path.startswith(prefix + "/") for prefix in CRM_CONFIGURATION_PREFIXES
+            )
+            if not crm_path or request.method == "DELETE" or configuration_write:
+                return JSONResponse({"detail": "Действие вне разрешённого рабочего доступа CRM"}, status_code=403)
         if (
             effective_user.deal_visibility == "own"
             and CRM_ROLES.intersection(roles)
