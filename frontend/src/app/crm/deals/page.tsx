@@ -69,7 +69,7 @@ export default async function DealsPage({
         ...(await fetchBoardResult(role, f.code, token)),
       })),
     );
-    const authError = sections.some((s) => s.authError) || Boolean(kpisRes.authError);
+    const authError = sections.some((s) => s.authError);
     return (
       <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>
         <DealsWorkspace
@@ -79,6 +79,7 @@ export default async function DealsPage({
           combinedStages={sections}
           demoData={sections.some((r) => r.demo) || kpisRes.demo}
           authError={authError}
+          kpiAccessDenied={kpisRes.authError}
           funnelTabs={funnelTabs}
           ownerId={ownerId}
           canAssignOwner={canAssignOwner}
@@ -101,7 +102,8 @@ export default async function DealsPage({
         initialStages={board.stages}
         initialKpis={kpisRes.kpis}
         demoData={board.demo || kpisRes.demo}
-        authError={board.authError || kpisRes.authError}
+        authError={board.authError}
+        kpiAccessDenied={kpisRes.authError}
         funnelTabs={funnelTabs}
         ownerId={ownerId}
         canAssignOwner={canAssignOwner}

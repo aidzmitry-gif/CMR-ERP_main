@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { ChannelButtons } from "@/components/channels";
@@ -33,7 +34,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const roles = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
   const d = await fetchDealDetail(id, roles, token);
-  // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 для mock/без стадии.
+  if (!d) notFound();
+  // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 при отсутствии стадии.
   const stageIdx = d.stage?.idx ?? 0;
 
   return (
