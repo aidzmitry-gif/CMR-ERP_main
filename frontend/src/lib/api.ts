@@ -1965,7 +1965,7 @@ export async function fetchOwnerDashboard(
         cache: "no-store",
         headers: roleHeaders(roles, accessToken),
       }),
-      fetchBoardStages(roles, accessToken),
+      fetchBoardStages(roles, undefined, accessToken),
       fetchKpis(roles, accessToken),
     ]);
     if (!metricsRes.ok) throw new Error(String(metricsRes.status));

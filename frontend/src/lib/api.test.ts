@@ -369,6 +369,21 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(dash?.metrics.approvals_pending).toBe(1);
   });
 
+  it("fetchOwnerDashboard keeps its access token out of board URLs", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => url.includes("/sales/board") ? { stages: [] } : url.includes("/sales/kpis") ? [] : {},
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchOwnerDashboard("director", "synthetic-owner-token");
+    const boardCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/sales/board"));
+    expect(boardCall?.[0]).toMatch(/\/sales\/board$/);
+    expect(boardCall?.[1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer synthetic-owner-token" }),
+    }));
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("synthetic-owner-token"))).toBe(true);
+  });
+
   it("fetchOwnerDashboard → null при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     expect(await fetchOwnerDashboard()).toBeNull();

@@ -955,6 +955,7 @@ export function DealsWorkspace({
   combinedStages,
   demoData = false,
   authError = false,
+  kpiAccessDenied = false,
   ownerId,
   canAssignOwner = false,
 }: {
@@ -967,6 +968,8 @@ export function DealsWorkspace({
   demoData?: boolean;
   /** SSR-фетч доски вернул 401/403 — не показывать пустую/демо-доску без пояснения. */
   authError?: boolean;
+  /** Общие KPI могут быть закрыты при разрешённой личной доске. */
+  kpiAccessDenied?: boolean;
   /** Владелец плана: когда задан, «План» скорборда берётся из согласованного PlanTarget. */
   ownerId?: number;
   /** Только admin/director/commercial получают UI выбора owner_id. */
@@ -1638,6 +1641,11 @@ export function DealsWorkspace({
           >
             Нет доступа к доске сделок. Проверьте вход в систему или обратитесь к администратору.
           </div>
+        )}
+        {kpiAccessDenied && !authError && (
+          <p role="status" className="mb-3 rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-muted">
+            Общие показатели отдела недоступны для вашего доступа. Ниже показаны доступные вам сделки.
+          </p>
         )}
         {demoData && (
           <div

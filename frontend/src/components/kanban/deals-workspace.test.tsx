@@ -472,6 +472,13 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByText(/Демо-данные/i)).not.toBeInTheDocument();
   });
 
+  it("keeps permitted deals visible with a separate KPI restriction message", () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} kpiAccessDenied />);
+    expect(screen.getByRole("status")).toHaveTextContent("Общие показатели отдела недоступны");
+    expect(screen.queryByText(/Нет доступа к доске сделок/i)).not.toBeInTheDocument();
+    expect(screen.getByText("ООО Доска")).toBeInTheDocument();
+  });
+
   // --- Слайс 3 + FIX-2 ---
 
   const condStage: Stage = {
