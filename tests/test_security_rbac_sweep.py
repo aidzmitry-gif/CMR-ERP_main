@@ -55,6 +55,11 @@ assert _OWNER_ROLE in SUPER_ROLES  # инвариант выбора: владе
 # Coverage-guard падает, если появится НОВЫЙ неслаггнутый модуль с write-роутами вне списка.
 _UNGATED_INFRA = frozenset({"integrations"})
 
+# Собственная анкета разрешена onboarding без общего HR-доступа. Роут остаётся
+# в свипе: техническая identity-роль запрещена до валидации тела. Привязка к
+# сотруднику, чужие карточки и отзыв проверяются в test_hr_self_profile.py.
+_ROUTE_DENIERS = {("PUT", "/hr/me/profile"): "identity_provisioner"}
+
 _PARAM_RE = re.compile(r"\{[^}]+\}")
 
 
@@ -116,7 +121,7 @@ def write_routes(app) -> list[tuple[str, str, str, str]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                routes.append((method, _concrete_url(full), package, denier))
+                routes.append((method, _concrete_url(full), package, _ROUTE_DENIERS.get(key, denier)))
     return routes
 
 
@@ -162,6 +167,8 @@ def test_sweep_discovered_module_write_routes(app, prefix_map, write_routes):
     found_packages = {pkg for _, _, pkg, _ in write_routes}
     for expected in ("sales", "procurement", "wms", "finance"):
         assert expected in found_packages, f"нет write-роутов модуля {expected} — свип неполон"
+    for (method, path), denier in _ROUTE_DENIERS.items():
+        assert (method, path, "hr", denier) in write_routes, "self-service route missing from RBAC sweep"
 
 
 def test_no_ungated_module_write_route(app, prefix_map):

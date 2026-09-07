@@ -48,7 +48,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const path = req.nextUrl.pathname;
   if (
     frontendAuthMode() === "oidc" &&
-    (path.startsWith("/erp") || path.startsWith("/crm") || path === "/onboarding") &&
+    (path.startsWith("/erp") || path.startsWith("/crm") || path === "/onboarding" || path === "/profile") &&
     accessTokenNeedsRefresh(req.cookies.get(TOKEN_COOKIE)?.value, 0)
   ) {
     return redirect("/login?error=session_expired");

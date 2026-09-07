@@ -788,16 +788,16 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
               showFull ? "gap-3 px-4 py-3" : "justify-center px-2 py-3",
             )}
           >
-            <span
+            <Link href="/profile" aria-label="Моя HR-карточка"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white"
               title={!showFull ? userName : undefined}
             >
               {initials(userName)}
-            </span>
+            </Link>
             {showFull && (
               <>
                 <div className="min-w-0 flex-1 leading-tight">
-                  <div className="truncate text-sm font-medium text-ink">{userName}</div>
+                  <Link href="/profile" className="block truncate text-sm font-medium text-ink">{userName}</Link>
                   <div className="truncate text-xs text-muted">{roleTitle ?? "—"}</div>
                 </div>
                 <form action="/api/auth/logout" method="post">

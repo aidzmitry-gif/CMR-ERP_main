@@ -32,7 +32,8 @@ OPEN_PREFIXES: tuple[str, ...] = (
 # собственном onboarding-доступе. Даже если ошибочно к токену будет добавлена
 # ещё какая-то роль, presence onboarding остаётся fail-closed до явной смены
 # набора ролей при подтверждении.
-ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access"})
+SELF_PROFILE_PATH = "/hr/me/profile"
+ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access", SELF_PROFILE_PATH})
 
 # Технический service-account приглашений не получает общего системного доступа:
 # ``/system`` содержит и маршруты без собственной permission dependency. Presence
@@ -153,7 +154,7 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         roles = roles_from_request(request)
         if CRM_INVITATION_OPERATOR_ROLE in roles and path not in CRM_INVITATION_OPERATOR_PATHS:
             return JSONResponse({"detail": "Доступна только подготовка приглашений CRM"}, status_code=403)
-        if effective_user.crm_restricted and path not in {"/health", "/system/access"}:
+        if effective_user.crm_restricted and path not in {"/health", "/system/access", SELF_PROFILE_PATH}:
             crm_path = any(path == prefix or path.startswith(prefix + "/") for prefix in ("/sales", "/leads"))
             configuration_write = request.method not in {"GET", "HEAD", "OPTIONS"} and any(
                 path == prefix or path.startswith(prefix + "/") for prefix in CRM_CONFIGURATION_PREFIXES
@@ -184,6 +185,11 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
                 status_code=403,
             )
         if path.startswith(OPEN_PREFIXES):
+            return await call_next(request)
+
+        if path == SELF_PROFILE_PATH and request.method in {"GET", "PUT"}:
+            # Only this route bypasses module access; its own dependency binds
+            # the record to the verified identity. Other HR data stays closed.
             return await call_next(request)
 
         for prefix, package in self.prefixes:
