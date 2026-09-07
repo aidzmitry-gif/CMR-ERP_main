@@ -1,10 +1,11 @@
 import { AppShell } from "@/components/app-shell";
+import Link from "next/link";
 import { FunnelBoard } from "@/components/funnel/funnel-board";
 import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
 
 export default function HrPage() {
   return (
-    <AppShell crumbs={["ERP", "HR · Подбор"]}>
+    <AppShell crumbs={["ERP", "HR · Подбор"]} headerActions={<Link href="/erp/hr/employees" className="rounded-xl border border-line px-4 py-2 text-sm">Карточки сотрудников</Link>}>
       <FunnelBoard
         title="HR · Подбор персонала"
         subtitle="Воронка подбора: от новой вакансии до найма."

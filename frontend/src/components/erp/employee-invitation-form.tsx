@@ -83,6 +83,8 @@ function errorDetail(body: unknown): string | null {
 
 function knownErrorMessage(detail: string | null, action: "invite" | "activate" | "preflight"): string {
   const messages: Record<string, string> = {
+    "Логин должен содержать не менее двух латинских букв или цифр": "Не удалось сформировать логин из email. Укажите логин латиницей: минимум 2 символа.",
+    "Не удалось сформировать логин": "Очистите поле логина, чтобы сформировать его из email, или укажите логин латиницей.",
     identity_invite_reconciliation_required: "Статус приглашения требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
     identity_activation_reconciliation_required: "Статус активации требует ручной сверки в журнале операций. Повтор автоматически не выполнен.",
     identity_activation_state_drift: "Данные сотрудника изменились во время активации. Проверьте журнал операций и данные HR.",
@@ -491,6 +493,7 @@ export function EmployeeInvitationForm({
                   placeholder="Будет сформирован из email, если оставить пустым"
                   className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                 />
+                <span className="text-xs text-muted">Можно оставить пустым. Для логина целиком кириллицей будет предложен вариант из email; проверьте его на следующем шаге.</span>
               </label>
             </div>
 

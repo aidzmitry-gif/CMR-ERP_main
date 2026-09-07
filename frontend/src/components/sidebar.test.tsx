@@ -28,12 +28,9 @@ vi.mock("next/link", () => ({
     children,
     href,
     className,
-  }: {
-    children: React.ReactNode;
-    href: string;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
+    ...props
+  }: React.ComponentProps<"a">) => (
+    <a href={href} className={className} {...props}>
       {children}
     </a>
   ),
@@ -168,6 +165,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Менеджер")).not.toBeInTheDocument();
     const avatar = screen.getByTitle("Иван Петров");
     expect(avatar).toHaveTextContent("ИП");
+    expect(avatar).toHaveAttribute("href", "/profile");
   });
 
   it("переключает режим редактирования порядка модулей по клику на карандаш", async () => {

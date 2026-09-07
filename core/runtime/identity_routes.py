@@ -279,8 +279,12 @@ class _ResolvedInvitation:
 def _username(payload: InviteEmployeeIn) -> str:
     raw = payload.username or payload.email.split("@", 1)[0]
     username = _USERNAME_RE.sub("-", raw.lower()).strip("-._")
+    if not username and payload.username:
+        # A Cyrillic display name is not an account identifier. Preflight
+        # explicitly returns the email-derived login for confirmation.
+        username = _USERNAME_RE.sub("-", payload.email.split("@", 1)[0].lower()).strip("-._")
     if len(username) < 2:
-        raise HTTPException(status_code=422, detail="Не удалось сформировать логин")
+        raise HTTPException(status_code=422, detail="Логин должен содержать не менее двух латинских букв или цифр")
     return username
 
 
