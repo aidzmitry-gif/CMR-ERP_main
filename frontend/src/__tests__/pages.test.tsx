@@ -9,7 +9,7 @@ vi.mock("next/font/google", () => ({
   Inter: () => ({ variable: "--font-inter", className: "font-inter" }),
 }));
 vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => <a>{children}</a> }));
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }) }));
 vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", className: "mock-font" }) }));
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
@@ -131,6 +131,13 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText("messages")).toBeInTheDocument();
     expect(screen.getByText("documents")).toBeInTheDocument();
     expect(screen.getByText("deal-calls")).toBeInTheDocument();
+  });
+
+  it("DealDetailPage stops before rendering a denied or missing card", async () => {
+    mock(api.fetchDealDetail).mockResolvedValueOnce(null);
+    await expect(DealDetailPage({ params: Promise.resolve({ id: "1" }) })).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(screen.queryByText("ООО Карточка")).not.toBeInTheDocument();
+    expect(screen.queryByText("messages")).not.toBeInTheDocument();
   });
 
   it("OwnerPage показывает метрики при наличии данных", async () => {

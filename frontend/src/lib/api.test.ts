@@ -203,9 +203,7 @@ describe("api client — сделки/доска/KPI", () => {
   it("fetchDealDetail маппит карточку с позициями", async () => {
     stubFetch({ ...apiDeal, items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
     const detail = await fetchDealDetail("9");
-    expect(detail.company).toBe("ООО Доска");
-    expect(detail.items[0].title).toBe("Лист");
-    expect(detail.items[0].minPrice).toBe(1450);
+    expect(detail).toMatchObject({ company: "ООО Доска", items: [{ title: "Лист", minPrice: 1450 }] });
   });
 
   it("createDeal маппит ответ; null при !ok", async () => {
@@ -389,9 +387,14 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchOwnerDashboard()).toBeNull();
   });
 
+  it.each([401, 403, 404, 500])("does not invent a deal after HTTP %i", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status }));
+    expect(await fetchDealDetail("1", "sales", "synthetic-test-token")).toBeNull();
+  });
+
   it("fallback'и при сетевой ошибке (mock-данные/пустые)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect((await fetchDealDetail("1")).number).toBeTruthy(); // mock-карточка
+    expect(await fetchDealDetail("1")).toBeNull();
     expect((await fetchKpis()).length).toBeGreaterThan(0); // mock-KPI
     expect(await fetchDocuments("1")).toEqual([]);
     expect(await fetchMessages("1")).toEqual([]);

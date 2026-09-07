@@ -1,6 +1,6 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
-import { DEAL_DETAIL, getDealDetail, KPIS, STAGES } from "@/lib/mock-data";
+import { DEAL_DETAIL, KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
@@ -317,7 +317,6 @@ export async function deleteStage(code: string): Promise<{ ok: boolean; detail?:
   }
 }
 
-/** Детальная карточка сделки из API; fallback — mock по id. */
 /** Активная стадия сделки для DealDetail: idx прогрессии + заголовок (канон) +
  *  «дней в стадии»/«протухает» (SALES-43, из stage_changed_at). undefined — нет канон-стадии. */
 function dealStage(stageId: string, stageChangedAt?: string | null): DealDetail["stage"] {
@@ -333,11 +332,12 @@ function dealStage(stageId: string, stageChangedAt?: string | null): DealDetail[
   };
 }
 
+/** Недоступная карточка остаётся недоступной, без подмены демо-данными. */
 export async function fetchDealDetail(
   id: string,
   roles?: string,
   accessToken?: string,
-): Promise<DealDetail> {
+): Promise<DealDetail | null> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, {
       cache: "no-store",
@@ -404,7 +404,7 @@ export async function fetchDealDetail(
       penaltyTerms: d.penalty_terms ?? undefined,
     };
   } catch {
-    return getDealDetail(id);
+    return null;
   }
 }
 
