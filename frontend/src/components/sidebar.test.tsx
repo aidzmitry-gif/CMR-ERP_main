@@ -163,7 +163,7 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.queryByText("CRM")).not.toBeInTheDocument());
     expect(screen.queryByText("Иван Петров")).not.toBeInTheDocument();
     expect(screen.queryByText("Менеджер")).not.toBeInTheDocument();
-    const avatar = screen.getByTitle("Иван Петров");
+    const avatar = screen.getByTitle("Иван Петров — Моя карточка");
     expect(avatar).toHaveTextContent("ИП");
     expect(avatar).toHaveAttribute("href", "/profile");
   });
