@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ROLE_COOKIE } from "@/lib/access";
+import { ROLE_COOKIE, USER_COOKIE } from "@/lib/access";
 import { applyOidcTokenCookies } from "@/lib/oidc-cookies";
 
 function tokenWithRoles(roles: string[]): string {
@@ -9,6 +9,15 @@ function tokenWithRoles(roles: string[]): string {
 }
 
 describe("applyOidcTokenCookies", () => {
+  it("writes the original Cyrillic display name after token refresh", () => {
+    const name = "Тест приглашений CRM";
+    const payload = Buffer.from(JSON.stringify({ name, realm_access: { roles: ["onboarding"] } })).toString("base64url");
+    const writes: Array<[string, string]> = [];
+    applyOidcTokenCookies({ access_token: `header.${payload}.signature` }, (key, value) => writes.push([key, value]));
+    expect(writes.find(([key]) => key === USER_COOKIE)).toEqual([USER_COOKIE, name]);
+    expect(writes.find(([key]) => key === ROLE_COOKIE)).toEqual([ROLE_COOKIE, "onboarding"]);
+  });
+
   it("сохраняет onboarding после refresh даже при технических Keycloak-ролях", () => {
     const writes: Array<[string, string]> = [];
     applyOidcTokenCookies(
