@@ -23,9 +23,22 @@ describe("buildBackendProxyHeaders", () => {
     expect(out.get("X-User-Roles")).toBe("sales");
   });
 
-  it("входящий Authorization имеет приоритет над accessToken", () => {
-    const incoming = new Headers({ authorization: "Bearer client" });
+  it.each(["Bearer client", "bearer client", "Bearer"])("явный %s имеет приоритет над cookie, включая некорректный Bearer", (authorization) => {
+    const incoming = new Headers({ authorization });
     const out = buildBackendProxyHeaders(incoming, { accessToken: "cookie-jwt" });
-    expect(out.get("authorization")).toBe("Bearer client");
+    expect(out.get("authorization")).toBe(authorization);
+  });
+
+  it("использует OIDC cookie, когда браузер передаёт Basic Auth входного прокси", () => {
+    const incoming = new Headers({ authorization: "Basic synthetic-edge-credentials" });
+    const out = buildBackendProxyHeaders(incoming, { accessToken: "cookie-jwt" });
+    expect(out.get("authorization")).toBe("Bearer cookie-jwt");
+    expect(incoming.get("authorization")).toBe("Basic synthetic-edge-credentials");
+  });
+
+  it("не передаёт Basic credentials backend без OIDC-сессии", () => {
+    const incoming = new Headers({ authorization: "Basic synthetic-edge-credentials" });
+    const out = buildBackendProxyHeaders(incoming);
+    expect(out.has("authorization")).toBe(false);
   });
 });
