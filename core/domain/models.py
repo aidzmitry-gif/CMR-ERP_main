@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -230,6 +230,47 @@ class IdentityAccessActivationRequest(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
     activated_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class IntakeIdentity(Base):
+    """One external business enquiry; deliveries may arrive through several channels."""
+
+    __tablename__ = "intake_identity"
+    __table_args__ = (UniqueConstraint("namespace", "source_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(64))
+    source_id: Mapped[str] = mapped_column(String(256))
+    # Soft reference: the shared kernel does not depend on the optional leads schema.
+    lead_id: Mapped[int | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class IntakeReceipt(Base):
+    """Durable inbox. queued is transport acknowledgement, never lead delivery."""
+
+    __tablename__ = "intake_receipt"
+    __table_args__ = (
+        UniqueConstraint("namespace", "delivery_id"),
+        CheckConstraint("status IN ('queued', 'delivered', 'failed')", name="intake_status"),
+        CheckConstraint(
+            "status != 'delivered' OR delivered_at IS NOT NULL", name="intake_delivered_at"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    identity_id: Mapped[int] = mapped_column(ForeignKey("intake_identity.id"), index=True)
+    namespace: Mapped[str] = mapped_column(String(64))
+    delivery_id: Mapped[str] = mapped_column(String(256))
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    # Normalized text/provenance only; file bytes never enter the database or outbox.
+    payload: Mapped[dict] = mapped_column(JSON)
+    files: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="queued", server_default="queued")
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class OutboxEvent(Base):
