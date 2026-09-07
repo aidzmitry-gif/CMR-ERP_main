@@ -10,8 +10,8 @@ export interface BackendProxyHeaderOptions {
 
 /**
  * Build upstream headers for the backend.
- * - Forward incoming Authorization when present.
- * - Else inject Bearer from accessToken (OIDC skeleton).
+ * - Forward an explicit incoming Bearer, otherwise use the OIDC access cookie.
+ * - Do not forward ingress Basic Auth credentials to the application backend.
  * - In dev also set X-User-Roles (ignored when auth_mode=oidc).
  */
 export function buildBackendProxyHeaders(
@@ -23,7 +23,8 @@ export function buildBackendProxyHeaders(
   headers.delete("connection");
 
   const incomingAuth = incoming.get("authorization");
-  if (incomingAuth) {
+  headers.delete("authorization");
+  if (incomingAuth && /^Bearer(?:\s|$)/i.test(incomingAuth)) {
     headers.set("authorization", incomingAuth);
   } else if (opts.accessToken) {
     headers.set("authorization", "Bearer " + opts.accessToken);
