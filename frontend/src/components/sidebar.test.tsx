@@ -135,20 +135,15 @@ describe("Sidebar", () => {
     expect(seo.className).toContain("text-muted");
   });
 
-  it("показывает профиль пользователя и роль, вызывает logout с очисткой сессии", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
-    vi.stubGlobal("fetch", fetchMock);
-
+  it("показывает профиль и отправляет браузерную форму выхода для завершения SSO", async () => {
     render(<Sidebar userName="Иван Петров" roleTitle="Менеджер" />);
     expect(await screen.findByText("Иван Петров")).toBeInTheDocument();
     expect(screen.getByText("Менеджер")).toBeInTheDocument();
 
     const logoutBtn = screen.getByLabelText("Выйти");
-    fireEvent.click(logoutBtn);
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" }));
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/login"));
-    expect(mockRefresh).toHaveBeenCalled();
+    expect(logoutBtn).toHaveAttribute("type", "submit");
+    expect(logoutBtn.closest("form")).toHaveAttribute("method", "post");
+    expect(logoutBtn.closest("form")).toHaveAttribute("action", "/api/auth/logout");
   });
 
   it("показывает «—» вместо роли, когда roleTitle не передан", async () => {

@@ -26,7 +26,7 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
@@ -313,7 +313,6 @@ interface SidebarProps {
 
 export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}) {
   const pathname = usePathname() || "";
-  const router = useRouter();
 
   // collapsed (rail) — пользовательский тоггл, в localStorage.
   // hoverExpanded — временное раскрытие при наведении (overlay, не толкает контент).
@@ -378,13 +377,6 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     pathname.startsWith("/crm/rop");
 
   const marketingActive = pathname.startsWith("/erp/marketing");
-
-  // dev-выход: чистим cookie сессии и уводим на экран входа
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
-  }
 
   function moduleActive(m: ModuleItem): boolean {
     if (m.slug === "crm") return crmActive;
@@ -788,7 +780,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
           )}
         </nav>
 
-        {/* профиль вошедшего сотрудника + выход (dev-логин; реальный — Keycloak, часть 5) */}
+        {/* Профиль и выход через браузерный переход к завершению SSO-сессии. */}
         {userName && (
           <div
             className={clsx(
@@ -808,15 +800,16 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                   <div className="truncate text-sm font-medium text-ink">{userName}</div>
                   <div className="truncate text-xs text-muted">{roleTitle ?? "—"}</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={logout}
-                  aria-label="Выйти"
-                  title="Выйти"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-ink"
-                >
-                  <LogOut size={16} />
-                </button>
+                <form action="/api/auth/logout" method="post">
+                  <button
+                    type="submit"
+                    aria-label="Выйти"
+                    title="Выйти"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-ink"
+                  >
+                    <LogOut size={16} />
+                  </button>
+                </form>
               </>
             )}
           </div>
