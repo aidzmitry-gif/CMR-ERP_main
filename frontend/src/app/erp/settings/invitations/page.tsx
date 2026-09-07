@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import {
   EmployeeInvitationForm,
@@ -76,18 +77,28 @@ function isRecordList<T>(body: unknown): body is T[] {
   return Array.isArray(body) && body.every((item) => item !== null && typeof item === "object" && !Array.isArray(item));
 }
 
-async function crmStaff(headers: Record<string, string>): Promise<{ staff: CrmStaffMember[]; error: string | null }> {
+async function crmStaff(headers: Record<string, string>, generalFlow = false): Promise<{ staff: CrmStaffMember[]; error: string | null }> {
   try {
-    const response = await fetch(`${BASE}/system/users/crm-staff`, { cache: "no-store", headers });
+    const response = await fetch(`${BASE}${generalFlow ? "/hr/employees" : "/system/users/crm-staff"}`, { cache: "no-store", headers });
     if (!response.ok) {
       return {
         staff: [],
         error: response.status === 401 || response.status === 403
-          ? "У текущей учётной записи нет прав для управления сотрудниками CRM."
-          : "Список сотрудников CRM временно недоступен.",
+          ? "У текущей учётной записи нет прав для просмотра сотрудников выбранного раздела."
+          : "Список сотрудников временно недоступен.",
       };
     }
-    const body = await response.json() as CrmStaffMember[];
+    const body = await response.json();
+    if (generalFlow) {
+      if (!Array.isArray(body) || !body.every((item) => item && Number.isInteger(item.id) && item.id > 0
+        && typeof item.full_name === "string" && typeof item.department === "string"
+        && typeof item.position === "string" && typeof item.status === "string")) {
+        return { staff: [], error: "ERP вернула некорректные данные сотрудников." };
+      }
+      return { staff: body.filter((item) => item.status === "active").map((item) => ({
+        employee_id: item.id, full_name: item.full_name, department: item.department, position: item.position,
+      })), error: null };
+    }
     return Array.isArray(body)
       ? { staff: body, error: null }
       : { staff: [], error: "ERP вернула некорректные данные сотрудников." };
@@ -96,31 +107,46 @@ async function crmStaff(headers: Record<string, string>): Promise<{ staff: CrmSt
   }
 }
 
-export default async function EmployeeInvitationsPage() {
+export default async function EmployeeInvitationsPage({ searchParams }: {
+  searchParams?: Promise<{ scope?: string | string[] }>;
+}) {
   const access = await invitationAccess(await currentRole());
+  const generalFlow = (await searchParams)?.scope === "erp";
   const canActivate = access.error === null && SUPER_ROLES.has(access.role);
-  const canPrepare = canActivate || (access.error === null && access.role === "crm_invitation_operator");
-  const accessError = access.error ?? (canPrepare ? null : "Подготовка приглашений требует полномочий руководителя или отдельно назначенного оператора CRM.");
+  const canPrepare = canActivate || (!generalFlow && access.error === null && access.role === "crm_invitation_operator");
+  const accessError = access.error ?? (canPrepare ? null : generalFlow
+    ? "Приглашения в другие отделы доступны только руководителю."
+    : "Подготовка приглашений требует полномочий руководителя или отдельно назначенного оператора CRM.");
   const [catalog, invitations, operations, staff] = canPrepare
     ? await Promise.all([
       invitationRead("departments", "справочник отделов и ролей", access.headers, isCatalog),
       invitationRead("invitations", "список ожидающих активации", access.headers, isRecordList<PendingInvitation>),
       invitationRead("invitation-operations", "журнал операций приглашений", access.headers, isRecordList<InvitationOperation>),
-      crmStaff(access.headers),
+      crmStaff(access.headers, generalFlow),
     ])
     : [{ data: null, error: null }, { data: null, error: null }, { data: null, error: null }, { staff: [], error: null }];
   return (
     <AppShell crumbs={["ERP", "IT и настройки", "Приглашения сотрудников"]}>
+      <div className="flex min-w-0 flex-1 flex-col">
+      {canActivate && (
+        <nav aria-label="Раздел приглашений" className="flex flex-wrap gap-4 border-b border-line bg-surface px-6 py-3 text-sm">
+          <Link href="/erp/settings/invitations" aria-current={!generalFlow ? "page" : undefined} className="text-accent">Сотрудники CRM</Link>
+          <Link href="/erp/settings/invitations?scope=erp" aria-current={generalFlow ? "page" : undefined} className="text-accent">Руководители и другие отделы</Link>
+        </nav>
+      )}
       <EmployeeInvitationForm
+        key={generalFlow ? "erp" : "crm"}
         departments={catalog.data?.departments ?? {}}
         pendingInvitations={invitations.data ?? []}
         invitationOperations={operations.data ?? []}
         canActivate={canActivate}
         canReadOperations={canPrepare}
         crmStaff={staff.staff}
-        crmFlow={canPrepare}
+        crmFlow={canPrepare && !generalFlow}
+        generalFlow={canPrepare && generalFlow}
         accessError={accessError ?? staff.error ?? catalog.error ?? invitations.error ?? operations.error}
       />
+      </div>
     </AppShell>
   );
 }
