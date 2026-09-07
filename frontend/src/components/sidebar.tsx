@@ -153,7 +153,7 @@ const MODULES: ModuleItem[] = [
     sub: [
       { label: "Подбор персонала", href: "/erp/hr" },
       { label: "Учёт времени", href: "/erp/hr/worktime" },
-      { label: "Сотрудники" },
+      { label: "Сотрудники", href: "/erp/hr/employees" },
       { label: "Адаптация" },
       { label: "Обучение и KPI" },
       { label: "Кадровый учёт" },
@@ -790,7 +790,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
           >
             <Link href="/profile" aria-label="Моя HR-карточка"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white"
-              title={!showFull ? userName : undefined}
+              title={`${userName} — Моя карточка`}
             >
               {initials(userName)}
             </Link>
@@ -799,6 +799,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
                 <div className="min-w-0 flex-1 leading-tight">
                   <Link href="/profile" className="block truncate text-sm font-medium text-ink">{userName}</Link>
                   <div className="truncate text-xs text-muted">{roleTitle ?? "—"}</div>
+                  <Link href="/profile" className="mt-1 inline-block text-xs font-medium text-accent underline underline-offset-2">Моя карточка</Link>
                 </div>
                 <form action="/api/auth/logout" method="post">
                   <button
