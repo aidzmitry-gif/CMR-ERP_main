@@ -25,6 +25,68 @@ afterEach(() => {
 });
 
 describe("EmployeeInvitationForm", () => {
+  it("prepares a new director through HR and sends only after confirmation", async () => {
+    const payload = { employee_id: 17, full_name: "Тестовый руководитель", email: "director@example.com", username: "test-director", department: "Руководство", role: "director", ready: true };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(true, { id: 17 }, 201))
+      .mockResolvedValueOnce(response(true, payload))
+      .mockResolvedValueOnce(response(true, { ...payload, role: "onboarding", expected_role: "director", expected_department: "Руководство", status: "invited" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EmployeeInvitationForm generalFlow departments={{ Руководство: ["director"], Продажи: ["sales"] }} />);
+    fireEvent.change(screen.getByLabelText("ФИО нового сотрудника"), { target: { value: payload.full_name } });
+    fireEvent.change(screen.getByLabelText("Рабочий email"), { target: { value: payload.email } });
+    fireEvent.change(screen.getByLabelText("Отдел из HR"), { target: { value: "Руководство" } });
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "director" } });
+    expect(screen.getByRole("option", { name: "Директор" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("director");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/hr/employees", "/api/system/users/preflight"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ full_name: payload.full_name, department: "Руководство", status: "active" });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ employee_id: 17, department: "Руководство", role: "director" });
+    fireEvent.click(screen.getByRole("button", { name: "Отправить приглашение" }));
+    await screen.findByText("Приглашение отправлено");
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/system/users/invite");
+    expect(fetchMock.mock.calls[2][1].headers["Idempotency-Key"]).toMatch(/^erp-invite-/);
+  });
+
+  it("keeps an existing HR department fixed and resets role on employee changes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(true, { ready: true, employee_id: 17, full_name: "Тест", email: "director@example.com", department: "Руководство", role: "director" }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EmployeeInvitationForm generalFlow departments={{ Руководство: ["director"], Продажи: ["sales"] }} crmStaff={[
+      { employee_id: 17, full_name: "Тест", department: "Руководство" },
+      { employee_id: 18, full_name: "Продажи тест", department: "Продажи" },
+    ]} />);
+    fireEvent.change(screen.getByLabelText("Сотрудник"), { target: { value: "17" } });
+    expect(screen.getByLabelText("Отдел из HR")).toBeDisabled();
+    expect(screen.getByLabelText("Отдел из HR")).toHaveValue("Руководство");
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "director" } });
+    fireEvent.change(screen.getByLabelText("Рабочий email"), { target: { value: "director@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+    await screen.findByRole("dialog");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/system/users/preflight");
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.change(screen.getByLabelText("Сотрудник"), { target: { value: "18" } });
+    expect(screen.getByLabelText("Целевая рабочая роль")).toHaveValue("");
+    expect(screen.queryByRole("option", { name: "Директор" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Рабочий email")).toHaveValue("");
+  });
+
+  it("does not repeat an uncertain general HR creation or send an invitation", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("connection lost"));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EmployeeInvitationForm generalFlow departments={{ Руководство: ["director"] }} />);
+    fireEvent.change(screen.getByLabelText("ФИО нового сотрудника"), { target: { value: "Тест" } });
+    fireEvent.change(screen.getByLabelText("Рабочий email"), { target: { value: "director@example.com" } });
+    fireEvent.change(screen.getByLabelText("Отдел из HR"), { target: { value: "Руководство" } });
+    fireEvent.change(screen.getByLabelText("Целевая рабочая роль"), { target: { value: "director" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и продолжить" }));
+    await screen.findByText(/Результат создания карточки неизвестен/);
+    expect(screen.getByRole("button", { name: "Проверить и продолжить" })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("проверяет один конкретный ID и отправляет только после явного подтверждения", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(true, {

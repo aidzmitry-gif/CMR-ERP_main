@@ -116,10 +116,7 @@ function newIdempotencyKey(prefix: "invite" | "activate"): string {
   return `erp-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-/**
- * Закрытая форма. Она не читает список сотрудников: оператор вручную вводит ID
- * из HR и сначала получает только preflight конкретного сотрудника.
- */
+/** Список сотрудников и режим определяет сервер; отправка всегда после preflight. */
 export function EmployeeInvitationForm({
   departments,
   pendingInvitations = [],
@@ -128,6 +125,7 @@ export function EmployeeInvitationForm({
   canReadOperations = canActivate,
   crmStaff = [],
   crmFlow = false,
+  generalFlow = false,
   accessError = null,
 }: InvitationCatalog & {
   pendingInvitations?: PendingInvitation[];
@@ -136,6 +134,7 @@ export function EmployeeInvitationForm({
   canReadOperations?: boolean;
   crmStaff?: CrmStaffMember[];
   crmFlow?: boolean;
+  generalFlow?: boolean;
   accessError?: string | null;
 }) {
   const router = useRouter();
@@ -150,6 +149,7 @@ export function EmployeeInvitationForm({
   const [role, setRole] = useState("");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [busy, setBusy] = useState(false);
+  const [creationUncertain, setCreationUncertain] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteResult | null>(null);
   const [activationCandidate, setActivationCandidate] = useState<PendingInvitation | null>(null);
@@ -166,7 +166,8 @@ export function EmployeeInvitationForm({
   const roles = department ? departments[department] ?? [] : [];
   const roleOptions = crmFlow
     ? CRM_ROLE_OPTIONS
-    : roles.map((name) => ({ slug: name, label: name }));
+    : roles.map((name) => ({ slug: name, label: name === "director" ? "Директор" : name === "commercial" ? "Коммерческий директор" : name }));
+  const namedFlow = crmFlow || generalFlow;
   const visiblePendingInvitations = pendingInvitations.filter(
     (item) => item.status === "onboarding" && item.role === "onboarding" && item.expected_role && !locallyActivatedEmployeeIds.has(item.employee_id),
   );
@@ -212,41 +213,46 @@ export function EmployeeInvitationForm({
 
   async function runPreflight(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || creationUncertain) return;
     clearResult();
 
     let id = Number(employeeId);
-    if ((!crmFlow && (!Number.isInteger(id) || id <= 0)) || !email.trim() || !department || !role) {
-      setError(crmFlow
+    if ((!namedFlow && (!Number.isInteger(id) || id <= 0)) || !email.trim() || !department || !role) {
+      setError(namedFlow
         ? "Выберите сотрудника или укажите ФИО нового сотрудника, email и роль."
         : "Заполните ID сотрудника, email, отдел и целевую рабочую роль.");
       return;
     }
 
-    if (crmFlow && (!Number.isInteger(id) || id <= 0)) {
+    if (namedFlow && (!Number.isInteger(id) || id <= 0)) {
       if (!newEmployeeName.trim()) {
         setError("Выберите сотрудника или укажите ФИО нового сотрудника.");
         return;
       }
       setBusy(true);
       try {
-        const response = await fetch("/api/system/users/crm-staff", {
+        const response = await fetch(generalFlow ? "/api/hr/employees" : "/api/system/users/crm-staff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ full_name: newEmployeeName.trim(), ...(newEmployeePosition.trim() ? { position: newEmployeePosition.trim() } : {}) }),
+          body: JSON.stringify({ full_name: newEmployeeName.trim(), ...(newEmployeePosition.trim() ? { position: newEmployeePosition.trim() } : {}),
+            ...(generalFlow ? { department, status: "active" } : {}) }),
         });
         if (!response.ok) {
+          if (generalFlow && response.status >= 500) setCreationUncertain(true);
           setError(await responseError(response, "preflight"));
           return;
         }
         const created = (await response.json()) as { employee_id?: number; id?: number };
         id = created.employee_id ?? created.id ?? 0;
         if (!Number.isInteger(id) || id <= 0) {
+          if (generalFlow) setCreationUncertain(true);
           setError("ERP не вернула ID созданного сотрудника. Приглашение не отправлялось.");
           return;
         }
         setEmployeeId(String(id));
         router.refresh();
       } catch {
+        if (generalFlow) setCreationUncertain(true);
         setError("Не удалось создать карточку сотрудника в ERP. Приглашение не отправлялось.");
         return;
       } finally {
@@ -375,6 +381,8 @@ export function EmployeeInvitationForm({
         <p className="mt-1 text-sm text-muted">
           {crmFlow
             ? "Отдел CRM: выберите сотрудника по имени или создайте карточку, затем проверьте данные до отправки письма."
+            : generalFlow
+            ? "Выберите сотрудника по имени или создайте карточку. Для директора выберите отдел «Руководство» и роль «Директор»."
             : "Укажите ID уже созданного сотрудника из HR. Форма не показывает реестр сотрудников и сначала только проверяет выбранные данные."}
         </p>
 
@@ -392,17 +400,18 @@ export function EmployeeInvitationForm({
         ) : (
           <form onSubmit={runPreflight} aria-busy={busy} className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
             <div className="grid gap-4 sm:grid-cols-2">
-              {crmFlow ? (
+              {namedFlow ? (
                 <>
                   <label className="flex flex-col gap-1 sm:col-span-2">
-                    <span className="text-xs font-medium text-muted">Сотрудник отдела CRM</span>
+                    <span className="text-xs font-medium text-muted">{generalFlow ? "Сотрудник" : "Сотрудник отдела CRM"}</span>
                     <select
                       value={employeeId}
                       onChange={(event) => {
                         const value = event.target.value;
                         setEmployeeId(value);
                         const employee = crmStaff.find((item) => item.employee_id === Number(value));
-                        if (employee?.email) setEmail(employee.email);
+                        setEmail(employee?.email ?? "");
+                        if (generalFlow) changeDepartment(employee?.department ?? "");
                         setPreflight(null);
                         setError(null);
                       }}
@@ -411,7 +420,7 @@ export function EmployeeInvitationForm({
                       <option value="">— новый сотрудник —</option>
                       {crmStaff.map((employee) => (
                         <option key={employee.employee_id} value={employee.employee_id}>
-                          {employee.full_name}{employee.position ? ` · ${employee.position}` : ""}{employee.role ? ` · ${employee.role}` : ""}
+                          {employee.full_name}{generalFlow ? ` · ${employee.department}` : ""}{employee.position ? ` · ${employee.position}` : ""}{employee.role ? ` · ${employee.role}` : ""}
                         </option>
                       ))}
                     </select>
@@ -450,7 +459,7 @@ export function EmployeeInvitationForm({
               ) : (
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-medium text-muted">Отдел из HR</span>
-                  <select value={department} onChange={(event) => changeDepartment(event.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent">
+                  <select value={department} disabled={generalFlow && !!employeeId} onChange={(event) => changeDepartment(event.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent">
                     <option value="">— выберите отдел —</option>
                     {departmentNames.map((name) => (<option key={name} value={name}>{name}</option>))}
                   </select>
@@ -488,7 +497,7 @@ export function EmployeeInvitationForm({
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <button
                 type="submit"
-                disabled={busy}
+                disabled={busy || creationUncertain}
                 ref={inviteTriggerRef}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -500,6 +509,7 @@ export function EmployeeInvitationForm({
         )}
 
         {error && <p role="alert" className="mt-4 text-sm text-rose-700">{error}</p>}
+        {creationUncertain && <p role="alert" className="mt-4 text-sm text-rose-700">Результат создания карточки неизвестен. Обновите страницу и проверьте список сотрудников перед повтором, чтобы не создать дубликат.</p>}
 
         {result && (
           <section className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
