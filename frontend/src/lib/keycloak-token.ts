@@ -27,7 +27,8 @@ export function peekJwtPayload(token: string): Record<string, unknown> | null {
     const b64 = (part + pad).replace(/-/g, "+").replace(/_/g, "/");
     const json =
       typeof atob === "function"
-        ? atob(b64)
+        // atob returns bytes, not Unicode text. JWT JSON is UTF-8.
+        ? new TextDecoder().decode(Uint8Array.from(atob(b64), (char) => char.charCodeAt(0)))
         : Buffer.from(b64, "base64").toString("utf8");
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
