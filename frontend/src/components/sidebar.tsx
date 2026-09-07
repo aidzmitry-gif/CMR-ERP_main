@@ -153,7 +153,7 @@ const MODULES: ModuleItem[] = [
     sub: [
       { label: "Подбор персонала", href: "/erp/hr" },
       { label: "Учёт времени", href: "/erp/hr/worktime" },
-      { label: "Сотрудники" },
+      { label: "Сотрудники", href: "/erp/hr/employees" },
       { label: "Адаптация" },
       { label: "Обучение и KPI" },
       { label: "Кадровый учёт" },
