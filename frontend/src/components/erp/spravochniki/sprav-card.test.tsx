@@ -45,7 +45,7 @@ describe("SpravCard", () => {
     // плашки «УНП …» в шапке нет вовсе; SourceTag честно рисует «УНП —»
     expect(screen.queryByText(/^УНП \d/)).not.toBeInTheDocument();
     expect(screen.getByText("УНП —")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
   });
 
   it("без контактов — честное «Контактов не найдено»", () => {
@@ -187,5 +187,45 @@ describe("SpravCard", () => {
     expect(screen.getByText("update")).toBeInTheDocument();
     expect(screen.getByText("ivan@example.com")).toBeInTheDocument();
     expect(screen.getByText("15.06.2026")).toBeInTheDocument();
+  });
+
+  it("показывает реквизиты, источники и время контактов после чтения карточки", () => {
+    const rich = clone({
+      id: 17,
+      unp: "190000001",
+      revision: 4,
+      requisites: {
+        legal_address: "г. Минск, ул. Ромашковая, 7",
+        registry_status: "Действующее",
+        bank_name: "Банк развития",
+        bank_account: "BY13 NBRB 3600 0000 0000 0000 0000",
+        bank_bic: "NBRBBY2X",
+      },
+      provenance: {
+        name: { source: "mns_grp", at: "2026-09-08T12:00:00Z" },
+        legal_address: { source: "mns_grp", at: "2026-09-08T12:00:00Z" },
+        registry_status: { source: "demo", at: "2026-09-08T12:00:00Z" },
+        bank_name: { source: "manual", at: "2026-09-08T12:00:00Z" },
+        contacts: { source: "manual", at: "2026-09-08T12:00:00Z" },
+      },
+      contacts: [{ id: 3, full_name: "Иван Петров", phone: "+375 29 111-22-33", email: "ivan@example.com", is_primary: true }],
+    });
+    render(<SpravCard card={rich} />);
+
+    expect(screen.getByText("г. Минск, ул. Ромашковая, 7")).toBeInTheDocument();
+    expect(screen.getByText("Действующее")).toBeInTheDocument();
+    expect(screen.getByText("Банк развития")).toBeInTheDocument();
+    expect(screen.getByText("BY13 NBRB 3600 0000 0000 0000 0000")).toBeInTheDocument();
+    expect(screen.getByText("NBRBBY2X")).toBeInTheDocument();
+    expect(screen.getAllByText("МНС (ГРП)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Демо-источник").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByTitle("Источник: Вручную · 08.09.2026").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Иван Петров")).toBeInTheDocument();
+  });
+
+  it("резервирует место справа под узкую панель и переносит длинные значения", () => {
+    const { container } = render(<SpravCard card={baseCard} />);
+    const wrapper = container.firstElementChild;
+    expect(wrapper).toHaveClass("min-w-0", "pr-[74px]");
   });
 });

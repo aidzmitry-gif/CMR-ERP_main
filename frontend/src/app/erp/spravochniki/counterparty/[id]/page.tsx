@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { SpravCard } from "@/components/erp/spravochniki/sprav-card";
+import { SpravCounterpartyEditor } from "@/components/erp/spravochniki/sprav-counterparty-editor";
 import Link from "next/link";
 
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
@@ -53,8 +54,8 @@ export default async function CounterpartyCardPage({
   return (
     <AppShell crumbs={["ERP", "Справочники", "Контрагент"]}>
       {result.status === "success" ? (
-        <div className="flex-1">
-          <div className="mx-auto max-w-5xl px-6 pt-6">
+        <div className="min-w-0 flex-1">
+          <div className="mx-auto min-w-0 max-w-5xl px-6 pr-[74px] pt-6 lg:pr-6">
             <Link
               href={backHref}
               className="text-sm font-medium text-accent hover:underline"
@@ -63,9 +64,15 @@ export default async function CounterpartyCardPage({
             </Link>
           </div>
           <SpravCard card={result.card} />
+          <SpravCounterpartyEditor
+            key={result.card.id}
+            mode="edit"
+            card={result.card}
+            returnQuery={{ name, unp }}
+          />
         </div>
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted">
+        <div className="min-w-0 flex flex-1 flex-col items-center justify-center gap-4 pr-[74px] text-muted lg:pr-6">
           <p role="status">{failureText(result.status)}</p>
           <Link href={backHref} className="text-sm font-medium text-accent hover:underline">
             ← К поиску контрагентов

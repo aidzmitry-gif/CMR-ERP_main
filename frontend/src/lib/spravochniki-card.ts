@@ -24,6 +24,8 @@ export interface SourceMeta {
 
 /** Источники по убыванию доверия — порядок = приоритет survivorship (egr > erp > manual > 1c > bitrix). */
 const SOURCE_META: Record<string, SourceMeta> = {
+  mns_grp: { label: "МНС (ГРП)", icon: "🏛", tone: "egr" },
+  demo: { label: "Демо-источник", icon: "◇", tone: "manual" },
   egr: { label: "ЕГР", icon: "🏛", tone: "egr" },
   erp: { label: "ERP", icon: "✦", tone: "erp" },
   manual: { label: "Вручную", icon: "✍", tone: "manual" },

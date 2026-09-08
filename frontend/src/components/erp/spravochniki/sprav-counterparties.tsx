@@ -11,6 +11,8 @@ import {
   searchCounterparties,
 } from "@/lib/reference-data";
 
+import { SpravCounterpartyEditor } from "./sprav-counterparty-editor";
+
 interface Props {
   initialName?: string;
   initialUnp?: string;
@@ -80,6 +82,7 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
   );
   const [rows, setRows] = useState<CounterpartyRow[]>([]);
   const [submittedQuery, setSubmittedQuery] = useState<Query>(initialQuery);
+  const [creating, setCreating] = useState(false);
   const requestVersion = useRef(0);
   const requestedQueryKey = useRef<string | null>(null);
   const propEffectVersion = useRef(0);
@@ -157,7 +160,7 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
   }
 
   return (
-    <div className="mx-auto min-w-0 max-w-[1280px] space-y-4 p-6">
+    <div className="mx-auto min-w-0 max-w-[1280px] space-y-4 p-6 pr-[74px] lg:pr-6">
       <div className="rounded-2xl bg-surface p-5 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -169,6 +172,15 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
           <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
             максимум {COUNTERPARTY_SEARCH_LIMIT} результатов
           </span>
+          {!creating && (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="rounded-xl border border-line px-3 py-2 text-sm font-medium text-accent-ink hover:bg-accent-soft"
+            >
+              + Новый контрагент
+            </button>
+          )}
         </div>
 
         <form className="mt-4 space-y-3" onSubmit={submit}>
@@ -209,6 +221,16 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
           </p>
         </form>
       </div>
+
+      {creating && (
+        <SpravCounterpartyEditor
+          mode="create"
+          embedded
+          initialUnp={submittedQuery.unp}
+          returnQuery={submittedQuery}
+          onCancel={() => setCreating(false)}
+        />
+      )}
 
       <div className="rounded-2xl bg-surface shadow-card" aria-live="polite">
         {state !== "success" ? (

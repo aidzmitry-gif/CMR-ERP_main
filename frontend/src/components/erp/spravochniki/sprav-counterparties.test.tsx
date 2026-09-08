@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
+const navigation = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -10,7 +10,7 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: navigation.replace }),
+  useRouter: () => navigation,
 }));
 
 import { SpravCounterparties } from "@/components/erp/spravochniki/sprav-counterparties";
@@ -22,6 +22,8 @@ function mockResponse(body: unknown, status = 200) {
 describe("SpravCounterparties", () => {
   beforeEach(() => {
     navigation.replace.mockReset();
+    navigation.push.mockReset();
+    navigation.refresh.mockReset();
   });
 
   afterEach(() => {
@@ -64,6 +66,50 @@ describe("SpravCounterparties", () => {
         body: JSON.stringify({ ref: "core.counterparties", name: "Ром", limit: 50 }),
       }),
     );
+  });
+
+  it("создаёт из списка, сохраняет реальные registry-поля и возвращает только отправленный query", async () => {
+    const registry = {
+      unp: "190000001",
+      name: "ООО Новая Ромашка",
+      address: "Новый адрес, 1",
+      status: "Действующее",
+      source: "mns_grp",
+      source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=190000001",
+      fetched_at: "2026-09-08T12:00:00Z",
+    };
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input === "/api/system/references/query") {
+        return mockResponse({ result: [{ id: 17, name: "ООО Ромашка", unp: "190000001" }] });
+      }
+      if (input.includes("/api/integrations/egr/")) return mockResponse(registry);
+      return mockResponse({ id: 42, revision: 1 }, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SpravCounterparties initialName="Ром" />);
+
+    expect(await screen.findByText("ООО Ромашка")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ Новый контрагент" }));
+    expect(screen.queryByRole("button", { name: "Скрыть создание" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("УНП (карточка)"), { target: { value: "190000001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
+    expect(await screen.findByText(/Источник: МНС \(ГРП\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Наименование" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать УНП" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(
+      "/erp/spravochniki/counterparty/42?name=%D0%A0%D0%BE%D0%BC",
+    ));
+    const saveCall = fetchMock.mock.calls.find(([input]) => String(input) === "/api/system/mdm/counterparty");
+    expect(saveCall).toBeDefined();
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
+      registry: {
+        unp: "190000001",
+        fields: ["name", "unp"],
+        preview: { name: "ООО Новая Ромашка", unp: "190000001" },
+      },
+    });
   });
 
   it("не дублирует запрос при возврате тех же URL params и восстанавливает поле при новом URL", async () => {
