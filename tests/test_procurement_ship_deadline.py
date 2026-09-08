@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -15,6 +17,7 @@ from sqlalchemy import select
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
+from modules.procurement import routes as procurement_routes
 from modules.procurement.models import ShipRequirement
 
 pytestmark = pytest.mark.asyncio
@@ -100,8 +103,15 @@ async def test_deadline_event_without_deal_id_skipped(deadline_app, session):
 # ───────────────────────── обратное планирование от срока + риск ─────────────────────────
 
 
-async def test_plan_auto_derives_target_from_deadline(deadline_app, session):
+async def test_plan_auto_derives_target_from_deadline(deadline_app, session, monkeypatch):
     """План без явной даты: target = самый ранний срок клиента − буфер (3 дня)."""
+    class PlanningClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 1, tzinfo=tz)
+
+    # Этот сценарий проверяет вывод даты, а не риск уже просроченного старта.
+    monkeypatch.setattr(procurement_routes, "datetime", PlanningClock)
     client, core = deadline_app
     o = await _order(client)
     await _emit_deadline(core, session, ship_deadline="2026-12-31")  # позиция A

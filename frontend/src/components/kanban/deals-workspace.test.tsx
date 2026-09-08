@@ -841,7 +841,7 @@ describe("DealsWorkspace (канбан)", () => {
     // «Сегодня» (тот неоднозначен: совпадает с чипом срочности на каждой карточке).
     await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(50));
     fireEvent.click(screen.getByRole("button", { name: "Показать ещё 10 (из 60)" }));
-    expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60);
+    await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60));
   });
 
   // --- «Все вместе»: свой обработчик drag&drop секции (FunnelSection.handleDragEnd) ---
