@@ -86,7 +86,9 @@ def test_parse_duration_garbage_no_crash():
 
 def test_originate_params():
     assert originate_params("101", "375291234567") == {"vnut": "101", "number": "+375291234567"}
-    assert originate_params("1234", "291234567")["vnut"] == "123"  # внутренний — не больше 3 цифр
+    assert originate_params("001", "291234567")["vnut"] == "001"  # ведущие нули — часть идентификатора
+    with pytest.raises(ValueError):
+        originate_params("1234", "291234567")
 
 
 # --- Резолв продавца по номеру (A.2) ----------------------------------------------

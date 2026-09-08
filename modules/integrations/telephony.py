@@ -99,6 +99,11 @@ def _to_seconds(value: object) -> int | None:
     return result if result >= 0 else None
 
 
+def _extension(value: object) -> str | None:
+    """Only a complete ASCII extension; provider identifiers are not extensions."""
+    return value if isinstance(value, str) and re.fullmatch(r"[0-9]{1,8}", value) else None
+
+
 def parse_event(params: dict) -> dict | None:
     """Разобрать webhook zruchna → ``{event_type, payload}`` или None (игнор).
 
@@ -119,8 +124,11 @@ def parse_event(params: dict) -> dict | None:
         "direction": direction,
         "phone_e164": normalize_e164(params.get("phone")),
         "did": _s(params.get("did")) or None,  # внешняя линия, на которую звонил клиент
-        "agent_ext": _s(params.get("code")) or None,  # внутренний номер сотрудника
-        "to_ext": _s(params.get("totransfer")) or None,  # перевод: на кого
+        # Keep provider values intact for audit; a short extension is not employee identity.
+        "provider_code": params.get("code"),
+        "provider_totransfer": params.get("totransfer"),
+        "agent_ext": _extension(params.get("code")),
+        "to_ext": _extension(params.get("totransfer")),
         "status": STATUS_MAP.get(_s(params.get("status")).upper()),
         "hold_sec": _to_seconds(params.get("hold")),
         "duration_sec": _to_seconds(params.get("duration")),
@@ -144,9 +152,18 @@ def ingest(session, event_bus, params: dict) -> dict:
 
 
 def originate_params(vnut: object, number: object) -> dict:
-    """Параметры запроса инициации звонка: ``vnut`` (≤3 цифр) + ``number`` (клиент)."""
-    vnut_digits = re.sub(r"\D", "", _s(vnut))[:3]
-    return {"vnut": vnut_digits, "number": normalize_e164(number) or _s(number)}
+    """Параметры запроса инициации звонка с валидацией до HTTP-вызова.
+
+    ``vnut`` — уже выбранный внутренний номер сотрудника: принимаем ровно 1–3
+    ASCII-цифры и не извлекаем/обрезаем значение. Номер клиента сохраняет общую
+    семантику ``normalize_e164``; пустое значение без цифр отклоняется.
+    """
+    if not isinstance(vnut, str) or re.fullmatch(r"[0-9]{1,3}", vnut) is None:
+        raise ValueError("Некорректный внутренний номер")
+    number_e164 = normalize_e164(number)
+    if number_e164 is None:
+        raise ValueError("Некорректный номер клиента")
+    return {"vnut": vnut, "number": number_e164}
 
 
 class ZruchnaClient:
@@ -157,12 +174,32 @@ class ZruchnaClient:
 
     @property
     def configured(self) -> bool:
-        return bool(self.originate_url)
+        """Настроен ли шлюз URL-ом абсолютного HTTP(S)-эндпоинта."""
+        if not isinstance(self.originate_url, str):
+            return False
+        if not self.originate_url or any(
+            char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in self.originate_url
+        ):
+            return False
+        try:
+            parsed = httpx.URL(self.originate_url)
+            port = parsed.port
+        except (TypeError, ValueError, httpx.InvalidURL):
+            return False
+        raw_host = parsed.raw_host.lower()
+        return (
+            parsed.scheme in {"http", "https"}
+            and bool(parsed.host)
+            and parsed.host not in {".", "..", "..."}
+            and (port is None or 1 <= port <= 65535)
+            and b"%5b" not in raw_host
+            and b"%5d" not in raw_host
+        )
 
     async def originate(self, vnut: str, number: str) -> dict:
         """Инициировать исходящий звонок: поднять трубку у ``vnut`` и набрать ``number``."""
         if not self.configured:
-            raise RuntimeError("Телефония: AIOS_TELEPHONY_ORIGINATE_URL не задан")
+            raise RuntimeError("Телефония: AIOS_TELEPHONY_ORIGINATE_URL не задан или некорректен")
         params = originate_params(vnut, number)
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(self.originate_url, params=params)
