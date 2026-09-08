@@ -38,7 +38,10 @@ class IntegrationsModule(ModuleContract):
 
             core.services.price_cost = StockPriceCostSource()
         core.services.stock = StockService()
-        core.services.registry = RegistryClient(core.config.egr_base_url)
+        core.services.registry = RegistryClient(
+            cfg.egr_base_url,
+            allow_demo=getattr(cfg, "environment", "prod").lower() in {"dev", "development", "test"},
+        )
         # телефонный шлюз: исходящий звонок через облачную АТС zruchna. Входящие
         # события идут не через шлюз, а webhook'ом → шина (см. routes/telephony).
         core.services.telephony = ZruchnaClient(core.config.telephony_originate_url)
