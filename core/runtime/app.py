@@ -65,6 +65,24 @@ async def _background_loop(services, tick_hooks=()) -> None:
         try:
             assert services.db.session_factory is not None
             async with services.db.session_factory() as session:
+                try:
+                    await services.event_bus.relay_once(
+                        session,
+                        EventContext(session, services),
+                        event_types=("intake.lead.received",),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await session.rollback()
+                    logger.exception("priority intake relay error")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("priority intake relay setup error")
+        try:
+            assert services.db.session_factory is not None
+            async with services.db.session_factory() as session:
                 await services.event_bus.relay_once(session, EventContext(session, services))
             async with services.db.session_factory() as session:
                 await services.approvals.escalate_once(session)
