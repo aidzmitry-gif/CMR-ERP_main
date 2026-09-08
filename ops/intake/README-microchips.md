@@ -56,7 +56,9 @@ canonical digest после G04 `IntakeRequestIn`/`_prepare`: все default-п�
 `phone`/`email` cleanup, сортировка объектов и `ensure_ascii=True` входят в
 расчёт. Поэтому producer не сравнивает receipt с SHA сырого wire JSON.
 `queued` означает только подтверждение очереди receiver и записывается как
-`queued`; producer не называет это доставленным лидом. Для `delivered` нужны
+`queued`; envelope остаётся в `pending` и получает bounded `next_retry_at` для
+повторного immutable POST. Ошибкой queued не считается. Producer не называет
+это доставленным лидом. Для `delivered` нужны
 положительный integer `lead_id`, полное совпадение количества ожидаемых files,
 SHA каждого файла и положительный `attachment_id`. Ответ `delivered` после
 POST считается промежуточным: producer обязательно делает GET receipt и
@@ -158,9 +160,10 @@ Bitrix24 hook, and check that no two producer hooks are active for one result.
 
 The consumer takes an exclusive non-blocking `flock` on `.consumer.lock`; a
 second process exits busy. It sends each pending envelope at most once per
-run. Failed/unavailable/transport errors remain visible in `pending` and in a
-0600 status file, with bounded exponential retry delay. `done` retains the
-original envelope for recovery and audit.
+run. Queued receipts, failed/unavailable responses and transport errors remain
+visible in `pending` and in a 0600 status file, with bounded exponential retry
+delay. Only a GET-confirmed `delivered` receipt moves the original envelope to
+`done` for recovery and audit.
 
 Run the staged consumer only after config and receiver acceptance:
 

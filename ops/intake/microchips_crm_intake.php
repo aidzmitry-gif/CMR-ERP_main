@@ -1530,9 +1530,9 @@ function microchipsCrmIntakeMove(string $path, string $spoolDir, string $directo
 }
 
 /**
- * Process each pending item once under one process-wide flock.  Failed and
- * unavailable deliveries remain pending with a durable retry time; queued and
- * delivered raw envelopes move to done and are retained there.
+ * Process each pending item once under one process-wide flock.  Queued,
+ * failed and unavailable deliveries remain pending with a durable retry time;
+ * only a GET-confirmed delivered envelope moves to done.
  */
 function microchipsCrmIntakeConsume(
     string $spoolDir,
@@ -1577,7 +1577,7 @@ function microchipsCrmIntakeConsume(
                 $status = microchipsCrmIntakeReadStatus($spoolDir, $sourceId) ?? [];
                 $metadata = is_array($envelope['metadata'] ?? null) ? $envelope['metadata'] : [];
                 $statusState = (string) ($status['state'] ?? 'spooled');
-                if (in_array($statusState, ['queued', 'delivered'], true)) {
+                if ($statusState === 'delivered') {
                     microchipsCrmIntakeMove($path, $spoolDir, 'done');
                     $items[] = ['source_id' => $sourceId, 'state' => $statusState, 'action' => 'retained_done'];
                     continue;
@@ -1647,8 +1647,14 @@ function microchipsCrmIntakeConsume(
                     'next_retry_at' => null,
                 ];
                 microchipsCrmIntakeUpdateStatus($spoolDir, $sourceId, $patch);
-                if (in_array($remoteState, ['queued', 'delivered'], true)) {
+                if ($remoteState === 'delivered') {
                     microchipsCrmIntakeMove($path, $spoolDir, 'done');
+                } elseif ($remoteState === 'queued') {
+                    // A 202/queued receipt only confirms receiver enqueue.
+                    // Keep the immutable source pending and poll by retrying
+                    // the same idempotent POST after a bounded delay.
+                    $patch['next_retry_at'] = gmdate('c', time() + microchipsCrmIntakeRetryDelay($attempts));
+                    microchipsCrmIntakeUpdateStatus($spoolDir, $sourceId, $patch);
                 } else {
                     $errors++;
                     $patch['next_retry_at'] = gmdate('c', time() + microchipsCrmIntakeRetryDelay($attempts));
