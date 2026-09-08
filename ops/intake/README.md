@@ -17,6 +17,11 @@ Backend добавляет `/integrations/intake/v1` и квитанции до�
   повтора. Порядок переключения в `MOTTOR-RUNBOOK.md`.
 - `mail_delivery.py` — IMAP readonly, MIME staging, отбор и доставка с receipt.
   Конфигурация и ограничения в `MAIL-RUNBOOK.md`.
+- `mail_receipts.py` — conservative parser: обычный внешний клиент, адресованный
+  на `To: order@microchips.by`, проходит по intent/file checks; site-copy review требует provenance от
+  `microchips.by`/`lpmotor.ru` или явного form/Mottor/RS marker. Email не является
+  ключом связывания. `application/msword`/`.doc` сохраняется байт-в-байт в тех же
+  пределах; выдача скачивает его как attachment с `nosniff`.
 
 Проверка ops-кода:
 

@@ -8,16 +8,22 @@ import hashlib
 import re
 from email import policy
 from email.parser import BytesParser
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from html.parser import HTMLParser
 
 MAILBOX = 'admin@enersys.by'
 FILE_TYPES = {
     'application/pdf': '.pdf',
+    'application/msword': '.doc',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
     'image/jpeg': '.jpg', 'image/png': '.png',
 }
+SITE_COPY_MARKER_RE = re.compile(
+    r'\b(?:form:\d+:result:\d+|mottor:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+)\b', re.IGNORECASE
+)
+RS_FORM_MARKER_RE = re.compile(r'\bRS_FORM_ID\b', re.IGNORECASE)
+RS_RESULT_MARKER_RE = re.compile(r'\bRS_RESULT_ID\b', re.IGNORECASE)
 
 
 class MailText(HTMLParser):
@@ -41,6 +47,47 @@ class MailText(HTMLParser):
             self.parts.append(data)
 
 
+def _domain_matches(domain, base):
+    domain = domain.rstrip('.').casefold()
+    base = base.rstrip('.').casefold()
+    return domain == base or domain.endswith('.' + base)
+
+
+def _sender_domains(msg):
+    values = []
+    for header in ('From', 'Sender'):
+        values.extend(str(value) for value in msg.get_all(header, []))
+    return [address.rsplit('@', 1)[1].casefold().rstrip('.')
+            for _, address in getaddresses(values) if '@' in address]
+
+
+def _text_parts_for_markers(msg):
+    parts = []
+    for part in msg.walk():
+        if (part.is_multipart() or part.get_content_disposition() == 'attachment'
+                or part.get_content_type() not in ('text/plain', 'text/html')):
+            continue
+        data = part.get_payload(decode=True)
+        if not isinstance(data, bytes):
+            continue
+        charset = part.get_content_charset() or 'utf-8'
+        try:
+            parts.append(data.decode(charset, errors='ignore'))
+        except (LookupError, UnicodeError):
+            parts.append(data.decode('utf-8', errors='ignore'))
+    return parts
+
+
+def _has_site_copy_provenance(msg, subject):
+    domains = _sender_domains(msg)
+    if any(_domain_matches(domain, base) for domain in domains for base in ('microchips.by', 'lpmotor.ru')):
+        return True
+    searchable = '\n'.join([subject, *_text_parts_for_markers(msg)])
+    if SITE_COPY_MARKER_RE.search(searchable):
+        return True
+    return bool(RS_FORM_MARKER_RE.search(searchable) and RS_RESULT_MARKER_RE.search(searchable))
+
+
 def prepare(raw, uidvalidity, uid):
     """Return (request, None), or (None, explicit review/exclusion reason).
 
@@ -53,15 +100,13 @@ def prepare(raw, uidvalidity, uid):
     name, address = parseaddr(str(msg.get('From', '')))
     if not address or '@' not in address:
         return None, 'sender_requires_review'
-    domain = address.rsplit('@', 1)[1].lower()
+    sender_domains = _sender_domains(msg)
+    if any(_domain_matches(value, 'omts.by') for value in sender_domains):
+        return None, 'omts_requires_source_mapping'
     # A separate parser must verify the actual tender/lot/template, rather than
     # importing Legat billing and account administration as customer requests.
-    if domain == 'legat.by' or domain.endswith('.legat.by'):
+    if any(_domain_matches(value, 'legat.by') for value in sender_domains):
         return None, 'legat_requires_verified_tender_parser'
-    recipients = ' '.join(str(msg.get(k, '')) for k in
-                          ('To', 'Cc', 'Delivered-To', 'X-Original-To'))
-    if 'order@microchips.by' in recipients.casefold():
-        return None, 'possible_site_copy_requires_exact_source_id'
     if (msg.get('List-ID') or msg.get('List-Unsubscribe') or
             str(msg.get('Precedence', '')).casefold() in ('bulk', 'list') or
             str(msg.get('Auto-Submitted', 'no')).casefold() != 'no'):
@@ -78,6 +123,8 @@ def prepare(raw, uidvalidity, uid):
         parser.feed(text)
         text = ''.join(parser.parts).strip()
     subject = str(msg.get('Subject', ''))
+    if _has_site_copy_provenance(msg, subject):
+        return None, 'possible_site_copy_requires_exact_source_id'
     combined = (subject + '\n' + text).casefold()
     if any(x in combined for x in ('тендер', 'закупк', 'маркетинговое исследование')):
         return None, 'procurement_requires_source_mapping'
