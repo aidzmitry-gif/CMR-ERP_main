@@ -7,6 +7,7 @@ import {
   buildCategoryTree,
   bulkUpsertRef,
   changedFields,
+  COUNTERPARTY_SEARCH_LIMIT,
   createNomenclatureGroup,
   createSimpleRef,
   currencyRateAsOf,
@@ -40,6 +41,7 @@ import {
   qualityTone,
   rowsFromResult,
   runReferenceQuery,
+  searchCounterparties,
   sortVersionsDesc,
   totalDuplicates,
   unmergeCounterparty,
@@ -312,6 +314,73 @@ describe("runReferenceQuery", () => {
       throw new Error("x");
     });
     expect(await runReferenceQuery({ ref: "x" })).toBeNull();
+  });
+});
+
+describe("searchCounterparties", () => {
+  it("ищет по названию через proxy и передаёт conservative limit", async () => {
+    const rows = [{ id: 17, name: "ООО Ромашка", unp: "190000001" }];
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ result: rows }) }));
+    mockFetch(f);
+
+    await expect(searchCounterparties({ name: "  Ромашка " })).resolves.toEqual({
+      status: "success",
+      rows,
+      limit: COUNTERPARTY_SEARCH_LIMIT,
+    });
+    expect(f).toHaveBeenCalledWith(
+      "/api/system/references/query",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ref: "core.counterparties", name: "Ромашка", limit: 50 }),
+      }),
+    );
+  });
+
+  it("ищет по УНП как exact key", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ result: [] }) }));
+    mockFetch(f);
+
+    await expect(searchCounterparties({ unp: "190000001" })).resolves.toEqual({
+      status: "success",
+      rows: [],
+      limit: COUNTERPARTY_SEARCH_LIMIT,
+    });
+    expect(f).toHaveBeenCalledWith(
+      "/api/system/references/query",
+      expect.objectContaining({
+        body: JSON.stringify({ ref: "core.counterparties", key: "190000001", limit: 50 }),
+      }),
+    );
+  });
+
+  it("не вызывает API для пустого/двойного запроса", async () => {
+    const f = vi.fn();
+    mockFetch(f);
+
+    await expect(searchCounterparties({})).resolves.toEqual({ status: "invalid-query", reason: "missing" });
+    await expect(searchCounterparties({ name: "Ромашка", unp: "190000001" })).resolves.toEqual({
+      status: "invalid-query",
+      reason: "ambiguous",
+    });
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [401, { status: "unauthorized" }],
+    [403, { status: "forbidden" }],
+    [503, { status: "service-error", statusCode: 503 }],
+  ] as const)("сохраняет HTTP статус %s отдельным состоянием", async (status, expected) => {
+    mockFetch(async () => ({ ok: false, status }));
+    await expect(searchCounterparties({ name: "Ромашка" })).resolves.toEqual(expected);
+  });
+
+  it("некорректный успешный payload — service-error, а не no-match", async () => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ result: [{ id: "17" }] }) }));
+    await expect(searchCounterparties({ name: "Ромашка" })).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
   });
 });
 

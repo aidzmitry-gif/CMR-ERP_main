@@ -149,6 +149,73 @@ export interface ReferenceQueryResult {
   result: unknown;
 }
 
+/** Строка результата поиска контрагентов (только активные golden records). */
+export interface CounterpartyRow {
+  id: number;
+  name: string;
+  unp: string | null;
+}
+
+/** Потолок одного поиска: API не получает запрос на полный список контрагентов. */
+export const COUNTERPARTY_SEARCH_LIMIT = 50;
+
+export type CounterpartySearchResult =
+  | { status: "success"; rows: CounterpartyRow[]; limit: number }
+  | { status: "invalid-query"; reason: "missing" | "ambiguous" }
+  | { status: "unauthorized" }
+  | { status: "forbidden" }
+  | { status: "service-error"; statusCode?: number };
+
+function isCounterpartyRow(value: unknown): value is CounterpartyRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0 &&
+    typeof row.name === "string" &&
+    (typeof row.unp === "string" || row.unp === null)
+  );
+}
+
+/** Поиск контрагентов через authenticated proxy с различимыми ошибками.
+ * Пустой запрос и одновременные name/unp отсекаются до fetch, поэтому list-all не вызывается. */
+export async function searchCounterparties(input: {
+  name?: string;
+  unp?: string;
+}): Promise<CounterpartySearchResult> {
+  const name = input.name?.trim() ?? "";
+  const unp = input.unp?.trim() ?? "";
+  if (!name && !unp) return { status: "invalid-query", reason: "missing" };
+  if (name && unp) return { status: "invalid-query", reason: "ambiguous" };
+
+  const limit = COUNTERPARTY_SEARCH_LIMIT;
+  try {
+    const res = await fetch("/api/system/references/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ref: "core.counterparties",
+        ...(unp ? { key: unp } : { name }),
+        limit,
+      }),
+    });
+    if (res.status === 401) return { status: "unauthorized" };
+    if (res.status === 403) return { status: "forbidden" };
+    if (!res.ok) return { status: "service-error", statusCode: res.status };
+
+    const payload: unknown = await res.json();
+    if (typeof payload !== "object" || payload === null) {
+      return { status: "service-error", statusCode: 200 };
+    }
+    const result = (payload as { result?: unknown }).result;
+    if (!Array.isArray(result) || !result.every(isCounterpartyRow)) {
+      return { status: "service-error", statusCode: 200 };
+    }
+    return { status: "success", rows: result, limit };
+  } catch {
+    return { status: "service-error" };
+  }
+}
+
 /** Выполнить структурный запрос AI к справочнику (клиент, интерактивный AI-экран). */
 export async function runReferenceQuery(
   input: ReferenceQueryInput,
