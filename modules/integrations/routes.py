@@ -197,9 +197,18 @@ async def telephony_originate(
     if gateway is None or not getattr(gateway, "configured", False):
         raise HTTPException(status_code=503, detail="Телефония не подключена")
     try:
+        # Провайдер не должен получать отброшенные/обрезанные параметры. Повторная
+        # проверка в gateway остаётся защитой для прямых вызовов шлюза.
+        telephony.originate_params(body.vnut, body.number)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Некорректные параметры исходящего звонка") from exc
+    try:
         return await gateway.originate(body.vnut, body.number)
     except Exception as exc:  # noqa: BLE001 — ошибку АТС отдаём вызывающему как 502
-        raise HTTPException(status_code=502, detail=f"АТС недоступна: {exc}") from exc
+        # Ошибка провайдера может содержать URL, query и credentials. В ответе
+        # оставляем только стабильную категорию, подробности не эхоируем.
+        logger.warning("telephony originate failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="АТС недоступна") from exc
 
 
 @router.post("/1c/sync")
