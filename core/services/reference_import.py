@@ -60,7 +60,10 @@ def _apply_field(
         setattr(cp, field, winner.value)
     # provenance отражает источник победителя (фиксируем «кто владеет полем»)
     prov = dict(cp.provenance or {})
-    prov[field] = {"source": winner.source, "at": winner.at}
+    prov[field] = {
+        **(prov.get(field, {}) if winner is current else {}),
+        "source": winner.source, "at": winner.at,
+    }
     cp.provenance = prov
     return changed
 

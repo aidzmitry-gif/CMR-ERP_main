@@ -7,9 +7,22 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import blake2b
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    event,
+    func,
+    inspect,
+    select,
+    text,
+)
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from core.db.base import Base
 
@@ -33,6 +46,10 @@ class Counterparty(Base):
     # Источник КАЖДОГО поля, а не записи целиком → survivorship-движок знает, что синк
     # вправе перезаписать, а что закреплено за ЕГР/ERP/ручным вводом (M2 дорожной карты).
     provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    requisites: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    revision: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+
+    __mapper_args__ = {"version_id_col": revision}
 
 
 class CounterpartyAlias(Base):
@@ -102,11 +119,85 @@ class Contact(Base):
     __tablename__ = "contact"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"))
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"), active_history=True)
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str | None] = mapped_column(String(255))
     is_primary: Mapped[bool] = mapped_column(default=False, server_default="false")
+
+
+class CounterpartyUnpConflict(ValueError):
+    """Новый/изменённый УНП уже принадлежит активному эталону."""
+
+    def __init__(self, ids: list[int]) -> None:
+        super().__init__("УНП уже принадлежит активному контрагенту")
+        self.ids = ids
+
+
+def lock_counterparty_unps(session: Session, unps: set[str]) -> None:
+    """Общий transaction lock для API, импорта и прямых ORM-записей УНП."""
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    for unp in sorted(unps):
+        digest = blake2b(f"counterparty-unp:{unp}".encode(), digest_size=8).digest()
+        session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {
+            "key": int.from_bytes(digest, "big", signed=True),
+        })
+
+
+@event.listens_for(Session, "before_flush")
+def _counterparty_write_guards(session: Session, _context, _instances) -> None:
+    """Обычные ORM writers участвуют в revision и проверке изменённого УНП.
+
+    Bulk SQL не проходит ORM flush: импорт исторических дублей/миграции требуют
+    собственной проверки. Неизменённый УНП, merge и unmerge legacy-записей не блокируем.
+    """
+    changed = set(session.new) | set(session.dirty) | set(session.deleted)
+    parents: set[int] = set()
+    candidates: list[Counterparty] = []
+    for obj in changed:
+        if isinstance(obj, Contact) and (obj in session.new or obj in session.deleted or session.is_modified(obj)):
+            if obj.counterparty_id is not None:
+                parents.add(obj.counterparty_id)
+            parents.update(value for value in inspect(obj).attrs.counterparty_id.history.deleted if value is not None)
+        if isinstance(obj, Counterparty) and obj not in session.deleted:
+            unp = (obj.unp or "").strip()
+            if (obj in session.new or inspect(obj).attrs.unp.history.has_changes()) and (
+                obj.is_active is not False and len(unp) == 9 and unp.isascii() and unp.isdigit()
+            ):
+                candidates.append(obj)
+    lock_counterparty_unps(session, {(obj.unp or "").strip() for obj in candidates})
+    for obj in candidates:
+        unp = (obj.unp or "").strip()
+        ids = list(session.scalars(select(Counterparty.id).where(
+            func.trim(Counterparty.unp) == unp, Counterparty.is_active.is_(True),
+            Counterparty.id != obj.id if obj.id is not None else True,
+        )))
+        conflicts: list[int] = []
+        for row_id in ids:
+            existing = session.get(Counterparty, row_id)
+            if existing is not None:
+                state = inspect(existing)
+                # Только реальные pending changes отменяют DB-совпадение:
+                # неизменённый identity-map объект может быть устаревшим.
+                if existing in session.deleted or (
+                    state.attrs.is_active.history.has_changes() and existing.is_active is False
+                ) or (
+                    state.attrs.unp.history.has_changes() and (existing.unp or "").strip() != unp
+                ):
+                    continue
+            conflicts.append(row_id)
+        pending_duplicate = any(
+            other is not obj and (other.unp or "").strip() == unp for other in candidates
+        )
+        if conflicts or pending_duplicate:
+            raise CounterpartyUnpConflict(conflicts)
+    for parent_id in sorted(parents):
+        parent = session.get(Counterparty, parent_id)
+        if parent is not None and parent not in session.deleted and parent not in session.new:
+            # Изменённый Counterparty уже получит новую version_id при этом flush.
+            if not session.is_modified(parent, include_collections=False):
+                parent.revision += 1
 
 
 class Sku(Base):

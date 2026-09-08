@@ -1,5 +1,6 @@
 """MDM контрагентов: дедуп по УНП, merge (survivorship + архив + alias), unmerge, гарды."""
 import pytest
+from sqlalchemy import insert
 
 from core.domain.models import Contact, Counterparty
 from core.services import mdm
@@ -10,10 +11,11 @@ bus = OutboxEventBus()
 
 
 async def test_duplicate_clusters_and_merge(session):
-    a = Counterparty(name="ООО Старт", unp="191234567")
-    b = Counterparty(name="", unp="191234567")  # дубль с пустым именем
-    session.add_all([a, b])
-    await session.flush()
+    # Historical rows predate the ORM guard; business operations below use normal ORM.
+    a_id, b_id = (await session.execute(insert(Counterparty).returning(Counterparty.id), [
+        {"name": "ООО Старт", "unp": "191234567"}, {"name": "", "unp": "191234567"},
+    ])).scalars().all()
+    a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
     clusters = await mdm.duplicate_clusters(session)
     assert len(clusters) == 1
@@ -33,20 +35,20 @@ async def test_duplicate_clusters_and_merge(session):
 
 
 async def test_survivorship_fills_empty_survivor_field(session):
-    a = Counterparty(name="", unp="100000001")  # эталон с пустым именем
-    b = Counterparty(name="ОАО Имя", unp="100000001")
-    session.add_all([a, b])
-    await session.flush()
+    a_id, b_id = (await session.execute(insert(Counterparty).returning(Counterparty.id), [
+        {"name": "", "unp": "100000001"}, {"name": "ОАО Имя", "unp": "100000001"},
+    ])).scalars().all()
+    a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
     await mdm.merge(session, bus, a.id, b.id)
     assert a.name == "ОАО Имя"  # непустое из дубля заполнило пустое эталона
 
 
 async def test_unmerge_reverses(session):
-    a = Counterparty(name="A", unp="100000002")
-    b = Counterparty(name="B", unp="100000002")
-    session.add_all([a, b])
-    await session.flush()
+    a_id, b_id = (await session.execute(insert(Counterparty).returning(Counterparty.id), [
+        {"name": "A", "unp": "100000002"}, {"name": "B", "unp": "100000002"},
+    ])).scalars().all()
+    a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
     await mdm.merge(session, bus, a.id, b.id)
     await mdm.unmerge(session, bus, b.id)
@@ -104,8 +106,9 @@ async def test_counterparty_card(api, session):
     await session.flush()
     session.add(Contact(counterparty_id=etalon.id, full_name="Иван Петров",
                         phone="+375291112233", is_primary=True))
-    dup = Counterparty(name="ООО Эталон дубль", unp="190445566")
-    session.add(dup)
+    dup_id = (await session.execute(insert(Counterparty).returning(Counterparty.id),
+                                   {"name": "ООО Эталон дубль", "unp": "190445566"})).scalar_one()
+    dup = await session.get(Counterparty, dup_id)
     await session.flush()
     await mdm.add_source_alias(session, etalon.id, "1c", "0000-77")  # источник 1С
     await mdm.merge(session, bus, etalon.id, dup.id)                  # даст merge-alias + слитый дубль
@@ -125,10 +128,10 @@ async def test_merge_unmerge_emit_audit_events(api, session):
     """merge/unmerge пишут событие в outbox → relay проецирует в аудит карточки эталона."""
     from core.services.eventbus import EventContext
 
-    a = Counterparty(name="ООО Альфа", unp="191000111")
-    b = Counterparty(name="ООО Альфа-2", unp="191000111")
-    session.add_all([a, b])
-    await session.flush()
+    a_id, b_id = (await session.execute(insert(Counterparty).returning(Counterparty.id), [
+        {"name": "ООО Альфа", "unp": "191000111"}, {"name": "ООО Альфа-2", "unp": "191000111"},
+    ])).scalars().all()
+    a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
     await mdm.merge(session, bus, a.id, b.id, by="director")
     await mdm.unmerge(session, bus, b.id, by="director")
@@ -152,9 +155,10 @@ async def test_merge_route_records_username_as_actor(api, session):
     """Через роут актёр аудита = личность (X-User), а не роль — кто слил, видно поимённо."""
     from core.services.eventbus import EventContext
 
-    a = Counterparty(name="ООО Гамма", unp="191222333")
-    b = Counterparty(name="ООО Гамма-2", unp="191222333")
-    session.add_all([a, b])
+    a_id, b_id = (await session.execute(insert(Counterparty).returning(Counterparty.id), [
+        {"name": "ООО Гамма", "unp": "191222333"}, {"name": "ООО Гамма-2", "unp": "191222333"},
+    ])).scalars().all()
+    a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
     await session.commit()
 
     r = await api.post(

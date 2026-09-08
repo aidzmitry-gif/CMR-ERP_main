@@ -709,8 +709,9 @@ export interface CounterpartyAudit {
 
 /** Происхождение одного поля (M2): откуда значение и когда записано. */
 export interface FieldProvenance {
-  source: string; // egr | erp | manual | 1c | bitrix
+  source: string; // mns_grp | demo | egr | erp | manual | 1c | bitrix
   at: string | null; // ISO-дата записи значения
+  source_url?: string | null;
 }
 
 /** Карта происхождения по полям записи: `{field: {source, at}}` (M2). */
@@ -742,12 +743,75 @@ export interface CounterpartyCard {
   is_active: boolean;
   merged_into_id: number | null;
   provenance: Provenance; // M2: происхождение по полям
+  // Optional для чтения старого backend; редактирование требует подтверждённой revision.
+  revision?: number;
+  requisites?: CounterpartyRequisites;
   aliases: CounterpartyAlias[];
   merged_duplicates: DuplicateMember[];
   contacts: { id: number; full_name: string; phone: string | null; email: string | null; is_primary: boolean }[];
   audit: CounterpartyAudit[];
   touches: Touch[]; // M5: 360°-история (пусто, если sales-фасад не подключён)
   touch_summary: TouchSummary | null;
+}
+
+export interface CounterpartyRequisites {
+  legal_address?: string | null;
+  registry_status?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
+  bank_bic?: string | null;
+}
+
+export type CounterpartyRegistryField = "name" | "unp" | "legal_address" | "registry_status";
+export interface CounterpartyWriteInput {
+  expected_revision?: number;
+  manual?: CounterpartyRequisites & { name?: string; unp?: string | null };
+  contacts?: { id?: number; full_name?: string; phone?: string | null; email?: string | null; is_primary?: boolean }[];
+  registry?: { unp: string; fields: CounterpartyRegistryField[]; preview: Partial<Record<CounterpartyRegistryField, string>> };
+}
+
+export type CounterpartySaveResult =
+  | { status: "success"; id: number; revision: number }
+  | { status: "conflict"; code: string; message: string; ids?: number[] }
+  | { status: "unauthorized" | "forbidden" | "not-found" | "validation-error" | "service-error"; code?: string; message: string };
+
+async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput): Promise<CounterpartySaveResult> {
+  try {
+    const response = await fetch(path, {
+      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
+    });
+    const body = await response.json().catch(() => null);
+    if (response.ok) {
+      return isPositiveId(body?.id) && isPositiveId(body?.revision)
+        ? { status: "success", id: body.id, revision: body.revision }
+        : { status: "service-error", message: "Сервер не подтвердил сохранение" };
+    }
+    const detail = body?.detail;
+    const code = typeof detail?.code === "string" ? detail.code : undefined;
+    const message = typeof detail?.message === "string" ? detail.message : "Не удалось сохранить карточку";
+    if (response.status === 409) return {
+      status: "conflict", code: code ?? "conflict", message,
+      ids: Array.isArray(detail?.ids) && detail.ids.every(isPositiveId) ? detail.ids : undefined,
+    };
+    if (response.status === 401) return { status: "unauthorized", message: "Войдите в систему" };
+    if (response.status === 403) return { status: "forbidden", message: "Нет права изменять карточку" };
+    if (response.status === 404) return { status: "not-found", code, message };
+    if (response.status === 422) return { status: "validation-error", code, message: typeof detail?.message === "string" ? message : "Проверьте введённые реквизиты" };
+    return { status: "service-error", code, message };
+  } catch {
+    return { status: "service-error", message: "Нет подтверждения сохранения. Проверьте карточку перед повтором" };
+  }
+}
+
+export function createCounterparty(input: Omit<CounterpartyWriteInput, "expected_revision">): Promise<CounterpartySaveResult> {
+  return writeCounterparty("/api/system/mdm/counterparty", "POST", input);
+}
+
+export function updateCounterparty(id: number, input: CounterpartyWriteInput & { expected_revision: number }): Promise<CounterpartySaveResult> {
+  if (!isPositiveId(id) || !isPositiveId(input.expected_revision)) {
+    return Promise.resolve({ status: "validation-error", message: "Нужны корректные ID и версия карточки" });
+  }
+  return writeCounterparty(`/api/system/mdm/counterparty/${id}`, "PATCH", input);
 }
 
 export type CounterpartyCardResult =
@@ -778,6 +842,8 @@ function isCounterpartyCardPayload(value: unknown, requestedId: number): value i
     !(card.merged_into_id === null || isPositiveId(card.merged_into_id)) ||
     typeof card.provenance !== "object" ||
     card.provenance === null ||
+    (card.revision !== undefined && !isPositiveId(card.revision)) ||
+    (card.requisites !== undefined && (typeof card.requisites !== "object" || card.requisites === null || Array.isArray(card.requisites) || !Object.values(card.requisites).every(isNullableString))) ||
     !Array.isArray(card.aliases) ||
     !Array.isArray(card.merged_duplicates) ||
     !Array.isArray(card.contacts) ||

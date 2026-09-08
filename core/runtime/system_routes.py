@@ -6,6 +6,7 @@ from datetime import date
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from config.access import (
     ACCESS_MATRIX,
@@ -16,7 +17,15 @@ from config.access import (
     users_with_titles,
 )
 from config.settings import get_settings
-from core.domain.models import Approval, AuditLog, Counterparty, OutboxEvent, Sku, SyncLink
+from core.domain.models import (
+    Approval,
+    AuditLog,
+    Counterparty,
+    CounterpartyUnpConflict,
+    OutboxEvent,
+    Sku,
+    SyncLink,
+)
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
@@ -30,6 +39,7 @@ from core.services import (
     tnved,
 )
 from core.services.auth import CurrentUser, require_permission
+from core.services.registry import RegistryError
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
 _GROUP_PATH_MAX_DEPTH = 32
@@ -416,6 +426,55 @@ async def mdm_unmerge(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return {"id": duplicate.id, "is_active": duplicate.is_active}
+
+
+async def _write_counterparty(
+    counterparty_id: int | None, payload: mdm.CounterpartyWrite,
+    request: Request, session: AsyncSession, user: CurrentUser,
+) -> dict:
+    if (counterparty_id is None) != (payload.expected_revision is None):
+        raise HTTPException(status_code=422, detail={"code": "revision_required", "message": "Для изменения нужна версия; для создания версия не передаётся"})
+    try:
+        # get_session ещё не использована: внешний запрос завершается до DB I/O/lock.
+        registry_data = await mdm.verified_registry_selection(
+            request.app.state.core.services.registry, payload.registry,
+        )
+        cp = await mdm.save_counterparty(
+            session, payload, counterparty_id=counterparty_id, registry_data=registry_data, actor=user.username,
+        )
+        await session.commit()
+        return {"id": cp.id, "revision": cp.revision}
+    except CounterpartyUnpConflict as exc:
+        await session.rollback()
+        # Эта ветка доступна только system.write; глобальный sales-handler IDs не выдаёт.
+        raise HTTPException(status_code=409, detail={"code": "duplicate_unp", "message": str(exc), "ids": exc.ids}) from exc
+    except mdm.CounterpartyWriteError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
+    except RegistryError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail={"code": "stale_revision", "message": "Карточка изменена. Обновите данные"}) from exc
+
+
+@router.post("/system/mdm/counterparty", status_code=201)
+async def create_counterparty(
+    payload: mdm.CounterpartyWrite, request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+) -> dict:
+    return await _write_counterparty(None, payload, request, session, user)
+
+
+@router.patch("/system/mdm/counterparty/{counterparty_id}")
+async def update_counterparty(
+    counterparty_id: int, payload: mdm.CounterpartyWrite, request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+) -> dict:
+    return await _write_counterparty(counterparty_id, payload, request, session, user)
 
 
 @router.get("/system/mdm/counterparty/{counterparty_id}")

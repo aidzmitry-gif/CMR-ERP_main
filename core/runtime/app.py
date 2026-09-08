@@ -12,9 +12,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm.exc import StaleDataError
 
 from config.modules import ENABLED_MODULES
+from core.domain.models import CounterpartyUnpConflict
 from core.runtime import approval_routes, identity_routes, system_routes, telegram_routes
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
@@ -121,6 +124,19 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
+
+    @app.exception_handler(CounterpartyUnpConflict)
+    async def counterparty_conflict(_request: Request, _exc: CounterpartyUnpConflict):
+        # Общие sales-пути не должны раскрывать ID чужих мастер-записей.
+        return JSONResponse(status_code=409, content={"detail": {
+            "code": "duplicate_unp", "message": "УНП уже принадлежит активному контрагенту",
+        }})
+
+    @app.exception_handler(StaleDataError)
+    async def stale_write(_request: Request, _exc: StaleDataError):
+        return JSONResponse(status_code=409, content={"detail": {
+            "code": "stale_revision", "message": "Запись изменена другим пользователем. Обновите данные",
+        }})
 
     # системные роуты ядра (/health, /system/modules, /system/events, /system/owner)
     app.include_router(system_routes.router)

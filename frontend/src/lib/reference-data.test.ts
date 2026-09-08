@@ -8,6 +8,7 @@ import {
   bulkUpsertRef,
   changedFields,
   COUNTERPARTY_SEARCH_LIMIT,
+  createCounterparty,
   createNomenclatureGroup,
   createSimpleRef,
   currencyRateAsOf,
@@ -46,6 +47,7 @@ import {
   sortVersionsDesc,
   totalDuplicates,
   unmergeCounterparty,
+  updateCounterparty,
   type NomenclatureGroup,
   type ReferenceCatalog,
   type ReferenceMeta,
@@ -53,6 +55,60 @@ import {
 } from "./reference-data";
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("counterparty writes — additive API contract", () => {
+  const input = { manual: { name: "Компания", unp: "100582333", bank_name: null },
+    contacts: [{ full_name: "Иван", phone: "+375 29 111-22-33" }] };
+
+  function response(body: unknown, status = 200) {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("создаёт через proxy, передаёт очистку optional и получает id/revision", async () => {
+    const fetchMock = response({ id: 8, revision: 1 }, 201);
+    expect(await createCounterparty(input)).toEqual({ status: "success", id: 8, revision: 1 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/system/mdm/counterparty", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
+    });
+  });
+
+  it("PATCH включает expected_revision и только выбранный preview", async () => {
+    const fetchMock = response({ id: 8, revision: 4 });
+    const body = { expected_revision: 3, registry: { unp: "100582333", fields: ["name" as const], preview: { name: "МНС" } } };
+    expect(await updateCounterparty(8, body)).toEqual({ status: "success", id: 8, revision: 4 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/system/mdm/counterparty/8", expect.objectContaining({ method: "PATCH", body: JSON.stringify(body) }));
+  });
+
+  it.each([[0, 1], [1, 0], [1.2, 2]])("не отправляет некорректные id/revision %s/%s", async (id, revision) => {
+    const fetchMock = response({});
+    expect(await updateCounterparty(id, { expected_revision: revision })).toMatchObject({ status: "validation-error" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["duplicate_unp", "stale_revision", "registry_changed", "protected_field"])("сохраняет смысл конфликта %s", async (code) => {
+    response({ detail: { code, message: "Конфликт", ids: [8] } }, 409);
+    expect(await createCounterparty(input)).toEqual({ status: "conflict", code, message: "Конфликт", ids: [8] });
+  });
+
+  it.each([[401, "unauthorized"], [403, "forbidden"], [404, "not-found"], [422, "validation-error"], [503, "service-error"]])("HTTP %s даёт %s", async (status, expected) => {
+    response({ detail: { message: "Ошибка" } }, status as number);
+    expect(await createCounterparty(input)).toMatchObject({ status: expected });
+  });
+
+  it.each([{}, { id: 8 }, { id: "8", revision: 2 }, { id: 8, revision: 0 }])("не выдаёт повреждённую квитанцию за сохранение %#", async (body) => {
+    response(body);
+    expect(await createCounterparty(input)).toMatchObject({ status: "service-error" });
+  });
+
+  it("при сетевом сбое сообщает об отсутствии подтверждения и не повторяет POST", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await createCounterparty(input)).toMatchObject({ status: "service-error", message: expect.stringContaining("Нет подтверждения") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 function mockFetch(impl: (...args: unknown[]) => Promise<unknown>) {
   global.fetch = vi.fn(impl) as unknown as typeof fetch;
@@ -872,6 +928,18 @@ describe("fetchCounterpartyCardResult", () => {
     touches: [],
     touch_summary: null,
   };
+
+  it("читает revision, реквизиты и metadata МНС из канонической карточки", async () => {
+    const enriched = { ...card, revision: 3, requisites: { legal_address: "Минск", bank_name: null },
+      provenance: { legal_address: { source: "mns_grp", at: "2026-09-08T12:00:00Z", source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=190000001" } } };
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => enriched }));
+    expect(await fetchCounterpartyCardResult(7)).toEqual({ status: "success", card: enriched });
+  });
+
+  it.each([{ revision: 0 }, { revision: "2" }, { requisites: [] }, { requisites: { bank_name: 12 } }])("отклоняет повреждённый контракт редактирования %#", async (extra) => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ ...card, ...extra }) }));
+    expect(await fetchCounterpartyCardResult(7)).toEqual({ status: "service-error", statusCode: 200 });
+  });
 
   it.each([null, "2026-09-08T12:30:00"])("читает фактическое поле sales last_contact_at: %s", async (at) => {
     mockFetch(async () => ({
