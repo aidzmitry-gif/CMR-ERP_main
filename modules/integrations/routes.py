@@ -15,6 +15,7 @@ from core.runtime.deps import get_core, get_session
 from core.services import sync_outbound
 from core.services.auth import require_permission
 from modules.integrations import telephony
+from modules.integrations.intake import router as intake_router
 from modules.integrations.models import StockItem
 from modules.integrations.schemas import OriginateIn, RegistryOut, StockOut
 from modules.integrations.service import sync_1c
@@ -22,6 +23,7 @@ from modules.integrations.service import sync_1c
 logger = logging.getLogger("aios.integrations.telephony")
 
 router = APIRouter(tags=["integrations"])
+router.include_router(intake_router)
 
 
 async def _collect_params(request: Request) -> dict:
