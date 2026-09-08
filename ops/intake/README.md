@@ -23,6 +23,16 @@ Backend добавляет `/integrations/intake/v1` и квитанции до�
   ключом связывания. `application/msword`/`.doc` сохраняется байт-в-байт в тех же
   пределах; выдача скачивает его как attachment с `nosniff`.
 
+Intent сохраняет прежние request/product markers и добавляет только
+`подскажите` вместе с marker аккумулятора/батареи. Если subject/body не дают
+intent, разрешённый DOCX проверяется в памяти: читается ровно один
+`word/document.xml` при не более 128 ZIP entries, XML до 256 KiB и текст до 64
+KiB. Принимаются только known Word namespaces, UTF-8 (с необязательным BOM),
+без encryption, неподдерживаемой compression, NUL, DTD или ENTITY. Текст DOCX
+используется только как intent evidence; lead message и исходный файл не
+переписываются. Ошибка разбора даёт явный review после обычных MIME, filename,
+count и size checks.
+
 Проверка ops-кода:
 
 ```sh
