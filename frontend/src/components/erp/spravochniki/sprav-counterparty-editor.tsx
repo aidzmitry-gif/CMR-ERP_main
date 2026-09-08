@@ -216,7 +216,10 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
     // A background refresh must not replace a dirty form or advance the
     // expected revision while the user is editing. A new identity is safe to
     // adopt immediately; a changed revision is adopted only while collapsed.
-    if (!identityChanged && (!revisionChanged || editing)) return;
+    const freshSavedRevisionReady = lastSavedRevision !== null
+      && card.revision !== undefined
+      && card.revision >= lastSavedRevision;
+    if (!identityChanged && ((!revisionChanged && !freshSavedRevisionReady) || editing)) return;
     const nextDraft = draftFromCard(card);
     baselineRevision.current = card.revision;
     setDraft(nextDraft);
@@ -228,7 +231,7 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
     setSelectedFields(new Set());
     setSaveError("");
     setSaveNotice("");
-  }, [card, editing, isEdit]);
+  }, [card, editing, isEdit, lastSavedRevision]);
 
   function updateField(field: ManualField, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));

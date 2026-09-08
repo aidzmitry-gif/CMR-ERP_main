@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 test("контрагенты: создание, preview, повторное обогащение и duplicate UNP", async ({ page }) => {
-  const demoUnp = "190445566";
+  const demoUnps = ["190445566", "190000002"] as const;
+  const retry = test.info().retry;
+  if (retry < 0 || retry >= demoUnps.length) {
+    throw new Error(`Поддерживаются только попытки E2E 0..${demoUnps.length - 1}, получена ${retry}`);
+  }
+  const demoUnp = demoUnps[retry];
   const runName = `CRM-CP-001 E2E ${Date.now()}-${test.info().workerIndex}`;
   const editedAddress = `${runName} manual address`;
   const bankName = "CRM E2E Bank";
@@ -86,6 +91,18 @@ test("контрагенты: создание, preview, повторное об
       await expect(page.getByText(bankName, { exact: true })).toBeVisible();
       await expect(page.getByText(contactName, { exact: true })).toBeVisible();
       await expect(page.getByText(contactEmail, { exact: true })).toBeVisible();
+    });
+
+    await test.step("no-op save не блокирует повторное редактирование", async () => {
+      const editor = page.getByRole("region", { name: "Редактирование контрагента" });
+      const editButton = editor.getByRole("button", { name: "Редактировать" });
+      await expect(editButton).toBeEnabled();
+      await editButton.click();
+      await editor.getByRole("button", { name: "Сохранить" }).click();
+      await expect(editor.getByRole("button", { name: "Редактировать" })).toBeEnabled();
+      await editor.getByRole("button", { name: "Редактировать" }).click();
+      await expect(editor.getByLabel("Банк")).toHaveValue(bankName);
+      await editor.getByRole("button", { name: "Отмена" }).click();
     });
 
     await page.screenshot({ path: test.info().outputPath("counterparty-desktop.png"), fullPage: true });

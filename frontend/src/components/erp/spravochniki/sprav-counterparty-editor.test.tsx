@@ -243,6 +243,48 @@ describe("SpravCounterpartyEditor", () => {
     expect(body.manual).toEqual({ bank_name: "Мой черновик" });
   });
 
+  it("не блокирует повторное редактирование после подтверждённого no-op сохранения", async () => {
+    const fetchMock = vi.fn(async () => response({ id: 17, revision: 4 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SpravCounterpartyEditor mode="edit" card={card} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(navigation.refresh).toHaveBeenCalledTimes(1));
+    const editButton = await screen.findByRole("button", { name: "Редактировать" });
+    expect(editButton).toBeEnabled();
+    fireEvent.click(editButton);
+    expect(screen.getByLabelText("Банк")).toHaveValue("Старый банк");
+  });
+
+  it.each([
+    [5, "Свежий банк"],
+    [4, "Свежий no-op банк"],
+  ] as const)("синхронизирует props, пришедшие во время pending save, при ответе revision %s", async (returnedRevision, freshBank) => {
+    let resolveSave: (value: unknown) => void = () => undefined;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { resolveSave = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<SpravCounterpartyEditor mode="edit" card={card} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+    fireEvent.change(screen.getByLabelText("Банк"), { target: { value: "Мой draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    view.rerender(<SpravCounterpartyEditor
+      mode="edit"
+      card={{ ...card, revision: 5, requisites: { ...card.requisites, bank_name: freshBank } }}
+    />);
+    resolveSave(response({ id: 17, revision: returnedRevision }));
+
+    await waitFor(() => expect(navigation.refresh).toHaveBeenCalledTimes(1));
+    const editButton = await screen.findByRole("button", { name: "Редактировать" });
+    expect(editButton).toBeEnabled();
+    fireEvent.click(editButton);
+    expect(screen.getByLabelText("Банк")).toHaveValue(freshBank);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("не открывает edit до свежих props после сохранения и принимает свежий draft после refresh", async () => {
     const fetchMock = vi.fn(async () => response({ id: 17, revision: 5 }));
     vi.stubGlobal("fetch", fetchMock);
