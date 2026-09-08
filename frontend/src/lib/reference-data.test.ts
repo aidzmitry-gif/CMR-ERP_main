@@ -873,6 +873,23 @@ describe("fetchCounterpartyCardResult", () => {
     touch_summary: null,
   };
 
+  it.each([null, "2026-09-08T12:30:00"])("читает фактическое поле sales last_contact_at: %s", async (at) => {
+    mockFetch(async () => ({
+      ok: true, status: 200,
+      json: async () => ({
+        ...card,
+        contacts: [{ id: 1, full_name: "Тестовый контакт", phone: null, email: "acceptance@example.invalid", is_primary: true }],
+        touch_summary: { calls: 0, messages: 0, deals: 0, total: 0, last_contact_at: at },
+      }),
+    }));
+    const result = await fetchCounterpartyCardResult(7);
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.card.touch_summary?.last_contact).toBe(at);
+      expect(result.card.contacts[0].email).toBe("acceptance@example.invalid");
+    }
+  });
+
   it("передаёт synthetic Bearer в SSR fetch, возвращает только совпавший id", async () => {
     const headers = { Authorization: "Bearer synthetic-test", "X-User-Roles": "director" };
     const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => card }));

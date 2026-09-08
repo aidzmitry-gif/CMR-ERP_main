@@ -878,6 +878,13 @@ export async function fetchCounterpartyCardResult(
     if (res.status === 404) return { status: "not-found" };
     if (!res.ok) return { status: "service-error", statusCode: res.status };
     const payload: unknown = await res.json();
+    // The sales gateway uses last_contact_at; retain the established UI field.
+    if (typeof payload === "object" && payload !== null && "touch_summary" in payload) {
+      const summary = payload.touch_summary;
+      if (typeof summary === "object" && summary !== null && "last_contact_at" in summary) {
+        payload.touch_summary = { ...summary, last_contact: summary.last_contact_at };
+      }
+    }
     return isCounterpartyCardPayload(payload, id)
       ? { status: "success", card: payload }
       : { status: "service-error", statusCode: 200 };
