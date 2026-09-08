@@ -14,6 +14,7 @@ from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.services import sync_outbound
 from core.services.auth import require_permission
+from core.services.registry import RegistryError
 from modules.integrations import telephony
 from modules.integrations.intake import router as intake_router
 from modules.integrations.models import StockItem
@@ -286,10 +287,15 @@ async def egr_lookup(
     core: Core = Depends(get_core),
     _: object = Depends(require_permission("sales.deal.read")),
 ):
-    """Подтянуть контрагента по УНП из реестра ЕГР РБ (sales-28)."""
-    if core.services.registry is None:
-        raise HTTPException(status_code=503, detail="Реестр ЕГР не подключён")
-    data = await core.services.registry.lookup(unp)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Контрагент по УНП не найден")
-    return data
+    """ГРП МНС по УНП; исторический путь /egr сохранён для совместимости."""
+    try:
+        if core.services.registry is None:
+            raise RegistryError("unconfigured", "Реестр МНС не подключён", 503)
+        return await core.services.registry.lookup_strict(unp)
+    except RegistryError as exc:
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+            headers=headers,
+        ) from exc

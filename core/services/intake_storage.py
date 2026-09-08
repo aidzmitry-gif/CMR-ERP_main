@@ -11,6 +11,7 @@ from pathlib import Path
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf": ".pdf",
+    "application/msword": ".doc",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "image/jpeg": ".jpg",

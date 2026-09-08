@@ -1,8 +1,8 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { fetchCrmStaff, type CrmStaffMember, type DealInput, lookupCounterparty } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { fetchCrmStaff, type CrmStaffMember, type DealInput, lookupCounterpartyResult } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
@@ -46,7 +46,10 @@ export function CreateDealModal({
   const [unp, setUnp] = useState("");
   const [looking, setLooking] = useState(false);
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+  const lookupId = useRef(0);
   const [owners, setOwners] = useState<CrmStaffMember[] | null>(null);
+
+  useEffect(() => () => { lookupId.current += 1; }, []);
 
   useEffect(() => {
     if (!canAssignOwner) return;
@@ -62,16 +65,25 @@ export function CreateDealModal({
   }
 
   async function onLookup() {
-    if (!unp.trim()) return;
+    const clean = unp.trim();
+    const id = ++lookupId.current;
+    if (!/^[0-9]{9}$/.test(clean)) {
+      setLooking(false);
+      setLookupMsg("УНП — 9 цифр");
+      return;
+    }
     setLooking(true);
     setLookupMsg(null);
-    const info = await lookupCounterparty(unp.trim());
+    const result = await lookupCounterpartyResult(clean);
+    if (id !== lookupId.current) return;
     setLooking(false);
-    if (info) {
+    if (result.status === "found") {
+      const info = result.data;
       set("counterparty", info.name);
-      setLookupMsg(`${info.name} · ${info.address} · ${info.status}`);
+      const source = info.source === "demo" ? "Демо-данные" : "ГРП МНС";
+      setLookupMsg(`${source} · ${info.name} · ${info.address} · ${info.status}`);
     } else {
-      setLookupMsg("По УНП в реестре ничего не найдено");
+      setLookupMsg(result.message);
     }
   }
 
@@ -105,11 +117,16 @@ export function CreateDealModal({
           <Field label="Номер">
             <input required value={form.number} onChange={(e) => set("number", e.target.value)} placeholder="CRM-2024-0200" className={INPUT} />
           </Field>
-          <Field label="УНП (поиск в реестре ЕГР)">
+          <Field label="УНП (поиск в ГРП МНС)">
             <div className="flex gap-2">
               <input
                 value={unp}
-                onChange={(e) => setUnp(e.target.value)}
+                onChange={(e) => {
+                  lookupId.current += 1;
+                  setUnp(e.target.value);
+                  setLooking(false);
+                  setLookupMsg(null);
+                }}
                 placeholder="191234567"
                 className={INPUT}
               />
@@ -123,9 +140,13 @@ export function CreateDealModal({
               </button>
             </div>
           </Field>
-          {lookupMsg && <p className="-mt-1 text-xs text-muted">{lookupMsg}</p>}
+          {lookupMsg && <p role="status" className="-mt-1 text-xs text-muted">{lookupMsg}</p>}
           <Field label="Компания">
-            <input required value={form.counterparty} onChange={(e) => set("counterparty", e.target.value)} placeholder="ООО ..." className={INPUT} />
+            <input required value={form.counterparty} onChange={(e) => {
+              lookupId.current += 1;
+              setLooking(false);
+              set("counterparty", e.target.value);
+            }} placeholder="ООО ..." className={INPUT} />
           </Field>
           <Field label="Описание">
             <input required value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Поставка ..." className={INPUT} />

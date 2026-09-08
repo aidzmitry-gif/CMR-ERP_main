@@ -1,6 +1,7 @@
 """Pydantic-схемы модуля Integrations."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -21,12 +22,19 @@ class StockOut(BaseModel):
 
 
 class RegistryOut(BaseModel):
-    """Карточка субъекта из реестра ЕГР (обогащение по УНП)."""
+    """Проверенная карточка ГРП МНС или явно помеченные demo-данные."""
 
     unp: str
     name: str
     address: str
     status: str
+    short_name: str | None = None
+    status_code: str | None = None
+    registered_at: str | None = None
+    closed_at: str | None = None
+    source: Literal["mns_grp", "demo"]
+    source_url: str | None
+    fetched_at: datetime
 
 
 class OriginateIn(BaseModel):

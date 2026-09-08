@@ -11,8 +11,12 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +25,12 @@ from core.domain.models import (
     Contact,
     Counterparty,
     CounterpartyAlias,
+    CounterpartyUnpConflict,
     SurvivorshipRule,
+    lock_counterparty_unps,
 )
+from core.services import survivorship
+from core.services.registry import RegistryError
 
 #: порог похожести имён по умолчанию для fuzzy-кандидатов (0..1); ниже — не предлагаем.
 FUZZY_THRESHOLD = 0.6
@@ -47,6 +55,298 @@ _SURVIVORSHIP_FIELDS = ("name", "unp")
 
 #: префикс ссылки на контрагента в журнале аудита (``entity_ref``)
 AUDIT_ENTITY_PREFIX = "counterparty:"
+
+
+class CounterpartyWriteError(ValueError):
+    def __init__(self, code: str, message: str, status: int = 409) -> None:
+        super().__init__(message)
+        self.code, self.status = code, status
+
+
+class ManualCounterpartyFields(BaseModel):
+    """Поддержка: null/пусто очищает optional; IBAN checksum, BIC syntax, без bank lookup."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    unp: str | None = None
+    legal_address: str | None = Field(default=None, max_length=1000)
+    registry_status: str | None = Field(default=None, max_length=255)
+    bank_name: str | None = Field(default=None, max_length=255)
+    bank_account: str | None = Field(default=None, max_length=64)
+    bank_bic: str | None = Field(default=None, max_length=32)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def clean(cls, value):
+        if isinstance(value, str):
+            value.encode("utf-8")
+            if any(ord(c) < 32 or ord(c) == 127 for c in value):
+                raise ValueError("Недопустимый управляющий символ")
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def name_required_if_supplied(cls, value):
+        if value is None:
+            raise ValueError("Название не может быть пустым")
+        return value
+
+    @field_validator("unp")
+    @classmethod
+    def valid_unp(cls, value):
+        if value is not None and not re.fullmatch(r"[0-9]{9}", value):
+            raise ValueError("УНП — 9 цифр")
+        return value
+
+    @field_validator("bank_bic")
+    @classmethod
+    def valid_bic(cls, value):
+        if value is None:
+            return None
+        value = value.upper()
+        if not re.fullmatch(r"[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", value):
+            raise ValueError("BIC должен содержать 8 или 11 допустимых символов")
+        return value
+
+    @field_validator("bank_account")
+    @classmethod
+    def valid_iban(cls, value):
+        if value is None:
+            return None
+        value = value.replace(" ", "").upper()
+        if not re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}", value):
+            raise ValueError("Нужен IBAN длиной 15–34 символа")
+        rearranged = value[4:] + value[:4]
+        digits = "".join(str(ord(c) - 55) if c.isalpha() else c for c in rearranged)
+        if int(digits) % 97 != 1:
+            raise ValueError("Неверная контрольная сумма IBAN")
+        return value
+
+
+class CounterpartyContactPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: int | None = Field(default=None, gt=0)
+    full_name: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    is_primary: bool | None = None
+
+    @field_validator("full_name", "phone", "email", mode="before")
+    @classmethod
+    def clean(cls, value):
+        return ManualCounterpartyFields.clean(value)
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, value):
+        if value is not None and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            raise ValueError("Неверный email")
+        return value.lower() if value else None
+
+    @field_validator("phone")
+    @classmethod
+    def phone_text(cls, value):
+        # Формат/добавочный номер сохраняем, телефон — строка, не план нумерации стран.
+        if value is not None and not any(c.isdigit() for c in value):
+            raise ValueError("Телефон должен содержать цифры")
+        return value
+
+    @model_validator(mode="after")
+    def name_and_primary(self):
+        if (self.id is None or "full_name" in self.model_fields_set) and not self.full_name:
+            raise ValueError("Нужно имя контактного лица")
+        if "is_primary" in self.model_fields_set and self.is_primary is None:
+            raise ValueError("is_primary должен быть true или false")
+        return self
+
+
+RegistryField = Literal["name", "unp", "legal_address", "registry_status"]
+_REGISTRY_FIELDS = {"name": "name", "unp": "unp", "legal_address": "address", "registry_status": "status"}
+
+
+class CounterpartyRegistrySelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    unp: str = Field(pattern=r"^[0-9]{9}$")
+    fields: list[RegistryField] = Field(min_length=1, max_length=4)
+    preview: dict[RegistryField, str]
+
+    @model_validator(mode="after")
+    def exact_selection(self):
+        if len(set(self.fields)) != len(self.fields) or set(self.preview) != set(self.fields):
+            raise ValueError("Предпросмотр должен содержать ровно выбранные поля")
+        return self
+
+
+class CounterpartyWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: int | None = Field(default=None, gt=0)
+    manual: ManualCounterpartyFields = Field(default_factory=ManualCounterpartyFields)
+    contacts: list[CounterpartyContactPatch] = Field(default_factory=list, max_length=50)
+    registry: CounterpartyRegistrySelection | None = None
+
+    @model_validator(mode="after")
+    def no_overlapping_edits(self):
+        ids = [c.id for c in self.contacts if c.id is not None]
+        if len(ids) != len(set(ids)) or sum(c.is_primary is True for c in self.contacts) > 1:
+            raise ValueError("Повтор контакта или несколько основных контактов")
+        if self.registry:
+            overlap = set(self.registry.fields) & self.manual.model_fields_set - {"unp"}
+            if overlap:
+                raise ValueError("Поле нельзя одновременно менять вручную и из реестра")
+            if "unp" in self.manual.model_fields_set and self.manual.unp != self.registry.unp:
+                raise ValueError("УНП ручного ввода и реестра не совпадают")
+        return self
+
+
+async def verified_registry_selection(gateway, selection: CounterpartyRegistrySelection | None) -> dict | None:
+    """Сеть до открытия DB-транзакции. Preview браузера только сравниваем, не сохраняем."""
+    if selection is None:
+        return None
+    if gateway is None:
+        raise RegistryError("unconfigured", "Реестр МНС не подключён", 503)
+    data = await gateway.lookup_strict(selection.unp)
+    if data["unp"] != selection.unp or data["source"] not in {"mns_grp", "demo"}:
+        raise RegistryError("invalid_upstream", "Реестр вернул некорректные данные", 502)
+    try:
+        ManualCounterpartyFields.model_validate({
+            field: data[_REGISTRY_FIELDS[field]] for field in set(selection.fields) | {"unp"}
+        })
+    except ValidationError as exc:
+        raise RegistryError("invalid_upstream", "Поля реестра не соответствуют формату карточки", 502) from exc
+    for field in selection.fields:
+        value = data[_REGISTRY_FIELDS[field]]
+        if value != selection.preview[field]:
+            raise CounterpartyWriteError("registry_changed", "Данные реестра изменились. Получите новый предпросмотр")
+        if not value:
+            raise CounterpartyWriteError("registry_field_missing", "Выбранное поле отсутствует в реестре", 422)
+    return data
+
+
+def _contact_dict(contact: Contact) -> dict:
+    return {key: getattr(contact, key) for key in ("id", "full_name", "phone", "email", "is_primary")}
+
+
+async def save_counterparty(
+    session: AsyncSession, payload: CounterpartyWrite, *, counterparty_id: int | None,
+    registry_data: dict | None, actor: str,
+) -> Counterparty:
+    """Одна транзакция у вызывающего роута; источник реестра уже проверен до DB I/O."""
+    manual = payload.manual.model_dump(exclude_unset=True)
+    requested_unp = registry_data["unp"] if registry_data else manual.get("unp")
+    if requested_unp:
+        await session.run_sync(lambda sync: lock_counterparty_unps(sync, {requested_unp}))
+    cp = None
+    if counterparty_id is not None:
+        cp = (await session.execute(select(Counterparty).where(
+            Counterparty.id == counterparty_id,
+        ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+        if cp is None:
+            raise CounterpartyWriteError("not_found", "Контрагент не найден", 404)
+        if not cp.is_active or cp.merged_into_id is not None:
+            raise CounterpartyWriteError("archived", "Редактирование архивной записи недоступно")
+        if cp.revision != payload.expected_revision:
+            raise CounterpartyWriteError("stale_revision", "Карточка изменена. Обновите данные")
+        if registry_data and cp.unp and cp.unp != requested_unp and manual.get("unp") != requested_unp:
+            raise CounterpartyWriteError("unp_mismatch", "Подтвердите смену УНП вручную", 422)
+    if registry_data and (cp is None or not cp.unp) and (
+        "unp" not in payload.registry.fields and manual.get("unp") != requested_unp
+    ):
+        raise CounterpartyWriteError("unp_confirmation_required", "Подтвердите назначение УНП выбранным полем или ручным вводом", 422)
+    effective_unp = requested_unp if (registry_data or "unp" in manual) else (cp.unp if cp else None)
+    if effective_unp:
+        ids = list((await session.scalars(select(Counterparty.id).where(
+            func.trim(Counterparty.unp) == effective_unp, Counterparty.is_active.is_(True),
+            Counterparty.id != counterparty_id if counterparty_id is not None else True,
+        ))).all())
+        if ids:
+            raise CounterpartyUnpConflict(ids)
+    contacts = list((await session.scalars(select(Contact).where(
+        Contact.counterparty_id == counterparty_id,
+    ))).all()) if cp else []
+    by_id = {contact.id: contact for contact in contacts}
+    if any(p.id is not None and p.id not in by_id for p in payload.contacts):
+        raise CounterpartyWriteError("contact_not_owned", "Контакт не принадлежит этой компании", 422)
+    before = None if cp is None else {
+        "name": cp.name, "unp": cp.unp, "requisites": deepcopy(cp.requisites or {}),
+        "provenance": deepcopy(cp.provenance or {}),
+        "contacts": [_contact_dict(c) for c in contacts],
+    }
+    rules = await survivorship.load_rules(session, "counterparty") if registry_data else {}
+    if cp is None:
+        name = manual.get("name") or (registry_data["name"] if registry_data and "name" in payload.registry.fields else None)
+        if not name:
+            raise CounterpartyWriteError("name_required", "Нужно название компании", 422)
+        cp = Counterparty(name=name, unp=effective_unp, provenance={}, requisites={})
+        session.add(cp)
+    provenance = dict(cp.provenance or {})
+    requisites = dict(cp.requisites or {})
+    now = datetime.now(UTC).isoformat()
+    for field, value in manual.items():
+        current = getattr(cp, field) if field in {"name", "unp"} else requisites.get(field)
+        if current != value or provenance.get(field, {}).get("source") != "manual":
+            if field in {"name", "unp"}:
+                setattr(cp, field, value)
+            else:
+                requisites[field] = value
+            provenance[field] = {"source": "manual", "at": now}
+    if registry_data:
+        registry_fields = list(payload.registry.fields)
+        for field in registry_fields:
+            rule = survivorship.rule_for(rules, field)
+            if rule.strategy == "manual_only":
+                raise CounterpartyWriteError("protected_field", "Поле закреплено за ручным вводом")
+            value = registry_data[_REGISTRY_FIELDS[field]]
+            current = getattr(cp, field) if field in {"name", "unp"} else requisites.get(field)
+            if field in rules and not survivorship.is_empty(current):
+                incoming = survivorship.FieldValue(value, registry_data["source"], registry_data["fetched_at"])
+                current_prov = provenance.get(field, {})
+                winner = survivorship.decide(
+                    survivorship.FieldValue(current, current_prov.get("source", "manual"), current_prov.get("at")),
+                    incoming, rule,
+                )
+                if winner is not incoming and (current != value or current_prov.get("source") != incoming.source):
+                    raise CounterpartyWriteError("protected_field", "Выбранное поле защищено правилом источников")
+            # Явное применение выбранных полей может заменить manual; произвольный синк — нет.
+            if current != value or provenance.get(field, {}).get("source") != registry_data["source"]:
+                if field in {"name", "unp"}:
+                    setattr(cp, field, value)
+                else:
+                    requisites[field] = value
+                provenance[field] = {"source": registry_data["source"], "at": registry_data["fetched_at"],
+                                     "source_url": registry_data["source_url"]}
+    cp.provenance, cp.requisites = provenance, requisites
+    if counterparty_id is None:
+        await session.flush()  # ID нужен для FK контактов; это ещё не commit.
+    contacts_changed = False
+    for patch in payload.contacts:
+        values = patch.model_dump(exclude_unset=True, exclude={"id"})
+        contact = by_id.get(patch.id) if patch.id is not None else None
+        if contact is None:
+            contact = Contact(counterparty_id=cp.id, full_name=patch.full_name, is_primary=False)
+            session.add(contact)
+            contacts.append(contact)
+            contacts_changed = True
+        if patch.is_primary:
+            for other in contacts:
+                if other is not contact and other.is_primary:
+                    other.is_primary = False
+                    contacts_changed = True
+        for key, value in values.items():
+            if getattr(contact, key) != value:
+                setattr(contact, key, value)
+                contacts_changed = True
+    if contacts_changed:
+        cp.provenance = {**cp.provenance, "contacts": {"source": "manual", "at": now}}
+    await session.flush()
+    after = {"name": cp.name, "unp": cp.unp, "requisites": dict(cp.requisites or {}),
+             "provenance": deepcopy(cp.provenance or {}),
+             "contacts": [_contact_dict(c) for c in contacts]}
+    if before != after:
+        session.add(AuditLog(actor=actor, action="counterparty.created" if before is None else "counterparty.updated",
+                             entity_ref=_entity_ref(cp.id), detail={"before": before, "after": after, "revision": cp.revision}))
+    return cp
 
 
 async def duplicate_clusters(session: AsyncSession) -> list[dict]:
@@ -276,6 +576,11 @@ def _apply_survivorship(survivor: Counterparty, duplicate: Counterparty) -> None
     for field in _SURVIVORSHIP_FIELDS:
         if not getattr(survivor, field) and getattr(duplicate, field):
             setattr(survivor, field, getattr(duplicate, field))
+            provenance = dict(survivor.provenance or {})
+            provenance.pop(field, None)
+            if field in (duplicate.provenance or {}):
+                provenance[field] = dict(duplicate.provenance[field])
+            survivor.provenance = provenance
 
 
 def _entity_ref(counterparty_id: int) -> str:
@@ -412,6 +717,8 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
         "unp": cp.unp,
         "is_active": cp.is_active,
         "merged_into_id": cp.merged_into_id,
+        "requisites": cp.requisites or {},
+        "revision": cp.revision,
         # M2: происхождение по полям {field: {source, at}} — карточка рисует бейдж источника
         "provenance": cp.provenance or {},
         "aliases": [

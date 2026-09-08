@@ -18,13 +18,14 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   createDeal,
   createDealTask,
   issueDocument,
-  lookupCounterparty,
+  lookupCounterpartyResult,
+  type RegistryInfo,
   updateDeal,
 } from "@/lib/api";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
@@ -47,7 +48,7 @@ const INVOICE_NEXT_STEP = "Проверить оплату счёта";
  *
  * Фазы: dialing (короткий дозвон) → live (3 колонки) → done (итог).
  *
- * РЕАЛЬНО работает: скрипт-чеклист, реквизиты по УНП из ЕГР (lookupCounterparty),
+ * РЕАЛЬНО работает: скрипт-чеклист, реквизиты по УНП из ГРП МНС,
  * подбор номенклатуры из справочника (fetchSkus), добавление позиций в сделку
  * (addDealItem), задача из звонка (createDealTask).
  * ЗАГЛУШКИ (помечены TODO): originate к АТС, отправка счёта/договора (1С),
@@ -150,13 +151,11 @@ export function CallWindow({
   // до явного запроса менеджера.
   const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
   const [reserve, setReserve] = useState(true);
-  const [unp, setUnp] = useState(""); // УНП контрагента — резолв реквизитов (ЕГР/MDM) пока заглушка
-  const [req, setReq] = useState<{
-    unp: string;
-    org: string;
-    address: string;
-    status: string;
-  } | null>(null);
+  const [unp, setUnp] = useState("");
+  const [req, setReq] = useState<RegistryInfo | null>(null);
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqError, setReqError] = useState<string | null>(null);
+  const lookupId = useRef(0);
   const [term, setTerm] = useState(TERMS[0]);
   const [customTerm, setCustomTerm] = useState(""); // свой вариант условий оплаты
   const [note, setNote] = useState("");
@@ -174,6 +173,7 @@ export function CallWindow({
   // «reset on key change», а не каскад от рендера.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    lookupId.current += 1;
     if (!context) return;
     setPhase("dialing");
     setSeconds(0);
@@ -181,6 +181,8 @@ export function CallWindow({
     setReserve(true);
     setUnp("");
     setReq(null);
+    setReqBusy(false);
+    setReqError(null);
     setTerm(TERMS[0]);
     setCustomTerm("");
     setNote("");
@@ -189,7 +191,7 @@ export function CallWindow({
     setCreated(null);
     setChecked(new Set(script.flatMap((s) => s.items.filter((i) => i.done).map((i) => i.id))));
     const t = setTimeout(() => setPhase("live"), 1200);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); lookupId.current += 1; };
   }, [context, script]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -231,18 +233,26 @@ export function CallWindow({
         ? `${ctx.person ? `${ctx.person} · ` : ""}лид${ctx.phone ? ` · ${ctx.phone}` : ""}`
         : `${ctx.phone ?? "новый номер"} · не в базе`;
 
-  // Подтянуть реквизиты по УНП через существующий резолвер ЕГР (РБ): lookupCounterparty
-  // → /integrations/egr. Бэкенд сам отдаёт demo-данные, если ЕГР не сконфигурирован
-  // (base_url пуст) — контракт RegistryInfo один и тот же, спец-обработки demo тут нет.
+  // Строгий lookup отделяет отсутствие компании от сбоя и маркирует demo.
   async function pullReq() {
-    const clean = unp.replace(/\D/g, "");
-    if (clean.length !== 9) return flash("УНП — 9 цифр");
-    setBusy(true);
-    const info = await lookupCounterparty(clean);
-    setBusy(false);
-    if (!info) return flash("⚠️ По УНП ничего не найдено");
-    setReq({ unp: info.unp || clean, org: info.name, address: info.address, status: info.status });
-    flash("✅ Реквизиты подтянуты из ЕГР");
+    const clean = unp.trim();
+    const id = ++lookupId.current;
+    setReq(null);
+    setReqError(null);
+    if (!/^[0-9]{9}$/.test(clean)) {
+      setReqBusy(false);
+      setReqError("УНП — 9 цифр");
+      return;
+    }
+    setReqBusy(true);
+    const result = await lookupCounterpartyResult(clean);
+    if (id !== lookupId.current) return;
+    setReqBusy(false);
+    if (result.status !== "found") {
+      setReqError(result.message);
+      return;
+    }
+    setReq(result.data);
   }
 
   // Колонка «Заказ» — главное действие зависит от контекста.
@@ -261,7 +271,7 @@ export function CallWindow({
     // converted) добавим эндпоинтом «быстрая сделка» отдельным шагом (SALES).
     // Реквизиты по УНП (если подтянули) дают официальное наименование, когда у лида/
     // нового клиента нет компании — иначе сохраняем известную компанию лида.
-    const counterparty = ctx.company || req?.org || ctx.phone || "Новый клиент";
+    const counterparty = ctx.company || req?.name || ctx.phone || "Новый клиент";
     // Date.now() в обработчике клика (не в рендере) — уникальный номер счёта в момент действия.
     const number = `CRM-CALL-${Date.now().toString(36).toUpperCase()}`;
     const deal = await createDeal({
@@ -486,9 +496,7 @@ export function CallWindow({
             <section className="min-w-0 space-y-3 bg-surface p-4">
               <ColHeader icon={<ShoppingCart size={14} />}>Заказ / счёт</ColHeader>
 
-              {/* Реквизиты по УНП (лид/новый клиент): подтянуть из ЕГР перед подбором.
-                  Резолв — заглушка (demo); реальный ЕГР/MDM — SALES. У сделки контрагент
-                  уже известен, поэтому блок только для lead/new. */}
+              {/* У сделки контрагент уже известен, поэтому lookup только для lead/new. */}
               {ctx.kind !== "deal" && (
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-muted">
@@ -498,7 +506,13 @@ export function CallWindow({
                   <div className="flex items-center gap-2">
                     <input
                       value={unp}
-                      onChange={(e) => setUnp(e.target.value)}
+                      onChange={(e) => {
+                        lookupId.current += 1;
+                        setUnp(e.target.value);
+                        setReq(null);
+                        setReqError(null);
+                        setReqBusy(false);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") void pullReq();
                       }}
@@ -507,23 +521,23 @@ export function CallWindow({
                       aria-label="УНП контрагента"
                       className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:border-accent"
                     />
-                    <Button variant="primary" size="sm" onClick={pullReq} disabled={busy}>
-                      Подтянуть
+                    <Button variant="primary" size="sm" onClick={pullReq} disabled={busy || reqBusy}>
+                      {reqBusy ? "Поиск…" : "Подтянуть"}
                     </Button>
                   </div>
+                  {reqError && <p role="status" className="mt-1 text-xs text-muted">{reqError}</p>}
                   {req && (
                     <div className="mt-1.5 space-y-1 rounded-lg border border-money/40 bg-money-soft px-2.5 py-2 text-[11.5px]">
                       <div className="font-semibold text-money">
-                        ✅ Реквизиты по УНП {req.unp} — ЕГР
+                        Реквизиты по УНП {req.unp} — {req.source === "demo" ? "Демо-данные" : "ГРП МНС"}
                       </div>
-                      <ReqRow k="Организация" v={req.org} />
+                      <ReqRow k="Организация" v={req.name} />
                       <ReqRow k="Адрес" v={req.address} />
                       {req.status && <ReqRow k="Статус" v={req.status} />}
                     </div>
                   )}
                   <div className="mt-1 text-[11px] text-faint">
-                    Реквизиты из ЕГР (egr.gov.by) через интеграцию; demo-данные, если ЕГР не
-                    сконфигурирован.
+                    Доступные название, адрес и статус из ГРП МНС. Демо-данные помечены отдельно.
                   </div>
                 </div>
               )}

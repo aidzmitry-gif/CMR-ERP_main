@@ -7,6 +7,8 @@ import {
   buildCategoryTree,
   bulkUpsertRef,
   changedFields,
+  COUNTERPARTY_SEARCH_LIMIT,
+  createCounterparty,
   createNomenclatureGroup,
   createSimpleRef,
   currencyRateAsOf,
@@ -14,6 +16,7 @@ import {
   fetchAiCatalog,
   fetchAllSkus,
   fetchCounterpartyCard,
+  fetchCounterpartyCardResult,
   fetchCurrencyRates,
   fetchDuplicateClusters,
   fetchNomenclatureGroups,
@@ -40,9 +43,11 @@ import {
   qualityTone,
   rowsFromResult,
   runReferenceQuery,
+  searchCounterparties,
   sortVersionsDesc,
   totalDuplicates,
   unmergeCounterparty,
+  updateCounterparty,
   type NomenclatureGroup,
   type ReferenceCatalog,
   type ReferenceMeta,
@@ -50,6 +55,60 @@ import {
 } from "./reference-data";
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("counterparty writes — additive API contract", () => {
+  const input = { manual: { name: "Компания", unp: "100582333", bank_name: null },
+    contacts: [{ full_name: "Иван", phone: "+375 29 111-22-33" }] };
+
+  function response(body: unknown, status = 200) {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("создаёт через proxy, передаёт очистку optional и получает id/revision", async () => {
+    const fetchMock = response({ id: 8, revision: 1 }, 201);
+    expect(await createCounterparty(input)).toEqual({ status: "success", id: 8, revision: 1 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/system/mdm/counterparty", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
+    });
+  });
+
+  it("PATCH включает expected_revision и только выбранный preview", async () => {
+    const fetchMock = response({ id: 8, revision: 4 });
+    const body = { expected_revision: 3, registry: { unp: "100582333", fields: ["name" as const], preview: { name: "МНС" } } };
+    expect(await updateCounterparty(8, body)).toEqual({ status: "success", id: 8, revision: 4 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/system/mdm/counterparty/8", expect.objectContaining({ method: "PATCH", body: JSON.stringify(body) }));
+  });
+
+  it.each([[0, 1], [1, 0], [1.2, 2]])("не отправляет некорректные id/revision %s/%s", async (id, revision) => {
+    const fetchMock = response({});
+    expect(await updateCounterparty(id, { expected_revision: revision })).toMatchObject({ status: "validation-error" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["duplicate_unp", "stale_revision", "registry_changed", "protected_field"])("сохраняет смысл конфликта %s", async (code) => {
+    response({ detail: { code, message: "Конфликт", ids: [8] } }, 409);
+    expect(await createCounterparty(input)).toEqual({ status: "conflict", code, message: "Конфликт", ids: [8] });
+  });
+
+  it.each([[401, "unauthorized"], [403, "forbidden"], [404, "not-found"], [422, "validation-error"], [503, "service-error"]])("HTTP %s даёт %s", async (status, expected) => {
+    response({ detail: { message: "Ошибка" } }, status as number);
+    expect(await createCounterparty(input)).toMatchObject({ status: expected });
+  });
+
+  it.each([{}, { id: 8 }, { id: "8", revision: 2 }, { id: 8, revision: 0 }])("не выдаёт повреждённую квитанцию за сохранение %#", async (body) => {
+    response(body);
+    expect(await createCounterparty(input)).toMatchObject({ status: "service-error" });
+  });
+
+  it("при сетевом сбое сообщает об отсутствии подтверждения и не повторяет POST", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await createCounterparty(input)).toMatchObject({ status: "service-error", message: expect.stringContaining("Нет подтверждения") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 function mockFetch(impl: (...args: unknown[]) => Promise<unknown>) {
   global.fetch = vi.fn(impl) as unknown as typeof fetch;
@@ -312,6 +371,73 @@ describe("runReferenceQuery", () => {
       throw new Error("x");
     });
     expect(await runReferenceQuery({ ref: "x" })).toBeNull();
+  });
+});
+
+describe("searchCounterparties", () => {
+  it("ищет по названию через proxy и передаёт conservative limit", async () => {
+    const rows = [{ id: 17, name: "ООО Ромашка", unp: "190000001" }];
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ result: rows }) }));
+    mockFetch(f);
+
+    await expect(searchCounterparties({ name: "  Ромашка " })).resolves.toEqual({
+      status: "success",
+      rows,
+      limit: COUNTERPARTY_SEARCH_LIMIT,
+    });
+    expect(f).toHaveBeenCalledWith(
+      "/api/system/references/query",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ref: "core.counterparties", name: "Ромашка", limit: 50 }),
+      }),
+    );
+  });
+
+  it("ищет по УНП как exact key", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ result: [] }) }));
+    mockFetch(f);
+
+    await expect(searchCounterparties({ unp: "190000001" })).resolves.toEqual({
+      status: "success",
+      rows: [],
+      limit: COUNTERPARTY_SEARCH_LIMIT,
+    });
+    expect(f).toHaveBeenCalledWith(
+      "/api/system/references/query",
+      expect.objectContaining({
+        body: JSON.stringify({ ref: "core.counterparties", key: "190000001", limit: 50 }),
+      }),
+    );
+  });
+
+  it("не вызывает API для пустого/двойного запроса", async () => {
+    const f = vi.fn();
+    mockFetch(f);
+
+    await expect(searchCounterparties({})).resolves.toEqual({ status: "invalid-query", reason: "missing" });
+    await expect(searchCounterparties({ name: "Ромашка", unp: "190000001" })).resolves.toEqual({
+      status: "invalid-query",
+      reason: "ambiguous",
+    });
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [401, { status: "unauthorized" }],
+    [403, { status: "forbidden" }],
+    [503, { status: "service-error", statusCode: 503 }],
+  ] as const)("сохраняет HTTP статус %s отдельным состоянием", async (status, expected) => {
+    mockFetch(async () => ({ ok: false, status }));
+    await expect(searchCounterparties({ name: "Ромашка" })).resolves.toEqual(expected);
+  });
+
+  it("некорректный успешный payload — service-error, а не no-match", async () => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ result: [{ id: "17" }] }) }));
+    await expect(searchCounterparties({ name: "Ромашка" })).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
   });
 });
 
@@ -784,6 +910,97 @@ describe("fetchCounterpartyCard", () => {
   it("не-200 → null", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchCounterpartyCard(1)).toBeNull();
+  });
+});
+
+describe("fetchCounterpartyCardResult", () => {
+  const card = {
+    id: 7,
+    name: "ООО Ромашка",
+    unp: "190000001",
+    is_active: true,
+    merged_into_id: null,
+    provenance: {},
+    aliases: [],
+    merged_duplicates: [],
+    contacts: [],
+    audit: [],
+    touches: [],
+    touch_summary: null,
+  };
+
+  it("читает revision, реквизиты и metadata МНС из канонической карточки", async () => {
+    const enriched = { ...card, revision: 3, requisites: { legal_address: "Минск", bank_name: null },
+      provenance: { legal_address: { source: "mns_grp", at: "2026-09-08T12:00:00Z", source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=190000001" } } };
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => enriched }));
+    expect(await fetchCounterpartyCardResult(7)).toEqual({ status: "success", card: enriched });
+  });
+
+  it.each([{ revision: 0 }, { revision: "2" }, { requisites: [] }, { requisites: { bank_name: 12 } }])("отклоняет повреждённый контракт редактирования %#", async (extra) => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ ...card, ...extra }) }));
+    expect(await fetchCounterpartyCardResult(7)).toEqual({ status: "service-error", statusCode: 200 });
+  });
+
+  it.each([null, "2026-09-08T12:30:00"])("читает фактическое поле sales last_contact_at: %s", async (at) => {
+    mockFetch(async () => ({
+      ok: true, status: 200,
+      json: async () => ({
+        ...card,
+        contacts: [{ id: 1, full_name: "Тестовый контакт", phone: null, email: "acceptance@example.invalid", is_primary: true }],
+        touch_summary: { calls: 0, messages: 0, deals: 0, total: 0, last_contact_at: at },
+      }),
+    }));
+    const result = await fetchCounterpartyCardResult(7);
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.card.touch_summary?.last_contact).toBe(at);
+      expect(result.card.contacts[0].email).toBe("acceptance@example.invalid");
+    }
+  });
+
+  it("передаёт synthetic Bearer в SSR fetch, возвращает только совпавший id", async () => {
+    const headers = { Authorization: "Bearer synthetic-test", "X-User-Roles": "director" };
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => card }));
+    mockFetch(f);
+
+    const result = await fetchCounterpartyCardResult(7, "director", headers);
+
+    expect(result).toEqual({ status: "success", card });
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/mdm/counterparty/7`,
+      expect.objectContaining({ headers }),
+    );
+    expect(JSON.stringify(result)).not.toContain("synthetic-test");
+  });
+
+  it("invalid id и mismatch payload не становятся success", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ...card, id: 8 }) }));
+    mockFetch(f);
+
+    await expect(fetchCounterpartyCardResult(0)).resolves.toEqual({ status: "invalid-id" });
+    expect(f).not.toHaveBeenCalled();
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
+  });
+
+  it.each([
+    [404, { status: "not-found" }],
+    [401, { status: "unauthorized" }],
+    [403, { status: "forbidden" }],
+    [503, { status: "service-error", statusCode: 503 }],
+  ] as const)("различает отказ карточки HTTP %s", async (status, expected) => {
+    mockFetch(async () => ({ ok: false, status }));
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual(expected);
+  });
+
+  it("некорректный success payload становится service-error", async () => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ id: 7, name: "сломано" }) }));
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
   });
 });
 

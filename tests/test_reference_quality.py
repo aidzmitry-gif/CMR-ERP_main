@@ -2,6 +2,8 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import insert
+
 from core.domain.models import Counterparty, Sku
 from core.domain.reference import NomenclatureCategory, TnvedCode, Unit
 from core.services import reference_quality
@@ -103,10 +105,11 @@ async def test_audit_category_orphan(session):
 
 
 async def test_audit_counterparties_missing_and_dup(session):
-    session.add_all([
-        Counterparty(name="ООО А", unp="123456789"),
-        Counterparty(name="ООО А (дубль)", unp="123456789"),
-        Counterparty(name="Без УНП", unp=None),
+    # Эти строки намеренно моделируют legacy duplicates, появившиеся до ORM guard.
+    await session.execute(insert(Counterparty), [
+        {"name": "ООО А", "unp": "123456789"},
+        {"name": "ООО А (дубль)", "unp": "123456789"},
+        {"name": "Без УНП", "unp": None},
     ])
     await session.commit()
     res = await reference_quality.audit_reference(session, "core.counterparties")

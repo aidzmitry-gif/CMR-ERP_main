@@ -149,6 +149,73 @@ export interface ReferenceQueryResult {
   result: unknown;
 }
 
+/** Строка результата поиска контрагентов (только активные golden records). */
+export interface CounterpartyRow {
+  id: number;
+  name: string;
+  unp: string | null;
+}
+
+/** Потолок одного поиска: API не получает запрос на полный список контрагентов. */
+export const COUNTERPARTY_SEARCH_LIMIT = 50;
+
+export type CounterpartySearchResult =
+  | { status: "success"; rows: CounterpartyRow[]; limit: number }
+  | { status: "invalid-query"; reason: "missing" | "ambiguous" }
+  | { status: "unauthorized" }
+  | { status: "forbidden" }
+  | { status: "service-error"; statusCode?: number };
+
+function isCounterpartyRow(value: unknown): value is CounterpartyRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0 &&
+    typeof row.name === "string" &&
+    (typeof row.unp === "string" || row.unp === null)
+  );
+}
+
+/** Поиск контрагентов через authenticated proxy с различимыми ошибками.
+ * Пустой запрос и одновременные name/unp отсекаются до fetch, поэтому list-all не вызывается. */
+export async function searchCounterparties(input: {
+  name?: string;
+  unp?: string;
+}): Promise<CounterpartySearchResult> {
+  const name = input.name?.trim() ?? "";
+  const unp = input.unp?.trim() ?? "";
+  if (!name && !unp) return { status: "invalid-query", reason: "missing" };
+  if (name && unp) return { status: "invalid-query", reason: "ambiguous" };
+
+  const limit = COUNTERPARTY_SEARCH_LIMIT;
+  try {
+    const res = await fetch("/api/system/references/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ref: "core.counterparties",
+        ...(unp ? { key: unp } : { name }),
+        limit,
+      }),
+    });
+    if (res.status === 401) return { status: "unauthorized" };
+    if (res.status === 403) return { status: "forbidden" };
+    if (!res.ok) return { status: "service-error", statusCode: res.status };
+
+    const payload: unknown = await res.json();
+    if (typeof payload !== "object" || payload === null) {
+      return { status: "service-error", statusCode: 200 };
+    }
+    const result = (payload as { result?: unknown }).result;
+    if (!Array.isArray(result) || !result.every(isCounterpartyRow)) {
+      return { status: "service-error", statusCode: 200 };
+    }
+    return { status: "success", rows: result, limit };
+  } catch {
+    return { status: "service-error" };
+  }
+}
+
 /** Выполнить структурный запрос AI к справочнику (клиент, интерактивный AI-экран). */
 export async function runReferenceQuery(
   input: ReferenceQueryInput,
@@ -642,8 +709,9 @@ export interface CounterpartyAudit {
 
 /** Происхождение одного поля (M2): откуда значение и когда записано. */
 export interface FieldProvenance {
-  source: string; // egr | erp | manual | 1c | bitrix
+  source: string; // mns_grp | demo | egr | erp | manual | 1c | bitrix
   at: string | null; // ISO-дата записи значения
+  source_url?: string | null;
 }
 
 /** Карта происхождения по полям записи: `{field: {source, at}}` (M2). */
@@ -675,12 +743,220 @@ export interface CounterpartyCard {
   is_active: boolean;
   merged_into_id: number | null;
   provenance: Provenance; // M2: происхождение по полям
+  // Optional для чтения старого backend; редактирование требует подтверждённой revision.
+  revision?: number;
+  requisites?: CounterpartyRequisites;
   aliases: CounterpartyAlias[];
   merged_duplicates: DuplicateMember[];
   contacts: { id: number; full_name: string; phone: string | null; email: string | null; is_primary: boolean }[];
   audit: CounterpartyAudit[];
   touches: Touch[]; // M5: 360°-история (пусто, если sales-фасад не подключён)
   touch_summary: TouchSummary | null;
+}
+
+export interface CounterpartyRequisites {
+  legal_address?: string | null;
+  registry_status?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
+  bank_bic?: string | null;
+}
+
+export type CounterpartyRegistryField = "name" | "unp" | "legal_address" | "registry_status";
+export interface CounterpartyWriteInput {
+  expected_revision?: number;
+  manual?: CounterpartyRequisites & { name?: string; unp?: string | null };
+  contacts?: { id?: number; full_name?: string; phone?: string | null; email?: string | null; is_primary?: boolean }[];
+  registry?: { unp: string; fields: CounterpartyRegistryField[]; preview: Partial<Record<CounterpartyRegistryField, string>> };
+}
+
+export type CounterpartySaveResult =
+  | { status: "success"; id: number; revision: number }
+  | { status: "conflict"; code: string; message: string; ids?: number[] }
+  | { status: "unauthorized" | "forbidden" | "not-found" | "validation-error" | "service-error"; code?: string; message: string };
+
+async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput): Promise<CounterpartySaveResult> {
+  try {
+    const response = await fetch(path, {
+      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
+    });
+    const body = await response.json().catch(() => null);
+    if (response.ok) {
+      return isPositiveId(body?.id) && isPositiveId(body?.revision)
+        ? { status: "success", id: body.id, revision: body.revision }
+        : { status: "service-error", message: "Сервер не подтвердил сохранение" };
+    }
+    const detail = body?.detail;
+    const code = typeof detail?.code === "string" ? detail.code : undefined;
+    const message = typeof detail?.message === "string" ? detail.message : "Не удалось сохранить карточку";
+    if (response.status === 409) return {
+      status: "conflict", code: code ?? "conflict", message,
+      ids: Array.isArray(detail?.ids) && detail.ids.every(isPositiveId) ? detail.ids : undefined,
+    };
+    if (response.status === 401) return { status: "unauthorized", message: "Войдите в систему" };
+    if (response.status === 403) return { status: "forbidden", message: "Нет права изменять карточку" };
+    if (response.status === 404) return { status: "not-found", code, message };
+    if (response.status === 422) return { status: "validation-error", code, message: typeof detail?.message === "string" ? message : "Проверьте введённые реквизиты" };
+    return { status: "service-error", code, message };
+  } catch {
+    return { status: "service-error", message: "Нет подтверждения сохранения. Проверьте карточку перед повтором" };
+  }
+}
+
+export function createCounterparty(input: Omit<CounterpartyWriteInput, "expected_revision">): Promise<CounterpartySaveResult> {
+  return writeCounterparty("/api/system/mdm/counterparty", "POST", input);
+}
+
+export function updateCounterparty(id: number, input: CounterpartyWriteInput & { expected_revision: number }): Promise<CounterpartySaveResult> {
+  if (!isPositiveId(id) || !isPositiveId(input.expected_revision)) {
+    return Promise.resolve({ status: "validation-error", message: "Нужны корректные ID и версия карточки" });
+  }
+  return writeCounterparty(`/api/system/mdm/counterparty/${id}`, "PATCH", input);
+}
+
+export type CounterpartyCardResult =
+  | { status: "success"; card: CounterpartyCard }
+  | { status: "invalid-id" }
+  | { status: "not-found" }
+  | { status: "unauthorized" }
+  | { status: "forbidden" }
+  | { status: "service-error"; statusCode?: number };
+
+function isPositiveId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function isCounterpartyCardPayload(value: unknown, requestedId: number): value is CounterpartyCard {
+  if (typeof value !== "object" || value === null) return false;
+  const card = value as Record<string, unknown>;
+  if (
+    card.id !== requestedId ||
+    !isPositiveId(card.id) ||
+    typeof card.name !== "string" ||
+    !isNullableString(card.unp) ||
+    typeof card.is_active !== "boolean" ||
+    !(card.merged_into_id === null || isPositiveId(card.merged_into_id)) ||
+    typeof card.provenance !== "object" ||
+    card.provenance === null ||
+    (card.revision !== undefined && !isPositiveId(card.revision)) ||
+    (card.requisites !== undefined && (typeof card.requisites !== "object" || card.requisites === null || Array.isArray(card.requisites) || !Object.values(card.requisites).every(isNullableString))) ||
+    !Array.isArray(card.aliases) ||
+    !Array.isArray(card.merged_duplicates) ||
+    !Array.isArray(card.contacts) ||
+    !Array.isArray(card.audit) ||
+    !Array.isArray(card.touches) ||
+    !(card.touch_summary === null || typeof card.touch_summary === "object")
+  ) {
+    return false;
+  }
+
+  const provenanceOk = Object.values(card.provenance).every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as Record<string, unknown>).source === "string" &&
+      isNullableString((value as Record<string, unknown>).at),
+  );
+  const aliasesOk = card.aliases.every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as Record<string, unknown>).source === "string" &&
+      typeof (value as Record<string, unknown>).external_ref === "string" &&
+      typeof (value as Record<string, unknown>).created_at === "string",
+  );
+  const duplicatesOk = card.merged_duplicates.every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      isPositiveId((value as Record<string, unknown>).id) &&
+      typeof (value as Record<string, unknown>).name === "string",
+  );
+  const contactsOk = card.contacts.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const contact = value as Record<string, unknown>;
+    return (
+      isPositiveId(contact.id) &&
+      typeof contact.full_name === "string" &&
+      isNullableString(contact.phone) &&
+      isNullableString(contact.email) &&
+      typeof contact.is_primary === "boolean"
+    );
+  });
+  const auditOk = card.audit.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const audit = value as Record<string, unknown>;
+    return (
+      isPositiveId(audit.id) &&
+      typeof audit.ts === "string" &&
+      typeof audit.actor === "string" &&
+      typeof audit.action === "string" &&
+      typeof audit.detail === "object" &&
+      audit.detail !== null &&
+      !Array.isArray(audit.detail)
+    );
+  });
+  const touchesOk = card.touches.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const touch = value as Record<string, unknown>;
+    return (
+      typeof touch.kind === "string" &&
+      typeof touch.ts === "string" &&
+      isNullableString(touch.channel) &&
+      isNullableString(touch.direction) &&
+      typeof touch.title === "string" &&
+      typeof touch.ref === "string"
+    );
+  });
+  const summary = card.touch_summary as Record<string, unknown> | null;
+  const summaryOk =
+    summary === null ||
+    (!Array.isArray(summary) &&
+      isPositiveOrZeroInteger(summary.calls) &&
+      isPositiveOrZeroInteger(summary.deals) &&
+      isPositiveOrZeroInteger(summary.messages) &&
+      isNullableString(summary.last_contact));
+  return provenanceOk && aliasesOk && duplicatesOk && contactsOk && auditOk && touchesOk && summaryOk;
+}
+
+function isPositiveOrZeroInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Статусный SSR fetch карточки. Старый `fetchCounterpartyCard` ниже сохраняет null-контракт. */
+export async function fetchCounterpartyCardResult(
+  id: number,
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<CounterpartyCardResult> {
+  if (!isPositiveId(id)) return { status: "invalid-id" };
+  try {
+    const res = await fetch(`${BASE}/system/mdm/counterparty/${id}`, {
+      cache: "no-store",
+      headers: authHeaders ?? roleHeaders(roles),
+    });
+    if (res.status === 401) return { status: "unauthorized" };
+    if (res.status === 403) return { status: "forbidden" };
+    if (res.status === 404) return { status: "not-found" };
+    if (!res.ok) return { status: "service-error", statusCode: res.status };
+    const payload: unknown = await res.json();
+    // The sales gateway uses last_contact_at; retain the established UI field.
+    if (typeof payload === "object" && payload !== null && "touch_summary" in payload) {
+      const summary = payload.touch_summary;
+      if (typeof summary === "object" && summary !== null && "last_contact_at" in summary) {
+        payload.touch_summary = { ...summary, last_contact: summary.last_contact_at };
+      }
+    }
+    return isCounterpartyCardPayload(payload, id)
+      ? { status: "success", card: payload }
+      : { status: "service-error", statusCode: 200 };
+  } catch {
+    return { status: "service-error" };
+  }
 }
 
 /** Карточка одного эталона контрагента (SSR) — экран карточки/MDM. `null` — нет записи. */

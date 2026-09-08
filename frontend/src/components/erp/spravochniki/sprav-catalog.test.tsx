@@ -97,6 +97,9 @@ describe("SpravCatalog", () => {
     expect(
       screen.getByRole("link", { name: /Номенклатура \(SKU\)/ }),
     ).toHaveAttribute("href", "/erp/spravochniki/sku");
+    expect(
+      screen.getByRole("link", { name: /Карточка контрагента/ }),
+    ).toHaveAttribute("href", "/erp/spravochniki/counterparty");
 
     // дерево: отделы в каноническом порядке (Общие раньше Продаж)
     expect(screen.getByText(/Общие/)).toBeInTheDocument();
