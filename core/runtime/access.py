@@ -21,6 +21,7 @@ from config.access import (
     PACKAGE_TO_SLUG,
     is_package_allowed,
 )
+from config.settings import get_settings
 
 # Префиксы, открытые всегда (системные/инфраструктурные роуты и dev-доки).
 OPEN_PREFIXES: tuple[str, ...] = (
@@ -65,6 +66,12 @@ OWN_DEAL_UNSCOPED_PREFIXES: tuple[str, ...] = (
     "/leads", "/service", "/system/mdm/counterparty",
 )
 CRM_ROLES: frozenset[str] = frozenset({"sales_head", "sales", "sales_manager", "sales_cli"})
+
+# These endpoints have their own machine-to-machine authentication. This is
+# separate from OPEN_PREFIXES, which bypass module RBAC, not authentication.
+OIDC_PUBLIC_PATHS = frozenset({
+    "/system/access", "/telegram/webhook", "/marketing/seo/webhook",
+})
 
 
 def roles_from_request(request: Request) -> list[str]:
@@ -152,6 +159,13 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
                 )
 
         roles = roles_from_request(request)
+        if (
+            get_settings().auth_mode == "oidc"
+            and (not roles or GUEST in roles)
+            and path not in OIDC_PUBLIC_PATHS
+            and not path.startswith("/integrations/")
+        ):
+            return JSONResponse({"detail": "Требуется вход в ERP"}, status_code=403)
         if CRM_INVITATION_OPERATOR_ROLE in roles and path not in CRM_INVITATION_OPERATOR_PATHS:
             return JSONResponse({"detail": "Доступна только подготовка приглашений CRM"}, status_code=403)
         if effective_user.crm_restricted and path not in {"/health", "/system/access", SELF_PROFILE_PATH}:
