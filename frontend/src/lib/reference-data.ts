@@ -750,6 +750,142 @@ export interface CounterpartyCard {
   touch_summary: TouchSummary | null;
 }
 
+export type CounterpartyCardResult =
+  | { status: "success"; card: CounterpartyCard }
+  | { status: "invalid-id" }
+  | { status: "not-found" }
+  | { status: "unauthorized" }
+  | { status: "forbidden" }
+  | { status: "service-error"; statusCode?: number };
+
+function isPositiveId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function isCounterpartyCardPayload(value: unknown, requestedId: number): value is CounterpartyCard {
+  if (typeof value !== "object" || value === null) return false;
+  const card = value as Record<string, unknown>;
+  if (
+    card.id !== requestedId ||
+    !isPositiveId(card.id) ||
+    typeof card.name !== "string" ||
+    !isNullableString(card.unp) ||
+    typeof card.is_active !== "boolean" ||
+    !(card.merged_into_id === null || isPositiveId(card.merged_into_id)) ||
+    typeof card.provenance !== "object" ||
+    card.provenance === null ||
+    !Array.isArray(card.aliases) ||
+    !Array.isArray(card.merged_duplicates) ||
+    !Array.isArray(card.contacts) ||
+    !Array.isArray(card.audit) ||
+    !Array.isArray(card.touches) ||
+    !(card.touch_summary === null || typeof card.touch_summary === "object")
+  ) {
+    return false;
+  }
+
+  const provenanceOk = Object.values(card.provenance).every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as Record<string, unknown>).source === "string" &&
+      isNullableString((value as Record<string, unknown>).at),
+  );
+  const aliasesOk = card.aliases.every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as Record<string, unknown>).source === "string" &&
+      typeof (value as Record<string, unknown>).external_ref === "string" &&
+      typeof (value as Record<string, unknown>).created_at === "string",
+  );
+  const duplicatesOk = card.merged_duplicates.every(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      isPositiveId((value as Record<string, unknown>).id) &&
+      typeof (value as Record<string, unknown>).name === "string",
+  );
+  const contactsOk = card.contacts.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const contact = value as Record<string, unknown>;
+    return (
+      isPositiveId(contact.id) &&
+      typeof contact.full_name === "string" &&
+      isNullableString(contact.phone) &&
+      isNullableString(contact.email) &&
+      typeof contact.is_primary === "boolean"
+    );
+  });
+  const auditOk = card.audit.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const audit = value as Record<string, unknown>;
+    return (
+      isPositiveId(audit.id) &&
+      typeof audit.ts === "string" &&
+      typeof audit.actor === "string" &&
+      typeof audit.action === "string" &&
+      typeof audit.detail === "object" &&
+      audit.detail !== null &&
+      !Array.isArray(audit.detail)
+    );
+  });
+  const touchesOk = card.touches.every((value) => {
+    if (typeof value !== "object" || value === null) return false;
+    const touch = value as Record<string, unknown>;
+    return (
+      typeof touch.kind === "string" &&
+      typeof touch.ts === "string" &&
+      isNullableString(touch.channel) &&
+      isNullableString(touch.direction) &&
+      typeof touch.title === "string" &&
+      typeof touch.ref === "string"
+    );
+  });
+  const summary = card.touch_summary as Record<string, unknown> | null;
+  const summaryOk =
+    summary === null ||
+    (!Array.isArray(summary) &&
+      isPositiveOrZeroInteger(summary.calls) &&
+      isPositiveOrZeroInteger(summary.deals) &&
+      isPositiveOrZeroInteger(summary.messages) &&
+      isNullableString(summary.last_contact));
+  return provenanceOk && aliasesOk && duplicatesOk && contactsOk && auditOk && touchesOk && summaryOk;
+}
+
+function isPositiveOrZeroInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Статусный SSR fetch карточки. Старый `fetchCounterpartyCard` ниже сохраняет null-контракт. */
+export async function fetchCounterpartyCardResult(
+  id: number,
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<CounterpartyCardResult> {
+  if (!isPositiveId(id)) return { status: "invalid-id" };
+  try {
+    const res = await fetch(`${BASE}/system/mdm/counterparty/${id}`, {
+      cache: "no-store",
+      headers: authHeaders ?? roleHeaders(roles),
+    });
+    if (res.status === 401) return { status: "unauthorized" };
+    if (res.status === 403) return { status: "forbidden" };
+    if (res.status === 404) return { status: "not-found" };
+    if (!res.ok) return { status: "service-error", statusCode: res.status };
+    const payload: unknown = await res.json();
+    return isCounterpartyCardPayload(payload, id)
+      ? { status: "success", card: payload }
+      : { status: "service-error", statusCode: 200 };
+  } catch {
+    return { status: "service-error" };
+  }
+}
+
 /** Карточка одного эталона контрагента (SSR) — экран карточки/MDM. `null` — нет записи. */
 export async function fetchCounterpartyCard(
   id: number,

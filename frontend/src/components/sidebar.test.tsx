@@ -109,6 +109,15 @@ describe("Sidebar", () => {
     expect(dealsLink.className).not.toContain("text-accent-ink");
   });
 
+  it("ведёт из Справочников в поиск контрагентов и подсвечивает вложенный маршрут", async () => {
+    mockUsePathname.mockReturnValue("/erp/spravochniki/counterparty");
+    render(<Sidebar />);
+
+    const link = (await screen.findByText("Контрагенты")).closest("a") as HTMLElement;
+    expect(link).toHaveAttribute("href", "/erp/spravochniki/counterparty");
+    expect(link.className).toContain("text-accent-ink");
+  });
+
   it("подсвечивает Маркетинг и вложенный SEO по префиксу вложенного маршрута", async () => {
     mockUsePathname.mockReturnValue("/erp/marketing/seo/details");
     render(<Sidebar />);

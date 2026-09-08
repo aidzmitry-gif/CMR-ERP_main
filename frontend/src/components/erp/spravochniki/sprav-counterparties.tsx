@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Search } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -45,6 +46,11 @@ function searchUrl(query: Query): string {
   return `/erp/spravochniki/counterparty${encoded ? `?${encoded}` : ""}`;
 }
 
+function cardUrl(id: number, query: Query): string {
+  const queryString = searchUrl(query).split("?")[1];
+  return `/erp/spravochniki/counterparty/${encodeURIComponent(String(id))}${queryString ? `?${queryString}` : ""}`;
+}
+
 function statusText(state: ViewState): string {
   switch (state) {
     case "idle":
@@ -73,6 +79,7 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
     initialQuery.name || initialQuery.unp ? "loading" : "idle",
   );
   const [rows, setRows] = useState<CounterpartyRow[]>([]);
+  const [submittedQuery, setSubmittedQuery] = useState<Query>(initialQuery);
   const requestVersion = useRef(0);
   const requestedQueryKey = useRef<string | null>(null);
   const propEffectVersion = useRef(0);
@@ -96,6 +103,7 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
       if (propEffectVersion.current !== effectVersion) return;
       setName(initialName);
       setUnp(initialUnp);
+      setSubmittedQuery(query);
     }, 0);
     if (requestedQueryKey.current === key) {
       return () => window.clearTimeout(syncTimer);
@@ -130,6 +138,7 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
     propEffectVersion.current += 1;
     const query = normalizedQuery(name, unp);
     router.replace(searchUrl(query), { scroll: false });
+    setSubmittedQuery(query);
     if (!query.name && !query.unp) {
       requestedQueryKey.current = queryKey(query);
       requestVersion.current += 1;
@@ -232,7 +241,14 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
                 <tbody className="divide-y divide-line">
                   {rows.map((row) => (
                     <tr key={row.id} className="hover:bg-sunken/60">
-                      <td className="px-4 py-2.5 font-mono text-[12px] text-muted">{row.id}</td>
+                      <td className="px-4 py-2.5 font-mono text-[12px] text-muted">
+                        <Link
+                          href={cardUrl(row.id, submittedQuery)}
+                          className="text-accent hover:underline"
+                        >
+                          {row.id}
+                        </Link>
+                      </td>
                       <td className="px-4 py-2.5 text-ink">{row.name}</td>
                       <td className="px-4 py-2.5 font-mono text-[12px] text-muted">{row.unp ?? "—"}</td>
                     </tr>

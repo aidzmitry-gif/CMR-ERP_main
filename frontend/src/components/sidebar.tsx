@@ -203,6 +203,7 @@ const MODULES: ModuleItem[] = [
     href: "/erp/spravochniki",
     sub: [
       { label: "Каталог", href: "/erp/spravochniki" },
+      { label: "Контрагенты", href: "/erp/spravochniki/counterparty" },
       { label: "Курсы валют · НДС", href: "/erp/spravochniki/rates" },
       { label: "Дедупликация", href: "/erp/spravochniki/merge" },
       { label: "Группы номенклатуры", href: "/erp/spravochniki/categories" },
@@ -381,6 +382,7 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
   function moduleActive(m: ModuleItem): boolean {
     if (m.slug === "crm") return crmActive;
     if (m.slug === "marketing") return marketingActive;
+    if (m.slug === "spravochniki") return pathname.startsWith("/erp/spravochniki");
     return !!m.href && pathname === m.href;
   }
 

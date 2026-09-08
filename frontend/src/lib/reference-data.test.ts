@@ -15,6 +15,7 @@ import {
   fetchAiCatalog,
   fetchAllSkus,
   fetchCounterpartyCard,
+  fetchCounterpartyCardResult,
   fetchCurrencyRates,
   fetchDuplicateClusters,
   fetchNomenclatureGroups,
@@ -853,6 +854,68 @@ describe("fetchCounterpartyCard", () => {
   it("не-200 → null", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchCounterpartyCard(1)).toBeNull();
+  });
+});
+
+describe("fetchCounterpartyCardResult", () => {
+  const card = {
+    id: 7,
+    name: "ООО Ромашка",
+    unp: "190000001",
+    is_active: true,
+    merged_into_id: null,
+    provenance: {},
+    aliases: [],
+    merged_duplicates: [],
+    contacts: [],
+    audit: [],
+    touches: [],
+    touch_summary: null,
+  };
+
+  it("передаёт synthetic Bearer в SSR fetch, возвращает только совпавший id", async () => {
+    const headers = { Authorization: "Bearer synthetic-test", "X-User-Roles": "director" };
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => card }));
+    mockFetch(f);
+
+    const result = await fetchCounterpartyCardResult(7, "director", headers);
+
+    expect(result).toEqual({ status: "success", card });
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/mdm/counterparty/7`,
+      expect.objectContaining({ headers }),
+    );
+    expect(JSON.stringify(result)).not.toContain("synthetic-test");
+  });
+
+  it("invalid id и mismatch payload не становятся success", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ...card, id: 8 }) }));
+    mockFetch(f);
+
+    await expect(fetchCounterpartyCardResult(0)).resolves.toEqual({ status: "invalid-id" });
+    expect(f).not.toHaveBeenCalled();
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
+  });
+
+  it.each([
+    [404, { status: "not-found" }],
+    [401, { status: "unauthorized" }],
+    [403, { status: "forbidden" }],
+    [503, { status: "service-error", statusCode: 503 }],
+  ] as const)("различает отказ карточки HTTP %s", async (status, expected) => {
+    mockFetch(async () => ({ ok: false, status }));
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual(expected);
+  });
+
+  it("некорректный success payload становится service-error", async () => {
+    mockFetch(async () => ({ ok: true, status: 200, json: async () => ({ id: 7, name: "сломано" }) }));
+    await expect(fetchCounterpartyCardResult(7)).resolves.toEqual({
+      status: "service-error",
+      statusCode: 200,
+    });
   });
 });
 

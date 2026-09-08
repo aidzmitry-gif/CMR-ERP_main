@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: navigation.replace }),
 }));
@@ -48,6 +54,10 @@ describe("SpravCounterparties", () => {
     );
     expect(await screen.findByText("ООО Ромашка")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "17" })).toHaveAttribute(
+      "href",
+      "/erp/spravochniki/counterparty/17?name=%D0%A0%D0%BE%D0%BC",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/system/references/query",
       expect.objectContaining({
@@ -81,7 +91,9 @@ describe("SpravCounterparties", () => {
     vi.stubGlobal("fetch", vi.fn(async () => mockResponse({ result: [] })));
     render(<SpravCounterparties initialUnp="190000001" />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Совпадений нет");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Совпадений нет"),
+    );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
@@ -93,7 +105,9 @@ describe("SpravCounterparties", () => {
     vi.stubGlobal("fetch", vi.fn(async () => mockResponse({}, status)));
     render(<SpravCounterparties initialName="Ромашка" />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent(message);
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(message),
+    );
     expect(screen.queryByText("Совпадений нет")).not.toBeInTheDocument();
   });
 
@@ -131,7 +145,9 @@ describe("SpravCounterparties", () => {
     fireEvent.change(screen.getByLabelText("УНП"), { target: { value: "190000001" } });
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Укажите только одно поле");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Укажите только одно поле"),
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
