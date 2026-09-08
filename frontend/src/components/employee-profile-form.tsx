@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ageOn, PROFILE_STATUSES, type EmployeeProfile } from "@/lib/employee-profile";
 
-const inputClass = "mt-2 w-full rounded-xl border border-line bg-white px-3 py-3 text-ink disabled:bg-slate-50";
+const inputClass = "mt-2 w-full rounded-xl border border-line bg-surface px-3 py-3 text-ink disabled:bg-sunken [color-scheme:light] dark:[color-scheme:dark]";
 
 export function EmployeeProfileForm({ employeeId }: { employeeId?: number }) {
   return <ProfileFormContent key={employeeId ?? "self"} employeeId={employeeId} />;
@@ -64,14 +64,14 @@ function ProfileFormContent({ employeeId }: { employeeId?: number }) {
     finally { setBusy(false); }
   }
 
-  return <section className="w-full rounded-2xl bg-white p-5 shadow-card sm:p-8" aria-labelledby="profile-title">
+  return <section className="w-full rounded-2xl bg-surface p-5 text-ink shadow-card sm:p-8" aria-labelledby="profile-title">
     <h2 id="profile-title" className="text-xl font-bold">{readOnly ? "Личная карточка сотрудника" : "Моя HR-карточка"}</h2>
     {!readOnly && <p className="mt-2 text-sm leading-6 text-muted">Все поля ниже необязательны. Заполняйте только те сведения, которыми хотите поделиться с HR. Руководитель видит статус заполнения.</p>}
     {!loaded && <p role="status" className="mt-4">Загружаем карточку…</p>}
     {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-red-800">{error}</p>}
     {notice && <p role="status" className="mt-4 rounded-xl bg-green-50 p-3 text-green-800">{notice}</p>}
     {profile && <>
-      <div className="my-5 rounded-xl bg-slate-50 p-4">
+      <div className="my-5 rounded-xl bg-sunken p-4">
         <p className="font-semibold">{profile.full_name}</p>
         <p className="mt-1 text-sm text-muted">{profile.department} · {profile.position}</p>
         <p className="mt-2 text-sm">Анкета: {PROFILE_STATUSES[profile.status] ?? profile.status}</p>

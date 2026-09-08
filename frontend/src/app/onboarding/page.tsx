@@ -12,9 +12,9 @@ export default async function OnboardingPage() {
   if (role !== ONBOARDING_ROLE) redirect(defaultPathForRole(role));
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-ink">
+    <main className="min-h-screen bg-canvas px-4 py-8 text-ink">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <section className="rounded-2xl bg-white p-8 shadow-card">
+      <section className="rounded-2xl bg-surface p-8 shadow-card">
         <p className="text-sm font-semibold uppercase tracking-wide text-accent-ink">AI-OS · ознакомление</p>
         <h1 className="mt-3 text-2xl font-bold">Добро пожаловать, {userName}</h1>
         <p className="mt-3 text-sm leading-6 text-muted">

@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -17,6 +17,7 @@ from sqlalchemy import select
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
+from modules.procurement import routes as procurement_routes
 from modules.procurement.models import ShipRequirement
 
 pytestmark = pytest.mark.asyncio
@@ -107,11 +108,10 @@ async def test_plan_auto_derives_target_from_deadline(deadline_app, session, mon
     class PlanningClock(datetime):
         @classmethod
         def now(cls, tz=None):
-            value = cls(2026, 9, 1, tzinfo=timezone.utc)
-            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+            return cls(2026, 1, 1, tzinfo=tz)
 
-    # Container start is 2026-09-07; keep this no-risk scenario before that date.
-    monkeypatch.setattr("modules.procurement.routes.datetime", PlanningClock)
+    # Этот сценарий проверяет вывод даты, а не риск уже просроченного старта.
+    monkeypatch.setattr(procurement_routes, "datetime", PlanningClock)
     client, core = deadline_app
     o = await _order(client)
     await _emit_deadline(core, session, ship_deadline="2026-12-31")  # позиция A
