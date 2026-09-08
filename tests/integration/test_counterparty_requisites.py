@@ -1,8 +1,8 @@
 """G09: queued concurrent writes on migrated, isolated PostgreSQL via real pg_app.
 
 Collection is not PostgreSQL proof; the fixture's infrastructure skip is not PASS.
-PATCH includes unchanged manual.unp to queue on the shared advisory lock. The
-row-lock-only PATCH branch (without UNP in the payload) is outside this batch.
+PATCH cases cover both the shared UNP advisory queue and dirty fields without
+UNP, which wait only on the row lock. Both require observed concurrent waiters.
 """
 from __future__ import annotations
 
@@ -69,7 +69,26 @@ async def _synthetic(pg_app):
                     await session.commit()
 
 
-async def _queued_writes(factory, unp, tasks, *writers):
+async def _row_waiter_pids(observer, holder_pid):
+    # A second row writer may wait on the first writer's tuple lock, so follow
+    # the actual blocking chain rather than require a direct edge to the holder.
+    await observer.execute(text("SELECT pg_stat_clear_snapshot()"))
+    blocked = (await observer.execute(text("""
+        SELECT DISTINCT locks.pid, pg_blocking_pids(locks.pid) AS blockers
+        FROM pg_locks AS locks
+        JOIN pg_stat_activity AS activity ON activity.pid = locks.pid
+        WHERE NOT locks.granted AND activity.datname = current_database()
+          AND activity.state = 'active' AND activity.wait_event_type = 'Lock'
+    """))).all()
+    connected = {holder_pid}
+    while True:
+        expanded = connected | {pid for pid, blockers in blocked if connected.intersection(blockers)}
+        if expanded == connected:
+            return connected - {holder_pid}
+        connected = expanded
+
+
+async def _queued_writes(factory, unp, tasks, *writers, counterparty_id=None):
     """Keep two distinct DB backends queued on the actual application lock."""
     assert len(writers) == 2
     async with factory() as holder, factory() as observer:
@@ -78,14 +97,21 @@ async def _queued_writes(factory, unp, tasks, *writers):
                 holder_pid = await holder.scalar(text("SELECT pg_backend_pid()"))
                 observer_pid = await observer.scalar(text("SELECT pg_backend_pid()"))
                 assert holder_pid != observer_pid
-                await holder.run_sync(lambda sync: lock_counterparty_unps(sync, {unp}))
-                assert await observer.scalar(text("""
-                    SELECT count(*) FROM pg_locks
-                    WHERE pid = :pid AND locktype = 'advisory' AND granted
-                """), {"pid": holder_pid}) == 1
+                if counterparty_id is None:
+                    await holder.run_sync(lambda sync: lock_counterparty_unps(sync, {unp}))
+                    assert await observer.scalar(text("""
+                        SELECT count(*) FROM pg_locks
+                        WHERE pid = :pid AND locktype = 'advisory' AND granted
+                    """), {"pid": holder_pid}) == 1
+                else:
+                    assert await holder.scalar(select(Counterparty.id).where(
+                        Counterparty.id == counterparty_id,
+                    ).with_for_update()) == counterparty_id
                 tasks.extend(asyncio.create_task(writer()) for writer in writers)
                 while True:
-                    pids = set(await observer.scalars(WAITERS, {"holder_pid": holder_pid}))
+                    pids = await _row_waiter_pids(observer, holder_pid) if counterparty_id is not None else set(
+                        await observer.scalars(WAITERS, {"holder_pid": holder_pid}),
+                    )
                     if len(pids) == 2:
                         assert not pids.intersection({holder_pid, observer_pid})
                         assert all(not task.done() for task in tasks)
@@ -196,6 +222,52 @@ async def test_same_revision_updates_overlap_without_loser_contacts_or_audit(pg_
         assert audit[1].detail["before"]["name"] == f"{marker}-base"
         assert audit[1].detail["after"]["name"] == cp.name
         assert {contact["full_name"] for contact in audit[1].detail["after"]["contacts"]} == {contact.full_name for contact in contacts}
+
+
+async def test_row_only_patch_overlaps_without_loser_address_contact_or_audit(pg_app):
+    async with _synthetic(pg_app) as (factory, marker, unp, tasks):
+        async with asyncio.timeout(10):
+            created = await pg_app.post("/system/mdm/counterparty", json={
+                "manual": {"name": f"{marker}-base", "unp": unp, "legal_address": "Base address"},
+                "contacts": [{"full_name": f"{marker}-base", "phone": "+375290000000", "is_primary": True}],
+            })
+        assert created.status_code == 201, created.text
+        receipt = created.json()
+        _, initial_contacts, _ = await _stored(factory, unp)
+        assert len(initial_contacts) == 1
+        contact_id = initial_contacts[0].id
+        payloads = [{
+            "expected_revision": receipt["revision"],
+            "manual": {"legal_address": f"Address {suffix}"},
+            "contacts": [{"id": contact_id, "full_name": f"{marker}-{suffix}", "phone": f"+37529000000{index}"}],
+        } for index, suffix in enumerate(("A", "B"), start=1)]
+        # Neither request has manual.unp or registry: only SELECT FOR UPDATE
+        # can hold them behind our separate row-lock holder.
+        responses, waiters = await _queued_writes(factory, None, tasks, *[
+            lambda payload=payload: pg_app.patch(f"/system/mdm/counterparty/{receipt['id']}", json=payload)
+            for payload in payloads
+        ], counterparty_id=receipt["id"])
+        assert len(waiters) == 2
+        assert sorted(response.status_code for response in responses) == [200, 409]
+        winner = next(index for index, response in enumerate(responses) if response.status_code == 200)
+        assert responses[1 - winner].json()["detail"]["code"] == "stale_revision"
+        companies, contacts, audit = await _stored(factory, unp)
+        assert len(companies) == len(contacts) == 1
+        cp, contact = companies[0], contacts[0]
+        assert cp.is_active and cp.id == receipt["id"] == responses[winner].json()["id"]
+        assert cp.name == f"{marker}-base" and cp.unp == unp
+        assert cp.revision == receipt["revision"] + 1 == responses[winner].json()["revision"]
+        assert cp.requisites["legal_address"] == payloads[winner]["manual"]["legal_address"]
+        assert contact.id == contact_id and contact.is_primary
+        assert contact.full_name == payloads[winner]["contacts"][0]["full_name"]
+        assert contact.phone == payloads[winner]["contacts"][0]["phone"]
+        assert [entry.action for entry in audit] == ["counterparty.created", "counterparty.updated"]
+        assert audit[1].actor and audit[1].detail["revision"] == cp.revision
+        assert audit[1].detail["before"]["requisites"]["legal_address"] == "Base address"
+        assert audit[1].detail["after"]["requisites"]["legal_address"] == cp.requisites["legal_address"]
+        assert len(audit[1].detail["after"]["contacts"]) == 1
+        assert audit[1].detail["after"]["contacts"][0]["full_name"] == contact.full_name
+        assert audit[1].detail["after"]["contacts"][0]["phone"] == contact.phone
 
 
 async def test_api_and_direct_orm_share_unp_lock_and_recheck(pg_app):
