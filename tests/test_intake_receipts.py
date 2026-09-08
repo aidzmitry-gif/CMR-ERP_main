@@ -58,11 +58,12 @@ def envelope(namespace="admin@enersys.by", source_id="mail:1", delivery_id="deli
     }
 
 
-def attachment(data=b"%PDF-1.4 exact test bytes\n%%EOF", file_id="1"):
+def attachment(data=b"%PDF-1.4 exact test bytes\n%%EOF", file_id="1",
+               filename="Запрос.pdf", content_type="application/pdf"):
     return {
-        "file_id": file_id, "filename": "Запрос.pdf", "size_bytes": len(data),
+        "file_id": file_id, "filename": filename, "size_bytes": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
-        "data_url": "data:application/pdf;base64," + base64.b64encode(data).decode(),
+        "data_url": f"data:{content_type};base64," + base64.b64encode(data).decode(),
     }
 
 
@@ -167,6 +168,52 @@ async def test_delivery_survives_new_session_with_exact_files(intake_env):
     repeated = await env.api.post(URL, json=request)
     assert repeated.status_code == 200 and repeated.json() == result
     assert await count(env.session, LeadAttachment) == 1
+
+
+async def test_legacy_doc_and_nested_png_delivery_download_once(intake_env):
+    env = intake_env
+    doc_data = (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(range(251))) * 200
+    doc_data = doc_data[:40960]
+    png_data = (b"\x89PNG\r\n\x1a\n" + b"PNG synthetic test bytes") * 200
+    png_data = png_data[:3341]
+    request = envelope(files=[
+        attachment(doc_data, "doc", "legacy.doc", "application/msword"),
+        attachment(png_data, "png", "inline.png", "image/png"),
+    ])
+    response = await env.api.post(URL, json=request)
+    assert response.status_code == 202, response.text
+    receipt_id = response.json()["receipt_id"]
+    await env.relay()
+    result = await receipt(env, receipt_id)
+    assert result["status"] == "delivered" and result["lead_id"]
+    by_name = {item["filename"]: item for item in result["files"]}
+    assert {"legacy.doc", "inline.png"} == set(by_name)
+    expected = {"legacy.doc": doc_data, "inline.png": png_data}
+    for filename, data in expected.items():
+        item = by_name[filename]
+        download = await env.api.get(
+            f"/leads/{result['lead_id']}/attachments/{item['attachment_id']}/download"
+        )
+        assert download.status_code == 200
+        assert download.content == data
+        assert hashlib.sha256(download.content).hexdigest() == item["sha256"]
+        assert download.headers["content-type"].split(";", 1)[0] == (
+            "application/msword" if filename == "legacy.doc" else "image/png"
+        )
+        if filename == "legacy.doc":
+            assert download.headers["content-disposition"].startswith("attachment;")
+            assert download.headers["x-content-type-options"] == "nosniff"
+    assert await count(env.session, LeadAttachment) == 2
+    repeated = await env.api.post(URL, json=request)
+    assert repeated.status_code == 200 and repeated.json() == result
+    assert await count(env.session, LeadAttachment) == 2
+
+    doc_row = await env.session.scalar(select(LeadAttachment).where(LeadAttachment.filename == "legacy.doc"))
+    doc_path = intake_storage.resolve_path(env.root, doc_row.storage_path)
+    doc_path.write_bytes(b"corrupted")
+    assert (await receipt(env, receipt_id))["status"] == "unavailable"
+    doc_path.unlink()
+    assert (await receipt(env, receipt_id))["status"] == "unavailable"
 
 
 async def test_duplicate_queued_and_payload_conflict(intake_env):

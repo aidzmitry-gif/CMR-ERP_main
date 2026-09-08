@@ -98,11 +98,35 @@ async def test_lead_attachment_upload_list_download(session, api, monkeypatch, t
     assert dl.status_code == 200
     assert dl.content == pdf_bytes
     assert dl.headers["content-type"] == "application/pdf"
+    assert dl.headers["content-disposition"].startswith("inline;")
+
+    doc_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy DOC test bytes"
+    doc_data_url = "data:application/msword;base64," + base64.b64encode(doc_bytes).decode()
+    doc_upload = await api.post(
+        f"/leads/{lead_id}/attachments",
+        json={"filename": "legacy.doc", "data_url": doc_data_url, "source": "tender"},
+    )
+    assert doc_upload.status_code == 201
+    doc_body = doc_upload.json()
+    assert doc_body["filename"] == "legacy.doc"
+    assert doc_body["content_type"] == "application/msword"
+    assert doc_body["size_bytes"] == len(doc_bytes)
+    doc_attachment_id = doc_body["id"]
+
+    doc_download = await api.get(f"/leads/{lead_id}/attachments/{doc_attachment_id}/download")
+    assert doc_download.status_code == 200
+    assert doc_download.content == doc_bytes
+    assert doc_download.headers["content-type"] == "application/msword"
+    assert doc_download.headers["content-disposition"].startswith("attachment;")
+    assert doc_download.headers["x-content-type-options"] == "nosniff"
 
     # чужой lead_id к тому же attachment_id — не найдено (нельзя скачать по чужому лиду)
     other_lead = (await api.post("/leads", json={"source": "site"})).json()
     assert (
         await api.get(f"/leads/{other_lead['id']}/attachments/{attachment_id}/download")
+    ).status_code == 404
+    assert (
+        await api.get(f"/leads/{other_lead['id']}/attachments/{doc_attachment_id}/download")
     ).status_code == 404
 
 
