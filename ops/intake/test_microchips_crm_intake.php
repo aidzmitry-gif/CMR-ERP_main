@@ -238,14 +238,55 @@ try {
     $consumed = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
     testSame(0, $consumed['errors'], 'queued receiver response succeeds');
     testSame('queued', microchipsCrmIntakeReadStatus($spool, 'form:1:result:101')['state'], 'queued state is durable');
-    testSame(1, count(testFiles($spool . DIRECTORY_SEPARATOR . 'done')), 'queued raw envelope retained in done');
+    testAssert(is_file($pending[0]), 'queued raw envelope remains pending');
+    testSame(0, count(testFiles($spool . DIRECTORY_SEPARATOR . 'done')), 'queued envelope is not moved to done');
     testSame(1, count($transportCalls), 'one HTTP POST for queued response');
     testAssert(strpos((string) $transportCalls[0]['body'], $token) === false, 'token absent from POST body');
     testAssert(in_array('X-Intake-Token: ' . $token, $transportCalls[0]['headers'], true), 'token only sent as header');
+    $queuedStatus = microchipsCrmIntakeReadStatus($spool, 'form:1:result:101');
+    testAssert(is_string($queuedStatus['next_retry_at'] ?? null) && strtotime($queuedStatus['next_retry_at']) > time(), 'queued response schedules a bounded retry');
 
-    $again = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
-    testSame(0, $again['processed'], 'queued item is not posted again');
+    $again = microchipsCrmIntakeConsume($spool, $token, $transport, 10, false);
+    testSame(1, $again['processed'], 'queued item is deferred until retry time');
+    testSame(0, $again['errors'], 'queued deferral is not an error');
     testSame(1, count($transportCalls), 'queued item does not duplicate HTTP');
+    $transportResponses[] = [
+        'http_code' => 200,
+        'body' => json_encode([
+            'receipt_id' => 'r-delivered-101',
+            'status' => 'delivered',
+            'source_id' => 'form:1:result:101',
+            'delivery_id' => 'form:1:result:101',
+            'namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'identity_namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'payload_sha256' => $payloadHash,
+            'lead_id' => 1001,
+            'files' => [],
+        ], JSON_THROW_ON_ERROR),
+    ];
+    $transportResponses[] = [
+        'http_code' => 200,
+        'body' => json_encode([
+            'receipt_id' => 'r-delivered-101',
+            'status' => 'delivered',
+            'source_id' => 'form:1:result:101',
+            'delivery_id' => 'form:1:result:101',
+            'namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'identity_namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'payload_sha256' => $payloadHash,
+            'lead_id' => 1001,
+            'files' => [],
+        ], JSON_THROW_ON_ERROR),
+    ];
+    $callsBeforeQueuedRetry = count($transportCalls);
+    $queuedRetry = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
+    testSame(0, $queuedRetry['errors'], 'queued retry reaches delivered');
+    testSame(2, count($transportCalls) - $callsBeforeQueuedRetry, 'queued retry uses POST then mandatory GET');
+    testSame($originalBody, $transportCalls[$callsBeforeQueuedRetry]['body'], 'queued retry POST body is byte-for-byte immutable');
+    testSame('GET', $transportCalls[$callsBeforeQueuedRetry + 1]['method'], 'queued retry confirms through GET');
+    testSame(MICROCHIPS_CRM_INTAKE_ENDPOINT . '/receipts/r-delivered-101', $transportCalls[$callsBeforeQueuedRetry + 1]['url'], 'queued retry GET receipt URL');
+    testSame('delivered', microchipsCrmIntakeReadStatus($spool, 'form:1:result:101')['state'], 'queued item leaves pending only after delivered GET');
+    testSame(1, count(testFiles($spool . DIRECTORY_SEPARATOR . 'done')), 'GET-confirmed queued item moves to done');
 
     $retry = microchipsCrmIntakeQueueBitrixResult(2, 202, $answers, ['spool_dir' => $spool]);
     testSame('spooled', $retry['state'], 'second target form spooled');
@@ -286,6 +327,30 @@ try {
     $retried = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
     testSame(0, $retried['errors'], 'same immutable body retries successfully');
     testSame($transportCalls[count($transportCalls) - 2]['body'], $transportCalls[count($transportCalls) - 1]['body'], 'retry body is byte-for-byte unchanged');
+    testSame('queued', microchipsCrmIntakeReadStatus($spool, 'form:2:result:202')['state'], 'queued retry remains pending');
+    testAssert(is_file($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'form:2:result:202') . '.json'), 'queued retry source remains pending');
+    foreach ([
+        ['http_code' => 200, 'status' => 'delivered', 'lead_id' => 2002],
+        ['http_code' => 200, 'status' => 'delivered', 'lead_id' => 2002],
+    ] as $reply) {
+        $transportResponses[] = [
+            'http_code' => $reply['http_code'],
+            'body' => json_encode([
+                'receipt_id' => 'r-delivered-202',
+                'status' => $reply['status'],
+                'source_id' => 'form:2:result:202',
+                'delivery_id' => 'form:2:result:202',
+                'namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+                'identity_namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+                'payload_sha256' => $retryHash,
+                'lead_id' => $reply['lead_id'],
+                'files' => [],
+            ], JSON_THROW_ON_ERROR),
+        ];
+    }
+    $retryDelivered = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
+    testSame(0, $retryDelivered['errors'], 'queued retry eventually reaches delivered');
+    testSame('delivered', microchipsCrmIntakeReadStatus($spool, 'form:2:result:202')['state'], 'queued retry leaves pending only after GET');
 
     $delivered = microchipsCrmIntakeQueueBitrixResult(9, 909, $answers, ['spool_dir' => $spool]);
     testSame('spooled', $delivered['state'], 'delivered test form is spooled');
@@ -426,13 +491,27 @@ try {
         'http_code' => 202,
         'body' => json_encode([
             'receipt_id' => 'r-queued-order-501',
-            'status' => 'queued',
+            'status' => 'delivered',
             'namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
             'identity_namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
             'source_id' => 'order:501',
             'delivery_id' => 'order:501',
             'payload_sha256' => $orderHash,
-            'lead_id' => null,
+            'lead_id' => 501,
+            'files' => [],
+        ], JSON_THROW_ON_ERROR),
+    ];
+    $transportResponses[] = [
+        'http_code' => 200,
+        'body' => json_encode([
+            'receipt_id' => 'r-queued-order-501',
+            'status' => 'delivered',
+            'namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'identity_namespace' => MICROCHIPS_CRM_INTAKE_NAMESPACE,
+            'source_id' => 'order:501',
+            'delivery_id' => 'order:501',
+            'payload_sha256' => $orderHash,
+            'lead_id' => 501,
             'files' => [],
         ], JSON_THROW_ON_ERROR),
     ];
@@ -447,7 +526,7 @@ try {
     $notConfirmedHash = $notConfirmedEnvelope['payload_sha256'];
     foreach ([
         ['http_code' => 200, 'status' => 'delivered', 'lead_id' => 9010],
-        ['http_code' => 202, 'status' => 'queued', 'lead_id' => null],
+        ['http_code' => 200, 'status' => 'delivered', 'lead_id' => null],
     ] as $reply) {
         $transportResponses[] = [
             'http_code' => $reply['http_code'],

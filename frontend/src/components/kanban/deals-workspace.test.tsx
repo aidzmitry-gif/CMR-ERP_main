@@ -753,7 +753,7 @@ describe("DealsWorkspace (канбан)", () => {
     // «1» рендерится в отдельном <b> — getByText(regex) сверяет только прямые текстовые
     // узлы элемента, поэтому число проверяем через toHaveTextContent (рекурсивно).
     const label = await screen.findByText(/Висяки:/);
-    expect(label.closest("span")).toHaveTextContent("Висяки: 1");
+    await waitFor(() => expect(label.closest("span")).toHaveTextContent("Висяки: 1"));
   });
 
   // --- Слайс 3 (D): гэп до плана в строке pipeline ---
