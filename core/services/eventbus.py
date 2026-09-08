@@ -66,7 +66,13 @@ class OutboxEventBus:
             if inspect.isawaitable(result):
                 await result
 
-    async def relay_once(self, session: AsyncSession, ctx: "EventContext | None" = None) -> int:
+    async def relay_once(
+        self,
+        session: AsyncSession,
+        ctx: "EventContext | None" = None,
+        *,
+        event_types=None,
+    ) -> int:
         """Доставить необработанные события подписчикам и пометить processed_at.
 
         Лок строк outbox (B1): без блокировки синхронный ``relay_once`` в
@@ -82,6 +88,8 @@ class OutboxEventBus:
             .where(OutboxEvent.processed_at.is_(None))
             .order_by(OutboxEvent.id)
         )
+        if event_types is not None:
+            stmt = stmt.where(OutboxEvent.event_type.in_(event_types))
         if session.get_bind().dialect.name == "postgresql":
             stmt = stmt.with_for_update(skip_locked=True)
         rows = (await session.execute(stmt)).scalars().all()
