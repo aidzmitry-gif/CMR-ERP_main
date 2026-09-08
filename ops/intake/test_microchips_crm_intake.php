@@ -194,6 +194,24 @@ try {
         'FORM_PAGE_URL' => ['answer-3' => ['USER_TEXT' => 'https://microchips.by/test', 'VALUE' => 'metadata-url']],
         'SOURCE_URL' => 'https://microchips.by/test?source=form',
     ];
+    $contextAnswers = [
+        'CLIENT_NAME' => ['answer' => ['USER_TEXT' => 'Алексей']],
+        'EMAIL' => ['answer' => ['USER_TEXT' => 'a@example.invalid']],
+        'QUESTION' => ['answer' => ['USER_TEXT' => 'Основной вопрос']],
+        'SERVICE' => ['49' => ['USER_TEXT' => 'Ремонт тяговых АКБ для погрузчиков и штабелёров', 'VALUE' => 'metadata-service']],
+        'STAFF' => ['50' => ['ANSWER_TEXT' => 'Срочный выезд', 'VALUE' => 'metadata-staff']],
+        'DELIVERY_METHOD' => ['51' => ['VALUE' => 'Самовывоз']],
+    ];
+    $contextPayload = microchipsCrmIntakeBuildFormPayload($contextAnswers);
+    $contextMessage = $contextPayload['payload']['lead']['message'];
+    testSame(
+        "Основной вопрос\nSERVICE: Ремонт тяговых АКБ для погрузчиков и штабелёров\nSTAFF: Срочный выезд\nDELIVERY_METHOD: Самовывоз",
+        $contextMessage,
+        'main and nonempty additional form answers are retained'
+    );
+    testSame(1, substr_count($contextMessage, 'Основной вопрос'), 'main message is included once');
+    testAssert(!str_contains($contextMessage, 'CLIENT_NAME:'), 'known name is not duplicated as an extra');
+    testAssert(!str_contains($contextMessage, 'EMAIL:'), 'known email is not duplicated as an extra');
     $queued = microchipsCrmIntakeQueueBitrixResult(1, 101, $answers, ['spool_dir' => $spool]);
     testSame('spooled', $queued['state'], 'target form is spooled before HTTP');
     $pending = testFiles($spool . DIRECTORY_SEPARATOR . 'pending');
@@ -458,6 +476,18 @@ try {
     $truncatedReview = microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
     testSame($transportCallCountBeforeReview, count($transportCalls), 'truncated field is not posted');
     testSame('failed_review', microchipsCrmIntakeReadStatus($spool, 'form:3:result:303')['state'], 'truncated source is retained for review');
+
+    $combinedTruncatedAnswers = $answers;
+    $combinedTruncatedAnswers['MESSAGE'] = str_repeat('Q', MICROCHIPS_CRM_INTAKE_MAX_MESSAGE_BYTES - 4);
+    $combinedTruncatedAnswers['SERVICE'] = ['49' => ['USER_TEXT' => 'Ремонт тяговых АКБ для погрузчиков и штабелёров']];
+    $combinedTruncated = microchipsCrmIntakeQueueBitrixResult(4, 404, $combinedTruncatedAnswers, ['spool_dir' => $spool]);
+    testSame('spooled_review_required', $combinedTruncated['state'], 'combined message truncation is review-only');
+    $transportCallCountBeforeCombinedReview = count($transportCalls);
+    microchipsCrmIntakeConsume($spool, $token, $transport, 10, true);
+    testSame($transportCallCountBeforeCombinedReview, count($transportCalls), 'combined message truncation is not posted');
+    testSame('failed_review', microchipsCrmIntakeReadStatus($spool, 'form:4:result:404')['state'], 'combined truncation source is retained for review');
+    $combinedTruncatedEnvelope = testReadJson($spool . DIRECTORY_SEPARATOR . 'review' . DIRECTORY_SEPARATOR . hash('sha256', 'form:4:result:404') . '.json');
+    testAssert(isset($combinedTruncatedEnvelope['raw_source']['answers']['SERVICE']), 'combined message source answers remain in review envelope');
 
     $order = microchipsCrmIntakeOnSaleOrderSaved([
         'ENTITY' => [

@@ -911,20 +911,23 @@ function microchipsCrmIntakeBuildFormPayload(array $answers, array $context = []
         return $value;
     };
 
-    $message = $bounded('message', MICROCHIPS_CRM_INTAKE_MAX_MESSAGE_BYTES);
-    if ($message === '') {
-        $known = [];
-        foreach ($aliases as $fieldAliases) {
-            $known = array_merge($known, $fieldAliases);
-        }
-        $message = microchipsCrmIntakeLimitText(
-            microchipsCrmIntakeAnswersMessage($answers, $known),
-            MICROCHIPS_CRM_INTAKE_MAX_MESSAGE_BYTES,
-            $wasTruncated
-        );
-        if ($wasTruncated) {
-            $truncatedFields[] = 'message';
-        }
+    $known = [];
+    foreach ($aliases as $fieldAliases) {
+        $known = array_merge($known, $fieldAliases);
+    }
+    $mainMessage = microchipsCrmIntakeText($read('message'));
+    $extraMessage = microchipsCrmIntakeAnswersMessage($answers, $known);
+    $message = $mainMessage;
+    if ($extraMessage !== '') {
+        $message = $message === '' ? $extraMessage : $message . "\n" . $extraMessage;
+    }
+    $message = microchipsCrmIntakeLimitText(
+        $message,
+        MICROCHIPS_CRM_INTAKE_MAX_MESSAGE_BYTES,
+        $wasTruncated
+    );
+    if ($wasTruncated) {
+        $truncatedFields[] = 'message';
     }
 
     $lead = [

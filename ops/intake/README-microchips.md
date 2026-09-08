@@ -49,6 +49,12 @@ URLs `<=2048` bytes. Полное исходное событие сохраня
 order, также получают `failed_review`: raw envelope сохраняется и HTTP не
 выполняется до ручного решения.
 
+Для form answers `lead.message` состоит из основного сообщения и всех
+непустых дополнительных ответов в формате `SID: value`; известные aliases
+контактных и служебных полей исключаются. Общий лимит применяется после
+объединения, а превышение оставляет исходные answers в `raw_source` и требует
+review.
+
 Ответ receiver принимается только с теми же `namespace`,
 `identity_namespace`, `source_id`, `delivery_id` и `payload_sha256`. В envelope
 `wire_sha256` — digest неизменяемых байтов `request_json`, а `payload_sha256` —
