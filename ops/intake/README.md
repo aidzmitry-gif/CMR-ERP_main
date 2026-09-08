@@ -17,6 +17,21 @@ Backend добавляет `/integrations/intake/v1` и квитанции до�
   повтора. Порядок переключения в `MOTTOR-RUNBOOK.md`.
 - `mail_delivery.py` — IMAP readonly, MIME staging, отбор и доставка с receipt.
   Конфигурация и ограничения в `MAIL-RUNBOOK.md`.
+- `mail_receipts.py` — conservative parser: обычный внешний клиент, адресованный
+  на `To: order@microchips.by`, проходит по intent/file checks; site-copy review требует provenance от
+  `microchips.by`/`lpmotor.ru` или явного form/Mottor/RS marker. Email не является
+  ключом связывания. `application/msword`/`.doc` сохраняется байт-в-байт в тех же
+  пределах; выдача скачивает его как attachment с `nosniff`.
+
+Intent сохраняет прежние request/product markers и добавляет только
+`подскажите` вместе с marker аккумулятора/батареи. Если subject/body не дают
+intent, разрешённый DOCX проверяется в памяти: читается ровно один
+`word/document.xml` при не более 128 ZIP entries, XML до 256 KiB и текст до 64
+KiB. Принимаются только known Word namespaces, UTF-8 (с необязательным BOM),
+без encryption, неподдерживаемой compression, NUL, DTD или ENTITY. Текст DOCX
+используется только как intent evidence; lead message и исходный файл не
+переписываются. Ошибка разбора даёт явный review после обычных MIME, filename,
+count и size checks.
 
 Проверка ops-кода:
 

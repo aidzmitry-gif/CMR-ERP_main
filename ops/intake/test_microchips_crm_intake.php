@@ -2,7 +2,95 @@
 
 declare(strict_types=1);
 
+final class TestBitrixEvent
+{
+    /** @param array<string, mixed> $parameters */
+    public function __construct(private array $parameters) {}
+
+    public function getParameter(string $name): mixed
+    {
+        return $this->parameters[$name] ?? null;
+    }
+}
+
+if (!class_exists('Bitrix\\Main\\Event')) {
+    class_alias(TestBitrixEvent::class, 'Bitrix\\Main\\Event');
+}
+
 require_once __DIR__ . '/microchips_crm_intake.php';
+require_once __DIR__ . '/microchips_bitrix_hooks.php';
+
+final class TestBitrixProperty
+{
+    public function __construct(
+        private string $code,
+        private string $type,
+        private mixed $value,
+        private string $name = ''
+    ) {}
+
+    /** @return array<string, string> */
+    public function getProperty(): array
+    {
+        return ['CODE' => $this->code, 'TYPE' => $this->type, 'NAME' => $this->name];
+    }
+
+    public function getValue(): mixed
+    {
+        return $this->value;
+    }
+}
+
+final class TestBitrixBasketItem
+{
+    /** @param array<string, mixed> $fields */
+    public function __construct(private array $fields) {}
+
+    /** @return array<string, mixed> */
+    public function getFieldValues(): array
+    {
+        return $this->fields;
+    }
+}
+
+final class TestBitrixOrder
+{
+    public int $fieldReads = 0;
+    public int $propertyReads = 0;
+
+    /** @param array<string, mixed> $fields @param list<TestBitrixProperty> $properties */
+    public function __construct(
+        private int $id,
+        private array $fields,
+        private array $properties,
+        private array $basket = []
+    ) {}
+
+    public function getId(): int
+    {
+        return $this->id;
+    }
+
+    /** @return array<string, mixed> */
+    public function getFieldValues(): array
+    {
+        $this->fieldReads++;
+        return $this->fields;
+    }
+
+    /** @return list<TestBitrixProperty> */
+    public function getPropertyCollection(): array
+    {
+        $this->propertyReads++;
+        return $this->properties;
+    }
+
+    /** @return list<TestBitrixBasketItem> */
+    public function getBasket(): array
+    {
+        return $this->basket;
+    }
+}
 
 function testAssert(bool $condition, string $message): void
 {
@@ -31,6 +119,40 @@ function testReadJson(string $path): array
 function testFiles(string $directory): array
 {
     return glob($directory . DIRECTORY_SEPARATOR . '*.json') ?: [];
+}
+
+function testReviewByReason(string $spool, string $reason): array
+{
+    foreach (testFiles($spool . DIRECTORY_SEPARATOR . 'review') as $path) {
+        $review = testReadJson($path);
+        if (($review['metadata']['review_reason'] ?? null) === $reason) {
+            return $review;
+        }
+    }
+    throw new RuntimeException('ASSERTION FAILED: review not found: ' . $reason);
+}
+
+function testNativeOrder(
+    int $id,
+    mixed $contactName = null,
+    string $lid = 's1',
+    mixed $personTypeId = 2,
+    string $contactPropertyType = 'STRING'
+): TestBitrixOrder {
+    return new TestBitrixOrder(
+        $id,
+        [
+            'ID' => $id, 'LID' => $lid, 'PERSON_TYPE_ID' => $personTypeId,
+            'PRICE' => '10.00', 'CURRENCY' => 'BYN', 'DELIVERY_ID' => 2,
+            'USER_DESCRIPTION' => 'Quickbuy test order',
+        ],
+        [
+            new TestBitrixProperty('CONTACT_PERSON', $contactPropertyType, $contactName, 'Contact person'),
+            new TestBitrixProperty('PHONE', 'STRING', '+375291111111', 'Phone'),
+            new TestBitrixProperty('EMAIL', 'STRING', 'quickbuy@example.invalid', 'Email'),
+        ],
+        [new TestBitrixBasketItem(['PRODUCT_ID' => 9, 'NAME' => 'Pack', 'QUANTITY' => 1, 'PRICE' => '10.00'])]
+    );
 }
 
 $spool = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'microchips-crm-intake-test-' . bin2hex(random_bytes(6));
@@ -577,6 +699,140 @@ try {
     testSame(1, $notConfirmedConsumed['errors'], 'POST delivered without delivered GET remains retryable');
     testAssert(is_file($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'form:10:result:910') . '.json'), 'GET-unconfirmed envelope remains pending');
     testSame('transport_or_validation_error', microchipsCrmIntakeReadStatus($spool, 'form:10:result:910')['state'], 'GET-unconfirmed state is visible');
+
+    // Native D7 quick-buy late-save regression.  The request is used only to
+    // fill CONTACT_PERSON; the full POST never enters the source envelope.
+    $oldPost = $_POST ?? [];
+    $oldServer = $_SERVER ?? [];
+    $runNative = static function (
+        TestBitrixOrder $order,
+        mixed $contactPerson = null,
+        bool $includeContact = true,
+        bool $isNew = true,
+        mixed $method = 'POST',
+        mixed $script = MICROCHIPS_CRM_INTAKE_NATIVE_QUICKBUY_SCRIPT,
+        mixed $siteId = 's1',
+        mixed $requestPersonTypeId = 2
+    ) use ($spool): void {
+        $_SERVER = ['REQUEST_METHOD' => $method, 'SCRIPT_FILENAME' => $script];
+        $_POST = [
+            'SITE_ID' => $siteId,
+            'PERSON_TYPE_ID' => $requestPersonTypeId,
+            'ONE_CLICK_BUY' => ['PHONE' => 'request-phone', 'EMAIL' => 'request@example.invalid'],
+        ];
+        if ($includeContact) {
+            $_POST['ONE_CLICK_BUY']['CONTACT_PERSON'] = $contactPerson;
+        }
+        // Deliberate test-only seam: the production callback supplies one arg;
+        // the second arg only selects this private spool directory.
+        microchipsCrmIntakeNativeOrder(
+            new TestBitrixEvent(['IS_NEW' => $isNew, 'ENTITY' => $order]),
+            ['spool_dir' => $spool]
+        );
+    };
+    try {
+        $quickOrder = testNativeOrder(701);
+        $runNative($quickOrder, 'Quick buyer');
+        $quickPath = $spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:701') . '.json';
+        $quickEnvelope = testReadJson($quickPath);
+        testSame('Quick buyer', $quickEnvelope['request']['lead']['name'], 'quick-buy CONTACT_PERSON fills missing name before enqueue');
+        testSame('Quick buyer', $quickEnvelope['raw_source']['snapshot']['_quickbuy_capture']['contact_person']['value'], 'selected CONTACT_PERSON provenance is retained');
+        testSame(701, $quickEnvelope['raw_source']['snapshot']['_quickbuy_capture']['original_snapshot']['order_id'], 'original snapshot is retained alongside enrichment');
+        testSame(null, $quickEnvelope['raw_source']['snapshot']['properties'][0]['value'], 'CONTACT_PERSON property is not rewritten');
+        testSame('+375291111111', $quickEnvelope['raw_source']['snapshot']['contact']['phone'], 'order phone remains source snapshot value');
+        testSame('quickbuy@example.invalid', $quickEnvelope['raw_source']['snapshot']['contact']['email'], 'order email remains source snapshot value');
+        testAssert(!isset($quickEnvelope['raw_source']['_POST']), 'whole POST is not retained');
+        testAssert(!str_contains((string) json_encode($quickEnvelope, JSON_THROW_ON_ERROR), 'request-phone'), 'request phone is not copied into capture');
+        $quickBody = $quickEnvelope['request_json'];
+        $quickPendingCount = count(testFiles($spool . DIRECTORY_SEPARATOR . 'pending'));
+        $runNative($quickOrder, 'Quick buyer');
+        testSame($quickPendingCount, count(testFiles($spool . DIRECTORY_SEPARATOR . 'pending')), 'repeat quick-buy does not add a pending envelope');
+        testSame($quickBody, testReadJson($quickPath)['request_json'], 'repeat quick-buy keeps immutable request bytes');
+
+        // Model an already delivered identity; POST/receipt delivery is covered
+        // above. Replaying its native event must preserve both durable files.
+        $quickDonePath = microchipsCrmIntakeMove($quickPath, $spool, 'done');
+        microchipsCrmIntakeUpdateStatus($spool, 'order:701', ['state' => 'delivered', 'lead_id' => '701']);
+        $quickStatusPath = $spool . DIRECTORY_SEPARATOR . 'status' . DIRECTORY_SEPARATOR . hash('sha256', 'order:701') . '.json';
+        $quickDoneBytes = file_get_contents($quickDonePath);
+        $quickStatusBytes = file_get_contents($quickStatusPath);
+        $callsBeforeNativeRepeat = count($transportCalls);
+        $runNative($quickOrder, 'Changed buyer');
+        testSame($quickDoneBytes, file_get_contents($quickDonePath), 'changed repeat preserves delivered envelope bytes');
+        testSame($quickStatusBytes, file_get_contents($quickStatusPath), 'changed repeat preserves delivered status bytes');
+        testAssert(!is_file($quickPath), 'changed repeat cannot requeue delivered order');
+        $runNative(testNativeOrder(701, 'Existing'), 'Other');
+        testSame($quickDoneBytes, file_get_contents($quickDonePath), 'native name conflict preserves delivered envelope');
+        testSame($quickStatusBytes, file_get_contents($quickStatusPath), 'native name conflict preserves delivered status');
+        testAssert(!is_file($quickPath), 'native name conflict cannot requeue delivered order');
+        testSame($callsBeforeNativeRepeat, count($transportCalls), 'native event repeats perform no HTTP requests');
+
+        $bound = str_repeat('B', MICROCHIPS_CRM_INTAKE_MAX_NAME_BYTES);
+        $runNative(testNativeOrder(702), $bound);
+        testSame($bound, testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:702') . '.json')['request']['lead']['name'], '255-byte CONTACT_PERSON is accepted exactly');
+
+        $reviewCount = count(testFiles($spool . DIRECTORY_SEPARATOR . 'review'));
+        $runNative(testNativeOrder(703), str_repeat('O', MICROCHIPS_CRM_INTAKE_MAX_NAME_BYTES + 1));
+        testSame($reviewCount + 1, count(testFiles($spool . DIRECTORY_SEPARATOR . 'review')), 'over-limit quick-buy name creates review');
+        $overflowReview = testReviewByReason($spool, 'quickbuy_contact_person_over_limit');
+        testSame(256, $overflowReview['raw_source']['quickbuy_context']['contact_person_bytes'], 'over-limit selected value length is retained');
+
+        $runNative(testNativeOrder(704), ['CONTACT_PERSON' => 'nested']);
+        $arrayReview = testReviewByReason($spool, 'quickbuy_contact_person_not_scalar');
+        testSame('array', $arrayReview['raw_source']['quickbuy_context']['contact_person_type'], 'array CONTACT_PERSON is review-only');
+        testAssert(!isset($arrayReview['raw_source']['quickbuy_context']['contact_person']), 'array CONTACT_PERSON contents are not spooled');
+
+        $runNative(testNativeOrder(705), "\xC3\x28");
+        $utf8Review = testReviewByReason($spool, 'quickbuy_contact_person_invalid_utf8');
+        testAssert(isset($utf8Review['raw_source']['quickbuy_context']['contact_person_sha256']), 'invalid UTF-8 is represented by digest');
+        testAssert(!isset($utf8Review['raw_source']['quickbuy_context']['contact_person']), 'invalid UTF-8 bytes are not written as JSON');
+
+        $runNative(testNativeOrder(706, 'Existing'), 'Other');
+        $conflictReview = testReviewByReason($spool, 'quickbuy_contact_person_conflict');
+        testSame('Existing', $conflictReview['raw_source']['snapshot']['contact']['name'], 'conflict review retains original snapshot');
+        testSame('Other', $conflictReview['raw_source']['quickbuy_context']['contact_person'], 'conflict review retains selected value');
+
+        $sameName = testNativeOrder(707, 'Existing');
+        $runNative($sameName, ' Existing ');
+        testSame('Existing', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:707') . '.json')['request']['lead']['name'], 'same normalized existing name is accepted');
+
+        $missing = testNativeOrder(708);
+        $runNative($missing, null, false);
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:708') . '.json')['request']['lead']['name'], 'missing optional CONTACT_PERSON keeps ordinary capture valid');
+        $empty = testNativeOrder(709);
+        $runNative($empty, '   ');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:709') . '.json')['request']['lead']['name'], 'empty optional CONTACT_PERSON keeps ordinary capture valid');
+
+        $wrongMethod = testNativeOrder(710);
+        $runNative($wrongMethod, 'Should skip', true, true, 'GET');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:710') . '.json')['request']['lead']['name'], 'wrong method skips quick-buy fallback');
+        testSame(1, $wrongMethod->fieldReads, 'wrong method uses established snapshot path once');
+        $wrongScript = testNativeOrder(711);
+        $runNative($wrongScript, 'Should skip', true, true, 'POST', '/home/user/web/other/script.php');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:711') . '.json')['request']['lead']['name'], 'wrong script skips quick-buy fallback');
+        $wrongSite = testNativeOrder(712);
+        $runNative($wrongSite, 'Should skip', true, true, 'POST', MICROCHIPS_CRM_INTAKE_NATIVE_QUICKBUY_SCRIPT, 's2');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:712') . '.json')['request']['lead']['name'], 'wrong request site skips quick-buy fallback');
+        $wrongType = testNativeOrder(713);
+        $runNative($wrongType, 'Should skip', true, true, 'POST', MICROCHIPS_CRM_INTAKE_NATIVE_QUICKBUY_SCRIPT, 's1', 1);
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:713') . '.json')['request']['lead']['name'], 'wrong request person type skips quick-buy fallback');
+        $wrongOrderContext = testNativeOrder(714, null, 's2');
+        $runNative($wrongOrderContext, 'Should skip');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:714') . '.json')['request']['lead']['name'], 'wrong order site skips quick-buy fallback');
+        $wrongProperty = testNativeOrder(715, null, 's1', 2, 'TEXT');
+        $runNative($wrongProperty, 'Should skip');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:715') . '.json')['request']['lead']['name'], 'missing STRING CONTACT_PERSON property skips fallback');
+        $wrongOrderType = testNativeOrder(716, null, 's1', 1);
+        $runNative($wrongOrderType, 'Should skip');
+        testSame('', testReadJson($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:716') . '.json')['request']['lead']['name'], 'wrong order person type skips fallback');
+        $existingOnly = testNativeOrder(717);
+        $runNative($existingOnly, 'Should not snapshot', true, false);
+        testSame(0, $existingOnly->fieldReads, 'non-new order does not rebuild snapshot');
+        testAssert(!is_file($spool . DIRECTORY_SEPARATOR . 'pending' . DIRECTORY_SEPARATOR . hash('sha256', 'order:717') . '.json'), 'non-new order is not queued');
+    } finally {
+        $_POST = $oldPost;
+        $_SERVER = $oldServer;
+    }
 
     echo "PASS: microchips CRM intake producer tests\n";
 } finally {
