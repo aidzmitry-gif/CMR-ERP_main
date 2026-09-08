@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.domain.models import SurvivorshipRule
 
 #: дефолтный приоритет источников (по убыванию доверия) — конституция данных M2.
-DEFAULT_SOURCE_PRIORITY = ["egr", "erp", "manual", "1c", "bitrix"]
+DEFAULT_SOURCE_PRIORITY = ["mns_grp", "egr", "erp", "manual", "1c", "bitrix"]
 
 #: стратегия по умолчанию для поля без явного правила.
 DEFAULT_STRATEGY = "non_empty_wins"
@@ -70,8 +70,15 @@ def decide(current: FieldValue | None, incoming: FieldValue, rule: Rule) -> Fiel
 
     if strategy == "source_priority":
         order = rule.priority()
-        cur_rank = order.index(current.source) if current.source in order else len(order)
-        inc_rank = order.index(incoming.source) if incoming.source in order else len(order)
+        # Старые operator lists знают egr: новый проверенный реестр занимает этот
+        # слот, только если собственного mns_grp в списке нет. Сами правила не меняем.
+        def rank(source: str) -> int:
+            if source == "mns_grp" and source not in order:
+                source = "egr"
+            return order.index(source) if source in order else len(order)
+
+        cur_rank = rank(current.source)
+        inc_rank = rank(incoming.source)
         # меньший индекс = выше доверие; при равенстве — оставляем эталон (стабильность)
         return incoming if inc_rank < cur_rank else current
 

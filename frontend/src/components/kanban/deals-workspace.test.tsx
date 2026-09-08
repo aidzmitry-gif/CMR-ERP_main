@@ -25,7 +25,7 @@ vi.mock("@/lib/api", () => ({
   createDealTask: vi.fn().mockResolvedValue(true),
   fetchChats: vi.fn().mockResolvedValue([]),
   fetchCalls: vi.fn().mockResolvedValue([]), // цикл 11 — батч «клиент ждёт ответа» (пропущенные звонки)
-  lookupCounterparty: vi.fn().mockResolvedValue(null),
+  lookupCounterpartyResult: vi.fn().mockResolvedValue({ status: "not_found", message: "По УНП ничего не найдено" }),
   loseDeal: vi.fn().mockResolvedValue(true),
   fetchLossReasons: vi.fn().mockResolvedValue([]),
   fetchPlans: vi.fn().mockResolvedValue([]),

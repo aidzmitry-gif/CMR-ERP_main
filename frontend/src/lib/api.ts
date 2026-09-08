@@ -744,17 +744,80 @@ export interface RegistryInfo {
   name: string;
   address: string;
   status: string;
+  short_name?: string | null;
+  status_code?: string | null;
+  registered_at?: string | null;
+  closed_at?: string | null;
+  source: "mns_grp" | "demo";
+  source_url: string | null;
+  fetched_at: string;
 }
 
-/** Подтянуть контрагента по УНП из реестра ЕГР (клиент, через /api). */
-export async function lookupCounterparty(unp: string): Promise<RegistryInfo | null> {
+const REGISTRY_ERRORS = {
+  bad_input: "УНП — 9 цифр",
+  not_found: "По УНП ничего не найдено",
+  unauthenticated: "Войдите в систему для поиска по УНП",
+  forbidden: "Нет доступа к поиску по УНП",
+  unconfigured: "Реестр МНС не подключён",
+  timeout: "Реестр МНС не ответил вовремя. Повторите запрос позже",
+  unreachable: "Реестр МНС недоступен. Повторите запрос позже",
+  unavailable: "Поиск по УНП временно недоступен",
+  rate_limited: "Слишком много запросов к реестру МНС. Повторите позже",
+  upstream_access_denied: "Источник МНС отклонил доступ",
+  upstream_error: "Ошибка сервиса МНС. Повторите запрос позже",
+  invalid_upstream: "Реестр вернул некорректные данные. Реквизиты не применены",
+  network_error: "Не удалось связаться с сервером. Проверьте подключение",
+} as const;
+
+type RegistryFailure = keyof typeof REGISTRY_ERRORS;
+export type RegistryLookupResult =
+  | { status: "found"; data: RegistryInfo }
+  | { status: RegistryFailure; message: string; retryAfter?: number };
+
+/** Строгий результат для интерфейсов. Ошибка сервиса не превращается в not_found. */
+export async function lookupCounterpartyResult(unp: string): Promise<RegistryLookupResult> {
+  const clean = unp.trim();
+  const failure = (status: RegistryFailure): RegistryLookupResult => ({ status, message: REGISTRY_ERRORS[status] });
+  if (!/^[0-9]{9}$/.test(clean)) return failure("bad_input");
+  let res: Response;
   try {
-    const res = await fetch(`/api/integrations/egr/${encodeURIComponent(unp)}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as RegistryInfo;
+    res = await fetch(`/api/integrations/egr/${encodeURIComponent(clean)}`, { cache: "no-store" });
   } catch {
-    return null;
+    return failure("network_error");
   }
+  let body: unknown;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok) {
+    if (res.status === 401) return failure("unauthenticated");
+    if (res.status === 403) return failure("forbidden");
+    if (res.status === 404) return failure("not_found");
+    if (res.status === 422) return failure("bad_input");
+    if (res.status === 429) {
+      const retry = res.headers.get("retry-after") ?? "";
+      const retryAfter = /^[0-9]{1,9}$/.test(retry) ? Math.min(300, Math.max(1, Number(retry))) : undefined;
+      return { status: "rate_limited", message: REGISTRY_ERRORS.rate_limited, retryAfter };
+    }
+    const code = (body as { detail?: { code?: unknown } } | null)?.detail?.code;
+    if (res.status === 503) {
+      return failure(code === "timeout" || code === "unreachable" || code === "unconfigured" ? code : "unavailable");
+    }
+    return failure(code === "invalid_upstream" || code === "upstream_access_denied" ? code : "upstream_error");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return failure("invalid_upstream");
+  const data = body as RegistryInfo;
+  if (data.unp !== clean || typeof data.name !== "string" || !data.name.trim()
+    || typeof data.address !== "string" || typeof data.status !== "string"
+    || (data.source !== "demo" && data.source !== "mns_grp")
+    || (data.source === "demo" ? data.source_url !== null : typeof data.source_url !== "string")
+    || typeof data.fetched_at !== "string" || !/(Z|\+00:00)$/.test(data.fetched_at)
+    || !Number.isFinite(Date.parse(data.fetched_at))) return failure("invalid_upstream");
+  return { status: "found", data };
+}
+
+/** Совместимый wrapper для необязательного обогащения старых потребителей. */
+export async function lookupCounterparty(unp: string): Promise<RegistryInfo | null> {
+  const result = await lookupCounterpartyResult(unp);
+  return result.status === "found" ? result.data : null;
 }
 
 /** Создать сделку (клиентский вызов через прокси /api). */

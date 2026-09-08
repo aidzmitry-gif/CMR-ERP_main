@@ -125,7 +125,7 @@ async def test_onec_client_mock():
 async def test_registry_client_lookup():
     from modules.integrations.registry import RegistryClient
 
-    r = RegistryClient()
+    r = RegistryClient(allow_demo=True)
     found = await r.lookup(" 191234567 ")  # пробелы обрезаются
     assert found is not None and found["unp"] == "191234567"
     assert await r.lookup("000000000") is None

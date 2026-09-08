@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({ lookupCounterparty: vi.fn(), fetchCrmStaff: vi.fn() }));
+vi.mock("@/lib/api", () => ({ lookupCounterpartyResult: vi.fn(), fetchCrmStaff: vi.fn() }));
 
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import * as api from "@/lib/api";
@@ -27,25 +27,69 @@ describe("CreateDealModal", () => {
   });
 
   it("поиск по УНП подставляет контрагента", async () => {
-    mock(api.lookupCounterparty).mockResolvedValue({
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status: "found", data: {
       unp: "191234567",
       name: "ООО Найдено",
       address: "Минск",
       status: "Действующий",
-    });
+      source: "demo", source_url: null, fetched_at: "2026-09-08T12:00:00Z",
+    } });
     render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
     fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "191234567" } });
     fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
-    await waitFor(() => expect(api.lookupCounterparty).toHaveBeenCalledWith("191234567"));
-    expect((screen.getByPlaceholderText("ООО ...") as HTMLInputElement).value).toBe("ООО Найдено");
+    await waitFor(() => expect(screen.getByPlaceholderText("ООО ...")).toHaveValue("ООО Найдено"));
+    expect(api.lookupCounterpartyResult).toHaveBeenCalledWith("191234567");
+    expect(screen.getByRole("status")).toHaveTextContent("Демо-данные");
+    expect(screen.getByRole("status")).not.toHaveTextContent("ГРП МНС");
   });
 
   it("сообщает, если по УНП ничего не найдено", async () => {
-    mock(api.lookupCounterparty).mockResolvedValue(null);
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status: "not_found", message: "По УНП ничего не найдено" });
     render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "000" } });
+    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "000000000" } });
     fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
     expect(await screen.findByText(/ничего не найдено/i)).toBeInTheDocument();
+  });
+
+  it.each(["123", "x191234567", "１９１２３４５６７"])("отклоняет невалидный УНП %s", async (value) => {
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("УНП — 9 цифр");
+    expect(api.lookupCounterpartyResult).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["timeout", "Реестр МНС не ответил вовремя"], ["unconfigured", "Реестр МНС не подключён"],
+    ["rate_limited", "Слишком много запросов"], ["forbidden", "Нет доступа к поиску по УНП"],
+    ["invalid_upstream", "Реестр вернул некорректные данные"],
+  ])("показывает %s без замены ручной компании", async (status, message) => {
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status, message });
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("ООО ..."), { target: { value: "Ручная компания" } });
+    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "191234567" } });
+    fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
+    expect(await screen.findByRole("status")).toHaveTextContent(message);
+    expect(screen.getByPlaceholderText("ООО ...")).toHaveValue("Ручная компания");
+    expect(screen.queryByText(/ничего не найдено/)).not.toBeInTheDocument();
+  });
+
+  it.each(["УНП", "Компания"])("не применяет старый ответ после изменения поля %s", async (field) => {
+    let resolve!: (value: api.RegistryLookupResult) => void;
+    mock(api.lookupCounterpartyResult).mockReturnValue(new Promise<api.RegistryLookupResult>((done) => { resolve = done; }));
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("191234567"), { target: { value: "191234567" } });
+    fireEvent.click(screen.getByRole("button", { name: /Найти/ }));
+    fireEvent.change(screen.getByPlaceholderText(field === "УНП" ? "191234567" : "ООО ..."), {
+      target: { value: field === "УНП" ? "100582333" : "Вручную" },
+    });
+    await act(async () => resolve({ status: "found", data: {
+      unp: "191234567", name: "Запоздавшая компания", address: "", status: "",
+      source: "demo", source_url: null, fetched_at: "2026-09-08T12:00:00Z",
+    } }));
+    expect(screen.getByPlaceholderText("ООО ...")).toHaveValue(field === "УНП" ? "" : "Вручную");
+    expect(screen.queryByText(/Запоздавшая компания/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Найти/ })).toBeEnabled();
   });
 
   it("обычному сотруднику не показывает реестр и не запрашивает его", async () => {

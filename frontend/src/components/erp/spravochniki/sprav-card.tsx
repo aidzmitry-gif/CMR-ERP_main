@@ -6,7 +6,7 @@ import { SourceTag } from "@/components/source-tag";
 import type { CounterpartyCard } from "@/lib/reference-data";
 import { formatAuditDate, formatTouchTs, provenanceCounts, touchKindMeta } from "@/lib/spravochniki-card";
 
-import { Field } from "./provenance-badge";
+import { Field, ProvenanceBadge } from "./provenance-badge";
 
 /** Происхождение эталона по алиасам: синк из 1С → mdm/1c, из Bitrix → bitrix, иначе MDM/ERP. */
 function counterpartyOrigin(aliases: { source: string }[]): string {
@@ -30,9 +30,10 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
   const counts = provenanceCounts(prov);
   const hasProvenance = counts.length > 0;
   const summary = card.touch_summary;
+  const requisites = card.requisites ?? {};
 
   return (
-    <div className="flex-1 overflow-y-auto bg-canvas p-6">
+    <div className="min-w-0 flex-1 overflow-y-auto bg-canvas p-6 pr-[74px] lg:pr-6">
       <div className="mx-auto max-w-5xl space-y-4">
 
         {/* Header */}
@@ -95,13 +96,33 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                     )
                   }
                 />
+                <Field
+                  className="sm:col-span-2"
+                  label="Юридический адрес"
+                  value={requisites.legal_address || "—"}
+                  prov={prov.legal_address}
+                />
+                <Field
+                  label="Статус реестра"
+                  value={requisites.registry_status || "—"}
+                  prov={prov.registry_status}
+                />
+                <Field label="Банк" value={requisites.bank_name || "—"} prov={prov.bank_name} />
+                <Field
+                  label="Счёт IBAN"
+                  value={requisites.bank_account || "—"}
+                  prov={prov.bank_account}
+                  mono
+                />
+                <Field label="BIC" value={requisites.bank_bic || "—"} prov={prov.bank_bic} mono />
               </div>
             </div>
 
             <div className="rounded-2xl bg-surface p-5 shadow-card">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                Контакты
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Контакты</p>
+                <ProvenanceBadge prov={prov.contacts} />
+              </div>
               {card.contacts.length === 0 ? (
                 <p className="mt-3 text-sm text-muted">Контактов не найдено</p>
               ) : (
@@ -166,7 +187,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                   ))}
                 </div>
                 <p className="mt-3 border-t border-line pt-3 text-[11px] text-faint">
-                  Синк из 1С обновляет только незакреплённые поля; правки и реквизиты ЕГР защищены
+                  Синк из 1С обновляет только незакреплённые поля; ручные правки и реквизиты реестра защищены
                   правилами слияния.
                 </p>
               </div>

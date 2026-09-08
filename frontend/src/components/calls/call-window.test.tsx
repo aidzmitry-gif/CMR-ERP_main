@@ -1,12 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ── Моки тяжёлых зависимостей (в стиле calls-workspace.test / product-picker не грузим ЕГР/остатки) ──
+// Изолированный UI: fixtures не доказывают доступность реестра/остатков.
 vi.mock("@/lib/api", () => ({
   createDeal: vi.fn(),
   createDealTask: vi.fn(),
   issueDocument: vi.fn(),
-  lookupCounterparty: vi.fn(),
+  lookupCounterpartyResult: vi.fn(),
   updateDeal: vi.fn(),
 }));
 
@@ -93,7 +93,7 @@ beforeEach(() => {
   mock(api.createDeal).mockResolvedValue({ id: "99", number: "CRM-99" });
   mock(api.createDealTask).mockResolvedValue(true);
   mock(api.issueDocument).mockResolvedValue({ ok: true, message: "Счёт создан", renderUrl: "/r" });
-  mock(api.lookupCounterparty).mockResolvedValue(null);
+  mock(api.lookupCounterpartyResult).mockResolvedValue({ status: "not_found", message: "По УНП ничего не найдено" });
   mock(api.updateDeal).mockResolvedValue(true);
 });
 
@@ -141,22 +141,23 @@ describe("CallWindow — закрытие", () => {
 });
 
 describe("CallWindow — реквизиты по УНП (лид/новый)", () => {
-  it("невалидный УНП не дёргает бэкенд", async () => {
+  it.each(["12", "x191234567", "１９１２３４５６７"])("невалидный УНП %s не дёргает бэкенд", async (value) => {
     renderCall(leadCtx);
     await toLive();
-    fireEvent.change(screen.getByLabelText("УНП контрагента"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("УНП контрагента"), { target: { value } });
     fireEvent.click(screen.getByRole("button", { name: "Подтянуть" }));
-    expect(api.lookupCounterparty).not.toHaveBeenCalled();
+    expect(api.lookupCounterpartyResult).not.toHaveBeenCalled();
     expect(screen.getByText("УНП — 9 цифр")).toBeInTheDocument();
   });
 
-  it("валидный УНП по Enter подтягивает реквизиты из ЕГР", async () => {
-    mock(api.lookupCounterparty).mockResolvedValue({
+  it("валидный УНП по Enter подтягивает реквизиты с явной demo-подписью", async () => {
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status: "found", data: {
       unp: "191234567",
       name: "ООО Тест",
       address: "Минск, пр. Победителей 1",
       status: "Действующий",
-    });
+      source: "demo", source_url: null, fetched_at: "2026-09-08T12:00:00Z",
+    } });
     renderCall(leadCtx);
     await toLive();
     const input = screen.getByLabelText("УНП контрагента");
@@ -164,20 +165,72 @@ describe("CallWindow — реквизиты по УНП (лид/новый)", ()
     await act(async () => {
       fireEvent.keyDown(input, { key: "Enter" });
     });
-    expect(api.lookupCounterparty).toHaveBeenCalledWith("191234567");
+    expect(api.lookupCounterpartyResult).toHaveBeenCalledWith("191234567");
     expect(screen.getByText("ООО Тест")).toBeInTheDocument();
     expect(screen.getByText("Минск, пр. Победителей 1")).toBeInTheDocument();
+    expect(screen.getByText(/Реквизиты по УНП 191234567 — Демо-данные/)).toBeInTheDocument();
   });
 
   it("УНП без совпадения показывает предупреждение", async () => {
-    mock(api.lookupCounterparty).mockResolvedValue(null);
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status: "not_found", message: "По УНП ничего не найдено" });
     renderCall(leadCtx);
     await toLive();
     fireEvent.change(screen.getByLabelText("УНП контрагента"), { target: { value: "999999999" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Подтянуть" }));
     });
-    expect(screen.getByText("⚠️ По УНП ничего не найдено")).toBeInTheDocument();
+    expect(screen.getByText("По УНП ничего не найдено")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["timeout", "Реестр МНС не ответил вовремя"], ["unconfigured", "Реестр МНС не подключён"],
+    ["rate_limited", "Слишком много запросов"], ["forbidden", "Нет доступа к поиску по УНП"],
+    ["invalid_upstream", "Реестр вернул некорректные данные"],
+  ])("показывает %s отдельно от отсутствия компании", async (status, message) => {
+    mock(api.lookupCounterpartyResult).mockResolvedValue({ status, message });
+    renderCall(leadCtx);
+    await toLive();
+    fireEvent.change(screen.getByLabelText("УНП контрагента"), { target: { value: "191234567" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Подтянуть" })));
+    expect(screen.getByRole("status")).toHaveTextContent(message);
+    expect(screen.queryByText(/ничего не найдено/)).not.toBeInTheDocument();
+  });
+
+  it("не смешивает компании, когда первый запрос завершается после второго", async () => {
+    let resolve!: (value: api.RegistryLookupResult) => void;
+    mock(api.lookupCounterpartyResult).mockReturnValueOnce(new Promise<api.RegistryLookupResult>((done) => { resolve = done; }));
+    renderCall(leadCtx);
+    await toLive();
+    const input = screen.getByLabelText("УНП контрагента");
+    fireEvent.change(input, { target: { value: "191234567" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтянуть" }));
+    fireEvent.change(input, { target: { value: "100582333" } });
+    mock(api.lookupCounterpartyResult).mockResolvedValueOnce({ status: "found", data: {
+      unp: "100582333", name: "Новая компания", address: "Минск", status: "",
+      source: "mns_grp", source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=100582333", fetched_at: "2026-09-08T12:00:00Z",
+    } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Подтянуть" })));
+    await act(async () => resolve({ status: "found", data: {
+      unp: "191234567", name: "Старая компания", address: "", status: "",
+      source: "demo", source_url: null, fetched_at: "2026-09-08T12:00:00Z",
+    } }));
+    expect(screen.getByText("Новая компания")).toBeInTheDocument();
+    expect(screen.queryByText("Старая компания")).not.toBeInTheDocument();
+    expect(screen.getByText(/Реквизиты по УНП 100582333 — ГРП МНС/)).toBeInTheDocument();
+  });
+
+  it("не применяет ответ после переключения на другой звонок", async () => {
+    let resolve!: (value: api.RegistryLookupResult) => void;
+    mock(api.lookupCounterpartyResult).mockReturnValueOnce(new Promise<api.RegistryLookupResult>((done) => { resolve = done; }));
+    const onClose = vi.fn();
+    const { rerender } = render(<CallWindow context={leadCtx} onClose={onClose} />);
+    await toLive();
+    fireEvent.change(screen.getByLabelText("УНП контрагента"), { target: { value: "191234567" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтянуть" }));
+    rerender(<CallWindow context={newCtx} onClose={onClose} />);
+    await act(async () => resolve({ status: "not_found", message: "Старый ответ" }));
+    expect(screen.queryByText("Старый ответ")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("УНП контрагента")).toHaveValue("");
   });
 
   it("у сделки блока реквизитов по УНП нет", async () => {
