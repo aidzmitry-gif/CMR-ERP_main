@@ -38,6 +38,39 @@ describe("OIDC middleware session guard", () => {
     vi.mocked(rolesFromAccessToken).mockReturnValue(["sales"]);
   });
 
+  it.each([undefined, "expired-token", "fresh-token"])(
+    "allows reauthentication with a stale onboarding cookie and access %s",
+    async (access) => {
+      const cookies: Record<string, string> = {
+        aios_role: "onboarding", aios_refresh_token: "expired-refresh",
+      };
+      if (access) cookies.aios_access_token = access;
+      const res = await middleware(request("/login?error=session_expired", cookies));
+      expect(res.headers.get("location")).toBeNull();
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(refreshAccessToken).not.toHaveBeenCalled();
+    },
+  );
+
+  it("ends the expired onboarding redirect chain at login without opening CRM", async () => {
+    vi.mocked(refreshAccessToken).mockResolvedValue(null);
+    const cookies = { aios_role: "onboarding", aios_refresh_token: "expired-refresh" };
+    for (const path of ["/crm/deals", "/erp/hr/employees", "/profile", "/onboarding"]) {
+      const protectedResponse = await middleware(request(path, cookies));
+      const location = new URL(protectedResponse.headers.get("location")!);
+      expect(location.pathname).toBe("/login");
+      const loginResponse = await middleware(request(location.pathname + location.search, cookies));
+      expect(loginResponse.headers.get("location")).toBeNull();
+    }
+  });
+
+  it("still isolates a valid onboarding session on a direct CRM URL", async () => {
+    const res = await middleware(request("/crm/deals", {
+      aios_access_token: "fresh-token", aios_role: "onboarding",
+    }));
+    expect(res.headers.get("location")).toBe("https://erp.belakb.by/onboarding");
+  });
+
   it.each([undefined, "expired-token"])("redirects protected routes when access token is %s", async (access) => {
     const req = request("/erp", access ? { aios_access_token: access } : {});
 
