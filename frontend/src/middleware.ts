@@ -14,6 +14,12 @@ import {
 import { applyOidcTokenCookies } from "@/lib/oidc-cookies";
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
+  // The login page must remain reachable even when a year-lived onboarding
+  // cookie outlasts the access/refresh session. Otherwise protected pages send
+  // the user to /login, which sends them straight back to /onboarding forever.
+  // Login starts a new OIDC flow; it does not grant access to protected pages.
+  if (req.nextUrl.pathname === "/login") return NextResponse.next();
+
   let res = NextResponse.next();
   const redirect = (path: string) => {
     const redirected = NextResponse.redirect(new URL(path, req.url));
