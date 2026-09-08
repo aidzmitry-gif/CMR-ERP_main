@@ -158,6 +158,22 @@ quantities and prices/totals, delivery, comment, UTM/source URL and any file
 metadata. The producer only reads the entity; it never edits the order and
 never invokes payment.
 
+The native wrapper has one narrow quick-buy completion path for the verified
+D7 script `/home/user/web/_shared/bitrix/components/aspro/oneclickbuy.max/script.php`.
+After `IS_NEW` and a positive order ID it requires POST, request `SITE_ID=s1`
+and `PERSON_TYPE_ID=2`, order `LID=s1` and person type 2, plus an existing
+STRING `CONTACT_PERSON` property. It reads only scalar
+`POST[ONE_CLICK_BUY][CONTACT_PERSON]`; missing or empty is valid and keeps the
+ordinary snapshot. A nonempty value is accepted only when valid UTF-8 and at
+most 255 bytes. It fills a missing name before the first spool write; a
+different existing name, array, invalid UTF-8, or over-limit value creates one
+private `failed_review` envelope with the original snapshot and selected-field
+provenance. Wrong method, script, site, person type, property, or non-new order
+skips this fallback and uses the established order path. The request is never
+logged or copied wholesale, and order fields/properties/payment remain
+unchanged. A public symlink path is accepted only when `realpath()` resolves
+to this exact verified script.
+
 The legacy Aios event hook remains active until the primary operator performs
 the cutover. At cutover, disable only that legacy Aios hook, preserve the
 Bitrix24 hook, and check that no two producer hooks are active for one result.
