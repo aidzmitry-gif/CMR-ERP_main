@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -100,8 +102,16 @@ async def test_deadline_event_without_deal_id_skipped(deadline_app, session):
 # ───────────────────────── обратное планирование от срока + риск ─────────────────────────
 
 
-async def test_plan_auto_derives_target_from_deadline(deadline_app, session):
+async def test_plan_auto_derives_target_from_deadline(deadline_app, session, monkeypatch):
     """План без явной даты: target = самый ранний срок клиента − буфер (3 дня)."""
+    class PlanningClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 9, 1, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    # Container start is 2026-09-07; keep this no-risk scenario before that date.
+    monkeypatch.setattr("modules.procurement.routes.datetime", PlanningClock)
     client, core = deadline_app
     o = await _order(client)
     await _emit_deadline(core, session, ship_deadline="2026-12-31")  # позиция A
