@@ -1,6 +1,8 @@
+import base64
 from io import BytesIO
 
 import pytest
+from PIL import Image
 from pypdf import PdfReader
 
 from modules.sales.mail_pdf import pdf, render_original
@@ -23,6 +25,24 @@ async def test_actual_pdf_contains_cyrillic_and_frozen_values(tmp_path):
     assert "КОНТРОЛЬ-001" in text and "Аккумулятор тестовый" in text
     assert "240,00 BYN" in text
     (tmp_path / "invoice.pdf").write_bytes(content)
+
+
+@pytest.mark.parametrize(
+    ("image_format", "mime_type"),
+    [("PNG", "image/png"), ("JPEG", "image/jpeg"), ("WEBP", "image/webp")],
+)
+async def test_actual_pdf_preserves_embedded_raster_image(image_format, mime_type):
+    image_data = BytesIO()
+    Image.new("RGB", (8, 8), (30, 100, 180)).save(image_data, format=image_format)
+    encoded = base64.b64encode(image_data.getvalue()).decode("ascii")
+    source = SOURCE.replace(
+        "</html>", f'<img src="data:{mime_type};base64,{encoded}" alt="Логотип"></html>',
+    )
+    content = await pdf(source)
+    reader = PdfReader(BytesIO(content))
+    assert len(reader.pages) == 1
+    assert len(reader.pages[0].images) == 1
+    assert reader.pages[0].images[0].image.size == (8, 8)
 
 
 @pytest.mark.parametrize(
