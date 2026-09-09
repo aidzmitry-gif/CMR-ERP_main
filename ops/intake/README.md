@@ -16,7 +16,17 @@ Backend добавляет `/integrations/intake/v1` и квитанции до�
   `mottor_bridge.py`, сохраняет legacy accepted/uncertain без автоматического
   повтора. Порядок переключения в `MOTTOR-RUNBOOK.md`.
 - `mail_delivery.py` — IMAP readonly, MIME staging, отбор и доставка с receipt.
-  Конфигурация и ограничения в `MAIL-RUNBOOK.md`.
+  Конфигурация и ограничения в `MAIL-RUNBOOK.md`. `prepare_batch(db,
+  source_identity, expected_raw_sha256, envelopes)` — явная точка входа для
+  отдельно проверенного адаптера пачки (например, Legat): принимает уже
+  подготовленные child payload, фиксирует канонический порядок-независимый
+  manifest и атомарно ставит доставки в outbox. API не угадывает tender/lot
+  IDs и не делает массовую реклассификацию; исходный MIME остаётся в
+  `messages`, обычный одиночный маршрут не меняется. Повтор того же набора
+  идемпотентен, изменение raw/set/payload, пропавший или чужой child и
+  недоставленная/изменённая квитанция удерживают источник в ожидании review.
+  Вызов не допускает уже открытую транзакцию SQLite: сам захватывает
+  `BEGIN IMMEDIATE` до чтения source/ownership и отклоняет вложенный вызов.
 - `mail_receipts.py` — conservative parser: обычный внешний клиент, адресованный
   на `To: order@microchips.by`, проходит по intent/file checks; site-copy review требует provenance от
   `microchips.by`/`lpmotor.ru` или явного form/Mottor/RS marker. Email не является
