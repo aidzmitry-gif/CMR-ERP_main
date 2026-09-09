@@ -125,10 +125,10 @@ class IntakeRequestIn(BaseModel):
         self.identity_namespace = self.identity_namespace or self.namespace
         if self.identity_namespace != self.namespace and not (
             self.namespace == "admin@enersys.by"
-            and self.identity_namespace in {"microchips.by", "enersys.by"}
+            and self.identity_namespace in {"microchips.by", "enersys.by", "zakupki.legat.by"}
         ):
             raise ValueError("Недопустимая межканальная связь")
-        if self.namespace == "zakupki.legat.by":
+        if self.identity_namespace == "zakupki.legat.by":
             if not self.template_id or not self.tender_id or not self.lot_id:
                 raise ValueError("Нужны включённый шаблон, тендер и лот")
             if self.source_id != f"tender:{self.tender_id}:lot:{self.lot_id}":
