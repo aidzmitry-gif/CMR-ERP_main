@@ -54,11 +54,14 @@ export interface ReferenceCatalog {
 }
 
 /** Каталог справочников (SSR): дерево вкладки + метаданные таблиц. */
-export async function fetchReferenceCatalog(roles?: string): Promise<ReferenceCatalog> {
+export async function fetchReferenceCatalog(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<ReferenceCatalog> {
   try {
     const res = await fetch(`${BASE}/system/references`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as ReferenceCatalog;
@@ -452,11 +455,12 @@ export async function fetchSimpleRef(
 export async function fetchRefRowsByEndpoint(
   endpoint: string,
   roles?: string,
+  authHeaders?: Record<string, string>,
 ): Promise<Record<string, unknown>[]> {
   try {
     const res = await fetch(`${BASE}${endpoint}`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
@@ -484,12 +488,13 @@ export async function fetchRefRowsByKey(
   key: string,
   roles?: string,
   limit = CATALOG_ROW_LIMIT,
+  authHeaders?: Record<string, string>,
 ): Promise<Record<string, unknown>[]> {
   try {
     const res = await fetch(`${BASE}/system/references/query`, {
       method: "POST",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", ...roleHeaders(roles) },
+      headers: { "Content-Type": "application/json", ...(authHeaders ?? roleHeaders(roles)) },
       body: JSON.stringify({ ref: key, limit }),
     });
     if (!res.ok) throw new Error(String(res.status));
