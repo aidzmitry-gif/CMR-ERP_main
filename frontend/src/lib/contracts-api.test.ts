@@ -96,7 +96,7 @@ describe("contracts-api", () => {
     });
   });
 
-  it("sendPackage при успехе — ok + фиксированный текст пакета", async () => {
+  it("старый ответ sent:true не доказывает отправку без нового сценария подтверждения", async () => {
     mockFetch(async () => ({
       ok: true,
       json: async () => ({
@@ -108,8 +108,8 @@ describe("contracts-api", () => {
       }),
     }));
     expect(await sendPackage("1")).toEqual({
-      ok: true,
-      message: "✅ Пакет отправлен: счёт + договор",
+      ok: false,
+      message: "Для отправки откройте «Email документов» и подтвердите письмо",
     });
   });
 

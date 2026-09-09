@@ -99,12 +99,10 @@ async def test_send_package_one_record(api):
     assert dec.status_code == 200, dec.text
 
     pkg = await api.post(f"/sales/deals/{deal['id']}/send-package")
-    assert pkg.status_code == 200, pkg.text
-    body = pkg.json()
-    assert body["sent"] and body["invoice_number"] and body["contract_number"]
-    # ровно одна запись «отправлен пакет» в истории переписки
+    assert pkg.status_code == 409, pkg.text
+    # Legacy click never produces a fictional outgoing message.
     msgs = (await api.get(f"/sales/deals/{deal['id']}/messages")).json()
-    assert len([m for m in msgs if "Отправлен пакет" in m["text"]]) == 1
+    assert len([m for m in msgs if "Отправлен пакет" in m["text"]]) == 0
 
 
 async def test_package_render_combines_invoice_and_contract(api):

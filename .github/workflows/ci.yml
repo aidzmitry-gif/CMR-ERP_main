@@ -39,6 +39,8 @@ jobs:
           python-version: "3.12"
       - name: Install deps
         run: pip install -r requirements-dev.txt
+      - name: Native dependencies for immutable document PDFs
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core
       - name: Invitation release gate (offline, secret-safe)
         run: python scripts/invitation_release_gate.py
       - name: Lint (ruff)

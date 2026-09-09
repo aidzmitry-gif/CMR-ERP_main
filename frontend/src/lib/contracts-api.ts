@@ -77,7 +77,7 @@ export async function sendPackage(dealId: string): Promise<SendPackageResult> {
       const body = (await res.json().catch(() => ({}))) as { detail?: string };
       return { ok: false, message: body.detail ?? "⚠️ Не удалось отправить пакет" };
     }
-    return { ok: true, message: "✅ Пакет отправлен: счёт + договор" };
+    return { ok: false, message: "Для отправки откройте «Email документов» и подтвердите письмо" };
   } catch {
     return { ok: false, message: "⚠️ Не удалось отправить пакет" };
   }

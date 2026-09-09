@@ -26,6 +26,7 @@ import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
+import { DocumentEmailPanel } from "@/components/kanban/document-email-panel";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +54,6 @@ import {
 import {
   fetchContractTemplates,
   prepareContract,
-  sendPackage,
   type ContractTemplate,
 } from "@/lib/contracts-api";
 import { messageTemplatesFor, presetDateISO } from "@/lib/sales-stages";
@@ -77,10 +77,6 @@ const CONTRACT_CLIENT_NEXT_STEP = "Вычитать договор клиент�
 /** Слайс 8 (C): авто-шаг после отправки сообщения клиенту — сообщение слабее счёта/договора,
  *  ставится ТОЛЬКО когда у сделки ещё не было своего шага (см. sendClientMessage). */
 const MESSAGE_WAIT_REPLY_STEP = "Дождаться ответа клиента";
-
-/** Слайс 8 (D): авто-шаг после отправки пакета «счёт + договор» — сильное событие, как счёт/
- *  договор, поэтому перетирает текущий шаг ВСЕГДА (см. sendPackageToClient). */
-const PACKAGE_NEXT_STEP = "Контроль получения пакета";
 
 /** Слайс 9 (B): авто-шаг после запроса одобрения РОП на скидку — как сообщение клиенту
  *  (MESSAGE_WAIT_REPLY_STEP), НЕ перетирает уже назначенный шаг (см. requestDiscountApproval). */
@@ -502,26 +498,6 @@ export function DealDrawerPreview({
     } else {
       setDocMsg("⚠️ Не отправилось");
     }
-  }
-
-  /** Слайс 8 (D): пакет «счёт + договор» одной отправкой — сильное событие (как выставление
-   *  счёта), поэтому авто-шаг «Контроль получения пакета» (+1 дн) перетирает текущий ВСЕГДА. */
-  async function sendPackageToClient() {
-    if (!deal) return;
-    const dealId = deal.id;
-    setDocBusy(true);
-    const { ok, message } = await sendPackage(dealId);
-    setDocBusy(false);
-    if (ok) {
-      const nextStepAt = presetDateISO(1, Date.now());
-      onUpdateFields(dealId, { next_step: PACKAGE_NEXT_STEP, next_step_at: nextStepAt });
-      // Цикл 17: пакет тоже пишет исходящее сообщение в переписку (routes.py send_package) —
-      // тот же гейт гашения, что sendClientMessage.
-      onMessageSent?.(dealId);
-    }
-    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
-    if (dealIdRef.current !== dealId) return;
-    setDocMsg(ok ? `${message} · Шаг: Контроль получения пакета (1 дн)` : message);
   }
 
   /** Слайс 9 (B): запрос одобрения РОП на скидку — гейт МЯГКИЙ (плашка только предупреждает,
@@ -1045,15 +1021,6 @@ export function DealDrawerPreview({
                         счёта И проведённого договора (то же условие, что у бэка send_package). */}
                     {canSendPackage && (
                       <div className="mt-2 flex gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          block
-                          onClick={() => void sendPackageToClient()}
-                          disabled={docBusy}
-                        >
-                          📦 Пакет клиенту
-                        </Button>
                         {/* Комбинированный лист счёт+договор для Ctrl+P → PDF (не фиксирует
                             факт отправки — только открывает печатную форму пакета). */}
                         <a
@@ -1066,6 +1033,7 @@ export function DealDrawerPreview({
                         </a>
                       </div>
                     )}
+                    <DocumentEmailPanel key={deal.id} dealId={deal.id} />
                   </section>
                 )}
               </div>

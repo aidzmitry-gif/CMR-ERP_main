@@ -433,57 +433,17 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     expect(screen.queryByRole("button", { name: "📦 Пакет клиенту" })).toBeNull();
   });
 
-  it("счёт posted + договор posted → кнопка видима", async () => {
+  it("открывает проверку email без отправки и смены следующего шага", async () => {
     mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
-    renderDrawer();
-    expect(await screen.findByRole("button", { name: "📦 Пакет клиенту" })).toBeInTheDocument();
-  });
-
-  it("счёт paid + договор posted → кнопка тоже видима (paid — тот же признак у бэка)", async () => {
-    mock(api.fetchDocuments).mockResolvedValue([{ ...postedInvoice, status: "paid" }, postedContract]);
-    renderDrawer();
-    expect(await screen.findByRole("button", { name: "📦 Пакет клиенту" })).toBeInTheDocument();
-  });
-
-  it("успех → тост + авто-шаг «Контроль получения пакета» (+1 дн), ПЕРЕТИРАЕТ уже назначенный шаг", async () => {
-    mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
-    mock(contractsApi.sendPackage).mockResolvedValue({
-      ok: true,
-      message: "✅ Пакет отправлен: счёт + договор",
-    });
     const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
     const { onUpdateFields, onMessageSent } = renderDrawer(vi.fn(), dealWithStep);
-    fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
-
-    expect(
-      await screen.findByText("✅ Пакет отправлен: счёт + договор · Шаг: Контроль получения пакета (1 дн)"),
-    ).toBeInTheDocument();
-    expect(contractsApi.sendPackage).toHaveBeenCalledWith("1");
-    expect(onUpdateFields).toHaveBeenCalledWith(
-      "1",
-      expect.objectContaining({
-        next_step: "Контроль получения пакета",
-        next_step_at: expect.any(String),
-      }),
-    );
-    // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
-    expect(api.updateDeal).not.toHaveBeenCalled();
-    // Цикл 17: пакет тоже пишет исходящее сообщение в переписку — тот же гейт гашения.
-    expect(onMessageSent).toHaveBeenCalledWith("1");
-  });
-
-  it("409 → тост с detail с бэка, шаг НЕ ставится", async () => {
-    mock(api.fetchDocuments).mockResolvedValue([postedInvoice, postedContract]);
-    mock(contractsApi.sendPackage).mockResolvedValue({
-      ok: false,
-      message: "Нужны проведённый счёт и согласованный договор",
-    });
-    const { onUpdateFields } = renderDrawer();
-    fireEvent.click(await screen.findByRole("button", { name: "📦 Пакет клиенту" }));
-
-    expect(await screen.findByText("Нужны проведённый счёт и согласованный договор")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Email документов" }));
+    expect(await screen.findByRole("region", { name: "Отправка документов по email" })).toBeInTheDocument();
+    expect(contractsApi.sendPackage).not.toHaveBeenCalled();
     expect(onUpdateFields).not.toHaveBeenCalled();
+    expect(onMessageSent).not.toHaveBeenCalled();
   });
+
 });
 
 describe("DealDrawerPreview — слайс 9: мягкий скидочный гейт (защита прибыли)", () => {
