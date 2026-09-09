@@ -168,6 +168,20 @@ async def test_sync_refuses_conflicting_manual_rate(session):
         await sync_currency(session, "USD", DAY)
 
 
+async def test_reference_rounding_does_not_change_exact_quote_or_break_retry(session):
+    from core.domain.reference import CurrencyRate
+    from core.services.nbrb_sync import sync_currency
+
+    await seed(session, "KRW", "2.1245", 1000)
+    await sync_currency(session, "KRW", DAY)
+    await session.commit()
+    await sync_currency(session, "KRW", DAY)
+    row = (await session.execute(select(CurrencyRate))).scalar_one()
+    assert row.rate == Decimal("0.002125")
+    value, rate = await nbrb.convert(session, "100000", "KRW", DAY)
+    assert value == Decimal("212.45") and rate["rate"] == "0.0021245"
+
+
 async def test_guest_cannot_trigger_fetch(api):
     result = await api.get(f"/system/fx/USD?on={DAY}", headers={"X-User-Roles": "guest"})
     assert result.status_code == 403

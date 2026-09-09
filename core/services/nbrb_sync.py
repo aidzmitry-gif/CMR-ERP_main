@@ -1,7 +1,7 @@
 """Hourly retry of daily NBRB refresh; independent of financial event delivery."""
 import asyncio
 import logging
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select, text
 
@@ -18,15 +18,16 @@ async def sync_currency(session, code, on):
         await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
                               {"key": f"nbrb-reference:{code}"})
     rate = await nbrb.quote(session, code, on)
+    display_rate = Decimal(rate["rate"]).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
     current = await scd2.current_version(session, CurrencyRate, "currency_code", code)
     if current is None or current.start_date < on:
-        await scd2.add_version(session, CurrencyRate, "currency_code", code, on, rate=rate["rate"])
+        await scd2.add_version(session, CurrencyRate, "currency_code", code, on, rate=display_rate)
         session.add(OutboxEvent(event_type="reference.ref_currency_rate.changed", payload={
             "action": "version", "ref_key": "core.currency_rates",
             "entity_ref": f"ref_currency_rate:{code}", "value_hint": f"NBRB {on}",
             "actor": "nbrb",
         }))
-    elif current.start_date == on and current.rate != Decimal(rate["rate"]).quantize(Decimal("0.000001")):
+    elif current.start_date == on and current.rate != display_rate:
         raise nbrb.RateUnavailable(f"Ручной курс {code} на {on} отличается от НБРБ")
     return rate
 
