@@ -394,7 +394,7 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
   });
 });
 
-describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет клиенту»", () => {
+describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Подготовить пакет»", () => {
   const postedInvoice = {
     id: 9,
     kind: "invoice",
@@ -404,6 +404,7 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     amount: 5000,
     valid_until: null,
     reserve_status: "none",
+    original_state: "issued",
   };
   const postedContract = {
     id: 4,
@@ -414,6 +415,7 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     amount: 1,
     valid_until: null,
     reserve_status: "none",
+    original_state: "issued",
   };
 
   it("нет кнопки, если договор ещё pending_approval (честное отсутствие, не дизейбл)", async () => {
@@ -423,14 +425,14 @@ describe("DealDrawerPreview — слайс 8 (D): кнопка «📦 Пакет
     ]);
     renderDrawer();
     await screen.findByText("Документы");
-    expect(screen.queryByRole("button", { name: "📦 Пакет клиенту" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "📦 Подготовить пакет" })).toBeNull();
   });
 
   it("нет кнопки, если договора нет вообще", async () => {
     mock(api.fetchDocuments).mockResolvedValue([postedInvoice]);
     renderDrawer();
     await screen.findByText("Документы");
-    expect(screen.queryByRole("button", { name: "📦 Пакет клиенту" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "📦 Подготовить пакет" })).toBeNull();
   });
 
   it("открывает проверку email без отправки и смены следующего шага", async () => {

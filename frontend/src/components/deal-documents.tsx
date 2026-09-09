@@ -1,5 +1,7 @@
 "use client";
 
+import { DocumentVersions } from "@/components/document-versions";
+
 import { Check, FileText, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
@@ -57,6 +59,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   const [items, setItems] = useState<DealDoc[]>([]);
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function refresh() {
     setItems(await fetchDocuments(dealId));
@@ -68,14 +71,16 @@ export function DealDocuments({ dealId }: { dealId: string }) {
 
   async function onCreate() {
     setBusy(true);
-    await createDocument(dealId, kind);
+    setError("");
+    if (!await createDocument(dealId, kind)) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
     await refresh();
     setBusy(false);
   }
 
   async function onDecide(docId: number, approved: boolean) {
     setBusy(true);
-    await decideDocument(docId, approved, "Юрист");
+    setError("");
+    if (!await decideDocument(docId, approved, "Юрист")) setError("Не удалось согласовать документ. Проверьте права и состояние версии.");
     await refresh();
     setBusy(false);
   }
@@ -107,6 +112,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         </button>
       </div>
 
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
         {items.map((d) => {
@@ -159,6 +165,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           );
         })}
       </ul>
+      <DocumentVersions docs={items} refresh={refresh} />
     </div>
   );
 }

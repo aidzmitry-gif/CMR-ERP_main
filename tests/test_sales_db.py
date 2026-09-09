@@ -1,4 +1,5 @@
 """БД-зависимые тесты модуля Sales (SQLite в памяти)."""
+from decimal import Decimal
 
 
 async def test_create_and_list_deal(api):
@@ -595,6 +596,8 @@ async def test_invoice_reserves_stock(session, api):
     await session.flush()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
     session.add(StockItem(sku_code="RSV-INV", warehouse="Главный", qty_available=50, qty_reserved=1))
+    from modules.sales.models import PriceQuote
+    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
     await session.commit()
 
     # счёт проводится в 1С и (SALES-51) резервирует остатки по позициям сделки
@@ -617,7 +620,7 @@ async def test_invoice_reserves_stock(session, api):
     assert "sales.document.posted" in types
 
 
-async def test_tick_reminds_before_invoice_expiry(session, api, services):
+async def test_tick_reminds_before_invoice_expiry(session, api, services, monkeypatch):
     """SALES-51: за день до конца срока tick шлёт sales.invoice.expiring (однократно)."""
     from datetime import timedelta
 
@@ -637,12 +640,13 @@ async def test_tick_reminds_before_invoice_expiry(session, api, services):
     await session.flush()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))
     session.add(StockItem(sku_code="EXP-SKU", warehouse="Главный", qty_available=10, qty_reserved=0))
+    from modules.sales.models import PriceQuote
+    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
     await session.commit()
     await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
 
     doc = (await session.execute(select(DealDocument))).scalars().first()
-    doc.valid_until = _utcnow().date() + timedelta(days=1)  # окно напоминания (−1 день)
-    await session.commit()
+    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: _utcnow() + timedelta(days=4))
 
     await tick_invoice_reserve(session, services)
     await session.commit()
@@ -660,7 +664,7 @@ async def test_tick_reminds_before_invoice_expiry(session, api, services):
     assert types.count("sales.invoice.expiring") == 1
 
 
-async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, services):
+async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, services, monkeypatch):
     """SALES-51: после срока счёт аннулируется, резерв снимается (stock.release)."""
     from datetime import timedelta
 
@@ -680,6 +684,8 @@ async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, ser
     await session.flush()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3))
     session.add(StockItem(sku_code="CNL-SKU", warehouse="Главный", qty_available=20, qty_reserved=0))
+    from modules.sales.models import PriceQuote
+    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
     await session.commit()
     await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
 
@@ -689,8 +695,7 @@ async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, ser
     assert float(item.qty_reserved) == 3  # счёт зарезервировал
 
     doc = (await session.execute(select(DealDocument))).scalars().first()
-    doc.valid_until = _utcnow().date() - timedelta(days=1)  # просрочен
-    await session.commit()
+    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: _utcnow() + timedelta(days=6))
 
     await tick_invoice_reserve(session, services)
     await session.commit()
@@ -722,6 +727,8 @@ async def test_payment_consumes_invoice_reserve(session, api):
     await session.flush()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1))
     session.add(StockItem(sku_code="PAID-SKU", warehouse="Главный", qty_available=5, qty_reserved=0))
+    from modules.sales.models import PriceQuote
+    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
     await session.commit()
     doc_body = (
         await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})

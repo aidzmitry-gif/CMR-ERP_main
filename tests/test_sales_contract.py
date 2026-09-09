@@ -99,10 +99,13 @@ async def test_send_package_one_record(api):
     assert dec.status_code == 200, dec.text
 
     pkg = await api.post(f"/sales/deals/{deal['id']}/send-package")
-    assert pkg.status_code == 409, pkg.text
-    # Legacy click never produces a fictional outgoing message.
+    assert pkg.status_code == 200, pkg.text
+    body = pkg.json()
+    assert body["sent"] is False and body["invoice_number"] and body["contract_number"]
+    # Подготовка фиксируется без ложного сообщения об отправке.
     msgs = (await api.get(f"/sales/deals/{deal['id']}/messages")).json()
-    assert len([m for m in msgs if "Отправлен пакет" in m["text"]]) == 0
+    assert len([m for m in msgs if "Подготовлен пакет" in m["text"]]) == 1
+    assert not any("Отправлен пакет" in m["text"] for m in msgs)
 
 
 async def test_package_render_combines_invoice_and_contract(api):
@@ -121,6 +124,7 @@ async def test_package_render_combines_invoice_and_contract(api):
         f"/sales/documents/{con.json()['id']}/decide", json={"approved": True, "by": "РОП"}
     )
     assert dec.status_code == 200, dec.text
+    assert (await api.post(f"/sales/deals/{deal['id']}/send-package")).status_code == 200
     r = await api.get(f"/sales/deals/{deal['id']}/package/render")
     assert r.status_code == 200, r.text
     html = r.text
@@ -146,6 +150,7 @@ async def test_package_render_template_less_contract_cover(api):
     assert single.status_code == 200, single.text
     assert "Оформлен по форме клиента" in single.text
     # пакет: счёт + template-less договор — 200 с обложкой
+    assert (await api.post(f"/sales/deals/{deal['id']}/send-package")).status_code == 200
     pkg = await api.get(f"/sales/deals/{deal['id']}/package/render")
     assert pkg.status_code == 200, pkg.text
     assert "Оформлен по форме клиента" in pkg.text
@@ -217,8 +222,8 @@ async def test_render_invoice_uses_real_deal_data(api, session):
     assert "360.00" in html or "360,00" in html
 
 
-async def test_render_invoice_without_price_quote_is_zero(api, session):
-    """Нет котировки цены — честный ноль, без падения (не demo-данные)."""
+async def test_invoice_without_price_quote_requires_pricing(api, session):
+    """Нет котировки: выпуск запрещён, неизвестная цена не превращается в ноль."""
     deal = await _make_deal(api, counterparty="ООО «БезЦены»")
     session.add(Sku(code="AKB-88", title="АКБ 6СТ-88", unit="шт"))
     await session.flush()
@@ -228,10 +233,7 @@ async def test_render_invoice_without_price_quote_is_zero(api, session):
     await session.commit()
 
     inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    assert inv.status_code == 201, inv.text
-    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
-    assert r.status_code == 200, r.text
-    assert "АКБ 6СТ-88" in r.text
+    assert inv.status_code == 422, inv.text
 
 
 async def test_render_order_kind_still_400(api):
@@ -255,6 +257,7 @@ async def test_render_invoice_escapes_html_in_sku_title(api, session):
     sku = (await session.execute(select(Sku).where(Sku.code == "XSS-1"))).scalars().first()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
     await session.flush()
+    session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
 
     inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
@@ -322,6 +325,7 @@ async def test_render_invoice_includes_uploaded_logo(api, session):
     sku = (await session.execute(select(Sku).where(Sku.code == "AKB-99"))).scalars().first()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
     await session.flush()
+    session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
 
     inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
@@ -338,6 +342,7 @@ async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
     sku = (await session.execute(select(Sku).where(Sku.code == "AKB-100"))).scalars().first()
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
     await session.flush()
+    session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
 
     inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})

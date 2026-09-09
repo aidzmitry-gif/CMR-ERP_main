@@ -108,8 +108,8 @@ describe("contracts-api", () => {
       }),
     }));
     expect(await sendPackage("1")).toEqual({
-      ok: false,
-      message: "Для отправки откройте «Email документов» и подтвердите письмо",
+      ok: true,
+      message: "✅ Пакет подготовлен: счёт + договор; доставка ещё не выполнена",
     });
   });
 
@@ -143,7 +143,7 @@ describe("contracts-api", () => {
     }));
     expect(await sendPackage("1")).toEqual({
       ok: false,
-      message: "⚠️ Не удалось отправить пакет",
+      message: "⚠️ Не удалось подготовить пакет",
     });
   });
 
@@ -153,7 +153,7 @@ describe("contracts-api", () => {
     });
     expect(await sendPackage("1")).toEqual({
       ok: false,
-      message: "⚠️ Не удалось отправить пакет",
+      message: "⚠️ Не удалось подготовить пакет",
     });
   });
 });
