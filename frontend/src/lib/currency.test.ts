@@ -22,15 +22,15 @@ describe("formatInBase (BYN → базовая валюта ЮЛ)", () => {
 
   it("EUR — делит на курс 3.55, подпись €", () => {
     // 355 BYN / 3.55 = 100 EUR
-    expect(norm(formatInBase(355, "EUR"))).toBe("100 €");
+    expect(norm(formatInBase(355, "EUR", 3.55))).toBe("100 €");
   });
 
   it("RUB — делит на 0.037, подпись ₽", () => {
     // 37 BYN / 0.037 = 1000 RUB
-    expect(norm(formatInBase(37, "RUB"))).toBe("1 000 ₽");
+    expect(norm(formatInBase(37, "RUB", 0.037))).toBe("1 000 ₽");
   });
 
   it("неизвестная валюта — без пересчёта, код как подпись", () => {
-    expect(norm(formatInBase(1000, "XXX"))).toBe("1 000 XXX");
+    expect(norm(formatInBase(1000, "XXX"))).toBe("Курс недоступен");
   });
 });
