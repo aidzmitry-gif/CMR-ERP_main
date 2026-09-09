@@ -309,7 +309,12 @@ async def test_html_only_mail_has_inert_readable_text(api, token_headers):
     assert not any(value in detail["body_text"] for value in ("steal", "hidden-style", "tracker", "<img"))
 
 
-async def test_malformed_html_is_durable_for_review(api, token_headers):
+@pytest.mark.parametrize("parser_failure", [False, True], ids=["native-parser", "parser-assertion"])
+async def test_malformed_html_is_durable_for_review(api, token_headers, monkeypatch, parser_failure):
+    if parser_failure:
+        def reject_html(self, content):
+            raise AssertionError("synthetic parser failure")
+        monkeypatch.setattr(mail_routing._PlainHTML, "feed", reject_html)
     message = EmailMessage()
     message["From"] = "control@example.test"
     message["To"] = "order@microchips.by"
@@ -318,7 +323,13 @@ async def test_malformed_html_is_durable_for_review(api, token_headers):
     assert response.status_code == 201
     rid = response.json()["receipt_id"]
     detail = (await api.get(f"/sales/mail/inbox/{rid}")).json()
-    assert detail["routing_reason"] == "malformed_mime"
+    assert detail["routing_status"] == "unresolved"
+    # Newer Python parsers tolerate this declaration. Both outcomes must retain
+    # the original for review; a parser failure must never produce HTTP 500.
+    if parser_failure:
+        assert detail["routing_reason"] == "malformed_mime"
+    else:
+        assert detail["routing_reason"] in {"malformed_mime", "unknown_chain"}
     assert detail["raw_sha256"] == digest(message.as_bytes())
 
 
