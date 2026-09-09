@@ -51,7 +51,31 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const company = COMPANIES.find((c) => c.id === id) ?? DEFAULT_COMPANY;
-  const fmt = useCallback((amountByn: number) => formatInBase(amountByn, company.base), [company.base]);
+  const [quote, setQuote] = useState<{ currency: string; date: string; rate: number } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = async () => {
+      if (company.base === "BYN") return;
+      const on = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Minsk" }).format(new Date());
+      try {
+        const response = await fetch(`/api/system/fx/${company.base}?on=${on}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("rate unavailable");
+        const value = await response.json();
+        if (value.currency !== company.base || value.date !== on) throw new Error("wrong quote");
+        if (!controller.signal.aborted) setQuote({ currency: value.currency, date: on, rate: Number(value.rate) });
+      } catch {
+        if (!controller.signal.aborted) setQuote(null);
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 60_000);
+    return () => { controller.abort(); clearInterval(timer); };
+  }, [company.base]);
+  const fmt = useCallback((amountByn: number) => {
+    const on = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Minsk" }).format(new Date());
+    const rate = company.base === "BYN" ? 1 : quote?.currency === company.base && quote.date === on ? quote.rate : NaN;
+    return formatInBase(amountByn, company.base, rate);
+  }, [company.base, quote]);
 
   return (
     <CurrencyContext.Provider value={{ company, companies: COMPANIES, setCompany, fmt }}>

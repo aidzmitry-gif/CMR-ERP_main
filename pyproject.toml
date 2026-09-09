@@ -5,6 +5,8 @@ description = "AI-First Business Operating System — модульный кар�
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "httpx>=0.27",
+    "tzdata>=2024.1",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",

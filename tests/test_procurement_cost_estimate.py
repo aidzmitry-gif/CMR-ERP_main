@@ -15,6 +15,18 @@ from modules.procurement.cost_estimate import CostLine, CostRates, estimate_chin
 D = Decimal
 
 
+@pytest.fixture
+async def official_quotes(session):
+    from core.domain.models import AuditLog
+    from core.services.nbrb import ACTION, today
+
+    for code, rate in {"USD": "3.0", "RUB": "0.04", "CNY": "0.4"}.items():
+        session.add(AuditLog(actor="nbrb", action=ACTION, entity_ref=f"nbrb:{code}:{today()}",
+                             detail={"currency": code, "date": str(today()), "source": "NBRB",
+                                     "scale": 1, "official_rate": rate, "rate": rate}))
+    await session.flush()
+
+
 def _rates(**over):
     base = dict(
         usd_byn=D("3.0"),
@@ -98,7 +110,7 @@ def test_fx_buffer_floored_at_10():
 
 
 @pytest.mark.asyncio
-async def test_cost_estimate_endpoint(api):
+async def test_cost_estimate_endpoint(api, official_quotes):
     body = {
         "rates": {"usd_byn": 3.0, "cny_rub": 10, "rub_byn": 0.04, "usd_rub": 90, "fx_buffer_pct": 10},
         "lines": [{"sku_code": "A", "path": "cny", "price": 10, "qty": 100, "weight": 2}],
@@ -108,10 +120,11 @@ async def test_cost_estimate_endpoint(api):
     data = r.json()
     assert data["lines"][0]["unit_landed_cost_byn"] == 4.40
     assert data["total_landed_byn"] == 440.0
+    assert data["fx_quotes"]["CNY"]["source"] == "NBRB"
 
 
 @pytest.mark.asyncio
-async def test_cost_estimate_usd_only_without_cny_rates(api):
+async def test_cost_estimate_usd_only_without_cny_rates(api, official_quotes):
     """USD-only запрос не обязан слать CNY-курсы (usd_rub/cny_rub/rub_byn) — не 422."""
     body = {
         "rates": {"usd_byn": 3.0},  # только базовый курс; CNY-поля опущены

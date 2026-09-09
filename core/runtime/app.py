@@ -10,7 +10,7 @@ import asyncio
 import inspect
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -21,11 +21,14 @@ from core.domain.models import CounterpartyUnpConflict
 from core.runtime import approval_routes, identity_routes, system_routes, telegram_routes
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
+from core.runtime.currency_routes import router as currency_router
 from core.runtime.loader import load_modules
 from core.runtime.reference_registry import register_system_references
 from core.runtime.reference_routes import build_reference_router
 from core.services import build_services
 from core.services.eventbus import EventContext
+from core.services.nbrb import RateUnavailable
+from core.services.nbrb_sync import run as sync_nbrb
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("aios.app")
@@ -115,15 +118,23 @@ def create_app() -> FastAPI:
         await services.db.connect()
         await _run_hooks(core.startup_hooks)
         background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
+        currency_task = asyncio.create_task(sync_nbrb(services))
         logger.info("Приложение запущено")
         yield
         background_task.cancel()
+        currency_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await currency_task
         await _run_hooks(core.shutdown_hooks)
         await services.db.disconnect()
         logger.info("Приложение остановлено")
 
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
+
+    @app.exception_handler(RateUnavailable)
+    async def rate_unavailable(request: Request, exc: RateUnavailable):
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     @app.exception_handler(CounterpartyUnpConflict)
     async def counterparty_conflict(_request: Request, _exc: CounterpartyUnpConflict):
@@ -144,6 +155,7 @@ def create_app() -> FastAPI:
     app.include_router(identity_routes.router)
     # CRUD системных справочников ядра под /system/refs/* (см. каталог /system/references)
     app.include_router(build_reference_router())
+    app.include_router(currency_router)
     # согласования (human-in-the-loop)
     app.include_router(approval_routes.router)
     # Telegram-интерфейс (часть 11): команды и согласования в боте

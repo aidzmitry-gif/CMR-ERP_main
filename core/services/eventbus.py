@@ -47,6 +47,7 @@ class EventContext:
     session: AsyncSession
     services: object
     _after_commit: list[Callable[[], object]] | None = field(default=None, repr=False)
+    occurred_at: datetime | None = None
 
     def after_commit(self, callback: Callable[[], object]) -> object | None:
         """Defer a relay notification; direct callers retain immediate delivery."""
@@ -89,7 +90,8 @@ class OutboxEventBus:
                 await result
 
     async def _deliver(self, session: AsyncSession, event: OutboxEvent, ctx: EventContext | None) -> None:
-        await self.dispatch(event.event_type, event.payload, ctx)
+        dated_ctx = replace(ctx, occurred_at=event.created_at) if ctx is not None else None
+        await self.dispatch(event.event_type, event.payload, dated_ctx)
         event.processed_at = datetime.now(timezone.utc)
         # Successful delivery and its immutable audit share the same transaction.
         session.add(
