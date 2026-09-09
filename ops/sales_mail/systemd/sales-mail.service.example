@@ -1,0 +1,13 @@
+[Unit]
+Description=CRM sales mailbox staging and relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cmr-erp
+Group=cmr-erp
+WorkingDirectory=/opt/cmr-erp
+Environment=PYTHONPATH=/opt/cmr-erp
+UMask=0077
+ExecStart=/usr/bin/python3 -m ops.sales_mail.cli run --config /etc/cmr-erp/sales-mail.json --queue /var/lib/cmr-erp/sales-mail/queue.sqlite
