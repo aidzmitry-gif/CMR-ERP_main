@@ -7,17 +7,19 @@ import {
 } from "@/lib/reference-data";
 import { defaultRef, rowsSource } from "@/lib/spravochniki-catalog";
 import { currentRole } from "@/lib/role-server";
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
 
 export default async function SpravochnikhiPage() {
   const role = await currentRole();
-  const catalog = await fetchReferenceCatalog(role);
+  const authHeaders = await backendAuthHeaders(role);
+  const catalog = await fetchReferenceCatalog(role, authHeaders);
   const firstRef = defaultRef(catalog);
   const initialRows =
     !firstRef || rowsSource(firstRef) === "lookup-only"
       ? []
       : rowsSource(firstRef) === "query-list"
-        ? await fetchRefRowsByKey(firstRef.key, role)
-        : await fetchRefRowsByEndpoint(firstRef.endpoint, role);
+        ? await fetchRefRowsByKey(firstRef.key, role, undefined, authHeaders)
+        : await fetchRefRowsByEndpoint(firstRef.endpoint, role, authHeaders);
 
   return (
     <AppShell crumbs={["ERP", "Справочники", "Каталог"]}>
