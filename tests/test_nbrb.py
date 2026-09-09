@@ -90,7 +90,9 @@ async def test_relay_uses_event_creation_date(session):
     session.add(OutboxEvent(event_type="test.freight", created_at=datetime(2026, 9, 1, 8),
                             payload={"amount": "100", "currency": "USD", "ref": "old"}))
     await session.commit()
-    await bus.relay_once(session, EventContext(session, SimpleNamespace(event_bus=bus)))
+    ctx = EventContext(session, SimpleNamespace(event_bus=bus))
+    await bus.relay_once(session, ctx)
+    assert ctx.occurred_at is None
     payment = (await session.execute(select(Payment))).scalar_one()
     assert payment.amount == Decimal("312.34")
 

@@ -90,8 +90,16 @@ class OutboxEventBus:
                 await result
 
     async def _deliver(self, session: AsyncSession, event: OutboxEvent, ctx: EventContext | None) -> None:
-        dated_ctx = replace(ctx, occurred_at=event.created_at) if ctx is not None else None
-        await self.dispatch(event.event_type, event.payload, dated_ctx)
+        # Keep the shared relay context: handlers attach batch deduplication state
+        # to it, and older callers also use duck-typed contexts.
+        previous_date = getattr(ctx, "occurred_at", None)
+        if ctx is not None:
+            ctx.occurred_at = event.created_at
+        try:
+            await self.dispatch(event.event_type, event.payload, ctx)
+        finally:
+            if ctx is not None:
+                ctx.occurred_at = previous_date
         event.processed_at = datetime.now(timezone.utc)
         # Successful delivery and its immutable audit share the same transaction.
         session.add(
