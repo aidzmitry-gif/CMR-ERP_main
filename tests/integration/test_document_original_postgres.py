@@ -111,6 +111,8 @@ async def test_two_pg_issue_requests_wait_on_same_deal_and_issue_only_once(pg_ap
             tasks = [asyncio.create_task(pg_app.post(f"/sales/documents/{new['id']}/issue")) for _ in range(2)]
             async with factory() as observer:
                 for _ in range(100):
+                    # Include request connections opened after the first activity snapshot.
+                    await observer.execute(text('SELECT pg_stat_clear_snapshot()'))
                     blocked = await observer.scalar(text('SELECT count(*) FROM pg_stat_activity WHERE :pid=ANY(pg_blocking_pids(pid))'), {'pid':pid})
                     if blocked >= 1:
                         break
