@@ -301,6 +301,95 @@ class MailReceiptTests(unittest.TestCase):
         msg.add_attachment(b'%PDF-1.4 test', maintype='application', subtype='pdf', filename='request.pdf')
         self.assertEqual(prepare(msg.as_bytes(), 1, 2), (None, 'procurement_requires_source_mapping'))
 
+    def test_direct_procurement_battery_rfq_keeps_pdf_and_source_identity(self):
+        msg = message()
+        msg.replace_header('Subject', 'Заявка')
+        msg.set_content(
+            'Высылаю заявку на закупку. Ожидаю коммерческое предложение. '
+            'Аккумулятор NiMh 600mAh - 12 шт. Фото во вложении'
+        )
+        data = b'%PDF-1.4\nBATTERY RFQ\n'
+        msg.add_attachment(data, maintype='application', subtype='pdf', filename='request.pdf')
+        payload, reason = prepare(msg.as_bytes(), 1, 2)
+        self.assertIsNone(reason)
+        self.assertEqual(
+            payload['source_id'],
+            'mail:' + hashlib.sha256(b'<test-001@example.invalid>').hexdigest(),
+        )
+        self.assertEqual(payload['delivery_id'], payload['source_id'])
+        file = payload['files'][0]
+        self.assertEqual(file['filename'], 'request.pdf')
+        self.assertEqual(file['size_bytes'], len(data))
+        self.assertTrue(file['data_url'].startswith('data:application/pdf;base64,'))
+        self.assertEqual(base64.b64decode(file['data_url'].split(',', 1)[1]), data)
+        self.assertEqual(file['sha256'], hashlib.sha256(data).hexdigest())
+
+    def test_product_prefix_is_not_a_procurement_id(self):
+        msg = message()
+        msg.replace_header('Subject', 'Заявка')
+        msg.set_content('Заявка на закупку NiMH аккумуляторов.')
+        payload, reason = prepare(msg.as_bytes(), 1, 2)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(payload)
+
+    def test_direct_procurement_ups_rfq_without_attachment_keeps_source_identity(self):
+        msg = message()
+        msg.replace_header('Subject', 'запрос')
+        msg.set_content(
+            'Подскажите есть ли в наличии Источник бесперебойного питания '
+            'Eaton 5E DIN 650VA - 3шт, цена для юр лиц, условия оплаты и доставки. '
+            'агент по закупкам'
+        )
+        payload, reason = prepare(msg.as_bytes(), 1, 2)
+        self.assertIsNone(reason)
+        self.assertEqual(
+            payload['source_id'],
+            'mail:' + hashlib.sha256(b'<test-001@example.invalid>').hexdigest(),
+        )
+        self.assertEqual(payload['delivery_id'], payload['source_id'])
+        self.assertEqual(payload['files'], [])
+
+    def test_numbered_procurement_and_hard_markers_stay_source_mapping(self):
+        cases = (
+            ('Заявка', 'Заявка на закупку №365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку: №365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку№365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку: (№365). Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку: N365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку — No. 365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку No.365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку; номер 365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку номер365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку 365. Аккумулятор - 12 шт.'),
+            ('Заявка', 'Заявка на закупку, лот 7. Аккумулятор - 12 шт.'),
+            ('Тендер', 'Просим аккумулятор - 12 шт.'),
+            ('Лот', 'Аккумулятор - 12 шт.'),
+            ('lot', 'Battery lot 7.'),
+            ('Запрос', 'Заявка на закупку lots 7. Аккумулятор - 12 шт.'),
+            ('Приглашение', 'Просим аккумулятор - 12 шт.'),
+            ('invitation', 'Battery invitation.'),
+            ('Запрос', 'Маркетинговое исследование аккумуляторов.'),
+            ('Запрос', 'Дополнительная закупка аккумуляторов.'),
+            ('Запрос', 'Заявка на закупку и дополнительная закупка аккумуляторов.'),
+        )
+        for subject, body in cases:
+            msg = message()
+            msg.replace_header('Subject', subject)
+            msg.set_content(body)
+            self.assertEqual(
+                prepare(msg.as_bytes(), 1, 2)[1],
+                'procurement_requires_source_mapping',
+                subject,
+            )
+
+    def test_lot_substring_in_product_text_does_not_hold(self):
+        msg = message()
+        msg.replace_header('Subject', 'Запрос аккумулятора')
+        msg.set_content('Просим аккумулятор с уточнением плотности.')
+        payload, reason = prepare(msg.as_bytes(), 1, 2)
+        self.assertIsNone(reason)
+        self.assertIsNotNone(payload)
+
     def test_unsupported_attachment_stays_reviewable(self):
         msg = message()
         msg.add_attachment(b'unsupported', maintype='application', subtype='octet-stream', filename='request.bin')

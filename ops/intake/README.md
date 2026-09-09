@@ -23,9 +23,14 @@ Backend добавляет `/integrations/intake/v1` и квитанции до�
   ключом связывания. `application/msword`/`.doc` сохраняется байт-в-байт в тех же
   пределах; выдача скачивает его как attachment с `nosniff`.
 
-Intent сохраняет прежние request/product markers и добавляет только
-`подскажите` вместе с marker аккумулятора/батареи. Если subject/body не дают
-intent, разрешённый DOCX проверяется в памяти: читается ровно один
+Intent сохраняет прежние request/product markers, добавляет `подскажите` вместе с
+marker аккумулятора/батареи и принимает точную фразу `источник бесперебойного питания`.
+Procurement guard остаётся консервативным: только bounded-фразы `заявка на закупку`
+и `агент по закупкам` освобождают обычный клиентский RFQ; residual `закупк`, номер
+после такой фразы (`№...`, `N...`, `No...`, `номер...` или bare numeric), тендер,
+word-bounded формы `лот`/`lot`, invitation и
+`маркетинговое исследование` остаются review. Если subject/body не дают intent,
+разрешённый DOCX проверяется в памяти: читается ровно один
 `word/document.xml` при не более 128 ZIP entries, XML до 256 KiB и текст до 64
 KiB. Принимаются только known Word namespaces, UTF-8 (с необязательным BOM),
 без encryption, неподдерживаемой compression, NUL, DTD или ENTITY. Текст DOCX
