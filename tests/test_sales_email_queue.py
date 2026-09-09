@@ -6,23 +6,44 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import undefer
 
+from core.domain.models import User
 from modules.sales.mail_models import EmailAttempt, OutgoingEmail
-from modules.sales.mail_queue import Attachment, claim, deliver, now, prepare, recover
+from modules.sales.mail_queue import (
+    Attachment,
+    claim,
+    deliver,
+    now,
+    prepare,
+    recover,
+    request_fingerprint,
+)
 from modules.sales.mail_transport import SMTPResult
 from modules.sales.models import Deal
 from tests.test_sales_email_transport import parse_message, receiver, settings
 
 
-async def prepared(session, key="test-request", number="QUEUE-1"):
+async def prepared(session, key="test-request", number="QUEUE-1", actor="director"):
     deal = await session.scalar(select(Deal).where(Deal.number == number))
     if deal is None:
         deal = Deal(number=number, title="Synthetic email only", counterparty="Synthetic buyer")
         session.add(deal)
         await session.commit()
+    profile = await session.scalar(select(User).where(User.username == actor))
+    if profile is None:
+        session.add(
+            User(
+                username=actor,
+                full_name="Synthetic sales director",
+                department="Продажи",
+                role="sales",
+                status="active",
+            )
+        )
+        await session.flush()
     return await prepare(
         session,
         deal_id=deal.id,
-        actor="manager",
+        actor=actor,
         key=key,
         sender="crm@example.test",
         to=["control@example.test"],
@@ -46,6 +67,30 @@ async def test_prepare_is_not_send_and_request_idempotency(session):
     with pytest.raises(HTTPException) as exc:
         await prepared(session, number="OTHER-DEAL")
     assert exc.value.status_code == 409
+
+
+def test_issued_fingerprint_ignores_render_size_and_byte_hash():
+    common = {
+        "document_id": 123,
+        "version": 2,
+        "number": "INV-1",
+        "source_sha256": "a" * 64,
+        "filename": "invoice-123-v2.pdf",
+        "content_type": "application/pdf",
+    }
+    first = {**common, "size": 512, "sha256": "b" * 64}
+    second = {**common, "size": 2048, "sha256": "c" * 64}
+    kwargs = {
+        "deal_id": 1,
+        "sender": "crm@example.test",
+        "to": ["control@example.test"],
+        "cc": [],
+        "subject": "Invoice",
+        "body": "Body",
+    }
+    assert request_fingerprint(attachments=[first], **kwargs) == request_fingerprint(
+        attachments=[second], **kwargs
+    )
 
 
 async def test_actual_local_smtp_receives_fixed_attachments_and_headers(session):
