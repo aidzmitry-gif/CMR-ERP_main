@@ -168,6 +168,7 @@ function StatusBadge({ status, overdue }: { status: string; overdue?: boolean | 
     planned: "план",
     pending: "ожидает",
     partial: "частично",
+    superseded: "счёт заменён",
     paid: "оплачен",
     overdue: "просрочен",
   };

@@ -364,7 +364,7 @@ async def test_procurement_received_creates_import_shipment(session):
     assert len((await session.execute(select(ImportShipment))).scalars().all()) == 1
 
 
-async def test_payment_paid_fallback_prefers_unpaid_invoice(session):
+async def test_payment_with_unknown_reference_never_moves_to_another_invoice(session):
     """S4: при привязке оплаты по deal_id (ref не совпал) помечается СТАРЕЙШИЙ
     НЕОПЛАЧЕННЫЙ счёт, а не слепо новейший — иначе при нескольких счетах оплата
     ушла бы на уже оплаченный, а реальный долг остался бы висеть (потеря учёта)."""
@@ -387,5 +387,5 @@ async def test_payment_paid_fallback_prefers_unpaid_invoice(session):
     await session.refresh(old_inv)
     await session.refresh(new_inv)
     # Регрессия .desc() выбрала бы новейший (уже paid) → old остался бы posted.
-    assert old_inv.status == "paid"
+    assert old_inv.status == "posted"
     assert new_inv.status == "paid"

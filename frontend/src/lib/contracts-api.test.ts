@@ -96,7 +96,7 @@ describe("contracts-api", () => {
     });
   });
 
-  it("sendPackage при успехе — ok + фиксированный текст пакета", async () => {
+  it("старый ответ sent:true не доказывает отправку без нового сценария подтверждения", async () => {
     mockFetch(async () => ({
       ok: true,
       json: async () => ({
@@ -109,7 +109,7 @@ describe("contracts-api", () => {
     }));
     expect(await sendPackage("1")).toEqual({
       ok: true,
-      message: "✅ Пакет отправлен: счёт + договор",
+      message: "✅ Пакет подготовлен: счёт + договор; доставка ещё не выполнена",
     });
   });
 
@@ -143,7 +143,7 @@ describe("contracts-api", () => {
     }));
     expect(await sendPackage("1")).toEqual({
       ok: false,
-      message: "⚠️ Не удалось отправить пакет",
+      message: "⚠️ Не удалось подготовить пакет",
     });
   });
 
@@ -153,7 +153,7 @@ describe("contracts-api", () => {
     });
     expect(await sendPackage("1")).toEqual({
       ok: false,
-      message: "⚠️ Не удалось отправить пакет",
+      message: "⚠️ Не удалось подготовить пакет",
     });
   });
 });

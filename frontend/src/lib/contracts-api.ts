@@ -58,6 +58,7 @@ export async function prepareContract(
 
 /** Итог отправки пакета клиенту (симметрично {@link PrepareContractResult}). */
 export interface SendPackageResult {
+  renderUrl?: string;
   ok: boolean;
   message: string;
 }
@@ -75,10 +76,11 @@ export async function sendPackage(dealId: string): Promise<SendPackageResult> {
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { detail?: string };
-      return { ok: false, message: body.detail ?? "⚠️ Не удалось отправить пакет" };
+      return { ok: false, message: body.detail ?? "⚠️ Не удалось подготовить пакет" };
     }
-    return { ok: true, message: "✅ Пакет отправлен: счёт + договор" };
+    const body = await res.json();
+    return { ok: true, message: "✅ Пакет подготовлен: счёт + договор; доставка ещё не выполнена", ...(body.render_url ? { renderUrl: `/api${body.render_url}` } : {}) };
   } catch {
-    return { ok: false, message: "⚠️ Не удалось отправить пакет" };
+    return { ok: false, message: "⚠️ Не удалось подготовить пакет" };
   }
 }

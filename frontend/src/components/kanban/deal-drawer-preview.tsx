@@ -1,5 +1,8 @@
 "use client";
 
+import { sendPackage } from "@/lib/contracts-api";
+import { DocumentVersions } from "@/components/document-versions";
+
 import clsx from "clsx";
 import {
   ArrowRight,
@@ -26,6 +29,7 @@ import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
+import { DocumentEmailPanel } from "@/components/kanban/document-email-panel";
 import { SourceTag } from "@/components/source-tag";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +57,6 @@ import {
 import {
   fetchContractTemplates,
   prepareContract,
-  sendPackage,
   type ContractTemplate,
 } from "@/lib/contracts-api";
 import { messageTemplatesFor, presetDateISO } from "@/lib/sales-stages";
@@ -77,10 +80,6 @@ const CONTRACT_CLIENT_NEXT_STEP = "Вычитать договор клиент�
 /** Слайс 8 (C): авто-шаг после отправки сообщения клиенту — сообщение слабее счёта/договора,
  *  ставится ТОЛЬКО когда у сделки ещё не было своего шага (см. sendClientMessage). */
 const MESSAGE_WAIT_REPLY_STEP = "Дождаться ответа клиента";
-
-/** Слайс 8 (D): авто-шаг после отправки пакета «счёт + договор» — сильное событие, как счёт/
- *  договор, поэтому перетирает текущий шаг ВСЕГДА (см. sendPackageToClient). */
-const PACKAGE_NEXT_STEP = "Контроль получения пакета";
 
 /** Слайс 9 (B): авто-шаг после запроса одобрения РОП на скидку — как сообщение клиенту
  *  (MESSAGE_WAIT_REPLY_STEP), НЕ перетирает уже назначенный шаг (см. requestDiscountApproval). */
@@ -176,6 +175,7 @@ export function DealDrawerPreview({
   const [taskDraft, setTaskDraft] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
+  const [packageUrl, setPackageUrl] = useState<string | null>(null);
   const [docMsg, setDocMsg] = useState<string | null>(null);
   // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
   const [docs, setDocs] = useState<DealDoc[]>([]);
@@ -214,6 +214,7 @@ export function DealDrawerPreview({
     setTaskDraft("");
     setPickerOpen(false);
     setDocMsg(null);
+    setPackageUrl(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
     setMargin(null); // цикл 15: та же причина — не мигать маржой предыдущей сделки
@@ -312,10 +313,10 @@ export function DealDrawerPreview({
   // статус фильтруем ДО поиска последнего документа (latestInvoice/latestContract выше —
   // латест ВООБЩЕ, вкл. черновик/отклонённый, здесь строже — латест среди проведённых).
   const packageInvoice = [...docs]
-    .filter((d) => d.kind === "invoice" && (d.status === "posted" || d.status === "paid"))
+    .filter((d) => d.kind === "invoice" && !d.superseded_by_id && d.original_state === "issued" && (d.status === "posted" || d.status === "paid"))
     .sort((a, b) => b.id - a.id)[0];
   const packageContract = [...docs]
-    .filter((d) => d.kind === "contract" && d.status === "posted")
+    .filter((d) => d.kind === "contract" && !d.superseded_by_id && d.original_state === "issued" && d.status === "posted")
     .sort((a, b) => b.id - a.id)[0];
   const canSendPackage = packageInvoice != null && packageContract != null;
 
@@ -504,24 +505,17 @@ export function DealDrawerPreview({
     }
   }
 
-  /** Слайс 8 (D): пакет «счёт + договор» одной отправкой — сильное событие (как выставление
-   *  счёта), поэтому авто-шаг «Контроль получения пакета» (+1 дн) перетирает текущий ВСЕГДА. */
+  /** Подготовка фиксирует пакет; отправка требует отдельного подтверждения email. */
   async function sendPackageToClient() {
     if (!deal) return;
     const dealId = deal.id;
     setDocBusy(true);
-    const { ok, message } = await sendPackage(dealId);
+    const { message, renderUrl } = await sendPackage(dealId);
     setDocBusy(false);
-    if (ok) {
-      const nextStepAt = presetDateISO(1, Date.now());
-      onUpdateFields(dealId, { next_step: PACKAGE_NEXT_STEP, next_step_at: nextStepAt });
-      // Цикл 17: пакет тоже пишет исходящее сообщение в переписку (routes.py send_package) —
-      // тот же гейт гашения, что sendClientMessage.
-      onMessageSent?.(dealId);
-    }
     // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
     if (dealIdRef.current !== dealId) return;
-    setDocMsg(ok ? `${message} · Шаг: Контроль получения пакета (1 дн)` : message);
+    setDocMsg(message);
+    if (renderUrl) setPackageUrl(renderUrl);
   }
 
   /** Слайс 9 (B): запрос одобрения РОП на скидку — гейт МЯГКИЙ (плашка только предупреждает,
@@ -981,6 +975,8 @@ export function DealDrawerPreview({
                 )}
                 {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
 
+                <DocumentVersions docs={docs} refresh={async () => { if (deal) setDocs(await fetchDocuments(deal.id)); }} />
+
                 {/* === СТАТУС ДОКУМЕНТОВ: последний счёт/договор (слайс 6, B) === */}
                 {(latestInvoice || latestContract) && (
                   <section className="mt-3 rounded-xl border border-line p-3">
@@ -1052,20 +1048,21 @@ export function DealDrawerPreview({
                           onClick={() => void sendPackageToClient()}
                           disabled={docBusy}
                         >
-                          📦 Пакет клиенту
+                          📦 Подготовить пакет
                         </Button>
                         {/* Комбинированный лист счёт+договор для Ctrl+P → PDF (не фиксирует
                             факт отправки — только открывает печатную форму пакета). */}
-                        <a
-                          href={`/api/sales/deals/${deal.id}/package/render`}
+                        {packageUrl && <a
+                          href={packageUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line px-3 text-[12.5px] font-medium text-ink hover:bg-sunken"
                         >
-                          Открыть пакет (PDF)
-                        </a>
+                          Открыть сохранённый пакет
+                        </a>}
                       </div>
                     )}
+                    <DocumentEmailPanel key={deal.id} dealId={deal.id} />
                   </section>
                 )}
               </div>

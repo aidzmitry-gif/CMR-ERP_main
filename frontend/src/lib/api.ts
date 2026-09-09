@@ -1034,6 +1034,13 @@ export interface DealDoc {
   amount: number;
   valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
   reserve_status: string; // none | reserved | consumed | released
+  version?: number;
+  supersedes_id?: number | null;
+  superseded_by_id?: number | null;
+  original_state?: string;
+  content_sha256?: string | null;
+  replacement_reason?: string | null;
+
 }
 
 /** Документы сделки (счета/договоры/заказы) — клиент, через /api. */

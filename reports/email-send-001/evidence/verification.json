@@ -1,0 +1,76 @@
+{
+  "observed_at": "2026-09-09T02:17:16.590284+00:00",
+  "backend": {
+    "tests": 1946,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 23,
+    "passed": 1923
+  },
+  "coverage_with_branches_percent": 91.33,
+  "coverage_gate_90": true,
+  "reused_database_initial_failure": {
+    "tests": 12,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0
+  },
+  "resolution": "All 12 integration tests passed after full Alembic upgrade on a fresh isolated database.",
+  "frontend": {
+    "passed": 2488,
+    "files": 183,
+    "last_changed_components_passed": 83,
+    "typecheck": "passed",
+    "lint_errors": 0,
+    "lint_warnings": 45,
+    "lint_ceiling": 47
+  },
+  "standard_playwright_passed": 8,
+  "synthetic_smtp_browser": {
+    "synthetic_only": true,
+    "dependency_snapshot": {
+      "models.py": "41f5a3ca4c9d894347dd54db28338efb736ef1e7dbecfd6ceb8e5960575b307f",
+      "access.py": "e34c1dff2936def8186524282c77388b5babce93442eda9f1ade793106e86b00",
+      "routes.py": "af4c08e08669a3cd298f1a9ba50d7e0eec8e077f8c1e6e1b02ad331f351e2b9b",
+      "documents.py": "621fd11ed94b0b122d72717af46b5fc62a53cb135b3b6b369af35db5ee2c4da6",
+      "events.py": "a8ea8d4774a302f589dc76a88801eb92c4113a7a91e467f8f2da7071fdb076c3",
+      "reserve.py": "e5ff9ea4cafc34475af235d310e4d34d16e0c936334154e505fe1345b0fefb17",
+      "schemas.py": "b5dfe1d514a4d2428959a57df072688871cbb26b96194a972cc7eff17606c346"
+    },
+    "deal_id": 1,
+    "email_id": "42fd8ac2-8c78-4a0b-9d96-f62c5bf2861a",
+    "invoice_v1_amount": 240,
+    "invoice_v2_amount": 360,
+    "contract_amount": 200,
+    "pdfs_unchanged_after_source_mutation_and_new_version": true,
+    "prepared_without_smtp": true,
+    "idempotent_prepare": true,
+    "smtp_received": 1,
+    "smtp_attempts": 1,
+    "received_mime_attachments_exact": true,
+    "received_to_cc_correct": true,
+    "browser": "Microsoft Edge headless",
+    "preview_before_send": true,
+    "double_click_one_delivery": true,
+    "fixed_old_version_sent": true,
+    "failed_then_manual_retry": true,
+    "uncertain_no_auto_retry": true,
+    "duplicate_ack_required": true,
+    "final_received": 4,
+    "final_attempts": 5
+  },
+  "migration": {
+    "revision": "0116",
+    "down_revision": "0114",
+    "heads": 1,
+    "fresh_postgresql_18_upgrade": "passed",
+    "pg16_ci": "not_run_push_not_authorized"
+  },
+  "release_blocks": [
+    "Final immutable-documents integration and migration ordering",
+    "Git push/draft PR authorization after automatic review rejection",
+    "Corporate sender/configuration and authorized live control recipient"
+  ],
+  "production_changed": false,
+  "external_mail_sent": false
+}
