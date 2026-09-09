@@ -113,7 +113,8 @@ describe("CreateDealModal", () => {
     fireEvent.change(screen.getByPlaceholderText("CRM-2024-0200"), { target: { value: "CRM-F" } });
     fireEvent.change(screen.getByPlaceholderText("ООО ..."), { target: { value: "ООО Ф" } });
     fireEvent.change(screen.getByPlaceholderText("Поставка ..."), { target: { value: "Тест" } });
-    fireEvent.change(await screen.findByRole("combobox", { name: "Ответственный" }), { target: { value: "17" } });
+    await screen.findByRole("option", { name: "Сидоров" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Ответственный" }), { target: { value: "17" } });
     const [amount] = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     fireEvent.change(amount, { target: { value: "7000" } });
     const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];

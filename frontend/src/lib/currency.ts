@@ -1,10 +1,10 @@
 /**
  * Мульти-ЮЛ + валюта (порт переключателя из sales-board-mockup.html).
  * Раздельный учёт: у каждого юр-лица своя базовая валюта; суммы доски (в BYN)
- * показываются в базовой валюте текущего ЮЛ по курсу НБ РБ (demo).
+ * показываются в базовой валюте текущего ЮЛ по курсу НБ РБ из backend.
  *
  * ⚠️ Фронт-демо: реальное разделение сделок по company_id + доступ пользователя +
- * живые курсы — за бэкендом (CRM.git + миграция). Здесь только вид + валюта.
+ * разделение данных — за бэкендом. CurrencyProvider получает официальный курс.
  */
 export interface Company {
   id: string;
@@ -20,8 +20,8 @@ export const COMPANIES: Company[] = [
   { id: "pl", name: "AkuMir Sp. z o.o.", country: "Польша", flag: "🇵🇱", base: "EUR" },
 ];
 
-/** Курс к BYN (demo НБ РБ): 1 ед. валюты = FX[cur] BYN. */
-export const FX: Record<string, number> = { BYN: 1, USD: 3.25, EUR: 3.55, RUB: 0.037, PLN: 0.82 };
+/** Только BYN имеет постоянный курс; иностранные курсы загружаются с backend. */
+export const FX: Record<string, number> = { BYN: 1 };
 
 export const CUR_SIGN: Record<string, string> = {
   BYN: "Br",
@@ -32,7 +32,8 @@ export const CUR_SIGN: Record<string, string> = {
 };
 
 /** Сумма в BYN → в базовую валюту ЮЛ (base_amount = byn / FX[base]) с подписью. */
-export function formatInBase(amountByn: number, base: string): string {
-  const value = amountByn / (FX[base] ?? 1);
+export function formatInBase(amountByn: number, base: string, rate = FX[base]): string {
+  if (!Number.isFinite(rate) || rate <= 0) return "Курс недоступен";
+  const value = amountByn / rate;
   return new Intl.NumberFormat("ru-RU").format(Math.round(value)) + " " + (CUR_SIGN[base] ?? base);
 }

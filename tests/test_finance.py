@@ -1,7 +1,7 @@
 """Тесты модуля Finance: lifecycle, allocations, aging, cost-center, fx, cashflow, margin, reconcile."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -13,7 +13,19 @@ from modules.finance.models import Payment
 
 
 def _ctx(session):
-    return EventContext(session=session, services=SimpleNamespace(event_bus=OutboxEventBus()))
+    return EventContext(session=session, services=SimpleNamespace(event_bus=OutboxEventBus()),
+                        occurred_at=datetime(2026, 9, 1, 8))
+
+
+@pytest.fixture
+async def official_usd(session):
+    from core.domain.models import AuditLog
+
+    session.add(AuditLog(actor="nbrb", action="currency.nbrb.quote",
+                         entity_ref="nbrb:USD:2026-09-01",
+                         detail={"currency": "USD", "date": "2026-09-01", "scale": 1,
+                                 "official_rate": "3.30", "rate": "3.30", "source": "NBRB"}))
+    await session.flush()
 
 
 # ───────────────────────── P1: lifecycle (due_date / paid_at / overdue) ─────────────────────────
@@ -253,12 +265,11 @@ def test_fx_byn_is_identity():
     assert to_byn(50, None) == Decimal("50")  # None == BYN
 
 
-def test_fx_usd_converted_with_buffer():
-    from modules.finance.fx import FX_BUFFER, RATES, to_byn
+def test_fx_usd_requires_explicit_official_rate():
+    from modules.finance.fx import to_byn
 
     # 100 USD × 3.30 × 1.10 = 363.00
-    expected = (Decimal("100") * RATES["USD"] * FX_BUFFER).quantize(Decimal("0.01"))
-    assert to_byn(100, "USD") == expected
+    assert to_byn(100, "USD", rate="3.30") == Decimal("330.00")
 
 
 def test_fx_unknown_currency_raises():
@@ -268,9 +279,8 @@ def test_fx_unknown_currency_raises():
         to_byn(10, "JPY")
 
 
-async def test_landed_with_foreign_currency_stores_byn_and_orig(session):
+async def test_landed_with_foreign_currency_stores_byn_and_orig(session, official_usd):
     from modules.finance.events import on_landed_cost
-    from modules.finance.fx import FX_BUFFER, RATES
 
     await on_landed_cost(
         {
@@ -283,7 +293,7 @@ async def test_landed_with_foreign_currency_stores_byn_and_orig(session):
     )
     await session.commit()
     p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
-    expected_byn = (Decimal("100") * RATES["USD"] * FX_BUFFER).quantize(Decimal("0.01"))
+    expected_byn = Decimal("330.00")
     assert Decimal(str(p.amount)) == expected_byn
     assert p.currency == "USD" and Decimal(str(p.amount_orig)) == Decimal("100")
 
@@ -514,9 +524,8 @@ async def test_claim_zero_amount_creates_nothing(session):
 # FIN-C2: FX в on_freight_refund (USD/BYN/неизвестная валюта)
 
 
-async def test_freight_refund_usd_applies_fx_buffer(session):
+async def test_freight_refund_usd_applies_official_rate(session, official_usd):
     from modules.finance.events import on_freight_refund
-    from modules.finance.fx import FX_BUFFER, RATES
 
     await on_freight_refund(
         {"shipment_code": "SH-1", "amount": "50", "currency": "USD", "entity_ref": "audit:1"},
@@ -526,7 +535,7 @@ async def test_freight_refund_usd_applies_fx_buffer(session):
     p = (
         await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
     ).scalars().one()
-    expected_byn = (Decimal("50") * RATES["USD"] * FX_BUFFER).quantize(Decimal("0.01"))
+    expected_byn = Decimal("165.00")
     assert p.amount == -expected_byn  # хранится ОТРИЦАТЕЛЬНОЙ — кредит против фрахта
     assert p.currency == "USD"
     assert Decimal(str(p.amount_orig)) == Decimal("50")
@@ -546,12 +555,14 @@ async def test_freight_refund_byn_keeps_amount_orig_none(session):
     assert p.amount_orig is None and p.currency == "BYN"
 
 
-async def test_freight_refund_unknown_currency_skips(session):
+async def test_freight_refund_unknown_currency_fails(session):
+    from core.services.nbrb import RateUnavailable
     from modules.finance.events import on_freight_refund
 
-    await on_freight_refund(
-        {"shipment_code": "SH-3", "amount": "10", "currency": "JPY"}, _ctx(session)
-    )
+    with pytest.raises(RateUnavailable):
+        await on_freight_refund(
+            {"shipment_code": "SH-3", "amount": "10", "currency": "INVALID"}, _ctx(session)
+        )
     await session.commit()
     rows = (
         await session.execute(select(Payment).where(Payment.kind == "freight_refund"))
