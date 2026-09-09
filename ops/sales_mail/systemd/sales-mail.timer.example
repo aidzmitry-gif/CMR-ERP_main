@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll and relay CRM sales mailbox
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=sales-mail.service
+
+[Install]
+WantedBy=timers.target
