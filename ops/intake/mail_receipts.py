@@ -35,6 +35,35 @@ SITE_COPY_MARKER_RE = re.compile(
 )
 RS_FORM_MARKER_RE = re.compile(r'\bRS_FORM_ID\b', re.IGNORECASE)
 RS_RESULT_MARKER_RE = re.compile(r'\bRS_RESULT_ID\b', re.IGNORECASE)
+_REQUEST_FOR_PROCUREMENT_RE = (
+    r'(?:заявка|заявку|заявки|заявке|заявкой|заявок|заявкам|заявками|заявках)'
+    r'\s+на\s+'
+    r'(?:закупка|закупку|закупки|закупке|закупкой|закупок|закупкам|закупками|закупках)'
+)
+_AGENT_FOR_PROCUREMENT_RE = (
+    r'(?:агент|агента|агенту|агентом|агенте|агенты|агентов|агентам|агентами|агентах)'
+    r'\s+по\s+'
+    r'(?:закупка|закупку|закупки|закупке|закупкой|закупок|закупкам|закупками|закупках)'
+)
+DIRECT_CUSTOMER_PROCUREMENT_RE = re.compile(
+    rf'\b(?:{_REQUEST_FOR_PROCUREMENT_RE}|{_AGENT_FOR_PROCUREMENT_RE})\b',
+    re.IGNORECASE,
+)
+_PROCUREMENT_ID_SEPARATOR_RE = r'[\s:;,./()\-–—]*'
+DIRECT_CUSTOMER_PROCUREMENT_ID_RE = re.compile(
+    rf'\b(?:{_REQUEST_FOR_PROCUREMENT_RE}|{_AGENT_FOR_PROCUREMENT_RE})\b'
+    rf'{_PROCUREMENT_ID_SEPARATOR_RE}'
+    r'(?:(?:№|#)\s*[0-9A-Za-zА-Яа-яЁё]+(?:[/-][0-9A-Za-zА-Яа-яЁё]+)*'
+    r'|(?:n|no\.?|номер)\s*(?=[0-9])[0-9A-Za-zА-Яа-яЁё]+(?:[/-][0-9A-Za-zА-Яа-яЁё]+)*'
+    r'|[0-9]+(?:[/-][0-9A-Za-zА-Яа-яЁё]+)*)',
+    re.IGNORECASE,
+)
+HARD_PROCUREMENT_RE = re.compile(
+    r'\b(?:тендер\w*|лот|лота|лоту|лоте|лотом|лоты|лотов|лотам|лотами|лотах|'
+    r'lot|lots|приглаш\w*|invitation)\b'
+    r'|\bмаркетинговое\s+исследование\b',
+    re.IGNORECASE,
+)
 
 
 class MailText(HTMLParser):
@@ -106,14 +135,19 @@ def _has_site_copy_text_provenance(text):
 
 def _has_procurement_language(text):
     combined = text.casefold()
-    return any(x in combined for x in ('тендер', 'закупк', 'маркетинговое исследование'))
+    if DIRECT_CUSTOMER_PROCUREMENT_ID_RE.search(combined):
+        return True
+    residual = DIRECT_CUSTOMER_PROCUREMENT_RE.sub(' ', combined)
+    return bool(HARD_PROCUREMENT_RE.search(residual) or 'закупк' in residual)
 
 
 def _has_customer_intent(subject, text):
     combined = (subject + '\n' + text).casefold()
     return (any(x in combined for x in (
         'прошу', 'просим', 'нужен', 'нужны', 'запрос', 'заявка', 'подскажите'))
-        and any(x in combined for x in ('аккумулятор', 'батаре', 'элемент питан', 'акб')))
+        and any(x in combined for x in (
+            'аккумулятор', 'батаре', 'элемент питан', 'акб',
+            'источник бесперебойного питания')))
 
 
 def _extract_docx_intent_text(data):
