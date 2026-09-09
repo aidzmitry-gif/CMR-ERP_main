@@ -10,7 +10,9 @@ import asyncio
 import base64
 import copy
 import hashlib
+import io
 import os
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -65,6 +67,78 @@ def attachment(data=b"%PDF-1.4 exact test bytes\n%%EOF", file_id="1",
         "sha256": hashlib.sha256(data).hexdigest(),
         "data_url": f"data:{content_type};base64," + base64.b64encode(data).decode(),
     }
+
+
+DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def docx_attachment(number):
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body><w:p><w:r><w:t>Verified request {number}</w:t></w:r></w:p></w:body>"
+        "</w:document>"
+    ).encode()
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        "</Types>"
+    ).encode()
+    relationships = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/>'
+        "</Relationships>"
+    ).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name, data in (
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", relationships),
+            ("word/document.xml", document),
+        ):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED
+            archive.writestr(info, data)
+    data = buffer.getvalue()
+    return attachment(
+        data,
+        file_id=f"docx-{number}", filename=f"request-{number}.docx", content_type=DOCX_CONTENT_TYPE,
+    )
+
+
+def legat_request(tender, lot, delivery_id, *, namespace="zakupki.legat.by", **extra):
+    source_id = f"tender:{tender}:lot:{lot}"
+    return envelope(
+        namespace, source_id, delivery_id,
+        lead={
+            "company": "Verified Buyer Co",
+            "product": f"Verified product {tender}/{lot}",
+            "message": "Legat notification with verified buyer company",
+        },
+        template_id=2344, tender_id=tender, lot_id=lot, **extra,
+    )
+
+
+def direct_legat_request(tender, lot, delivery_id):
+    source_id = f"tender:{tender}:lot:{lot}"
+    return envelope(
+        "admin@enersys.by", source_id, delivery_id,
+        identity_namespace="zakupki.legat.by", template_id=2344,
+        tender_id=tender, lot_id=lot,
+        lead={
+            "name": "Verified buyer", "company": "Verified Buyer Co",
+            "phone": f"+375290000{int(lot):02d}", "email": f"buyer-{tender}-{lot}@example.invalid",
+            "product": f"Verified product {tender}/{lot}",
+            "message": "Direct buyer request with verified contacts",
+        },
+        files=[docx_attachment(1)],
+    )
 
 
 def app_for(session_dependency):
@@ -269,6 +343,139 @@ async def test_tenders_and_lots_separate_across_three_templates(intake_env):
     assert len({result["lead_id"] for result in results}) == 3
     assert results[0]["lead_id"] == results[3]["lead_id"]
     assert all(lead.source == "tender" for lead in (await env.session.scalars(select(Lead))).all())
+
+
+@pytest.mark.parametrize("admin_first", [False, True])
+async def test_legat_admin_alias_preserves_history_contacts_and_docx(intake_env, monkeypatch, admin_first):
+    env = intake_env
+    manual = Counterparty(name="Manual association")
+    env.session.add(manual)
+    await env.session.flush()
+    await env.session.commit()
+    pairs = [("365", "1"), ("365", "2"), ("366", "1"), ("366", "2")]
+    legat = [legat_request(tender, lot, f"legat:{tender}:{lot}") for tender, lot in pairs]
+    direct = [direct_legat_request(tender, lot, f"mail:{tender}:{lot}") for tender, lot in pairs]
+    assert len({request["files"][0]["sha256"] for request in direct}) == 1
+    first, second = (direct, legat) if admin_first else (legat, direct)
+
+    batch_responses = []
+    for batch in (first, second):
+        responses = [await env.api.post(URL, json=request) for request in batch]
+        assert all(response.status_code == 202 for response in responses)
+        batch_responses.append(responses)
+        if batch is direct:
+            failed_file = batch[0]["files"][0]["filename"]
+            original_verify = intake_storage.verify_file
+            failed = {"done": False}
+
+            def fail_once(root, item):
+                if item["filename"] == failed_file and not failed["done"]:
+                    failed["done"] = True
+                    raise OSError("synthetic retry")
+                return original_verify(root, item)
+
+            monkeypatch.setattr(intake_storage, "verify_file", fail_once)
+            await env.relay()
+            monkeypatch.setattr(intake_storage, "verify_file", original_verify)
+            retry = await env.api.post(URL, json=batch[0])
+            assert retry.status_code == 202
+            await env.relay()
+        else:
+            await env.relay()
+
+        if batch is first:
+            assert await count(env.session, IntakeReceipt) == 4
+            assert await count(env.session, IntakeIdentity) == 4
+            assert await count(env.session, Lead) == 4
+            for lead in (await env.session.scalars(select(Lead))).all():
+                lead.counterparty_id, lead.customer_kind = manual.id, "existing"
+            await env.session.commit()
+
+    for request in first + second:
+        response = await env.api.post(URL, json=request)
+        assert response.status_code == 200
+    await env.relay()
+    assert await count(env.session, IntakeReceipt) == 8
+    assert await count(env.session, IntakeIdentity) == 4
+    assert await count(env.session, Lead) == 4
+    leads = (await env.session.scalars(select(Lead).order_by(Lead.id))).all()
+    expected_by_product = {
+        request["lead"]["product"]: (
+            base64.b64decode(request["files"][0]["data_url"].split(",", 1)[1]),
+            request["files"][0]["sha256"],
+        )
+        for request in direct
+    }
+    assert {lead.product for lead in leads} == set(expected_by_product)
+    for tender, lot in pairs:
+        lead = next(item for item in leads if item.product == f"Verified product {tender}/{lot}")
+        assert (lead.name, lead.company, lead.phone, lead.email) == (
+            "Verified buyer", "Verified Buyer Co", f"+375290000{int(lot):02d}",
+            f"buyer-{tender}-{lot}@example.invalid",
+        )
+        legat_provenance = f"Источник: zakupki.legat.by; ID: tender:{tender}:lot:{lot}"
+        admin_provenance = f"Источник: admin@enersys.by; ID: tender:{tender}:lot:{lot}"
+        assert lead.message.count(legat_provenance) == 1
+        assert lead.message.count(admin_provenance) == 1
+        assert lead.message.count("Legat notification with verified buyer company") == 1
+        assert lead.message.count("Direct buyer request with verified contacts") == 1
+    attachments = (await env.session.scalars(select(LeadAttachment).order_by(LeadAttachment.id))).all()
+    assert len(attachments) == 4
+    assert all(item.source == "email" and item.content_type == DOCX_CONTENT_TYPE for item in attachments)
+    leads_by_id = {lead.id: lead for lead in leads}
+    for item in attachments:
+        data = intake_storage.resolve_path(env.root, item.storage_path).read_bytes()
+        expected_data, expected_hash = expected_by_product[leads_by_id[item.lead_id].product]
+        assert data == expected_data
+        assert hashlib.sha256(data).hexdigest() == expected_hash
+        assert item.size_bytes == len(data) == len(expected_data)
+    assert all(lead.counterparty_id == manual.id and lead.customer_kind == "existing" for lead in leads)
+    results = [await receipt(env, response.json()["receipt_id"])
+               for responses in batch_responses for response in responses]
+    assert len({(item["identity_namespace"], item["source_id"]) for item in results}) == 4
+    assert sum(item["namespace"] == "zakupki.legat.by" for item in results) == 4
+    assert sum(item["namespace"] == "admin@enersys.by" for item in results) == 4
+    expected_hash_by_source = {
+        request["source_id"]: request["files"][0]["sha256"] for request in direct
+    }
+    for item in results:
+        if item["namespace"] == "admin@enersys.by":
+            assert item["files"][0]["sha256"] == expected_hash_by_source[item["source_id"]]
+    assert all(lead.source == "tender" for lead in (await env.session.scalars(select(Lead))).all())
+
+
+@pytest.mark.parametrize("payload", [
+    legat_request("365", "1", "bad-alias", namespace="microchips.by",
+                  identity_namespace="zakupki.legat.by"),
+    legat_request("365", "1", "bad-alias", namespace="enersys.by",
+                  identity_namespace="zakupki.legat.by"),
+    envelope(
+        "admin@enersys.by", "tender:365:lot:1", "missing-template",
+        identity_namespace="zakupki.legat.by", tender_id="365", lot_id="1",
+    ),
+    envelope(
+        "admin@enersys.by", "mail:365:1", "bad-source-id",
+        identity_namespace="zakupki.legat.by", template_id=2344, tender_id="365", lot_id="1",
+    ),
+    envelope(
+        "zakupki.legat.by", "tender:365:lot:1", "bad-identity",
+        identity_namespace="microchips.by", template_id=2344, tender_id="365", lot_id="1",
+    ),
+])
+async def test_legat_alias_guards_reject_forbidden_or_incomplete_requests(intake_env, payload):
+    response = await intake_env.api.post(URL, json=payload)
+    assert response.status_code == 422, response.text
+    assert await count(intake_env.session, IntakeReceipt) == 0
+    assert await count(intake_env.session, IntakeIdentity) == 0
+
+
+async def test_legat_alias_rejects_tampered_docx_metadata(intake_env):
+    request = direct_legat_request("365", "1", "mail:tampered")
+    request["files"][0]["sha256"] = "0" * 64
+    response = await intake_env.api.post(URL, json=request)
+    assert response.status_code == 422, response.text
+    assert await count(intake_env.session, IntakeReceipt) == 0
+    assert await count(intake_env.session, IntakeIdentity) == 0
 
 
 async def test_site_contact_wins_when_mail_copy_arrives_first(intake_env):
@@ -667,6 +874,60 @@ async def test_postgres_concurrent_delivery_and_rollback(monkeypatch, receipt_tm
                 final_lead = await session.get(Lead, lead_id)
                 assert final_lead.email == "buyer@example.invalid"
                 assert final_lead.counterparty_id == manual_id
+
+            # Two independent source adapters may deliver the same four
+            # tender identities concurrently. PostgreSQL identity locks must
+            # serialize each pair without duplicate leads or attachments.
+            before = {}
+            async with factory() as session:
+                for model in (IntakeReceipt, IntakeIdentity, Lead, LeadAttachment):
+                    before[model] = await count(session, model)
+            pairs = [("pg365", "1"), ("pg365", "2"), ("pg366", "1"), ("pg366", "2")]
+            legat_batch = [
+                legat_request(tender, lot, f"pg-legat:{tender}:{lot}")
+                for tender, lot in pairs
+            ]
+            admin_batch = [
+                direct_legat_request(tender, lot, f"pg-admin:{tender}:{lot}")
+                for tender, lot in pairs
+            ]
+            batch_responses = await asyncio.gather(*(
+                client.post(URL, json=copy.deepcopy(request))
+                for request in legat_batch + admin_batch
+            ))
+            assert all(response.status_code == 202 for response in batch_responses)
+            receipt_ids = [response.json()["receipt_id"] for response in batch_responses]
+            assert len(set(receipt_ids)) == 8
+
+            async def deliver_receipt(receipt_id):
+                async with factory() as session:
+                    await events.on_intake_lead(
+                        {"receipt_id": receipt_id}, EventContext(session, services),
+                    )
+                    await session.commit()
+
+            await asyncio.gather(*(deliver_receipt(receipt_id) for receipt_id in receipt_ids))
+            # The direct deliveries leave their intake outbox notifications queued;
+            # ordinary relay must consume those delivered-receipt noops safely.
+            await asyncio.gather(relay(), relay())
+            async with factory() as session:
+                assert await count(session, IntakeReceipt) == before[IntakeReceipt] + 8
+                assert await count(session, IntakeIdentity) == before[IntakeIdentity] + 4
+                assert await count(session, Lead) == before[Lead] + 4
+                products = {request["lead"]["product"] for request in admin_batch}
+                new_leads = (await session.scalars(select(Lead).where(Lead.product.in_(products)))).all()
+                assert len(new_leads) == 4
+                attachments = (await session.scalars(
+                    select(LeadAttachment).where(
+                        LeadAttachment.lead_id.in_([lead.id for lead in new_leads]),
+                    ).order_by(LeadAttachment.id)
+                )).all()
+                assert await count(session, LeadAttachment) == before[LeadAttachment] + 4
+                assert len(attachments) == 4
+                assert all(item.source == "email" for item in attachments)
+            statuses = await asyncio.gather(*(client.get(f"{URL}/receipts/{receipt_id}")
+                                              for receipt_id in receipt_ids))
+            assert all(response.json()["status"] == "delivered" for response in statuses)
     finally:
         async with engine.begin() as connection:
             await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
