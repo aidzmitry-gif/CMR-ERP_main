@@ -44,11 +44,12 @@ async def test_stock_reserve_skip_branches(session):
     from modules.integrations.stock import StockService
 
     svc = StockService()
-    # пустой список / без кода / нулевое qty / неизвестный SKU — всё пропускается
+    # Пустые позиции пропускаются; неизвестный SKU теперь отклоняет всю корзину.
     assert await svc.reserve(session, []) == []
     assert await svc.reserve(session, [{"sku_code": "", "qty": 1}]) == []
     assert await svc.reserve(session, [{"sku_code": "X", "qty": 0}]) == []
-    assert await svc.reserve(session, [{"sku_code": "НЕТ", "qty": 5}]) == []
+    with pytest.raises(ValueError, match="Нет складского остатка"):
+        await svc.reserve(session, [{"sku_code": "НЕТ", "qty": 5}])
 
     session.add(StockItem(sku_code="RS-1", warehouse="Главный", qty_available=100, qty_reserved=2))
     await session.commit()

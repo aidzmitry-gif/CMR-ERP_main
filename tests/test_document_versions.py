@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, OutboxEvent, Sku, User
+from modules.integrations.models import StockItem
 from modules.sales.events import on_payment_paid
 from modules.sales.models import (
     CompanyBranding,
@@ -24,6 +25,7 @@ async def make_invoice(api, session):
     session.add_all([sku, cp])
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('100')))
+    session.add(StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0))
     await session.commit()
     deal = (await api.post('/sales/deals', json={
         'number': 'ORIG', 'title': 'Original deal', 'counterparty': cp.name, 'amount': 200,

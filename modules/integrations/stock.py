@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,26 +18,58 @@ from modules.integrations.models import Batch, StockItem
 _FEFO_WARN_DAYS = 365
 
 
+def _quantities(items: list[dict]) -> dict[str, Decimal]:
+    quantities: dict[str, Decimal] = {}
+    for item in items:
+        code = item.get("sku_code")
+        if not code:
+            continue
+        try:
+            qty = Decimal(str(item.get("qty", 0)))
+        except InvalidOperation:
+            raise ValueError(f"Некорректное количество для {code}") from None
+        if not qty.is_finite():
+            raise ValueError(f"Некорректное количество для {code}")
+        if qty > 0:
+            quantities[code] = quantities.get(code, Decimal("0")) + qty
+    return quantities
+
+
+async def _locked_stock(session: AsyncSession, codes) -> dict[str, StockItem]:
+    # All callers take stock locks in the same order. Refresh an already loaded
+    # ORM row after waiting, or its stale balance could overwrite another reserve.
+    rows = (await session.scalars(
+        select(StockItem).where(StockItem.sku_code.in_(codes)).order_by(StockItem.id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).all()
+    first: dict[str, StockItem] = {}
+    for row in rows:
+        first.setdefault(row.sku_code, row)
+    return first
+
+
 class StockService:
     async def reserve(self, session: AsyncSession, items: list[dict]) -> list[dict]:
         """Зарезервировать остатки под позиции ``[{sku_code, qty}]`` — ``qty_reserved`` растёт.
 
-        Резерв ставится на первый склад с таким SKU; позиции без остатка пропускаются.
-        Возвращает сводку фактически зарезервированного.
+        Резерв ставится на первый склад с таким SKU. Вся корзина проверяется под
+        блокировками до изменений; отсутствие/дефицит остатка → ValueError.
+        Транзакцией владеет вызывающий. Возвращает фактический резерв по SKU.
         """
-        reserved: list[dict] = []
-        for it in items:
-            code = it.get("sku_code")
-            qty = Decimal(str(it.get("qty", 0)))
-            if not code or qty <= 0:
-                continue
-            row = (
-                await session.execute(
-                    select(StockItem).where(StockItem.sku_code == code).order_by(StockItem.id)
-                )
-            ).scalars().first()
+        quantities = _quantities(items)
+        if not quantities:
+            return []
+        rows = await _locked_stock(session, quantities)
+        for code, qty in quantities.items():
+            row = rows.get(code)
             if row is None:
-                continue
+                raise ValueError(f"Нет складского остатка для {code}")
+            free = (row.qty_available or Decimal("0")) - (row.qty_reserved or Decimal("0"))
+            if qty > free:
+                raise ValueError(f"Недостаточно остатка {code}: нужно {qty}, свободно {max(free, 0)}")
+        reserved: list[dict] = []
+        for code, qty in quantities.items():
+            row = rows[code]
             row.qty_reserved = (row.qty_reserved or Decimal("0")) + qty
             reserved.append({"sku_code": code, "qty": float(qty), "warehouse": row.warehouse})
         return reserved
@@ -48,22 +80,20 @@ class StockService:
         Зеркально ``reserve`` (SALES-51); не опускает резерв ниже нуля. Применяется
         при аннулировании просроченного счёта. Возвращает сводку фактически снятого.
         """
+        quantities = _quantities(items)
+        if not quantities:
+            return []
+        rows = await _locked_stock(session, quantities)
         released: list[dict] = []
-        for it in items:
-            code = it.get("sku_code")
-            qty = Decimal(str(it.get("qty", 0)))
-            if not code or qty <= 0:
-                continue
-            row = (
-                await session.execute(
-                    select(StockItem).where(StockItem.sku_code == code).order_by(StockItem.id)
-                )
-            ).scalars().first()
+        for code, qty in quantities.items():
+            row = rows.get(code)
             if row is None:
                 continue
             current = row.qty_reserved or Decimal("0")
-            row.qty_reserved = current - qty if current > qty else Decimal("0")
-            released.append({"sku_code": code, "qty": float(qty), "warehouse": row.warehouse})
+            actual = min(qty, max(current, Decimal("0")))
+            if actual:
+                row.qty_reserved = current - actual
+                released.append({"sku_code": code, "qty": float(actual), "warehouse": row.warehouse})
         return released
 
     async def stock_by_sku(self, session: AsyncSession, sku_code: str) -> dict | None:
