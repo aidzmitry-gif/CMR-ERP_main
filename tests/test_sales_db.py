@@ -298,6 +298,47 @@ async def test_deal_contacts(api):
     assert len(primary) == 1 and primary[0]["id"] == c2["id"]
 
 
+async def test_ambiguous_counterparty_name_never_selects_or_changes_arbitrary_record(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import Contact, Counterparty, User
+
+    session.add(User(username="duplicate-owner", full_name="Duplicate Owner", employee_id=301,
+                     department="Продажи", role="sales", status="active", deal_visibility="own"))
+    first = Counterparty(name="Same client", unp="111111111")
+    second = Counterparty(name="Same client", unp="222222222")
+    session.add_all([first, second])
+    await session.flush()
+    primary = Contact(counterparty_id=first.id, full_name="Private first", is_primary=True)
+    candidate = Contact(counterparty_id=first.id, full_name="Private second")
+    foreign = Contact(counterparty_id=second.id, full_name="Other client", is_primary=True)
+    session.add_all([primary, candidate, foreign])
+    await session.commit()
+    deal = (await api.post("/sales/deals", json={
+        "number": "CP-AMBIGUOUS", "title": "Ambiguous client", "counterparty": "Same client",
+        "owner_id": 301,
+    })).json()
+    headers = {"X-User": "duplicate-owner", "X-User-Roles": "sales"}
+    for method, path, payload in (
+        ("GET", f"/sales/deals/{deal['id']}", None),
+        ("GET", f"/sales/deals/{deal['id']}/contacts", None),
+        ("POST", f"/sales/deals/{deal['id']}/contacts", {"full_name": "New", "is_primary": True}),
+        ("PATCH", f"/sales/contacts/{candidate.id}/primary", None),
+    ):
+        response = await api.request(method, path, json=payload, headers=headers)
+        assert response.status_code == 409, response.text
+        assert response.json() == {"detail": "Неоднозначный контрагент сделки"}
+
+    for contact, is_primary in ((primary, True), (candidate, False), (foreign, True)):
+        await session.refresh(contact)
+        assert contact.is_primary == is_primary
+    assert len((await session.execute(select(Contact))).scalars().all()) == 3
+    assert len((await session.execute(select(Counterparty))).scalars().all()) == 2
+    await session.refresh(first)
+    await session.refresh(second)
+    assert (first.unp, second.unp) == ("111111111", "222222222")
+
+
 async def test_skus_for_picker_excludes_demo(session, api):
     from core.domain.models import Sku
 
