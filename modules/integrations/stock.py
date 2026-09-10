@@ -49,6 +49,12 @@ async def _locked_stock(session: AsyncSession, codes) -> dict[str, StockItem]:
 
 
 class StockService:
+    async def lock_reservation_items(self, session: AsyncSession, items: list[dict]) -> None:
+        """Lock all old/new stock before a transaction performs release + reserve."""
+        quantities = _quantities(items)
+        if quantities:
+            await _locked_stock(session, quantities)
+
     async def reserve(self, session: AsyncSession, items: list[dict]) -> list[dict]:
         """Зарезервировать остатки под позиции ``[{sku_code, qty}]`` — ``qty_reserved`` растёт.
 

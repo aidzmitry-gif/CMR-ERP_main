@@ -423,6 +423,7 @@ async def test_invoice_document_amount_includes_vat(api, session):
     печатной формы (нетто+НДС 20%), а не нетто. Решение оператора «с НДС» (PLATFORM #1)."""
     from decimal import Decimal
 
+    from modules.integrations.models import StockItem
     from modules.sales.models import DealItem, PriceQuote
     from modules.sales.routes import _invoice_gross, _invoice_items, _invoice_line
 
@@ -441,6 +442,8 @@ async def test_invoice_document_amount_includes_vat(api, session):
         DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),  # 3×20 = 60 нетто → 72 с НДС
         PriceQuote(sku_code="VAT1", counterparty="ООО V", price=15),
         PriceQuote(sku_code="VAT2", counterparty="ООО V", price=20),
+        StockItem(sku_code="VAT1", qty_available=5, qty_reserved=0),
+        StockItem(sku_code="VAT2", qty_available=3, qty_reserved=0),
     ])
     await session.commit()
 
