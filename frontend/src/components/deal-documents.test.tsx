@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
   fetchDocuments: vi.fn(),
@@ -12,6 +12,87 @@ import * as api from "@/lib/api";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.unstubAllGlobals());
+
+const issuedInvoice: api.DealDoc = {
+  id: 50, kind: "invoice", number: "СЧ-50", status: "posted", amount: 360,
+  onec_ref: null, valid_until: null, reserve_status: "unreserved", reserve_mode: "on_order",
+  original_state: "issued", version: 1,
+};
+
+function moneySummary() {
+  return within(screen.getByRole("region", { name: "Оплата и деньги" }));
+}
+
+describe("DealDocuments — сумма выпущенного счёта", () => {
+  it.each(["posted", "paid"])("сумма с НДС 360 берётся из оригинала %s, оплата и остаток неизвестны", async (status) => {
+    mock(api.fetchDocuments).mockResolvedValue([{ ...issuedInvoice, status }]);
+    render(<DealDocuments dealId="1" />);
+    expect(await moneySummary().findByText("360 BYN")).toBeInTheDocument();
+    expect(moneySummary().getByText("Сумма счёта (с НДС)")).toBeInTheDocument();
+    expect(moneySummary().getByRole("link")).toHaveAttribute("href", "/api/sales/documents/50/render");
+    expect(moneySummary().getAllByText("Нет данных")).toHaveLength(2);
+    expect(moneySummary().queryByText("0 BYN")).toBeNull();
+    expect(screen.getAllByText("Под заказ — товар не зарезервирован")).toHaveLength(2);
+  });
+
+  it("сохраняет копейки и исходную валюту счёта", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([{ ...issuedInvoice, amount: 360.12 }]);
+    render(<DealDocuments dealId="1" />);
+    expect(await moneySummary().findByText("360,12 BYN")).toBeInTheDocument();
+  });
+
+  it.each([
+    [],
+    [{ ...issuedInvoice, status: "draft", original_state: "draft" }],
+    [{ ...issuedInvoice, status: "cancelled" }],
+    [{ ...issuedInvoice, superseded_by_id: 51 }],
+    [{ ...issuedInvoice, original_state: "legacy_unavailable" }],
+    [{ ...issuedInvoice, original_state: undefined }],
+    [{ ...issuedInvoice, amount: NaN }],
+    [{ ...issuedInvoice, amount: -10 }],
+    [issuedInvoice, { ...issuedInvoice, id: 51 }],
+    [issuedInvoice, { ...issuedInvoice, id: 51, original_state: "legacy_unavailable" }],
+  ].map((docs, index) => ({ docs, index })))("нет единственного подтверждённого актуального оригинала: $index", async ({ docs }) => {
+    mock(api.fetchDocuments).mockResolvedValue(docs);
+    await act(async () => { render(<DealDocuments dealId="1" />); });
+    expect(moneySummary().getAllByText("Нет данных")).toHaveLength(3);
+    expect(moneySummary().queryByRole("link")).toBeNull();
+    expect(moneySummary().queryByText(/BYN/)).toBeNull();
+  });
+
+  it("черновик замены сохраняет старый итог; выпуск обновляет сумму без переноса оплаты", async () => {
+    const old = { ...issuedInvoice, status: "paid" };
+    const next = { ...issuedInvoice, id: 51, number: "СЧ-51", version: 2, amount: 480, supersedes_id: 50, status: "draft", original_state: "draft" };
+    mock(api.fetchDocuments).mockResolvedValueOnce([old, next])
+      .mockResolvedValue([{ ...old, superseded_by_id: 51 }, { ...next, status: "posted", original_state: "issued" }]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    render(<DealDocuments dealId="1" />);
+    await moneySummary().findByText("360 BYN");
+    fireEvent.click(screen.getByText("Выпустить версию"));
+    await moneySummary().findByText("480 BYN");
+    expect(moneySummary().queryByText("360 BYN")).toBeNull();
+    expect(moneySummary().getByRole("link")).toHaveAttribute("href", "/api/sales/documents/51/render");
+    expect(moneySummary().getAllByText("Нет данных")).toHaveLength(2);
+    expect(screen.getByText(/Заменён документом #51; оплата: оплачен/)).toBeInTheDocument();
+  });
+
+  it("смена сделки скрывает прежнюю сумму и игнорирует запоздавший ответ", async () => {
+    let finishOld!: (docs: api.DealDoc[]) => void;
+    mock(api.fetchDocuments).mockReturnValueOnce(new Promise<api.DealDoc[]>((resolve) => { finishOld = resolve; }))
+      .mockResolvedValueOnce([{ ...issuedInvoice, id: 70, amount: 720 }]);
+    const { rerender } = render(<DealDocuments dealId="1" />);
+    rerender(<DealDocuments dealId="2" />);
+    await moneySummary().findByText("720 BYN");
+    await act(async () => { finishOld([issuedInvoice]); });
+    expect(moneySummary().getByText("720 BYN")).toBeInTheDocument();
+    expect(moneySummary().queryByText("360 BYN")).toBeNull();
+    mock(api.fetchDocuments).mockReturnValueOnce(new Promise(() => {}));
+    rerender(<DealDocuments dealId="3" />);
+    expect(moneySummary().queryByText("720 BYN")).toBeNull();
+    expect(moneySummary().getAllByText("Нет данных")).toHaveLength(3);
+  });
+});
 
 describe("DealDocuments", () => {
   it("явный выбор сохраняет ключ после ошибки и сбрасывается при смене сделки/типа", async () => {

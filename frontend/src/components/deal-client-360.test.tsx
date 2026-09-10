@@ -45,23 +45,21 @@ describe("DealClient360", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     render(await DealClient360({ company: "   " }));
-    expect(screen.getByText(/нет в MDM/)).toBeInTheDocument();
+    expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("контрагент не резолвится в MDM (query вернул пусто) — honest-empty", async () => {
     stubFetch(() => queryResponse([]));
     render(await DealClient360({ company: "Незнакомая компания" }));
-    expect(screen.getByText(/нет в MDM/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/контрагент не найден в справочнике/),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
+    expect(screen.queryByText(/MDM|отдельная сессия|после загрузки/)).toBeNull();
   });
 
   it("query-запрос падает (500) — резолв даёт null, honest-empty без падения", async () => {
     stubFetch(() => ({ ok: false } as Response));
     render(await DealClient360({ company: "Компания" }));
-    expect(screen.getByText(/нет в MDM/)).toBeInTheDocument();
+    expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
   });
 
   it("резолвится и карточка найдена — показывает УНП, источник и контакт", async () => {
@@ -75,7 +73,7 @@ describe("DealClient360", () => {
     expect(screen.getByText("1С")).toBeInTheDocument(); // маппинг SOURCE_LABEL["1c"]
     expect(screen.getByText("Иван Иванов")).toBeInTheDocument();
     expect(screen.getByText(/\+375291234567/)).toBeInTheDocument();
-    expect(screen.queryByText(/нет в MDM/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Досье клиента пока недоступно.")).not.toBeInTheDocument();
   });
 
   it("нет УНП — прочерк «—» вместо пустой строки", async () => {

@@ -46,9 +46,7 @@ export async function DealClient360({ company, roles }: { company: string; roles
 function Empty() {
   return (
     <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-muted">
-      <span className="font-semibold text-faint">нет в MDM · </span>
-      контрагент не найден в справочнике (контрагентов 1С загружает отдельная сессия) — досье
-      появится после загрузки.
+      Досье клиента пока недоступно.
     </div>
   );
 }

@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from core.domain.models import Counterparty, OutboxEvent, Sku
 from core.services.eventbus import EventContext
 from modules.finance.models import Payment
+from modules.integrations.models import StockItem
 from modules.sales.models import ContractTemplate, DealDocument, PriceQuote
 
 
@@ -29,6 +30,7 @@ async def _sources(pg_app):
         session.add_all([sku, buyer, template])
         await session.flush()
         session.add(PriceQuote(sku_code=sku.code, counterparty=buyer.name, price=100))
+        session.add(StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0))
         await session.commit()
         sku_id, buyer_id, template_id = sku.id, buyer.id, template.id
         buyer_name = buyer.name

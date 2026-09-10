@@ -1,4 +1,5 @@
 """Explicit on-order invoices preserve their choice without inventing stock."""
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -11,6 +12,23 @@ from modules.sales.documents import digest
 from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
 
 LABEL = "Под заказ — товар не зарезервирован"
+
+
+@pytest.mark.parametrize("mode", ["stock", "on_order"])
+async def test_printed_deadline_matches_frozen_calendar_date(api, session, monkeypatch, mode):
+    from modules.sales import routes
+
+    monkeypatch.setattr(routes, "_utcnow", lambda: datetime(2026, 9, 10, 12))
+    monkeypatch.setenv("AIOS_INVOICE_VALID_DAYS", "5")
+    deal_id = await sale(session, available=10)
+    result = await invoice(api, deal_id, mode)
+    assert result["valid_until"] == "2026-09-15"
+    url = f"/sales/documents/{result['id']}/render"
+    original = (await api.get(url)).text
+    assert "Счёт действителен до 15.09.2026 включительно." in original
+    assert "банковских дней" not in original
+    monkeypatch.setenv("AIOS_INVOICE_VALID_DAYS", "30")
+    assert (await api.get(url)).text == original
 
 
 async def sale(session, *, available=None):

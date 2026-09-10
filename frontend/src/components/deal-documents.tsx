@@ -1,10 +1,12 @@
 "use client";
 
 import { DocumentVersions } from "@/components/document-versions";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 
 import { Check, FileText, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
+import { formatByn } from "@/lib/format";
 
 const KINDS = [
   { value: "invoice", label: "Счёт" },
@@ -57,8 +59,46 @@ function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
   return null;
 }
 
+function InvoiceMoney({ items }: { items: DealDoc[] }) {
+  const current = items.filter((doc) => doc.kind === "invoice"
+    && ["posted", "paid"].includes(doc.status) && !doc.superseded_by_id);
+  const candidate = current.length === 1 ? current[0] : null;
+  const invoice = candidate?.original_state === "issued"
+    && typeof candidate.amount === "number" && Number.isFinite(candidate.amount) && candidate.amount >= 0
+    ? candidate : null;
+
+  return (
+    <Card role="region" aria-label="Оплата и деньги">
+      <CardHeader><span aria-hidden>💵</span> Оплата и деньги</CardHeader>
+      <CardBody>
+        <dl className="grid grid-cols-2 gap-2.5">
+          <div className="col-span-2 rounded-[10px] bg-sunken px-3 py-2.5">
+            <dt className="text-[11px] text-muted">Сумма счёта (с НДС)</dt>
+            <dd className="mt-0.5 text-[16px] font-extrabold tabular-nums text-ink">
+              {invoice ? formatByn(invoice.amount) : "Нет данных"}
+            </dd>
+            {invoice && <a className="text-[11px] text-accent-ink underline"
+              href={`/api/sales/documents/${invoice.id}/render`} target="_blank" rel="noreferrer">
+              Счёт {invoice.number} · версия {invoice.version ?? 1}
+            </a>}
+            {!invoice && <p className="mt-1 text-[11px] text-muted">
+              {current.length > 1 ? "Несколько актуальных счетов — проверьте документы ниже." : "Сумма выпущенного счёта пока не подтверждена."}
+            </p>}
+          </div>
+          {["Оплачено", "Остаток к оплате"].map((label) => <div key={label} className="rounded-[10px] bg-sunken px-3 py-2.5">
+            <dt className="text-[11px] text-muted">{label}</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-muted">Нет данных</dd>
+          </div>)}
+        </dl>
+      </CardBody>
+    </Card>
+  );
+}
+
 export function DealDocuments({ dealId }: { dealId: string }) {
-  const [items, setItems] = useState<DealDoc[]>([]);
+  const [documents, setDocuments] = useState<{ dealId: string; items: DealDoc[] } | null>(null);
+  const activeDealId = useRef(dealId);
+  const items = documents?.dealId === dealId ? documents.items : [];
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -66,15 +106,19 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   const invoiceRequestKey = useRef<string | null>(null);
 
   async function refresh() {
-    setItems(await fetchDocuments(dealId));
+    const items = await fetchDocuments(dealId);
+    if (activeDealId.current === dealId) setDocuments({ dealId, items });
   }
 
   useEffect(() => {
+    activeDealId.current = dealId;
     // Выбор относится только к открытой сделке.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOnOrder(false);
     invoiceRequestKey.current = null;
-    void fetchDocuments(dealId).then(setItems);
+    let ignore = false;
+    void fetchDocuments(dealId).then((items) => { if (!ignore) setDocuments({ dealId, items }); });
+    return () => { ignore = true; };
   }, [dealId]);
 
   async function onCreate() {
@@ -100,6 +144,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   }
 
   return (
+    <>
+    <InvoiceMoney items={items} />
     <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
         <FileText size={18} className="text-accent-ink" /> Документы
@@ -187,5 +233,6 @@ export function DealDocuments({ dealId }: { dealId: string }) {
       </ul>
       <DocumentVersions docs={items} refresh={refresh} />
     </div>
+    </>
   );
 }

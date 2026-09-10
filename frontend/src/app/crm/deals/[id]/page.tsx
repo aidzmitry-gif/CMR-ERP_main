@@ -19,9 +19,7 @@ import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
 import { PriorityBadge } from "@/components/priority-badge";
 import { SourceTag } from "@/components/source-tag";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Money } from "@/components/money";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
 import { formatNextStep } from "@/lib/format";
@@ -72,7 +70,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                   />
                 ) : (
                   <span className="inline-flex items-center rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-faint">
-                    контрагент · не найден в MDM-витрине
+                    Данные контрагента не получены
                   </span>
                 )}
               </div>
@@ -149,7 +147,6 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <NextStepStub nextStep={d.nextStep} datetime={d.datetime} contact={d.contact} />
             <ShipStub />
             <DealCalls dealId={id} roles={roles} accessToken={token} />
-            <PayStub amount={d.amount} />
             <DeliveryStub />
             <DealItems dealId={id} />
             <DealTasks dealId={id} />
@@ -160,7 +157,6 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <div className="min-w-0 space-y-4">
             <DealClient360 company={d.company} roles={roles} />
             <DealContacts dealId={id} />
-            <RegStub />
             <DealMessages dealId={id} />
             <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
             <DealApprovals dealId={id} />
@@ -295,107 +291,22 @@ function NextStepStub({
 }
 
 function ShipStub() {
-  // STUB: «🚚 Сквозная машина / отгрузка» — три источника данных:
-  //   logistics (рейс / ETA / route), 1С OData (резерв / статус склада),
-  //   procurement/ZAK (сквозной груз нескольких сделок одним рейсом).
   return (
     <Card>
       <PanelHeader icon="🚚" title="Сквозная машина / отгрузка" />
       <CardBody className="space-y-2">
-        <ul className="space-y-1 text-[12px] text-muted">
-          <li>
-            <span aria-hidden>🚚</span>{" "}
-            <b className="text-ink">Рейс / ETA / маршрут</b> — модуль <code>logistics</code>
-          </li>
-          <li>
-            <span aria-hidden>📦</span>{" "}
-            <b className="text-ink">Резерв / статус склада</b> — 1С OData (источник истины, см.
-            memory <code>invoice-1c-reserve-shipment</code>)
-          </li>
-          <li>
-            <span aria-hidden>🔗</span>{" "}
-            <b className="text-ink">Сквозной груз нескольких сделок</b> — модуль{" "}
-            <code>procurement</code> (ZAK)
-          </li>
-        </ul>
-        <StubNote>
-          подключим, когда бэкенд начнёт отдавать{" "}
-          <code>ship.{`{tripId, eta, route, reserve1cDocId, warehouseStatus, cargoTripDealIds}`}</code>{" "}
-          в DealDetail.
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}
-
-function PayStub({ amount }: { amount: number }) {
-  // STUB: «к оплате» — из счёта ERP; «оплачено» — факт из 1С (банк/касса).
-  // Прогресс-бар вернём, когда придёт pay.paid: бессмысленно держать пустой 0%-bar в DOM.
-  return (
-    <Card>
-      <PanelHeader icon="💵" title="Оплата и деньги" />
-      <CardBody className="space-y-2">
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="rounded-[10px] bg-sunken px-3 py-2.5">
-            <div className="text-[11px] text-muted">К оплате</div>
-            <div className="mt-0.5 text-[16px] font-extrabold tabular-nums text-ink">
-              <Money byn={amount} />
-            </div>
-            <div className="mt-0.5 text-[10px] text-faint">из счёта ERP</div>
-          </div>
-          <div className="rounded-[10px] bg-sunken px-3 py-2.5">
-            <div className="text-[11px] text-muted">Оплачено</div>
-            <div className="mt-0.5 text-[16px] font-extrabold tabular-nums text-faint">—</div>
-            <div className="mt-0.5 text-[10px] text-faint">из 1С (банк/касса)</div>
-          </div>
-        </div>
-        <StubNote>
-          подключим, когда payments появятся в API (<code>pay.invoiced</code> из ERP,{" "}
-          <code>pay.paid</code> из 1С-фида).
-        </StubNote>
+        <StubNote>Сведения о рейсе и отгрузке пока недоступны.</StubNote>
       </CardBody>
     </Card>
   );
 }
 
 function DeliveryStub() {
-  // STUB: без визуально-«выбранной» кнопки (a11y: имитация selected без aria-checked сбивает SR).
   return (
     <Card>
       <PanelHeader icon="📦" title="Доставка" />
       <CardBody className="space-y-2">
-        <div className="flex gap-2">
-          {["Самовывоз", "Доставка по адресу", "Наша машина"].map((opt) => (
-            <Button key={opt} variant="secondary" size="sm" disabled className="flex-1">
-              {opt}
-            </Button>
-          ))}
-        </div>
-        <StubNote>
-          метод / адрес / дата — CRM (ввод продавцом); склад отгрузки — справочник WMS
-          (синхронизирован с 1С, резерв создаётся в 1С); рейс / машина — модуль{" "}
-          <code>logistics</code>.
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}
-
-function RegStub() {
-  // STUB: «★ Постоянный клиент». В прототипе условно рендерится при d.reg=true.
-  // TODO: показывать только при d.regular?.isRegular; пока всегда виден с note.
-  return (
-    <Card>
-      <PanelHeader icon="★" title="Постоянный клиент" />
-      <CardBody className="space-y-2">
-        <div className="text-[11px] text-faint">
-          плашка будет показываться только для постоянных клиентов —{" "}
-          <code>d.regular?.isRegular === true</code>
-        </div>
-        <StubNote>
-          счётчик заказов — из CRM (<code>sales.deal</code>); LTV / средний чек — из 1С (реализации).
-          Подключим, когда LTV-витрина начнёт отдавать regular-флаг.
-        </StubNote>
+        <StubNote>Способ, адрес и дата доставки пока не получены.</StubNote>
       </CardBody>
     </Card>
   );
