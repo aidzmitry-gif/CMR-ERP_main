@@ -402,8 +402,7 @@ export function ProductPicker({
 }
 
 /** Итог + маржа заказа (общий футер под ProductPicker, используется звонком и модалкой).
- * `reserve` — помечает итог как резервируемый (чекбокс «Зарезервировать под счёт» живёт
- * в окне звонка; в модалке подбора его нет — по умолчанию не показываем). */
+ * `reserve` — намерение запросить резерв при выпуске счёта, ещё не факт резерва. */
 export function ProductPickerTotals({
   state,
   fmt,
@@ -419,7 +418,7 @@ export function ProductPickerTotals({
     <>
       {orderTotal > 0 && (
         <div className="flex items-center justify-between rounded-lg bg-sunken px-3 py-2 text-[12.5px]">
-          <span className="text-muted">Итого{reserve ? " · резерв" : ""}</span>
+          <span className="text-muted">Итого{reserve ? " · резерв при выпуске" : ""}</span>
           <span className="font-bold text-ink">
             {fmt(orderTotal)}
             <span className="ml-1 font-normal text-faint">· с НДС {fmt(orderTotal * 1.2)}</span>
@@ -467,6 +466,15 @@ export function ProductPickerModal({
   const { fmt } = useCurrency();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Выбор относится только к открытой сделке.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOnOrder(false);
+    invoiceRequestKey.current = null;
+  }, [dealId]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -494,9 +502,13 @@ export function ProductPickerModal({
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
     setBusy(true);
+    const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
     try {
       await picker.commitToDeal(dealId, counterparty); // позиции+котировки записаны ДО рендера
-      const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
+      const { ok, message, renderUrl } = requestKey
+        ? await issueDocument(dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
+        : await issueDocument(dealId, "invoice");
+      if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
       if (win && ok && renderUrl) win.location.href = renderUrl;
       else win?.close();
       flash(message);
@@ -557,6 +569,11 @@ export function ProductPickerModal({
           </div>
           <ProductPicker state={picker} fmt={fmt} />
           <ProductPickerTotals state={picker} fmt={fmt} />
+          <label className="mt-2 flex items-center gap-2 text-sm text-ink">
+            <input type="checkbox" checked={onOrder} disabled={busy}
+              onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }} />
+            Под заказ — без резерва
+          </label>
         </div>
 
         <footer className="grid grid-cols-2 gap-2 border-t border-line px-5 py-3.5">

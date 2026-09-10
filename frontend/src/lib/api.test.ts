@@ -347,6 +347,33 @@ describe("api client — сделки/доска/KPI", () => {
 });
 
 describe("api client — документы/сообщения/согласования", () => {
+  it("обычный счёт сохраняет прежнее тело; дефицит не переключает режим", async () => {
+    stubFetch({ detail: "Недостаточно товара" }, false);
+    expect((await issueDocument("1", "invoice")).ok).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ kind: "invoice", requested_by: "Менеджер" });
+  });
+
+  it("явный режим и ключ передаются без изменения, ответ определяет подпись", async () => {
+    stubFetch({ id: 9, number: "СЧ-9", reserve_mode: "on_order", reserve_status: "unreserved" });
+    const options = { reserve_mode: "on_order" as const, request_key: "retry-invoice-9" };
+    const result = await issueDocument("1", "invoice", options);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ kind: "invoice", requested_by: "Менеджер", ...options });
+    expect(result.message).toContain("Под заказ — товар не зарезервирован");
+    expect(result.renderUrl).toBe("/api/sales/documents/9/render");
+  });
+
+  it.each(["contract", "order"])("под заказ недоступен для %s: нет запроса", async (kind) => {
+    stubFetch({});
+    expect(await createDocument("1", kind, { reserve_mode: "on_order" })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["none", "unreserved"])("legacy %s не выдаётся за режим под заказ", async (reserve_status) => {
+    stubFetch({ id: 9, number: "СЧ-9", reserve_status });
+    expect((await issueDocument("1", "invoice", { reserve_mode: "on_order" })).message).not.toContain("Под заказ");
+  });
+
   it("fetchDocuments / createDocument", async () => {
     stubFetch([{ id: 1, kind: "invoice", number: "СЧ-1", status: "posted", onec_ref: "1С-СЧ-1", amount: 5000 }]);
     expect((await fetchDocuments("1"))[0].onec_ref).toBe("1С-СЧ-1");

@@ -3,7 +3,7 @@
 import { DocumentVersions } from "@/components/document-versions";
 
 import { Check, FileText, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
 
 const KINDS = [
@@ -41,6 +41,8 @@ function daysUntil(iso: string): number {
 }
 
 function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
+  if (d.kind === "invoice" && d.reserve_mode === "on_order")
+    return { label: "Под заказ — товар не зарезервирован", cls: "bg-amber-50 text-amber-700" };
   if (d.reserve_status === "reserved" && d.valid_until) {
     const days = daysUntil(d.valid_until);
     const left =
@@ -60,19 +62,31 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
 
   async function refresh() {
     setItems(await fetchDocuments(dealId));
   }
 
   useEffect(() => {
+    // Выбор относится только к открытой сделке.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOnOrder(false);
+    invoiceRequestKey.current = null;
     void fetchDocuments(dealId).then(setItems);
   }, [dealId]);
 
   async function onCreate() {
     setBusy(true);
     setError("");
-    if (!await createDocument(dealId, kind)) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
+    const requestKey = kind === "invoice" && onOrder
+      ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
+    const doc = requestKey
+      ? await createDocument(dealId, kind, { reserve_mode: "on_order", request_key: requestKey })
+      : await createDocument(dealId, kind);
+    if (!doc) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
+    else if (invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
     await refresh();
     setBusy(false);
   }
@@ -94,7 +108,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
       <div className="mt-3 flex gap-2">
         <select
           value={kind}
-          onChange={(e) => setKind(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { setKind(e.target.value); setOnOrder(false); invoiceRequestKey.current = null; }}
           className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {KINDS.map((k) => (
@@ -112,6 +127,11 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         </button>
       </div>
 
+      {kind === "invoice" && <label className="mt-2 flex items-center gap-2 text-sm text-ink">
+        <input type="checkbox" checked={onOrder} disabled={busy}
+          onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }} />
+        Под заказ — без резерва
+      </label>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}

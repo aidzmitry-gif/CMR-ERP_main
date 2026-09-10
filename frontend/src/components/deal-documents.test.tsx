@@ -14,6 +14,63 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => vi.clearAllMocks());
 
 describe("DealDocuments", () => {
+  it("явный выбор сохраняет ключ после ошибки и сбрасывается при смене сделки/типа", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([]);
+    mock(api.createDocument).mockResolvedValue(null);
+    const { rerender } = render(<DealDocuments dealId="1" />);
+    const checkbox = screen.getByRole("checkbox", { name: "Под заказ — без резерва" });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByText("Сформировать"));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByText("Сформировать")).not.toBeDisabled());
+    fireEvent.click(screen.getByText("Сформировать"));
+    await waitFor(() => expect(api.createDocument).toHaveBeenCalledTimes(2));
+    const first = mock(api.createDocument).mock.calls[0];
+    expect(first).toEqual(["1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) }]);
+    expect(mock(api.createDocument).mock.calls[1]).toEqual(first);
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeDisabled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "contract" } });
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "invoice" } });
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox"));
+    rerender(<DealDocuments dealId="2" />);
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("ожидание запроса не показывает созданный резерв", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([]);
+    mock(api.createDocument).mockReturnValue(new Promise(() => {}));
+    render(<DealDocuments dealId="1" />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByText("Сформировать"));
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.queryByText(/В резерве/)).toBeNull();
+    expect(screen.queryByText("Под заказ — товар не зарезервирован")).toBeNull();
+  });
+
+  it("успешный счёт отображает сохранённый режим после обновления списка", async () => {
+    const doc = { id: 8, kind: "invoice", number: "СЧ-8", status: "posted", amount: 100, reserve_status: "unreserved", reserve_mode: "on_order" };
+    mock(api.fetchDocuments).mockResolvedValueOnce([]).mockResolvedValue([doc]);
+    mock(api.createDocument).mockResolvedValue(doc);
+    render(<DealDocuments dealId="1" />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByText("Сформировать"));
+    await screen.findByText("Счёт · СЧ-8");
+    expect(screen.getAllByText("Под заказ — товар не зарезервирован")).toHaveLength(2);
+    expect(screen.queryByText(/В резерве/)).toBeNull();
+    expect(api.createDocument).toHaveBeenCalledWith("1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) });
+  });
+
+  it.each([undefined, "stock", "on_order"])("показывает сохранённый режим %s", async (reserve_mode) => {
+    mock(api.fetchDocuments).mockResolvedValue([{ id: 8, kind: "invoice", number: "СЧ-8", status: "draft", amount: 100, reserve_status: "unreserved", reserve_mode }]);
+    render(<DealDocuments dealId="1" />);
+    await screen.findByText("Счёт · СЧ-8");
+    expect(screen.queryAllByText("Под заказ — товар не зарезервирован").length).toBe(reserve_mode === "on_order" ? 2 : 0);
+    expect(screen.queryByText(/В резерве/)).toBeNull();
+  });
+
   it("пустой список → формирование документа (счёт по умолчанию)", async () => {
     mock(api.fetchDocuments).mockResolvedValue([]);
     mock(api.createDocument).mockResolvedValue(true);

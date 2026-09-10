@@ -1033,7 +1033,8 @@ export interface DealDoc {
   onec_ref: string | null;
   amount: number;
   valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
-  reserve_status: string; // none | reserved | consumed | released
+  reserve_status: string; // none | unreserved | reserved | consumed | released
+  reserve_mode?: "stock" | "on_order"; // отсутствует у старых документов: stock
   version?: number;
   supersedes_id?: number | null;
   superseded_by_id?: number | null;
@@ -1055,12 +1056,18 @@ export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
 }
 
 /** Сформировать документ сделки (счёт/договор/заказ). Договор уходит на согласование. */
-export async function createDocument(dealId: string, kind: string): Promise<DealDoc | null> {
+export interface DocumentCreateOptions {
+  reserve_mode?: "stock" | "on_order";
+  request_key?: string;
+}
+
+export async function createDocument(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<DealDoc | null> {
+  if (options?.reserve_mode === "on_order" && kind !== "invoice") return null;
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, requested_by: "Менеджер" }),
+      body: JSON.stringify({ kind, requested_by: "Менеджер", ...options }),
     });
     if (!res.ok) return null;
     return (await res.json()) as DealDoc;
@@ -1079,13 +1086,13 @@ export interface DocIssueResult {
   renderUrl?: string;
 }
 
-export async function issueDocument(dealId: string, kind: "invoice" | "contract"): Promise<DocIssueResult> {
-  const doc = await createDocument(dealId, kind);
+export async function issueDocument(dealId: string, kind: "invoice" | "contract", options?: DocumentCreateOptions): Promise<DocIssueResult> {
+  const doc = await createDocument(dealId, kind, options);
   if (!doc) {
     return { ok: false, message: kind === "invoice" ? "⚠️ Не удалось выставить счёт" : "⚠️ Не удалось создать договор" };
   }
   return kind === "invoice"
-    ? { ok: true, message: `✅ Счёт ${doc.number} выставлен`, renderUrl: `/api/sales/documents/${doc.id}/render` }
+    ? { ok: true, message: `✅ Счёт ${doc.number} выставлен${doc.reserve_mode === "on_order" ? " · Под заказ — товар не зарезервирован" : ""}`, renderUrl: `/api/sales/documents/${doc.id}/render` }
     : { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
 }
 

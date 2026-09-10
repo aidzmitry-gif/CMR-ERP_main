@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentVersions } from "./document-versions";
 
@@ -12,7 +12,7 @@ describe("DocumentVersions", () => {
       .mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetch);
     const refresh = vi.fn().mockResolvedValue(undefined);
-    render(<DocumentVersions docs={[base]} refresh={refresh} />);
+    render(<DocumentVersions docs={[{ ...base, reserve_mode: "on_order" }]} refresh={refresh} />);
     fireEvent.click(screen.getByText("Новая версия #1"));
     fireEvent.change(screen.getByLabelText("Причина новой версии"), { target: { value: "Новая цена" } });
     fireEvent.click(screen.getByText("Создать черновик"));
@@ -23,6 +23,7 @@ describe("DocumentVersions", () => {
     const retry = JSON.parse(fetch.mock.calls[1][1].body);
     expect(first).toEqual(retry);
     expect(first.reason).toBe("Новая цена");
+    expect(first).not.toHaveProperty("reserve_mode"); // сервер наследует режим исходной версии
     expect(fetch.mock.calls[0][0]).toBe("/api/sales/documents/1/revision");
   });
 
@@ -42,8 +43,21 @@ describe("DocumentVersions", () => {
   it("черновик выпускается отдельным действием", async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetch);
-    render(<DocumentVersions docs={[{ ...base, id: 2, status: "draft", original_state: "draft", supersedes_id: 1 }]} refresh={vi.fn()} />);
+    render(<DocumentVersions docs={[{ ...base, id: 2, status: "draft", original_state: "draft", supersedes_id: 1, reserve_mode: "on_order" }]} refresh={vi.fn()} />);
     fireEvent.click(screen.getByText("Выпустить версию"));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/sales/documents/2/issue", expect.objectContaining({ method: "POST" })));
+    expect(fetch.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+
+  it("каждая версия показывает собственный режим, legacy unreserved остаётся без отметки", () => {
+    render(<DocumentVersions docs={[
+      { ...base, status: "paid", superseded_by_id: 2, reserve_mode: "on_order" },
+      { ...base, id: 2, version: 2, supersedes_id: 1, reserve_mode: "stock" },
+      { ...base, id: 3, reserve_status: "unreserved" },
+    ]} refresh={vi.fn()} />);
+    expect(within(screen.getByLabelText("Документ 1")).getByText("Под заказ — товар не зарезервирован")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Документ 2")).queryByText(/Под заказ/)).toBeNull();
+    expect(within(screen.getByLabelText("Документ 3")).queryByText(/Под заказ/)).toBeNull();
+    expect(screen.getByText("Оригинал #1")).toHaveAttribute("href", "/api/sales/documents/1/render");
   });
 });

@@ -175,6 +175,8 @@ export function DealDrawerPreview({
   const [taskDraft, setTaskDraft] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
   const [packageUrl, setPackageUrl] = useState<string | null>(null);
   const [docMsg, setDocMsg] = useState<string | null>(null);
   // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
@@ -214,6 +216,8 @@ export function DealDrawerPreview({
     setTaskDraft("");
     setPickerOpen(false);
     setDocMsg(null);
+    setOnOrder(false);
+    invoiceRequestKey.current = null;
     setPackageUrl(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
@@ -352,7 +356,11 @@ export function DealDrawerPreview({
     const win = window.open("about:blank", "_blank");
     setDocBusy(true);
     try {
-      const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
+      const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
+      const { ok, message, renderUrl } = requestKey
+        ? await issueDocument(dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
+        : await issueDocument(dealId, "invoice");
+      if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
       if (win && ok && renderUrl) win.location.href = renderUrl;
       else win?.close();
       if (ok) {
@@ -973,6 +981,11 @@ export function DealDrawerPreview({
                     </div>
                   </section>
                 )}
+                <label className="mt-2 flex items-center gap-2 text-[12px] text-ink">
+                  <input type="checkbox" checked={onOrder} disabled={docBusy}
+                    onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }} />
+                  Под заказ — без резерва
+                </label>
                 {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
 
                 <DocumentVersions docs={docs} refresh={async () => { if (deal) setDocs(await fetchDocuments(deal.id)); }} />
@@ -1002,7 +1015,12 @@ export function DealDrawerPreview({
                                 {invoiceExpiry.text}
                               </span>
                             )}
-                            {latestInvoice.reserve_status === "reserved" && (
+                            {latestInvoice.reserve_mode === "on_order" && (
+                              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                Под заказ — товар не зарезервирован
+                              </span>
+                            )}
+                            {latestInvoice.reserve_mode !== "on_order" && latestInvoice.reserve_status === "reserved" && (
                               <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:bg-sky-500/15 dark:text-sky-300">
                                 резерв
                               </span>

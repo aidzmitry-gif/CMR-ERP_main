@@ -58,7 +58,7 @@ function renderDrawer(
     dealOverride === deal
       ? stages
       : [{ id: "invoice", title: "Счёт отправлен", color: "#000", count: 1, sum: 1000, deals: [dealOverride] }];
-  render(
+  const view = render(
     <DealDrawerPreview
       deal={dealOverride}
       stages={stagesForDeal}
@@ -73,7 +73,7 @@ function renderDrawer(
       approvals={approvals}
     />,
   );
-  return { onUpdateFields, onMessageSent };
+  return { ...view, onUpdateFields, onMessageSent };
 }
 
 beforeEach(() => {
@@ -91,6 +91,31 @@ beforeEach(() => {
 });
 
 describe("DealDrawerPreview — слайс 6 (A): авто-шаг после счёта", () => {
+  it("под заказ включается явно, повтор ошибки сохраняет ключ, новая сделка сбрасывает выбор", async () => {
+    mock(api.issueDocument).mockResolvedValue({ ok: false, message: "Повторите запрос" });
+    const { rerender } = renderDrawer();
+    const choice = screen.getByRole("checkbox", { name: "Под заказ — без резерва" });
+    expect(choice).not.toBeChecked();
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "Счёт" }));
+    await screen.findByText("Повторите запрос");
+    fireEvent.click(screen.getByRole("button", { name: "Счёт" }));
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledTimes(2));
+    const first = mock(api.issueDocument).mock.calls[0];
+    expect(first).toEqual(["1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) }]);
+    expect(mock(api.issueDocument).mock.calls[1]).toEqual(first);
+    rerender(<DealDrawerPreview deal={{ ...deal, id: "2" }} stages={stages} onClose={vi.fn()} onMoveStage={vi.fn()} onUpdateFields={vi.fn()} onAddTask={vi.fn()} onWin={vi.fn()} onLose={vi.fn()} now={Date.now()} />);
+    expect(screen.getByRole("checkbox", { name: "Под заказ — без резерва" })).not.toBeChecked();
+  });
+
+  it.each([undefined, "stock", "on_order"])("последний счёт показывает сохранённый режим %s", async (reserve_mode) => {
+    mock(api.fetchDocuments).mockResolvedValue([{ id: 9, kind: "invoice", number: "СЧ-9", status: "posted", amount: 100, valid_until: null, reserve_status: "unreserved", reserve_mode }]);
+    renderDrawer();
+    await screen.findByText(/Счёт СЧ-9/);
+    expect(screen.queryAllByText("Под заказ — товар не зарезервирован").length).toBe(reserve_mode === "on_order" ? 2 : 0);
+    expect(screen.queryByText("резерв")).toBeNull();
+  });
+
   it("успешный счёт → onUpdateFields с next_step «Проверить оплату…» (+3 дн); updateDeal НЕ дублируем", async () => {
     mock(api.issueDocument).mockResolvedValue({
       ok: true,

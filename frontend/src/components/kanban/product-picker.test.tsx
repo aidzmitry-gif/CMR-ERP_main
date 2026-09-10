@@ -234,6 +234,28 @@ describe("ProductPicker — поиск/фильтр и подбор позици
 });
 
 describe("ProductPickerModal — интеграция: повтор заказа / добавление в сделку / счёт", () => {
+  it("дефицит не включает режим автоматически; явный выбор сохраняет ключ при повторе", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    mock(api.issueDocument).mockResolvedValue({ ok: false, message: "Недостаточно товара" });
+    const { rerender } = render(<ProductPickerModal dealId="d1" counterparty="ООО Ромашка" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText("АКБ 100Ah 12V")); // свободный остаток 0
+    const choice = screen.getByRole("checkbox", { name: "Под заказ — без резерва" });
+    expect(choice).not.toBeChecked();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    expect(api.issueDocument).toHaveBeenCalledExactlyOnceWith("d1", "invoice");
+    expect(choice).not.toBeChecked();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    fireEvent.click(choice);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    const explicit = mock(api.issueDocument).mock.calls[1];
+    expect(explicit).toEqual(["d1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) }]);
+    expect(mock(api.issueDocument).mock.calls[2]).toEqual(explicit);
+    expect(screen.queryByText("Под заказ — товар не зарезервирован")).toBeNull();
+    rerender(<ProductPickerModal dealId="d2" counterparty="ООО Другая" onClose={vi.fn()} />);
+    expect(screen.getByRole("checkbox", { name: "Под заказ — без резерва" })).not.toBeChecked();
+  });
+
   function openModal(onClose = vi.fn(), onCommitted = vi.fn()) {
     render(
       <ProductPickerModal

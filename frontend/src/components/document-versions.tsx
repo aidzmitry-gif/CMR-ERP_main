@@ -53,6 +53,7 @@ export function DocumentVersions({ docs, refresh }: { docs: VersionDoc[]; refres
         {docs.map((doc) => (
           <li key={doc.id} className="border-t border-line pt-2 text-xs" aria-label={`Документ ${doc.id}`}>
             <div>{doc.kind === "invoice" ? "Счёт" : doc.kind === "contract" ? "Договор" : "Заказ"} · версия {doc.version ?? 1} · ID {doc.id} · {doc.amount.toFixed(2)} BYN</div>
+            {doc.kind === "invoice" && doc.reserve_mode === "on_order" && <div className="text-amber-700">Под заказ — товар не зарезервирован</div>}
             {doc.supersedes_id && <div>Заменяет документ #{doc.supersedes_id}</div>}
             {doc.superseded_by_id && <div>Заменён документом #{doc.superseded_by_id}; оплата: {doc.status === "paid" ? "оплачен" : "не подтверждена"}</div>}
             {doc.replacement_reason && <div>Причина: {doc.replacement_reason}</div>}
