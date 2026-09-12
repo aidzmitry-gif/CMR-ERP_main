@@ -1106,6 +1106,35 @@ describe("api client — корзина лида/вложения/бренд", (
 });
 
 describe("api client — convertLead поллит deal_id", () => {
+  it("сохраняет немедленный deal_id сервера без дополнительного поллинга", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ lead_id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toEqual({ lead_id: 1, status: "converted", deal_id: 42 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("409 после потерянного ответа восстанавливает существующую сделку чтением", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toEqual({ lead_id: 1, status: "converted", deal_id: 42 });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/leads/1", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("проверка ожидающей конвертации не отправляет POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await convertLead(1, true))?.deal_id).toBe(42);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/leads/1", { cache: "no-store" });
+  });
+
+  it("409 у неконвертированного лида не выдаёт готовую сделку", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, status: "qualified", deal_id: null }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toBeNull();
+  });
   it("возвращает deal_id, как только он появляется у лида", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()

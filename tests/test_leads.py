@@ -1,7 +1,21 @@
 """Тесты вертикали лидов: приём → квалификация → распределение → сделка (ФАЗА 1)."""
+import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import OutboxEvent, User
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def crm_managers(session, request):
+    """Existing API scenarios now route to real local CRM accounts."""
+    if not {"api", "services", "ai_api"}.intersection(request.fixturenames):
+        return
+    session.add_all([
+        User(username=f"lead-manager-{index}", full_name=name, employee_id=700 + index,
+             department="Продажи", role="sales", status="active")
+        for index, name in enumerate(("Иванов И.И.", "Петров П.П.", "Сидоров С.С."), start=1)
+    ])
+    await session.commit()
 
 # --- Юнит: движок скоринга и распределения (без БД) ---
 
@@ -262,7 +276,7 @@ async def test_lead_route_assigns_manager(session, api):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "routed"
-    assert body["assigned_to"] == "Иванов И.И."  # Минск + прокат
+    assert body["assigned_to"] == "Иванов И.И."  # первый реальный кандидат при равной загрузке
     assert body["funnel"] in {"new", "regular", "project", "tender"}
 
 
@@ -276,7 +290,7 @@ async def test_lead_route_manual_override(session, api):
     ).json()
     await api.post(f"/leads/{lead['id']}/qualify")
 
-    # без ручного выбора авто-правила отдали бы Иванова (Минск+лист) — переопределяем на Петрова
+    # При равной загрузке первым был бы Иванов — вручную выбираем Петрова.
     r = await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Петров П.П."})
     assert r.status_code == 200
     body = r.json()
@@ -296,7 +310,7 @@ async def test_lead_managers_list_with_load(session, api):
     lead = (
         await api.post("/leads", json={"source": "site", "region": "Гомель", "product": "станок"})
     ).json()
-    await api.post(f"/leads/{lead['id']}/route")  # авто → Петров (Гомель+станок), load=1
+    await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Петров П.П."})
 
     r = await api.get("/leads/managers")
     assert r.status_code == 200
@@ -1160,7 +1174,7 @@ async def test_manager_performance_counts_converted_in_volume(session, api):
             )
         ).json()
         await api.post(f"/leads/{lead['id']}/qualify")
-        await api.post(f"/leads/{lead['id']}/route")  # оба → Иванов (Минск+лист)
+        await api.post(f"/leads/{lead['id']}/route", json={"assigned_to": "Иванов И.И."})
         ids.append(lead["id"])
     await api.post(f"/leads/{ids[0]}/convert")  # один доведён до сделки (статус converted)
 

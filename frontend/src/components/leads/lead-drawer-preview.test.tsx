@@ -371,11 +371,12 @@ describe("LeadDrawerPreview", () => {
     expect(api.issueDocument).toHaveBeenCalledWith("55", "invoice");
   });
 
-  it("цепочка: сделка не создалась → ошибка, позиции и счёт не трогаются", async () => {
+  it("цепочка: ожидает сделку, проверяет результат без повторной конвертации и затем выставляет счёт", async () => {
     const h = noopHandlers();
     const onConverted = vi.fn();
     mock(api.fetchLeadItems).mockResolvedValue(items);
-    mock(api.convertLead).mockResolvedValue({}); // без deal_id
+    mock(api.convertLead).mockResolvedValueOnce({ status: "converted" }).mockResolvedValueOnce({ status: "converted", deal_id: 55 });
+    mock(api.issueDocument).mockResolvedValue({ ok: true });
 
     render(
       <LeadDrawerPreview
@@ -389,11 +390,16 @@ describe("LeadDrawerPreview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "⚡ В сделку + счёт" }));
 
     expect(
-      await screen.findByText("Сделка не создалась — сервис sales не ответил"),
+      await screen.findByText(/Создание сделки ещё выполняется/),
     ).toBeInTheDocument();
-    expect(onConverted).not.toHaveBeenCalled();
+    expect(onConverted).toHaveBeenCalledWith(7);
     expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
     expect(api.issueDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить создание сделки" }));
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledExactlyOnceWith("55", "invoice"));
+    expect(api.convertLead).toHaveBeenNthCalledWith(2, 7, true);
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+    expect(onConverted).toHaveBeenCalledWith(7, 55);
   });
 
   it("цепочка: счёт не выставился → ошибка при готовых сделке и позициях", async () => {

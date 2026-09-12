@@ -197,12 +197,19 @@ export function LeadDrawerPreview({
   }
 
   // Цепочка «В сделку + счёт»: конвертация с позициями на сервере → счёт, со статусом по шагам.
-  async function convertWithInvoice() {
+  async function convertWithInvoice(checkOnly = false) {
     if (lead == null) return;
     setChain({ deal: "run", items: "pending", invoice: "pending" });
-    const conv = await convertLead(lead.id);
-    if (!conv?.deal_id) {
-      setChain({ deal: "err", items: "pending", invoice: "pending", error: "Сделка не создалась — сервис sales не ответил" });
+    const conv = checkOnly ? await convertLead(lead.id, true) : await convertLead(lead.id);
+    if (!conv) {
+      setChain({ deal: "err", items: "pending", invoice: "pending", waitingForDeal: checkOnly,
+        error: "Не удалось подтвердить конвертацию. Проверьте результат в карточке лида." });
+      return;
+    }
+    if (!conv.deal_id) {
+      onConverted?.(lead.id);
+      setChain({ deal: "pending", items: "pending", invoice: "pending", waitingForDeal: true,
+        error: "Создание сделки ещё выполняется. Товары сохранены на сервере; проверьте результат перед выставлением счёта." });
       return;
     }
     const dealId = String(conv.deal_id);
@@ -609,7 +616,7 @@ export function LeadDrawerPreview({
                   block
                   icon={<Receipt size={14} />}
                   disabled={busy}
-                  onClick={convertWithInvoice}
+                  onClick={() => convertWithInvoice()}
                 >
                   ⚡ В сделку + счёт
                 </Button>
@@ -620,6 +627,11 @@ export function LeadDrawerPreview({
                   <StepLine label="Позиции" st={chain.items} />
                   <StepLine label="Счёт" st={chain.invoice} />
                   {chain.error && <p className="text-[11.5px] font-medium text-danger">{chain.error}</p>}
+                  {(chain.waitingForDeal || chain.deal === "err") && (
+                    <Button variant="secondary" size="sm" onClick={() => convertWithInvoice(!!chain.waitingForDeal)}>
+                      {chain.waitingForDeal ? "Проверить создание сделки" : "Повторить конвертацию"}
+                    </Button>
+                  )}
                   {chain.renderUrl && (
                     <a
                       href={chain.renderUrl}
@@ -638,16 +650,16 @@ export function LeadDrawerPreview({
                     Открыть сделку
                   </Button>
                 </Link>
-              ) : (
+              ) : !chain ? (
                 <Button
                   variant="money"
                   block
                   disabled={busy || !routed || !!rejected || chain != null}
                   onClick={() => onConvert(lead.id)}
                 >
-                  В сделку
+                  {converted ? "Проверить создание сделки" : "В сделку"}
                 </Button>
-              )}
+              ) : null}
               <Link href={`/crm/leads/${lead.id}`} className="block">
                 <Button variant="secondary" block icon={<ArrowRight size={14} />}>
                   Открыть полную карточку
@@ -689,6 +701,7 @@ interface ChainState {
   error?: string;
   dealId?: number;
   renderUrl?: string;
+  waitingForDeal?: boolean;
 }
 
 function StepLine({ label, st }: { label: string; st: StepStatus }) {

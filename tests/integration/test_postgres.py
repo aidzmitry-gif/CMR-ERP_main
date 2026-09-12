@@ -38,7 +38,19 @@ async def test_deal_crud_on_postgres(pg_app):
     assert any(e["event_type"] == "sales.deal.created" for e in events)
 
 
-async def test_lead_lifecycle_on_postgres(pg_app):
+async def test_lead_lifecycle_on_postgres(pg_app, postgres_url):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from core.domain.models import User
+    owner_name = f"PG Owner {uuid4().hex}"
+    engine = create_async_engine(postgres_url)
+    try:
+        async with async_sessionmaker(engine)() as session:
+            session.add(User(username=owner_name, full_name=owner_name, employee_id=1000000000 + uuid4().int % 1000000000,
+                             department="Продажи", role="sales", status="active"))
+            await session.commit()
+    finally:
+        await engine.dispose()
     lead = (
         await pg_app.post(
             "/leads",
@@ -46,7 +58,7 @@ async def test_lead_lifecycle_on_postgres(pg_app):
         )
     ).json()
     await pg_app.post(f"/leads/{lead['id']}/qualify")
-    routed = (await pg_app.post(f"/leads/{lead['id']}/route")).json()
+    routed = (await pg_app.post(f"/leads/{lead['id']}/route", json={"assigned_to": owner_name})).json()
     assert routed["assigned_to"]
 
     conv = await pg_app.post(f"/leads/{lead['id']}/convert")

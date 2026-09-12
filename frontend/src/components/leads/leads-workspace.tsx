@@ -9,13 +9,11 @@ import { CallWindow } from "@/components/calls/call-window";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import { loadLeadsClient, type LeadsLoadState } from "@/components/leads/leads-load";
 import {
-  commitLeadItemsToDeal,
   convertLead,
   createLead,
   expressBulkLeads,
   expressLead,
   fetchLeadHandoffStats,
-  fetchLeadItems,
   fetchLeadManagers,
   fetchLeadPlan,
   fetchLeadSourceStats,
@@ -1405,35 +1403,15 @@ export function LeadsWorkspace({
 
   async function onConvert(id: number) {
     setBusyId(id);
-    const res = await convertLead(id);
+    const current = leads.find((lead) => lead.id === id);
+    const res = current?.status === "converted" ? await convertLead(id, true) : await convertLead(id);
     if (res) {
       // convertedAt локально (фикс ревью Ц13): сторож «⚠ сделка не создана» должен
       // сработать и в живой сессии без перезагрузки, если deal_id так и не пришёл.
-      patch(id, { status: "converted", dealId: res.deal_id, convertedAt: new Date().toISOString() });
-      // Цикл 14: подобранное на лиде КП доезжает до сделки при ЛЮБОЙ конвертации.
-      // Раньше позиции переносила только цепочка «В сделку + счёт», а обычная «В сделку»
-      // (карточка и drawer) создавала ПУСТУЮ сделку (amount=0) — продавец начинал с нуля,
-      // хотя скорборд уже засчитал Σ КП как переданные деньги.
-      const cur = leads.find((l) => l.id === id);
-      if (res.deal_id && (cur?.itemsCount ?? 0) > 0) {
-        const items = await fetchLeadItems(id);
-        if (items.length > 0) {
-          const { ok, total } = await commitLeadItemsToDeal(
-            String(res.deal_id),
-            cur?.company || cur?.name || "Новый лид",
-            items,
-          );
-          if (ok < total) {
-            flash(`Сделка создана, но перенесено ${ok}/${total} позиций КП — проверьте сделку`, 4000);
-          }
-        }
-      } else if (!res.deal_id && (cur?.itemsCount ?? 0) > 0) {
-        // Фикс ревью Ц14: поллинг deal_id истёк (событие в пути дольше 12с) — не молчим:
-        // повторная конвертация вернёт 409, а КП само не переедет. Честно говорим, что делать.
-        flash(
-          "Сделка создаётся дольше обычного — позиции КП не перенесены. Обновите страницу и перенесите КП из карточки лида",
-          6000,
-        );
+      patch(id, { status: "converted", dealId: res.deal_id, convertedAt: current?.convertedAt ?? new Date().toISOString() });
+      // Сервер создаёт сделку вместе с позициями КП; клиент не повторяет их POST.
+      if (!res.deal_id) {
+        flash("Создание сделки ещё выполняется. Проверьте результат в карточке лида; повторно переносить товары не нужно.", 6000);
       }
       refreshPlan();
     } else {
@@ -1833,7 +1811,7 @@ export function LeadsWorkspace({
         onCall={(l) => setCallPopupLead(l)}
         onItemsSaved={(id, count, total) => patch(id, { itemsCount: count, itemsTotal: total })}
         onConverted={(id, dealId) =>
-          patch(id, { status: "converted", dealId, convertedAt: new Date().toISOString() })
+          patch(id, { status: "converted", dealId, convertedAt: leads.find((lead) => lead.id === id)?.convertedAt ?? new Date().toISOString() })
         }
       />
 

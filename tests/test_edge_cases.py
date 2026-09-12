@@ -46,7 +46,11 @@ async def test_lead_404_paths(api):
     assert (await api.post("/leads/999999/convert")).status_code == 404
 
 
-async def test_lead_route_after_convert_conflicts(api):
+async def test_lead_route_after_convert_conflicts(api, session):
+    from core.domain.models import User
+    session.add(User(username="edge-owner", full_name="Edge Owner", employee_id=901,
+                     department="Продажи", role="sales", status="active"))
+    await session.commit()
     lead = (await api.post("/leads", json={"source": "site", "company": "ООО Цикл"})).json()
     await api.post(f"/leads/{lead['id']}/qualify")
     await api.post(f"/leads/{lead['id']}/route")

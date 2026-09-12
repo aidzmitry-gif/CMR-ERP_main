@@ -142,7 +142,11 @@ async def test_create_activity_with_explicit_date(api):
     assert r.status_code == 201 and r.json()["date"] == "2026-06-01"
 
 
-async def test_lead_requalify_keeps_routed_status(api):
+async def test_lead_requalify_keeps_routed_status(api, session):
+    from core.domain.models import User
+    session.add(User(username="coverage-owner", full_name="Coverage Owner", employee_id=902,
+                     department="Продажи", role="sales", status="active"))
+    await session.commit()
     lead = (await api.post("/leads", json={"source": "site", "company": "ООО Реквал"})).json()
     await api.post(f"/leads/{lead['id']}/qualify")  # new → qualified
     await api.post(f"/leads/{lead['id']}/route")  # → routed

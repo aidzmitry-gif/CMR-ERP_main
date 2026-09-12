@@ -1848,11 +1848,20 @@ async function pollLeadDealId(id: number, tries = 12): Promise<number | undefine
 /** Конвертировать распределённый лид. Сам convert лишь помечает лид и публикует
  *  `leads.lead.converted`; сделку создаёт модуль sales (§2.4) — её id подтягиваем
  *  поллингом, чтобы вернуть UI готовую ссылку «Открыть сделку». */
-export async function convertLead(id: number): Promise<LeadConvertResult | null> {
+export async function convertLead(id: number, checkOnly = false): Promise<LeadConvertResult | null> {
   try {
-    const res = await fetch(`/api/leads/${id}/convert`, { method: "POST" });
+    let res = checkOnly
+      ? await fetch(`/api/leads/${id}`, { cache: "no-store" })
+      : await fetch(`/api/leads/${id}/convert`, { method: "POST" });
+    // Повтор после потерянного ответа не создаёт вторую сделку: читаем результат первого.
+    if (!checkOnly && res.status === 409) {
+      res = await fetch(`/api/leads/${id}`, { cache: "no-store" });
+    }
     if (!res.ok) return null;
-    const conv = (await res.json()) as { lead_id: number; status: LeadStatus };
+    const data = (await res.json()) as LeadConvertResult;
+    if (data.status !== "converted") return null;
+    const conv: LeadConvertResult = { lead_id: id, status: data.status, deal_id: data.deal_id ?? undefined };
+    if (conv.deal_id) return conv;
     return { ...conv, deal_id: await pollLeadDealId(id) };
   } catch {
     return null;
