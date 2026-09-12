@@ -1,6 +1,6 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
-import { DEAL_DETAIL, KPIS, STAGES } from "@/lib/mock-data";
+import { KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
@@ -356,6 +356,10 @@ export async function fetchDealDetail(
       } | null;
     };
     const cp = d.counterparty_ref;
+    // Бэкенд хранит naive UTC; полная SSR-карточка показывает явное время организации.
+    const stepAt = d.next_step_at
+      ? new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(d.next_step_at) ? d.next_step_at : `${d.next_step_at}Z`)
+      : null;
     return {
       number: d.number,
       company: d.counterparty,
@@ -374,9 +378,14 @@ export async function fetchDealDetail(
       // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
       amount: Number(d.amount ?? 0),
       priority: toPriority(d.priority),
-      nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
-      contact: d.owner || DEAL_DETAIL.contact,
-      datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,
+      nextStep: d.next_step ?? "",
+      contact: d.owner || "",
+      datetime: stepAt && Number.isFinite(stepAt.getTime())
+        ? `${stepAt.toLocaleString("ru-RU", {
+            timeZone: "Europe/Minsk", day: "2-digit", month: "2-digit", year: "numeric",
+            hour: "2-digit", minute: "2-digit",
+          })} (Минск)`
+        : "",
       // позиции номенклатуры с ценами клиенту (Price Engine); сообщения — отдельный блок
       itemsTitle: "Номенклатура",
       items: (d.items ?? []).map((i) => ({
@@ -384,7 +393,7 @@ export async function fetchDealDetail(
         lastPrice: i.last_price ?? undefined,
         minPrice: i.min_price ?? undefined,
       })),
-      messages: DEAL_DETAIL.messages,
+      messages: [],
       focus: d.focus,
       starred: d.starred,
       dealDate: d.deal_date ?? "",

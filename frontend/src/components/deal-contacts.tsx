@@ -11,6 +11,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     setItems(await fetchContacts(dealId));
@@ -23,25 +24,45 @@ export function DealContacts({ dealId }: { dealId: string }) {
   async function onAdd() {
     if (!name.trim()) return;
     setBusy(true);
-    await addContact(dealId, {
-      full_name: name.trim(),
-      phone: phone.trim() || undefined,
-      email: email.trim() || undefined,
-      is_primary: items.length === 0,
-    });
-    setName("");
-    setPhone("");
-    setEmail("");
-    setAdding(false);
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      const saved = await addContact(dealId, {
+        full_name: name.trim(),
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        is_primary: items.length === 0,
+      });
+      if (!saved) {
+        setError("Не удалось сохранить контакт. Повторите попытку.");
+        return;
+      }
+      setName("");
+      setPhone("");
+      setEmail("");
+      setAdding(false);
+      await refresh();
+    } catch {
+      setError("Не удалось сохранить контакт. Повторите попытку.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onPrimary(contactId: number) {
     setBusy(true);
-    await setPrimaryContact(contactId);
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      const saved = await setPrimaryContact(contactId);
+      if (!saved) {
+        setError("Не удалось назначить основной контакт. Повторите попытку.");
+        return;
+      }
+      await refresh();
+    } catch {
+      setError("Не удалось назначить основной контакт. Повторите попытку.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -58,6 +79,8 @@ export function DealContacts({ dealId }: { dealId: string }) {
           <Plus size={14} /> Добавить
         </button>
       </div>
+
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
 
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Контактов пока нет</li>}

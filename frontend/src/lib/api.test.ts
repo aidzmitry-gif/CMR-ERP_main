@@ -277,6 +277,30 @@ describe("api client — сделки/доска/KPI", () => {
     expect(detail).toMatchObject({ company: "ООО Доска", items: [{ title: "Лист", minPrice: 1450 }] });
   });
 
+  it("пустая карточка не выдумывает шаг, ответственного, время и переписку", async () => {
+    stubFetch({ ...apiDeal, next_step: null, next_step_at: null, owner: "" });
+    expect(await fetchDealDetail("9")).toMatchObject({
+      nextStep: "", contact: "", datetime: "", messages: [],
+    });
+  });
+
+  it.each(["2026-09-12T07:25:00", "2026-09-12T07:25:00Z", "2026-09-12T10:25:00+03:00"])(
+    "время следующего шага %s берётся из срока, а не даты сделки",
+    async (next_step_at) => {
+      stubFetch({ ...apiDeal, next_step_at });
+      const detail = await fetchDealDetail("9");
+      expect(detail?.datetime).toContain("12.09.2026");
+      expect(detail?.datetime).toContain("10:25");
+      expect(detail?.datetime).toContain("(Минск)");
+      expect(detail).toMatchObject({ nextStep: "Звонок", contact: "Иванов" });
+    },
+  );
+
+  it("невалидный срок не становится выдуманным временем", async () => {
+    stubFetch({ ...apiDeal, next_step_at: "invalid" });
+    expect((await fetchDealDetail("9"))?.datetime).toBe("");
+  });
+
   it("createDeal маппит ответ; null при !ok", async () => {
     stubFetch(apiDeal);
     expect((await createDeal({ number: "CRM-9", title: "t", counterparty: "c", amount: 1, priority: "Средний", stage: "new", owner: "" }))?.number).toBe("CRM-9");

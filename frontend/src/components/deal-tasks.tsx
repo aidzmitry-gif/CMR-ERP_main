@@ -36,6 +36,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     setTasks(await fetchDealTasks(dealId));
@@ -48,18 +49,38 @@ export function DealTasks({ dealId }: { dealId: string }) {
   async function onAdd() {
     if (!title.trim()) return;
     setBusy(true);
-    await createDealTask(dealId, { title: title.trim(), due_at: due || null });
-    setTitle("");
-    setDue("");
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      const saved = await createDealTask(dealId, { title: title.trim(), due_at: due || null });
+      if (!saved) {
+        setError("Не удалось создать задачу. Повторите попытку.");
+        return;
+      }
+      setTitle("");
+      setDue("");
+      await refresh();
+    } catch {
+      setError("Не удалось создать задачу. Повторите попытку.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onDone(id: number) {
     setBusy(true);
-    await completeDealTask(id);
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      const saved = await completeDealTask(id);
+      if (!saved) {
+        setError("Не удалось завершить задачу. Повторите попытку.");
+        return;
+      }
+      await refresh();
+    } catch {
+      setError("Не удалось завершить задачу. Повторите попытку.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const openCount = tasks.filter((t) => t.status === "open").length;
@@ -70,6 +91,8 @@ export function DealTasks({ dealId }: { dealId: string }) {
         <ListTodo size={18} className="text-accent-ink" />
         Задачи <span className="font-medium text-accent-ink">({openCount} откр.)</span>
       </div>
+
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
 
       <ul className="mt-3 space-y-2">
         {tasks.length === 0 && <li className="text-sm text-muted">Задач пока нет</li>}
