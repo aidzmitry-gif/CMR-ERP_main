@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from core.domain.models import User
+from modules.sales.models import CallLog
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -17,6 +18,54 @@ async def _create(api, number: str, **extra) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session):
+    session.add_all([
+        User(username="call-owner", full_name="Call Owner", employee_id=301,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="call-other", full_name="Call Other", employee_id=302,
+             department="Продажи", role="sales", status="active"),
+    ])
+    await session.commit()
+    own = await _create(api, "CALL-VIS-OWN", owner_id=301)
+    other = await _create(api, "CALL-VIS-OTHER", owner_id=302)
+    calls = [
+        CallLog(call_id="VIS-LINK-OWN", deal_id=own["id"], owner_id=302),
+        CallLog(call_id="VIS-LINK-OTHER", deal_id=other["id"], owner_id=301),
+        CallLog(call_id="VIS-UNLINK-OWN", owner_id=301),
+        CallLog(call_id="VIS-UNLINK-OTHER", owner_id=302),
+        CallLog(call_id="VIS-UNCONFIRMED", owner="Call Owner"),
+    ]
+    session.add_all(calls)
+    await session.commit()
+    headers = _sales_headers("call-owner")
+    listed = await api.get("/sales/calls", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert {row["id"] for row in listed.json()} == {calls[0].id, calls[2].id}
+    assert (await api.get(f"/sales/calls?deal_id={other['id']}", headers=headers)).status_code == 404
+    assert len((await api.get("/sales/calls")).json()) == 5
+    for call in (calls[1], calls[3], calls[4]):
+        assert (await api.get(f"/sales/calls/{call.id}", headers=headers)).status_code == 404
+        for action, payload in (("comment", {"comment": "forbidden"}),
+                                ("result", {"result": "forbidden"}),
+                                ("link-deal", {"deal_id": own["id"]})):
+            assert (await api.post(f"/sales/calls/{call.id}/{action}", json=payload, headers=headers)).status_code == 404
+    comment = await api.post(f"/sales/calls/{calls[0].id}/comment", json={"comment": "checked"}, headers=headers)
+    assert comment.status_code == 200 and comment.json()["comment"] == "checked"
+    result = await api.post(f"/sales/calls/{calls[0].id}/result", json={"result": "callback"}, headers=headers)
+    assert result.status_code == 200 and result.json()["result"] == "callback"
+    foreign_link = await api.post(f"/sales/calls/{calls[2].id}/link-deal", json={"deal_id": other["id"]}, headers=headers)
+    assert foreign_link.status_code == 404
+    created = await api.post(f"/sales/calls/{calls[2].id}/link-deal", json={"create": True}, headers=headers)
+    assert created.status_code == 200, created.text
+    deal = await api.get(f"/sales/deals/{created.json()['deal_id']}", headers=headers)
+    assert deal.status_code == 200 and deal.json()["owner_id"] == 301
+    from_visible = await api.post(f"/sales/calls/{calls[0].id}/link-deal", json={"create": True}, headers=headers)
+    assert from_visible.status_code == 200, from_visible.text
+    linked_deal = await api.get(f"/sales/deals/{from_visible.json()['deal_id']}", headers=headers)
+    assert linked_deal.status_code == 200 and linked_deal.json()["owner_id"] == 301
 
 
 @pytest.mark.asyncio
