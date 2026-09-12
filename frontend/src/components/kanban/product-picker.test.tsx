@@ -28,6 +28,33 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const fmt = (v: number) => `${v.toFixed(2)} BYN`;
 
+it("встроенный подбор меняет количество, выбор и удаление только одной повторённой строки", async () => {
+  mockSkusFetch();
+  mock(api.fetchStock).mockResolvedValue([]);
+  mock(api.fetchLastOrder).mockResolvedValue([100, 200].map((unit_price, index) => ({
+    id: index + 1, sku_id: 1, code: "AKB-60", title: "АКБ 60Ah 12V", unit: "шт",
+    qty: index + 1, unit_price,
+  })));
+  function RepeatedPicker() {
+    const picker = useProductPicker(true);
+    return <><button onClick={() => picker.repeatLastOrder("d1")}>Повтор</button>
+      <ProductPicker state={picker} fmt={fmt} /></>;
+  }
+  render(<RepeatedPicker />);
+  await act(async () => { fireEvent.click(screen.getByText("Повтор")); });
+  fireEvent.change(screen.getAllByLabelText("Количество АКБ 60Ah 12V")[0], { target: { value: "3" } });
+  expect(screen.getAllByLabelText("Количество АКБ 60Ah 12V")[1]).toHaveValue("2");
+  const checks = screen.getAllByLabelText("Включить АКБ 60Ah 12V");
+  fireEvent.click(checks[1]);
+  expect(checks[0]).toBeChecked();
+  expect(checks[1]).not.toBeChecked();
+  fireEvent.click(screen.getAllByRole("button", { name: "Убрать позицию" })[0]);
+  expect(screen.getAllByLabelText("Количество АКБ 60Ah 12V")).toHaveLength(1);
+  expect(screen.getByLabelText("Количество АКБ 60Ah 12V")).toHaveValue("2");
+  expect(screen.getByLabelText("Включить АКБ 60Ah 12V")).not.toBeChecked();
+  expect(screen.getByText(/200.00 BYN/)).toBeInTheDocument();
+});
+
 const skus = [
   { id: 1, code: "AKB-60", title: "АКБ 60Ah 12V", unit: "шт" },
   { id: 2, code: "AKB-100", title: "АКБ 100Ah 12V", unit: "шт" },

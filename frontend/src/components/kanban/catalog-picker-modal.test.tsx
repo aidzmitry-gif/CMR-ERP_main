@@ -31,6 +31,34 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CatalogPickerModal — цена подбора", () => {
+  it("независимо редактирует цену и количество двух повторённых строк одного SKU", async () => {
+    vi.mocked(api.fetchLastOrder).mockResolvedValue([100, 200].map((unit_price, index) => ({
+      id: index + 9, sku_id: sku.id, code: sku.code, title: sku.title, unit: sku.unit,
+      qty: index + 1, unit_price, last_price: 700, min_price: 500,
+    })));
+    render(<Harness />);
+    await screen.findByText(sku.title);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Прошлый заказ" })); });
+    fireEvent.click(screen.getAllByTitle("Изменить количество/цену")[0]);
+    expect(screen.getByLabelText("Цена за единицу")).toHaveValue("100");
+    fireEvent.change(screen.getByLabelText("Цена за единицу"), { target: { value: "125.50" } });
+    fireEvent.change(screen.getByLabelText("Количество товара"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    fireEvent.click(screen.getAllByTitle("Изменить количество/цену")[1]);
+    expect(screen.getByLabelText("Цена за единицу")).toHaveValue("200");
+    expect(screen.getByLabelText("Количество товара")).toHaveValue("2");
+    fireEvent.change(screen.getByLabelText("Цена за единицу"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Количество товара"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    fireEvent.click(screen.getAllByTitle("Изменить количество/цену")[0]);
+    expect(screen.getByLabelText("Цена за единицу")).toHaveValue("125.5");
+    expect(screen.getByLabelText("Количество товара")).toHaveValue("3");
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]); });
+    expect(api.addDealItem).toHaveBeenNthCalledWith(1, "d1", 1, 3, 125.5);
+    expect(api.addDealItem).toHaveBeenNthCalledWith(2, "d1", 1, 4, 0);
+  });
+
   it.each(["125.50", "0"])("сохраняет ручную цену %s без складской базы", async (price) => {
     render(<Harness />);
     fireEvent.click(await screen.findByText(sku.title));

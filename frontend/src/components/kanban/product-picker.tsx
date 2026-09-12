@@ -131,27 +131,29 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   }
   /** Добавить с явным кол-вом (CatalogPickerModal — попап «Ввод количества и цены»);
    *  повторный подбор уже добавленной позиции суммирует количество, не дублирует строку. */
-  function addSkuWithQty(s: SkuOption, qty: number) {
+  function addSkuWithQty(s: SkuOption, qty: number, priceOverride?: number | null) {
     setRows((r) => {
       const existing = r.find((x) => x.skuId === s.id);
       if (existing) {
-        return r.map((x) => (x.skuId === s.id ? { ...x, qty: x.qty + qty, picked: true } : x));
+        return r.map((x) => (x === existing ? { ...x, qty: x.qty + qty, picked: true,
+          ...(priceOverride !== undefined ? { priceOverride } : {}) } : x));
       }
-      return [...r, { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true }];
+      return [...r, { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true, priceOverride }];
     });
   }
-  function setRowQty(skuId: number, qty: number) {
-    setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, qty: Math.max(1, qty) } : x)));
+  function setRowQty(row: PickerRow, qty: number, priceOverride?: number | null) {
+    setRows((r) => r.map((x) => (x === row ? { ...x, qty: Math.max(1, qty),
+      ...(priceOverride !== undefined ? { priceOverride } : {}) } : x)));
   }
   /** Ручная правка цены строки (попап «Ввод количества и цены»). undefined — вернуть цену со склада. */
   function setRowPrice(skuId: number, price: number | null | undefined) {
     setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, priceOverride: price } : x)));
   }
-  function toggleRow(skuId: number) {
-    setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, picked: !x.picked } : x)));
+  function toggleRow(row: PickerRow) {
+    setRows((r) => r.map((x) => (x === row ? { ...x, picked: !x.picked } : x)));
   }
-  function removeRow(skuId: number) {
-    setRows((r) => r.filter((x) => x.skuId !== skuId));
+  function removeRow(row: PickerRow) {
+    setRows((r) => r.filter((x) => x !== row));
   }
   /** Убирает только успешно отправленные снимки строк, включая отдельные строки одного SKU. */
   function removeCommittedRows(committedRows: PickerRow[]) {
@@ -314,7 +316,7 @@ export function ProductPicker({
                 <input
                   type="checkbox"
                   checked={r.picked}
-                  onChange={() => toggleRow(r.skuId)}
+                  onChange={() => toggleRow(r)}
                   className="h-4 w-4 accent-money"
                   aria-label={`Включить ${r.title}`}
                 />
@@ -339,7 +341,7 @@ export function ProductPicker({
                 <input
                   value={r.qty}
                   onChange={(e) =>
-                    setRowQty(r.skuId, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1)
+                    setRowQty(r, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1)
                   }
                   inputMode="numeric"
                   className="w-12 rounded-md border border-line bg-surface px-1.5 py-1 text-center text-[12.5px] tabular-nums text-ink outline-none focus:border-accent"
@@ -347,7 +349,7 @@ export function ProductPicker({
                 />
                 <button
                   type="button"
-                  onClick={() => removeRow(r.skuId)}
+                  onClick={() => removeRow(r)}
                   aria-label="Убрать позицию"
                   className="text-faint hover:text-danger"
                 >

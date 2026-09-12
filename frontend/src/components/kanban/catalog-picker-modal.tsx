@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
 import { marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
-import { catalogEmptyMessage, type ProductPickerState } from "./product-picker";
+import { catalogEmptyMessage, type PickerRow, type ProductPickerState } from "./product-picker";
 
 /**
  * Компактная модалка подбора товара (порт sales-catalog-picker-compact.html —
@@ -61,7 +61,7 @@ export function CatalogPickerModal({
   saving?: boolean;
 }) {
   const picker = state;
-  const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, setRowPrice, removeRow } =
+  const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, removeRow } =
     picker;
   const { fmt } = useCurrency();
 
@@ -72,7 +72,11 @@ export function CatalogPickerModal({
   const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
   const [kbdIndex, setKbdIndex] = useState(-1);
-  const [popoverSku, setPopoverSku] = useState<SkuOption | null>(null);
+  const [popover, setPopover] = useState<{ sku: SkuOption; row?: PickerRow } | null>(null);
+  const popoverSku = popover?.sku;
+  function setPopoverSku(sku: SkuOption | null, row = rows.find((r) => r.skuId === sku?.id)) {
+    setPopover(sku ? { sku, row } : null);
+  }
   // «Мягкий» гардрейл маржи: скидка ниже порога не блокирует перенос, но требует ОДНОГО
   // подтверждения — по нему уходит запрос на согласование скидки (kind=deal.discount, тот
   // же контракт, что и DealApprovals на полной карточке сделки).
@@ -100,7 +104,9 @@ export function CatalogPickerModal({
   }
 
   const q = query.trim().toLowerCase();
-  const rowBySkuId = new Map(rows.map((r) => [r.skuId, r]));
+  // Каталог показывает первую строку SKU; каждую повторённую строку правят в корзине.
+  const rowBySkuId = new Map<number, PickerRow>();
+  for (const row of rows) if (!rowBySkuId.has(row.skuId)) rowBySkuId.set(row.skuId, row);
 
   const filtered: RowVm[] = useMemo(() => {
     return skus
@@ -226,7 +232,7 @@ export function CatalogPickerModal({
     function onKey(e: KeyboardEvent) {
       if (busy) return;
       if (e.key === "Escape") {
-        if (popoverSku) setPopoverSku(null);
+        if (popoverSku) setPopover(null);
         else onClose();
       }
     }
@@ -442,7 +448,7 @@ export function CatalogPickerModal({
                               <div className="inline-flex items-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => (row.qty > 1 ? picker.setRowQty(sku.id, row.qty - 1) : removeRow(sku.id))}
+                                  onClick={() => (row.qty > 1 ? picker.setRowQty(row, row.qty - 1) : removeRow(row))}
                                   className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-ink hover:bg-sunken"
                                 >
                                   −
@@ -455,7 +461,7 @@ export function CatalogPickerModal({
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => picker.setRowQty(sku.id, row.qty + 1)}
+                                  onClick={() => picker.setRowQty(row, row.qty + 1)}
                                   className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-ink hover:bg-sunken"
                                 >
                                   +
@@ -501,7 +507,7 @@ export function CatalogPickerModal({
                         <input
                           type="checkbox"
                           checked={r.picked}
-                          onChange={() => picker.toggleRow(r.skuId)}
+                          onChange={() => picker.toggleRow(r)}
                           aria-label="Включить в счёт"
                           title="Включить/исключить из счёта (не удаляя)"
                           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
@@ -509,7 +515,7 @@ export function CatalogPickerModal({
                         <div className="min-w-0 flex-1 text-[12px] font-semibold leading-tight text-ink">{r.title}</div>
                         <button
                           type="button"
-                          onClick={() => picker.removeRow(r.skuId)}
+                          onClick={() => picker.removeRow(r)}
                           aria-label="Убрать из корзины"
                           className="shrink-0 text-faint hover:text-danger"
                         >
@@ -519,7 +525,7 @@ export function CatalogPickerModal({
                       <div className="mt-1.5 flex items-center gap-1.5 pl-6">
                         <button
                           type="button"
-                          onClick={() => (r.qty > 1 ? picker.setRowQty(r.skuId, r.qty - 1) : picker.removeRow(r.skuId))}
+                          onClick={() => (r.qty > 1 ? picker.setRowQty(r, r.qty - 1) : picker.removeRow(r))}
                           className="flex h-5 w-5 items-center justify-center rounded border border-line bg-surface text-ink hover:bg-sunken"
                         >
                           −
@@ -527,14 +533,14 @@ export function CatalogPickerModal({
                         <span className="min-w-[24px] text-center text-[12px] font-bold tabular-nums text-ink">{r.qty}</span>
                         <button
                           type="button"
-                          onClick={() => picker.setRowQty(r.skuId, r.qty + 1)}
+                          onClick={() => picker.setRowQty(r, r.qty + 1)}
                           className="flex h-5 w-5 items-center justify-center rounded border border-line bg-surface text-ink hover:bg-sunken"
                         >
                           +
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPopoverSku({ id: r.skuId, code: r.code, title: r.title, unit: r.unit })}
+                          onClick={() => setPopoverSku({ id: r.skuId, code: r.code, title: r.title, unit: r.unit }, r)}
                           title="Изменить количество/цену"
                           className="text-[10.5px] text-faint underline decoration-dotted underline-offset-2 hover:text-accent-ink"
                         >
@@ -627,22 +633,17 @@ export function CatalogPickerModal({
           sku={popoverSku}
           st={stock[popoverSku.code]}
           whSt={warehouseStock[popoverSku.code]}
-          existingQty={rowBySkuId.get(popoverSku.id)?.qty}
+          existingQty={popover?.row?.qty}
           basePrice={stock[popoverSku.code]?.unitPrice ?? null}
-          existingPrice={rowBySkuId.has(popoverSku.id) ? picker.agreedPriceOf(rowBySkuId.get(popoverSku.id)!) : undefined}
+          existingPrice={popover?.row ? picker.agreedPriceOf(popover.row) : undefined}
           onCancel={() => setPopoverSku(null)}
           onOk={(qty, price) => {
-            // Попап показывает и правит АБСОЛЮТНОЕ количество строки (не «сколько добавить»):
-            // для уже существующей строки — setRowQty (перезаписать), для новой — addSkuWithQty
-            // (создать). addSkuWithQty суммирует qty только когда его вызывают ПОВТОРНО с ДОБАВКОЙ
-            // (напр. клавиатурный ⏎ по кандидату) — здесь так не делаем, чтобы не задвоить.
-            if (rowBySkuId.has(popoverSku.id)) {
-              picker.setRowQty(popoverSku.id, qty);
+            // Количество и цена меняются атомарно у выбранного снимка строки.
+            if (popover?.row) {
+              picker.setRowQty(popover.row, qty, price);
             } else {
-              addSkuWithQty(popoverSku, qty);
+              addSkuWithQty(popoverSku, qty, price);
             }
-            // Явное подтверждение цены, включая 0 и пустую неподтверждённую цену.
-            setRowPrice(popoverSku.id, price);
             setPopoverSku(null);
             flash(`✓ Подобрано: ${popoverSku.title.slice(0, 28)}`);
           }}
