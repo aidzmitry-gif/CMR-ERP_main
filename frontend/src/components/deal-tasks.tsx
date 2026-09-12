@@ -8,6 +8,7 @@ import {
   createDealTask,
   type DealTaskView,
   fetchDealTasks,
+  localToNaiveUtc,
 } from "@/lib/api";
 
 const KIND_LABEL: Record<string, string> = {
@@ -21,7 +22,7 @@ const KIND_LABEL: Record<string, string> = {
 
 function fmtDue(due: string | null): string {
   if (!due) return "без срока";
-  return new Date(due).toLocaleString("ru-RU", {
+  return new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(due) ? due : `${due}Z`).toLocaleString("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -51,7 +52,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = await createDealTask(dealId, { title: title.trim(), due_at: due || null });
+      const saved = await createDealTask(dealId, { title: title.trim(), due_at: due ? localToNaiveUtc(due) : null });
       if (!saved) {
         setError("Не удалось создать задачу. Повторите попытку.");
         return;

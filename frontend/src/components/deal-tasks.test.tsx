@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/api")>(),
   fetchDealTasks: vi.fn(),
   createDealTask: vi.fn(),
   completeDealTask: vi.fn(),
@@ -27,6 +28,20 @@ beforeEach(() => {
 });
 
 describe("DealTasks", () => {
+  it.each(["2026-09-15T07:00:00", "2026-09-15T07:00:00Z", "2026-09-15T10:00:00+03:00"])(
+    "показывает UTC-срок %s в местном времени менеджера",
+    async (due_at) => {
+      vi.mocked(api.fetchDealTasks).mockResolvedValue([{
+        id: 9, deal_id: 1, title: "Проверить срок", kind: "call", assignee_id: null,
+        due_at, status: "open", result: null, overdue: false,
+      }]);
+      render(<DealTasks dealId="1" />);
+      await screen.findByText("Проверить срок");
+      const localHour = new Date("2026-09-15T07:00:00Z").getHours().toString().padStart(2, "0");
+      expect(screen.getByText(new RegExp(`Звонок · .*${localHour}:00`))).toBeInTheDocument();
+    },
+  );
+
   it("рендерит задачи, считает открытые и подсвечивает просрочку", async () => {
     render(<DealTasks dealId="1" />);
     await waitFor(() => expect(screen.getByText("Перезвонить")).toBeInTheDocument());
@@ -64,7 +79,7 @@ describe("DealTasks", () => {
     fireEvent.click(add);
     expect(await screen.findByText("Перезвонить Анне")).toBeInTheDocument();
     expect(create).toHaveBeenNthCalledWith(2, "1", {
-      title: "Перезвонить Анне", due_at: "2026-09-15T10:00",
+      title: "Перезвонить Анне", due_at: new Date("2026-09-15T10:00").toISOString().slice(0, 19),
     });
     expect(title).toHaveValue("");
     expect(due).toHaveValue("");
