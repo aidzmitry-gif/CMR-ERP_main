@@ -1,9 +1,8 @@
-"""PC3 — потребление цены/себеса из 1С в марже сделки: приоритет источников (1С→landed),
-дефолт цены из прайса 1С, КП перекрывает прайс, провенанс cost_source/price_source, честная
-деградация без фасадов. Фасады подменяются стендами на ``app.state.core.services`` (как v2-тесты).
-"""
+"""Confirmed deal-line prices, NULL rejection of quote/catalog fallback, and cost provenance."""
 from datetime import datetime
 from decimal import Decimal as D
+
+import pytest
 
 from core.domain.models import Sku
 from core.services.price_cost import ItemPriceCost
@@ -54,8 +53,8 @@ class _FakeLanded:
         }
 
 
-async def test_price_cost_provides_cost_and_price_from_1c(api, session):
-    """1С даёт и цену, и себес (нет КП, нет landed) → маржа из 1С, источники onec."""
+async def test_null_price_ignores_1c_price_but_preserves_cost(api, session):
+    """NULL remains unknown despite an available 1C selling price; cost is retained."""
     sku = await _seed_sku(session, "PCA", "АКБ")
     deal = await _new_deal(api, "PC-1", counterparty="ООО X")
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
@@ -70,15 +69,15 @@ async def test_price_cost_provides_cost_and_price_from_1c(api, session):
     finally:
         app.state.core.services.price_cost = None
     line = r["lines"][0]
-    assert line["unit_price"] == 150.0 and line["price_source"] == "onec"
+    assert line["unit_price"] is None and line["price_source"] is None
     assert line["unit_landed_cost"] == 100.0 and line["cost_source"] == "onec"
-    assert line["status"] == "priced"
-    assert r["revenue"] == 600.0 and r["cogs_landed"] == 400.0 and r["gross_profit"] == 200.0
-    assert r["margin_pct"] == 33  # (150-100)/150 → 33
+    assert line["status"] == "no_price" and line["revenue"] is None
+    assert line["cogs"] == 400.0
+    assert r["gross_profit"] is None and r["margin_pct"] is None
 
 
-async def test_quote_overrides_1c_price_list(api, session):
-    """КП клиента перекрывает прайс 1С; себес всё равно из 1С."""
+async def test_null_price_ignores_historical_quote_and_price_list(api, session):
+    """Historical customer quote and catalog price cannot confirm a NULL line price."""
     sku = await _seed_sku(session, "PCB")
     deal = await _new_deal(api, "PC-2", counterparty="ООО Y")
     session.add_all([
@@ -95,7 +94,8 @@ async def test_quote_overrides_1c_price_list(api, session):
     finally:
         app.state.core.services.price_cost = None
     line = r["lines"][0]
-    assert line["unit_price"] == 200.0 and line["price_source"] == "quote"  # КП перекрыл прайс
+    assert line["unit_price"] is None and line["price_source"] is None
+    assert line["status"] == "no_price" and r["gross_profit"] is None
     assert line["cost_source"] == "onec"
 
 
@@ -104,7 +104,7 @@ async def test_1c_cost_takes_priority_over_landed(api, session):
     sku = await _seed_sku(session, "PCC")
     deal = await _new_deal(api, "PC-3", counterparty="ООО Z")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1),
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1, unit_price=300),
         PriceQuote(sku_code="PCC", counterparty="ООО Z", price=300),
     ])
     await session.commit()
@@ -129,7 +129,7 @@ async def test_only_landed_marks_source_landed(api, session):
     sku = await _seed_sku(session, "PCD")
     deal = await _new_deal(api, "PC-4", counterparty="ООО W")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1),
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1, unit_price=50),
         PriceQuote(sku_code="PCD", counterparty="ООО W", price=50),
     ])
     await session.commit()
@@ -151,7 +151,7 @@ async def test_no_facade_degradation_sources_none(api, session):
     sku = await _seed_sku(session, "PCE")
     deal = await _new_deal(api, "PC-5", counterparty="ООО Q")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1),
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1, unit_price=50),
         PriceQuote(sku_code="PCE", counterparty="ООО Q", price=50),
     ])
     await session.commit()
@@ -165,8 +165,8 @@ async def test_no_facade_degradation_sources_none(api, session):
     assert line["price_source"] == "quote"  # цена из КП есть, себеса нет
 
 
-async def test_price_defaulted_from_1c_list_when_no_quote(api, session):
-    """Нет КП → цена клиенту дефолтится из прайса 1С, строка становится priced (цена+себес)."""
+async def test_null_price_ignores_demo_price_list(api, session):
+    """A demo catalog price also cannot replace NULL."""
     sku = await _seed_sku(session, "PCF")
     deal = await _new_deal(api, "PC-6", counterparty="ООО R")
     session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))  # НЕТ котировки КП
@@ -180,9 +180,10 @@ async def test_price_defaulted_from_1c_list_when_no_quote(api, session):
     finally:
         app.state.core.services.price_cost = None
     line = r["lines"][0]
-    assert line["unit_price"] == 60.0 and line["price_source"] == "demo"  # дефолт из прайса 1С
-    assert line["status"] == "priced"  # есть и цена (прайс), и себес → priced
-    assert r["revenue"] == 120.0
+    assert line["unit_price"] is None and line["price_source"] is None
+    assert line["status"] == "no_price" and line["revenue"] is None
+    assert line["cost_source"] == "demo"
+    assert r["gross_profit"] is None
 
 
 async def test_forecast_uses_1c_cost_without_landed(api, session):
@@ -190,7 +191,7 @@ async def test_forecast_uses_1c_cost_without_landed(api, session):
     sku = await _seed_sku(session, "PCG")
     deal = await _new_deal(api, "PC-7", counterparty="ООО T")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1),
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1, unit_price=100),
         PriceQuote(sku_code="PCG", counterparty="ООО T", price=100),
     ])
     await session.commit()
@@ -236,3 +237,72 @@ async def test_plan_sources_no_margin_default_without_facade(api, session):
     r = (await api.get("/sales/plan-sources", params={"month": "2030-02"})).json()
     d = r["defaults"]
     assert d["margin_pct"] is None and d["margin_pct_source"] is None
+
+
+@pytest.mark.parametrize("price", [None, D("0"), D("125.50")])
+async def test_margin_confirmed_rows_are_independent(api, session, price):
+    sku = await _seed_sku(session, "SAME")
+    deal = await _new_deal(api, "ROW", probability=100)
+    other = await _new_deal(api, "OTHER", probability=0)
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2, unit_price=price),
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3, unit_price=200),
+        DealItem(deal_id=other["id"], sku_id=sku.id, qty=7, unit_price=900),
+        PriceQuote(sku_code="SAME", counterparty="c", price=777),
+    ])
+    await session.commit()
+    services = api._transport.app.state.core.services
+    services.price_cost = _FakePriceCost({
+        "SAME": ItemPriceCost(cost_byn=50, price_byn=888, source="onec"),
+    })
+    try:
+        response = await api.get(f"/sales/deals/{deal['id']}/margin")
+        assert response.status_code == 200
+        margin = response.json()
+        by_qty = {line["qty"]: line for line in margin["lines"]}
+        assert by_qty[2]["unit_price"] == (float(price) if price is not None else None)
+        assert by_qty[3]["unit_price"] == 200
+        assert by_qty[2]["cost_source"] == "onec"
+        expected = 450 + ((float(price) - 50) * 2 if price is not None else 0)
+        assert margin["gross_profit"] == expected
+        assert margin["priced_count"] == (1 if price is None else 2)
+        forecast = (await api.get("/sales/pipeline/margin-forecast")).json()
+        assert forecast["gross_weighted"] == expected
+        other_margin = (await api.get(f"/sales/deals/{other['id']}/margin")).json()
+        assert other_margin["lines"][0]["unit_price"] == 900
+    finally:
+        services.price_cost = None
+
+
+async def test_all_null_prices_remain_unknown_in_margin_callers(api, session):
+    sku = await _seed_sku(session, "UNKNOWN")
+    deal = await _new_deal(api, "NULL-CALLERS", probability=100)
+    session.add_all([
+        DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2),
+        PriceQuote(sku_code="UNKNOWN", counterparty="c", price=777),
+    ])
+    await session.commit()
+    services = api._transport.app.state.core.services
+    services.price_cost = _FakePriceCost({
+        "UNKNOWN": ItemPriceCost(cost_byn=50, price_byn=888, source="onec"),
+    })
+    try:
+        margin = (await api.get(f"/sales/deals/{deal['id']}/margin")).json()
+        assert margin["priced_count"] == 0
+        assert margin["gross_profit"] is None and margin["margin_pct"] is None
+        assert margin["lines"][0]["revenue"] is None
+        forecast = (await api.get("/sales/pipeline/margin-forecast")).json()
+        assert forecast["deals_priced"] == 0
+        assert forecast["gross_weighted"] is None
+        assert forecast["margin_pct_blended"] is None
+        reconcile = (await api.get(f"/sales/deals/{deal['id']}/margin/reconcile")).json()
+        assert reconcile["sales_forecast_gross"] is None
+        assert reconcile["finance_actual_gross"] is None
+        won = await api.post(f"/sales/deals/{deal['id']}/win")
+        assert won.status_code == 200
+        journal = (await api.get("/sales/journal")).json()
+        row = next(row for row in journal if row["deal_id"] == deal["id"])
+        assert row["gross_profit"] is None and row["margin_pct"] is None
+        assert row["margin_reason"]
+    finally:
+        services.price_cost = None

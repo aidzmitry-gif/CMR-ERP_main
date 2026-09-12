@@ -207,7 +207,7 @@ async def test_margin_blind_facade_present_sku_no_cost(api, session):
     sku2 = await _seed_sku(session, "SKU2", "Товар без landed")  # _FakeLanded → None
     deal = await _new_deal(api, "MB-1", counterparty="ООО Слепой")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),
+        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3, unit_price=20),
         PriceQuote(sku_code="SKU2", counterparty="ООО Слепой", price=20),
     ])
     await session.commit()
@@ -232,7 +232,7 @@ async def test_pipeline_forecast_blind_facade_honest(api, session):
     sku2 = await _seed_sku(session, "SKU2C", "Blind SKU")
     a = await _new_deal(api, "MBF-1", counterparty="ООО F", probability=50)
     session.add_all([
-        DealItem(deal_id=a["id"], sku_id=sku2.id, qty=2),
+        DealItem(deal_id=a["id"], sku_id=sku2.id, qty=2, unit_price=30),
         PriceQuote(sku_code="SKU2C", counterparty="ООО F", price=30),
     ])
     await session.commit()

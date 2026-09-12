@@ -524,8 +524,8 @@ async def test_deal_margin_priced_no_price_no_cost(api, session):
     sku3 = await _seed_sku(session, "SKU3", "A3")
     deal = await _new_deal(api, "MGN-1", counterparty="ООО X")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),
-        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5, unit_price=15),
+        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3, unit_price=20),
         DealItem(deal_id=deal["id"], sku_id=sku3.id, qty=2),
         PriceQuote(sku_code="SKU1", counterparty="ООО X", price=15),
         PriceQuote(sku_code="SKU2", counterparty="ООО X", price=20),
@@ -825,8 +825,8 @@ async def test_margin_forecast_weighted_gross(api, session):
     a = await _new_deal(api, "MF-1", counterparty="ООО X", probability=40)
     b = await _new_deal(api, "MF-2", counterparty="ООО X", probability=10)
     session.add_all([
-        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=5),   # priced: выручка 75, gross 25
-        DealItem(deal_id=b["id"], sku_id=sku2.id, qty=3),   # no_cost: выручка 60, без gross
+        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=5, unit_price=15),   # priced: выручка 75, gross 25
+        DealItem(deal_id=b["id"], sku_id=sku2.id, qty=3, unit_price=20),   # no_cost: выручка 60, без gross
         PriceQuote(sku_code="SKU1", counterparty="ООО X", price=15),
         PriceQuote(sku_code="SKU2", counterparty="ООО X", price=20),
     ])
@@ -852,7 +852,7 @@ async def test_margin_forecast_facade_missing(api, session):
     sku1 = await _seed_sku(session, "SKU1", "A1")
     a = await _new_deal(api, "MF-3", counterparty="ООО Y", probability=50)
     session.add_all([
-        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=4),
+        DealItem(deal_id=a["id"], sku_id=sku1.id, qty=4, unit_price=10),
         PriceQuote(sku_code="SKU1", counterparty="ООО Y", price=10),
     ])
     await session.commit()
@@ -917,7 +917,7 @@ async def test_margin_reconcile_with_and_without_finance(api, session):
     sku1 = await _seed_sku(session, "SKU1", "A1")
     deal = await _new_deal(api, "RC-1", counterparty="ООО R")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5, unit_price=15),
         PriceQuote(sku_code="SKU1", counterparty="ООО R", price=15),
     ])
     await session.commit()
