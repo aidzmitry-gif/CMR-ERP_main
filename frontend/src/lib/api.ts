@@ -672,15 +672,51 @@ export interface DealContact {
   is_primary: boolean;
 }
 
-/** Контакты контрагента сделки (основной — первым). */
-export async function fetchContacts(dealId: string): Promise<DealContact[]> {
+export type FetchContactsResult =
+  | { status: "ok"; data: DealContact[] }
+  | { status: "http_error"; httpStatus: number }
+  | { status: "network_error" }
+  | { status: "malformed_response" };
+
+function isDealContact(value: unknown): value is DealContact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const contact = value as Record<string, unknown>;
+  return typeof contact.id === "number"
+    && Number.isSafeInteger(contact.id)
+    && contact.id > 0
+    && typeof contact.full_name === "string"
+    && (typeof contact.phone === "string" || contact.phone === null)
+    && (typeof contact.email === "string" || contact.email === null)
+    && typeof contact.is_primary === "boolean";
+}
+
+function isDealContactList(value: unknown): value is DealContact[] {
+  return Array.isArray(value) && value.every(isDealContact);
+}
+
+/** Контакты контрагента сделки с различимым результатом загрузки. */
+export async function fetchContactsResult(dealId: string): Promise<FetchContactsResult> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/contacts`, { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as DealContact[];
+    if (!res.ok) return { status: "http_error", httpStatus: res.status };
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      return { status: "malformed_response" };
+    }
+    return isDealContactList(data)
+      ? { status: "ok", data }
+      : { status: "malformed_response" };
   } catch {
-    return [];
+    return { status: "network_error" };
   }
+}
+
+/** Legacy wrapper: channels and older callers still receive an array. */
+export async function fetchContacts(dealId: string): Promise<DealContact[]> {
+  const result = await fetchContactsResult(dealId);
+  return result.status === "ok" ? result.data : [];
 }
 
 /** Добавить контакт контрагенту сделки. */

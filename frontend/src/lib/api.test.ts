@@ -33,6 +33,7 @@ import {
   fetchCrmStaff,
   fetchChats,
   fetchContacts,
+  fetchContactsResult,
   fetchDealDetail,
   fetchDealHandoff,
   fetchDealItems,
@@ -468,6 +469,37 @@ describe("api client — документы/сообщения/согласов�
 });
 
 describe("api client — прочие операции и fallback'и", () => {
+  it("fetchContactsResult различает empty, HTTP, network и malformed", async () => {
+    const response = (body: unknown, status = 200) =>
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+    let fetchMock = response([]);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "ok", data: [] });
+
+    fetchMock = response({ detail: "down" }, 503);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "http_error", httpStatus: 503 });
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    expect(await fetchContactsResult("1")).toEqual({ status: "network_error" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+
+    fetchMock = response([{ id: "1", full_name: "Анна", phone: null, email: null, is_primary: true }]);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+    expect(await fetchContacts("1")).toEqual([]);
+  });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects malformed contact id %s", async (id) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id, full_name: "Анна", phone: null, email: null, is_primary: true },
+    ]))));
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+  });
+
   it.each([125.5, 0, null, undefined])("цена строки %s передаётся в add/patch без потери null или нуля", async (unitPrice) => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
