@@ -37,7 +37,7 @@ async def test_invoice_projection_replay_is_idempotent(api, session):
 async def test_replacement_retires_old_demand_and_preserves_allocated_cash(
     api, session, late_amount, expected_status, manual_paid,
 ):
-    _, old, sku, cp, _ = await make_invoice(api, session)
+    _, old, sku, cp, item = await make_invoice(api, session)
     ctx = SimpleNamespace(session=session, services=SimpleNamespace(event_bus=OutboxEventBus()))
     original_event = (await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == 'sales.document.posted'))).scalars().one()
     await on_original_issued(original_event.payload, ctx)
@@ -57,6 +57,7 @@ async def test_replacement_retires_old_demand_and_preserves_allocated_cash(
     new = (await api.post(f"/sales/documents/{old['id']}/revision", json={'reason':'Replacement', 'request_key':'finance-revision'})).json()
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('150')))
     await session.commit()
+    assert (await api.patch(f"/sales/deal-items/{item['id']}", json={'unit_price': '150.00'})).status_code == 200
     assert (await api.post(f"/sales/documents/{new['id']}/issue")).status_code == 200
     replacement_event = (await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == 'sales.document.superseded'))).scalars().one()
     await on_original_superseded(replacement_event.payload, ctx)

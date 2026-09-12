@@ -37,7 +37,7 @@ async def sale(session, *, available=None):
     session.add_all([deal, sku])
     await session.flush()
     session.add_all([
-        DealItem(deal_id=deal.id, sku_id=sku.id, qty=2),
+        DealItem(deal_id=deal.id, sku_id=sku.id, qty=2, unit_price=100),
         PriceQuote(sku_code=sku.code, counterparty="Buyer", price=100),
     ])
     if available is not None:
@@ -258,7 +258,9 @@ async def test_revision_stock_to_on_order_releases_only_old_basket(api, session,
     replacement_sku = Sku(code="NEW-ORDER", title="New ordered product", unit="шт")
     session.add(replacement_sku)
     await session.flush()
-    (await session.scalar(select(DealItem))).sku_id = replacement_sku.id
+    replacement_item = await session.scalar(select(DealItem))
+    replacement_item.sku_id = replacement_sku.id
+    replacement_item.unit_price = Decimal("120")
     session.add(PriceQuote(sku_code="NEW-ORDER", counterparty="Buyer", price=120))
     await session.commit()
     issued = await api.post(f"/sales/documents/{new_id}/issue")

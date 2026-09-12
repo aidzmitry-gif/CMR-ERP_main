@@ -65,7 +65,7 @@ async def _sale(session, *, second_available=10):
     session.add_all([deal, *skus])
     await session.flush()
     for sku in skus:
-        session.add(DealItem(deal_id=deal.id, sku_id=sku.id, qty=2))
+        session.add(DealItem(deal_id=deal.id, sku_id=sku.id, qty=2, unit_price=100))
         session.add(PriceQuote(sku_code=sku.code, counterparty="Buyer", price=100))
     session.add(StockItem(sku_code="A", qty_available=10, qty_reserved=1))
     if second_available is not None:

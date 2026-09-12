@@ -144,11 +144,11 @@ async def test_replacement_and_new_invoice_lock_old_and_new_stock_before_release
         setup.add(StockItem(sku_code="LOW", qty_available=10, qty_reserved=0))
         await setup.flush()
         setup.add(StockItem(sku_code="HIGH", qty_available=10, qty_reserved=0))
-        old_item = DealItem(deal_id=old_deal.id, sku_id=high.id, qty=2)
+        old_item = DealItem(deal_id=old_deal.id, sku_id=high.id, qty=2, unit_price=100)
         setup.add_all([
             old_item,
-            DealItem(deal_id=other_deal.id, sku_id=low.id, qty=2),
-            DealItem(deal_id=other_deal.id, sku_id=high.id, qty=2),
+            DealItem(deal_id=other_deal.id, sku_id=low.id, qty=2, unit_price=100),
+            DealItem(deal_id=other_deal.id, sku_id=high.id, qty=2, unit_price=100),
             PriceQuote(sku_code="LOW", counterparty="Buyer", price=100),
             PriceQuote(sku_code="HIGH", counterparty="Buyer", price=100),
         ])

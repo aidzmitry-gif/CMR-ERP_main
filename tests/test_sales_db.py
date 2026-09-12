@@ -635,7 +635,7 @@ async def test_invoice_reserves_stock(session, api):
     sku = Sku(code="RSV-INV", title="Резерв под счёт", unit="шт")
     session.add(sku)
     await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4, unit_price=Decimal("100")))
     session.add(StockItem(sku_code="RSV-INV", warehouse="Главный", qty_available=50, qty_reserved=1))
     from modules.sales.models import PriceQuote
     session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
@@ -679,7 +679,7 @@ async def test_tick_reminds_before_invoice_expiry(session, api, services, monkey
     sku = Sku(code="EXP-SKU", title="t", unit="шт")
     session.add(sku)
     await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2, unit_price=Decimal("100")))
     session.add(StockItem(sku_code="EXP-SKU", warehouse="Главный", qty_available=10, qty_reserved=0))
     from modules.sales.models import PriceQuote
     session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
@@ -723,7 +723,7 @@ async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, ser
     sku = Sku(code="CNL-SKU", title="t", unit="шт")
     session.add(sku)
     await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3, unit_price=Decimal("100")))
     session.add(StockItem(sku_code="CNL-SKU", warehouse="Главный", qty_available=20, qty_reserved=0))
     from modules.sales.models import PriceQuote
     session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
@@ -766,7 +766,7 @@ async def test_payment_consumes_invoice_reserve(session, api):
     sku = Sku(code="PAID-SKU", title="t", unit="шт")
     session.add(sku)
     await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1, unit_price=Decimal("100")))
     session.add(StockItem(sku_code="PAID-SKU", warehouse="Главный", qty_available=5, qty_reserved=0))
     from modules.sales.models import PriceQuote
     session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))

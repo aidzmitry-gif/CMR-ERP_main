@@ -14,7 +14,7 @@ from core.domain.models import Counterparty, OutboxEvent, Sku
 from core.services.eventbus import EventContext
 from modules.finance.models import Payment
 from modules.integrations.models import StockItem
-from modules.sales.models import ContractTemplate, DealDocument, PriceQuote
+from modules.sales.models import ContractTemplate, DealDocument, DealItem, PriceQuote
 
 
 async def _sources(pg_app):
@@ -37,7 +37,7 @@ async def _sources(pg_app):
     response = await pg_app.post('/sales/deals', json={'number':key, 'title':'Original deal', 'counterparty':buyer_name, 'amount':240})
     assert response.status_code == 201, response.text
     deal = response.json()
-    assert (await pg_app.post(f"/sales/deals/{deal['id']}/items", json={'sku_id':sku_id, 'qty':2})).status_code == 201
+    assert (await pg_app.post(f"/sales/deals/{deal['id']}/items", json={'sku_id':sku_id, 'qty':2, 'unit_price':100})).status_code == 201
     return core, factory, key, deal, sku_id, buyer_id, template_id
 
 
@@ -57,6 +57,8 @@ async def test_migrated_originals_approval_packages_and_sql_guards(pg_app):
         sku.title, buyer.requisites = 'New SKU title', {'address':'Changed buyer address'}
         (await session.get(ContractTemplate, template_id)).body = '<h1>Different template</h1>'
         session.add(PriceQuote(sku_code=sku.code, counterparty=buyer.name, price=150))
+        item = await session.scalar(select(DealItem).where(DealItem.deal_id == deal['id']))
+        item.unit_price = Decimal('150')
         await session.commit()
     approve = await pg_app.post(f"/sales/documents/{contract['id']}/decide", json={'approved':True})
     assert approve.status_code == 200, approve.text

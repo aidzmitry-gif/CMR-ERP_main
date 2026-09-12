@@ -33,7 +33,7 @@ async def concurrent_app(tmp_path):
         sku = Sku(code='CONCURRENT', title='Original SKU', unit='шт')
         session.add_all([deal, sku])
         await session.flush()
-        session.add_all([DealItem(deal_id=deal.id, sku_id=sku.id, qty=2),
+        session.add_all([DealItem(deal_id=deal.id, sku_id=sku.id, qty=2, unit_price=100),
                          PriceQuote(sku_code=sku.code, counterparty='Buyer', price=100),
                          StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0)])
         await session.commit()
