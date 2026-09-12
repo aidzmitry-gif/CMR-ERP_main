@@ -14,6 +14,7 @@ import {
   createDeal,
   createDealTask,
   createDocument,
+  createDocumentResult,
   createPriceQuote,
   createStage,
   decideApproval,
@@ -467,6 +468,16 @@ describe("api client — документы/сообщения/согласов�
 });
 
 describe("api client — прочие операции и fallback'и", () => {
+  it.each([125.5, 0, null, undefined])("цена строки %s передаётся в add/patch без потери null или нуля", async (unitPrice) => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await addDealItem("1", 2, 3, unitPrice)).toBe(true);
+    expect(await updateDealItem(9, 4, unitPrice)).toBe(true);
+    const priceFields = unitPrice === undefined ? {} : { unit_price: unitPrice };
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ sku_id: 2, qty: 3, ...priceFields });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ qty: 4, ...priceFields });
+  });
+
   it("updateDealItem / deleteDealItem / setPrimaryContact / decideDocument", async () => {
     stubFetch({}, true);
     expect(await updateDealItem(1, 5)).toBe(true);
@@ -1002,13 +1013,16 @@ describe("api client — корзина лида/вложения/бренд", (
   });
 
   it("commitLeadItemsToDeal переносит позиции в сделку и котирует цену; считает ok/total", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
     const items = [
       { skuId: 1, skuCode: "AKB-60", name: "АКБ", qty: 2, price: 100, discountPct: 0 },
-      { skuId: 2, skuCode: "AKB-70", name: "АКБ70", qty: 0, price: 0, discountPct: 0 }, // price=0 → без котировки
+      { skuId: 2, skuCode: "AKB-70", name: "АКБ70", qty: 1, price: 0, discountPct: 0 },
     ];
     const res = await commitLeadItemsToDeal("9", "ООО Ромашка", items);
     expect(res).toEqual({ ok: 2, total: 2 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ sku_id: 1, qty: 2, unit_price: 100 });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ sku_id: 2, qty: 1, unit_price: 0 });
   });
 
   it("commitLeadItemsToDeal — ok меньше total, если часть addDealItem провалилась", async () => {
@@ -1023,6 +1037,7 @@ describe("api client — корзина лида/вложения/бренд", (
     ];
     const res = await commitLeadItemsToDeal("9", "ООО", items);
     expect(res).toEqual({ ok: 1, total: 2 });
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/sales/prices")).toHaveLength(1);
   });
 
   it("fetchLeadAttachments маппит вложения", async () => {
@@ -1120,4 +1135,15 @@ describe("api client — convertLead поллит deal_id", () => {
     expect(res?.deal_id).toBeUndefined();
     vi.useRealTimers();
   });
+});
+
+it("причина отказа счёта видна менеджеру, технические ошибки не раскрываются", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "Подтвердите цену каждой позиции" }), { status: 422 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { internal: "not for UI" } }), { status: 422 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "internal stack" }), { status: 500 }));
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await createDocumentResult("1", "invoice")).toEqual({ doc: null, error: "Подтвердите цену каждой позиции" });
+  expect((await createDocumentResult("1", "invoice")).error).toBe("Не удалось создать документ. Проверьте данные и состояние версии.");
+  expect((await createDocumentResult("1", "invoice")).error).not.toContain("internal");
 });

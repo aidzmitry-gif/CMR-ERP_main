@@ -42,6 +42,8 @@ export function CatalogPickerModal({
   onClose,
   onCommitted,
   state,
+  errorMessage,
+  saving = false,
 }: {
   /** Реальная сделка — есть у deal-drawer и у звонка по СУЩЕСТВУЮЩЕЙ сделке. Для звонка по
    *  лиду/новому клиенту (сделки ещё нет) — не передаётся: «Перенести в документ» тогда не
@@ -55,6 +57,8 @@ export function CatalogPickerModal({
   /** Общий стейт подбора — переиспользуем из вызывающей стороны (окно звонка уже держит
    *  свой `useProductPicker`; drawer создаёт новый). Не дублируем fetch внутри модалки. */
   state: ProductPickerState;
+  errorMessage?: string | null;
+  saving?: boolean;
 }) {
   const picker = state;
   const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, setRowPrice, removeRow } =
@@ -64,7 +68,8 @@ export function CatalogPickerModal({
   const [query, setQuery] = useState("");
   const [exact, setExact] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [committing, setBusy] = useState(false);
+  const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
   const [kbdIndex, setKbdIndex] = useState(-1);
   const [popoverSku, setPopoverSku] = useState<SkuOption | null>(null);
@@ -72,6 +77,8 @@ export function CatalogPickerModal({
   // подтверждения — по нему уходит запрос на согласование скидки (kind=deal.discount, тот
   // же контракт, что и DealApprovals на полной карточке сделки).
   const [confirmingDiscount, setConfirmingDiscount] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const blendedMarginPct =
@@ -79,11 +86,13 @@ export function CatalogPickerModal({
       ? (picker.orderMargin / picker.costedRevenue) * 100
       : null;
   const belowFloor = blendedMarginPct != null && blendedMarginPct < MIN_MARGIN_FLOOR_PCT;
-  const transferLabel = confirmingDiscount
-    ? "Да, перенести (на согласование)"
-    : belowFloor
-      ? "🔒 Перенести → согласовать скидку"
-      : "Перенести в документ";
+  const transferLabel = pendingApproval && !picker.pickedRows.length
+    ? "Повторить согласование"
+    : confirmingDiscount
+      ? "Да, перенести (на согласование)"
+      : belowFloor || pendingApproval
+        ? "🔒 Перенести → согласовать скидку"
+        : "Перенести в документ";
 
   function flash(msg: string) {
     setToast(msg);
@@ -142,13 +151,14 @@ export function CatalogPickerModal({
    *  WarehousePickerModal раньше).
    *
    *  Маржа ниже порога (belowFloor) — НЕ блокирует перенос: первый клик показывает inline-
-   *  подтверждение (banner ниже), второй — коммитит как обычно И параллельно уходит запрос
+   *  подтверждение (banner ниже), второй — коммитит позиции, затем отправляет запрос
    *  на согласование скидки (requestApproval, kind=deal.discount) — тот же путь, что и
    *  DealApprovals на полной карточке. Жёсткий блок «не пускать в 1С» — не делаем: см. ROP-
    *  решение в памяти сессии (мягкий гейт, не хард-блок). */
   async function transfer() {
-    if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
-    if (belowFloor && !confirmingDiscount) {
+    if (busy) return;
+    if (!picker.pickedRows.length && !pendingApproval) return flash("Отметьте хотя бы одну позицию");
+    if (belowFloor && !confirmingDiscount && !pendingApproval) {
       setConfirmingDiscount(true);
       return;
     }
@@ -157,18 +167,37 @@ export function CatalogPickerModal({
       return;
     }
     setBusy(true);
-    const tasks: Promise<unknown>[] = [picker.commitToDeal(dealId, counterparty)];
-    if (belowFloor) tasks.push(requestApproval(dealId, "deal.discount"));
-    const [committed] = await Promise.all(tasks);
-    const { ok, total } = committed as { ok: number; total: number };
-    setBusy(false);
-    setConfirmingDiscount(false);
-    flash(
-      belowFloor
-        ? `✅ Перенесено: ${ok}/${total} · скидка отправлена на согласование РОПу`
-        : `✅ Перенесено в документ позиций: ${ok}/${total}`,
-    );
-    onCommitted?.();
+    setTransferError(null);
+    setToast(null);
+    const needsApproval = pendingApproval || belowFloor;
+    setPendingApproval(needsApproval);
+    try {
+      const { ok, total, successfulRows } = picker.pickedRows.length
+        ? await picker.commitToDeal(dealId, counterparty)
+        : { ok: 0, total: 0, successfulRows: [] };
+      picker.removeCommittedRows(successfulRows);
+      if (ok !== total) {
+        setTransferError(`Перенесено позиций: ${ok}/${total}. Не удалось перенести остальные позиции; они оставлены для повторной попытки.`);
+        return;
+      }
+      if (needsApproval) {
+        const approved = await requestApproval(dealId, "deal.discount").catch(() => false);
+        if (!approved) {
+          setTransferError("Позиции сохранены, но не удалось отправить скидку на согласование. Повторите согласование без повторного переноса товаров.");
+          return;
+        }
+        setPendingApproval(false);
+      }
+      setConfirmingDiscount(false);
+      flash(needsApproval
+        ? "✅ Позиции сохранены · скидка отправлена на согласование РОПу"
+        : `✅ Перенесено в документ позиций: ${ok}/${total}`);
+      onCommitted?.();
+    } catch {
+      setTransferError("Не удалось перенести позиции. Подбор оставлен для повторной попытки.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Корзину поправили после того, как показали подтверждение согласования скидки — сбрасываем,
@@ -195,6 +224,7 @@ export function CatalogPickerModal({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (busy) return;
       if (e.key === "Escape") {
         if (popoverSku) setPopoverSku(null);
         else onClose();
@@ -202,8 +232,7 @@ export function CatalogPickerModal({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popoverSku]);
+  }, [onClose, popoverSku, busy]);
 
   // Автофокус на поиск при открытии — клавиатура ↑↓/Enter работает сразу без лишнего клика.
   useEffect(() => {
@@ -217,6 +246,8 @@ export function CatalogPickerModal({
       role="dialog"
       aria-modal
       aria-label="Подбор товара"
+      aria-busy={busy}
+      inert={busy}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
       onClick={onClose}
     >
@@ -233,7 +264,7 @@ export function CatalogPickerModal({
             <div className="text-[11px] text-faint">открывается поверх сделки — без перехода на другой экран</div>
           </div>
           <div className="flex-1" />
-          <Button variant="primary" size="sm" onClick={transfer} disabled={busy || !pickedCount} icon={<ShoppingCart size={13} />}>
+          <Button variant="primary" size="sm" onClick={transfer} disabled={busy || (!pickedCount && !pendingApproval)} icon={<ShoppingCart size={13} />}>
             {transferLabel}
           </Button>
           <button
@@ -245,6 +276,9 @@ export function CatalogPickerModal({
             <X size={16} />
           </button>
         </header>
+
+        {errorMessage && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{errorMessage}</p>}
+        {transferError && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{transferError}</p>}
 
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2">
@@ -349,8 +383,8 @@ export function CatalogPickerModal({
                       const sk = srokOf(st);
                       // Цена клиенту: отредактированная в попапе — приоритетнее цены со склада;
                       // маржа считается ОТ НЕЁ ЖЕ (иначе бейдж соврёт зелёным при уже данной скидке).
-                      const effPrice = row?.priceOverride ?? st?.price;
-                      const m = st ? marginOf({ ...st, price: effPrice ?? st.price }) : null;
+                      const effPrice = row ? picker.agreedPriceOf(row) : stock[sku.code]?.unitPrice ?? null;
+                      const m = st && effPrice != null ? marginOf({ ...st, price: effPrice }) : null;
                       const low = (st?.free ?? 0) > 0 && (st?.free ?? 0) <= 5;
                       return (
                         <tr
@@ -366,7 +400,7 @@ export function CatalogPickerModal({
                           <td className="px-2.5 py-1.5 font-semibold text-ink">{highlight(sku.title)}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap text-[11px] text-muted">{sku.code}</td>
                           <td className="px-2 py-1.5 text-right font-bold text-ink">
-                            {effPrice ? fmt(effPrice) : "—"}
+                            {effPrice != null ? fmt(effPrice) : "Не подтверждена"}
                             {row?.priceOverride != null && (
                               <span className="ml-1 text-[10px] font-semibold text-accent-ink" title="Цена отредактирована вручную">
                                 ✎
@@ -459,10 +493,10 @@ export function CatalogPickerModal({
                   Пусто. Добавляйте товар из таблицы — он появится здесь, и его можно поправить до переноса в счёт.
                 </p>
               ) : (
-                rows.map((r) => {
-                  const price = r.priceOverride ?? stock[r.code]?.price ?? 0;
+                rows.map((r, rowIndex) => {
+                  const price = picker.agreedPriceOf(r);
                   return (
-                    <div key={r.skuId} className={clsx("border-b border-line px-3 py-2", !r.picked && "opacity-45")}>
+                    <div key={`${r.skuId}-${rowIndex}`} className={clsx("border-b border-line px-3 py-2", !r.picked && "opacity-45")}>
                       <div className="flex items-start gap-2">
                         <input
                           type="checkbox"
@@ -504,10 +538,10 @@ export function CatalogPickerModal({
                           title="Изменить количество/цену"
                           className="text-[10.5px] text-faint underline decoration-dotted underline-offset-2 hover:text-accent-ink"
                         >
-                          × {price ? fmt(price) : "—"}
+                          × {price != null ? fmt(price) : "Цена не подтверждена"}
                           {r.priceOverride != null ? " ✎" : ""}
                         </button>
-                        <span className="ml-auto text-[12px] font-bold text-ink">{price ? fmt(price * r.qty) : "—"}</span>
+                        <span className="ml-auto text-[12px] font-bold text-ink">{price != null ? fmt(price * r.qty) : "—"}</span>
                       </div>
                     </div>
                   );
@@ -517,7 +551,7 @@ export function CatalogPickerModal({
             <div className="border-t border-line px-3 py-2 text-[12px]">
               <div className="flex items-center justify-between">
                 <span className="text-muted">Итого{pickedCount < rows.length ? ` (${pickedCount} в счёт)` : ""}</span>
-                <b className="text-ink">{fmt(picker.orderTotal)}</b>
+                <b className="text-ink">{picker.pickedRows.some((r) => picker.agreedPriceOf(r) == null) ? "Цена не подтверждена" : fmt(picker.orderTotal)}</b>
               </div>
               {picker.costedRows.length > 0 && picker.costedRevenue > 0 && (
                 <div className="mt-0.5 flex items-center justify-between">
@@ -545,7 +579,7 @@ export function CatalogPickerModal({
               {pickedCount > 0 && (
                 <>
                   {" "}
-                  · сумма <b className="text-ink">{fmt(picker.orderTotal)}</b>
+                  · сумма <b className="text-ink">{picker.pickedRows.some((r) => picker.agreedPriceOf(r) == null) ? "Цена не подтверждена" : fmt(picker.orderTotal)}</b>
                   {picker.costedRows.length > 0 && picker.costedRevenue > 0 && (
                     <>
                       {" "}
@@ -573,7 +607,7 @@ export function CatalogPickerModal({
               variant="primary"
               size="sm"
               onClick={transfer}
-              disabled={busy || !pickedCount}
+              disabled={busy || (!pickedCount && !pendingApproval)}
               icon={<ShoppingCart size={13} />}
             >
               {transferLabel}
@@ -594,7 +628,8 @@ export function CatalogPickerModal({
           st={stock[popoverSku.code]}
           whSt={warehouseStock[popoverSku.code]}
           existingQty={rowBySkuId.get(popoverSku.id)?.qty}
-          existingPrice={rowBySkuId.get(popoverSku.id)?.priceOverride}
+          basePrice={stock[popoverSku.code]?.unitPrice ?? null}
+          existingPrice={rowBySkuId.has(popoverSku.id) ? picker.agreedPriceOf(rowBySkuId.get(popoverSku.id)!) : undefined}
           onCancel={() => setPopoverSku(null)}
           onOk={(qty, price) => {
             // Попап показывает и правит АБСОЛЮТНОЕ количество строки (не «сколько добавить»):
@@ -606,10 +641,8 @@ export function CatalogPickerModal({
             } else {
               addSkuWithQty(popoverSku, qty);
             }
-            // Цену пишем ТОЛЬКО если она реально отличается от цены со склада — иначе строка
-            // навсегда помечена «✎ отредактировано», хотя пользователь просто подтвердил цену как есть.
-            const base = stock[popoverSku.code]?.price;
-            setRowPrice(popoverSku.id, base != null && price !== base ? price : undefined);
+            // Явное подтверждение цены, включая 0 и пустую неподтверждённую цену.
+            setRowPrice(popoverSku.id, price);
             setPopoverSku(null);
             flash(`✓ Подобрано: ${popoverSku.title.slice(0, 28)}`);
           }}
@@ -631,6 +664,7 @@ function QtyPricePopover({
   whSt,
   existingQty,
   existingPrice,
+  basePrice,
   onCancel,
   onOk,
 }: {
@@ -640,26 +674,32 @@ function QtyPricePopover({
   existingQty?: number;
   /** Уже отредактированная ранее цена строки (PickerRow.priceOverride) — при повторном
    *  открытии попапа показываем ЕЁ, а не сбрасываем на цену со склада. */
-  existingPrice?: number;
+  existingPrice?: number | null;
+  basePrice: number | null;
   onCancel: () => void;
-  onOk: (qty: number, price: number) => void;
+  onOk: (qty: number, price: number | null) => void;
 }) {
-  const basePrice = st?.price ?? 0;
   const [qty, setQty] = useState(existingQty ?? 1);
-  const [price, setPrice] = useState(existingPrice ?? basePrice);
+  const initialPrice = existingPrice !== undefined ? existingPrice : basePrice;
+  const [priceText, setPriceText] = useState(initialPrice == null ? "" : String(initialPrice));
+  const price = priceText.trim() === "" ? null : Number(priceText.replace(/\s/g, "").replace(",", "."));
+  const priceValid = price == null || (Number.isFinite(price) && price >= 0);
   const [discount, setDiscount] = useState(
-    existingPrice != null && basePrice > 0 ? Math.round((1 - existingPrice / basePrice) * 100 * 10) / 10 : 0,
+    existingPrice != null && basePrice != null && basePrice > 0 ? Math.round((1 - existingPrice / basePrice) * 100 * 10) / 10 : 0,
   );
 
   const cost = st?.cost ?? null;
-  const maxDiscount = cost != null && basePrice > 0 ? Math.max(0, (1 - cost / (1 - MIN_MARGIN_FLOOR_PCT / 100) / basePrice) * 100) : null;
-  const currentDiscount = basePrice > 0 ? (1 - price / basePrice) * 100 : 0;
+  const maxDiscount = cost != null && basePrice != null && basePrice > 0 ? Math.max(0, (1 - cost / (1 - MIN_MARGIN_FLOOR_PCT / 100) / basePrice) * 100) : null;
+  const currentDiscount = priceValid && price != null && basePrice != null && basePrice > 0 ? (1 - price / basePrice) * 100 : 0;
   const overFloor = maxDiscount != null && currentDiscount > maxDiscount + 0.5;
-  const m = marginOf({ ...(st ?? { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] }), price });
+  const m = priceValid && price != null ? marginOf({ ...(st ?? { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] }), price }) : null;
 
   function applyDiscount(pct: number) {
+    if (basePrice == null) return;
     setDiscount(pct);
-    setPrice(Math.round(basePrice * (1 - pct / 100)));
+    const cents = basePrice * (100 - pct);
+    // HALF_UP до копеек; компенсация двоичной погрешности на границе вроде 1.005.
+    setPriceText(String(Math.round(cents + Number.EPSILON * Math.abs(cents)) / 100));
   }
 
   return (
@@ -681,6 +721,7 @@ function QtyPricePopover({
         <div className="mt-2.5 flex items-center gap-2">
           <span className="w-[74px] shrink-0 text-[11.5px] text-muted">Количество</span>
           <input
+            aria-label="Количество товара"
             value={qty}
             onChange={(e) => setQty(Math.max(1, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1))}
             inputMode="numeric"
@@ -726,11 +767,13 @@ function QtyPricePopover({
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted">Цена</span>
             <input
-              value={price}
+              aria-label="Цена за единицу"
+              value={priceText}
               onChange={(e) => {
-                const v = parseFloat(e.target.value.replace(/\s/g, "").replace(",", ".")) || 0;
-                setPrice(v);
-                setDiscount(basePrice > 0 ? Math.round((1 - v / basePrice) * 100 * 10) / 10 : 0);
+                const text = e.target.value;
+                const v = text.trim() === "" ? null : Number(text.replace(/\s/g, "").replace(",", "."));
+                setPriceText(text);
+                setDiscount(v != null && Number.isFinite(v) && basePrice != null && basePrice > 0 ? Math.round((1 - v / basePrice) * 100 * 10) / 10 : 0);
               }}
               className="w-[74px] rounded-lg border border-line bg-surface px-2 py-1.5 text-right text-[12.5px] text-ink outline-none focus:border-accent"
             />
@@ -739,6 +782,8 @@ function QtyPricePopover({
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted">Скидка</span>
             <input
+              aria-label="Скидка, %"
+              disabled={basePrice == null || basePrice <= 0}
               value={discount}
               onChange={(e) => applyDiscount(parseFloat(e.target.value.replace(",", ".")) || 0)}
               className="w-[74px] rounded-lg border border-line bg-surface px-2 py-1.5 text-right text-[12.5px] text-ink outline-none focus:border-accent"
@@ -759,6 +804,9 @@ function QtyPricePopover({
           </span>
         </div>
 
+        {price == null && <p className="mt-1.5 text-[11px] text-faint">Цена не подтверждена</p>}
+        {!priceValid && <p role="alert" className="mt-1.5 text-[11px] text-danger">Укажите цену не меньше нуля или оставьте поле пустым.</p>}
+
         {overFloor && (
           <p className="mt-1.5 text-[11px] text-danger">
             ⚠ Скидка ниже порога маржи {MIN_MARGIN_FLOOR_PCT}% — на согласование РОПу.
@@ -776,7 +824,8 @@ function QtyPricePopover({
           <button
             type="button"
             onClick={() => onOk(qty, price)}
-            className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-bold text-white hover:bg-accent-ink"
+            disabled={!priceValid}
+            className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-bold text-white hover:bg-accent-ink disabled:opacity-60"
           >
             ОК
           </button>

@@ -37,8 +37,10 @@ export interface PickerRow {
   qty: number;
   picked: boolean;
   /** Цена клиенту, отредактированная вручную (попап «Ввод количества и цены» в
-   *  CatalogPickerModal) — перебивает цену со склада для ЭТОЙ строки. undefined = цена со склада. */
-  priceOverride?: number;
+   *  CatalogPickerModal) — перебивает цену строки. undefined = без правки, null = цена не подтверждена. */
+  priceOverride?: number | null;
+  /** Согласованная цена повторяемой строки; null нельзя заменять текущей складской ценой. */
+  unitPrice?: number | null;
 }
 
 /**
@@ -50,7 +52,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   const [skus, setSkus] = useState<SkuOption[]>([]);
   /** loading → ready | auth (401/403) | error. Пустой [] больше не маскируем под «Загрузка…». */
   const [catalogStatus, setCatalogStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
-  const [stock, setStock] = useState<Record<string, SkuStock>>({});
+  const [stock, setStock] = useState<Record<string, SkuStock & { unitPrice?: number | null }>>({});
   // Per-warehouse разбивка (не агрегат) — попап «Ввод количества и цены»
   // (CatalogPickerModal, catalog-picker-modal.tsx): Остаток/Резерв/Свободно по каждому складу.
   const [warehouseStock, setWarehouseStock] = useState<Record<string, SkuWarehouseStock>>({});
@@ -95,7 +97,13 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     })();
     void fetchStock().then((stockRows) => {
       if (alive) {
-        setStock(aggregateStock(stockRows));
+        const aggregated = aggregateStock(stockRows);
+        setStock(Object.fromEntries(Object.entries(aggregated).map(([code, item]) => [code, {
+          ...item,
+          // aggregateStock использует 0 для итогов, даже если raw-цена отсутствовала.
+          unitPrice: stockRows.some((r) => r.sku_code === code && typeof r.price === "number"
+            && Number.isFinite(r.price) && r.price >= 0 && r.price === item.price) ? item.price : null,
+        }])));
         setWarehouseStock(groupStockBySku(stockRows));
       }
     });
@@ -136,7 +144,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, qty: Math.max(1, qty) } : x)));
   }
   /** Ручная правка цены строки (попап «Ввод количества и цены»). undefined — вернуть цену со склада. */
-  function setRowPrice(skuId: number, price: number | undefined) {
+  function setRowPrice(skuId: number, price: number | null | undefined) {
     setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, priceOverride: price } : x)));
   }
   function toggleRow(skuId: number) {
@@ -144,6 +152,10 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   }
   function removeRow(skuId: number) {
     setRows((r) => r.filter((x) => x.skuId !== skuId));
+  }
+  /** Убирает только успешно отправленные снимки строк, включая отдельные строки одного SKU. */
+  function removeCommittedRows(committedRows: PickerRow[]) {
+    setRows((r) => r.filter((x) => !committedRows.includes(x)));
   }
   function reset() {
     genRef.current++;
@@ -173,6 +185,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
           unit: it.unit,
           qty: Math.max(1, Math.round(it.qty)),
           picked: true,
+          unitPrice: it.unit_price ?? null,
         })),
       ]);
     }
@@ -180,7 +193,9 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   }
 
   // Цена строки клиенту: отредактированная вручную — приоритетнее цены со склада.
-  const priceOf = (r: PickerRow) => r.priceOverride ?? stock[r.code]?.price ?? 0;
+  const agreedPriceOf = (r: PickerRow) => r.priceOverride !== undefined
+    ? r.priceOverride : r.unitPrice !== undefined ? r.unitPrice : stock[r.code]?.unitPrice ?? null;
+  const priceOf = (r: PickerRow) => agreedPriceOf(r) ?? 0;
 
   const pickedRows = rows.filter((r) => r.picked);
   const orderTotal = pickedRows.reduce((sum, r) => sum + priceOf(r) * r.qty, 0);
@@ -191,20 +206,21 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   const orderMargin = costedRevenue - orderCost;
   const hasUnderOrder = pickedRows.some((r) => stock[r.code]?.cost == null);
 
-  /** Добавить отмеченные позиции в РЕАЛЬНУЮ сделку + зафиксировать цену клиенту (отредактированную
-   * вручную — если её меняли в попапе «Ввод количества и цены» — иначе цену со склада).
-   * Позиции и котировки независимы между собой — шлём параллельно; котировки ДОЖИДАЕМСЯ
-   * (await, не fire-and-forget), иначе следом за commitToDeal рендер счёта прочитает ещё
-   * не записанные PriceQuote и напечатает цены 0.00. */
-  async function commitToDeal(dealId: string, counterparty: string): Promise<{ ok: number; total: number }> {
-    const results = await Promise.all(pickedRows.map((r) => addDealItem(dealId, r.skuId, r.qty)));
-    await Promise.all(
-      pickedRows.map((r) => {
-        const p = priceOf(r);
-        return p ? createPriceQuote(r.code, counterparty, p) : Promise.resolve(true);
+  /** Согласованная цена сохраняется вместе с позицией; котировки — только история. */
+  async function commitToDeal(dealId: string, counterparty: string): Promise<{ ok: number; total: number; successfulRows: PickerRow[] }> {
+    const results = await Promise.allSettled(pickedRows.map((r) => addDealItem(dealId, r.skuId, r.qty, agreedPriceOf(r))));
+    const successfulRows = pickedRows.filter((_, index) => {
+      const result = results[index];
+      return result.status === "fulfilled" && result.value;
+    });
+    await Promise.allSettled(
+      successfulRows.map((r) => {
+        const p = agreedPriceOf(r);
+        return p != null ? createPriceQuote(r.code, counterparty, p) : Promise.resolve(true);
       }),
     );
-    return { ok: results.filter(Boolean).length, total: pickedRows.length };
+    // Вызывающая сторона решает, убрать ли успешные строки: остальные callers сохраняют свою корзину.
+    return { ok: successfulRows.length, total: pickedRows.length, successfulRows };
   }
 
   return {
@@ -222,6 +238,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     setRowPrice,
     toggleRow,
     removeRow,
+    removeCommittedRows,
     reset,
     repeatLastOrder,
     pickedRows,
@@ -231,6 +248,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     orderCost,
     orderMargin,
     hasUnderOrder,
+    agreedPriceOf,
     commitToDeal,
   };
 }
@@ -276,19 +294,21 @@ export function ProductPicker({
     setRowQty,
     toggleRow,
     removeRow,
+    agreedPriceOf,
   } = state;
 
   return (
     <div>
       {rows.length > 0 && (
         <div className="mb-2 space-y-1.5">
-          {rows.map((r) => {
+          {rows.map((r, rowIndex) => {
             const st = stock[r.code];
+            const price = agreedPriceOf(r);
             const s = srokOf(st);
-            const m = marginOf(st);
+            const m = price == null || st == null ? null : marginOf({ ...st, price });
             return (
               <div
-                key={r.skuId}
+                key={`${r.skuId}-${rowIndex}`}
                 className="flex items-center gap-2 rounded-lg border border-line bg-sunken px-2.5 py-1.5"
               >
                 <input
@@ -301,7 +321,7 @@ export function ProductPicker({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-semibold text-ink">{r.title}</div>
                   <div className="truncate text-[11px] text-faint">
-                    {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
+                    {price == null ? "Цена не подтверждена · " : `${fmt(price)} · `}своб {st?.free ?? 0}
                     {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                     <span className={s.cls}>{s.label}</span>
                     {m ? (
@@ -309,9 +329,9 @@ export function ProductPicker({
                     ) : st?.free === 0 ? (
                       <span className="text-faint"> · себес из предрасчёта</span>
                     ) : null}
-                    {st?.price ? (
+                    {price != null ? (
                       <span className="ml-1 font-semibold text-ink">
-                        · {fmt(st.price * r.qty)}
+                        · {fmt(price * r.qty)}
                       </span>
                     ) : null}
                   </div>

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
@@ -289,7 +289,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
     expect(api.createPriceQuote).toHaveBeenCalledWith("AKB-60", "ООО Ромашка", 150);
     expect(screen.getByText("✅ Добавлено в сделку позиций: 1/1")).toBeInTheDocument();
     expect(onCommitted).toHaveBeenCalledTimes(1);
@@ -329,7 +329,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Выставить счёт/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
     expect(api.issueDocument).toHaveBeenCalledWith("d1", "invoice");
     expect(winStub.location.href).toBe("/r");
     expect(screen.getByText("Счёт создан")).toBeInTheDocument();
@@ -392,5 +392,114 @@ describe("ProductPickerModal — статусы каталога (401/ошибк
         screen.getByText("Не удалось загрузить номенклатуру. Обновите страницу."),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe("useProductPicker — согласованная цена позиции", () => {
+  it.each([0, 123.45])("ручная цена %s сохраняется в строку и историю", async (price) => {
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    act(() => result.current.setRowPrice(skus[0].id, price));
+    await act(async () => {
+      expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
+    });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price);
+    expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", price);
+  });
+
+  it.each([null, undefined, 0])("raw складская цена %s сохраняет различие unknown/0", async (price) => {
+    mock(api.fetchStock).mockResolvedValue([{ ...stockRows[0], price }]);
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price ?? null);
+    if (price == null) expect(api.createPriceQuote).not.toHaveBeenCalled();
+    else expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", 0);
+  });
+
+  it("без складских данных показывает неподтверждённую цену и отправляет null", async () => {
+    mock(api.fetchStock).mockResolvedValue([]);
+    render(<ProductPickerModal dealId="d1" counterparty="Клиент" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText(skus[0].title));
+    expect(screen.getByText(/Цена не подтверждена/)).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ })); });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, null);
+    expect(api.createPriceQuote).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 0, 99])("повтор заказа сохраняет unit_price=%s независимо от истории и склада", async (unit_price) => {
+    mock(api.fetchLastOrder).mockResolvedValue([{
+      id: 9, sku_id: skus[0].id, code: skus[0].code, title: skus[0].title,
+      unit: "шт", qty: 2, unit_price, last_price: 700, min_price: 500,
+    }]);
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    await act(async () => { await result.current.repeatLastOrder("d1"); });
+    await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 2, unit_price);
+  });
+
+  it("ошибка истории котировок не заменяет подтверждение сохранённой цены строки", async () => {
+    mock(api.createPriceQuote).mockResolvedValue(false);
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    await act(async () => {
+      expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
+    });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, 150);
+  });
+
+  it("при отказе строки не создаёт историю цены и сохраняет подбор", async () => {
+    mock(api.addDealItem).mockResolvedValue(false);
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    act(() => result.current.setRowPrice(skus[0].id, 95));
+    await act(async () => {
+      expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 0, total: 1, successfulRows: [] });
+    });
+    expect(api.createPriceQuote).not.toHaveBeenCalled();
+    expect(result.current.rows[0].priceOverride).toBe(95);
+  });
+
+  it("возвращает только успешные строки при mixed false/rejection и не меняет корзину остальных callers", async () => {
+    mock(api.addDealItem).mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockRejectedValueOnce(new Error("network"));
+    mock(api.createPriceQuote).mockRejectedValueOnce(new Error("history unavailable"));
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => skus.forEach((sku) => result.current.addSku(sku)));
+    await act(async () => {
+      expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 3, successfulRows: [result.current.pickedRows[0]] });
+    });
+    expect(api.createPriceQuote).toHaveBeenCalledTimes(1);
+    expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", 150);
+    expect(result.current.pickedRows.map((r) => r.skuId)).toEqual(skus.map((s) => s.id));
+  });
+
+  it("удаляет только успешный снимок повторённой строки того же SKU, оставляя цену второй", async () => {
+    mock(api.fetchLastOrder).mockResolvedValue([100, 200].map((unit_price, index) => ({
+      id: index + 9, sku_id: skus[0].id, code: skus[0].code, title: skus[0].title,
+      unit: "шт", qty: 1, unit_price, last_price: 700, min_price: 500,
+    })));
+    mock(api.addDealItem).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    await act(async () => { await result.current.repeatLastOrder("d1"); });
+    const [first, second] = result.current.pickedRows;
+    await act(async () => {
+      const committed = await result.current.commitToDeal("d1", "Клиент");
+      expect(committed.successfulRows).toHaveLength(1);
+      expect(committed.successfulRows[0]).toBe(first);
+      expect(result.current.rows).toEqual([first, second]);
+      result.current.removeCommittedRows(committed.successfulRows);
+    });
+    expect(result.current.pickedRows).toHaveLength(1);
+    expect(result.current.pickedRows[0]).toBe(second);
+    expect(result.current.agreedPriceOf(second)).toBe(200);
+    await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
+    expect(mock(api.addDealItem).mock.calls.map((args) => args[3])).toEqual([100, 200, 200]);
   });
 });

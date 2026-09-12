@@ -34,3 +34,11 @@ describe("formatInBase (BYN → базовая валюта ЮЛ)", () => {
     expect(norm(formatInBase(1000, "XXX"))).toBe("Курс недоступен");
   });
 });
+
+it("сохраняет копейки согласованной цены и округляет валютный пересчёт до копеек", () => {
+  expect(norm(formatInBase(125.50, "BYN"))).toBe("125,5 Br");
+  expect(norm(formatInBase(100.50, "BYN"))).toBe("100,5 Br");
+  expect(norm(formatInBase(0.01, "BYN"))).toBe("0,01 Br");
+  expect(norm(formatInBase(0, "BYN"))).toBe("0 Br");
+  expect(norm(formatInBase(1, "EUR", 3))).toBe("0,33 €");
+});

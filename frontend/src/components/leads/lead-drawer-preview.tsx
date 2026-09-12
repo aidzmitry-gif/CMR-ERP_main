@@ -8,7 +8,6 @@ import { useProductPicker } from "@/components/kanban/product-picker";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { Button } from "@/components/ui/button";
 import {
-  commitLeadItemsToDeal,
   convertLead,
   fetchLeadItems,
   fetchLeadManagers,
@@ -67,15 +66,6 @@ export function LeadDrawerPreview({
   // Цикл 3: цепочка «В сделку + счёт» сконвертировала лид → пометить его converted.
   onConverted?: (leadId: number, dealId?: number) => void;
 }) {
-  useEffect(() => {
-    if (!lead) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [lead, onClose]);
-
   const [managers, setManagers] = useState<Manager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -110,15 +100,26 @@ export function LeadDrawerPreview({
   const [savedItems, setSavedItems] = useState<LeadCartItem[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [chain, setChain] = useState<ChainState | null>(null);
   // Общий стейт пикера (справочник+остатки+корзина) — как в окне звонка/сделке; грузится
   // только когда каталог открыт (active=catalogOpen), refetchKey — id лида.
   const picker = useProductPicker(catalogOpen, lead ? `lead-${lead.id}` : undefined);
   const hydratedRef = useRef(false);
 
+  useEffect(() => {
+    if (!lead || catalogOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lead, onClose, catalogOpen]);
+
   // Сохранённый подбор лида — грузим при смене лида (для списка КП и цепочки в сделку).
   useEffect(() => {
     setChain(null);
+    setSaveError(null);
     setCatalogOpen(false);
     if (lead == null) {
       setSavedItems([]);
@@ -143,19 +144,20 @@ export function LeadDrawerPreview({
       const sku = picker.skus.find((s) => s.id === it.skuId || s.code === it.skuCode);
       if (!sku) continue;
       picker.addSkuWithQty(sku, it.qty);
-      const base = picker.stock[sku.code]?.price;
-      if (base != null && it.price !== base) picker.setRowPrice(sku.id, it.price);
+      picker.setRowPrice(sku.id, it.price);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogOpen, picker.skus, savedItems]);
 
   function openPicker() {
     hydratedRef.current = false;
+    setSaveError(null);
     setCatalogOpen(true);
   }
 
   // Закрытие каталога = сохранить корзину (отмеченные позиции) на лид (replace-all).
   async function closePickerAndSave() {
+    if (saving) return;
     if (lead == null) return setCatalogOpen(false);
     // Каталог закрыли ДО того, как гидрация успела восстановить сохранённое КП
     // (справочник ещё грузился) — replace-all пустой корзиной затёр бы КП. Просто закрыть.
@@ -164,26 +166,39 @@ export function LeadDrawerPreview({
       picker.reset();
       return;
     }
-    const items: LeadCartItem[] = picker.pickedRows.map((r) => {
-      const base = picker.stock[r.code]?.price;
-      const price = r.priceOverride ?? base ?? 0;
+    setSaveError(null);
+    const items: LeadCartItem[] = [];
+    for (const r of picker.pickedRows) {
+      const price = picker.agreedPriceOf(r);
+      if (price == null || !Number.isFinite(price) || price < 0) {
+        setSaveError(`Укажите цену для «${r.title}», чтобы сохранить подбор. Нулевая цена допустима.`);
+        return;
+      }
+      const base = picker.stock[r.code]?.unitPrice;
       const discountPct = base && base > 0 && price < base ? Math.round((1 - price / base) * 1000) / 10 : 0;
-      return { skuId: r.skuId, skuCode: r.code, name: r.title, qty: r.qty, price, discountPct };
-    });
+      items.push({ skuId: r.skuId, skuCode: r.code, name: r.title, qty: r.qty, price, discountPct });
+    }
     setSaving(true);
-    await saveLeadItems(lead.id, items);
-    setSaving(false);
-    setSavedItems(items);
-    setCatalogOpen(false);
-    picker.reset();
-    const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-    onItemsSaved?.(lead.id, items.length, total);
+    try {
+      if (!await saveLeadItems(lead.id, items)) {
+        setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
+        return;
+      }
+      setSavedItems(items);
+      setCatalogOpen(false);
+      picker.reset();
+      const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+      onItemsSaved?.(lead.id, items.length, total);
+    } catch {
+      setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // Цепочка «В сделку + счёт»: конвертация → перенос позиций → счёт, со статусом по шагам.
+  // Цепочка «В сделку + счёт»: конвертация с позициями на сервере → счёт, со статусом по шагам.
   async function convertWithInvoice() {
     if (lead == null) return;
-    const counterparty = lead.company || lead.name || "Новый лид";
     setChain({ deal: "run", items: "pending", invoice: "pending" });
     const conv = await convertLead(lead.id);
     if (!conv?.deal_id) {
@@ -192,17 +207,7 @@ export function LeadDrawerPreview({
     }
     const dealId = String(conv.deal_id);
     onConverted?.(lead.id, conv.deal_id);
-    setChain({ deal: "ok", items: "run", invoice: "pending", dealId: conv.deal_id });
-
-    const { ok, total } = await commitLeadItemsToDeal(dealId, counterparty, savedItems);
-    if (total > 0 && ok < total) {
-      // Любая непереехавшая позиция — стоп: счёт по неполной сделке хуже, чем нет счёта.
-      setChain({
-        deal: "ok", items: "err", invoice: "pending", dealId: conv.deal_id,
-        error: `Перенеслись ${ok} из ${total} позиций — счёт не выставлен, проверь сделку`,
-      });
-      return;
-    }
+    // Конвертация возвращает сделку уже с серверными строками; повторный POST удвоит счёт.
     setChain({ deal: "ok", items: "ok", invoice: "run", dealId: conv.deal_id });
 
     const doc = await issueDocument(dealId, "invoice");
@@ -662,6 +667,8 @@ export function LeadDrawerPreview({
           counterparty={lead.company || lead.name || ""}
           onClose={closePickerAndSave}
           onCommitted={closePickerAndSave}
+          errorMessage={saveError}
+          saving={saving}
         />
       )}
       {saving && (

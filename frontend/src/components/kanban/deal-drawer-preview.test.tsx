@@ -583,6 +583,7 @@ describe("DealDrawerPreview — цикл 14 (B): «Повторить заказ
     title: "Товар А",
     unit: "шт",
     qty: 3,
+    unit_price: 80,
     last_price: 100,
     min_price: null,
   };
@@ -594,8 +595,18 @@ describe("DealDrawerPreview — цикл 14 (B): «Повторить заказ
 
     expect(await screen.findByText("✅ Добавлено из прошлого заказа: 1/1")).toBeInTheDocument();
     expect(api.fetchLastOrder).toHaveBeenCalledWith("1");
-    expect(api.addDealItem).toHaveBeenCalledWith("1", 10, 3);
-    expect(api.createPriceQuote).toHaveBeenCalledWith("A1", "ООО Карта", 100);
+    expect(api.addDealItem).toHaveBeenCalledWith("1", 10, 3, 80);
+    expect(api.createPriceQuote).toHaveBeenCalledWith("A1", "ООО Карта", 80);
+  });
+
+  it.each([null, 0])("повтор переносит unit_price=%s без подстановки исторической цены", async (unit_price) => {
+    mock(api.fetchLastOrder).mockResolvedValue([{ ...lastOrderItem, unit_price }]);
+    renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: /Повторить заказ/ }));
+    await screen.findByText("✅ Добавлено из прошлого заказа: 1/1");
+    expect(api.addDealItem).toHaveBeenCalledWith("1", 10, 3, unit_price);
+    if (unit_price === null) expect(api.createPriceQuote).not.toHaveBeenCalled();
+    else expect(api.createPriceQuote).toHaveBeenCalledWith("A1", "ООО Карта", 0);
   });
 
   it("прошлых заказов нет — honest-empty сообщение, без падения", async () => {

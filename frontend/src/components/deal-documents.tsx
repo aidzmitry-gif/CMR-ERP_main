@@ -5,7 +5,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 
 import { Check, FileText, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
+import { createDocumentResult, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
 import { formatByn } from "@/lib/format";
 
 const KINDS = [
@@ -126,10 +126,10 @@ export function DealDocuments({ dealId }: { dealId: string }) {
     setError("");
     const requestKey = kind === "invoice" && onOrder
       ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
-    const doc = requestKey
-      ? await createDocument(dealId, kind, { reserve_mode: "on_order", request_key: requestKey })
-      : await createDocument(dealId, kind);
-    if (!doc) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
+    const result = requestKey
+      ? await createDocumentResult(dealId, kind, { reserve_mode: "on_order", request_key: requestKey })
+      : await createDocumentResult(dealId, kind);
+    if (!result.doc) setError(result.error ?? "Не удалось создать документ.");
     else if (invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
     await refresh();
     setBusy(false);

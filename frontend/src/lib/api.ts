@@ -486,6 +486,8 @@ export interface DealItemFull {
   title: string;
   unit: string;
   qty: number;
+  /** Согласованная цена строки. Отсутствие на старом backend также означает неизвестную цену. */
+  unit_price?: number | null;
   last_price: number | null;
   min_price: number | null;
 }
@@ -526,8 +528,7 @@ export async function fetchStock(): Promise<StockRow[]> {
 
 /**
  * Зафиксировать котировку цены SKU клиенту (Price Engine, POST /prices).
- * Нужна, чтобы позиция сделки знала цену: deal-items берёт last/min из PriceQuote
- * по (sku_code, counterparty). Пишем цену со склада на контрагента сделки.
+ * История last/min по (sku_code, counterparty); согласованная цена хранится в самой позиции.
  */
 export async function createPriceQuote(
   skuCode: string,
@@ -570,12 +571,12 @@ export async function fetchLastOrder(dealId: string): Promise<DealItemFull[]> {
 }
 
 /** Добавить позицию в сделку. */
-export async function addDealItem(dealId: string, skuId: number, qty: number): Promise<boolean> {
+export async function addDealItem(dealId: string, skuId: number, qty: number, unitPrice?: number | null): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sku_id: skuId, qty }),
+      body: JSON.stringify({ sku_id: skuId, qty, unit_price: unitPrice }),
     });
     return res.ok;
   } catch {
@@ -583,13 +584,13 @@ export async function addDealItem(dealId: string, skuId: number, qty: number): P
   }
 }
 
-/** Изменить количество в позиции. */
-export async function updateDealItem(itemId: number, qty: number): Promise<boolean> {
+/** Изменить количество и при явной передаче — согласованную цену позиции. */
+export async function updateDealItem(itemId: number, qty: number, unitPrice?: number | null): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deal-items/${itemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qty }),
+      body: JSON.stringify({ qty, unit_price: unitPrice }),
     });
     return res.ok;
   } catch {
@@ -1070,19 +1071,28 @@ export interface DocumentCreateOptions {
   request_key?: string;
 }
 
-export async function createDocument(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<DealDoc | null> {
-  if (options?.reserve_mode === "on_order" && kind !== "invoice") return null;
+export async function createDocumentResult(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<{ doc: DealDoc | null; error?: string }> {
+  const fallback = "Не удалось создать документ. Проверьте данные и состояние версии.";
+  if (options?.reserve_mode === "on_order" && kind !== "invoice") return { doc: null, error: "Под заказ можно выставить только счёт." };
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, requested_by: "Менеджер", ...options }),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as DealDoc;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const detail = body?.detail;
+      return { doc: null, error: res.status >= 400 && res.status < 500 && typeof detail === "string" ? detail : fallback };
+    }
+    return { doc: (await res.json()) as DealDoc };
   } catch {
-    return null;
+    return { doc: null, error: fallback };
   }
+}
+
+export async function createDocument(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<DealDoc | null> {
+  return (await createDocumentResult(dealId, kind, options)).doc;
 }
 
 /** Итог выставления документа: сообщение для тоста + URL печатной формы (у счёта).
@@ -1916,18 +1926,16 @@ export async function saveLeadItems(leadId: number, items: LeadCartItem[]): Prom
   }
 }
 
-/** Перенести подбор лида в созданную сделку: позиции (addDealItem) + цена клиенту
- * (createPriceQuote) — тот же контракт, что и `commitToDeal` пикера, но от сохранённых
- * позиций лида (без открытого пикера). Котировки ждём (await), чтобы рендер счёта
- * не прочитал ещё не записанные цены. */
+/** Перенести подбор лида вместе с согласованными ценами в строки сделки.
+ * Котировки сохраняются отдельно только как история цен. */
 export async function commitLeadItemsToDeal(
   dealId: string,
   counterparty: string,
   items: LeadCartItem[],
 ): Promise<{ ok: number; total: number }> {
-  const results = await Promise.all(items.map((it) => addDealItem(dealId, it.skuId, it.qty)));
+  const results = await Promise.all(items.map((it) => addDealItem(dealId, it.skuId, it.qty, it.price ?? null)));
   await Promise.all(
-    items.map((it) => (it.price ? createPriceQuote(it.skuCode, counterparty, it.price) : Promise.resolve(true))),
+    items.map((it, index) => (results[index] && it.price != null ? createPriceQuote(it.skuCode, counterparty, it.price) : Promise.resolve(true))),
   );
   return { ok: results.filter(Boolean).length, total: items.length };
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
   fetchDocuments: vi.fn(),
-  createDocument: vi.fn(),
+  createDocumentResult: vi.fn(),
   decideDocument: vi.fn(),
 }));
 
@@ -97,19 +97,19 @@ describe("DealDocuments — сумма выпущенного счёта", () =>
 describe("DealDocuments", () => {
   it("явный выбор сохраняет ключ после ошибки и сбрасывается при смене сделки/типа", async () => {
     mock(api.fetchDocuments).mockResolvedValue([]);
-    mock(api.createDocument).mockResolvedValue(null);
+    mock(api.createDocumentResult).mockResolvedValue({ doc: null, error: "Подтвердите цену каждой позиции" });
     const { rerender } = render(<DealDocuments dealId="1" />);
     const checkbox = screen.getByRole("checkbox", { name: "Под заказ — без резерва" });
     expect(checkbox).not.toBeChecked();
     fireEvent.click(checkbox);
     fireEvent.click(screen.getByText("Сформировать"));
-    await screen.findByRole("alert");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Подтвердите цену каждой позиции");
     await waitFor(() => expect(screen.getByText("Сформировать")).not.toBeDisabled());
     fireEvent.click(screen.getByText("Сформировать"));
-    await waitFor(() => expect(api.createDocument).toHaveBeenCalledTimes(2));
-    const first = mock(api.createDocument).mock.calls[0];
+    await waitFor(() => expect(api.createDocumentResult).toHaveBeenCalledTimes(2));
+    const first = mock(api.createDocumentResult).mock.calls[0];
     expect(first).toEqual(["1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) }]);
-    expect(mock(api.createDocument).mock.calls[1]).toEqual(first);
+    expect(mock(api.createDocumentResult).mock.calls[1]).toEqual(first);
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeDisabled());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "contract" } });
     expect(screen.queryByRole("checkbox")).toBeNull();
@@ -122,7 +122,7 @@ describe("DealDocuments", () => {
 
   it("ожидание запроса не показывает созданный резерв", async () => {
     mock(api.fetchDocuments).mockResolvedValue([]);
-    mock(api.createDocument).mockReturnValue(new Promise(() => {}));
+    mock(api.createDocumentResult).mockReturnValue(new Promise(() => {}));
     render(<DealDocuments dealId="1" />);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByText("Сформировать"));
@@ -134,14 +134,14 @@ describe("DealDocuments", () => {
   it("успешный счёт отображает сохранённый режим после обновления списка", async () => {
     const doc = { id: 8, kind: "invoice", number: "СЧ-8", status: "posted", amount: 100, reserve_status: "unreserved", reserve_mode: "on_order" };
     mock(api.fetchDocuments).mockResolvedValueOnce([]).mockResolvedValue([doc]);
-    mock(api.createDocument).mockResolvedValue(doc);
+    mock(api.createDocumentResult).mockResolvedValue({ doc });
     render(<DealDocuments dealId="1" />);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByText("Сформировать"));
     await screen.findByText("Счёт · СЧ-8");
     expect(screen.getAllByText("Под заказ — товар не зарезервирован")).toHaveLength(2);
     expect(screen.queryByText(/В резерве/)).toBeNull();
-    expect(api.createDocument).toHaveBeenCalledWith("1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) });
+    expect(api.createDocumentResult).toHaveBeenCalledWith("1", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) });
   });
 
   it.each([undefined, "stock", "on_order"])("показывает сохранённый режим %s", async (reserve_mode) => {
@@ -154,11 +154,11 @@ describe("DealDocuments", () => {
 
   it("пустой список → формирование документа (счёт по умолчанию)", async () => {
     mock(api.fetchDocuments).mockResolvedValue([]);
-    mock(api.createDocument).mockResolvedValue(true);
+    mock(api.createDocumentResult).mockResolvedValue({ doc: issuedInvoice });
     render(<DealDocuments dealId="1" />);
     expect(await screen.findByText("Документов пока нет")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Сформировать"));
-    await waitFor(() => expect(api.createDocument).toHaveBeenCalledWith("1", "invoice"));
+    await waitFor(() => expect(api.createDocumentResult).toHaveBeenCalledWith("1", "invoice"));
   });
 
   it("договор на согласовании → проведение в 1С", async () => {
@@ -176,13 +176,13 @@ describe("DealDocuments", () => {
     mock(api.fetchDocuments).mockResolvedValue([
       { id: 4, kind: "contract", number: "ДГ-2", status: "pending_approval", onec_ref: null, amount: 1, reserve_status: "none", valid_until: null },
     ]);
-    mock(api.createDocument).mockResolvedValue(true);
+    mock(api.createDocumentResult).mockResolvedValue({ doc: issuedInvoice });
     mock(api.decideDocument).mockResolvedValue(true);
     render(<DealDocuments dealId="1" />);
     await screen.findByText(/ДГ-2/);
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "order" } });
     fireEvent.click(screen.getByText("Сформировать"));
-    await waitFor(() => expect(api.createDocument).toHaveBeenCalledWith("1", "order"));
+    await waitFor(() => expect(api.createDocumentResult).toHaveBeenCalledWith("1", "order"));
     fireEvent.click(screen.getByTitle("Отклонить"));
     await waitFor(() => expect(api.decideDocument).toHaveBeenCalledWith(4, false, "Юрист"));
   });

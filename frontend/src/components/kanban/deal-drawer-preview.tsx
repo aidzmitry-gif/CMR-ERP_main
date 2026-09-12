@@ -556,8 +556,8 @@ export function DealDrawerPreview({
    *  (addDealItem + createPriceQuote), которой пользуются commitToDeal (product-picker.tsx) и
    *  commitLeadItemsToDeal (api.ts) — не изобретаем новый способ добавить позиции в сделку.
    *  Не заводит СВОЙ picker/остатки (useProductPicker(pickerOpen, …) тут гейтит склад активным
-   *  открытым пикером) — DealItemFull уже несёт `last_price` прошлой цены клиенту, этого
-   *  достаточно для котировки. Честная деградация: прошлых заказов нет → сообщение, не падаем. */
+   *  открытым пикером) — переносим `unit_price` самой прошлой строки, а не историю last/min.
+   *  Честная деградация: прошлых заказов нет → сообщение, не падаем. */
   async function repeatOrder() {
     if (!deal) return;
     const dealId = deal.id;
@@ -576,9 +576,9 @@ export function DealDrawerPreview({
       setDocBusy(false);
       return;
     }
-    const results = await Promise.all(items.map((it) => addDealItem(dealId, it.sku_id, it.qty)));
+    const results = await Promise.all(items.map((it) => addDealItem(dealId, it.sku_id, it.qty, it.unit_price ?? null)));
     await Promise.all(
-      items.map((it) => (it.last_price ? createPriceQuote(it.code, counterparty, it.last_price) : Promise.resolve(true))),
+      items.map((it, index) => (results[index] && it.unit_price != null ? createPriceQuote(it.code, counterparty, it.unit_price) : Promise.resolve(true))),
     );
     setDocBusy(false);
     if (dealIdRef.current !== dealId) return;

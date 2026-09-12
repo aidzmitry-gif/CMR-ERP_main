@@ -23,7 +23,10 @@ export function DealItems({ dealId }: { dealId: string }) {
   const [margin, setMargin] = useState<Map<string, MarginLine>>(new Map());
   const [skuId, setSkuId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
+  const [unitPrice, setUnitPrice] = useState("");
+  const [drafts, setDrafts] = useState<Record<number, { qty: string; price: string }>>({});
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     setItems(await fetchDealItems(dealId));
@@ -41,25 +44,81 @@ export function DealItems({ dealId }: { dealId: string }) {
 
   async function onAdd() {
     if (!skuId) return;
+    const price = unitPrice.trim() === "" ? null : Number(unitPrice);
+    if (!Number.isFinite(qty) || qty <= 0 || (price !== null && (!Number.isFinite(price) || price < 0))) {
+      setError("Укажите количество больше нуля и цену не меньше нуля либо оставьте цену пустой.");
+      return;
+    }
     setBusy(true);
-    await addDealItem(dealId, skuId, qty);
-    setQty(1);
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      if (!await addDealItem(dealId, skuId, qty, price)) {
+        setError("Не удалось добавить позицию. Введённые данные сохранены.");
+        return;
+      }
+      setQty(1);
+      setUnitPrice("");
+      await refresh();
+    } catch {
+      setError("Не удалось добавить позицию. Введённые данные сохранены.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function onQty(itemId: number, value: number) {
-    if (value <= 0) return;
-    // Себес/маржа — на единицу, от количества не зависят → маржу не перезапрашиваем.
-    setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, qty: value } : i)));
-    await updateDealItem(itemId, value);
+  function editItem(item: DealItemFull, field: "qty" | "price", value: string) {
+    setDrafts((prev) => ({ ...prev, [item.id]: {
+      ...(prev[item.id] ?? { qty: String(item.qty), price: item.unit_price == null ? "" : String(item.unit_price) }),
+      [field]: value,
+    } }));
+  }
+
+  async function onSave(item: DealItemFull) {
+    const draft = drafts[item.id];
+    if (!draft) return;
+    const quantity = Number(draft.qty);
+    const price = draft.price.trim() === "" ? null : Number(draft.price);
+    if (!Number.isFinite(quantity) || quantity <= 0 || (price !== null && (!Number.isFinite(price) || price < 0))) {
+      setError("Укажите количество больше нуля и цену не меньше нуля либо оставьте цену пустой.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = price === (item.unit_price ?? null)
+        ? await updateDealItem(item.id, quantity)
+        : await updateDealItem(item.id, quantity, price);
+      if (!saved) {
+        setError("Не удалось сохранить позицию. Введённые данные сохранены.");
+        return;
+      }
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      await refresh();
+    } catch {
+      setError("Не удалось сохранить позицию. Введённые данные сохранены.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onDelete(itemId: number) {
     setBusy(true);
-    await deleteDealItem(itemId);
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      if (!await deleteDealItem(itemId)) {
+        setError("Не удалось удалить позицию.");
+        return;
+      }
+      await refresh();
+    } catch {
+      setError("Не удалось удалить позицию.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -69,19 +128,26 @@ export function DealItems({ dealId }: { dealId: string }) {
         Номенклатура <span className="font-medium text-accent-ink">({items.length} поз.)</span>
       </div>
 
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+
       <ul className="mt-3 space-y-2">
         {items.length === 0 && <li className="text-sm text-muted">Позиций пока нет</li>}
         {items.map((item) => {
           const ml = margin.get(item.code);
           const hasCost = ml != null && ml.unit_landed_cost != null;
+          const marginPct = hasCost && item.unit_price != null && item.unit_price > 0
+            ? (item.unit_price - ml.unit_landed_cost!) / item.unit_price * 100 : null;
           return (
-          <li key={item.id} className="flex items-center gap-2 rounded-lg bg-sunken px-3 py-2">
+          <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-sunken px-3 py-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-line-strong" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm text-muted">{item.title}</div>
+              <div className="text-xs text-ink">
+                {item.unit_price == null ? "Цена не подтверждена" : `Согласованная цена: ${fmt(item.unit_price)}`}
+              </div>
               {item.last_price != null && (
                 <span className="text-xs text-faint">
-                  {fmt(item.last_price)}
+                  История: последняя {fmt(item.last_price)}
                   {item.min_price != null && item.min_price < item.last_price
                     ? ` · мин ${fmt(item.min_price)}`
                     : ""}
@@ -91,7 +157,7 @@ export function DealItems({ dealId }: { dealId: string }) {
                 <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] font-semibold text-money">
                   <span>
                     себес {fmt(ml!.unit_landed_cost!)}
-                    {ml!.margin_pct != null ? ` · маржа ${Math.round(ml!.margin_pct)}%` : ""}
+                    {marginPct != null ? ` · маржа ${Math.round(marginPct)}%` : ""}
                   </span>
                   {ml!.cost_source != null && (
                     <span className="font-normal text-faint">· {COST_SRC_LABEL[ml!.cost_source]}</span>
@@ -104,11 +170,33 @@ export function DealItems({ dealId }: { dealId: string }) {
             <input
               type="number"
               min={1}
-              value={item.qty}
-              onChange={(e) => onQty(item.id, Number(e.target.value))}
+              step="any"
+              aria-label={`Количество ${item.title}`}
+              disabled={busy}
+              value={drafts[item.id]?.qty ?? item.qty}
+              onChange={(e) => editItem(item, "qty", e.target.value)}
               className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-accent"
             />
             <span className="shrink-0 text-xs text-muted">{item.unit}</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              aria-label={`Цена за единицу ${item.title}`}
+              placeholder="Не подтверждена"
+              disabled={busy}
+              value={drafts[item.id]?.price ?? item.unit_price ?? ""}
+              onChange={(e) => editItem(item, "price", e.target.value)}
+              className="w-28 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-accent"
+            />
+            <button
+              onClick={() => onSave(item)}
+              disabled={busy || !drafts[item.id]}
+              aria-label={`Сохранить позицию ${item.title}`}
+              className="rounded-lg px-2 py-1 text-sm font-medium text-accent-ink disabled:opacity-60"
+            >
+              Сохранить
+            </button>
             <button
               onClick={() => onDelete(item.id)}
               disabled={busy}
@@ -122,11 +210,12 @@ export function DealItems({ dealId }: { dealId: string }) {
         })}
       </ul>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <select
           value={skuId ?? ""}
           onChange={(e) => setSkuId(Number(e.target.value))}
           aria-label="Номенклатура (справочник из 1С через MDM)"
+          disabled={busy}
           className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {skus.map((s) => (
@@ -138,9 +227,23 @@ export function DealItems({ dealId }: { dealId: string }) {
         <input
           type="number"
           min={1}
+          step="any"
+          aria-label="Количество новой позиции"
+          disabled={busy}
           value={qty}
           onChange={(e) => setQty(Number(e.target.value))}
           className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
+        />
+        <input
+          type="number"
+          min={0}
+          step="any"
+          aria-label="Цена за единицу новой позиции"
+          placeholder="Цена не подтверждена"
+          disabled={busy}
+          value={unitPrice}
+          onChange={(e) => setUnitPrice(e.target.value)}
+          className="w-36 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <button
           onClick={onAdd}
