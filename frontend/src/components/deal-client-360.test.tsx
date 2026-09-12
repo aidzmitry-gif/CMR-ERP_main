@@ -3,6 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DealClient360 } from "@/components/deal-client-360";
 import type { CounterpartyCard } from "@/lib/reference-data";
 
+vi.mock("@/lib/auth-headers-server", () => ({
+  backendAuthHeaders: async (roles?: string) => ({
+    Authorization: "Bearer synthetic-session-token",
+    ...(roles ? { "X-User-Roles": roles } : {}),
+  }),
+}));
+
 // Компонент — async server component: сам ходит в /system/references/query (резолв имени →
 // id) и /system/mdm/counterparty/{id} (карточка). Мокаем глобальный fetch по URL.
 function stubFetch(
@@ -56,10 +63,10 @@ describe("DealClient360", () => {
     expect(screen.queryByText(/MDM|отдельная сессия|после загрузки/)).toBeNull();
   });
 
-  it("query-запрос падает (500) — резолв даёт null, honest-empty без падения", async () => {
+  it("query-запрос падает (500) — ошибка загрузки вместо пустого досье", async () => {
     stubFetch(() => ({ ok: false } as Response));
     render(await DealClient360({ company: "Компания" }));
-    expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить досье клиента");
   });
 
   it("резолвится и карточка найдена — показывает УНП, источник и контакт", async () => {
@@ -155,5 +162,21 @@ describe("DealClient360", () => {
     render(await DealClient360({ company: "ООО Ромашка", roles: "rop,sales" }));
     expect((queryHeaders as Record<string, string>)["X-User-Roles"]).toBe("rop,sales");
     expect((cardHeaders as Record<string, string>)["X-User-Roles"]).toBe("rop,sales");
+    expect((queryHeaders as Record<string, string>).Authorization).toBe("Bearer synthetic-session-token");
+    expect((cardHeaders as Record<string, string>).Authorization).toBe("Bearer synthetic-session-token");
+  });
+
+  it.each([401, 403])("отказ %s при поиске не маскируется отсутствием клиента", async (status) => {
+    stubFetch(() => ({ ok: false, status } as Response));
+    render(await DealClient360({ company: "Компания" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "войдите снова" : "Нет доступа");
+    expect(screen.queryByText("Досье клиента пока недоступно.")).not.toBeInTheDocument();
+  });
+
+  it.each([401, 403, 500])("отказ %s при чтении карточки отображается явно", async (status) => {
+    stubFetch((url) => url.includes("/system/mdm/counterparty/")
+      ? { ok: false, status } as Response : queryResponse([{ id: 42 }]));
+    render(await DealClient360({ company: "Компания" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "войдите снова" : status === 403 ? "Нет доступа" : "Не удалось загрузить");
   });
 });
