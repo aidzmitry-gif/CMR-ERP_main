@@ -1,7 +1,7 @@
 "use client";
 
-import { Mail, MessageCircle, Phone, Send, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Mail, MessageCircle, Phone, Save, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { FaTelegramPlane, FaViber, FaWhatsapp } from "react-icons/fa";
 import { aiDraftReply, type DealMsg, fetchMessages, sendMessage } from "@/lib/api";
 
@@ -29,6 +29,8 @@ export function DealMessages({ dealId }: { dealId: string }) {
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const saving = useRef(false);
 
   async function refresh() {
     setItems(await fetchMessages(dealId));
@@ -39,12 +41,23 @@ export function DealMessages({ dealId }: { dealId: string }) {
   }, [dealId]);
 
   async function onSend() {
-    if (!text.trim()) return;
+    if (!text.trim() || saving.current) return;
+    saving.current = true;
     setBusy(true);
-    await sendMessage(dealId, channel, text.trim());
-    setText("");
-    await refresh();
-    setBusy(false);
+    setError(null);
+    try {
+      if (!await sendMessage(dealId, channel, text.trim())) {
+        setError("Не удалось сохранить запись. Повторите попытку.");
+        return;
+      }
+      setText("");
+      await refresh();
+    } catch {
+      setError("Не удалось сохранить запись. Повторите попытку.");
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
   }
 
   async function onAiDraft() {
@@ -76,6 +89,8 @@ export function DealMessages({ dealId }: { dealId: string }) {
         </select>
       </div>
 
+      <p className="mt-3 text-xs text-muted">Запись в историю общения. Клиенту сообщение не отправляется. Для отправки документов используйте «Email документов».</p>
+      {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
       <div className="mt-3 space-y-3">
         {items.length === 0 && <p className="text-sm text-muted">Переписки пока нет</p>}
         {items.map((m) => {
@@ -126,10 +141,11 @@ export function DealMessages({ dealId }: { dealId: string }) {
         />
         <button
           onClick={onSend}
-          disabled={busy}
+          disabled={busy || !text.trim()}
+          aria-label="Сохранить запись в историю"
           className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-60"
         >
-          <Send size={16} />
+          <Save size={16} />
         </button>
       </div>
     </div>

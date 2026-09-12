@@ -12,13 +12,47 @@ import * as api from "@/lib/api";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => vi.resetAllMocks());
 
-describe("DealMessages (омниканальный инбокс)", () => {
+describe("DealMessages (история общения)", () => {
   it("показывает пустое состояние, когда переписки нет", async () => {
     mock(api.fetchMessages).mockResolvedValue([]);
     render(<DealMessages dealId="1" />);
     expect(await screen.findByText("Переписки пока нет")).toBeInTheDocument();
+    expect(screen.getByText(/Клиенту сообщение не отправляется/)).toBeInTheDocument();
+  });
+
+  it.each(["false", "rejection"])("при %s сохраняет текст и позволяет повторить запись", async (failure) => {
+    vi.mocked(api.fetchMessages).mockResolvedValue([]);
+    if (failure === "false") vi.mocked(api.sendMessage).mockResolvedValueOnce(false);
+    else vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("offline"));
+    vi.mocked(api.sendMessage).mockResolvedValueOnce(true);
+    render(<DealMessages dealId="1" />);
+    const input = screen.getByPlaceholderText("Написать сообщение...");
+    fireEvent.change(input, { target: { value: "Согласовали доставку" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись в историю" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось сохранить запись");
+    expect(input).toHaveValue("Согласовали доставку");
+    const save = screen.getByRole("button", { name: "Сохранить запись в историю" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(api.sendMessage).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("повторный Enter во время сохранения не создаёт вторую запись", async () => {
+    vi.mocked(api.fetchMessages).mockResolvedValue([]);
+    let finish!: (value: boolean) => void;
+    vi.mocked(api.sendMessage).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<DealMessages dealId="1" />);
+    const input = screen.getByPlaceholderText("Написать сообщение...");
+    fireEvent.change(input, { target: { value: "Подтверждение" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    finish(true);
+    await waitFor(() => expect(input).toHaveValue(""));
   });
 
   it("рендерит загруженные сообщения по каналам", async () => {
@@ -31,7 +65,7 @@ describe("DealMessages (омниканальный инбокс)", () => {
     expect(screen.getAllByText(/WhatsApp/).length).toBeGreaterThan(0);
   });
 
-  it("отправляет сообщение по Enter", async () => {
+  it("сохраняет запись по Enter", async () => {
     mock(api.fetchMessages).mockResolvedValue([]);
     mock(api.sendMessage).mockResolvedValue(true);
     render(<DealMessages dealId="3" />);
@@ -65,7 +99,7 @@ describe("DealMessages (омниканальный инбокс)", () => {
     expect(await screen.findByText(/AI-слой выключен/)).toBeInTheDocument();
   });
 
-  it("отправляет по выбранному каналу", async () => {
+  it("сохраняет выбранный канал записи", async () => {
     mock(api.fetchMessages).mockResolvedValue([]);
     mock(api.sendMessage).mockResolvedValue(true);
     render(<DealMessages dealId="6" />);

@@ -12,6 +12,7 @@ import { DealContacts } from "@/components/deal-contacts";
 import { DealLinkedDeals } from "@/components/deal-linked-deals";
 import { DealEditButton } from "@/components/deal-edit-button";
 import { DealDocuments } from "@/components/deal-documents";
+import { DocumentEmailPanel } from "@/components/kanban/document-email-panel";
 import { DealHandoffBlock } from "@/components/deal-handoff";
 import { DealMetrics } from "@/components/deal-metrics";
 import { DealItems } from "@/components/deal-items";
@@ -151,6 +152,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DealItems dealId={id} />
             <DealTasks dealId={id} />
             <DealDocuments dealId={id} />
+            <DocumentEmailPanel dealId={id} />
           </div>
 
           {/* RIGHT — клиент / постоянный / переписка / связанные / действия */}
@@ -311,4 +313,3 @@ function DeliveryStub() {
     </Card>
   );
 }
-
