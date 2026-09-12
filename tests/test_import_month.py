@@ -615,3 +615,215 @@ async def test_counterparty_alias_unp_drift_rolls_back_and_is_reported(
     await module.reconcile()
     report = json.loads(capsys.readouterr().out)
     assert report["destination"]["alias_audit"]["unp_conflict_refs"] == 1
+
+
+@pytest.mark.asyncio
+async def test_private_reconcile_details_preserve_aggregate_and_are_repeatable(
+    monkeypatch, tmp_path, capsys
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+
+    await module.load()
+    capsys.readouterr()
+
+    from sqlalchemy import select
+
+    from core.domain.models import Contact, Counterparty, CounterpartyAlias
+
+    db = module._isolated_database()
+    await db.connect()
+    async with db.session_factory() as session:
+        counterparty_id = (
+            select(CounterpartyAlias.counterparty_id)
+            .where(
+                CounterpartyAlias.source == "bitrix",
+                CounterpartyAlias.external_ref == "company:10",
+            )
+            .scalar_subquery()
+        )
+        company = (await session.execute(select(Counterparty).where(
+            Counterparty.id == counterparty_id
+        ))).scalar_one()
+        company.name = "Changed Company"
+        contact = (await session.execute(
+            select(Contact).where(Contact.full_name == "Test Contact")
+        )).scalar_one()
+        contact.counterparty_id = None
+        await session.commit()
+    await db.disconnect()
+
+    await module.reconcile()
+    aggregate_stdout = capsys.readouterr().out
+    assert "Test Company" not in aggregate_stdout
+    assert "Changed Company" not in aggregate_stdout
+
+    detail_path = (tmp_path / "private" / "details.json").resolve()
+    monkeypatch.setenv("IMPORT_RECONCILE_DETAIL_REPORT", str(detail_path))
+    await module.reconcile()
+    detail_stdout = capsys.readouterr().out
+    assert detail_stdout == aggregate_stdout
+    private_report = json.loads(detail_path.read_text(encoding="utf-8"))
+    rows = private_report["rows"]
+    assert [row["source_id"] for row in rows] == ["10", "20"]
+    assert rows[0]["changed_fields"] == ["name"]
+    assert rows[0]["source"]["name"] == "Test Company"
+    assert rows[0]["destination"]["name"] == "Changed Company"
+    assert rows[1]["changed_fields"] == ["counterparty_link"]
+    assert rows[1]["source"]["counterparty_link"] == "company:10"
+    assert rows[1]["destination"]["counterparty_link"] is None
+    first_bytes = detail_path.read_bytes()
+
+    await module.reconcile()
+    assert capsys.readouterr().out == detail_stdout
+    assert detail_path.read_bytes() == first_bytes
+
+
+def test_private_source_details_include_missing_links_without_default_output(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+
+    deals = [json.loads(line) for line in (cache / "bx_deals.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()]
+    deals[0] = {**deals[0], "ID": "31", "COMPANY_ID": "999"}
+    _write_jsonl(cache, "bx_deals", deals)
+    calls = [json.loads(line) for line in (cache / "bx_calls.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()]
+    calls[0] = {
+        **calls[0],
+        "ID": "51",
+        "CALL_ID": "51",
+        "CRM_ENTITY_TYPE": "COMPANY",
+        "CRM_ENTITY_ID": "888",
+    }
+    calls.append({
+        **calls[0],
+        "ID": "52",
+        "CALL_ID": "52",
+        "CRM_ENTITY_TYPE": "CONTACT",
+        "CRM_ENTITY_ID": "777",
+    })
+    _write_jsonl(cache, "bx_calls", calls)
+    sales = [json.loads(line) for line in (cache / "onec_sales.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()]
+    sales[0] = {
+        **sales[0],
+        "Контрагент_Key": "cp-missing",
+        "Товары": [{"Номенклатура_Key": "sku-missing", "Цена": "10"}],
+    }
+    sales.append({**sales[0], "Ref_Key": "second-shared-missing-sale"})
+    _write_jsonl(cache, "onec_sales", sales)
+
+    monkeypatch.setattr(module, "OUT_DIR", cache)
+    detail_rows = []
+    report = module._source_reconciliation(detail_rows=detail_rows)
+    relations = {row["relation"] for row in detail_rows}
+    assert relations == {
+        "deals_to_companies",
+        "calls_to_companies",
+        "calls_to_contacts",
+        "onec_sales_to_sku",
+        "onec_sales_to_counterparty",
+    }
+    assert {
+        row["source_id"]
+        for row in detail_rows
+        if row["dataset"].startswith("bitrix_")
+    } == {"31", "51", "52"}
+    onec_details = [row for row in detail_rows if row["dataset"] == "onec_sales"]
+    assert {(row["relation"], row["source_reference_id"]) for row in onec_details} == {
+        ("onec_sales_to_sku", "sku-missing"),
+        ("onec_sales_to_counterparty", "cp-missing"),
+    }
+    assert report["links"]["deals_to_companies"]["rows_missing"] == 1
+    assert report["links"]["calls_to_companies"]["rows_missing"] == 1
+    assert report["links"]["calls_to_contacts"]["rows_missing"] == 1
+    assert len(onec_details) == 4
+    assert {row["source_id"] for row in onec_details} == {
+        str(sales[0]["Ref_Key"]), "second-shared-missing-sale",
+    }
+    assert report["products"]["onec_item_refs_missing_sku"] == 1
+    assert report["products"]["onec_counterparty_refs_missing"] == 1
+
+
+@pytest.mark.asyncio
+async def test_private_detail_path_is_validated_before_any_write(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    aggregate_path = (tmp_path / "aggregate.json").resolve()
+    monkeypatch.setenv("IMPORT_RECONCILE_REPORT", str(aggregate_path))
+    monkeypatch.setenv("IMPORT_RECONCILE_DETAIL_REPORT", "relative-details.json")
+    monkeypatch.setattr(
+        module,
+        "_isolated_database",
+        lambda: pytest.fail("path validation must precede database access"),
+    )
+
+    with pytest.raises(RuntimeError, match="IMPORT_RECONCILE_DETAIL_REPORT"):
+        await module.reconcile()
+    assert not aggregate_path.exists()
+    assert not (Path("relative-details.json")).exists()
+
+
+@pytest.mark.asyncio
+async def test_private_report_collision_guard_preserves_inputs_and_skips_db(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    cache_file = cache / "bx_companies.jsonl"
+    cache_bytes = cache_file.read_bytes()
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    db_path.write_bytes(b"sqlite-input")
+    db_bytes = db_path.read_bytes()
+    _set_load_environment(monkeypatch, cache, db_path)
+    monkeypatch.setattr(
+        module,
+        "_isolated_database",
+        lambda: pytest.fail("collision validation must precede database access"),
+    )
+
+    detail_targets = [cache_file, db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")]
+    hardlink = tmp_path / "cache-hardlink.jsonl"
+    try:
+        os.link(cache_file, hardlink)
+    except OSError:
+        pass
+    else:
+        detail_targets.append(hardlink)
+
+    for index, detail_target in enumerate(detail_targets):
+        aggregate_path = (tmp_path / f"aggregate-{index}.json").resolve()
+        monkeypatch.setenv("IMPORT_RECONCILE_REPORT", str(aggregate_path))
+        monkeypatch.setenv("IMPORT_RECONCILE_DETAIL_REPORT", str(detail_target))
+        with pytest.raises(RuntimeError, match="IMPORT_RECONCILE_DETAIL_REPORT"):
+            await module.reconcile()
+        assert cache_file.read_bytes() == cache_bytes
+        assert db_path.read_bytes() == db_bytes
+        assert not aggregate_path.exists()
+
+    same_path = (tmp_path / "same.json").resolve()
+    monkeypatch.setenv("IMPORT_RECONCILE_REPORT", str(same_path))
+    monkeypatch.setenv("IMPORT_RECONCILE_DETAIL_REPORT", str(same_path))
+    with pytest.raises(RuntimeError, match="IMPORT_RECONCILE_REPORT"):
+        await module.reconcile()
+    assert not same_path.exists()

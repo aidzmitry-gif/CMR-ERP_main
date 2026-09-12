@@ -16,6 +16,8 @@ Load-only требует явных переменных ``IMPORT_CACHE_DIR`` (�
 ``AIOS_ENVIRONMENT=dev`` и ``AIOS_DATABASE_URL`` с абсолютным файлом
 ``sqlite+aiosqlite:///...``. При ``IMPORT_RECONCILE_REPORT`` сверка сохраняется
 как агрегированный JSON без исходных значений.
+При ``IMPORT_RECONCILE_DETAIL_REPORT`` дополнительно сохраняется приватный
+JSON с деталями расхождений; путь должен быть абсолютным.
 
 Идемпотентность load: контрагент — CounterpartyAlias(source, external_ref) + склейка по УНП;
 сделка — Deal.number = "BX-<id>"; звонок — CallLog.call_id; лид — служебный marker в message;
@@ -33,6 +35,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -200,11 +203,17 @@ def _load_cache_dir() -> Path:
     return OUT_DIR
 
 
-def _require_isolated_load() -> Path:
-    """Fail-closed guard для операций, которые пишут только из локального кэша."""
-    cache_dir = _load_cache_dir()
-    if os.getenv("AIOS_ENVIRONMENT", "").strip().lower() != "dev":
-        raise RuntimeError("load-only разрешён только при AIOS_ENVIRONMENT=dev")
+def _resolve_report_path(env_name: str) -> Path | None:
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise RuntimeError(f"{env_name} должен быть абсолютным путём")
+    return path
+
+
+def _isolated_database_path() -> Path:
     db_url = os.getenv("AIOS_DATABASE_URL", "").strip()
     prefix = "sqlite+aiosqlite:///"
     if not db_url.startswith(prefix):
@@ -214,7 +223,62 @@ def _require_isolated_load() -> Path:
     db_path = db_url[len(prefix):].split("?", 1)[0]
     if not db_path or db_path == ":memory:" or not Path(db_path).expanduser().is_absolute():
         raise RuntimeError("load-only требует абсолютный файловый путь SQLite")
+    return Path(db_path).expanduser().resolve()
+
+
+def _require_isolated_load() -> Path:
+    """Fail-closed guard для операций, которые пишут только из локального кэша."""
+    cache_dir = _load_cache_dir()
+    if os.getenv("AIOS_ENVIRONMENT", "").strip().lower() != "dev":
+        raise RuntimeError("load-only разрешён только при AIOS_ENVIRONMENT=dev")
+    _isolated_database_path()
     return cache_dir
+
+
+def _same_existing_path(left: Path, right: Path) -> bool:
+    try:
+        return left.exists() and right.exists() and left.samefile(right)
+    except OSError:
+        return False
+
+
+def _guard_report_paths(
+    cache_dir: Path,
+    db_path: Path,
+    aggregate_path: Path | None,
+    detail_path: Path | None,
+) -> None:
+    report_paths = [
+        ("IMPORT_RECONCILE_REPORT", aggregate_path),
+        ("IMPORT_RECONCILE_DETAIL_REPORT", detail_path),
+    ]
+    report_paths = [(name, path.resolve()) for name, path in report_paths if path is not None]
+    if not report_paths:
+        return
+
+    cache_root = cache_dir.resolve()
+    cache_entries = [cache_root, *cache_root.rglob("*")]
+    sqlite_targets = [
+        db_path.resolve(),
+        *[Path(f"{db_path}{suffix}").resolve() for suffix in ("-wal", "-shm", "-journal")],
+    ]
+    for name, path in report_paths:
+        try:
+            path.relative_to(cache_root)
+        except ValueError:
+            pass
+        else:
+            raise RuntimeError(f"{name} не должен указывать в IMPORT_CACHE_DIR")
+        if any(path == target or _same_existing_path(path, target) for target in cache_entries):
+            raise RuntimeError(f"{name} не должен совпадать с файлом кэша")
+        if any(path == target or _same_existing_path(path, target) for target in sqlite_targets):
+            raise RuntimeError(f"{name} не должен совпадать с SQLite DB или sidecar")
+
+    if len(report_paths) == 2:
+        first_name, first_path = report_paths[0]
+        second_name, second_path = report_paths[1]
+        if first_path == second_path or _same_existing_path(first_path, second_path):
+            raise RuntimeError(f"{first_name} и {second_name} должны быть разными файлами")
 
 
 def _isolated_database():
@@ -292,6 +356,8 @@ def _semantic_classification(
     expected_rows: list[dict],
     actual_rows: list[dict],
     alias_audit: dict,
+    detail_rows: list[dict] | None = None,
+    source_identity_ids: dict[str, str] | None = None,
 ) -> dict:
     """Сверить identity и поля; любое отличие требует ручной проверки."""
     expected_by_id = {str(row.get("identity")): row for row in expected_rows}
@@ -305,10 +371,28 @@ def _semantic_classification(
 
     changed_rows: set[str] = set()
     review_counts: dict[str, int] = {}
-    for identity in expected_ids & actual_ids:
+    source_identity_ids = source_identity_ids or {}
+    if detail_rows is not None:
+        for identity in sorted(missing):
+            detail_rows.append({
+                "kind": "missing_identity",
+                "dataset": name,
+                "source_id": source_identity_ids.get(identity, identity),
+                "identity": identity,
+            })
+        for identity in sorted(extra):
+            detail_rows.append({
+                "kind": "extra_identity",
+                "dataset": name,
+                "destination_identity": identity,
+                "identity": identity,
+            })
+
+    for identity in sorted(expected_ids & actual_ids):
         expected = expected_by_id[identity]
         actual = actual_by_id[identity]
-        for field in set(expected) | set(actual):
+        field_diffs: dict[str, dict[str, object]] = {}
+        for field in sorted(set(expected) | set(actual)):
             if field == "identity":
                 continue
             if _semantic_value(expected.get(field)) == _semantic_value(actual.get(field)):
@@ -318,6 +402,45 @@ def _semantic_classification(
             # retaining which semantic field requires review.
             review_field = f"changed_{field}"
             review_counts[review_field] = review_counts.get(review_field, 0) + 1
+            if detail_rows is not None:
+                field_diffs[field] = {
+                    "source": _semantic_value(expected.get(field)),
+                    "destination": _semantic_value(actual.get(field)),
+                }
+        if detail_rows is not None and field_diffs:
+            detail_rows.append({
+                "kind": "semantic_difference",
+                "dataset": name,
+                "source_id": source_identity_ids.get(identity, identity),
+                "identity": identity,
+                "changed_fields": sorted(field_diffs),
+                "source": {field: field_diffs[field]["source"] for field in sorted(field_diffs)},
+                "destination": {
+                    field: field_diffs[field]["destination"] for field in sorted(field_diffs)
+                },
+            })
+
+    if detail_rows is not None:
+        source_identity_counts = Counter(str(row.get("identity")) for row in expected_rows)
+        destination_identity_counts = Counter(str(row.get("identity")) for row in actual_rows)
+        if duplicate_source:
+            for identity in sorted(expected_ids):
+                if source_identity_counts[identity] > 1:
+                    detail_rows.append({
+                        "kind": "duplicate_source_identity",
+                        "dataset": name,
+                        "source_id": source_identity_ids.get(identity, identity),
+                        "identity": identity,
+                    })
+        if duplicate_destination:
+            for identity in sorted(actual_ids):
+                if destination_identity_counts[identity] > 1:
+                    detail_rows.append({
+                        "kind": "duplicate_destination_identity",
+                        "dataset": name,
+                        "destination_identity": identity,
+                        "identity": identity,
+                    })
 
     if missing and extra:
         status = "missing_and_extra_identity"
@@ -385,7 +508,9 @@ def _expected_stock_semantic_rows(sku_rows: list[dict], sales_rows: list[dict]) 
     ]
 
 
-def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
+def _source_reconciliation(
+    *, include_semantic_rows: bool = False, detail_rows: list[dict] | None = None
+) -> dict:
     """Собрать безопасную агрегированную сверку кэша без вывода исходных значений."""
     files = {path.stem: _load_jsonl(path.stem) for path in sorted(OUT_DIR.glob("*.jsonl"))}
     users = files.get("bx_users", [])
@@ -482,7 +607,59 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         for row in requisites
         if row.get("ENTITY_ID") not in (None, "", "0")
     )
+    if detail_rows is not None:
+        def append_missing_links(
+            dataset: str,
+            relation: str,
+            rows: list[dict],
+            source_id_field: str,
+            source_field: str,
+            target_ids: set[str],
+            predicate=None,
+        ) -> None:
+            for row in rows:
+                if predicate is not None and not predicate(row):
+                    continue
+                reference = row.get(source_field)
+                if reference in (None, "", "0") or str(reference) in target_ids:
+                    continue
+                source_id = str(row.get(source_id_field) or row.get("ID") or "")
+                detail_rows.append({
+                    "kind": "missing_link",
+                    "dataset": dataset,
+                    "relation": relation,
+                    "source_id": source_id,
+                    "source_field": source_field,
+                    "source_reference_id": str(reference),
+                })
 
+        append_missing_links(
+            "bitrix_deals", "deals_to_companies", deals, "ID", "COMPANY_ID", company_ids
+        )
+        append_missing_links(
+            "bitrix_deals", "deals_to_contacts", deals, "ID", "CONTACT_ID", contact_ids
+        )
+        append_missing_links(
+            "bitrix_deals", "deals_to_users", deals, "ID", "ASSIGNED_BY_ID", user_ids
+        )
+        append_missing_links(
+            "bitrix_calls", "calls_to_companies", calls, "CALL_ID", "CRM_ENTITY_ID", company_ids,
+            lambda row: row.get("CRM_ENTITY_TYPE") == "COMPANY",
+        )
+        append_missing_links(
+            "bitrix_calls", "calls_to_contacts", calls, "CALL_ID", "CRM_ENTITY_ID", contact_ids,
+            lambda row: row.get("CRM_ENTITY_TYPE") == "CONTACT",
+        )
+        append_missing_links(
+            "bitrix_calls", "calls_to_users", calls, "CALL_ID", "PORTAL_USER_ID", user_ids,
+        )
+        append_missing_links(
+            "bitrix_leads", "leads_to_users", leads, "ID", "ASSIGNED_BY_ID", user_ids
+        )
+        append_missing_links(
+            "bitrix_requisites", "requisites_to_companies", requisites,
+            "ID", "ENTITY_ID", company_ids,
+        )
     categories = {}
     for row in deals:
         category = str(row.get("CATEGORY_ID") or "0")
@@ -530,6 +707,40 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         for row in onec_counterparties
         if row.get("Ref_Key")
     }
+    if detail_rows is not None:
+        missing_item_refs = item_refs - sku_refs
+        item_source_pairs: set[tuple[str, str]] = set()
+        for doc in onec_sales:
+            sale_id = str(doc.get("Ref_Key") or "")
+            for item in doc.get("Товары") or []:
+                item_ref = str(item.get("Номенклатура_Key") or "")
+                if item_ref in missing_item_refs:
+                    item_source_pairs.add((sale_id, item_ref))
+        for sale_id, item_ref in sorted(item_source_pairs):
+            detail_rows.append({
+                "kind": "missing_link",
+                "dataset": "onec_sales",
+                "relation": "onec_sales_to_sku",
+                "source_id": sale_id,
+                "source_field": "Товары[].Номенклатура_Key",
+                "source_reference_id": item_ref,
+            })
+        missing_counterparty_refs = sale_counterparty_refs - counterparty_refs
+        counterparty_source_pairs: set[tuple[str, str]] = set()
+        for doc in onec_sales:
+            sale_id = str(doc.get("Ref_Key") or "")
+            counterparty_ref = str(doc.get("Контрагент_Key") or "")
+            if counterparty_ref in missing_counterparty_refs:
+                counterparty_source_pairs.add((sale_id, counterparty_ref))
+        for sale_id, counterparty_ref in sorted(counterparty_source_pairs):
+            detail_rows.append({
+                "kind": "missing_link",
+                "dataset": "onec_sales",
+                "relation": "onec_sales_to_counterparty",
+                "source_id": sale_id,
+                "source_field": "Контрагент_Key",
+                "source_reference_id": counterparty_ref,
+            })
     dedicated_activity_names = {
         "bx_activities",
         "bx_messages",
@@ -595,6 +806,7 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         value = str(company_id or "")
         return f"company:{value}" if value in company_ids else None
 
+    source_identity_ids: dict[str, dict[str, str]] = {}
     source_company_semantic = [
         {
             "identity": f"company:{company_id}",
@@ -603,6 +815,10 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         }
         for company_id, row in sorted(companies_by_id.items())
     ]
+    source_identity_ids["bitrix_companies"] = {
+        row["identity"]: row["identity"].removeprefix("company:")
+        for row in source_company_semantic
+    }
     source_contact_semantic = []
     seen_contact_keys: set[tuple[str, str | None, str | None]] = set()
     for row in contacts:
@@ -611,9 +827,13 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         if key in seen_contact_keys:
             continue
         seen_contact_keys.add(key)
+        identity = _opaque_identity("contact", full_name, phone, email)
+        source_identity_ids.setdefault("bitrix_contacts", {}).setdefault(
+            identity, str(row.get("ID") or "")
+        )
         source_contact_semantic.append(
             {
-                "identity": _opaque_identity("contact", full_name, phone, email),
+                "identity": identity,
                 "full_name": full_name,
                 "phone": phone,
                 "email": email,
@@ -638,9 +858,13 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         created = _naive(row.get("DATE_CREATE")) or datetime.fromisoformat(FROM_ISO)
         closed = _naive(row.get("CLOSEDATE"))
         terminal = stage in ("won", "lost", "rp_won", "rp_lost")
+        identity = f"BX-{row.get('ID')}"
+        source_identity_ids.setdefault("bitrix_deals", {}).setdefault(
+            identity, str(row.get("ID") or "")
+        )
         source_deal_semantic.append(
             {
-                "identity": f"BX-{row.get('ID')}",
+                "identity": identity,
                 "title": (row.get("TITLE") or f"BX-{row.get('ID')}")[:255],
                 "counterparty": counterparty[:255] or "Не указан",
                 "amount": _dec(row.get("OPPORTUNITY")),
@@ -656,6 +880,9 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
     source_lead_semantic = []
     for row in leads:
         marker = f"{LEAD_IMPORT_MARKER}{row.get('ID')}"
+        source_identity_ids.setdefault("bitrix_leads", {}).setdefault(
+            marker, str(row.get("ID") or "")
+        )
         name = f"{row.get('NAME') or ''} {row.get('LAST_NAME') or ''}".strip()
         source_lead_semantic.append(
             {
@@ -676,6 +903,9 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
     source_call_semantic = []
     for row in calls:
         call_id = str(row.get("CALL_ID") or row.get("ID"))[:64]
+        source_identity_ids.setdefault("bitrix_calls", {}).setdefault(
+            call_id, str(row.get("ID") or call_id)
+        )
         started = _naive(row.get("CALL_START_DATE")) or datetime.fromisoformat(FROM_ISO)
         duration = int(row.get("CALL_DURATION") or 0)
         answered = str(row.get("CALL_FAILED_CODE") or "") == "200" and duration > 0
@@ -718,6 +948,9 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         if row.get("Posted") is False:
             continue
         entity_ref = f"1c:sale:{row.get('Ref_Key')}"
+        source_identity_ids.setdefault("onec_payments", {}).setdefault(
+            entity_ref, str(row.get("Ref_Key") or "")
+        )
         number = (row.get("Number") or "").strip()
         source_payment_semantic.append(
             {
@@ -744,6 +977,16 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
         for row in onec_sku
         if (row.get("Code") or "").strip()
     ]
+    source_identity_ids["onec_sku"] = {
+        str(row.get("Code") or "").strip(): str(row.get("Ref_Key") or "")
+        for row in onec_sku
+        if (row.get("Code") or "").strip()
+    }
+    source_identity_ids["onec_stock_prices"] = {
+        f"{row.get('Code').strip()}|Главный": str(row.get("Ref_Key") or row.get("Code") or "")
+        for row in onec_sku
+        if (row.get("Code") or "").strip()
+    }
     source_semantic_rows = {
         "bitrix_companies": source_company_semantic,
         "bitrix_contacts": source_contact_semantic,
@@ -789,6 +1032,7 @@ def _source_reconciliation(*, include_semantic_rows: bool = False) -> dict:
     # в печатаемый/сохраняемый aggregate report: там могут быть PII из локального кэша.
     if include_semantic_rows:
         report["_semantic_rows"] = source_semantic_rows
+        report["_source_identity_ids"] = source_identity_ids
     return report
 
 
@@ -1341,7 +1585,11 @@ async def load_onec() -> None:
 
 
 async def _destination_reconciliation(
-    db, source_report: dict, source_semantic_rows: dict[str, list[dict]] | None = None
+    db,
+    source_report: dict,
+    source_semantic_rows: dict[str, list[dict]] | None = None,
+    detail_rows: list[dict] | None = None,
+    source_identity_ids: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     from core.domain.models import Contact, Counterparty, CounterpartyAlias, Sku, User
     from modules.finance.models import Payment, PaymentAllocation
@@ -1359,6 +1607,7 @@ async def _destination_reconciliation(
     source_records = source_report["source"]["records"]
     expected_deals = source_report["stages"]["supported_deal_rows"]
     source_semantic = source_report["semantic"]
+    source_identity_ids = source_identity_ids or {}
     async with db.session_factory() as session:
         counts = {
             "counterparties": await count(Counterparty),
@@ -1575,6 +1824,29 @@ async def _destination_reconciliation(
         counts["deals_with_ambiguous_counterparty_name"] = sum(
             row.counterparty in ambiguous_counterparty_names for row in deals
         )
+        if detail_rows is not None:
+            source_deals_by_identity = {
+                str(row.get("identity")): row
+                for row in (source_semantic_rows or {}).get("bitrix_deals", [])
+            }
+            deal_source_ids = source_identity_ids.get("bitrix_deals", {})
+            for row in sorted(deals, key=lambda item: str(item.number)):
+                if row.counterparty not in ambiguous_counterparty_names:
+                    continue
+                expected = source_deals_by_identity.get(str(row.number), {})
+                detail_rows.append({
+                    "kind": "ambiguous_deal_counterparty",
+                    "dataset": "bitrix_deals",
+                    "source_id": deal_source_ids.get(str(row.number), str(row.number)),
+                    "identity": row.number,
+                    "destination_id": row.id,
+                    "changed_fields": ["counterparty"],
+                    "source": {
+                        "counterparty": _semantic_value(expected.get("counterparty")),
+                    },
+                    "destination": {"counterparty": _semantic_value(row.counterparty)},
+                    "reason": "distinct active counterparties share this name",
+                })
         destination_semantic_rows["bitrix_deals"] = [
             {
                 "identity": row.number,
@@ -1703,6 +1975,8 @@ async def _destination_reconciliation(
                 source_semantic_rows.get(name, []),
                 destination_semantic_rows[name],
                 alias_audit,
+                detail_rows,
+                source_identity_ids.get(name),
             ),
         }
 
@@ -1765,16 +2039,32 @@ async def _destination_reconciliation(
 
 async def reconcile() -> None:
     """Сверить локальный кэш с изолированной БД и вывести только агрегаты."""
-    _require_isolated_load()
-    source_report = _source_reconciliation(include_semantic_rows=True)
+    aggregate_path = _resolve_report_path("IMPORT_RECONCILE_REPORT")
+    detail_path = _resolve_report_path("IMPORT_RECONCILE_DETAIL_REPORT")
+    cache_dir = _require_isolated_load()
+    _guard_report_paths(
+        cache_dir,
+        _isolated_database_path(),
+        aggregate_path,
+        detail_path,
+    )
+    detail_rows = [] if detail_path is not None else None
+    source_report = _source_reconciliation(
+        include_semantic_rows=True, detail_rows=detail_rows
+    )
     source_semantic_rows = source_report.pop("_semantic_rows")
+    source_identity_ids = source_report.pop("_source_identity_ids", {})
     db = _isolated_database()
     if db.is_sqlite:
         await db.connect()
     assert db.session_factory is not None
     try:
         destination_report = await _destination_reconciliation(
-            db, source_report, source_semantic_rows
+            db,
+            source_report,
+            source_semantic_rows,
+            detail_rows,
+            source_identity_ids,
         )
     finally:
         await db.disconnect()
@@ -1858,13 +2148,40 @@ async def reconcile() -> None:
                 "remain ambiguous until a counterparty_id link is introduced"
             ),
         })
-    report_path = os.getenv("IMPORT_RECONCILE_REPORT", "").strip()
-    if report_path:
-        path = Path(report_path).expanduser()
-        if not path.is_absolute():
-            raise RuntimeError("IMPORT_RECONCILE_REPORT должен быть абсолютным путём")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if aggregate_path is not None:
+        aggregate_path.parent.mkdir(parents=True, exist_ok=True)
+        aggregate_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    if detail_path is not None:
+        details = sorted(
+            detail_rows or [],
+            key=lambda row: (
+                str(row.get("dataset", "")),
+                str(row.get("kind", "")),
+                str(row.get("source_id", "")),
+                str(row.get("identity", "")),
+                json.dumps(row, ensure_ascii=False, sort_keys=True, default=_semantic_value),
+            ),
+        )
+        private_report = {
+            "schema": 1,
+            "period": LABEL,
+            "aggregate": report,
+            "rows": details,
+        }
+        detail_path.parent.mkdir(parents=True, exist_ok=True)
+        detail_path.write_text(
+            json.dumps(
+                private_report,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=_semantic_value,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
 
 
