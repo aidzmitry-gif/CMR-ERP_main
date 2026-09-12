@@ -157,7 +157,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
           {/* RIGHT — клиент / постоянный / переписка / связанные / действия */}
           <div className="min-w-0 space-y-4">
-            <DealClient360 company={d.company} roles={roles} />
+            <DealClient360 counterpartyId={d.counterparty?.id} roles={roles} />
             <DealContacts dealId={id} />
             <DealMessages dealId={id} />
             <DealLinkedDeals company={d.company} currentId={id} roles={roles} />

@@ -2,45 +2,18 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchCounterpartyCardResult, type CounterpartyCard } from "@/lib/reference-data";
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
 
-const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 const SOURCE_LABEL: Record<string, string> = { "1c": "1С", bitrix: "Bitrix", erp: "ERP", egr: "ЕГР" };
 
-/** Резолв контрагента сделки (free-text имя) в MDM по имени → id эталона (или null). */
-async function resolveId(company: string, headers: Record<string, string>): Promise<{ id: number | null; error?: string }> {
-  try {
-    const res = await fetch(`${BASE}/system/references/query`, {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ ref: "core.counterparties", name: company, limit: 1 }),
-    });
-    if (res.status === 401) return { id: null, error: "Для просмотра досье клиента войдите снова." };
-    if (res.status === 403) return { id: null, error: "Нет доступа к досье клиента." };
-    if (!res.ok) return { id: null, error: "Не удалось загрузить досье клиента. Обновите страницу." };
-    const rows = ((await res.json())?.result ?? []) as { id: number }[];
-    return { id: rows[0]?.id ?? null };
-  } catch {
-    return { id: null, error: "Не удалось загрузить досье клиента. Обновите страницу." };
-  }
-}
-
-/**
- * Мини-досье 360° по контрагенту сделки (SSR). Резолвит компанию в MDM по имени и
- * показывает golden record: УНП, источники (1С/Bitrix/ЕГР — единая личность клиента из
- * синхронизированных систем), первичный контакт и сводку касаний. Honest-empty, если в MDM
- * нет совпадения — контрагентов 1С грузит сессия Справочников, досье «оживёт» по мере загрузки.
- * Читает только core-эндпоинты (`/system/references/query`, `/system/mdm/counterparty/{id}`).
- */
-export async function DealClient360({ company, roles }: { company: string; roles?: string }) {
-  const headers = company?.trim() ? await backendAuthHeaders(roles) : {};
-  const resolved = company?.trim() ? await resolveId(company, headers) : { id: null };
-  const result = resolved.id == null ? null : await fetchCounterpartyCardResult(resolved.id, roles, headers);
+/** Досье однозначного контрагента, уже разрешённого сервером в карточке сделки. */
+export async function DealClient360({ counterpartyId, roles }: { counterpartyId?: number; roles?: string }) {
+  const result = counterpartyId == null ? null
+    : await fetchCounterpartyCardResult(counterpartyId, roles, await backendAuthHeaders(roles));
   const card = result?.status === "success" ? result.card : null;
-  const error = resolved.error ?? (result?.status === "unauthorized"
+  const error = result?.status === "unauthorized"
     ? "Для просмотра досье клиента войдите снова."
     : result?.status === "forbidden" ? "Нет доступа к досье клиента."
-    : result?.status === "service-error" ? "Не удалось загрузить досье клиента. Обновите страницу." : null);
-
+    : result?.status === "service-error" || result?.status === "invalid-id"
+      ? "Не удалось загрузить досье клиента. Обновите страницу." : null;
   return (
     <Card className="px-[18px] py-[14px]">
       <CardHeader>

@@ -10,8 +10,7 @@ vi.mock("@/lib/auth-headers-server", () => ({
   }),
 }));
 
-// Компонент — async server component: сам ходит в /system/references/query (резолв имени →
-// id) и /system/mdm/counterparty/{id} (карточка). Мокаем глобальный fetch по URL.
+// Server component читает досье по ID, полученному из карточки сделки.
 function stubFetch(
   handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
 ) {
@@ -21,9 +20,7 @@ function stubFetch(
   );
 }
 
-function queryResponse(rows: { id: number }[]): Response {
-  return { ok: true, json: () => Promise.resolve({ result: rows }) } as Response;
-}
+
 
 function cardFixture(over: Partial<CounterpartyCard> = {}): CounterpartyCard {
   return {
@@ -48,34 +45,34 @@ function cardFixture(over: Partial<CounterpartyCard> = {}): CounterpartyCard {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DealClient360", () => {
-  it("пустое имя компании — honest-empty, fetch вообще не вызывается", async () => {
+  it("контрагент сделки не определён — honest-empty, fetch вообще не вызывается", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    render(await DealClient360({ company: "   " }));
+    render(await DealClient360({ counterpartyId: undefined }));
     expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("контрагент не резолвится в MDM (query вернул пусто) — honest-empty", async () => {
-    stubFetch(() => queryResponse([]));
-    render(await DealClient360({ company: "Незнакомая компания" }));
+  it("сервер сделки не передал ID контрагента — honest-empty", async () => {
+    stubFetch(() => { throw new Error("unexpected lookup"); });
+    render(await DealClient360({ counterpartyId: undefined }));
     expect(screen.getByText("Досье клиента пока недоступно.")).toBeInTheDocument();
     expect(screen.queryByText(/MDM|отдельная сессия|после загрузки/)).toBeNull();
   });
 
-  it("query-запрос падает (500) — ошибка загрузки вместо пустого досье", async () => {
+  it("запрос досье падает (500) — ошибка загрузки вместо пустого досье", async () => {
     stubFetch(() => ({ ok: false } as Response));
-    render(await DealClient360({ company: "Компания" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить досье клиента");
   });
 
-  it("резолвится и карточка найдена — показывает УНП, источник и контакт", async () => {
+  it("карточка по ID найдена — показывает УНП, источник и контакт", async () => {
     stubFetch((url) =>
       url.includes("/system/mdm/counterparty/")
         ? ({ ok: true, json: () => Promise.resolve(cardFixture()) } as Response)
-        : queryResponse([{ id: 42 }]),
+        : new Response(null, { status: 404 }),
     );
-    render(await DealClient360({ company: "ООО Ромашка" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByText("192766048")).toBeInTheDocument();
     expect(screen.getByText("1С")).toBeInTheDocument(); // маппинг SOURCE_LABEL["1c"]
     expect(screen.getByText("Иван Иванов")).toBeInTheDocument();
@@ -87,9 +84,9 @@ describe("DealClient360", () => {
     stubFetch((url) =>
       url.includes("/system/mdm/counterparty/")
         ? ({ ok: true, json: () => Promise.resolve(cardFixture({ unp: null })) } as Response)
-        : queryResponse([{ id: 42 }]),
+        : new Response(null, { status: 404 }),
     );
-    render(await DealClient360({ company: "ООО Ромашка" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
@@ -101,9 +98,9 @@ describe("DealClient360", () => {
             json: () =>
               Promise.resolve(cardFixture({ is_active: false, merged_into_id: 7 })),
           } as Response)
-        : queryResponse([{ id: 42 }]),
+        : new Response(null, { status: 404 }),
     );
-    render(await DealClient360({ company: "ООО Ромашка" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByText("неактивен")).toBeInTheDocument();
     expect(screen.getByText("слит")).toBeInTheDocument();
   });
@@ -125,9 +122,9 @@ describe("DealClient360", () => {
                 }),
               ),
           } as Response)
-        : queryResponse([{ id: 42 }]),
+        : new Response(null, { status: 404 }),
     );
-    render(await DealClient360({ company: "ООО Ромашка" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByText(/📞 11 зв\./)).toBeInTheDocument();
     expect(screen.getByText(/🤝 4 сд\./)).toBeInTheDocument();
     expect(screen.getByText(/💬 27 сообщ\./)).toBeInTheDocument();
@@ -142,41 +139,33 @@ describe("DealClient360", () => {
             ok: true,
             json: () => Promise.resolve(cardFixture({ touch_summary: null })),
           } as Response)
-        : queryResponse([{ id: 42 }]),
+        : new Response(null, { status: 404 }),
     );
-    render(await DealClient360({ company: "ООО Ромашка" }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.queryByText(/зв\./)).not.toBeInTheDocument();
   });
 
-  it("роли пробрасываются заголовком X-User-Roles в оба запроса", async () => {
-    let queryHeaders: HeadersInit | undefined;
+  it("досье читается по точному ID с ролью и bearer без поиска по имени", async () => {
+
     let cardHeaders: HeadersInit | undefined;
     stubFetch((url, init) => {
       if (url.includes("/system/mdm/counterparty/")) {
         cardHeaders = init?.headers;
         return { ok: true, json: () => Promise.resolve(cardFixture()) } as Response;
       }
-      queryHeaders = init?.headers;
-      return queryResponse([{ id: 42 }]);
+      throw new Error("unexpected name lookup");
     });
-    render(await DealClient360({ company: "ООО Ромашка", roles: "rop,sales" }));
-    expect((queryHeaders as Record<string, string>)["X-User-Roles"]).toBe("rop,sales");
+    render(await DealClient360({ counterpartyId: 42, roles: "rop,sales" }));
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect((cardHeaders as Record<string, string>)["X-User-Roles"]).toBe("rop,sales");
-    expect((queryHeaders as Record<string, string>).Authorization).toBe("Bearer synthetic-session-token");
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/system/mdm/counterparty/42"), expect.anything());
     expect((cardHeaders as Record<string, string>).Authorization).toBe("Bearer synthetic-session-token");
-  });
-
-  it.each([401, 403])("отказ %s при поиске не маскируется отсутствием клиента", async (status) => {
-    stubFetch(() => ({ ok: false, status } as Response));
-    render(await DealClient360({ company: "Компания" }));
-    expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "войдите снова" : "Нет доступа");
-    expect(screen.queryByText("Досье клиента пока недоступно.")).not.toBeInTheDocument();
   });
 
   it.each([401, 403, 500])("отказ %s при чтении карточки отображается явно", async (status) => {
     stubFetch((url) => url.includes("/system/mdm/counterparty/")
-      ? { ok: false, status } as Response : queryResponse([{ id: 42 }]));
-    render(await DealClient360({ company: "Компания" }));
+      ? { ok: false, status } as Response : new Response(null, { status: 404 }));
+    render(await DealClient360({ counterpartyId: 42 }));
     expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "войдите снова" : status === 403 ? "Нет доступа" : "Не удалось загрузить");
   });
 });
