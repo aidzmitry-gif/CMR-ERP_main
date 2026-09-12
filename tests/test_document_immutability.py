@@ -20,7 +20,7 @@ async def test_issued_invoice_stays_unchanged_after_new_customer_quote(api, sess
     })
     assert deal_response.status_code == 201, deal_response.text
     deal_id = deal_response.json()["id"]
-    item = await api.post(f"/sales/deals/{deal_id}/items", json={"sku_id": sku.id, "qty": 2})
+    item = await api.post(f"/sales/deals/{deal_id}/items", json={"sku_id": sku.id, "qty": 2, "unit_price": "100.00"})
     assert item.status_code == 201, item.text
     invoice = await api.post(f"/sales/deals/{deal_id}/documents", json={"kind": "invoice"})
     assert invoice.status_code == 201, invoice.text

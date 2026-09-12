@@ -695,7 +695,7 @@ async def test_lead_converted_event_carries_items(session, api):
     await api.post(f"/leads/{lead_id}/route")
     await api.put(
         f"/leads/{lead_id}/items",
-        json=[{"sku_id": 7, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
+        json=[{"sku_id": 7, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 285, "discount_pct": 5}],
     )
 
     converted = (await api.post(f"/leads/{lead_id}/convert")).json()
@@ -708,9 +708,9 @@ async def test_lead_converted_event_carries_items(session, api):
     items = ev.payload["items"]
     assert len(items) == 1
     assert items[0]["sku_code"] == "6СТ-190"
-    assert items[0]["qty"] == 2 and items[0]["price"] == 300 and items[0]["discount_pct"] == 5
+    assert items[0]["qty"] == 2 and items[0]["price"] == 285 and items[0]["discount_pct"] == 5
 
-    # sales.on_lead_converted перенёс КП в DealItem + amount (2×300×0.95 = 570)
+    # sales.on_lead_converted перенёс КП в DealItem + amount (2×285 = 570, скидка уже в цене).
     deal_items = (await api.get(f"/sales/deals/{converted['deal_id']}/items")).json()
     assert len(deal_items) == 1
     assert deal_items[0]["sku_id"] == 7 and float(deal_items[0]["qty"]) == 2
@@ -1982,23 +1982,14 @@ async def test_rbac_sales_cli_cannot_route(session, api):
 
 
 async def test_lead_converted_creates_price_quote_for_invoice(session, api):
-    """S3: конвертация лида с КП создаёт PriceQuote → счёт клиенту НЕ с нулями.
-
-    Печать счёта (routes._invoice_items) берёт цену позиции ТОЛЬКО из
-    PriceQuote(sku_code, counterparty). До фикса on_lead_converted писал
-    DealItem+amount, но не PriceQuote → верная сумма сделки, но счёт печатался
-    с нулевой ценой. Цена в котировке — ПОСЛЕ скидки (unit×qty == сумма позиции
-    сделки), иначе счёт (net=qty×price, скидку не применяет) переставил бы
-    клиенту цену выше согласованной в КП.
-    """
+    """Конвертация сохраняет цену строки после скидки и отдельную историю котировок."""
     from decimal import Decimal
 
     from core.domain.models import Sku
     from modules.sales.models import Deal, PriceQuote
     from modules.sales.routes import _invoice_items
 
-    # Счёт резолвит Sku по DealItem.sku_id → sku.code и по нему ищет PriceQuote:
-    # мастер-данные должны существовать, иначе цена в счёте = 0 независимо от котировки.
+    # Мастер-данные дают наименование и единицу, цена принадлежит строке сделки.
     sku = Sku(code="6СТ-190", title="АКБ 190", unit="шт")
     session.add(sku)
     await session.flush()
@@ -2012,16 +2003,18 @@ async def test_lead_converted_creates_price_quote_for_invoice(session, api):
     lead_id = lead["id"]
     await api.post(f"/leads/{lead_id}/qualify")
     await api.post(f"/leads/{lead_id}/route")
-    await api.put(
+    saved = await api.put(
         f"/leads/{lead_id}/items",
-        json=[{"sku_id": sku.id, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 300, "discount_pct": 5}],
+        json=[{"sku_id": sku.id, "sku_code": "6СТ-190", "name": "АКБ 190", "qty": 2, "price": 285, "discount_pct": 5}],
     )
+    assert saved.status_code == 200 and saved.json()[0]["price"] == 285
+    assert (await api.get(f"/leads/{lead_id}")).json()["items_total"] == 570
 
     converted = (await api.post(f"/leads/{lead_id}/convert")).json()
     deal_id = converted["deal_id"]
     assert deal_id is not None
 
-    # PriceQuote создан один, цена ПОСЛЕ скидки: 300 × (1 − 5%) = 285.00
+    # PriceQuote создан один с сохранённой NET-ценой: справочные 5% повторно не вычитаются.
     quotes = (
         await session.execute(select(PriceQuote).where(PriceQuote.sku_code == "6СТ-190"))
     ).scalars().all()
@@ -2036,3 +2029,37 @@ async def test_lead_converted_creates_price_quote_for_invoice(session, api):
     assert items[0]["price"] == Decimal("285.00")
     # позиция счёта (unit×qty) сходится с суммой сделки: 2×285 = 570 = Deal.amount
     assert Decimal(items[0]["qty"]) * items[0]["price"] == deal.amount == Decimal("570.00")
+    session.add(PriceQuote(sku_code=sku.code, counterparty=deal.counterparty, price=Decimal("999")))
+    await session.commit()
+    assert (await _invoice_items(session, deal_id))[0]["price"] == Decimal("285.00")
+
+
+async def test_converted_net_unit_price_ignores_discount_metadata_and_preserves_zero(session, api):
+    from decimal import Decimal
+
+    from core.domain.models import Sku
+    from modules.leads.models import Lead
+    from modules.sales.models import Deal, DealItem
+
+    sku = Sku(code="CONFIRMED-DISCOUNT", title="Synthetic", unit="шт")
+    session.add(sku)
+    await session.flush()
+    for discount, expected in ((5, Decimal("1.01")), (100, Decimal("0.00"))):
+        lead = Lead(source="site", company="Synthetic discount", status="routed",
+                    assigned_to="Иванов И.И.")
+        session.add(lead)
+        await session.flush()
+        await session.commit()
+        saved = await api.put(f"/leads/{lead.id}/items", json=[{
+            "sku_id": sku.id, "sku_code": sku.code, "name": sku.title,
+            "qty": 3, "price": float(expected), "discount_pct": discount,
+        }])
+        assert saved.status_code == 200, saved.text
+        assert Decimal(str(saved.json()[0]["price"])) == expected
+        assert Decimal(str((await api.get(f"/leads/{lead.id}")).json()["items_total"])) == expected * 3
+        converted = await api.post(f"/leads/{lead.id}/convert")
+        assert converted.status_code == 201, converted.text
+        deal_id = converted.json()["deal_id"]
+        item = (await session.execute(select(DealItem).where(DealItem.deal_id == deal_id))).scalar_one()
+        assert item.unit_price == expected
+        assert (await session.get(Deal, deal_id)).amount == expected * 3

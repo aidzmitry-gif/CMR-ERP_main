@@ -1,6 +1,9 @@
 """БД-тесты «Сделки 2.0»: отказ+причины (SALES-40), история стадий (SALES-43),
 прогноз (SALES-44), счётчик непрочитанных (SALES-49). SQLite в памяти."""
 from datetime import date, datetime, timezone
+from decimal import Decimal
+
+import pytest
 
 
 async def _new_deal(api, number, **extra):
@@ -8,6 +11,133 @@ async def _new_deal(api, number, **extra):
     r = await api.post("/sales/deals", json=payload)
     assert r.status_code == 201
     return r.json()
+
+
+async def test_confirmed_item_prices_are_independent_and_original_stays_fixed(api, session):
+    from modules.sales.models import PriceQuote
+    from modules.sales.routes import _invoice_items
+
+    sku = await _seed_sku(session, "CONFIRMED-PRICE")
+    a = await _new_deal(api, "PRICE-A", counterparty="Synthetic buyer")
+    b = await _new_deal(api, "PRICE-B", counterparty="Synthetic buyer")
+    lines = []
+    for deal, price in ((a, "100.00"), (b, "250.00")):
+        response = await api.post(
+            f"/sales/deals/{deal['id']}/items",
+            json={"sku_id": sku.id, "qty": 2, "unit_price": price},
+        )
+        assert response.status_code == 201, response.text
+        lines.append(response.json())
+        session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal(price)))
+        await session.commit()
+
+    documents = []
+    for deal, expected in ((a, Decimal("100")), (b, Decimal("250"))):
+        assert (await _invoice_items(session, deal["id"]))[0]["price"] == expected
+        detail = (await api.get(f"/sales/deals/{deal['id']}")).json()
+        assert Decimal(str(detail["items"][0]["unit_price"])) == expected
+        listed = (await api.get(f"/sales/deals/{deal['id']}/items")).json()
+        assert Decimal(str(listed[0]["unit_price"])) == expected
+        margin = (await api.get(f"/sales/deals/{deal['id']}/margin")).json()
+        assert Decimal(str(margin["lines"][0]["unit_price"])) == expected
+        issued = await api.post(
+            f"/sales/deals/{deal['id']}/documents",
+            json={"kind": "invoice", "reserve_mode": "on_order"},
+        )
+        assert issued.status_code == 201, issued.text
+        doc = issued.json()
+        assert Decimal(str(doc["amount"])) == expected * 2 * Decimal("1.20")
+        documents.append(doc)
+
+    original_id = documents[0]["id"]
+    before = await api.get(f"/sales/documents/{original_id}/render")
+    assert before.status_code == 200, before.text
+    session.add(PriceQuote(sku_code=sku.code, counterparty=a["counterparty"], price=Decimal("999")))
+    await session.commit()
+    assert (await _invoice_items(session, a["id"]))[0]["price"] == Decimal("100")
+    changed = await api.patch(f"/sales/deal-items/{lines[0]['id']}", json={"unit_price": "120.00"})
+    assert changed.status_code == 200, changed.text
+    after = await api.get(f"/sales/documents/{original_id}/render")
+    assert after.status_code == 200
+    assert after.content == before.content
+    persisted = (await api.get(f"/sales/deals/{a['id']}/documents")).json()[0]
+    assert persisted["content_sha256"] == documents[0]["content_sha256"]
+    assert persisted["amount"] == 240.0
+
+
+async def test_item_null_zero_and_partial_update_contract(api, session):
+    from modules.sales.models import PriceQuote
+    from modules.sales.routes import _invoice_items
+
+    sku = await _seed_sku(session, "CONFIRMED-ZERO")
+    deal = await _new_deal(api, "PRICE-ZERO", counterparty="Synthetic zero")
+    session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("999")))
+    await session.commit()
+    added = await api.post(f"/sales/deals/{deal['id']}/items", json={"sku_id": sku.id, "qty": 2})
+    assert added.status_code == 201, added.text
+    item = added.json()
+    assert item["unit_price"] is None
+    endpoint = f"/sales/deals/{deal['id']}/documents"
+    payload = {"kind": "invoice", "reserve_mode": "on_order"}
+    assert (await api.post(endpoint, json=payload)).status_code == 422
+    # The shared-session test fixture needs the rollback performed by a real request's close.
+    await session.rollback()
+
+    patched = await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": "0.00"})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["qty"] == 2 and patched.json()["unit_price"] == 0
+    quantity = await api.patch(f"/sales/deal-items/{item['id']}", json={"qty": 3})
+    assert quantity.status_code == 200 and quantity.json()["unit_price"] == 0
+    assert (await _invoice_items(session, deal["id"]))[0]["price"] == Decimal("0")
+    cleared = await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": None})
+    assert cleared.status_code == 200 and cleared.json()["unit_price"] is None
+    assert cleared.json()["qty"] == 3
+    assert (await api.post(endpoint, json=payload)).status_code == 422
+    await session.rollback()
+
+    assert (await api.patch(f"/sales/deal-items/{item['id']}", json={"qty": None})).status_code == 422
+    assert (await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": 0})).status_code == 200
+    issued = await api.post(endpoint, json=payload)
+    assert issued.status_code == 201, issued.text
+    assert issued.json()["amount"] == 0
+
+
+@pytest.mark.parametrize("price", [-1, "NaN", "Infinity", "1000000000000", "1.001"])
+async def test_item_price_rejects_invalid_money(api, session, price):
+    sku = await _seed_sku(session, "CONFIRMED-INVALID")
+    deal = await _new_deal(api, "PRICE-INVALID")
+    endpoint = f"/sales/deals/{deal['id']}/items"
+    assert (await api.post(endpoint, json={"sku_id": sku.id, "unit_price": price})).status_code == 422
+    item = (await api.post(endpoint, json={"sku_id": sku.id, "unit_price": "10.50"})).json()
+    rejected = await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": price})
+    assert rejected.status_code == 422
+    listed = (await api.get(endpoint)).json()
+    assert len(listed) == 1 and listed[0]["unit_price"] == 10.5
+
+
+async def test_item_price_database_rejects_negative(session):
+    from sqlalchemy.exc import IntegrityError
+
+    from modules.sales.models import Deal, DealItem
+
+    deal = Deal(number="PRICE-DB", title="Synthetic", counterparty="Synthetic")
+    session.add(deal)
+    await session.flush()
+    session.add(DealItem(deal_id=deal.id, sku_id=1, qty=1, unit_price=Decimal("-0.01")))
+    with pytest.raises(IntegrityError, match="ck_deal_item_unit_price_nonnegative"):
+        await session.flush()
+    await session.rollback()
+
+
+async def test_confirmed_price_cannot_issue_an_item_with_missing_sku(api, session):
+    from modules.sales.models import DealItem
+
+    deal = await _new_deal(api, "PRICE-ORPHAN")
+    session.add(DealItem(deal_id=deal["id"], sku_id=999999, qty=2, unit_price=Decimal("100")))
+    await session.commit()
+    result = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    assert result.status_code == 422
+    assert "Номенклатура" in result.json()["detail"]
 
 
 # ── SALES-40: отказ + причины ──────────────────────────────────────────────
@@ -438,8 +568,8 @@ async def test_invoice_document_amount_includes_vat(api, session):
     sku2 = await _seed_sku(session, "VAT2")
     deal = await _new_deal(api, "VAT-1", counterparty="ООО V")
     session.add_all([
-        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5),  # 5×15 = 75 нетто → 90 с НДС
-        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3),  # 3×20 = 60 нетто → 72 с НДС
+        DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5, unit_price=15),  # 75 нетто → 90 с НДС
+        DealItem(deal_id=deal["id"], sku_id=sku2.id, qty=3, unit_price=20),  # 60 нетто → 72 с НДС
         PriceQuote(sku_code="VAT1", counterparty="ООО V", price=15),
         PriceQuote(sku_code="VAT2", counterparty="ООО V", price=20),
         StockItem(sku_code="VAT1", qty_available=5, qty_reserved=0),
