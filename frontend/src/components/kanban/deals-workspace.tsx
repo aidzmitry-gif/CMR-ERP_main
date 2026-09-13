@@ -15,7 +15,7 @@ import clsx from "clsx";
 import { Calendar, Clock, LayoutGrid, LayoutList, List, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Children, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Children, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
@@ -147,6 +147,18 @@ function autoNextStepPatch(stageId: string): NextStepPatch {
  *  откат карточки после `winDeal → false` выглядел одинаково независимо от того, откуда
  *  пришло действие. */
 const WIN_FAILED_MSG = "Не удалось закрыть сделку как выигранную — попробуйте ещё раз.";
+
+const STAGE_FAILED_MSG = "Не удалось изменить стадию сделки. Повторите попытку.";
+const TRANSITION_PENDING_MSG = "Изменение сделки ещё сохраняется. Повторите действие после завершения.";
+
+/** One in-flight transition per deal across the main board, sections and drawer. */
+async function runTransition(pending: RefObject<Set<string>>, id: string, action: () => Promise<boolean>) {
+  if (pending.current.has(id)) return null;
+  pending.current.add(id);
+  try { return await action(); }
+  catch { return false; }
+  finally { pending.current.delete(id); }
+}
 
 async function winDeal(dealId: string): Promise<boolean> {
   try {
@@ -579,6 +591,9 @@ function FunnelSection({
   onOpen,
   onAddDeal,
   onError,
+  onLose,
+  transitions,
+  nextStepEdits,
 }: {
   title: string;
   color: string;
@@ -594,6 +609,9 @@ function FunnelSection({
    *  после неудачного winDeal делает она сама, но сообщение об ошибке рисует родитель
    *  (общий boardMsg-баннер над всей доской, см. DealsWorkspace). */
   onError?: (message: string) => void;
+  onLose: (dealId: string, onClosed: () => void) => void;
+  transitions: RefObject<Set<string>>;
+  nextStepEdits: RefObject<Map<string, symbol>>;
 }) {
   const [stages, setStages] = useState<Stage[]>(initialStages);
   const [active, setActive] = useState<Deal | null>(null);
@@ -611,33 +629,26 @@ function FunnelSection({
     setActive(stages.flatMap((s) => s.deals).find((d) => d.id === id) ?? null);
   }
 
-  function handleDragEnd(e: DragEndEvent) {
+  async function handleDragEnd(e: DragEndEvent) {
     setActive(null);
     const dealId = String(e.active.id);
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
-    const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
-    // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
-    const originStageId = stages.find((s) => s.deals.some((d) => d.id === dealId))?.id ?? null;
-    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
-    // Цикл 16: won — канонический бэк-путь POST /win (closed_date + sales.deal.won), не голый
-    // PATCH стадии; endsWith — тот же охват, что isClosedStageId/combinedCardExtras выше (won
-    // секции могут прийти с префиксом кода воронки). Остальные стадии — как раньше, PATCH.
-    if (targetStage.endsWith("won")) {
-      // ФИКС (адверсарная верификация): false — реальный сбой (409 идемпотентен внутри
-      // winDeal) — откатываем локальный перенос, сообщение об ошибке — родителю (onError).
-      void winDeal(dealId).then((ok) => {
-        if (!ok && originStageId) {
-          setStages((prev) => moveDealToStage(prev, dealId, originStageId));
-          onError?.(WIN_FAILED_MSG);
-        }
-      });
-    } else {
-      void updateDealStage(dealId, targetStage);
+    if (targetStage.endsWith("lost") && !targetStage.endsWith("cond_lost")) {
+      onLose(dealId, () => setStages((prev) => moveDealToStage(prev, dealId, targetStage)));
+      return;
     }
-    // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
-    // пресет стадии (не перетираем сделку с уже назначенным шагом).
-    if (found && shouldAutoAssignNextStep(found, targetStage)) {
+    const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId);
+    const nextStepEdit = nextStepEdits.current.get(dealId);
+    const winning = targetStage.endsWith("won");
+    const ok = await runTransition(transitions, dealId,
+      () => winning ? winDeal(dealId) : updateDealStage(dealId, targetStage));
+    if (!ok) {
+      onError?.(ok === null ? TRANSITION_PENDING_MSG : winning ? WIN_FAILED_MSG : STAGE_FAILED_MSG);
+      return;
+    }
+    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
+    if (nextStepEdits.current.get(dealId) === nextStepEdit && found && shouldAutoAssignNextStep(found, targetStage)) {
       patchSectionNextStep(dealId, autoNextStepPatch(targetStage));
     }
   }
@@ -653,6 +664,7 @@ function FunnelSection({
    *  тот же оптимистичный патч + PATCH бэку, что и на основной доске (handleNextStep),
    *  но пишет в локальный стейт секции. Гашение legacy — в nextStepFields (board.ts). */
   function patchSectionNextStep(dealId: string, patch: NextStepPatch) {
+    nextStepEdits.current.set(dealId, Symbol());
     setStages((prev) => patchStages(prev, dealId, nextStepFields(patch)));
     void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
@@ -1030,7 +1042,9 @@ export function DealsWorkspace({
   // onMoveStage/onWin ниже) ставят это сообщение рядом с откатом карточки в исходную стадию.
   const [boardMsg, setBoardMsg] = useState<string | null>(null);
   const [lossReasons, setLossReasons] = useState<LossReason[]>(LOSS_REASONS);
-  const [losing, setLosing] = useState<{ dealId: string; label: string } | null>(null);
+  const [losing, setLosing] = useState<{ dealId: string; label: string; onClosed?: () => void } | null>(null);
+  const transitions = useRef(new Set<string>());
+  const nextStepEdits = useRef(new Map<string, symbol>());
   // П1: второй ряд метрик под стрелкой «Ещё N показателей» (состояние переживает перезагрузку).
   const [moreKpis, setMoreKpis] = useState(false);
   // П2: «план продаж согласован РОПом» в подзаголовке — если на текущий месяц есть approved-план.
@@ -1257,68 +1271,54 @@ export function DealsWorkspace({
   }
 
   /** Открыть модалку отказа (SALES-40): причина обязательна, без неё сделку не слить. */
-  function openLose(dealId: string) {
+  function openLose(dealId: string, onClosed?: () => void) {
     const found = findDeal(dealId);
     if (!found) return;
-    setLosing({ dealId, label: `№ ${found.deal.number} · ${found.deal.company}` });
+    setLosing({ dealId, label: `№ ${found.deal.number} · ${found.deal.company}`, onClosed });
   }
 
   /** Подтвердить отказ: помечаем сделку (причина/коммент/вероятность 0) и двигаем в «отказ». */
-  function confirmLose(reasonCode: string, comment?: string) {
+  async function confirmLose(reasonCode: string, comment?: string): Promise<boolean> {
     const dealId = losing?.dealId;
-    if (!dealId) return;
-    setStages((prev) => {
+    if (!dealId) return false;
+    if (!await runTransition(transitions, dealId, () => loseDeal(dealId, reasonCode, comment))) return false;
+    if (!combinedStages) setStages((prev) => {
       const tagged = prev.map((s) => ({
         ...s,
         deals: s.deals.map((d) =>
           d.id === dealId ? { ...d, lostReasonCode: reasonCode, lostComment: comment, probability: 0 } : d,
         ),
       }));
-      return moveDealToStage(tagged, dealId, "lost");
+      const target = tagged.find((s) => s.id.endsWith("lost") && !s.id.endsWith("cond_lost"));
+      return target ? moveDealToStage(tagged, dealId, target.id) : tagged;
     });
-    void loseDeal(dealId, reasonCode, comment);
+    losing?.onClosed?.();
+    if (combinedStages) router.refresh();
     setLosing(null);
+    return true;
   }
 
-  function handleDragEnd(e: DragEndEvent) {
+  async function handleDragEnd(e: DragEndEvent) {
     setActiveDeal(null);
     const dealId = String(e.active.id);
     const targetStage = e.over ? String(e.over.id) : null;
     if (!targetStage) return;
-
-    // Перетаскивание в «отказ» обязано спросить причину (SALES-40): не двигаем и не дёргаем
-    // бэк, пока менеджер не выберет причину в модалке. Внутри самой колонки «отказ» — ничего.
-    if (targetStage === "lost") {
+    if (targetStage.endsWith("lost") && !targetStage.endsWith("cond_lost")) {
       const found = findDeal(dealId);
-      if (found && found.stageId !== "lost") openLose(dealId);
+      if (found && found.stageId !== targetStage) openLose(dealId);
       return;
     }
-
-    const found = findDeal(dealId); // снимок ДО переноса — origin-стадия для отката + шаг (D)
-
-    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
-
-    // Цикл 16: won — канонический бэк-путь POST /win (закрывает closed_date + эмитит
-    // sales.deal.won; голый PATCH стадии этого не делает — сделка «зависает» won только на
-    // фронте). Остальные стадии — как раньше, через PATCH стадии.
-    if (targetStage.endsWith("won")) {
-      const originStageId = found?.stageId ?? null;
-      // ФИКС (адверсарная верификация): winDeal может вернуть false (сеть/500 — 409 уже
-      // трактуется как успех внутри winDeal) — бэк сделку не закрыл, откатываем оптимистичный
-      // перенос обратно в исходную стадию вместо тихого расхождения фронта с бэком.
-      void winDeal(dealId).then((ok) => {
-        if (!ok && originStageId) {
-          setStages((prev) => moveDealToStage(prev, dealId, originStageId));
-          setBoardMsg(WIN_FAILED_MSG);
-        }
-      });
-    } else {
-      void updateDealStage(dealId, targetStage);
+    const found = findDeal(dealId);
+    const nextStepEdit = nextStepEdits.current.get(dealId);
+    const winning = targetStage.endsWith("won");
+    const ok = await runTransition(transitions, dealId,
+      () => winning ? winDeal(dealId) : updateDealStage(dealId, targetStage));
+    if (!ok) {
+      setBoardMsg(ok === null ? TRANSITION_PENDING_MSG : winning ? WIN_FAILED_MSG : STAGE_FAILED_MSG);
+      return;
     }
-
-    // D (слайс 4): целевая стадия открыта и у сделки ещё нет шага — подставляем дефолтный
-    // пресет стадии (сделку с уже назначенным шагом не перетираем).
-    if (found?.deal && shouldAutoAssignNextStep(found.deal, targetStage)) {
+    setStages((prev) => moveDealToStage(prev, dealId, targetStage));
+    if (nextStepEdits.current.get(dealId) === nextStepEdit && found?.deal && shouldAutoAssignNextStep(found.deal, targetStage)) {
       handleNextStep(dealId, autoNextStepPatch(targetStage));
     }
   }
@@ -1526,6 +1526,7 @@ export function DealsWorkspace({
    *  Гашение legacy todo/actionDate/actionTime — в nextStepFields (board.ts).
    *  Оптимистично, fire-and-forget PATCH. */
   function handleNextStep(dealId: string, patch: NextStepPatch) {
+    nextStepEdits.current.set(dealId, Symbol());
     setStages((prev) => patchStages(prev, dealId, nextStepFields(patch)));
     void updateDeal(dealId, { next_step: patch.text, next_step_at: patch.atISO });
   }
@@ -2144,6 +2145,9 @@ export function DealsWorkspace({
                 onOpen={(d) => router.push(`/crm/deals/${d.id}`)}
                 onAddDeal={openModal}
                 onError={setBoardMsg}
+                onLose={openLose}
+                transitions={transitions}
+                nextStepEdits={nextStepEdits}
               />
             ))}
           </>
@@ -2239,46 +2243,27 @@ export function DealsWorkspace({
         deal={previewDeal}
         stages={stages}
         onClose={() => setPreviewDeal(null)}
-        onMoveStage={(dealId, stageId) => {
-          if (stageId === "lost") {
-            // Drawer-Lose открывает модалку причины (как drag в колонку «отказ»).
+        onMoveStage={async (dealId, stageId) => {
+          if (stageId.endsWith("lost") && !stageId.endsWith("cond_lost")) {
             openLose(dealId);
             return;
           }
-          const found = stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? null;
-          // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
-          const originStageId = stages.find((s) => s.deals.some((d) => d.id === dealId))?.id ?? null;
-          setStages((prev) => moveDealToStage(prev, dealId, stageId));
-          // Поддерживаем превью консистентным: если перенесли активный deal, обновляем ссылку
-          setPreviewDeal((p) =>
-            p && p.id === dealId
-              ? (stages.flatMap((s) => s.deals).find((d) => d.id === dealId) ?? p)
-              : p,
-          );
-          // Цикл 16: won из стадия-мувера (select) — тот же канонический /win, что кнопка
-          // «Выиграна» ниже (onWin); без этой ветки выбор «Успех» в списке стадий тихо
-          // проскакивал мимо closed_date/sales.deal.won через голый PATCH.
-          if (stageId.endsWith("won")) {
-            // ФИКС (адверсарная верификация): false (не 409 — идемпотентен внутри winDeal) —
-            // откатываем перенос назад в исходную стадию, drawer сам подхватит её из `stages`.
-            void winDeal(dealId).then((ok) => {
-              if (!ok && originStageId) {
-                setStages((prev) => moveDealToStage(prev, dealId, originStageId));
-                setBoardMsg(WIN_FAILED_MSG);
-              }
-            });
-          } else {
-            void updateDealStage(dealId, stageId);
+          const found = findDeal(dealId);
+          const nextStepEdit = nextStepEdits.current.get(dealId);
+          const winning = stageId.endsWith("won");
+          const ok = await runTransition(transitions, dealId,
+            () => winning ? winDeal(dealId) : updateDealStage(dealId, stageId));
+          if (!ok) {
+            setBoardMsg(ok === null ? TRANSITION_PENDING_MSG : winning ? WIN_FAILED_MSG : STAGE_FAILED_MSG);
+            return;
           }
-          // D (слайс 4): авто-пресет, если целевая стадия открыта и шага ещё нет.
-          if (found && shouldAutoAssignNextStep(found, stageId)) {
+          if (!combinedStages) setStages((prev) => moveDealToStage(prev, dealId, stageId));
+          if (combinedStages) router.refresh();
+          if (nextStepEdits.current.get(dealId) === nextStepEdit && found?.deal && shouldAutoAssignNextStep(found.deal, stageId)) {
             const patch = autoNextStepPatch(stageId);
             handleNextStep(dealId, patch);
-            // Синхронизируем и previewDeal: иначе «Написать клиенту» из ещё открытого
-            // drawer видел бы пустой шаг и молча перетирал только что назначенный (верификация арки)
-            setPreviewDeal((p) =>
-              p && p.id === dealId ? { ...p, nextStep: patch.text ?? undefined, nextStepAt: patch.atISO ?? undefined } : p,
-            );
+            setPreviewDeal((p) => p && p.id === dealId
+              ? { ...p, nextStep: patch.text ?? undefined, nextStepAt: patch.atISO ?? undefined } : p);
           }
         }}
         onUpdateFields={(dealId, fields) => {
@@ -2292,6 +2277,7 @@ export function DealsWorkspace({
           // Запись шага гасит legacy-todo, как handleNextStep/patchSectionNextStep, — иначе
           // dealStepText показывал бы старый todo при новой дате (верификация арки; mock-данные)
           if ("next_step" in fields || "next_step_at" in fields) {
+            nextStepEdits.current.set(dealId, Symbol());
             camel.todo = undefined;
             camel.actionDate = undefined;
             camel.actionTime = undefined;
@@ -2307,20 +2293,18 @@ export function DealsWorkspace({
           // Создаём fire-and-forget; в drawer'е список задач не показываем (он в полной карточке).
           void createDealTask(dealId, { title });
         }}
-        onWin={(dealId) => {
-          // Снимок ДО переноса — origin-стадия для отката, если winDeal вернёт false ниже.
-          const originStageId = findDeal(dealId)?.stageId ?? null;
-          setStages((prev) => moveDealToStage(prev, dealId, "won"));
-          // Цикл 16: канонический /win (closed_date + sales.deal.won), не голый PATCH стадии.
-          // ФИКС (адверсарная верификация): false (не 409 — идемпотентен внутри winDeal) —
-          // бэк won не закрыл, откатываем карточку обратно в исходную стадию.
-          void winDeal(dealId).then((ok) => {
-            if (!ok && originStageId) {
-              setStages((prev) => moveDealToStage(prev, dealId, originStageId));
-              setBoardMsg(WIN_FAILED_MSG);
-            }
-          });
+        onWin={async (dealId) => {
           setPreviewDeal(null);
+          const ok = await runTransition(transitions, dealId, () => winDeal(dealId));
+          if (!ok) {
+            setBoardMsg(ok === null ? TRANSITION_PENDING_MSG : WIN_FAILED_MSG);
+            return;
+          }
+          if (!combinedStages) setStages((prev) => {
+            const target = prev.find((s) => s.id.endsWith("won"));
+            return target ? moveDealToStage(prev, dealId, target.id) : prev;
+          });
+          if (combinedStages) router.refresh();
         }}
         onLose={(dealId) => {
           // Просим причину через ту же модалку, что и при drag-в-отказ.

@@ -11,8 +11,9 @@ vi.mock("next/link", () => ({
 // useSearchParams — фильтры читаются из URL (FiltersMenu в шапке); mockSearchParams per-test.
 let mockSearchParams = new URLSearchParams();
 const routerReplace = vi.hoisted(() => vi.fn());
+const routerRefresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: routerReplace, prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: routerRefresh, replace: routerReplace, prefetch: vi.fn() }),
   useSearchParams: () => mockSearchParams,
   usePathname: () => "/crm/deals",
 }));
@@ -58,6 +59,7 @@ vi.mock("@dnd-kit/core", () => ({
       <button data-testid="dnd-end-null" onClick={() => onDragEnd({ active: { id: "1" }, over: null })} />
       {/* Слайс 4 (D): "1" (CRM-1, без шага) / "2" (CRM-2, шаг уже есть) → стадия "qual" (открыта) */}
       <button data-testid="dnd-end-qual" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "qual" } })} />
+      <button data-testid="dnd-end-new" onClick={() => onDragEnd({ active: { id: "1" }, over: { id: "new" } })} />
       <button data-testid="dnd-end-2-qual" onClick={() => onDragEnd({ active: { id: "2" }, over: { id: "qual" } })} />
       {children}
     </div>
@@ -269,6 +271,127 @@ describe("DealsWorkspace (канбан)", () => {
     fireEvent.click(screen.getByTestId("dnd-end-lost"));
     expect(screen.getByText("Закрыть сделку в отказ")).toBeInTheDocument();
     expect(api.updateDealStage).not.toHaveBeenCalled(); // отказ не сохраняет стадию напрямую
+  });
+
+  it("failed loss preserves the stage and selected reason for retry", async () => {
+    vi.mocked(api.loseDeal).mockResolvedValueOnce(false);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    expect(await screen.findByText("Не удалось закрыть сделку в отказ. Повторите попытку.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Причина отказа")).toHaveValue("price");
+    expect(within(screen.getByTestId("stage-column-new")).getByTestId("deal-card-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    await waitFor(() => expect(screen.queryByText("Закрыть сделку в отказ")).toBeNull());
+    expect(within(screen.getByTestId("stage-column-lost")).getByTestId("deal-card-1")).toBeInTheDocument();
+  });
+
+  it("pending loss blocks duplicate confirmation and cancellation", async () => {
+    let finish!: (ok: boolean) => void;
+    vi.mocked(api.loseDeal).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+    const confirm = screen.getByRole("button", { name: "Закрыть в отказ" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(confirm).toBeDisabled();
+    const cancel = screen.getByRole("button", { name: "Отмена" });
+    expect(cancel).toBeDisabled();
+    fireEvent.click(cancel);
+    expect(api.loseDeal).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Закрыть сделку в отказ")).toBeInTheDocument();
+    expect(within(screen.getByTestId("stage-column-new")).getByTestId("deal-card-1")).toBeInTheDocument();
+    finish(true);
+    await waitFor(() => expect(screen.queryByText("Закрыть сделку в отказ")).toBeNull());
+  });
+
+  it("combined loss uses the reason gate before changing the section", async () => {
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]}
+      combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages }]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    expect(api.updateDealStage).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    await waitFor(() => expect(within(screen.getByTestId("stage-column-lost")).getByTestId("deal-card-1")).toBeInTheDocument());
+  });
+
+  it("rejected normal stage change rolls the card back", async () => {
+    vi.mocked(api.updateDealStage).mockResolvedValueOnce(false);
+    render(<DealsWorkspace initialStages={[...stages, { id: "qual", title: "Квалификация", color: "#000", count: 0, sum: 0, deals: [] }]} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-qual"));
+    expect(await screen.findByText(/Не удалось изменить стадию сделки/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("stage-column-new")).getByTestId("deal-card-1")).toBeInTheDocument();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it("overlapping transitions wait for the previous result and preserve the confirmed stage on failures", async () => {
+    let fail!: (ok: boolean) => void;
+    vi.mocked(api.updateDealStage).mockReturnValueOnce(new Promise(resolve => { fail = resolve; }));
+    const initial = [...stages, { id: "qual", title: "Квалификация", color: "#000", count: 0, sum: 0, deals: [] }];
+    render(<DealsWorkspace initialStages={initial} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-qual"));
+    fireEvent.click(screen.getByTestId("dnd-end-new"));
+    expect(await screen.findByText(/Изменение сделки ещё сохраняется/)).toBeInTheDocument();
+    expect(api.updateDealStage).toHaveBeenCalledTimes(1);
+    await act(async () => { fail(false); });
+    vi.mocked(api.updateDealStage).mockResolvedValueOnce(false);
+    fireEvent.click(screen.getByTestId("dnd-end-qual"));
+    await waitFor(() => expect(api.updateDealStage).toHaveBeenCalledTimes(2));
+    expect(within(screen.getByTestId("stage-column-new")).getByTestId("deal-card-1")).toBeInTheDocument();
+  });
+
+  it.each([false, true])("loss waits for the pending normal result %s across the combined section", async (reply) => {
+    let finish!: (ok: boolean) => void;
+    vi.mocked(api.updateDealStage).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const initial = [...stages, { id: "qual", title: "Квалификация", color: "#000", count: 0, sum: 0, deals: [] }];
+    render(<DealsWorkspace initialStages={initial} initialKpis={[]}
+      combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages: initial }]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-qual"));
+    fireEvent.click(screen.getByTestId("dnd-end-lost"));
+    fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    expect(await screen.findByText(/Не удалось закрыть сделку в отказ/)).toBeInTheDocument();
+    expect(api.loseDeal).not.toHaveBeenCalled();
+    await act(async () => { finish(reply); });
+    const stepCalls = vi.mocked(api.updateDeal).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    await waitFor(() => expect(screen.queryByText("Закрыть сделку в отказ")).toBeNull());
+    expect(within(screen.getByTestId("stage-column-lost")).getByTestId("deal-card-1")).toBeInTheDocument();
+    expect(api.updateDeal).toHaveBeenCalledTimes(stepCalls);
+  });
+
+  it("a manual next step survives a pending stage response", async () => {
+    let finish!: (ok: boolean) => void;
+    vi.mocked(api.updateDealStage).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const initial = [...stages, { id: "qual", title: "Квалификация", color: "#000", count: 0, sum: 0, deals: [] }];
+    render(<DealsWorkspace initialStages={initial} initialKpis={[]} />);
+    fireEvent.click(screen.getByTestId("dnd-end-qual"));
+    fireEvent.click(screen.getByText("+ след. шаг"));
+    fireEvent.click(screen.getByText(nextStepPreset("new").label));
+    fireEvent.click(screen.getByRole("button", { name: "Сегодня" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.updateDeal).toHaveBeenCalledTimes(1));
+    const saved = vi.mocked(api.updateDeal).mock.calls[0][1];
+    await act(async () => { finish(true); });
+    expect(api.updateDeal).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.updateDeal).mock.calls[0][1]).toEqual(saved);
+  });
+
+  it.each(["win", "lose"])("drawer %s refreshes the first combined section", async (outcome) => {
+    stubWinFetch(200);
+    render(<DealsWorkspace initialStages={stages} initialKpis={[]}
+      combinedStages={[{ code: "new_clients", title: "Новые клиенты", stages }]} />);
+    fireEvent.click(screen.getByTestId("deal-card-1"));
+    const drawer = await screen.findByRole("dialog", { name: /Превью сделки/ });
+    await waitFor(() => expect(drawer).toHaveAttribute("aria-hidden", "false"));
+    fireEvent.click(within(drawer).getByRole("button", { name: outcome === "win" ? "Выиграна" : "Отказ", exact: true }));
+    if (outcome === "lose") {
+      fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+      fireEvent.click(screen.getByRole("button", { name: "Закрыть в отказ" }));
+    }
+    await waitFor(() => expect(routerRefresh).toHaveBeenCalled());
   });
 
   it("подтверждение отказа закрывает модалку, проставляет причину и зовёт loseDeal (SALES-40)", async () => {

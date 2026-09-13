@@ -936,8 +936,7 @@ export async function fetchLossReasons(): Promise<LossReason[]> {
   }
 }
 
-/** Закрыть сделку в отказ (SALES-40): причина обязательна, комментарий — опционально.
- * Fire-and-forget, как updateDealStage: UI обновляется оптимистично, бэк — best-effort. */
+/** Confirm closure before changing the board; reconcile a retry after a lost response. */
 export async function loseDeal(id: string, reasonCode: string, comment?: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${id}/lose`, {
@@ -945,6 +944,14 @@ export async function loseDeal(id: string, reasonCode: string, comment?: string)
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason_code: reasonCode, comment }),
     });
+    if (res.status === 409) {
+      const current = await fetch(`/api/sales/deals/${id}`, { cache: "no-store" });
+      if (!current.ok) return false;
+      const deal = await current.json();
+      return String(deal.id) === id && typeof deal.stage === "string"
+        && deal.stage.endsWith("lost") && !deal.stage.endsWith("cond_lost")
+        && deal.lost_reason_code === reasonCode && (deal.lost_comment ?? "") === (comment ?? "");
+    }
     return res.ok;
   } catch {
     return false;

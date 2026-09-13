@@ -812,6 +812,21 @@ describe("api client — склад/цена/позиции/задачи/при�
       body: JSON.stringify({ reason_code: "price", comment: "слишком дорого" }),
     }));
   });
+
+  it.each([
+    [{ id: 1, stage: "lost", lost_reason_code: "price", lost_comment: "reason" }, true],
+    [{ id: 1, stage: "rp_lost", lost_reason_code: "price", lost_comment: "reason" }, true],
+    [{ id: 1, stage: "cond_lost", lost_reason_code: "price", lost_comment: "reason" }, false],
+    [{ id: 1, stage: "lost", lost_reason_code: "other", lost_comment: "reason" }, false],
+    [{ id: 1, stage: "lost", lost_reason_code: "price", lost_comment: "different" }, false],
+    [null, false],
+  ])("loss conflict is reconciled only against the same saved outcome %j", async (deal, expected) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => deal });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await loseDeal("1", "price", "reason")).toBe(expected);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/sales/deals/1", { cache: "no-store" });
+  });
 });
 
 describe("api client — телефония", () => {
