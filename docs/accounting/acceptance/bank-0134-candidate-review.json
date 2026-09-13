@@ -1,0 +1,18 @@
+{
+  "candidate_sha256": "9131cb447d5ca1a544be9719e0f061ebb9ea9963088633fe333da1927c8b9d10",
+  "checks": {
+    "revision": true,
+    "parent": true,
+    "ddl_exact": true,
+    "preflight_exact": true,
+    "probe_same_candidate": true
+  },
+  "review": "Candidate takes table locks before preflight, refuses conflicts, then installs frozen DDL. No dynamic reads of mutable runtime SQL. Downgrade refuses silent removal.",
+  "runtime_evidence": "Owner probe reports four installed triggers and none after rollback on synthetic DB; reviewed probe hash matches candidate.",
+  "open": [
+    "Registered upgrade not yet accepted",
+    "Preflight conflict through migration not yet tested",
+    "Populated upgrade and restored financial behavior remain open"
+  ],
+  "release_ready": false
+}
