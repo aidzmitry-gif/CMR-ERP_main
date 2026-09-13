@@ -14,6 +14,7 @@ it("accepts and displays confirmed historical identity without breaking register
   render(<DealDocumentRegister dealId="501" org="7" />);
   expect(await screen.findByText(/Подтверждённый клиент ID 42/)).toHaveTextContent("Historical client · УНП 111111111");
   expect(screen.queryByText(/Общий реестр клиента пока недоступен/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("ID клиента для привязки")).not.toBeInTheDocument();
 });
 
 it("rejects a snapshot belonging to a different exact client", async () => {

@@ -52,12 +52,10 @@ function RegisterSelection({ dealId, confirmedOrg, initialDocumentId }: { dealId
 
 function RegisterBody({ org, dealId, initialDocumentId }: { org: string; dealId: string; initialDocumentId?: number }) {
   const [kind, setKind] = useState("");
-  const [bindingRevision, setBindingRevision] = useState(0);
   return <div className="space-y-3">
     <p className="text-xs text-muted">Здесь показаны документы выбранной сделки. Принадлежность клиенту определяется подтверждённой связью.</p>
     <label className="block text-sm">Вид документа<Select aria-label="Вид документа реестра" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Все виды</option>{Object.entries(kinds).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></label>
-    <DealClientBinding org={org} dealId={dealId} onBound={() => setBindingRevision((n) => n + 1)} />
-    <RegisterPage key={`${kind}/${bindingRevision}`} org={org} dealId={dealId} kind={kind} initialDocumentId={initialDocumentId} />
+    <RegisterPage key={kind} org={org} dealId={dealId} kind={kind} initialDocumentId={initialDocumentId} />
     <p className="text-xs text-muted">Подтверждённые оплаты и возвраты доступны в отдельном регистре главного бухгалтера. Статус «оплачен» не заменяет первичные основания.</p>
     <p className="text-xs text-muted">Реестр показывает внутренние акты WMS; они не заменяют ТН/ТТН. Официальный источник ТН/ТТН подключается отдельно.</p>
   </div>;
@@ -86,6 +84,7 @@ function RegisterPage({ org, dealId, kind, initialDocumentId }: { org: string; d
   return <div className="space-y-3">
     {loading && <p role="status">Загрузка реестра…</p>}
     {error && <><p role="alert" className="text-red-700">{error}</p><Button variant="secondary" disabled={loading} onClick={() => { setLoading(true); setError(""); setRevision((n) => n + 1); }}>Повторить загрузку реестра</Button></>}
+    {page?.client_identity.status === "unresolved" && !loading && !error && <DealClientBinding org={org} dealId={dealId} onBound={() => { setPage(null); setCursor(0); setLoading(true); setRevision(n => n + 1); }} />}
     {page?.client_identity.status === "confirmed" && <p className="text-sm">Подтверждённый клиент ID {page.client_identity.counterparty_id} · {page.client_identity.snapshot.name} · УНП {page.client_identity.snapshot.unp || "не указан"}. Реквизиты на момент подтверждения.</p>}
     {page?.client_identity.status === "unresolved" && <p className="text-sm text-muted">Клиент сделки ещё не подтверждён. В общий реестр клиента она не включается.</p>}
     {page && <ShipmentDocuments page={page} />}
