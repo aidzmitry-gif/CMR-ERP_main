@@ -251,11 +251,11 @@ async def test_real_client_path_without_network(api, monkeypatch):
     assert result.status_code == 200 and result.json()["rate"] == "3.30"
 
 
-async def test_api_rejects_missing_quote_and_invalid_dates(api):
+async def test_api_rejects_invalid_dates_as_request_errors(api):
     result = await api.get("/system/fx/USD?on=2010-01-01")
-    assert result.status_code == 503
+    assert result.status_code == 422
     result = await api.post("/system/fx/convert", json={"amount": "10", "currency": "USD", "on": "2099-01-01"})
-    assert result.status_code == 503
+    assert result.status_code == 422
 
 
 async def test_nonfinite_amount_is_rejected(session):
