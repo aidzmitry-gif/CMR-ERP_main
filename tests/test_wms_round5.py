@@ -12,6 +12,8 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 
+from tests.test_wms_organization import book
+
 # ===========================================================================
 # Кейс 1 — QC-гейт приёмки
 # ===========================================================================
@@ -25,8 +27,9 @@ async def test_qc_gate_no_movement_before_accept(api, session):
     """
     from modules.wms.events import on_goods_received
 
+    organization_id = await book(api)
     await on_goods_received(
-        {"item": "AKB-R5-1", "qty": 20, "warehouse": "Гомель", "entity_ref": "purchase:99"},
+        {"organization_id": organization_id, "item": "AKB-R5-1", "qty": 20, "warehouse": "Гомель", "entity_ref": "purchase:99"},
         SimpleNamespace(session=session),
     )
     await session.commit()
@@ -49,8 +52,9 @@ async def test_qc_gate_accept_without_explicit_qc_uses_expected(api, session):
     """
     from modules.wms.events import on_goods_received
 
+    organization_id = await book(api)
     await on_goods_received(
-        {"item": "AKB-R5-1A", "qty": 15, "warehouse": "Минск", "entity_ref": "purchase:100"},
+        {"organization_id": organization_id, "item": "AKB-R5-1A", "qty": 15, "warehouse": "Минск", "entity_ref": "purchase:100"},
         SimpleNamespace(session=session),
     )
     await session.commit()
@@ -79,8 +83,9 @@ async def test_qc_gate_repeated_accept_still_exactly_one_movement(api, session):
     """
     from modules.wms.events import on_goods_received
 
+    organization_id = await book(api)
     await on_goods_received(
-        {"item": "AKB-R5-2", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:101"},
+        {"organization_id": organization_id, "item": "AKB-R5-2", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:101"},
         SimpleNamespace(session=session),
     )
     await session.commit()
@@ -261,8 +266,10 @@ async def test_reconciliation_shows_diff_not_silent(api, session):
     await session.commit()
 
     # WMS: 12 пришло, 1С: 20 доступно → diff = 12 − 20 = −8
-    await api.post("/wms/receipt",
-                   json={"sku_code": "R5-DIFF", "qty": 12, "warehouse": "Минск"})
+    organization_id = await book(api)
+    response = await api.post("/wms/receipt",
+                   json={"organization_id": organization_id, "sku_code": "R5-DIFF", "qty": 12, "warehouse": "Минск"})
+    assert response.status_code == 201, response.text
 
     rec = (await api.get("/wms/reconciliation")).json()
     assert rec["gateway"] is True
@@ -291,8 +298,10 @@ async def test_reconciliation_no_cost_diff_value_is_none(api, session):
     await session.commit()
 
     # WMS: 5 пришло, 1С: 10 → diff = −5, но cost=None → diff_value должен быть null
-    await api.post("/wms/receipt",
-                   json={"sku_code": "R5-NOCOST", "qty": 5, "warehouse": "Минск"})
+    organization_id = await book(api)
+    response = await api.post("/wms/receipt",
+                   json={"organization_id": organization_id, "sku_code": "R5-NOCOST", "qty": 5, "warehouse": "Минск"})
+    assert response.status_code == 201, response.text
 
     rec = (await api.get("/wms/reconciliation")).json()
     row = next((r for r in rec["rows"] if r["sku_code"] == "R5-NOCOST"), None)
@@ -321,9 +330,14 @@ async def test_reconciliation_does_not_write_to_1c(api, session):
     await session.commit()
 
     # WMS: 15 ≠ 1С: 25
-    await api.post("/wms/receipt",
-                   json={"sku_code": "R5-NOWRITE", "qty": 15, "warehouse": "Минск"})
-    await api.get("/wms/reconciliation")
+    organization_id = await book(api)
+    created = await api.post("/wms/receipt",
+                   json={"organization_id": organization_id, "sku_code": "R5-NOWRITE", "qty": 15, "warehouse": "Минск"})
+    assert created.status_code == 201, created.text
+    result = await api.get("/wms/reconciliation")
+    assert result.status_code == 200, result.text
+    difference = next(row for row in result.json()["rows"] if row["sku_code"] == "R5-NOWRITE")
+    assert difference["diff"] == -10.0
 
     # StockItem в БД не изменился
     from sqlalchemy import select
@@ -331,6 +345,7 @@ async def test_reconciliation_does_not_write_to_1c(api, session):
         select(StockItem).where(StockItem.sku_code == "R5-NOWRITE")
     )).scalars().first()
     assert item is not None
+    await session.refresh(item)
     assert item.qty_available == original_qty, (
         f"1С-зеркало изменилось: ожидалось {original_qty}, получено {item.qty_available}"
     )
