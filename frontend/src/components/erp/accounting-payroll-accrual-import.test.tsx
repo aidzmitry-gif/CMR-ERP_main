@@ -35,7 +35,7 @@ describe("AccountingPayrollAccrualImport", () => {
     fireEvent.change(screen.getByLabelText("Основание строки начислений 1"), { target: { value: "Ведомость и табель" } });
     fireEvent.click(screen.getByRole("button", { name: "Проверить импорт начислений" }));
     expect(await screen.findByText("Пакет проверен: Дт и Кт сбалансированы. Проводка ещё не создана.")).toBeInTheDocument();
-    expect(screen.getByText("Итого: 100.00 BYN")).toBeInTheDocument();
+    expect(screen.getByText(/^Итого: 100\.00 BYN/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("payroll-accrual-import-preview"), expect.objectContaining({ method: "POST" }));
   });
 });

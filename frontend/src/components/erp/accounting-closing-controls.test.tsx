@@ -55,7 +55,7 @@ it("loads a scoped read-only snapshot and shows blockers and review items", asyn
   expect(screen.getByText(/Документы ожидают проведения/)).toBeInTheDocument();
   expect(screen.getByText(/Входной НДС без регистрации/)).toBeInTheDocument();
   expect(screen.getByText("Проводки производства:")).toBeInTheDocument();
-  expect(screen.getByText("Материалы:")).toBeInTheDocument();
+  expect(screen.getByText(/^Материалы:/)).toBeInTheDocument();
   expect(screen.getByText(/Нормативная база подтверждена/)).toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledWith("/api/accounting/organizations/7/periods/2026-10/closing-controls", { cache: "no-store" });
 });

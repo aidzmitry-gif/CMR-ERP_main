@@ -30,6 +30,9 @@ vi.mock("@/components/kanban/deals-workspace", () => ({ DealsWorkspace: () => <d
 vi.mock("@/components/leads/leads-workspace", () => ({ LeadsWorkspace: () => <div>leads-workspace</div> }));
 vi.mock("@/components/owner-ai-insight", () => ({ OwnerAiInsight: () => <div>owner-ai-insight</div> }));
 vi.mock("@/components/channels", () => ({ ChannelButtons: () => <div>channels</div> }));
+vi.mock("@/components/kanban/lose-deal-modal", () => ({ DealLossControl: () => <div>loss-control</div> }));
+vi.mock("@/components/erp/procurement-request-plan", () => ({ ProcurementRequestPlan: () => <div>procurement-plan</div> }));
+vi.mock("@/components/erp/procurement-nav", () => ({ ProcurementNav: () => <div>procurement-nav</div> }));
 vi.mock("@/components/deal-actions", () => ({ DealActions: () => <div>actions</div> }));
 vi.mock("@/components/deal-ai-assistant", () => ({ DealAiAssistant: () => <div>ai</div> }));
 vi.mock("@/components/deal-approvals", () => ({ DealApprovals: () => <div>approvals</div> }));
@@ -174,12 +177,14 @@ describe("страницы (src/app)", () => {
 
   it("ERP-воронки монтируют FunnelBoard", () => {
     // WMS больше не воронка (bespoke-дашборд, async) — вынесен в отдельный тест ниже.
-    for (const Page of [ProcurementPage, ProductionPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
+    for (const Page of [ProductionPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^funnel:/)).toBeInTheDocument();
       unmount();
     }
   });
+
+  it("Закупки открывают план закупок", () => { render(<ProcurementPage />); expect(screen.getByText("procurement-plan")).toBeInTheDocument(); });
 
   it("ERP-таблицы монтируют ModuleBoard", () => {
     // Finance стал bespoke (FinanceView) — вынесен в отдельный тест ниже.
