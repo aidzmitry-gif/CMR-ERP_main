@@ -45,8 +45,23 @@ async def test_invoice_freezes_branch_identity_and_legal_name(api, session):
     original = doc.snapshot_json["buyer"]
     assert original["name"] == "Legal buyer"
     assert original["branch"]["portal_branch_code"] == "0001"
+    from starlette.requests import Request
+
+    from core.services.auth import CurrentUser
+    from modules.eschf.source import SalesSourceResolver
+    request = Request({"type": "http", "method": "POST", "path": "/eschf/preparations",
+                       "headers": [], "app": api._transport.app})
+    pin = await SalesSourceResolver().load(session, request, CurrentUser("issuer", ["director"]), doc.id, doc.version)
+    assert pin.selection.legal_entity_id == buyer.id
+    assert pin.selection.branch_id == branch.id
+    assert pin.selection.portal_branch_code == "0001"
+    with pytest.raises(HTTPException) as forbidden:
+        await SalesSourceResolver().load(session, request, CurrentUser("ungranted", ["director"]), doc.id, doc.version)
+    assert forbidden.value.status_code == 403
     branch.name = "Renamed"
     buyer.legal_name = "Changed legal name"
     await session.commit()
     await session.refresh(doc)
     assert doc.snapshot_json["buyer"] == original
+    with pytest.raises(ValueError, match="source_party_changed"):
+        await SalesSourceResolver().load(session, request, CurrentUser("issuer", ["director"]), doc.id, doc.version)

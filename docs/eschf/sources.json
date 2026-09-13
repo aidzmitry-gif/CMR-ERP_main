@@ -1,0 +1,93 @@
+{
+  "checked_on": "2026-09-09",
+  "sources": [
+    {
+      "file": "xml-spec.pdf",
+      "url": "http://vat.gov.by/mainPage/download/Opisanie-xml-dokumentov-dlya-raznyh-tipov-EHSCHF-sistemy-AIS-EHlektronnye-scheta-faktury.pdf",
+      "bytes": 1557084,
+      "sha256": "ef9ec9189bacaa2c17967c40e1faa17102bf0f08bcbceabe59199967837b1469",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "webservice.zip",
+      "url": "http://vat.gov.by/mainPage/download/eInvVat.zip",
+      "bytes": 40685020,
+      "sha256": "7afebd8fb5037835e5ddaac70404a2cafa7d54b76b9bc8a9f9e9f40773b15d01",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "law14.docx",
+      "url": "https://nalog.gov.by/upload/iblock/f66/95ktnrjrxblbt7j1t6yqhy69vm4xfjlc/%D0%9F%D0%BE%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20%D0%9C%D0%9D%D0%A1%20%D0%BE%D1%82%2031.03.2026%20%E2%84%96%2014%20%C2%AB%D0%9E%D0%B1%20%D1%8D%D0%BB%D0%B5%D0%BA%D1%82%D1%80%D0%BE%D0%BD%D0%BD%D0%BE%D0%BC%20%D1%81%D1%87%D0%B5%D1%82%D0%B5-%D1%84%D0%B0%D0%BA%D1%82%D1%83%D1%80%D0%B5%C2%BB.DOCX",
+      "bytes": 867921,
+      "sha256": "3446b8cf99f0783ae53407953aa63ef3d4af66ab80fcf37746e3e7cc8d70bde6",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "comment14.docx",
+      "url": "https://nalog.gov.by/upload/iblock/4cc/vpz1vn01j0agp1e0bg43i1bfkst67xc7/%D0%BA%D0%BE%D0%BC%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D1%80%D0%B8%D0%B9.DOCX",
+      "error": "ReadTimeout"
+    },
+    {
+      "file": "manual.html",
+      "url": "http://vat.gov.by/mainPage/manual/",
+      "error": "ConnectionError"
+    },
+    {
+      "file": "dictionary.html",
+      "url": "http://vat.gov.by/mainPage/dictionary/",
+      "bytes": 10121,
+      "sha256": "03d805b44ac8f3a63f88a2d0ff30798d0c7cc3bfa3c4bf40e877d453b4add87c",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "news.html",
+      "url": "http://vat.gov.by/mainPage/news/",
+      "bytes": 9086,
+      "sha256": "91f75d0c79a43fdb4183c8a6a798e4ab3901ed99ac8b0b7bb266f941b8f91833",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "current-xsd.zip",
+      "url": "http://vat.gov.by/mainPage/download/xsd-skhemy-EHSCHF.zip",
+      "bytes": 9591,
+      "sha256": "41aabe4c8e588f6c99bad482d3a21bd1b02c6684da1aa91c44977d5f590942af",
+      "date": "2026-09-09"
+    },
+    {
+      "file": "modules/eschf/xsd/MNSATI_original.xsd",
+      "archive": "current-xsd.zip",
+      "member": "xsd/MNSATI_original.xsd",
+      "sha256": "01cd10900994bd7cde998faa5a178754388cd1b46adc30c3ff844e9754623867",
+      "model_version": "1.6.0",
+      "portal_publication_date": "2025-12-11"
+    }
+  ],
+  "xml_spec_publication": "2026-03-10",
+  "sdk_portal_publication": "2025-12-11",
+  "sdk_internal_readme_version": "1.3.4 (2023-10-04)",
+  "sdk_programmer_guide_version": "1.4 (2019-02-22)",
+  "raw_source_directory": "../../.tmp_pytest/eschf_sources",
+  "note": "Sources downloaded only; SDK binaries never executed. Hashes record fetched bytes, not an independent publisher signature.",
+  "additional_references": [
+    {
+      "url": "https://portal.1c.ru/download/public/instruction/Instruction_ESCHF.pdf",
+      "role": "official 1C connector setup"
+    },
+    {
+      "url": "https://www.avest.by/",
+      "role": "vendor support contacts"
+    },
+    {
+      "url": "https://www.avest.by/crypto/index.htm",
+      "result": "browser verification page; Linux SDK not confirmed"
+    },
+    {
+      "url": "https://grp.nalog.gov.by/api/grp-public/data?unp=192766048&charset=UTF-8&type=json",
+      "result": "TLS ReadTimeout; UNP remains user-supplied, official legal name not verified"
+    },
+    {
+      "url": "https://pravo.by/document/?guid=3871&p0=hk0200166",
+      "result": "403 via official MNS tax_code link"
+    }
+  ]
+}

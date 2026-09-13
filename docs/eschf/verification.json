@@ -1,0 +1,106 @@
+{
+  "checked_at": "2026-09-09T06:38:03.318254+00:00",
+  "scope": "offline preparation only; not integrated or deployed",
+  "git_base": "e6fbb65c33a86477b1343f64700711e4c7d73138",
+  "sales_gitlink": "903962bff8130e8174e42a75969e80ff79319670",
+  "branch": "agent/crm-eschf-001-20260909",
+  "checks": [
+    {
+      "command": "python -m pytest --confcutdir=tests/eschf tests/eschf -q --cov=modules.eschf --cov-report=term-missing --cov-fail-under=90",
+      "exit_code": 0,
+      "passed": 59,
+      "coverage_percent": 97.08
+    },
+    {
+      "command": "python -m ruff check .",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m alembic heads",
+      "exit_code": 0,
+      "head": "0116",
+      "head_count": 1
+    },
+    {
+      "command": "python -m modules.eschf docs/eschf/example-offline.json --out .tmp_eschf_demo",
+      "exit_code": 0,
+      "output_moved_to": ".tmp_pytest/eschf_demo"
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0,
+      "note": "Only original XSD trailing spaces excluded by directory attribute; vendor bytes preserved"
+    },
+    {
+      "check": "staged XSD SHA-256 equals official downloaded file",
+      "result": "PASS",
+      "sha256": "01cd10900994bd7cde998faa5a178754388cd1b46adc30c3ff844e9754623867"
+    }
+  ],
+  "production_read_only": {
+    "database_revision": "0116",
+    "host_checkout_sha": "9a0238827a175db8e2952edbb64ae1d509b524f1",
+    "image_id": "sha256:3b57bb5a810997c8f14483b6d165b90b929802f66f18c7a840eccb241881aca1",
+    "documents_py_sha256": "0346c01c331ec1f00df0035de3f68f6b8192accae7f520292c166422ec332fdb",
+    "matches_local_git_blob": true,
+    "os": "Ubuntu 26.04 LTS",
+    "architecture": "x86_64",
+    "java_in_path": false
+  },
+  "user_confirmed": {
+    "unp": "192766048",
+    "signer_role": "accountant",
+    "key_location": "existing 1C server",
+    "eschf_sending_works": true,
+    "verification": "User statement; no send performed by ESCHF task",
+    "recommended_initial_route": "Linux ERP -> existing 1C -> portal"
+  },
+  "coordination": {
+    "counterparty_thread": "01a08118-a261-7e71-a0d9-49b3741ab8fe",
+    "boundary": "agreed internal draft",
+    "cp_migration": "0117 reserved by CRM-CP-001",
+    "documents_thread": "01a083a0-be17-79b3-aabe-a24be7e8a742",
+    "shared_module_changes": false,
+    "onec_source_thread": "01a08210-8e0b-7a02-a589-0e33e3548b14",
+    "onec_evidence_file": "docs/eschf/onec-evidence.json"
+  },
+  "not_verified": [
+    "Linux cryptographic SDK compatibility",
+    "portal test environment",
+    "actual organization GRP record",
+    "live signatures or transmission",
+    "portal business/dictionary validation",
+    "independent branch taxpayer registration",
+    "durable database/outbox concurrency",
+    "full ERP tests or remote CI",
+    "Configuration identity and relation of ka_copy to working ESCHF database",
+    "Exact 1C ESCHF adapter contract"
+  ],
+  "files_sha256": {
+    "docs/eschf/README.md": "6de8a83f77a892208d5e650d216659eab0abede7479b55e4a2bd2599f97c284e",
+    "docs/eschf/example-offline.json": "8b8a76b235e9e483ee1aa1ac4252de502fd3f8399036a8402601d573c194b7d3",
+    "docs/eschf/onec-contract.md": "e1be08f776713a131e98db918439e8b0281abfe60fb438abcddc7e9a52c41a04",
+    "docs/eschf/onec-evidence.json": "e096b645d546ae9e08458df87662d35adfb324eafd6382336644f081423b101a",
+    "docs/eschf/sources.json": "e13977d37cdbc0987f886478da32db0f6b9911df132664390cc1b69588648867",
+    "docs/eschf/support-request.md": "e3cc396e1eb695fa2ae1be88dfec0cf7ec7a34b8a0f90584bc41ce0893021121",
+    "modules/eschf/__init__.py": "4994eeac4a564057264ecd841804417565d6e4de8bdd12d7b793fda22ef46ea0",
+    "modules/eschf/__main__.py": "56c230a3abb2e59d0bf672f7a498613c58f5e41d29b9ed7ac554080587a78c50",
+    "modules/eschf/lifecycle.py": "69bda4931d82d486ce08a332662dd239539ea0f5e491c2b517bdc494fc338398",
+    "modules/eschf/preparation.py": "92f53637abd20eddade60ffa9020c1ee6f3a4b123810f54c2cde3b465adf487e",
+    "modules/eschf/xsd/MNSATI_original.xsd": "01cd10900994bd7cde998faa5a178754388cd1b46adc30c3ff844e9754623867",
+    "pyproject.toml": "0ed13cc3bcf8bcaedf3b70d124519c26e2cb6ed614895e856cb7a60d50da34bf",
+    "tests/eschf/conftest.py": "7a17f53c95ae7fb2060d0f639741e35a0f9a88fc905edb9e48459bcf3290fbdc",
+    "tests/eschf/test_lifecycle.py": "e530a47bb9c6a7d074da7c15eb01f1271da283f14f0f8972f1ed9bf66f29ff12",
+    "tests/eschf/test_preparation.py": "aedd1e12e0f9b04d4e9a5cf67b6aade04bee87eecdc38b2a3ee42721e14ed717",
+    "modules/eschf/xsd/.gitattributes": "29931cf98c29a1de4f7a640df0c5a04bf49945c17fc12ebf1a9f1cf5aa396a52"
+  },
+  "evidence_refreshed_at": "2026-09-09T06:49:46.135135+00:00",
+  "test_evidence_validity": {
+    "code_and_test_hashes_unchanged_since_recorded_checks": true,
+    "checked_paths": 9,
+    "repeat_test_run": false
+  },
+  "review_corrections": [
+    "Git initially normalized vendor XSD CRLF, breaking its pinned hash. Added scoped -text attribute and restaged; exact official bytes now preserved."
+  ]
+}

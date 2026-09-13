@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "status": "local_packet_only",
+  "verified_date": "2026-09-09",
+  "base_commit": "acba1a81a675d85256c04b47afe806c324fe4ee4",
+  "configuration_observed": "КомплекснаяАвтоматизацияДляБеларуси 2.4.14.182",
+  "platform_export_observed": "8.3.18.1661",
+  "source_origin": "selective Designer main-configuration export; no source procedure executed",
+  "source_directory": "D:/6 Проекты/CRM ERP/.harness/work/CRM-ESCHF-001-handler-evidence",
+  "runtime_entrypoint_available": false,
+  "native_execution_evidence": null,
+  "sources": [
+    {
+      "file": "inner-module.bsl",
+      "sha256": "7e335d9807465f8c0f0d91429d92f5527b0a6ebd214afcf77918be065d467eff",
+      "metadata_name": "CommonModule.ЭлектронныеДокументыВнутренний_Локализация",
+      "verified_current_file_hash": true,
+      "anchors": [
+        {"symbol": "ЗаполнитьДанныеПоСчетуФактуре", "lines": [266, 783], "use": "native fill; by-reference number/error/refusal"},
+        {"symbol": "СформироватьСчетФактуруXDTO", "lines": [787, 827], "use": "source comparison only; upper business mutation excluded"},
+        {"symbol": "УдалитьПространствоИмен", "lines": [1142, 1162], "use": "native final string cleanup; called by upper path at818"},
+        {"symbol": "ДобавитьЗаписьПоСостояниюЭД", "lines": [1239, 1285], "use": "excluded register write at1281; privileged mode at1241"},
+        {"symbol": "ПолучитьОбъектТипаCML / ПолучитьТипОбъектаCML", "lines": [43, 101], "use": "native XDTO factory and package dependency"},
+        {"symbol": "ПолучитьТипСтавки / ПолучитьПроцентНДС", "lines": [224, 249], "use": "CALCULATED priority, ZERO, NO_VAT, DECIMAL; native resolver output"},
+        {"symbol": "ПолучитьНаименование", "lines": [201, 220], "use": "native item name and export-service route transformation"},
+        {"symbol": "ДополнительныеДанныеИзПредставления", "lines": [1573, 1586], "use": "native enum to description-code map"},
+        {"symbol": "УстановитьЗначениеXDTO", "lines": [25, 40], "use": "native error text and registration-journal dependency"}
+      ]
+    },
+    {
+      "file": "manager-module.bsl",
+      "sha256": "6f8eb82d738f592ce6b6eca78612837cb5b2b540e8fd32bcaebcfd964f350e16",
+      "metadata_name": "Document.СчетФактураВыданный.ManagerModule",
+      "verified_current_file_hash": true,
+      "anchors": [
+        {"symbol": "ТекстЗапросаДляЭДСчетовФактур", "lines": [7118, 7289], "use": "three parameterized query results, validation and empty result on failure"},
+        {"symbol": "ПроверитьОбщиеРеквизиты", "lines": [7291, 7562], "use": "basis/posting/party/date/branch/native business checks"},
+        {"symbol": "ПроверитьТовары", "lines": [7564, 7651], "use": "item/classifier/no-VAT-description checks; user messages"}
+      ]
+    },
+    {
+      "file": "inner-module-metadata.xml",
+      "sha256": "31c95cab01ac39e70c68bf3e8cc1463c74dd9b5c71fe05327d960e6bab3cc65f",
+      "metadata_name": "CommonModule.ЭлектронныеДокументыВнутренний_Локализация",
+      "verified_current_file_hash": true,
+      "bytes": 1692,
+      "flags": {
+        "Server": true,
+        "ExternalConnection": true,
+        "ServerCall": true,
+        "Global": false,
+        "Privileged": false,
+        "ClientOrdinaryApplication": true,
+        "ClientManagedApplication": false,
+        "ReturnValuesReuse": "DontUse"
+      },
+      "scope": "observed main-configuration capability; database equality and actual invocation remain unproven"
+    },
+    {
+      "file": "common-module.bsl",
+      "sha256": "3cf79f1b6b1a4c18275f56b6c28f01e2d117e70a3e901d28f5de81397eba5970",
+      "bytes": 608834,
+      "metadata_name": "CommonModule.ОбщегоНазначения.Module",
+      "verified_current_file_hash": true,
+      "anchors": [
+        {"symbol": "СообщитьПользователю", "lines": [56, 80], "use": "delegates at72 to ОбщегоНазначенияСлужебныйКлиентСервер.СообщитьПользователю(text,key,field,path,refusal,isObject); queue operation still unproven"}
+      ]
+    }
+  ],
+  "xml_name_reference": {
+    "file": "modules/eschf/xsd/MNSATI_original.xsd",
+    "sha256": "01cd10900994bd7cde998faa5a178754388cd1b46adc30c3ff844e9754623867",
+    "lines": [198, 250],
+    "use": "roster totals are required attributes at198-201; existing pinned offline element names include case-sensitive rateType",
+    "native_xdto_package_equality": "unproven"
+  },
+  "capabilities": {
+    "local_binding_and_immutable_envelope": "one detached input set before validation/serialization; fixed init=False local scope; trusted resolver and reconciliation acquisition remain external",
+    "local_row_values": "goods/service native rows; P01-P08 synthetic; no financial recalculation",
+    "exact_provided_bytes_and_sha256": "implemented with explicit codec hypothesis and evidence reference; no default native codec",
+    "native_two_call_wrapper": "body written; not compiled, packaged, installed or executed",
+    "main_database_configuration_equality": "unproven",
+    "module_execution_context": "main-config Server/ExternalConnection/ServerCall=true observed; actual database/external invocation remains unproven",
+    "native_message_capture": "unresolved; documented global GetUserMessages is a candidate, not an implemented COM receiver",
+    "native_string_to_final_bytes": "unresolved; supplied UTF8/BOM hypotheses are synthetic only",
+    "full_projection_freshness": "unproven; local content comparison is implemented but is not an atomicity proof",
+    "signature_send_or_business_write": "absent from packet"
+  },
+  "exact_missing_dependencies": [
+    {
+      "priority": 1,
+      "object": "CommonModule.ЭлектронныеДокументыВнутренний_Локализация",
+      "need": "metadata flags obtained; remaining requirement is database configuration equality and actual approved isolated context test",
+      "anchor": "inner-module.bsl:266,1142 exports alone do not establish call context"
+    },
+    {
+      "priority": 1,
+      "object": "CommonModule.ОбщегоНазначенияСлужебныйКлиентСервер.Module",
+      "symbols": ["СообщитьПользователю"],
+      "need": "critical next source: common-module export obtained; follow its actual service-module delegation to locate queue operation and verify any global capture primitive",
+      "anchor": "common-module.bsl:56-80, direct delegate at72; manager-module.bsl:7301,7325,7573"
+    },
+    {
+      "priority": 2,
+      "object": "CommonModule.УчетНДСВызовСервераПовтИсп.Module",
+      "symbols": ["ПолучитьСтавкуНДС"],
+      "need": "rate dependency and enum identity; preserve exact decimal output",
+      "anchor": "inner-module.bsl:246"
+    },
+    {
+      "priority": 2,
+      "object": "CommonModule.ПрефиксацияОбъектовКлиентСервер.Module",
+      "symbols": ["НомерНаПечать"],
+      "need": "native number dependency; no local reimplementation",
+      "anchor": "inner-module.bsl:339-341; manager-module.bsl:7311"
+    },
+    {
+      "priority": 2,
+      "object": "CommonModule.РеглУчетСервер_ЛокализацияКА.Module",
+      "symbols": ["ЕстьНеЦифры", "ОшибкаЗаполненияНомера"],
+      "need": "native validation dependencies",
+      "anchor": "manager-module.bsl:7312,7330,7590"
+    },
+    {
+      "priority": 2,
+      "object": "CommonModule.ЭлектронноеВзаимодействиеСлужебный.Module",
+      "symbols": ["ВыполнитьЗаписьСобытияПоЭДВЖурналРегистрации"],
+      "need": "diagnostic side-effect boundary on XDTO error",
+      "anchor": "inner-module.bsl:36-37"
+    },
+    {
+      "priority": 2,
+      "object": "CommonModule.СтроковыеФункцииКлиентСервер.Module",
+      "symbols": ["ПодставитьПараметрыВСтроку"],
+      "need": "error formatting dependency",
+      "anchor": "inner-module.bsl:33,778"
+    },
+    {
+      "priority": 2,
+      "object": null,
+      "need": "resolve exact XDTO package metadata name by namespace http://www.w3schools.com before any package export; obtain native string-to-export/pre-sign byte-conversion source by an observed pointer",
+      "anchor": "inner-module.bsl:55,70,361-367,771-773; no exact package or byte-conversion selector yet"
+    }
+  ],
+  "message_primitive_candidate": {
+    "name": "global GetUserMessages",
+    "status": "official links verified by primary; not called or inserted in wrapper",
+    "links": [
+      "https://1c-dn.com/library/messages_displayed_to_users/",
+      "https://kb.1ci.com/1C_Enterprise_Platform/FAQ/Development/Standards/1C_Enterprise_script/",
+      "https://1c-dn.com/library/v8update_027v8SmKe5_changes_affecting_the_system_behavior/"
+    ],
+    "caveat": "historical update removes ComConnector object method and refers to global context; actual 8.3.18 receiver and native helper queue behavior require evidence"
+  },
+  "known_ambiguities": [
+    "main export is not proved equal to database configuration",
+    "manager returns an empty result after user-message validation; lower fill can leave refusal=false and error empty",
+    "all-NO_VAT domestic sale suppresses recipient identifiers/name/address in native XML (inner306-312,493-503,534-540); P04 is row-only",
+    "query result rows have no explicit ORDER BY (manager7212-7237); byte determinism needs native evidence",
+    "lower code compares supplied type code to another enum family for correction paths (inner283-285); wrapper only accepts ORIGINAL, G06 remains separate",
+    "native captured projection completeness includes external reference properties/contact data and resolver outputs; nonzero organization token does not cover it",
+    "no transport, trusted binding store, CP integration, native runtime freshness or signature path exists in this packet"
+  ]
+}

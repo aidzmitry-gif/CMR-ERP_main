@@ -1,6 +1,6 @@
 # Accounting migration integration proposal
 
-Status: SEND application and revision 0120 integrated in the accounting agent branch; counterparty application and revisions 0117–0119 are also integrated; ESCHF and accounting revisions remain pending. Not deployed or production-ready.
+Status: SEND application and revision 0120 integrated in the accounting agent branch; counterparty application and revisions 0117–0119 are also integrated; ESCHF application and revision 0121 are integrated; accounting registration remains pending. Not deployed or production-ready.
 
 The separate worktrees currently branch from different parents. Proposed combined order:
 
@@ -31,7 +31,7 @@ Local evidence: `reports/CRM-ACC-001/acc_install_d37b6fe404bc475cae7221e86a85b42
 
 ## Remaining release work
 
-1. SEND application changes are integrated from root `62cfcdc6` / sales `a5562b4`, preserving accounting routes and proxy cache headers. Counterparty identities are integrated at the checkpoint below; ESCHF application changes remain to integrate; SQL compatibility alone does not prove API/model compatibility.
+1. SEND application changes are integrated from root `62cfcdc6` / sales `a5562b4`, preserving accounting routes and proxy cache headers. Counterparty identities are integrated at the checkpoint below; ESCHF application changes are integrated at the checkpoint below; SQL compatibility alone does not prove API/model compatibility.
 2. Reconcile shared revision reservations against the final upstream branches; recheck source hashes if any migration changes.
 3. Register the accounting revision after the final shared chain and apply the **registered** chain on an isolated PostgreSQL database; verify one head and the resulting alembic_version.
 4. Review correction/downgrade behavior and test a backup/restore of the final registered schema before production authorization.
@@ -55,3 +55,13 @@ The integration keeps the accounting deal lock and lost-stage coordinator. Addit
 52 frontend checks, typecheck and targeted lint passed. Backend branch/reference and invoice acceptance were exercised locally; a focused integration scenario confirms the buyer conflict and frozen invoice branch snapshot. The actual branch form was inspected using synthetic data, preserving the `0001` portal code. PostgreSQL registered-chain execution and concurrency acceptance remain to verify. No production migration or external filing occurred.
 
 Remaining application prerequisite: ESCHF. The frozen accounting SQL proposal still needs registration after the combined chain and verification of a fresh registered PostgreSQL upgrade and recovery.
+
+## ESCHF integration checkpoint (2026-09-13)
+
+Integrated the ESCHF-only package from `05d53eef` without importing its older counterparty files. Revision 0121 follows 0119 in this isolated branch; `alembic heads` reports only 0121. The module declares local API roles but installs no transport, source provider, signer or background worker. The deployable requirements include the pinned lxml range used by offline XML validation.
+
+ERP invoice issuance now captures the same explicit `party` projection consumed by ESCHF. The source reader additionally requires organization membership and validates the immutable ERP issuance receipt. The actual issue-to-source-reader API scenario passed, including rejection without organization access and rejection after party revision changes. Legacy issued originals are not rewritten.
+
+Offline preparation/adapter and packaging checks were run. Exact-hash native artifacts retain their upstream LF bytes and the official XSD retains its original bytes. A generated synthetic unsigned candidate passed pinned XSD validation (`unsigned_xml_sha256=98f8d3a7be5014415f42a9a457b89560f9ff4605b5cb4b8bf7e8dbb96ae14375`). This is no proof of signing, portal acceptance or live delivery.
+
+Next: execute the registered 0116→0120→0117→0118→0119→0121 chain in an isolated PostgreSQL database, allocate and register accounting after it, and verify final recovery. ESCHF PostgreSQL suites still require their explicitly guarded dedicated database.
