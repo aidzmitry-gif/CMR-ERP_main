@@ -128,7 +128,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
     if data.operation == "inventory_issue" and not inventory_issue:
         raise AccountingError("Inventory issues require the dedicated cost-confirmation rule")
     if data.operation in {"period_close", "period_reopen"} and not financial_transfer:
-        raise AccountingError("Financial-result transfer is not implemented; period_close is reserved")
+        raise AccountingError("Financial-result transfer requires the dedicated closing or reopening command; period_close is reserved")
     if financial_transfer and (data.operation not in {"period_close", "period_reopen"} or data.opening):
         raise AccountingError("Invalid internal financial transfer")
     month = data.posting_date.strftime("%Y-%m")
@@ -203,7 +203,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
             raise AccountingError(f"Unknown or inactive currency: {sorted(foreign - known)}")
     categories = {accounts[line.account].category for line in data.lines if line.account in accounts}
     if not financial_transfer and not data.opening and "equity" in categories and categories & {"income", "expense"}:
-        raise AccountingError("Financial-result transfer between profit/loss and equity is not implemented")
+        raise AccountingError("Financial-result transfer between profit/loss and equity requires the dedicated closing command")
     for line in data.lines:
         account = accounts.get(line.account)
         if account is None:

@@ -13,7 +13,7 @@ async def test_arbitrary_operation_label_cannot_hide_income(db, book, posting):
     await service.post(db, book[0], posting("ordinary-sale", "62", "90.1"), "tester")
     with pytest.raises(service.AccountingError, match="reserved"):
         await service.post(db, book[0], posting("transfer", "90.1", "80", operation="period_close"), "tester")
-    with pytest.raises(service.AccountingError, match="not implemented"):
+    with pytest.raises(service.AccountingError, match="dedicated closing command"):
         await service.post(db, book[0], posting("transfer-manual", "90.1", "80"), "tester")
     result = await reports.report(db, book[0], date(2026, 9, 1), date(2026, 9, 30))
     assert result["pnl"]["profit"] == "100.00"
