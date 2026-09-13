@@ -1,0 +1,43 @@
+{
+  "chain": "CRM-ACC-001",
+  "code_commit": "6e86b38a9c2f0a240b4acc29bb2ab3a5817dde7c",
+  "branch": "agent/crm-acc-contracts-20260913",
+  "gitlinks": {
+    "modules/finance": "cc539d72a476077822d98096911b7d434d00db35",
+    "modules/hr": "59204510f1d9b3cded7ac546b4e9f0e243e085de",
+    "modules/leads": "f818936f34cbdba571343a3413bd8b85b5819337",
+    "modules/logistics": "6923d2e021980ef2546f382364d38dc34a0fef29",
+    "modules/marketing": "d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282",
+    "modules/procurement": "c2483d60b4bc22526cd8e2694053fd9eddfdc273",
+    "modules/production": "85c495fb8392d0ad0713c2f2c94b1df0f0a678bd",
+    "modules/sales": "6ab1b242e9feaf273e18d56834016291a4888bbd",
+    "modules/service": "3d33800c44865cd7a7373b29192c5d59d3c4bec8",
+    "modules/wms": "6baf54311c6fbfc52c0d036a384ca6c27481811e"
+  },
+  "registered_migration_heads": [
+    "0132"
+  ],
+  "release_ready": false,
+  "bank_sql_package": {
+    "path": "modules/accounting/bank_period_guards.sql",
+    "preflight": "modules/accounting/bank_period_preflight.sql",
+    "registered": false,
+    "owner": "CRM-ERPNext-001; next allocated revision after joint0133"
+  },
+  "verification": {
+    "bank_sql_pg": "4 passed,16.67s; isolated proposal installation",
+    "bank_preflight_pg": "1 passed,5.46s",
+    "bank_browser": "2 passed incl auth,42.7s; real Next/FastAPI synthetic SQLite",
+    "reports_partial_and_api": "11 passed,6.72s",
+    "reports_multimonth": "14 passed,8.71s"
+  },
+  "open": [
+    "Include all pending deltas in joint root and commit the integration",
+    "Register bank SQL after joint0133 with existing-data preflight",
+    "Verify populated upgrades and restore financial behavior on the resulting head",
+    "Obtain full CI for the final joint commit",
+    "Verify applicable Belarus normative texts and per-entity policies",
+    "Reconcile actual books and complete agreed monthly/quarterly/annual cutover gates"
+  ],
+  "note": "Verification scopes differ; do not sum counts into overall coverage or readiness. This manifest freezes the handoff code version, not a release approval."
+}
