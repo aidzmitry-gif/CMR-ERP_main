@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const refreshPage = vi.hoisted(() => vi.fn());
 
 // next/link → простая <a> в jsdom; API модуля — мок (компонент тестируем изолированно)
 vi.mock("next/link", () => ({
@@ -9,7 +10,7 @@ vi.mock("next/link", () => ({
 }));
 // next/navigation.useRouter — нужен для router.push в двойном клике по лиду (drawer-pattern).
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: refreshPage, replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("@/lib/api", () => ({
   createLead: vi.fn(),
@@ -829,11 +830,18 @@ describe("LeadsWorkspace", () => {
   });
 
   it("ошибка загрузки лидов — сообщение о сбое сети, а не «лидов нет»", () => {
-    render(<LeadsWorkspace initialLeads={[]} initialLoadState="error" />);
+    const view = render(<LeadsWorkspace initialLeads={[]} initialLoadState="error" />);
     expect(
       screen.getByText(/Не удалось загрузить лиды — проверьте связь с сервером/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Лидов пока нет/)).not.toBeInTheDocument();
+    expect(api.fetchLeadPlan).not.toHaveBeenCalled();
+    expect(screen.getByText("Повторить загрузку лидов")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Повторить загрузку лидов"));
+    expect(refreshPage).toHaveBeenCalledTimes(1);
+    view.rerender(<LeadsWorkspace initialLeads={[]} initialLoadState="ok" ownOnly />);
+    expect(screen.getByText("Мои лиды")).toBeInTheDocument();
+    expect(api.fetchLeadPlan).not.toHaveBeenCalled();
   });
 
   it("«Передачи продавцам» — пусто, когда за 30 дней никому не передавали", async () => {

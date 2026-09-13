@@ -63,7 +63,7 @@ CRM_CONFIGURATION_PREFIXES = (
 # implement numeric-owner scoping. Block them before the open system-prefix
 # bypass. Shared SKU/reference endpoints remain available for normal deal work.
 OWN_DEAL_UNSCOPED_PREFIXES: tuple[str, ...] = (
-    "/leads", "/service", "/system/mdm/counterparty",
+    "/service", "/system/mdm/counterparty",
 )
 CRM_ROLES: frozenset[str] = frozenset({"sales_head", "sales", "sales_manager", "sales_cli"})
 

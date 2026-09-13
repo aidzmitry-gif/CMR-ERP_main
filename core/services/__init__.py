@@ -14,6 +14,7 @@ from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
 from core.services.bank import BankGateway
 from core.services.config import Settings, get_settings
+from core.services.crm_clients import CrmClientLookupGateway
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
 from core.services.gsheets import GSheetsClient, GSheetsGateway
@@ -43,6 +44,7 @@ class Services:
     llm: LLMGateway
     # шлюзы 1С / складских остатков / реестра ЕГР наполняет модуль integrations
     # при register (часть 6/9/10); None — модуль не подключён
+    crm_clients: CrmClientLookupGateway | None = None
     onec: OneCGateway | None = None
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None

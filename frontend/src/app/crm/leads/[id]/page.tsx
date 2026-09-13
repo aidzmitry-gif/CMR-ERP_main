@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft, Mail, Phone, Star, User } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { OwnLeadDetail } from "@/components/leads/own-leads-workspace";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchLead } from "@/lib/api";
 import { validActivityId } from "@/lib/lead-activity";
-import { currentAccessToken, currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentDevUsername, currentRole } from "@/lib/role-server";
 
 /**
  * Полная страница лида (открывается двойным кликом по карточке на канбане).
@@ -22,7 +23,7 @@ export default async function LeadDetailPage({
   const role = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
   // Точечный GET /leads/{id} — не тащим всю доску ради одной карточки (переживает объёмы).
-  const lead = validActivityId(Number(id)) ? await fetchLead(Number(id), role, token) : null;
+  const lead = validActivityId(Number(id)) ? await fetchLead(Number(id), role, token, await currentDevUsername()) : null;
 
   return (
     <AppShell crumbs={["CRM", "Лиды", `ЛИД-${id}`]}>
@@ -116,10 +117,10 @@ export default async function LeadDetailPage({
                   <Card>
                     <CardHeader>
                       <span aria-hidden>📄</span>
-                      <span>Прикреплённые документы</span>
+                      <span>{lead.crmClientId ? "Работа с лидом" : "Прикреплённые документы"}</span>
                     </CardHeader>
                     <CardBody>
-                      <LeadAttachments leadId={lead.id} />
+                      {lead.crmClientId ? <OwnLeadDetail lead={lead} /> : <LeadAttachments leadId={lead.id} />}
                     </CardBody>
                   </Card>
 

@@ -1380,6 +1380,9 @@ export async function triggerIncomingCall(payload: Record<string, unknown>): Pro
 }
 
 interface ApiLead {
+  owner_id?: number | null;
+  crm_client_id?: number | null;
+  crm_contact_id?: number | null;
   id: number;
   source: string;
   name: string;
@@ -1419,6 +1422,7 @@ interface ApiLead {
 
 function mapLead(l: ApiLead): Lead {
   return {
+    ownerId: l.owner_id, crmClientId: l.crm_client_id, crmContactId: l.crm_contact_id,
     id: l.id,
     source: l.source,
     name: l.name,
@@ -1490,11 +1494,11 @@ export async function fetchLeads(roles?: string, accessToken?: string): Promise<
 
 /** Один лид по id (SSR, кокпит /crm/leads/[id]) — точечный GET вместо «скачать все и найти».
  *  null — не найден/сбой. Заодно будит созревший «не сейчас» (wake-on-read на бэке). */
-export async function fetchLead(id: number, roles?: string, accessToken?: string): Promise<Lead | null> {
+export async function fetchLead(id: number, roles?: string, accessToken?: string, username?: string): Promise<Lead | null> {
   try {
     const res = await fetch(`${BASE}/leads/${id}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, username),
     });
     if (!res.ok) return null;
     return mapLead((await res.json()) as ApiLead);
@@ -1527,6 +1531,10 @@ export async function submitEmailLead(payload: Record<string, string>): Promise<
 }
 
 export interface LeadInput {
+  owner_id?: number;
+  crm_client_id?: number;
+  crm_contact_id?: number | null;
+  request_key?: string;
   source: string;
   name?: string;
   company?: string;

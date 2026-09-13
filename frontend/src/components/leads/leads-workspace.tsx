@@ -2,10 +2,12 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { Globe, Mail, Phone, Plus, User, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { CallWindow } from "@/components/calls/call-window";
+import { OwnLeadsWorkspace } from "@/components/leads/own-leads-workspace";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import { loadLeadsClient, type LeadsLoadState } from "@/components/leads/leads-load";
 import {
@@ -1150,7 +1152,17 @@ function IntakeModal({
   );
 }
 
-export function LeadsWorkspace({
+export function LeadsWorkspace(props: { initialLeads: Lead[]; initialLoadState?: LeadsLoadState; ownOnly?: boolean }) {
+  const router = useRouter();
+  if (props.initialLoadState && props.initialLoadState !== "ok") return <main className="space-y-3 p-6">
+    <p role="alert">{props.initialLoadState === "auth" ? "Нет доступа к лидам" : "Не удалось загрузить лиды — проверьте связь с сервером"}</p>
+    {props.initialLoadState === "auth" && <Link href="/login">Войти через Keycloak</Link>}
+    <button onClick={() => router.refresh()}>Повторить загрузку лидов</button>
+  </main>;
+  return props.ownOnly ? <OwnLeadsWorkspace initialLeads={props.initialLeads} initialLoadState={props.initialLoadState} /> : <LegacyLeadsWorkspace {...props} />;
+}
+
+function LegacyLeadsWorkspace({
   initialLeads,
   initialLoadState = "ok",
 }: {

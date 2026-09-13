@@ -16,6 +16,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from core.db.base import Base
 from core.domain.models import AuditLog, Counterparty, OutboxEvent, User
+from core.services.crm_access import CrmAccess
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.leads.events import on_deal_created_from_lead
 from modules.leads.models import Lead, LeadItem
@@ -100,7 +101,7 @@ async def _finish_tasks(*tasks):
 
 async def _convert(session, lead_id, core):
     try:
-        return await convert_lead(lead_id, core=core, session=session)
+        return await convert_lead(lead_id, core=core, session=session, access=CrmAccess("all"))
     finally:
         await session.rollback()
 
