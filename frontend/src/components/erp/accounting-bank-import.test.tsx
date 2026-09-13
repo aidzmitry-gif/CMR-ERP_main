@@ -44,3 +44,15 @@ it("binds an imported bank source, previews it, and confirms the same package", 
   expect(JSON.parse(String(previewCall?.[1]?.body)).source_digest).toBe("a".repeat(64));
   expect(JSON.parse(String(confirmCall?.[1]?.body)).digest).toBe("c".repeat(64));
 });
+
+
+it("shows invalid money without offering posting", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [{
+    source_snapshot: { transaction_id: 8, ext_id: "BROKEN", occurred_on: "2026-09-05", amount: null, currency: "BYN", payer_name: "Buyer" },
+    source_digest: null, binding_status: "own", imported: false, entry_id: null,
+  }] }));
+  render(<AccountingBankImport org="1" accounts={[]} policyId={3} date="2026-09-05" onDate={vi.fn()} onPosted={vi.fn()} />);
+  expect(await screen.findByText(/Некорректная сумма/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Выбрать" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Подтвердить импорт" })).not.toBeInTheDocument();
+});
