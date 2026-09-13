@@ -201,3 +201,13 @@ export async function sendEdit(scope: Identity, command: EditCommand, mode: "exe
   if ((response.status !== 200 && response.status !== 409) || !(await validOutcome(result, scope, command)) || (response.status === 200) !== ((result as EditOutcome).outcome === "applied")) throw new MutationUnknown(`Нет подтверждённого результата (${response.status}). Сохранённая попытка остаётся открытой.`);
   return result as EditOutcome;
 }
+
+
+export type CustomerDeadlines = { organization_id: number; order_id: number; status: "live_review"; source: "outstanding_expected_reservations"; earliest_required_arrival: string | null; unresolved_deadlines: number; complete_customer_demand: false; at_risk: boolean | null; items: { reservation_id: number; deal_id: number; sku_code: string; outstanding_qty: string; ship_deadline: string | null; required_arrival: string | null; deadline_status: string; at_risk: boolean | null }[] };
+export async function fetchCustomerDeadlines(org: number, orderId: number): Promise<CustomerDeadlines> {
+  const v = await read<CustomerDeadlines>(`${prefix(org)}/orders/${orderId}/customer-deadlines`);
+  const date = (x: unknown) => x === null || typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
+  const risk = (x: unknown) => x === null || typeof x === "boolean";
+  if (v.organization_id !== org || v.order_id !== orderId || v.status !== "live_review" || v.source !== "outstanding_expected_reservations" || v.complete_customer_demand !== false || !date(v.earliest_required_arrival) || !risk(v.at_risk) || !Number.isInteger(v.unresolved_deadlines) || v.unresolved_deadlines < 0 || !Array.isArray(v.items) || v.items.some(x => !id(x.reservation_id) || !id(x.deal_id) || typeof x.sku_code !== "string" || typeof x.outstanding_qty !== "string" || !/^\d+\.\d{2}$/.test(x.outstanding_qty) || (x.ship_deadline !== null && typeof x.ship_deadline !== "string") || !date(x.required_arrival) || !risk(x.at_risk))) throw new Error("Некорректный обзор клиентских сроков");
+  return v;
+}
