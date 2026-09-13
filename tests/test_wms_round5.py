@@ -12,6 +12,9 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
+from tests.test_inventory_organization import CONFIRM
 from tests.test_wms_organization import book
 
 # ===========================================================================
@@ -348,118 +351,69 @@ async def test_reconciliation_does_not_write_to_1c(api, session):
     await session.refresh(item)
     assert item.qty_available == original_qty, (
         f"1С-зеркало изменилось: ожидалось {original_qty}, получено {item.qty_available}"
-    )
-
-
-# ===========================================================================
-# Кейс 5 — Цикл-каунт: Decimal(str()) в деньго-оценке, нет float-погрешности
+    )# ===========================================================================
+# Кейс 5 — Физический пересчёт юрлица; неподтверждённая стоимость неизвестна
 # ===========================================================================
 
 
-async def test_cycle_count_variance_decimal_str_precision(api, session):
-    """Деньго-оценка расхождения через Decimal(str()), без float-погрешности.
-
-    Падал бы, если бы variance * cost считался через float: 3 × 1850.50 = 5551.5
-    через float даёт 5551.499999... (BYN-ошибка копейки). Тест фиксирует точность.
-    """
+@pytest.mark.parametrize(
+    "expected,counted,kind,quantity",
+    [("30.10", "27.05", "out", "3.05"),
+     ("10", "14", "in", "4"),
+     ("5", "5", None, "0")],
+    ids=["decimal-shortage", "surplus", "no-variance"],
+)
+async def test_cycle_count_physical_variance(api, session, expected, counted, kind, quantity):
+    """Adjust only owned physical stock; never value it using the unverified 1C mirror."""
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
 
+    organization_id = await book(api)
+    sku, warehouse = "R5-CYCLE", "Минск"
     session.add_all([
-        Sku(code="R5-DECIMAL", title="Тест-Decimal", unit="шт"),
-        StockItem(sku_code="R5-DECIMAL", warehouse="Минск",
-                  qty_available=Decimal(30), cost=Decimal("1850.50")),
+        Sku(code=sku, title="Пересчёт", unit="кг"),
+        StockItem(sku_code=sku, warehouse=warehouse,
+                  qty_available=Decimal("999"), cost=Decimal("1850.50")),
     ])
     await session.commit()
-
-    plan = (await api.post("/wms/cycle-plans",
-                           json={"warehouse": "Минск", "cadence_days": 30})).json()
-    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
-    line = next((ln for ln in doc["lines"] if ln["sku_code"] == "R5-DECIMAL"), None)
-    assert line is not None, "Строка R5-DECIMAL должна быть в документе инвентаризации"
-
-    # Факт: 27 (недостача 3 ед.)
-    await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 27})
-    done = (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()
-    assert done["status"] == "done"
-
-    det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
-    dl = next(ln for ln in det["lines"] if ln["sku_code"] == "R5-DECIMAL")
-    # Точная проверка: −3 × 1850.50 = −5551.50
-    assert dl["variance"] == -3.0
-    assert dl["variance_value"] == -5551.5, (
-        f"Float-погрешность: ожидалось -5551.5, получено {dl['variance_value']!r}"
-    )
-
-
-async def test_cycle_count_surplus_valued_positive(api, session):
-    """Излишек (counted > expected): корректирующее движение 'in' + variance_value > 0.
-
-    Падал бы, если sign инвертирован: излишек писался бы как 'out' (уменьшение остатка)
-    и variance_value был бы отрицательным (излишек выглядел как недостача в деньгах).
-    """
-    from core.domain.models import Sku
-    from modules.integrations.models import StockItem
-
-    session.add_all([
-        Sku(code="R5-SURPLUS", title="Тест-излишек", unit="шт"),
-        StockItem(sku_code="R5-SURPLUS", warehouse="Гродно",
-                  qty_available=Decimal(10), cost=Decimal("200.00")),
-    ])
-    await session.commit()
-
-    plan = (await api.post("/wms/cycle-plans",
-                           json={"warehouse": "Гродно", "cadence_days": 30})).json()
-    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
-    line = next((ln for ln in doc["lines"] if ln["sku_code"] == "R5-SURPLUS"), None)
-    assert line is not None
-
-    # Факт: 14 (излишек 4 ед.)
-    await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 14})
-    await api.post(f"/wms/inventory/{doc['id']}/complete")
-
-    # Корректирующее движение — приход (излишек)
-    mvs = [m for m in (await api.get("/wms/movements?reason=adjustment")).json()
-           if m["sku_code"] == "R5-SURPLUS"]
-    assert len(mvs) == 1
-    assert mvs[0]["kind"] == "in", "Излишек → движение 'in'"
-    assert mvs[0]["qty"] == 4.0
-
-    # Деньго-оценка: +4 × 200 = +800
-    det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
-    dl = next(ln for ln in det["lines"] if ln["sku_code"] == "R5-SURPLUS")
-    assert dl["variance"] == 4.0
-    assert dl["variance_value"] == 800.0
-
-
-async def test_cycle_count_zero_variance_no_movement(api, session):
-    """Пересчёт без расхождения (counted == expected) НЕ пишет движение.
-
-    Падал бы, если бы complete записывал нулевые adjustment-движения: шум в журнале
-    (движение qty=0 не меняет остаток, но засоряет историю и may break downstream).
-    """
-    from core.domain.models import Sku
-    from modules.integrations.models import StockItem
-
-    session.add_all([
-        Sku(code="R5-ZERO-VAR", title="Тест-нет-расхождения", unit="шт"),
-        StockItem(sku_code="R5-ZERO-VAR", warehouse="Витебск",
-                  qty_available=Decimal(5), cost=Decimal("100.00")),
-    ])
-    await session.commit()
-
-    plan = (await api.post("/wms/cycle-plans",
-                           json={"warehouse": "Витебск", "cadence_days": 30})).json()
-    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
-    line = next((ln for ln in doc["lines"] if ln["sku_code"] == "R5-ZERO-VAR"), None)
-    assert line is not None
-
-    # Факт совпадает с ожидаемым
-    await api.patch(f"/wms/inventory/lines/{line['id']}",
-                    json={"counted_qty": float(line["expected_qty"])})
-    await api.post(f"/wms/inventory/{doc['id']}/complete")
-
-    # Движений adjustment по этому SKU быть не должно
-    mvs = [m for m in (await api.get("/wms/movements?reason=adjustment")).json()
-           if m["sku_code"] == "R5-ZERO-VAR"]
-    assert mvs == [], f"Нулевое расхождение не должно давать движение, получено: {mvs}"
+    receipt = await api.post("/wms/receipt", json={
+        "organization_id": organization_id, "warehouse": warehouse,
+        "sku_code": sku, "qty": expected,
+    })
+    assert receipt.status_code == 201, receipt.text
+    plan = await api.post("/wms/cycle-plans", json={
+        "organization_id": organization_id, "warehouse": warehouse,
+        "cadence_days": 30, **CONFIRM,
+    })
+    assert plan.status_code == 201, plan.text
+    response = await api.post(f"/wms/cycle-plans/{plan.json()['id']}/run", json=CONFIRM)
+    assert response.status_code == 200, response.text
+    doc = response.json()
+    assert doc["organization_id"] == organization_id
+    assert doc["expected_source"] == "wms_physical"
+    line, = doc["lines"]
+    assert line["sku_code"] == sku
+    assert Decimal(str(line["expected_qty"])) == Decimal(expected)
+    assert line["unit_cost"] is None
+    response = await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": counted})
+    assert response.status_code == 200, response.text
+    response = await api.post(f"/wms/inventory/{doc['id']}/complete")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "done"
+    response = await api.get(f"/wms/inventory/{doc['id']}")
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    final_line, = detail["lines"]
+    assert Decimal(str(final_line["variance"])) == Decimal(counted) - Decimal(expected)
+    assert final_line["variance_value"] is None
+    response = await api.get("/wms/movements?reason=adjustment")
+    assert response.status_code == 200, response.text
+    movements = [m for m in response.json() if m["sku_code"] == sku]
+    if kind is None:
+        assert movements == []
+    else:
+        movement, = movements
+        assert movement["organization_id"] == organization_id
+        assert movement["warehouse"] == warehouse
+        assert movement["kind"] == kind
+        assert Decimal(str(movement["qty"])) == Decimal(quantity)
