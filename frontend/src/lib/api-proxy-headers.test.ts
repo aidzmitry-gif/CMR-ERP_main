@@ -9,11 +9,17 @@ describe("buildBackendProxyHeaders", () => {
       host: "localhost:3000",
       connection: "keep-alive",
     });
-    const out = buildBackendProxyHeaders(incoming, { devRole: "director" });
+    const out = buildBackendProxyHeaders(incoming, { devRole: "director", devUser: "kharkovich_d" });
     expect(out.get("authorization")).toBe("Bearer incoming-token");
     expect(out.get("X-User-Roles")).toBe("director");
+    expect(out.get("X-User")).toBe("kharkovich_d");
     expect(out.has("host")).toBe(false);
     expect(out.has("connection")).toBe(false);
+  });
+
+  it("передаёт dev-идентификатор для scoped backend records", () => {
+    const out = buildBackendProxyHeaders(new Headers(), { devUser: "accountant_1" });
+    expect(out.get("X-User")).toBe("accountant_1");
   });
 
   it("inject Bearer из accessToken только если Authorization не пришёл", () => {

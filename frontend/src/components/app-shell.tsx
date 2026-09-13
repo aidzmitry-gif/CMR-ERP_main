@@ -46,7 +46,8 @@ export async function AppShell({
       <ActiveCallProvider owner={userName ?? undefined}>
         <div className="flex h-screen overflow-hidden">
           <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
-          <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Reserve the collapsed chat rail; its zero-width slot overlays the right edge. */}
+          <div className="mr-[68px] flex min-w-0 flex-1 flex-col overflow-hidden">
             <Topbar crumbs={crumbs} headerActions={headerActions} />
             {/* Вертикальный скролл на уровне оболочки: страницы без своего overflow-контейнера
                 (справочники и т.п.) прокручиваются здесь; страницы со своим <main overflow-auto>

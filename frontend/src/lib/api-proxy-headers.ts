@@ -4,6 +4,8 @@
 export interface BackendProxyHeaderOptions {
   /** Dev role from cookie aios_role. */
   devRole?: string;
+  /** Stable dev actor from cookie aios_actor; required for scoped backend records. */
+  devUser?: string;
   /** Future Keycloak httpOnly access token. */
   accessToken?: string;
 }
@@ -32,6 +34,9 @@ export function buildBackendProxyHeaders(
 
   if (opts.devRole) {
     headers.set("X-User-Roles", opts.devRole);
+  }
+  if (opts.devUser) {
+    headers.set("X-User", opts.devUser);
   }
 
   return headers;

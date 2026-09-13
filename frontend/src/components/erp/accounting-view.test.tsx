@@ -1,0 +1,167 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./expense-control", () => ({ ExpenseControl: ({org}: {org?: string}) => <section aria-label="Общий экран расходов">Расходы книги {org}</section> }));
+
+import { AccountingView } from "./accounting-view";
+
+const report = { organization_id: 1, status: "preliminary", pending_documents: 0,
+  trial_balance: [{ account: "41", title: "Товары", currency: "BYN", dimensions: {}, opening: "0.00", debit: "100.00", credit: "0.00", closing: "100.00", off_balance: false }],
+  movements: [{ entry_id: 5, source: "Поступление 1", date: "2026-09-01", account: "41", side: "debit", amount: "100.00" }],
+  balance: { equity: "1000.00", difference: "0.00" }, pnl: { income: "180.00", expenses: "100.00", profit: "80.00" }, cashflow: { closing: "1080.00" } };
+const fetchMock = vi.fn();
+const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", fetchMock);
+  fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+    if (input.endsWith("/organizations")) return respond([{ id: 1, name: "Тестовая компания", unp: "999999999" }, { id: 2, name: "Вторая компания", unp: "888888888" }]);
+    if (input.includes("/accounts?")) return respond([{ id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] }, { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }]);
+    if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
+    if (input.includes("/reports?")) return respond(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report);
+    if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest: "test", explanation: body.explanation, lines: body.lines, normative_verified: false }); }
+    if (input.endsWith("/entries")) return respond({ id: 6 });
+    if (input.endsWith("/entries/5")) return respond({ id: 5, source: "Поступление 1", explanation: "Контрольное поступление", posting_date: "2026-09-01", lines: [{ id: 1, account_code: "41", account_title: "Товары", side: "debit", amount: "100.00" }] });
+    throw new Error(input);
+  });
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+describe("AccountingView", () => {
+  it("opens an inventory_purchase source inside accounting", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5")
+      ? respond({ id: 5, operation: "inventory_purchase", source: "procurement:receipt:9", explanation: "Поступление", posting_date: "2026-09-01", lines: [] })
+      : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    fireEvent.click(await screen.findByText("№ 5 · Поступление 1"));
+    expect(await screen.findByRole("button", { name: "Открыть поступление" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Открыть первичную накладную" })).not.toBeInTheDocument();
+  });
+  it("shows the saved dates, FX basis and analytics and opens the corrected entry in the same organization", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5") ? respond({
+      id: 5, source: "Correction FX", operation: "manual", explanation: "Historical snapshot", source_version: 3,
+      document_date: "2026-08-28", operation_date: "2026-08-29", posting_date: "2026-09-01",
+      created_at: "2026-09-02T10:11:12+03:00", rule_version: "manual-v1", correction_of: 4,
+      lines: [{ id: 1, account_code: "60", account_title: "Историческое название", side: "credit", amount: "321.00",
+        dimensions: { counterparty: "Поставщик A", contract: "Договор 7", lot: "Партия 9", settlement_document: "sales:document:27", bank_statement: "Выписка 9", order: "sales:document:99" }, currency: "USD",
+        original_amount: "100.00", rate: "3.210000", rate_scale: 1, rate_date: "2026-08-29", rate_source: "Учебный источник", quantity: "2.000000" }],
+    }) : url.endsWith("/entries/4") ? respond({ id: 4, source: "Original", explanation: "Original posting", lines: [] }) : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    fireEvent.click(await screen.findByText("№ 5 · Поступление 1"));
+    await screen.findByText("Historical snapshot");
+    for (const value of ["2026-08-28", "2026-08-29", "2026-09-01", "2026-09-02T10:11:12+03:00", "manual-v1", "Поставщик A", "Договор 7", "Партия 9", "Количество: 2.000000", "Сумма в валюте: 100.00 USD", "Курс: 3.210000 BYN за 1 USD"]) expect(screen.getByText(value, { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Дата курса: 2026-08-29 · Источник: Учебный источник")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Оригинал документа № 27" })).toHaveAttribute("href", "/api/sales/organizations/1/documents/27/original");
+    expect(screen.queryByRole("link", { name: "Оригинал документа № 99" })).not.toBeInTheDocument();
+    expect(screen.getByText("Банковская выписка")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Исправляет операцию № 4" }));
+    expect(await screen.findByText("Original posting")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/accounting/organizations/1/entries/4")).toBe(true);
+  });
+  it("keeps the latest entry selection and ignores responses after closing", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    const pending: Array<(value: unknown) => void> = [];
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5")
+      ? new Promise((resolve) => pending.push(resolve)) : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    const link = await screen.findByText("№ 5 · Поступление 1");
+    fireEvent.click(link);
+    fireEvent.click(link);
+    const entry = (explanation: string) => ({ ok: true, json: async () => ({ id: 5, source: "Source", posting_date: "2026-09-01", explanation, lines: [] }) });
+    await act(async () => pending[1](entry("Latest selection")));
+    await act(async () => pending[0](entry("Stale selection")));
+    expect(screen.getByText("Latest selection")).toBeInTheDocument();
+    expect(screen.queryByText("Stale selection")).not.toBeInTheDocument();
+    fireEvent.click(link);
+    fireEvent.click(screen.getByText("Закрыть карточку"));
+    await act(async () => pending[2](entry("Closed selection")));
+    expect(screen.queryByRole("region", { name: "Карточка проводки" })).not.toBeInTheDocument();
+  });
+  it("renders preliminary reports and opens a traceable entry", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    expect(await screen.findByText("Оборотно-сальдовая ведомость")).toBeInTheDocument();
+    expect(screen.getByText(/Предварительные данные/)).toBeInTheDocument();
+    expect(screen.getByText("80.00 BYN")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("№ 5 · Поступление 1"));
+    expect(await screen.findByText("Контрольное поступление")).toBeInTheDocument();
+  });
+  it("requires preview and explicit confirmation before posting", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    await screen.findByText("Оборотно-сальдовая ведомость");
+    fireEvent.click(screen.getByText("Ручная операция"));
+    fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "Справка 1" } });
+    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов" } });
+    fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
+    fireEvent.change(screen.getByLabelText("Счёт 2"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "100.00" } });
+    fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "100.00" } });
+    expect(screen.queryByText("Подтвердить и провести")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Проверить проводки"));
+    fireEvent.click(await screen.findByText("Подтвердить и провести"));
+    expect(await screen.findByText("Операция № 6 проведена.")).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/entries"));
+    expect(JSON.parse(call?.[1].body).lines[0].amount).toBe("100.00");
+  });
+  it("clears the previous organization report on selection change", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    await screen.findByText("Оборотно-сальдовая ведомость");
+    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
+    await waitFor(() => expect(screen.queryByText("№ 5 · Поступление 1")).not.toBeInTheDocument());
+    expect(await screen.findByText("За выбранный период нет проводок.")).toBeInTheDocument();
+  });
+  it("shows denied access without fabricated empty balances", async () => {
+    fetchMock.mockImplementation(() => respond({ detail: "No access" }, false));
+    render(<AccountingView />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No access");
+    expect(screen.queryByText("Оборотно-сальдовая ведомость")).not.toBeInTheDocument();
+  });
+  it("opens the production accounting workspace from the accountant navigation", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    fireEvent.click(screen.getByRole("button", { name: "Производство", exact: true }));
+    expect(await screen.findByRole("region", { name: "Источники затрат производства" })).toBeInTheDocument();
+    expect(screen.getByText(/Затраты производства/)).toBeInTheDocument();
+  });
+  it("opens the separate verified payroll accrual workspace", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    fireEvent.click(screen.getByRole("button", { name: "Начисления зарплаты", exact: true }));
+    expect(await screen.findByRole("region", { name: "Проверенные начисления зарплаты" })).toBeInTheDocument();
+    expect(screen.getByText(/Это не расчёт зарплаты, удержаний, взносов или обязательной отчётности/)).toBeInTheDocument();
+  });
+  it("opens the separate reviewed payroll statutory workspace", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    fireEvent.click(screen.getByRole("button", { name: "Удержания и взносы", exact: true }));
+    expect(await screen.findByRole("region", { name: "Проверенные удержания и взносы" })).toBeInTheDocument();
+    expect(screen.getByText(/Ставки и расчёт от оклада не угадываются/)).toBeInTheDocument();
+  });
+});
+
+
+
+it("opens expense control with the selected accounting organization", async () => {
+  render(<AccountingView />);
+  await screen.findByRole("option", {name:"Тестовая компания · 999999999"});
+  fireEvent.click(screen.getByRole("button", {name:"Открыть: Контроль расходов"}));
+  expect(screen.getByText("Расходы книги 1")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Организация"), {target:{value:"2"}});
+  await screen.findByText("Расходы книги 2");
+});

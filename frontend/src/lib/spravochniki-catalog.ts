@@ -81,6 +81,7 @@ export type RowsSource = "crud" | "query-list" | "lookup-only";
 const LOOKUP_ONLY_KEYS = new Set(["core.counterparties", "core.contacts", "core.employees"]);
 
 export function rowsSource(ref: Pick<ReferenceMeta, "endpoint" | "key">): RowsSource {
+  if (ref.key === "accounting.chart" && ref.endpoint === "/accounting/catalog/accounts") return "crud";
   if (ref.endpoint.startsWith("/system/refs/")) return "crud";
   if (LOOKUP_ONLY_KEYS.has(ref.key)) return "lookup-only";
   return "query-list";

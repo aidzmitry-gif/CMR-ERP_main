@@ -1,25 +1,7 @@
 import { AppShell } from "@/components/app-shell";
-import { FunnelBoard } from "@/components/funnel/funnel-board";
-import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
+import { ProcurementNav } from "@/components/erp/procurement-nav";
+import { ProcurementRequestPlan } from "@/components/erp/procurement-request-plan";
 
 export default function ProcurementPage() {
-  return (
-    <AppShell crumbs={["ERP", "Закупки"]}>
-      <FunnelBoard
-        title="Закупки"
-        subtitle="Воронка закупок: от потребности до завершения. «Приёмка / QC» создаёт приход на склад."
-        boardPath="/procurement/board"
-        createPath="/procurement/requests"
-        patchPath="/procurement/requests"
-        fields={[
-          { key: "supplier", label: "Поставщик" },
-          { key: "item", label: "Позиция" },
-          { key: "qty", label: "Кол-во", type: "number", default: 1 },
-          { key: "amount", label: "Сумма, ₽", type: "number", default: 0 },
-        ]}
-        showChannels
-        {...FUNNEL_EXTRAS.procurement}
-      />
-    </AppShell>
-  );
+  return <AppShell crumbs={["ERP", "Закупки"]}><div className="flex min-w-0 flex-1 flex-col"><ProcurementNav /><ProcurementRequestPlan /></div></AppShell>;
 }

@@ -1,0 +1,96 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { AccountingInventoryIssue } from "./accounting-inventory-issue";
+
+afterEach(() => vi.unstubAllGlobals());
+const accounts = [{ code: "41", title: "Goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "90.4", title: "Cost", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] }];
+const props = { org: "1", date: "2026-09-01", policyId: 1, accounts, onDate: vi.fn(), onBusyChange: vi.fn(), onPosted: vi.fn() };
+const calculation = { cost: { basis_digest: "basis", book_quantity: "3.000000", book_value_byn: "10.00", remaining_quantity: "1.500000", remaining_value_byn: "5.00", evidence: [{ entry_id: 2, line_id: 3, source: "receipt", source_version: 1, amount_byn: "10.00", quantity: "3.000000" }] }, digest: "posting", posting: { lines: [{ side: "debit", account: "90.4", amount: "5.00", quantity: null, dimensions: {} }, { side: "credit", account: "41", amount: "5.00", quantity: "1.500000", dimensions: { lot: "LOT" } }] } };
+function fill(sale = false) {
+  for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Склад партии", "W"], ["Номенклатура партии", "SKU"], ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+}
+
+it("requires preview and retries confirmation with the same prepared body", async () => {
+  let fail = true;
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.endsWith("confirm") && fail) throw new Error("Network failure");
+    return { ok: true, json: async () => url.endsWith("confirm") ? { id: 7 } : calculation };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const onPosted = vi.fn();
+  render(<AccountingInventoryIssue {...props} onPosted={onPosted} />);
+  fill();
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  fireEvent.click(await screen.findByText("Подтвердить списание"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Network failure");
+  expect(screen.getByLabelText("Количество списания")).toHaveValue("1,5");
+  fail = false;
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Бухгалтерское списание № 7 проведено.")).toBeInTheDocument();
+  expect(onPosted).toHaveBeenCalledTimes(1);
+  const first = fetcher.mock.calls[1] as unknown as [string, RequestInit];
+  const second = fetcher.mock.calls[2] as unknown as [string, RequestInit];
+  expect(first[1].body).toBe(second[1].body);
+  expect(JSON.parse(String(first[1].body))).toMatchObject({ quantity: "1.5", basis_digest: "basis", digest: "posting" });
+});
+
+it("invalidates a calculation when form or posting date changes", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => calculation })));
+  const view = render(<AccountingInventoryIssue {...props} />);
+  fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText("Подтвердить списание");
+  fireEvent.change(screen.getByLabelText("Количество списания"), { target: { value: "2" } });
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText("Подтвердить списание");
+  view.rerender(<AccountingInventoryIssue {...props} date="2026-09-02" />);
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+});
+
+it("allows FIFO to value a SKU across explicit lots", async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ...calculation, cost: { ...calculation.cost, method: "fifo" } }) }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingInventoryIssue {...props} inventoryMethod="fifo" />);
+  for (const [label, value] of [["Идентификатор основания", "FIFO-1"], ["Склад партии", "W"], ["Номенклатура партии", "SKU"], ["Количество списания", "1"], ["Содержание списания", "FIFO issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  expect(screen.getByLabelText("Партия (необязательно)")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText(/Метод: ФИФО/);
+  const call = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(call[1].body)).lot).toBe("");
+});
+
+it("previews sale with exact VAT inputs, invalidates edits and confirms its frozen package", async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00" }) }));
+  vi.stubGlobal("fetch", fetcher);
+  const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
+  render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  fill(true);
+  for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Контрагент", "buyer"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  await screen.findByText("Подтвердить продажу");
+  expect(screen.getByText(/К оплате: 24.00/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Ставка НДС, %"), { target: { value: "10" } });
+  expect(screen.queryByText("Подтвердить продажу")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  fireEvent.click(await screen.findByText("Подтвердить продажу"));
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  expect(calls[2][0]).toBe("/api/accounting/organizations/1/sales/confirm");
+  expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", buyer_dimensions: { counterparty: "buyer", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
+});
+
+it.each(["account", "date"])("drops hidden revenue analytics when %s changes", async (mode) => {
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => calculation }));
+  vi.stubGlobal("fetch", fetcher);
+  const saleAccounts = [...accounts, ...["90.1.1", "90.1.2"].map((code) => ({ code, category: "income", title: code, cash: false, quantity_tracking: false, required_dimensions: code.endsWith("1") ? ["department"] : [] }))];
+  const view = render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.1" } });
+  fireEvent.change(screen.getByLabelText("Выручка: Подразделение"), { target: { value: "OLD-DEPARTMENT" } });
+  if (mode === "account") fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.2" } });
+  else view.rerender(<AccountingInventoryIssue {...props} date="2026-09-02" sale accounts={saleAccounts.map((a) => ({ ...a, required_dimensions: [] }))} />);
+  expect(screen.queryByLabelText("Выручка: Подразделение")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  expect(JSON.parse(String(calls[0][1].body)).revenue_dimensions).toEqual({});
+});
