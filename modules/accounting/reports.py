@@ -93,17 +93,23 @@ async def report(session, org_id, start, end):
     bank_pending = await pending_count(session, org_id, end)
     final = final and not primary_pending and not bank_pending
     review_items = []
-    # A closed period is not enough to label a report final: unresolved VAT,
-    # foreign-trade, depreciation, production, repair or late-cost evidence
-    # keeps the report preliminary.  Reuse the accountant's read-only control
-    # snapshot only for a complete calendar month so arbitrary date-range
-    # reports do not inspect records beyond their requested end date.
-    month_first = end.replace(day=1)
+    # Review every complete month in monthly, quarterly and annual reports.
+    # Partial ranges must not inspect source records beyond their end date.
     month_last = end.replace(day=monthrange(end.year, end.month)[1])
-    if start == month_first and end == month_last:
+    if start.day == 1 and end == month_last:
         from modules.accounting.closing_controls import snapshot as closing_snapshot
 
-        review_items = (await closing_snapshot(session, org_id, end.strftime("%Y-%m")))['review_items']
+        month = start
+        grouped = {}
+        while month <= end:
+            controls = await closing_snapshot(session, org_id, month.strftime("%Y-%m"))
+            for item in controls["review_items"]:
+                if item["code"] not in grouped:
+                    grouped[item["code"]] = {**item, "count": 0, "months": []}
+                grouped[item["code"]]["count"] += item["count"]
+                grouped[item["code"]]["months"].append(month.strftime("%Y-%m"))
+            month = month.replace(year=month.year + 1, month=1) if month.month == 12 else month.replace(month=month.month + 1)
+        review_items = list(grouped.values())
         final = final and not review_items
     # Unclosed income/expense account balances remain an explicit current result.
     current_result = -balances["income"] - balances["expense"]
