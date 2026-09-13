@@ -57,8 +57,8 @@ const MODULES: ModuleItem[] = [
     sub: [
       { label: "Продажи", href: "/crm/sales" },
       { label: "Лиды", href: "/crm/leads" },
-      { label: "Клиенты" },
-      { label: "Контакты" },
+      { label: "Клиенты", href: "/crm/clients" },
+      { label: "Контакты", href: "/crm/contacts" },
       { label: "Сделки", href: "/crm/deals" },
       { label: "Звонки", href: "/crm/calls" },
       { label: "Каталог · подбор", href: "/crm/catalog" },
@@ -368,6 +368,8 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     pathname.startsWith("/crm/sales") ||
     pathname.startsWith("/crm/deals") ||
     pathname.startsWith("/crm/leads") ||
+    pathname.startsWith("/crm/clients") ||
+    pathname.startsWith("/crm/contacts") ||
     pathname.startsWith("/crm/calls") ||
     pathname.startsWith("/crm/catalog") ||
     pathname.startsWith("/crm/docs") ||

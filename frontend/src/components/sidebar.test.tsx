@@ -50,6 +50,15 @@ vi.mock("next/navigation", () => ({
 import { Sidebar } from "@/components/sidebar";
 
 describe("Sidebar", () => {
+  it.each([["/crm/clients", "Клиенты"], ["/crm/contacts", "Контакты"]])(
+    "раскрывает CRM и подключает навигацию на %s", async (path, label) => {
+      mockUsePathname.mockReturnValue(path);
+      render(<Sidebar allowedSlugs={["home", "crm"]} />);
+      const link = await screen.findByRole("link", { name: label, exact: true });
+      expect(link).toHaveAttribute("href", path);
+      expect(screen.getByRole("link", { name: "Сделки", exact: true })).toHaveAttribute("href", "/crm/deals");
+    },
+  );
   it("рендерит навигацию по модулям, включая лиды и сделки", async () => {
     // Сайдбар по умолчанию — свёрнутый rail (collapsed); подписи модулей есть в DOM
     // только при развороте (showFull). Разворачиваем через localStorage-настройку,
