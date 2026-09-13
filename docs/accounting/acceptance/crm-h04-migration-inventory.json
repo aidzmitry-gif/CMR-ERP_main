@@ -1,0 +1,49 @@
+{
+  "accountingRoot": "069bf3fa69770c3c789559c28889bf70502600d0",
+  "commonRevisionContentDifferences": [],
+  "crmAdditions": {
+    "0123": {
+      "revision": "0123",
+      "down_revision": "0116",
+      "file": "0123_deal_item_unit_price.py",
+      "sha256": "1d349516ae5374c23909d3f9f35bc99712e96059bae6f1de7bc48ebf0ad743cf"
+    },
+    "0126": {
+      "revision": "0126",
+      "down_revision": "0123",
+      "file": "0126_crm_clients.py",
+      "sha256": "522227dda05f4f92f2037c54d4cff4ff0b7899af837c02694da9c9888bc15a92"
+    },
+    "0127": {
+      "revision": "0127",
+      "down_revision": "0126",
+      "file": "0127_crm_client_contacts.py",
+      "sha256": "783fbd956bea062b26fd59f8e0663a0d9c6d2611f510e8e40ee1d41dd8c7f0e9"
+    },
+    "0128": {
+      "revision": "0128",
+      "down_revision": "0127",
+      "file": "0128_message_request_key.py",
+      "sha256": "90141abcb5375126dadcceaac2c80551dfabffe2c91923283a9257425b09056f"
+    },
+    "0129": {
+      "revision": "0129",
+      "down_revision": "0128",
+      "file": "0129_lead_crm_links.py",
+      "sha256": "a801d08aa5b7363038ce1a156472d78105cdc4459439c740b853123858ed2ec4"
+    }
+  },
+  "combinedHeadsWithoutMerge": [
+    "0129",
+    "0132"
+  ],
+  "recommendation": "Preserve existing revision parents; reserve a new merge revision with parents 0129 and 0132 after combined code integration and PostgreSQL upgrade acceptance. No revision reserved or changed by this report.",
+  "acceptanceRequired": [
+    "Review common revision differences if any",
+    "Integrate Sales/Leads models and routes without replacing SEND/CP/accounting changes",
+    "Upgrade from both branch heads and empty DB on owned PostgreSQL databases",
+    "Verify existing records and constraints preserved",
+    "Run combined CRM/accounting scenarios"
+  ],
+  "status": "static migration inventory only; joint integration unaccepted"
+}
