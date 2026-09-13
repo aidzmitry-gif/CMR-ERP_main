@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from core.domain.models import OutboxEvent, Sku
 from modules.integrations.models import StockItem
+from tests.test_wms_organization import book
 
 
 async def _events(session, etype: str) -> list[OutboxEvent]:
@@ -97,9 +98,10 @@ async def test_alerts_emit_clamps_negative_reorder(api, session):
 #  WMS-R3-3 / R3-8(3): эмит wms.shipment.completed из /wms/shipment
 # --------------------------------------------------------------------------- #
 async def test_shipment_emits_completed_with_doc_ref(api, session):
+    org = await book(api)
     r = await api.post(
         "/wms/shipment",
-        json={"sku_code": "AKB-60", "qty": 5, "warehouse": "Минск", "doc_ref": "ДОК-2026-0007"},
+        json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск", "doc_ref": "ДОК-2026-0007"},
     )
     assert r.status_code == 201
 
@@ -115,7 +117,8 @@ async def test_shipment_emits_completed_with_doc_ref(api, session):
 
 
 async def test_shipment_silent_without_doc_ref(api, session):
-    r = await api.post("/wms/shipment", json={"sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
+    org = await book(api)
+    r = await api.post("/wms/shipment", json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
     assert r.status_code == 201
     assert await _events(session, "wms.shipment.completed") == []
 
@@ -124,6 +127,7 @@ async def test_shipment_silent_without_doc_ref(api, session):
 #  WMS-R3-4 / R3-8(4): оценка остатка в деньгах /wms/balances/valued
 # --------------------------------------------------------------------------- #
 async def test_balances_valued_money(api, session):
+    org = await book(api)
     session.add_all([
         Sku(code="AKB-60", title="АКБ 60", unit="шт"),
         Sku(code="AKB-100", title="АКБ 100", unit="шт"),
@@ -132,8 +136,9 @@ async def test_balances_valued_money(api, session):
     ])
     await session.commit()
     # движения WMS (теневой остаток): AKB-60 in 10 → 2300; AKB-100 in 4 → 2000
-    await api.post("/wms/movements", json={"sku_code": "AKB-60", "warehouse": "Минск", "kind": "in", "qty": 10})
-    await api.post("/wms/movements", json={"sku_code": "AKB-100", "warehouse": "Минск", "kind": "in", "qty": 4})
+    for sku, qty in [("AKB-60", 10), ("AKB-100", 4)]:
+        response = await api.post("/wms/movements", json={"organization_id": org, "sku_code": sku, "warehouse": "Минск", "kind": "in", "qty": qty})
+        assert response.status_code == 201, response.text
 
     data = (await api.get("/wms/balances/valued")).json()
     assert data["gateway"] is True
@@ -153,13 +158,15 @@ async def test_balances_valued_no_gateway(api_no_gateways):
 #  WMS-R3-6 / R3-8(5): деньги на дашборде (дефицит + оценка остатка)
 # --------------------------------------------------------------------------- #
 async def test_dashboard_money_fields(api, session):
+    org = await book(api)
     await _seed_deficit(session)  # free=3, cost=230
     await api.post(
         "/wms/thresholds",
         json={"sku_code": "AKB-60", "warehouse": "Минск", "min_qty": 10, "reorder_qty": 20},
     )
     # теневой остаток для оценки: in 10 → 10×230 = 2300
-    await api.post("/wms/movements", json={"sku_code": "AKB-60", "warehouse": "Минск", "kind": "in", "qty": 10})
+    response = await api.post("/wms/movements", json={"organization_id": org, "sku_code": "AKB-60", "warehouse": "Минск", "kind": "in", "qty": 10})
+    assert response.status_code == 201, response.text
 
     data = (await api.get("/wms/dashboard")).json()
     assert data["gateway"] is True

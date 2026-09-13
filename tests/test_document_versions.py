@@ -29,11 +29,20 @@ async def make_invoice(api, session):
         'number': 'ORIG', 'title': 'Original deal', 'counterparty': cp.name, 'amount': 200,
     })).json()
     item = (await api.post(f"/sales/deals/{deal['id']}/items", json={'sku_id': sku.id, 'qty': 2})).json()
-    result = await api.post(f"/sales/deals/{deal['id']}/documents", json={
-        'kind': 'invoice', 'request_key': 'invoice-original',
-    })
-    assert result.status_code == 201, result.text
-    return deal, result.json(), sku, cp, item
+    # Historical persisted fixture: new invoice API deliberately no longer accepts
+    # this legacy payload. These tests exercise already-saved originals/consumers.
+    from modules.sales import documents
+    from modules.sales.routes import _post_document_to_1c
+    from modules.sales.schemas import DocumentOut
+    row = DealDocument(deal_id=deal['id'], kind='invoice', number='LEGACY-ORIGINAL', status='draft')
+    session.add(row)
+    await session.flush()
+    core = api._transport.app.state.core
+    await documents.capture(session, core, row)
+    await documents.mark_issued(session, core, row, 'legacy-fixture')
+    await _post_document_to_1c(core, session, row, cp.name)
+    await session.commit()
+    return deal, DocumentOut.model_validate(row).model_dump(mode='json'), sku, cp, item
 
 
 async def make_contract(api, session, deal):
@@ -97,6 +106,21 @@ async def test_contract_approval_issues_the_reviewed_copy(api, session):
     assert events[-1].payload['amount'] == '200.00'
 
 
+async def test_paid_invoice_replacement_does_not_release_reservation(api, session):
+    _, old, _, _, _ = await make_invoice(api, session)
+    doc = await session.get(DealDocument, old['id'])
+    doc.reserve_status = 'reserved'
+    await on_payment_paid({'document_id': doc.id}, SimpleNamespace(session=session))
+    await session.commit()
+    revision = await api.post(f"/sales/documents/{old['id']}/revision", json={'reason': 'Synthetic replacement', 'request_key': 'paid-revision'})
+    assert revision.status_code == 201, revision.text
+    issued = await api.post(f"/sales/documents/{revision.json()['id']}/issue")
+    assert issued.status_code == 422, issued.text
+    await session.refresh(doc)
+    assert doc.status == 'paid' and doc.reserve_status == 'reserved'
+    assert doc.superseded_by_id is None
+
+
 async def test_revision_draft_issue_history_and_payment_identity(api, session):
     deal, old, sku, cp, item = await make_invoice(api, session)
     before = (await api.get(f"/sales/documents/{old['id']}/render")).content
@@ -114,19 +138,20 @@ async def test_revision_draft_issue_history_and_payment_identity(api, session):
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('150')))
     await session.commit()
     issued = await api.post(f"/sales/documents/{new['id']}/issue")
-    assert issued.status_code == 200, issued.text
-    assert issued.json()['amount'] == 360
+    # New replacement issue requires ERP payload and an implemented exact release.
+    assert issued.status_code == 422, issued.text
     assert (await api.get(f"/sales/documents/{old['id']}/render")).content == before
-    assert (await api.post(f"/sales/documents/{new['id']}/issue")).json()['id'] == new['id']
-    assert (await session.get(DealDocument, old['id'])).superseded_by_id == new['id']
+    assert (await session.get(DealDocument, old['id'])).superseded_by_id is None
+    assert (await session.get(DealDocument, new['id'])).original_html is None
     await on_payment_paid({'ref': old['number'], 'deal_id': deal['id']}, SimpleNamespace(session=session))
     await session.commit()
     assert (await session.get(DealDocument, old['id'])).status == 'paid'
-    assert (await session.get(DealDocument, new['id'])).status == 'posted'
+    assert (await session.get(DealDocument, new['id'])).status == 'draft'
     await on_payment_paid({'ref': 'Unknown', 'deal_id': deal['id']}, SimpleNamespace(session=session))
     await session.commit()
-    assert (await session.get(DealDocument, new['id'])).status == 'posted'
+    assert (await session.get(DealDocument, new['id'])).status == 'draft'
     assert (await api.patch(f"/sales/documents/{old['id']}/draft", json={'payment_terms': 'tamper'})).status_code == 409
+
 
 
 async def test_package_pins_versions_and_is_idempotent(api, session):
@@ -146,12 +171,12 @@ async def test_package_pins_versions_and_is_idempotent(api, session):
     revision = (await api.post(f"/sales/documents/{invoice['id']}/revision", json={
         'reason': 'New conditions', 'request_key': 'package-revision',
     })).json()
-    assert (await api.post(f"/sales/documents/{revision['id']}/issue")).status_code == 200
+    assert (await api.post(f"/sales/documents/{revision['id']}/issue")).status_code == 422
     assert (await api.get(p['render_url'])).content == original
     newer = (await api.post(f"/sales/deals/{deal['id']}/send-package")).json()
-    assert newer['package_id'] != p['package_id']
+    assert newer['package_id'] == p['package_id']
     assert (await api.get(p['render_url'])).content == original
-    assert len((await session.execute(select(DocumentPackage))).scalars().all()) == 2
+    assert len((await session.execute(select(DocumentPackage))).scalars().all()) == 1
 
 
 async def test_legacy_original_is_never_reconstructed(api, session):
@@ -169,15 +194,21 @@ async def test_legacy_original_is_never_reconstructed(api, session):
 
 
 async def test_creation_retries_do_not_duplicate_document_or_events(api, session):
-    deal, doc, *_ = await make_invoice(api, session)
-    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={'kind': 'invoice', 'request_key': 'invoice-original'})
-    assert r.status_code == 201 and r.json()['id'] == doc['id']
-    assert (await api.post(f"/sales/deals/{deal['id']}/documents", json={'kind': 'invoice'})).status_code == 409
-    events = (await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == 'sales.document.posted'))).scalars().all()
+    from tests.test_invoice_issuance import command, create, seed
+    ids, base = await seed(api, session)
+    cmd, _ = await command(api, ids, base)
+    first = await create(api, ids, cmd)
+    assert first.status_code == 201, first.text
+    doc = first.json()['document']
+    r = await create(api, ids, cmd)
+    assert r.status_code == 200 and r.json()['document']['id'] == doc['id']
+    assert (await api.post(f"/sales/deals/{ids['deal']}/documents", json={'kind': 'invoice'})).status_code == 422
+    events = (await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == 'sales.invoice.issued'))).scalars().all()
     assert len(events) == 1
     assert events[0].payload['amount'] == '240.00'
-    assert events[0].payload['payer_unp'] == '111111111'
+    assert events[0].payload['buyer_id'] == ids['buyer']
     assert events[0].payload['content_sha256'] == doc['content_sha256']
+
 
 
 @pytest.mark.parametrize('path,method,payload', [
@@ -244,13 +275,13 @@ async def test_draft_preview_does_not_freeze_live_data(api, session):
     deal, old, sku, cp, _ = await make_invoice(api, session)
     new = (await api.post(f"/sales/documents/{old['id']}/revision", json={'reason': 'Preview', 'request_key': 'preview-revision'})).json()
     before = await api.get(f"/sales/documents/{new['id']}/preview")
-    assert before.status_code == 200, before.text
-    assert 'ЧЕРНОВИК' in before.text
+    assert before.status_code == 409, before.text
+    assert 'ERP' in before.text
     assert (await session.get(DealDocument, new['id'])).original_html is None
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('175')))
     await session.commit()
     after = await api.get(f"/sales/documents/{new['id']}/preview")
-    assert after.content != before.content
-    assert '420.00' in after.text
+    assert after.status_code == 409
+    assert (await session.get(DealDocument, new['id'])).original_html is None
     issued = await api.post(f"/sales/documents/{new['id']}/issue")
-    assert issued.json()['amount'] == 420
+    assert issued.status_code == 422

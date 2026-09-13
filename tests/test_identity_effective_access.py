@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.domain.models import AuditLog, User
@@ -17,6 +17,21 @@ from core.services.auth import (
     EffectiveIdentityLookupError,
     resolve_effective_oidc_user,
 )
+
+
+@pytest.mark.parametrize("changes", [{"status": "suspended"}, {"role": "guest"}])
+async def test_effective_identity_refreshes_a_retained_user(session, changes):
+    linked = User(username="retained-user", full_name="Synthetic", keycloak_user_id="kc-retained",
+                  role="director", status="active")
+    session.add(linked)
+    await session.commit()
+    principal = CurrentUser("retained-user", ["director"], "kc-retained")
+    assert (await resolve_effective_oidc_user(principal, session)).roles == ["director"]
+    # A database change must be seen even while this session retains the old ORM row.
+    await session.execute(update(User).where(User.id == linked.id).values(**changes)
+                          .execution_options(synchronize_session=False))
+    assert linked.status == "active" and linked.role == "director"
+    assert (await resolve_effective_oidc_user(principal, session)).roles == [GUEST]
 
 
 @pytest.mark.asyncio

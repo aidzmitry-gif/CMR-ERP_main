@@ -1,4 +1,5 @@
 """Тесты межмодульных взаимосвязей (через событийную шину, §2.5)."""
+# ruff: noqa: F811 -- imported pytest fixture
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -6,6 +7,8 @@ from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
 from core.services.eventbus import EventContext, OutboxEventBus
+from tests.reservation_source import event_context, invoice
+from tests.test_logistics_invoice_binding import exact as logistics_invoice  # noqa: F401
 
 
 def _ctx(session):
@@ -33,7 +36,7 @@ async def test_invoice_creates_payment(session):
 
 async def test_order_creates_shipment(session):
     from modules.logistics.events import on_document_posted
-    from modules.logistics.models import Shipment
+    from modules.logistics.models import Shipment, ShipmentIntake
 
     await on_document_posted(
         {"kind": "order", "counterparty": "ООО Альфа", "deal_id": 7, "entity_ref": "deal:7"},
@@ -41,22 +44,24 @@ async def test_order_creates_shipment(session):
     )
     await session.commit()
     rows = (await session.execute(select(Shipment))).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].customer == "ООО Альфа" and rows[0].status == "planned"
+    assert rows == []
+    intake = await session.scalar(select(ShipmentIntake))
+    assert intake.state == "pending" and intake.pending_reason == "persisted_source_required"
+    assert intake.snapshot["counterparty"] == "ООО Альфа"
 
 
-async def test_reserve_creates_stock_movement(session):
+async def test_reserve_keeps_physical_stock(session):
     from modules.wms.events import on_stock_reserved
     from modules.wms.models import StockMovement
 
+    await invoice(session, 5, [{"sku_code": "ROLL-5", "qty": "12"}])
     await on_stock_reserved(
-        {"items": [{"sku_code": "ROLL-5", "qty": 12, "warehouse": "Склад-2"}]},
-        _ctx(session),
+        {"document_id": 5, "items": [{"sku_code": "ROLL-5", "qty": 12, "warehouse": "Склад-2"}]},
+        event_context(session),
     )
     await session.commit()
     rows = (await session.execute(select(StockMovement))).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].sku_code == "ROLL-5" and rows[0].kind == "out" and float(rows[0].qty) == 12
+    assert rows == []
 
 
 async def test_goods_received_creates_receipt_pending_qc(session):
@@ -86,9 +91,14 @@ async def test_goods_received_creates_receipt_pending_qc(session):
 
 
 async def test_procurement_received_emits(session, api):
+    api.headers["X-User"] = "synthetic-procurement-owner"
     req = (
         await api.post("/procurement/requests", json={"supplier": "S", "item": "Болт", "qty": 10})
     ).json()
+    organization = await api.post("/accounting/organizations", json={"name": "Synthetic source company", "unp": "999999986"})
+    assert organization.status_code == 201, organization.text
+    ownership = await api.post(f"/procurement/organizations/{organization.json()['id']}/purchase-ownership", json={"kind": "request", "source_id": req["id"], "evidence": "Synthetic ownership confirmation"})
+    assert ownership.status_code == 201, ownership.text
     r = await api.patch(f"/procurement/requests/{req['id']}", json={"stage": "qc"})
     assert r.status_code == 200 and r.json()["stage"] == "qc"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
@@ -135,6 +145,34 @@ async def test_payment_paid_marks_document(session):
     assert doc.status == "paid"
 
 
+async def test_late_payment_does_not_resurrect_cancelled_invoice(session):
+    import pytest
+
+    from modules.sales.events import on_payment_paid
+    from modules.sales.models import Deal, DealDocument
+
+    deal = Deal(number="LATE-PAYMENT", title="Synthetic", counterparty="Synthetic")
+    session.add(deal)
+    await session.flush()
+    doc = DealDocument(deal_id=deal.id, kind="invoice", number="CANCELLED-1",
+                       status="cancelled", reserve_status="released")
+    session.add(doc)
+    await session.flush()
+    document_id = doc.id
+    bus = OutboxEventBus()
+    bus.subscribe("finance.payment.paid", on_payment_paid)
+    bus.emit(session, "finance.payment.paid", {"document_id": document_id, "ref": doc.number})
+    await session.commit()
+    for _ in range(2):
+        with pytest.raises(ValueError, match="cancelled invoice requires reconciliation"):
+            await bus.relay_once(session, EventContext(session, SimpleNamespace(event_bus=bus)))
+        await session.rollback()
+        current = await session.get(DealDocument, document_id, populate_existing=True)
+        assert current.status == "cancelled" and current.reserve_status == "released"
+        pending = (await session.scalars(select(OutboxEvent))).all()
+        assert len(pending) == 1 and pending[0].processed_at is None
+
+
 async def test_shipment_delivered_wins_deal(session):
     from modules.sales.events import on_shipment_delivered
     from modules.sales.models import Deal
@@ -169,8 +207,10 @@ async def test_finance_paid_emits(session, api):
     assert "finance.payment.paid" in types
 
 
-async def test_logistics_delivered_emits(session, api):
-    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+async def test_logistics_delivered_emits(session, api, logistics_invoice):
+    created = await api.post("/logistics/shipments", json={"customer": "K", "invoice": logistics_invoice, "source_key": "links-delivery"})
+    assert created.status_code == 201, created.text
+    ship = created.json()
     r = await api.patch(f"/logistics/shipments/{ship['id']}", json={"status": "delivered"})
     assert r.status_code == 200
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
@@ -282,8 +322,10 @@ async def test_finance_summary_empty_is_honest(session):
     assert s["cash"]["net"] == "0.00"
 
 
-async def test_delivered_shipment_emits_freight_cost(session, api):
-    ship = (await api.post("/logistics/shipments", json={"customer": "K"})).json()
+async def test_delivered_shipment_emits_freight_cost(session, api, logistics_invoice):
+    created = await api.post("/logistics/shipments", json={"customer": "K", "invoice": logistics_invoice, "source_key": "links-freight"})
+    assert created.status_code == 201, created.text
+    ship = created.json()
     # назначаем перевозчика с тарифом → amount > 0
     await api.post(
         f"/logistics/shipments/{ship['id']}/carrier-order",
@@ -295,15 +337,15 @@ async def test_delivered_shipment_emits_freight_cost(session, api):
 
 
 async def test_freight_audit_overbill_emits_refund(session, api):
-    # счёт перевозчика больше тарифа → переплата → событие «к возврату»
+    # Audit lacks an exact organization binding; it must not fabricate refunds.
     r = await api.post(
         "/logistics/costs/audit",
         json={"shipment_code": "ЛОГ-1", "carrier_code": "dpd",
               "invoice_amount": 250, "expected_amount": 200},
     )
-    assert r.status_code == 201 and float(r.json()["variance"]) == 50
+    assert r.status_code == 409 and "organization_scope_incomplete" in r.text
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "logistics.freight.audit_refund" in types
+    assert "logistics.freight.audit_refund" not in types
 
     # счёт ≤ тарифа → переплаты нет → события нет
     await api.post(
@@ -313,7 +355,7 @@ async def test_freight_audit_overbill_emits_refund(session, api):
     )
     refunds = [e for e in (await session.execute(select(OutboxEvent))).scalars().all()
                if e.event_type == "logistics.freight.audit_refund"]
-    assert len(refunds) == 1
+    assert len(refunds) == 0
 
 
 async def test_procurement_received_creates_import_shipment(session):

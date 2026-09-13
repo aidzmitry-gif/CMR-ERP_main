@@ -32,6 +32,22 @@ from config.modules import ENABLED_MODULES
 from core.db.base import Base
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
+from modules.procurement import (  # noqa: F401 — tables declared outside models.py
+    ownership,
+    receipt_documents,
+)
+from modules.sales import (  # noqa: F401 — immutable allocations/receipts
+    deal_loss,
+    invoice_cancellation,
+    invoice_issuance,
+    invoice_reconciliation,
+    invoice_settlements,
+)
+from modules.wms import (  # noqa: F401 — durable event tables
+    invoice_reservations,
+    primary_receipts,
+    reservation_events,
+)
 
 for _module in ENABLED_MODULES:
     try:
@@ -74,6 +90,7 @@ AUTHED_HEADERS = {"X-User-Roles": "director"}
 @pytest_asyncio.fixture
 async def api(session):
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session
@@ -90,6 +107,7 @@ async def api(session):
 async def ai_api(session):
     """API-клиент с включённым AI-слоем (mock-режим шлюза) — для AI-эндпоинтов."""
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session
@@ -128,6 +146,7 @@ async def services(session):
     """Сервисы загруженного приложения (event_bus, stock, …) — для прямого вызова
     фоновых шагов (``core.on_tick``) в тестах. Операции идут над тест-сессией ``session``."""
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
     return app.state.core.services
 
 

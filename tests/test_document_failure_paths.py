@@ -80,11 +80,11 @@ async def test_package_integrity_and_exact_selected_versions(api, session):
 async def test_failed_issue_does_not_retire_the_old_document(api, api_no_gateways, session):
     _, old, *_ = await make_invoice(api, session)
     new = (await api.post(f"/sales/documents/{old['id']}/revision", json={'reason': 'Retry gateway', 'request_key': 'gateway-retry'})).json()
-    assert (await api_no_gateways.post(f"/sales/documents/{new['id']}/issue")).status_code == 503
+    assert (await api_no_gateways.post(f"/sales/documents/{new['id']}/issue")).status_code == 422
     await session.rollback()
     assert (await session.get(DealDocument, old['id'])).superseded_by_id is None
     assert (await session.get(DealDocument, new['id'])).original_html is None
-    assert (await api.post(f"/sales/documents/{new['id']}/issue")).status_code == 200
+    assert (await api.post(f"/sales/documents/{new['id']}/issue")).status_code == 422
 
 
 async def test_no_item_invoice_keeps_exact_agreed_gross_amount(api, session):
@@ -92,12 +92,10 @@ async def test_no_item_invoice_keeps_exact_agreed_gross_amount(api, session):
     session.add(deal)
     await session.commit()
     result = await api.post(f'/sales/deals/{deal.id}/documents', json={'kind': 'invoice'})
-    assert result.status_code == 201
-    snap = (await api.get(f"/sales/documents/{result.json()['id']}/snapshot")).json()
-    assert Decimal(snap['amount']) == Decimal('0.03')
-    line = snap['items'][0]
-    assert Decimal(line['net']) + Decimal(line['tax']) == Decimal('0.03')
-    assert line['basis'] == 'agreed_gross_amount'
+    # Service-only ERP issue is an explicit guard, not implicit gross/VAT invention.
+    assert result.status_code == 422
+    assert (await session.execute(select(DealDocument))).scalars().all() == []
+
 
 
 async def test_only_drafts_can_preview_and_rejected_candidates_cannot_issue(api, session):
