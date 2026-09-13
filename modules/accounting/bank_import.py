@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
@@ -66,11 +66,19 @@ class BankImportConfirmInput(BankImportInput):
 
 
 def source_snapshot(row: BankTransaction) -> dict:
+    try:
+        if row.amount is None or isinstance(row.amount, bool):
+            raise ValueError
+        amount = Decimal(row.amount)
+        if not amount.is_finite():
+            raise ValueError
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise service.AccountingError("Imported bank transaction has an invalid monetary amount") from exc
     return {
         "transaction_id": row.id,
         "ext_id": row.ext_id,
         "occurred_on": row.occurred_on.isoformat() if row.occurred_on else None,
-        "amount": format(Decimal(row.amount), ".2f"),
+        "amount": format(amount, ".2f"),
         "currency": row.currency,
         "payer_unp": row.payer_unp,
         "payer_name": row.payer_name,
@@ -92,7 +100,7 @@ async def _source(session, org_id: int, source_transaction_id: int) -> tuple[Ban
         )
     row = await session.scalar(select(BankTransaction).where(
         BankTransaction.id == source_transaction_id,
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise service.AccountingError("Imported bank transaction was not found")
     snapshot = source_snapshot(row)

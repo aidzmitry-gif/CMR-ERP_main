@@ -2,7 +2,7 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from modules.accounting import bank_import
 from modules.accounting.models import BankImportReceipt, Entry, SourceBinding
@@ -131,3 +131,25 @@ async def test_bank_import_candidates_expose_digest_and_explicit_binding_state(c
     response = await client.get(f"/accounting/organizations/{book[0]}/bank-import/candidates")
     candidate = next(row for row in response.json() if row["source_snapshot"]["ext_id"] == "BANK-EXT-CANDIDATE")
     assert candidate["binding_status"] == "own"
+
+
+@pytest.mark.parametrize("amount", ["NaN", "sNaN", "Infinity", "-Infinity", None, True, "invalid"])
+def test_bank_snapshot_rejects_invalid_money(amount):
+    source = BankTransaction(ext_id="INVALID", occurred_on=date(2026, 9, 3), amount=amount, currency="BYN")
+    with pytest.raises(bank_import.service.AccountingError, match="invalid monetary amount"):
+        bank_import.source_snapshot(source)
+
+
+async def test_bank_source_refreshes_previously_loaded_amount(db, book):
+    source = BankTransaction(ext_id="CHANGED", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+    db.add(source)
+    await db.flush()
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction",
+        source_id=source.id, ownership="own", evidence="Explicit test source", actor="tester"))
+    await db.commit()
+    await db.execute(update(BankTransaction).where(BankTransaction.id == source.id)
+        .values(amount="240.00").execution_options(synchronize_session=False))
+    await db.commit()
+    assert str(source.amount) == "120.00"
+    _, snapshot, _ = await bank_import._source(db, book[0], source.id)
+    assert snapshot["amount"] == "240.00"
