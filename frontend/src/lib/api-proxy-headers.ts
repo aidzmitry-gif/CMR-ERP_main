@@ -23,6 +23,9 @@ export function buildBackendProxyHeaders(
   const headers = new Headers(incoming);
   headers.delete("host");
   headers.delete("connection");
+  // Fetch frames the buffered upstream body; ingress framing may no longer match it.
+  headers.delete("content-length");
+  headers.delete("transfer-encoding");
 
   const incomingAuth = incoming.get("authorization");
   headers.delete("authorization");

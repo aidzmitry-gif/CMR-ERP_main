@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 import { buildBackendProxyHeaders } from "@/lib/api-proxy-headers";
 
 describe("buildBackendProxyHeaders", () => {
+  it("lets fetch calculate framing for the forwarded body", () => {
+    const incoming = new Headers({ "content-length": "999", "transfer-encoding": "chunked", "content-type": "application/json" });
+    const out = buildBackendProxyHeaders(incoming);
+    expect(out.has("content-length")).toBe(false);
+    expect(out.has("transfer-encoding")).toBe(false);
+    expect(out.get("content-type")).toBe("application/json");
+    expect(incoming.get("content-length")).toBe("999");
+  });
   it("пробрасывает Authorization и добавляет X-User-Roles для dev", () => {
     const incoming = new Headers({
       authorization: "Bearer incoming-token",

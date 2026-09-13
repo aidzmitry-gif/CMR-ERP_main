@@ -1033,6 +1033,7 @@ export interface DealDoc {
   onec_ref: string | null;
   amount: number;
   valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
+  reserve_mode?: "stock" | "on_order" | null;
   reserve_status: string; // none | reserved | consumed | released
   version?: number;
   supersedes_id?: number | null;
@@ -1044,12 +1045,13 @@ export interface DealDoc {
 }
 
 /** Документы сделки (счета/договоры/заказы) — клиент, через /api. */
-export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
+export async function fetchDocuments(dealId: string, strict = false): Promise<DealDoc[]> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as DealDoc[];
   } catch {
+    if (strict) throw new Error("Не удалось загрузить документы сделки.");
     return [];
   }
 }
@@ -1057,6 +1059,10 @@ export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
 /** Сформировать документ сделки (счёт/договор/заказ). Договор уходит на согласование. */
 export async function createDocument(dealId: string, kind: string): Promise<DealDoc | null> {
   try {
+    if (kind === "invoice") {
+      const { openInvoiceIssuance } = await import("@/components/invoice-issuance-dialog");
+      return (await openInvoiceIssuance(dealId))?.document ?? null;
+    }
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

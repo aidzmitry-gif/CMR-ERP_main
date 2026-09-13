@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { openInvoiceIssuance } from "@/components/invoice-issuance-dialog";
+import { InvoiceLateReservation } from "@/components/invoice-late-reservation";
 import type { DealDoc } from "@/lib/api";
 
 type VersionDoc = DealDoc & {
@@ -11,7 +13,7 @@ type VersionDoc = DealDoc & {
   replacement_reason?: string | null;
 };
 
-export function DocumentVersions({ docs, refresh }: { docs: VersionDoc[]; refresh: () => Promise<void> }) {
+export function DocumentVersions({ dealId, docs, refresh }: { dealId?: string; docs: VersionDoc[]; refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<number | null>(null);
@@ -23,6 +25,11 @@ export function DocumentVersions({ docs, refresh }: { docs: VersionDoc[]; refres
     setError("");
     if (action === "revision") requestKey.current ??= crypto.randomUUID();
     try {
+      if (action === "issue" && doc.kind === "invoice") {
+        if (!dealId || doc.supersedes_id) throw new Error("Замена счёта пока недоступна. Для первого черновика откройте его сделку.");
+        if (await openInvoiceIssuance(dealId, doc.id)) await refresh();
+        return;
+      }
       const res = await fetch(`/api/sales/documents/${doc.id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -52,7 +59,9 @@ export function DocumentVersions({ docs, refresh }: { docs: VersionDoc[]; refres
       <ul className="space-y-3">
         {docs.map((doc) => (
           <li key={doc.id} className="border-t border-line pt-2 text-xs" aria-label={`Документ ${doc.id}`}>
-            <div>{doc.kind === "invoice" ? "Счёт" : doc.kind === "contract" ? "Договор" : "Заказ"} · версия {doc.version ?? 1} · ID {doc.id} · {doc.amount.toFixed(2)} BYN</div>
+            <div>{doc.kind === "invoice" ? "Счёт" : doc.kind === "contract" ? "Договор" : "Заказ"} · версия {doc.version ?? 1} · ID {doc.id} · {doc.amount.toFixed(2)} · валюта в оригинале</div>
+            {doc.reserve_mode === "on_order" && <p className="text-amber-700">Выпущен под заказ{doc.reserve_status === "unreserved" ? " — товар не зарезервирован" : ""}.</p>}
+            {dealId && doc.reserve_mode === "on_order" && ["unreserved", "reserved"].includes(doc.reserve_status) && ["issued", "paid"].includes(doc.status) && !doc.superseded_by_id && <InvoiceLateReservation key={`${doc.id}:${doc.version}:${doc.content_sha256}`} dealId={dealId} doc={doc} refresh={refresh} />}
             {doc.supersedes_id && <div>Заменяет документ #{doc.supersedes_id}</div>}
             {doc.superseded_by_id && <div>Заменён документом #{doc.superseded_by_id}; оплата: {doc.status === "paid" ? "оплачен" : "не подтверждена"}</div>}
             {doc.replacement_reason && <div>Причина: {doc.replacement_reason}</div>}
@@ -62,17 +71,18 @@ export function DocumentVersions({ docs, refresh }: { docs: VersionDoc[]; refres
                 {doc.original_state === "issued" ? "Оригинал" : "На согласовании"} #{doc.id}
               </a>
             )}
-            {doc.status === "draft" && <>
-              <a className="mr-3 text-accent-ink underline" href={`/api/sales/documents/${doc.id}/preview`} target="_blank" rel="noreferrer">Предпросмотр черновика</a>
+            {doc.status === "draft" && !(doc.kind === "invoice" && doc.supersedes_id) && <>
+              {doc.kind !== "invoice" && <a className="mr-3 text-accent-ink underline" href={`/api/sales/documents/${doc.id}/preview`} target="_blank" rel="noreferrer">Предпросмотр черновика</a>}
               <button className="underline" disabled={busy} onClick={() => void mutate(doc, "issue")}>
                 {doc.kind === "contract" ? "Отправить версию на согласование" : "Выпустить версию"}
               </button>
             </>}
-            {!doc.superseded_by_id && ["posted", "paid", "cancelled", "rejected"].includes(doc.status) && (
+            {doc.kind !== "invoice" && !doc.superseded_by_id && ["posted", "paid", "cancelled", "rejected"].includes(doc.status) && (
               <button className="underline" disabled={busy} onClick={() => { setEditing(doc.id); setReason(""); requestKey.current = null; }}>
                 Новая версия #{doc.id}
               </button>
             )}
+            {doc.kind === "invoice" && (doc.status !== "draft" || doc.supersedes_id) && <p className="text-amber-700">Замена счёта пока недоступна; оригинал и история сохраняются.</p>}
             {editing === doc.id && <div className="mt-2 flex flex-wrap gap-2">
               <input aria-label="Причина новой версии" className="rounded border border-line bg-surface p-2" value={reason}
                 maxLength={500} onChange={(e) => { setReason(e.target.value); requestKey.current = null; }} />

@@ -3,7 +3,7 @@
 import { DocumentVersions } from "@/components/document-versions";
 
 import { Check, FileText, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
 
 const KINDS = [
@@ -19,6 +19,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
+  issued: { label: "Выпущен", cls: "bg-emerald-50 text-emerald-600" },
   draft: { label: "Черновик", cls: "bg-sunken text-muted" },
   pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
   posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
@@ -56,23 +57,47 @@ function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
 }
 
 export function DealDocuments({ dealId }: { dealId: string }) {
+  return <DealDocumentsForDeal key={dealId} dealId={dealId} />;
+}
+
+function DealDocumentsForDeal({ dealId }: { dealId: string }) {
   const [items, setItems] = useState<DealDoc[]>([]);
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
 
+  const currentDeal = useRef(dealId);
+  const createButton = useRef<HTMLButtonElement>(null);
+  const restoreCreateFocus = useRef(false);
+  useEffect(() => {
+    if (busy || !restoreCreateFocus.current) return;
+    restoreCreateFocus.current = false;
+    if (document.activeElement === document.body) createButton.current?.focus();
+  }, [busy]);
   async function refresh() {
-    setItems(await fetchDocuments(dealId));
+    try {
+      const rows = await fetchDocuments(dealId, true);
+      if (currentDeal.current === dealId) { setItems(rows); setLoaded(true); }
+    } catch (e) { if (currentDeal.current === dealId) setError(e instanceof Error ? e.message : "Ошибка загрузки"); }
   }
 
   useEffect(() => {
-    void fetchDocuments(dealId).then(setItems);
+    let active = true;
+    currentDeal.current = dealId;
+    void fetchDocuments(dealId, true).then(rows => { if (active) { setItems(rows); setLoaded(true); } }).catch(e => { if (active) setError(e instanceof Error ? e.message : "Ошибка загрузки"); });
+    return () => { active = false; currentDeal.current = ""; };
   }, [dealId]);
 
   async function onCreate() {
     setBusy(true);
     setError("");
-    if (!await createDocument(dealId, kind)) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
+    const result = await createDocument(dealId, kind);
+    if (currentDeal.current !== dealId) { setBusy(false); return; }
+    // The opener is disabled until refresh finishes, so the dialog cannot
+    // restore focus itself. Wait for React to enable it; preserve a new focus.
+    restoreCreateFocus.current = kind === "invoice" && document.activeElement === document.body;
+    if (!result) setError(kind === "invoice" ? "Выпуск не подтверждён. Сохранённый запрос можно продолжить; замена счёта пока недоступна." : "Не удалось создать документ.");
     await refresh();
     setBusy(false);
   }
@@ -104,6 +129,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           ))}
         </select>
         <button
+          ref={createButton}
           onClick={onCreate}
           disabled={busy}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
@@ -114,7 +140,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
 
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <ul className="mt-3 space-y-2">
-        {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
+        {!loaded && !error && <li className="text-sm text-muted">Загрузка документов…</li>}
+        {loaded && !error && items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
         {items.map((d) => {
           const s = STATUS[d.status] ?? STATUS.draft;
           const rb = reserveBadge(d);
@@ -165,7 +192,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           );
         })}
       </ul>
-      <DocumentVersions docs={items} refresh={refresh} />
+      <DocumentVersions dealId={dealId} docs={items} refresh={refresh} />
     </div>
   );
 }

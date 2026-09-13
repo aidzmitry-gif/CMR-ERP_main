@@ -12,7 +12,7 @@ describe("DocumentVersions", () => {
       .mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetch);
     const refresh = vi.fn().mockResolvedValue(undefined);
-    render(<DocumentVersions docs={[base]} refresh={refresh} />);
+    render(<DocumentVersions docs={[{ ...base, kind: "contract" }]} refresh={refresh} />);
     fireEvent.click(screen.getByText("Новая версия #1"));
     fireEvent.change(screen.getByLabelText("Причина новой версии"), { target: { value: "Новая цена" } });
     fireEvent.click(screen.getByText("Создать черновик"));
@@ -39,11 +39,12 @@ describe("DocumentVersions", () => {
     expect(screen.queryByText("Оригинал #1")).toBeNull();
   });
 
-  it("черновик выпускается отдельным действием", async () => {
+  it("replacement счёта не выпускается без поддержанного ERP workflow", () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetch);
     render(<DocumentVersions docs={[{ ...base, id: 2, status: "draft", original_state: "draft", supersedes_id: 1 }]} refresh={vi.fn()} />);
-    fireEvent.click(screen.getByText("Выпустить версию"));
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/sales/documents/2/issue", expect.objectContaining({ method: "POST" })));
+    expect(screen.queryByText("Выпустить версию")).toBeNull();
+    expect(screen.getByText(/Замена счёта пока недоступна/)).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
