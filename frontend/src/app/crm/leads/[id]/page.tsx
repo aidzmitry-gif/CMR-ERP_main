@@ -27,8 +27,8 @@ export default async function LeadDetailPage({
 
   return (
     <AppShell crumbs={["CRM", "Лиды", `ЛИД-${id}`]}>
-      <div className="flex-1 overflow-y-auto bg-canvas text-ink">
-        <div className="mx-auto max-w-[1280px] px-[22px] pb-10 pt-[18px]">
+      <div className="min-w-0 flex-1 overflow-y-auto bg-canvas text-ink [overflow-wrap:anywhere]">
+        <div className="mx-auto max-w-[1280px] px-3 pb-10 pt-[18px] sm:px-[22px]">
           <Link
             href="/crm/leads"
             className="mb-3 inline-flex items-center gap-1 text-[12.5px] font-semibold text-muted hover:text-ink"
