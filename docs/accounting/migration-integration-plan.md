@@ -28,8 +28,14 @@ Local detailed evidence: `reports/CRM-ACC-001/acc_install_b2ad69b97ab64786927891
 
 ## Remaining release gates
 
-1. Check full GitHub CI on the final integrated branch and finish unresolved application acceptance, including dedicated PostgreSQL ESCHF concurrency tests.
+1. Check full GitHub CI on the final integrated branch and finish unresolved application acceptance, including the newly enabled PostgreSQL ESCHF concurrency tests in CI.
 2. Inspect the actual target revision history and reconcile other reserved application migrations before deployment approval; do not rewrite already-applied history.
 3. Obtain and reconcile real organization policies, account balances and primary documents; complete the required monthly, quarterly and annual acceptance cycles.
 4. Verify the actual backup and recovery procedure in the intended deployment environment. A synthetic local restore does not prove production recovery.
 5. Validate current statutory references, native bindings, signature and portal results before claiming ESCHF delivery or replacement of 1C.
+
+## ESCHF PostgreSQL checkpoint
+
+[Local PostgreSQL acceptance](acceptance/eschf-postgres.json): 79 repository/API checks and 89 source/freshness checks passed in two bounded batches. Source fixture setup was updated to include the real CRM stage/loss guards introduced by integration. No guard was disabled. Both dedicated ephemeral PostgreSQL containers were removed.
+
+GitHub CI now provisions a separate ESCHF service matching the strict fixture address/database/user guard. These tests previously skipped without `ESCHF_TEST_DATABASE_URL`; the new CI run must confirm the integrated result. Synthetic adapters do not establish native signature validity, portal submission or statutory acceptance.
