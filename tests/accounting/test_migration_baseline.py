@@ -25,3 +25,20 @@ def test_proposal_does_not_recreate_registered_tables():
     assert created, "Proposal must contain table definitions"
     collisions = {name: registered[name] for name in created & registered.keys()}
     assert not collisions, f"Proposal recreates existing tables: {collisions}"
+
+
+def test_registered_accounting_revision_freezes_reviewed_sql():
+    path = Path("migrations/versions/0130_accounting_ledger.py")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    constants = {node.targets[0].id: ast.literal_eval(node.value)
+                 for node in tree.body if isinstance(node, ast.Assign)
+                 and isinstance(node.targets[0], ast.Name)}
+    assert constants["revision"] == "0130"
+    assert constants["down_revision"] == "0121"
+    proposal = ast.parse(Path("docs/accounting/migration-proposal.py").read_text(encoding="utf-8"))
+    frozen = next(ast.literal_eval(node.value) for node in proposal.body
+                  if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                  and node.targets[0].id == "DDL")
+    assert constants["DDL"] == frozen
+    readable = Path("docs/accounting/schema-proposal.sql").read_text(encoding="utf-8")
+    assert [line.rstrip() for line in constants["DDL"].splitlines()] == [line.rstrip() for line in readable.splitlines()]
