@@ -170,7 +170,8 @@ async def test_whole_act_accounting_preview_uses_actual_act_and_keeps_it_pending
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["costs"][0]["issue_cost_byn"] == "10.00" and result["gross_byn"] == "48.00"
-    assert result["confirmation_available"] is False
+    assert result["confirmation_available"] is True
+    assert result["posted"] is False
     assert await session.scalar(select(func.count()).select_from(models.Entry)) == 1
     assert await session.scalar(select(models.SourceControl.entry_id).where(models.SourceControl.source == result["source"])) is None
     changed = deepcopy(data)

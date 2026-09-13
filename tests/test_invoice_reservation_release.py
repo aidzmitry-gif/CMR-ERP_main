@@ -28,6 +28,7 @@ from modules.sales.deal_loss import DealLossRequest, DealLossResolution
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
 from modules.sales.models import Deal, DealDocument, Stage
 from modules.sales.reservation_source import SalesReservationSource
+from modules.wms.invoice_remainder import RemainderRelease, RemainderReleaseLine
 from modules.wms.invoice_reservations import (
     EvidenceReference,
     InvoiceReservation,
@@ -65,7 +66,7 @@ SCOPES = ("wms_issue", "wms_pick", "logistics_shipment", "accounting_issue", "le
 TABLES = [m.__table__ for m in (Organization, Deal, DealDocument, Stage, DealLossRequest, DealLossResolution,
     InvoiceIssuanceReceipt, DealOwnership, Location,
     StockMovement, Task, ReservationVersion, InvoiceReservation, ReservationEventState,
-    ReservationPick, InvoiceReservationRelease, InvoiceReservationReleaseLine, PhysicalShipmentAct, PhysicalShipmentLine, Proof)]
+    ReservationPick, InvoiceReservationRelease, InvoiceReservationReleaseLine, PhysicalShipmentAct, PhysicalShipmentLine, RemainderRelease, RemainderReleaseLine, Proof)]
 
 
 def digest(data):

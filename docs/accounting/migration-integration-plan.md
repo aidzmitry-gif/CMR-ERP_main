@@ -1,12 +1,12 @@
 # Accounting migration integration
 
-Status (2026-09-13): registered and locally verified through **0130** in the accounting agent branch. Not merged or deployed. Real accounting and statutory cutover acceptance remain open.
+Status (2026-09-13): registered and locally verified through **0131** in the accounting agent branch. Not merged or deployed. Real accounting and statutory cutover acceptance remain open.
 
 ## Registered chain
 
-`0116 → 0120 (SEND) → 0117 → 0118 → 0119 (counterparties) → 0121 (ESCHF) → 0130 (accounting)`
+`0116 → 0120 (SEND) → 0117 → 0118 → 0119 (counterparties) → 0121 (ESCHF) → 0130 (accounting) → 0131 (reservation remainder)`
 
-0130 was reserved under the existing shared migration lock after checking other Git worktrees: 0122–0129 are already used elsewhere. Their numbers are skipped here; their features are not claimed to be integrated. The single Alembic head is 0130. The isolated branch reparents 0117 to 0120 and 0121 to 0119; no deployed history was changed. Any future deployment must first inspect the target database revision history and reconcile the other branches.
+0130 was reserved under the existing shared migration lock after checking other Git worktrees: 0122–0129 are already used elsewhere. Their numbers are skipped here; their features are not claimed to be integrated. The single Alembic head is 0131. The isolated branch reparents 0117 to 0120 and 0121 to 0119; no deployed history was changed. Any future deployment must first inspect the target database revision history and reconcile the other branches.
 
 ## Application integration
 
@@ -39,3 +39,11 @@ Local detailed evidence: `reports/CRM-ACC-001/acc_install_b2ad69b97ab64786927891
 [Local PostgreSQL acceptance](acceptance/eschf-postgres.json): 79 repository/API checks and 89 source/freshness checks passed in two bounded batches. Source fixture setup was updated to include the real CRM stage/loss guards introduced by integration. No guard was disabled. Both dedicated ephemeral PostgreSQL containers were removed.
 
 GitHub CI now provisions a separate ESCHF service matching the strict fixture address/database/user guard. These tests previously skipped without `ESCHF_TEST_DATABASE_URL`; the new CI run must confirm the integrated result. Synthetic adapters do not establish native signature validity, portal submission or statutory acceptance.
+
+## Partial shipment remainder
+
+0131 adds immutable WMS remainder-release receipts to the existing reservation ledger. It reuses reviewed WMS package b73c41b from the isolated reservation task; the duplicate pilot ledger and its 0122 migration are excluded. Neither 0130 nor already published migrations were rewritten.
+
+The API releases only unshipped reserved quantities after a physical act. For physical stock 10, reservation 6 and shipment 2, releasing 4 leaves physical stock 8, reserved 0 and free 8. The invoice, financial status and shipment act remain unchanged. An explicit reason and current preview digest are required; replay uses the original UUID and body. Invoice cancellation remains separate.
+
+Registered upgrade to 0131 passed on an owned temporary PostgreSQL database, preserving a pre-existing logistics shipment and all 51 accounting tables. This checkpoint has no new restore acceptance: the earlier 0130 restore proof remains scoped to 0130. The dedicated UI for remainder release remains to be integrated; API availability is not user acceptance or deployment.

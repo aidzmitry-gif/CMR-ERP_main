@@ -360,6 +360,8 @@ async def pg_factory():
                 # Existing WMS schema before this additive ownership migration.
                 baseline = MetaData()
                 for table in wms_models.Base.metadata.sorted_tables:
+                    if table.schema == "wms" and table.name in {"invoice_remainder_release", "invoice_remainder_release_line"}:
+                        continue  # Added by registered migration 0131 after the accounting baseline.
                     if table.schema == "wms" and table.name == "production_arrival":
                         continue  # Added by the shared unallocated proposal, not the legacy baseline.
                     if table.schema == "wms" and table.name not in {"primary_receipt_binding", "reservation_version", "reservation_event_state", "reservation_pick", "invoice_reservation", "invoice_reservation_release", "invoice_reservation_release_line", "physical_shipment_act", "physical_shipment_line", "production_material_issue"}:
@@ -408,6 +410,8 @@ async def pg_factory():
                 connection.execute(text("ALTER TABLE public.audit_log ALTER COLUMN actor TYPE varchar(128)"))
                 with Operations.context(MigrationContext.configure(connection)):
                     migration["upgrade"]()
+                    remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
+                    remainder["upgrade"]()
 
             await conn.run_sync(upgrade)
         yield async_sessionmaker(engine, expire_on_commit=False)
