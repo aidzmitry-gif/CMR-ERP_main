@@ -1,6 +1,6 @@
 # Accounting migration integration proposal
 
-Status: reviewed local proposal; not registered, merged or production-ready.
+Status: SEND application and revision 0120 integrated in the accounting agent branch; counterparty, ESCHF and accounting revisions remain pending. Not deployed or production-ready.
 
 The separate worktrees currently branch from different parents. Proposed combined order:
 
@@ -31,9 +31,17 @@ Local evidence: `reports/CRM-ACC-001/acc_install_d37b6fe404bc475cae7221e86a85b42
 
 ## Remaining release work
 
-1. Integrate the matching application changes for SEND, counterparty identities and ESCHF; SQL compatibility alone does not prove API/model compatibility.
+1. SEND application changes are integrated from root `62cfcdc6` / sales `a5562b4`, preserving accounting routes and proxy cache headers. Counterparty identities and ESCHF application changes remain to integrate; SQL compatibility alone does not prove API/model compatibility.
 2. Reconcile shared revision reservations against the final upstream branches; recheck source hashes if any migration changes.
 3. Register the accounting revision after the final shared chain and apply the **registered** chain on an isolated PostgreSQL database; verify one head and the resulting alembic_version.
 4. Review correction/downgrade behavior and test a backup/restore of the final registered schema before production authorization.
 
 No already-applied migration may be reparented on an existing deployment without first inspecting its actual revision history. This document proposes integration of currently separate branches, not rewriting deployed history.
+
+## SEND integration checkpoint (2026-09-13)
+
+The agent branch now registers the unchanged SEND migration 0120 after 0116; `alembic heads` reports only 0120. Mail intake, scoped routing, attachments, reply snapshots, queue tooling and the `/crm/mail` interface are integrated. No live mailbox worker or outgoing transport was enabled.
+
+Acceptance: 132 selected backend tests passed, one skipped and two subtests passed; 18 frontend tests passed; TypeScript, targeted ESLint and Ruff passed. The actual Next page was inspected with an incoming synthetic request and blocked external requests. These checks do not prove a registered PostgreSQL upgrade or live mailbox delivery. The PostgreSQL routing suite is included for CI.
+
+Next: integrate counterparty and ESCHF application packages, preserve the agreed chain, then register and verify the accounting revision.
