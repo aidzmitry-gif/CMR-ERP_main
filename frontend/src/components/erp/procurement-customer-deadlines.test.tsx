@@ -30,3 +30,14 @@ it("refreshes the date before copying it into the unsaved plan", async () => {
   await waitFor(() => expect(onUseDate).toHaveBeenCalledWith("2026-12-20"));
   expect(fetchCustomerDeadlines).toHaveBeenCalledTimes(2);
 });
+
+it("discards a pending response when the order context changes", async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof fetchCustomerDeadlines>>) => void;
+  vi.mocked(fetchCustomerDeadlines).mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  const view = render(<ProcurementCustomerDeadlines org={1} orderId={7} />);
+  fireEvent.click(screen.getByText("Проверить клиентские сроки"));
+  view.rerender(<ProcurementCustomerDeadlines org={2} orderId={8} />);
+  resolve({ organization_id: 1, order_id: 7, status: "live_review", source: "outstanding_expected_reservations", earliest_required_arrival: "2026-12-28", unresolved_deadlines: 0, complete_customer_demand: false, at_risk: true, items: [] });
+  await waitFor(() => expect(screen.getByText("Проверить клиентские сроки")).toBeEnabled());
+  expect(screen.queryByText(/Есть риск опоздания/)).not.toBeInTheDocument();
+});
