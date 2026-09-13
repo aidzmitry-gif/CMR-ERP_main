@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from types import ModuleType
 
 from core.services import sku_master
+from core.services.accounting import AccountingGateway
 from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
 from core.services.bank import BankGateway
@@ -21,6 +22,7 @@ from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
 from core.services.price_cost import PriceCostGateway
+from core.services.procurement import ProcurementSourceGateway
 from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
@@ -66,6 +68,9 @@ class Services:
     # Несёт PII/коммерческую переписку → роут-потребитель защищён правом, реализация в sales
     # тоже проводит свою проверку прав (защита на обоих уровнях).
     touch_history: TouchHistoryGateway | None = None
+    # Populated by the owning modules during registration; absent means unavailable.
+    accounting: AccountingGateway | None = None
+    procurement_source: ProcurementSourceGateway | None = None
 
 
 def build_services() -> Services:
