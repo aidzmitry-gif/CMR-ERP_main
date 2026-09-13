@@ -103,11 +103,17 @@ async def report(session, org_id, start, end):
         grouped = {}
         while month <= end:
             controls = await closing_snapshot(session, org_id, month.strftime("%Y-%m"))
-            for item in controls["review_items"]:
+            items = list(controls["review_items"])
+            if not controls["period"]["closed"]:
+                items.append({"code": "reporting_period_open", "count": 1,
+                              "message": "Не все месяцы отчёта закрыты."})
+            for item in items:
                 if item["code"] not in grouped:
                     grouped[item["code"]] = {**item, "count": 0, "months": []}
                 grouped[item["code"]]["count"] += item["count"]
                 grouped[item["code"]]["months"].append(month.strftime("%Y-%m"))
+            if month == end.replace(day=1):
+                break
             month = month.replace(year=month.year + 1, month=1) if month.month == 12 else month.replace(month=month.month + 1)
         review_items = list(grouped.values())
         final = final and not review_items

@@ -23,3 +23,15 @@ async def test_multimonth_report_keeps_earlier_policy_review_visible(db, book):
     item = next(row for row in combined["review_items"] if row["code"] == "policy_normative_basis")
     assert item["count"] == 1
     assert item["months"] == ["2026-09"]
+
+
+@pytest.mark.asyncio
+async def test_report_requires_every_month_not_only_existing_closed_rows(db, book):
+    for month in ["2026-09", "2026-11"]:
+        db.add(Period(organization_id=book[0], month=month, closed=True, generation=0))
+    await db.commit()
+    combined = await report(db, book[0], date(2026, 9, 1), date(2026, 11, 30))
+    assert combined["status"] == "preliminary"
+    item = next(row for row in combined["review_items"] if row["code"] == "reporting_period_open")
+    assert item["months"] == ["2026-10"]
+    assert item["count"] == 1
