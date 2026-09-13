@@ -133,7 +133,7 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
   it("fetchReceiptsServer / fetchTasksServer / fetchCyclePlansServer / fetchThresholdsServer — пустой fallback при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     await expect(fetchReceiptsServer()).rejects.toThrow("down");
-    expect(await fetchTasksServer()).toEqual([]);
+    await expect(fetchTasksServer()).rejects.toThrow("down");
     expect(await fetchCyclePlansServer()).toEqual([]);
     expect(await fetchThresholdsServer()).toEqual([]);
   });
@@ -196,7 +196,7 @@ describe("Client fetch-обёртки (api/post helpers)", () => {
     stubFetch([{ id: 1, kind: "pick" }]);
     expect((await fetchTasks())[0].kind).toBe("pick");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await fetchTasks()).toEqual([]);
+    await expect(fetchTasks()).rejects.toThrow("net");
 
     stubFetch([{ id: 2, warehouse: "w1" }]);
     expect((await fetchCyclePlans())[0].warehouse).toBe("w1");

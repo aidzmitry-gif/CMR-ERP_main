@@ -35,6 +35,7 @@ export interface ReceiptDetail extends Receipt {
 
 export interface WmsTask {
   id: number;
+  organization_id?: number | null;
   kind: string; // putaway | pick
   status: string; // open | in_progress | done | canceled
   sku_code: string;
@@ -228,7 +229,11 @@ export async function fetchReceiptServer(id: string, r?: string, authHeaders?: R
   if (!response.ok) throw new Error(`Receipt unavailable (${response.status})`);
   return response.json();
 }
-export const fetchTasksServer = (r?: string) => ssr<WmsTask[]>("/wms/tasks", r, []);
+export async function fetchTasksServer(r?: string, authHeaders?: Record<string, string>): Promise<WmsTask[]> {
+  const response = await fetch(`${BASE}/wms/tasks`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
+  if (!response.ok) throw new Error(`Warehouse tasks unavailable (${response.status})`);
+  return response.json();
+}
 export const fetchReconServer = (r?: string) =>
   ssr<Reconciliation>("/wms/reconciliation", r, { rows: [], gateway: false, total_abs_diff_value: 0 });
 export const fetchAlertsServer = (r?: string) =>
@@ -238,7 +243,11 @@ export const fetchThresholdsServer = (r?: string) => ssr<StockThreshold[]>("/wms
 
 // ---- Client ----
 export const fetchReceipt = (id: number) => api<ReceiptDetail | null>(`/wms/receipts/${id}`, null);
-export const fetchTasks = () => api<WmsTask[]>("/wms/tasks", []);
+export async function fetchTasks(): Promise<WmsTask[]> {
+  const response = await fetch("/api/wms/tasks", { cache: "no-store" });
+  if (!response.ok) throw new Error("Не удалось загрузить складские задания. Проверьте доступ к юрлицу и повторите запрос.");
+  return response.json();
+}
 export const qcReceipt = (id: number, decisions: unknown[], decidedBy = "", expectedRevision?: string) =>
   post(`/wms/receipts/${id}/qc`, { decisions, decided_by: decidedBy, expected_revision: expectedRevision });
 export const acceptReceipt = (id: number) => post(`/wms/receipts/${id}/accept`);
