@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -48,6 +48,8 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   onDate: (date: string) => void;
   onPosted: () => void;
 }) {
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [bankAccount, setBankAccount] = useState("");
@@ -76,6 +78,7 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
     try {
       const response = await fetch(`/api/accounting/organizations/${org}/bank-import/candidates`, { cache: "no-store" });
       const body = await response.json();
+      if (!alive.current) return;
       if (!response.ok) throw new Error(message(body, "Не удалось загрузить очередь банковских строк."));
       setCandidates(body as Candidate[]);
     } catch (e) {
@@ -116,6 +119,7 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
         }),
       });
       const body = await response.json();
+      if (!alive.current) return;
       if (!response.ok) throw new Error(message(body, "Не удалось закрепить банковскую строку за юрлицом."));
       setNotice(`Строка ${candidate.source_snapshot.ext_id} привязана к выбранному юрлицу.`);
       await load();
@@ -146,12 +150,13 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const result = await response.json();
+      if (!alive.current) return;
       if (!response.ok) throw new Error(message(result, "Проверьте источник, политику и счета."));
       if (confirm) {
         setSelectedId(null); setPreview(null); setPrepared(null);
         setNotice(`Строка ${selected.source_snapshot.ext_id} проведена в бухгалтерскую книгу.`);
         await load();
-        onPosted();
+        if (alive.current) onPosted();
       } else {
         setPrepared(body as Record<string, unknown>);
         setPreview(result as Preview);
