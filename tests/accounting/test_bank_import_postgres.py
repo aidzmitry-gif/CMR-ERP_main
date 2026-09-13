@@ -134,3 +134,68 @@ async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, p
             with pytest.raises(DBAPIError):
                 await session.execute(text(statement))
             await session.rollback()
+
+
+@pytest.mark.parametrize("close_first", [True, False])
+async def test_bank_binding_and_month_closing_serialize(pg_factory, pg_book, close_first):  # noqa: F811
+    from fastapi import HTTPException
+
+    from modules.accounting import routes
+    from modules.accounting.models import Period
+    from modules.accounting.schemas import CloseInput, SourceBindingInput
+
+    async with pg_factory() as session:
+        source = BankTransaction(ext_id="PG-BIND-CLOSE", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+        session.add(source)
+        await session.commit()
+        source_id = source.id
+    binding = SourceBindingInput(source_type="finance_bank_transaction", source_id=source_id,
+                                 ownership="own", evidence="Synthetic concurrent bank binding")
+
+    async def perform(session, closing):
+        if closing:
+            await service.close_period(session, pg_book[0], "2026-09", CloseInput(
+                expected_generation=0, evidence={key: "Checked synthetic month" for key in service.CLOSE_STEPS}), "tester")
+        else:
+            await routes.bind_source(pg_book[0], binding, (session, "tester", "chief"))
+
+    worker_started = asyncio.Event()
+    worker_pid = None
+
+    async def second():
+        nonlocal worker_pid
+        async with pg_factory() as session:
+            worker_pid = await session.scalar(text("SELECT pg_backend_pid()"))
+            worker_started.set()
+            try:
+                await perform(session, not close_first)
+                await session.commit()
+                return "unexpected success"
+            except (HTTPException, service.AccountingError) as exc:
+                await session.rollback()
+                return str(exc)
+
+    async with pg_factory() as holder:
+        await perform(holder, close_first)
+        task = asyncio.create_task(second())
+        try:
+            await asyncio.wait_for(worker_started.wait(), 5)
+            for _ in range(100):
+                blocked = await holder.scalar(text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"), {"pid": worker_pid})
+                if blocked:
+                    break
+                await asyncio.sleep(0.02)
+            assert blocked, "Second writer must wait for the organization lock"
+            await holder.commit()
+            result = await asyncio.wait_for(task, 10)
+            assert ("closed period" if close_first else "Unposted imported bank") in result
+        finally:
+            await holder.rollback()
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    async with pg_factory() as session:
+        bound = await session.scalar(select(SourceBinding.id).where(SourceBinding.source_id == source_id))
+        closed = await session.scalar(select(Period.closed).where(Period.organization_id == pg_book[0], Period.month == "2026-09"))
+        assert bool(bound) is (not close_first)
+        assert bool(closed) is close_first
