@@ -6,6 +6,7 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError
 
@@ -17,6 +18,20 @@ from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def bank_period_sql_guards(pg_factory):  # noqa: F811
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    async with pg_factory() as session:
+        connection = await session.connection()
+        sql = Path("modules/accounting/bank_period_guards.sql").read_text(encoding="utf-8")
+        await connection.run_sync(lambda conn: Operations(MigrationContext.configure(conn)).execute(sql))
+        await session.commit()
 
 async def _install_finance_source_tables(session):
     """The frozen accounting proposal deliberately does not own finance.*."""
@@ -199,3 +214,46 @@ async def test_bank_binding_and_month_closing_serialize(pg_factory, pg_book, clo
         closed = await session.scalar(select(Period.closed).where(Period.organization_id == pg_book[0], Period.month == "2026-09"))
         assert bool(bound) is (not close_first)
         assert bool(closed) is close_first
+
+
+async def test_bank_sql_guards_reject_close_mutation_and_late_binding(pg_factory, pg_book):  # noqa: F811
+    from modules.accounting.models import Period
+    from modules.accounting.schemas import CloseInput
+
+    async with pg_factory() as session:
+        source = BankTransaction(ext_id="PG-SQL-GUARD", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+        session.add(source)
+        await session.flush()
+        source_id = source.id
+        session.add(SourceBinding(organization_id=pg_book[0], source_type="finance_bank_transaction", source_id=source_id,
+                                  ownership="own", evidence="SQL guard fixture", actor="tester"))
+        session.add(Period(organization_id=pg_book[0], month="2026-09", closed=False, generation=0))
+        await session.commit()
+    statements = [
+        ("UPDATE accounting.period SET closed=true WHERE organization_id=:org AND month='2026-09'", "Unposted imported bank"),
+        ("UPDATE finance.bank_transaction SET amount=121 WHERE id=:source", "financial fields are immutable"),
+        ("DELETE FROM finance.bank_transaction WHERE id=:source", "financial fields are immutable"),
+        ("TRUNCATE finance.bank_transaction", "cannot be truncated"),
+    ]
+    for sql, expected in statements:
+        async with pg_factory() as session:
+            with pytest.raises(DBAPIError, match=expected):
+                await session.execute(text(sql), {"org": pg_book[0], "source": source_id})
+                await session.commit()
+            await session.rollback()
+    async with pg_factory() as session:
+        await session.execute(text("UPDATE finance.bank_transaction SET match_status='matched' WHERE id=:id"), {"id": source_id})
+        await session.commit()
+        # An earlier month can close; its source dates remain outside that month.
+        await service.close_period(session, pg_book[0], "2026-08", CloseInput(
+            expected_generation=0, evidence={key: "Synthetic SQL guard check" for key in service.CLOSE_STEPS}), "tester")
+        await session.commit()
+    async with pg_factory() as session:
+        old = BankTransaction(ext_id="PG-SQL-LATE", occurred_on=date(2026, 8, 3), amount="1.00", currency="BYN")
+        session.add(old)
+        await session.flush()
+        session.add(SourceBinding(organization_id=pg_book[0], source_type="finance_bank_transaction", source_id=old.id,
+                                  ownership="own", evidence="Rejected old source", actor="tester"))
+        with pytest.raises(DBAPIError, match="Bank source affects a closed period"):
+            await session.flush()
+        await session.rollback()
