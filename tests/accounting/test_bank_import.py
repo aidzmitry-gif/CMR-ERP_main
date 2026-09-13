@@ -153,3 +153,23 @@ async def test_bank_source_refreshes_previously_loaded_amount(db, book):
     assert str(source.amount) == "120.00"
     _, snapshot, _ = await bank_import._source(db, book[0], source.id)
     assert snapshot["amount"] == "240.00"
+
+
+def test_invalid_bank_snapshot_can_be_displayed_without_a_postable_amount():
+    source = BankTransaction(ext_id="INVALID-LIST", occurred_on=date(2026, 9, 3), amount="NaN", currency="BYN")
+    assert bank_import.source_snapshot(source, allow_invalid=True)["amount"] is None
+
+
+async def test_bank_candidates_exclude_rows_bound_to_another_company(db, book):
+    from modules.accounting.models import Organization
+
+    other = Organization(name="Other company", unp="999999995")
+    db.add(other)
+    source = BankTransaction(ext_id="PRIVATE-OTHER", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+    db.add(source)
+    await db.flush()
+    db.add(SourceBinding(organization_id=other.id, source_type="finance_bank_transaction",
+        source_id=source.id, ownership="own", evidence="Other company statement", actor="tester"))
+    await db.commit()
+    result = await bank_import.list_candidates(db, book[0])
+    assert all(x["source_snapshot"]["transaction_id"] != source.id for x in result)

@@ -65,7 +65,7 @@ class BankImportConfirmInput(BankImportInput):
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-def source_snapshot(row: BankTransaction) -> dict:
+def source_snapshot(row: BankTransaction, *, allow_invalid=False) -> dict:
     try:
         if row.amount is None or isinstance(row.amount, bool):
             raise ValueError
@@ -73,12 +73,14 @@ def source_snapshot(row: BankTransaction) -> dict:
         if not amount.is_finite():
             raise ValueError
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise service.AccountingError("Imported bank transaction has an invalid monetary amount") from exc
+        if not allow_invalid:
+            raise service.AccountingError("Imported bank transaction has an invalid monetary amount") from exc
+        amount = None
     return {
         "transaction_id": row.id,
         "ext_id": row.ext_id,
         "occurred_on": row.occurred_on.isoformat() if row.occurred_on else None,
-        "amount": format(amount, ".2f"),
+        "amount": format(amount, ".2f") if amount is not None else None,
         "currency": row.currency,
         "payer_unp": row.payer_unp,
         "payer_name": row.payer_name,
@@ -280,12 +282,15 @@ async def list_candidates(session, org_id: int):
     receipt_by_source = {row.source_transaction_id: row for row in receipts}
     result = []
     for row in rows:
-        snapshot = source_snapshot(row)
         binding = binding_by_source.get(row.id)
+        if binding is not None and binding.organization_id != org_id:
+            continue
+        snapshot = source_snapshot(row, allow_invalid=True)
         receipt = receipt_by_source.get(row.id)
         result.append({
             "source_snapshot": snapshot,
-            "source_digest": _digest(snapshot),
+            "source_digest": _digest(snapshot) if snapshot["amount"] is not None else None,
+            "source_error": "invalid_monetary_amount" if snapshot["amount"] is None else None,
             "binding_status": (
                 "own" if binding is not None and binding.organization_id == org_id and binding.ownership == "own"
                 else "other" if binding is not None
