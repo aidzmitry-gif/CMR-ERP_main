@@ -23,11 +23,13 @@ from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
 from core.services.price_cost import PriceCostGateway
 from core.services.procurement import ProcurementSourceGateway
+from core.services.production import ProductionOutputGateway
 from core.services.registry import RegistryGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
 from core.services.temporal import TemporalService
 from core.services.touch_history import TouchHistoryGateway
+from core.services.wms import WmsReservationGateway
 
 __all__ = ["Services", "build_services"]
 
@@ -71,6 +73,8 @@ class Services:
     # Populated by the owning modules during registration; absent means unavailable.
     accounting: AccountingGateway | None = None
     procurement_source: ProcurementSourceGateway | None = None
+    wms_reservations: WmsReservationGateway | None = None
+    production_output: ProductionOutputGateway | None = None
 
 
 def build_services() -> Services:
