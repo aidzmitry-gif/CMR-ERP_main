@@ -20,7 +20,6 @@ function Fields({ org, effectiveDate, onChange }: Props) {
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    setAccounts(null); setError("");
     void (async () => {
       try {
         if (!/^[1-9]\d*$/.test(org) || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)
@@ -56,10 +55,10 @@ function Fields({ org, effectiveDate, onChange }: Props) {
   useLayoutEffect(() => { onChange(JSON.parse(signature) as ProductionCostSelection); }, [signature, onChange]);
   return <fieldset className="min-w-0 space-y-2 rounded-lg border border-line p-3">
     <legend>Производственные затраты</legend>
-    <label className="block"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Настроить затраты производства</label>
+    <label className="block"><input type="checkbox" checked={enabled} onChange={e => { setAccounts(null); setError(""); setEnabled(e.target.checked); }} /> Настроить затраты производства</label>
     {enabled && <>
       <p className="text-sm">Используется база распределения из этой политики. Настройка не означает, что себестоимость рассчитана.</p>
-      {error && <p role="alert">{error} <button type="button" onClick={() => setRetry(v => v + 1)}>Повторить загрузку счетов</button></p>}
+      {error && <p role="alert">{error} <button type="button" onClick={() => { setAccounts(null); setError(""); setRetry(v => v + 1); }}>Повторить загрузку счетов</button></p>}
       <Select aria-label="Группировка производственных затрат" value={pool} onChange={e => { setPool(e.target.value); setWip(""); setOverhead([]); }}>
         <option value="">Выберите группировку</option><option value="department">По подразделениям</option><option value="organization">По юрлицу целиком</option>
       </Select>

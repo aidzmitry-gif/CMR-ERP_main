@@ -11,7 +11,7 @@ export function AccountingShipmentConfirm({ org, sourceKey, source, body, onLock
   const [state, setState] = useState<"ready" | "sending" | "uncertain" | "done" | "rejected">("ready");
   const [message, setMessage] = useState("");
   const postedCallback = useRef(onPosted);
-  postedCallback.current = onPosted;
+  useEffect(() => { postedCallback.current = onPosted; }, [onPosted]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   async function confirm() {
