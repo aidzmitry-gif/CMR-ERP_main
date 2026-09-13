@@ -117,6 +117,10 @@ async def report(session, org_id, start, end):
             month = month.replace(year=month.year + 1, month=1) if month.month == 12 else month.replace(month=month.month + 1)
         review_items = list(grouped.values())
         final = final and not review_items
+    else:
+        final = False
+        review_items.append({"code": "partial_period_review", "count": 1,
+                             "message": "Диапазон включает неполный месяц; проверки закрытия всего месяца к нему не применены."})
     # Unclosed income/expense account balances remain an explicit current result.
     current_result = -balances["income"] - balances["expense"]
     assets, liabilities, equity = balances["asset"], -balances["liability"], -balances["equity"]
