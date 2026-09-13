@@ -1,0 +1,70 @@
+{
+  "collected_at": "2026-09-09T06:49:46.135135+00:00",
+  "provenance": "Existing task receipts read locally; no new WinRM, COM or OData calls by ESCHF task",
+  "source_tasks": [
+    {
+      "id": "01a08210-8e0b-7a02-a589-0e33e3548b14",
+      "title": "Проверь готовность карточки товара"
+    },
+    {
+      "id": "01a08282-4a93-7180-84ed-39f4bc640172",
+      "title": "CRM-SKU-001 · H01 · Интерфейс карточки…"
+    }
+  ],
+  "source_receipts": [
+    {
+      "path_from_workspace": ".harness/work/CRM-SKU-001-winrm-status.json",
+      "sha256": "ac7a08d25729f99fe7de1f348a22c7bd25eebb269d6fcdb93c613bfce18c17fd"
+    },
+    {
+      "path_from_workspace": ".harness/work/CRM-SKU-001-evidence/g12-live-metadata.json",
+      "sha256": "18dad6332609b19f780ab8f8f8e8b1e19b21e2f0a4ff48ccec82ed4d42969fe6"
+    },
+    {
+      "path_from_workspace": ".harness/work/CRM-SKU-001-evidence/g12-live-summary.json",
+      "sha256": "81e57ed6f06d8313badaec37ade8289966b2149becb25815c4c9dfa405da0831"
+    }
+  ],
+  "server": {
+    "hostname": "1CSRV",
+    "os_family": "Windows",
+    "os_edition_version": null,
+    "authenticated_winrm": true,
+    "token_is_administrator": false
+  },
+  "publication": {
+    "name": "ka_copy",
+    "database_server": "localhost",
+    "database_ref": "ka_copy",
+    "handler_version": "8.3.18.1661",
+    "odata_enabled": true,
+    "purpose": "Not established; name alone does not prove test/production status"
+  },
+  "odata": {
+    "service_status": 200,
+    "metadata_status": 200,
+    "published_entity_count": 42,
+    "receipt_selection_scope": "Realizations and inventory metadata; not an exhaustive ESCHF inventory"
+  },
+  "com_connector": {
+    "registered": true,
+    "component_version": "8.3.18.1661",
+    "onec_session_opened_in_receipt": false
+  },
+  "unknown": [
+    "Configuration name and version",
+    "Relation of ka_copy to working ESCHF sender",
+    "Exact ESCHF preparation/sign/send/status methods",
+    "Ready isolated development database",
+    "Organization and branch mappings"
+  ],
+  "user_confirmed": {
+    "unp": "192766048",
+    "signer_role": "accountant",
+    "key_location": "existing 1C server",
+    "eschf_sending_works": true,
+    "verification": "User statement; no send performed by ESCHF task"
+  },
+  "credential_values_copied": false,
+  "existing_task_followup": "Requested already verified facts only; no duplicate live discovery or access changes requested"
+}

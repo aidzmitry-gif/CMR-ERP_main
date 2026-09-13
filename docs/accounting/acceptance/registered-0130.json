@@ -1,0 +1,28 @@
+{
+  "database": "acc_install_b2ad69b97ab647869278910ad697ba41",
+  "baseline": "pass",
+  "proposal": "pass",
+  "cleanup": true,
+  "registered_revision": "0130",
+  "registered_accounting_upgrade": "pass",
+  "legacy_import_preserved": true,
+  "accounting_tables": 51,
+  "restore": {
+    "status": "pass",
+    "tables": 234,
+    "triggers": 366,
+    "sequences": 172,
+    "ledger_rows": 2,
+    "immutable_entry_guard": true,
+    "dump_sha256": "543aab5527eb661dcd9d51181865dd3ca280584ee5a2f8c8314bf8729c3df5fb"
+  },
+  "scope": "isolated local PostgreSQL; synthetic ledger; no production or statutory acceptance",
+  "migration_sha256_lf": {
+    "0117_counterparty_names_branches.py": "554738af8ca9eb671b052097f64525367090205b4b78d6c2cb157c85b236ef22",
+    "0118_sales_party_identity.py": "aaf2232fbc6ea27f2c31e3ae335055ff4e9711fdb82fff0fd941ffb46d5fb8d9",
+    "0119_branch_contacts_alias_identity.py": "769833d5e35eb60ac5c21b224e2839f5ca8caf976584ccbaaf8cefb7e591a4a7",
+    "0120_sales_incoming_email.py": "02335dfeacc24bc1194f325c4b0d856a70c7256ca40449186dbafaa796def1ae",
+    "0121_eschf_durable_state.py": "0f0700b64de476426361041d005ce25a76b392a4ddb72af2f4a52d3c5eb7fee2",
+    "0130_accounting_ledger.py": "b0f0cab65f49661287c7029ee8dfa6f0805aec403335da42394f8e00dccd3adc"
+  }
+}

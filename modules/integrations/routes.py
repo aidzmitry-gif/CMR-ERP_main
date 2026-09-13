@@ -14,6 +14,7 @@ from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.services import sync_outbound
 from core.services.auth import require_permission
+from core.services.mdm import CounterpartyWriteError
 from core.services.registry import RegistryError
 from modules.integrations import telephony
 from modules.integrations.intake import router as intake_router
@@ -218,8 +219,12 @@ async def sync(
     _: object = Depends(require_permission("integrations.sync")),
 ) -> dict:
     """Прочитать данные из 1С и синхронизировать в бизнес-память."""
-    summary = await sync_1c(session, core.event_bus, core.services.onec)
-    await session.commit()
+    try:
+        summary = await sync_1c(session, core.event_bus, core.services.onec)
+        await session.commit()
+    except CounterpartyWriteError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
     return {"ok": True, **summary}
 
 

@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 
-import { ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { ACTOR_COOKIE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
 import { keycloakPublicConfig } from "@/lib/auth-mode";
 import { OIDC_STATE_COOKIE, OIDC_VERIFIER_COOKIE, REFRESH_COOKIE } from "@/lib/keycloak";
 
@@ -10,6 +10,7 @@ export async function POST(req: Request): Promise<Response> {
   const jar = await cookies();
   jar.delete(ROLE_COOKIE);
   jar.delete(USER_COOKIE);
+  jar.delete(ACTOR_COOKIE);
   jar.delete(TOKEN_COOKIE);
   jar.delete(REFRESH_COOKIE);
   jar.delete(OIDC_STATE_COOKIE);

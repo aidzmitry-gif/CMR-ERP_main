@@ -2,11 +2,14 @@
 
 import clsx from "clsx";
 import { CheckCircle2, Download, Lock } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import Link from "next/link";
+import { useInventoryRequestScope } from "./wms-inventory-source";
 
 import { formatByn, formatNumber } from "@/lib/format";
 import {
   completeInventory,
+  InventoryRequestError,
   fetchInventoryDetail,
   type InventoryDetail,
   inventoryStatusLabel,
@@ -32,50 +35,78 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
 }
 
 export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
+  return <InventoryDetailBody key={JSON.stringify(initial)} initial={initial} />;
+}
+
+function InventoryDetailBody({ initial }: { initial: InventoryDetail }) {
   const [doc, setDoc] = useState<InventoryDetail>(initial);
-  const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const locked = doc.status !== "open";
+  const [needsRecount, setNeedsRecount] = useState(false);
+  const action = useRef(false);
+  const request = useInventoryRequestScope();
+  const busy = request.busy;
+  const locked = doc.status !== "open" || doc.organization_id === null || doc.expected_source !== "wms_physical";
+  const canComplete = !locked && !needsRecount && Boolean(doc.snapshot_version) && doc.lines.length > 0
+    && doc.lines.every((line) => line.counted_qty !== null) && Object.keys(drafts).length === 0;
 
   async function refresh() {
-    const fresh = await fetchInventoryDetail(doc.id);
-    if (fresh) setDoc(fresh);
+    if (action.current) return;
+    action.current = true;
+    const ticket = request.begin();
+    try { const fresh = await fetchInventoryDetail(doc.id); if (request.current(ticket)) setDoc(fresh); }
+    catch (error) { request.fail(ticket, error); }
+    finally { action.current = false; request.finish(ticket); }
   }
 
   async function onPopulate() {
-    setBusy(true);
-    const fresh = await populateInventory(doc.id);
-    if (fresh) setDoc(fresh);
-    setBusy(false);
+    if (action.current || locked || needsRecount) return;
+    action.current = true;
+    const ticket = request.begin();
+    try { const fresh = await populateInventory(doc.id); if (request.current(ticket)) setDoc(fresh); }
+    catch (error) {
+      request.fail(ticket, error);
+      if (request.current(ticket) && doc.snapshot_version && error instanceof InventoryRequestError && error.status === 409) setNeedsRecount(true);
+    } finally { action.current = false; request.finish(ticket); }
   }
 
   async function onComplete() {
-    setBusy(true);
-    const ok = await completeInventory(doc.id);
-    setBusy(false);
-    if (ok) await refresh();
+    if (action.current || !canComplete) return;
+    action.current = true;
+    const ticket = request.begin();
+    try {
+      const completed = await completeInventory(doc.id);
+      if (request.current(ticket)) setDoc((value) => ({ ...value, ...completed }));
+    } catch (error) {
+      request.fail(ticket, error);
+      if (request.current(ticket) && error instanceof InventoryRequestError && error.status === 409) setNeedsRecount(true);
+    } finally { action.current = false; request.finish(ticket); }
   }
 
   async function commitCount(lineId: number) {
     const raw = drafts[lineId];
-    if (raw === undefined) return;
-    const value = raw.trim() === "" ? null : Number(raw.replace(",", "."));
-    if (value !== null && Number.isNaN(value)) return;
-    setBusy(true);
-    await updateInventoryLine(lineId, { counted_qty: value });
-    setDrafts((d) => {
-      const next = { ...d };
-      delete next[lineId];
-      return next;
-    });
-    await refresh();
-    setBusy(false);
+    if (raw === undefined || action.current || locked) return;
+    const value = Number(raw.replace(",", "."));
+    if (!/^\d+(?:[.,]\d{1,2})?$/.test(raw.trim()) || !Number.isFinite(value) || value < 0 || value >= 1e12) {
+      request.setError("Введите неотрицательное количество с точностью до двух знаков. Пустое значение не считается нулём."); return;
+    }
+    action.current = true;
+    const ticket = request.begin();
+    try {
+      await updateInventoryLine(lineId, { counted_qty: value });
+      if (!request.current(ticket)) return;
+      const fresh = await fetchInventoryDetail(doc.id);
+      if (request.current(ticket)) {
+        setDoc(fresh);
+        setDrafts((value) => { const next = { ...value }; delete next[lineId]; return next; });
+      }
+    } catch (error) { request.fail(ticket, error); }
+    finally { action.current = false; request.finish(ticket); }
   }
 
   const s = doc.summary;
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="min-w-0 flex-1 overflow-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -92,20 +123,20 @@ export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
           </div>
           <p className="mt-0.5 text-sm text-muted">Склад: {doc.warehouse}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {!locked && (
             <button
               onClick={onPopulate}
-              disabled={busy}
+              disabled={busy || needsRecount}
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
             >
-              <Download size={15} /> Подтянуть из 1С
+              <Download size={15} /> Зафиксировать снимок WMS
             </button>
           )}
           {!locked && doc.lines.length > 0 && (
             <button
               onClick={onComplete}
-              disabled={busy}
+              disabled={busy || !canComplete}
               className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
             >
               <CheckCircle2 size={15} /> Провести
@@ -114,27 +145,41 @@ export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
         </div>
       </div>
 
+      {request.error && <div role="alert" className="mt-3 text-sm text-red-600">{request.error}</div>}
+      {busy && <p role="status" className="mt-3 text-sm">Выполняется запрос…</p>}
+      <button onClick={refresh} disabled={busy} className="mt-3 text-sm underline">Обновить документ</button>
+      {needsRecount && <p className="mt-3 text-sm"><Link className="text-accent-ink underline" href={`/erp/wms/inventory?organization_id=${doc.organization_id}`}>Создать новый пересчёт</Link>. Исходный снимок не перезаписывается.</p>}
+      <dl className="mt-4 space-y-1 rounded-xl border border-line p-4 text-sm">
+        <div><dt className="inline font-medium">Юрлицо: </dt><dd className="inline">{doc.organization_id ?? "Не подтверждено"}</dd></div>
+        <div><dt className="inline font-medium">Источник: </dt><dd className="inline">{doc.expected_source === "wms_physical" ? "Физический журнал WMS" : "Не подтверждён"}</dd></div>
+        <div><dt className="inline font-medium">Основание: </dt><dd className="inline">{doc.source_evidence || "Неизвестно"}</dd></div>
+        <div><dt className="inline font-medium">Полноту подтвердил: </dt><dd className="inline">{doc.journal_confirmed_by || "Неизвестно"} · {doc.journal_confirmed_at || "Время неизвестно"}</dd></div>
+        <div><dt className="inline font-medium">Версия снимка: </dt><dd className="inline break-all font-mono text-xs">{doc.snapshot_version || "Не зафиксирована"}</dd></div>
+        <div><dt className="inline font-medium">Последнее движение снимка: </dt><dd className="inline">{doc.snapshot_cutoff ?? "Неизвестно"}</dd></div>
+        <div><dt className="inline font-medium">Время снимка: </dt><dd className="inline">{doc.snapshot_at || "Не зафиксировано"}</dd></div>
+      </dl>
+      <p className="mt-2 text-sm text-muted">Ожидаемое относится к физическому журналу этого юрлица и склада. Без подтверждённой себестоимости денежная оценка неизвестна.</p>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Kpi label="Строк / посчитано" value={`${s.counted} / ${s.lines}`} />
         <Kpi label="Недостач" value={formatNumber(s.shortages)} tone={s.shortages ? "text-red-600" : undefined} />
-        <Kpi label="Стоимость недостач" value={formatByn(s.shortage_value)} tone={s.shortage_value ? "text-red-600" : undefined} />
-        <Kpi label="Стоимость излишков" value={formatByn(s.surplus_value)} tone={s.surplus_value ? "text-amber-600" : undefined} />
+        <Kpi label="Стоимость недостач" value={s.shortage_value === null ? "Неизвестно" : formatByn(s.shortage_value)} tone={s.shortage_value ? "text-red-600" : undefined} />
+        <Kpi label="Стоимость излишков" value={s.surplus_value === null ? "Неизвестно" : formatByn(s.surplus_value)} tone={s.surplus_value ? "text-amber-600" : undefined} />
       </div>
 
-      {locked && (
+      {doc.status === "done" && (
         <div className="mt-4 rounded-xl border border-line bg-sunken px-4 py-3 text-sm text-muted">
           Инвентаризация проведена{doc.completed_at ? ` ${new Date(doc.completed_at).toLocaleString("ru-RU")}` : ""}.
-          Расхождения зафиксированы как факт; остатки в 1С не корректируются (фаза 1).
+          Корректировки записаны в физический журнал указанного юрлица. Сверка с 1С этим не подтверждается.
         </div>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">Код</th>
               <th className="px-4 py-2 font-medium">Номенклатура</th>
-              <th className="px-4 py-2 text-right font-medium">Ожидается (1С)</th>
+              <th className="px-4 py-2 text-right font-medium">Ожидается (WMS)</th>
               <th className="px-4 py-2 text-right font-medium">Факт</th>
               <th className="px-4 py-2 text-right font-medium">Расхождение</th>
               <th className="px-4 py-2 text-right font-medium">В деньгах</th>
@@ -144,7 +189,7 @@ export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
             {doc.lines.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-muted">
-                  Строк нет — нажмите «Подтянуть из 1С», чтобы заполнить ожидаемыми остатками.
+                  Снимок ещё не заполнен. Зафиксируйте физический журнал выбранного юрлица; отсутствие данных не означает нулевой остаток.
                 </td>
               </tr>
             )}
@@ -164,6 +209,8 @@ export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
                       </span>
                     ) : (
                       <input
+                        aria-label={`Факт ${l.sku_code}`}
+                        disabled={busy || needsRecount}
                         value={drafts[l.id] ?? (l.counted_qty === null ? "" : String(l.counted_qty))}
                         onChange={(e) => setDrafts((d) => ({ ...d, [l.id]: e.target.value }))}
                         onBlur={() => commitCount(l.id)}
@@ -178,7 +225,7 @@ export function WmsInventoryDetail({ initial }: { initial: InventoryDetail }) {
                     {l.variance === null ? "—" : l.variance > 0 ? `+${formatNumber(l.variance)}` : formatNumber(l.variance)}
                   </td>
                   <td className={clsx("px-4 py-2.5 text-right tabular-nums", TONE_STYLES[tone])}>
-                    {l.variance_value === null ? "—" : formatByn(l.variance_value)}
+                    {l.variance_value === null ? "Неизвестно" : formatByn(l.variance_value)}
                   </td>
                 </tr>
               );

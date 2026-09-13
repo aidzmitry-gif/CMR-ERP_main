@@ -6,6 +6,7 @@
 процессы и миграции просто не регистрируются, система спокойно стартует без него.
 """
 ENABLED_MODULES: list[str] = [
+    "eschf",
     "sales",
     "leads",
     "integrations",
@@ -14,6 +15,7 @@ ENABLED_MODULES: list[str] = [
     "wms",
     "logistics",
     "finance",
+    "accounting",
     "marketing",
     "service",
     "hr",

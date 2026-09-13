@@ -4,6 +4,8 @@
 export interface BackendProxyHeaderOptions {
   /** Dev role from cookie aios_role. */
   devRole?: string;
+  /** Stable dev actor from cookie aios_actor; required for scoped backend records. */
+  devUser?: string;
   /** Future Keycloak httpOnly access token. */
   accessToken?: string;
 }
@@ -21,6 +23,9 @@ export function buildBackendProxyHeaders(
   const headers = new Headers(incoming);
   headers.delete("host");
   headers.delete("connection");
+  // Fetch frames the buffered upstream body; ingress framing may no longer match it.
+  headers.delete("content-length");
+  headers.delete("transfer-encoding");
 
   const incomingAuth = incoming.get("authorization");
   headers.delete("authorization");
@@ -32,6 +37,9 @@ export function buildBackendProxyHeaders(
 
   if (opts.devRole) {
     headers.set("X-User-Roles", opts.devRole);
+  }
+  if (opts.devUser) {
+    headers.set("X-User", opts.devUser);
   }
 
   return headers;

@@ -7,7 +7,7 @@
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 
-import { ROLE_COOKIE } from "@/lib/access";
+import { ACTOR_COOKIE, ROLE_COOKIE } from "@/lib/access";
 import { buildBackendProxyHeaders } from "@/lib/api-proxy-headers";
 import { ensureFreshAccessToken } from "@/lib/auth-session-server";
 
@@ -16,10 +16,15 @@ const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const jar = await cookies();
   const role = jar.get(ROLE_COOKIE)?.value;
+  const actor = jar.get(ACTOR_COOKIE)?.value;
   const accessToken = await ensureFreshAccessToken();
   const target = `${BASE}/${segments.join("/")}${req.nextUrl.search}`;
 
-  const headers = buildBackendProxyHeaders(req.headers, { devRole: role, accessToken: accessToken ?? undefined });
+  const headers = buildBackendProxyHeaders(req.headers, {
+    devRole: role,
+    devUser: actor,
+    accessToken: accessToken ?? undefined,
+  });
 
   const init: RequestInit = { method: req.method, headers, cache: "no-store" };
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -30,6 +35,10 @@ async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const out = new Headers();
   const contentType = res.headers.get("content-type");
   if (contentType) out.set("content-type", contentType);
+  for (const name of ["content-disposition", "x-content-type-options", "cache-control"]) {
+    const value = res.headers.get(name);
+    if (value) out.set(name, value);
+  }
   // SSE/поток: пробрасываем тело стримом, НЕ буферизуем. Иначе text/event-stream
   // (окно входящего звонка, /sales/calls/stream) «висит» до закрытия апстрима и
   // карточки звонка не доходят до клиента.

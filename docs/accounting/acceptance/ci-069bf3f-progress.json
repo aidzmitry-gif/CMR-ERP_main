@@ -1,0 +1,20 @@
+{
+  "head": "069bf3fa69770c3c789559c28889bf70502600d0",
+  "run": 34776294752,
+  "e2e": {
+    "job": 103774932630,
+    "conclusion": "success",
+    "passed": 8,
+    "duration": "1.2m"
+  },
+  "backend": "in_progress at observation",
+  "frontend": "in_progress at observation",
+  "earlierFrontend": {
+    "head": "cfcf9360923f2037566a1e3d16e576745c8949b2",
+    "job": 103768588717,
+    "conclusion": "success",
+    "files": 268,
+    "passed": 3071
+  },
+  "fullAcceptance": false
+}

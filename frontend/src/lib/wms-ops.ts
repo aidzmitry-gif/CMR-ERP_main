@@ -1,11 +1,11 @@
 // Домен операционного склада поверх backend-API `/wms` (движения/операции/ячейки/остаток).
-// 🔴 WMS НЕ источник истины остатка: 1С — истина, журнал ДУБЛИРУЕТ движения; оперативный
-// остаток = знаковая сумма (in − out), его СВЕРЯЮТ с 1С. Чистые функции тестируются без React.
+// Физические движения ERP. Полнота начальных остатков и сверка подтверждаются отдельно.
 
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface StockMovement {
   id: number;
+  organization_id?: number | null;
   sku_code: string;
   warehouse: string;
   kind: "in" | "out";
@@ -28,6 +28,7 @@ export interface WmsLocation {
 }
 
 export interface BalanceRow {
+  organization_id?: number;
   sku_code: string;
   sku_title: string;
   warehouse: string;
@@ -70,29 +71,21 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
 
 // ===== SSR =====
 
-export async function fetchMovementsServer(roles?: string): Promise<StockMovement[]> {
-  try {
-    const res = await fetch(`${BASE}/wms/movements`, { cache: "no-store", headers: roleHeaders(roles) });
-    if (!res.ok) return [];
-    return (await res.json()) as StockMovement[];
-  } catch {
-    return [];
-  }
+export async function fetchMovementsServer(roles?: string, authHeaders?: Record<string, string>): Promise<StockMovement[]> {
+  const res = await fetch(`${BASE}/wms/movements`, { cache: "no-store", headers: authHeaders ?? roleHeaders(roles) });
+  if (!res.ok) throw new Error("Не удалось загрузить журнал движений");
+  return (await res.json()) as StockMovement[];
 }
 
-export async function fetchBalancesServer(roles?: string): Promise<Balances> {
-  try {
-    const res = await fetch(`${BASE}/wms/balances`, { cache: "no-store", headers: roleHeaders(roles) });
-    if (!res.ok) return { rows: [], sku_count: 0 };
-    return (await res.json()) as Balances;
-  } catch {
-    return { rows: [], sku_count: 0 };
-  }
+export async function fetchBalancesServer(roles?: string, authHeaders?: Record<string, string>): Promise<Balances> {
+  const res = await fetch(`${BASE}/wms/balances`, { cache: "no-store", headers: authHeaders ?? roleHeaders(roles) });
+  if (!res.ok) throw new Error("Не удалось загрузить остатки");
+  return (await res.json()) as Balances;
 }
 
-export async function fetchLocationsServer(roles?: string): Promise<WmsLocation[]> {
+export async function fetchLocationsServer(roles?: string, authHeaders?: Record<string, string>): Promise<WmsLocation[]> {
   try {
-    const res = await fetch(`${BASE}/wms/locations`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}/wms/locations`, { cache: "no-store", headers: authHeaders ?? roleHeaders(roles) });
     if (!res.ok) return [];
     return (await res.json()) as WmsLocation[];
   } catch {
@@ -103,23 +96,15 @@ export async function fetchLocationsServer(roles?: string): Promise<WmsLocation[
 // ===== Клиент (через прокси /api) =====
 
 export async function fetchMovements(): Promise<StockMovement[]> {
-  try {
-    const res = await fetch("/api/wms/movements", { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as StockMovement[];
-  } catch {
-    return [];
-  }
+  const res = await fetch("/api/wms/movements", { cache: "no-store" });
+  if (!res.ok) throw new Error("Не удалось загрузить журнал движений");
+  return (await res.json()) as StockMovement[];
 }
 
 export async function fetchBalances(): Promise<Balances> {
-  try {
-    const res = await fetch("/api/wms/balances", { cache: "no-store" });
-    if (!res.ok) return { rows: [], sku_count: 0 };
-    return (await res.json()) as Balances;
-  } catch {
-    return { rows: [], sku_count: 0 };
-  }
+  const res = await fetch("/api/wms/balances", { cache: "no-store" });
+  if (!res.ok) throw new Error("Не удалось загрузить остатки");
+  return (await res.json()) as Balances;
 }
 
 export async function fetchLocations(): Promise<WmsLocation[]> {
@@ -133,6 +118,7 @@ export async function fetchLocations(): Promise<WmsLocation[]> {
 }
 
 export interface OpInput {
+  organization_id: number;
   sku_code: string;
   qty: number;
   warehouse?: string;
@@ -158,6 +144,7 @@ export const receipt = (i: OpInput) => postOp("receipt", i);
 export const shipment = (i: OpInput) => postOp("shipment", i);
 export const adjustment = (i: OpInput) => postOp("adjustment", i);
 export const transfer = (i: {
+  organization_id: number;
   sku_code: string;
   qty: number;
   warehouse?: string;

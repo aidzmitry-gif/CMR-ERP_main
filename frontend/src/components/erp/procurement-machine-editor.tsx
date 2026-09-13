@@ -1,246 +1,199 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatNumber } from "@/lib/format";
+import { sendEdit, fetchOrder, fetchLandedPreview, fetchExpectedReservations, fetchDealDemandOrder, fetchPlan, identity, organizations, emptyLine, decimalInput, ReadFailure, MutationUnknown, type EditCommand, type Identity, type Organization, type MachineOrder, type LandedPreview, type ExpectedOrder, type DealDemandOrder, type Plan, type NewLine } from "@/lib/procurement-machine";
+import { allocateDealDemand, clearDealDemandAllocation, loadDealDemandAllocation, type DealDemandAllocationScope, type PendingDealDemandAllocation, DealDemandError } from "@/lib/procurement-deal-demand";
+import { ProcurementCustomerDeadlines } from "./procurement-customer-deadlines";
+import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
 
-import { formatByn, formatNumber } from "@/lib/format";
-import {
-  addLine,
-  deleteLine,
-  emptyLine,
-  fetchLandedPreview,
-  type LandedPreview,
-  type MachineOrder,
-  type NewLine,
-  updateFreight,
-} from "@/lib/procurement-machine";
+import { editorJournal, type Attempt, type Scope } from "@/lib/procurement-editor-journal";
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Черновик",
-  ordered: "Заказан",
-  shipped: "Отгружен",
-  customs: "Таможня",
-  received: "Принят",
-  cancelled: "Отменён",
+const STATUS: Record<string, string> = { draft: "Черновик", ordered: "Заказан", shipped: "Отгружен", customs: "Таможня", received: "Принят", cancelled: "Отменён" };
+const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось выполнить действие";
+const validId = (s?: string) => s && /^[1-9]\d*$/.test(s) && Number(s) <= 2147483647 ? s : "";
+const reserveUnits = (value: string) => { const [whole, fraction] = value.split("."); return BigInt(whole) * 100n + BigInt(fraction); };
+const maxReserve = (left: string, right: string) => {
+  const units = reserveUnits(left) < reserveUnits(right) ? reserveUnits(left) : reserveUnits(right);
+  return `${units / 100n}.${String(units % 100n).padStart(2, "0")}`;
 };
-
-/** Заглушка для блоков прототипа без бэкенда (зал ожидания / версии / back-signal). */
-function HonestEmpty({ title, reason }: { title: string; reason: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-3">
-      <div className="text-sm font-medium text-muted">{title}</div>
-      <div className="mt-0.5 text-[11px] text-faint">{reason}</div>
-    </div>
-  );
+export function ProcurementMachineEditor({ orderId, suggestedOrg }: { orderId: number; suggestedOrg?: string }) {
+  const [companies, setCompanies] = useState<Organization[]>([]); const [org, setOrg] = useState(validId(suggestedOrg)); const [error, setError] = useState("");
+  useEffect(() => { let live = true; organizations().then(v => { if (live) setCompanies(v); }).catch(e => { if (live) setError(message(e)); }); return () => { live = false; }; }, []);
+  return <main className="w-full space-y-4 overflow-auto p-6"><label>Юрлицо заказа<select className="ml-2 rounded border p-2" value={org} onChange={e => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{companies.map(x => <option key={x.id} value={x.id}>{x.name} · {x.unp}</option>)}</select></label>{error && <p role="alert">{error}</p>}{org && <Editor key={`${org}/${orderId}`} org={Number(org)} orderId={orderId} />}</main>;
 }
-
-export function ProcurementMachineEditor({ initial }: { initial: MachineOrder }) {
-  const [order, setOrder] = useState<MachineOrder>(initial);
-  const [preview, setPreview] = useState<LandedPreview | null>(null);
-  const [freight, setFreight] = useState(String(initial.freight_byn));
-  const [draft, setDraft] = useState<NewLine>(emptyLine());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const readonly = order.status === "received" || order.status === "cancelled";
-
-  async function reloadPreview(id: number) {
-    setPreview(await fetchLandedPreview(id));
+function Editor({ org, orderId }: { org: number; orderId: number }) {
+  const [scope, setScope] = useState<Identity | null>(null); const [order, setOrder] = useState<MachineOrder | null>(null); const [preview, setPreview] = useState<LandedPreview | null>(null); const [expected, setExpected] = useState<ExpectedOrder | null>(null); const [demandOrder, setDemandOrder] = useState<DealDemandOrder | null>(null); const [plan, setPlan] = useState<Plan | null>(null);
+  const [draft, setDraft] = useState<NewLine>(emptyLine()); const [freight, setFreight] = useState(""); const [status, setStatus] = useState("ordered"); const [method, setMethod] = useState("truck"); const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(true); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [attempt, setAttempt] = useState<Attempt | null>(null); const [legacy, setLegacy] = useState(false); const [prepared, setPrepared] = useState(false); const [unknownNotice, setUnknownNotice] = useState(false); const [allocationRecovery, setAllocationRecovery] = useState<PendingDealDemandAllocation | null>(null);
+  const generation = useRef(0); const locked = useRef(false); const principal = useRef<string | null>(null); const stored = useRef<Attempt | null>(null);
+  const journalKey = `procurement-editor/${org}/${orderId}`;
+  const active = (n: number) => generation.current === n;
+  function clearView() { setOrder(null); setPreview(null); setExpected(null); setDemandOrder(null); setPlan(null); setScope(null); }
+  async function who(n: number, expected?: string) {
+    let current: Identity;
+    try { current = await identity(org); } catch (e) { if (active(n)) clearView(); throw e; }
+    if (!active(n)) throw new Error("Контекст изменился");
+    if (expected && current.principal !== expected) { clearView(); throw new Error("Пользователь изменился. Откройте заказ заново."); }
+    return current;
   }
-
+  async function load(n: number, current: Identity) {
+    let complete = true;
+    const result = await fetchOrder(org, orderId);
+    const confirmed = await who(n, current.principal);
+    if (!active(n)) return;
+    setScope(confirmed); setOrder(result); setFreight(result.freight_byn);
+    // A missing estimate is not a zero cost and must not hide the editable order.
+    try { const v = await fetchLandedPreview(org, orderId); await who(n, current.principal); if (active(n)) setPreview(v); }
+    catch (e) { complete = false; if (active(n)) { setPreview(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
+    try { const v = await fetchExpectedReservations(org, orderId); await who(n, current.principal); if (active(n)) setExpected(v); }
+    catch { if (active(n)) setExpected(null); }
+    try { const v = await fetchDealDemandOrder(org, orderId); await who(n, current.principal); if (active(n)) setDemandOrder(v); }
+    catch { if (active(n)) setDemandOrder(null); }
+    try { const v = await fetchPlan(org, orderId); await who(n, current.principal); if (active(n)) { setPlan(v); setMethod(v.transport_method_code ?? "truck"); setTarget(v.target_arrival_date ?? ""); } }
+    catch (e) { complete = false; if (active(n)) { setPlan(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
+    return complete;
+  }
   useEffect(() => {
-    void reloadPreview(initial.id);
-  }, [initial.id]);
-
-  async function apply(updated: MachineOrder | null, errMsg: string) {
-    if (!updated) {
-      setError(errMsg);
-      return;
+    const n = ++generation.current;
+    async function start() {
+      try {
+        const current = await who(n); principal.current = current.principal;
+        const saved = sessionStorage.getItem(journalKey);
+        if (saved) { setLegacy(true); setNotice("Старая попытка без UUID остаётся неразрешённой. Она не будет автоматически отправлена заново; требуется проверка перехода со старой версии."); }
+        await syncJournal(n, current);
+        await load(n, current);
+      } catch (e) { if (active(n)) { clearView(); setError(message(e)); } }
+      finally { if (active(n)) setBusy(false); }
     }
-    setError("");
-    setOrder(updated);
-    setFreight(String(updated.freight_byn));
-    await reloadPreview(updated.id);
+    void start(); return () => { generation.current = n + 1; };
+    // One mounted editor owns one organization/order. No async result crosses its generation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org, orderId]);
+  async function syncJournal(n: number, current: Identity) {
+    const saved = await editorJournal.load({ ...current, order_id: orderId });
+    await who(n, current.principal);
+    if (active(n)) { stored.current = saved; setAttempt(saved); setUnknownNotice(saved?.state === "pending"); }
+    return saved;
   }
-
-  async function onAddLine() {
-    if (!draft.sku_code.trim()) {
-      setError("Укажите код номенклатуры позиции");
-      return;
-    }
-    setBusy(true);
-    await apply(await addLine(order.id, draft), "Не удалось добавить позицию");
-    setBusy(false);
-    setDraft(emptyLine());
+  async function deliver(n: number, current: Identity, saved: Attempt) {
+    await who(n, current.principal);
+    if (!active(n)) return;
+    const result = await sendEdit(current, JSON.parse(saved.body), saved.mode);
+    await who(n, current.principal);
+    if (!active(n)) return;
+    const terminal = await editorJournal.settle({ ...current, order_id: orderId }, saved, result);
+    if (!active(n)) return;
+    stored.current = terminal; setAttempt(terminal); setPrepared(false); setUnknownNotice(false);
+    setNotice(result.outcome === "applied" ? "Изменение сохранено. Серверная квитанция подтверждена." : `Команда завершена без изменения заказа: ${result.code}.`);
+    if (result.outcome === "applied") setDraft(emptyLine());
+    try { await load(n, current); }
+    catch (e) { if (active(n)) { setOrder(null); setPreview(null); setDemandOrder(null); setPlan(null); setError(`Квитанция сохранена, но состав не обновлён: ${message(e)}`); } }
   }
-
-  async function onDeleteLine(lineId: number) {
-    setBusy(true);
-    await apply(await deleteLine(order.id, lineId), "Не удалось удалить позицию");
-    setBusy(false);
+  async function perform(action: EditCommand["action"], payload: Record<string, unknown>) {
+    if (locked.current || busy || uncertain || !scope || needsPreparation) return;
+    locked.current = true; setBusy(true); setError(""); setNotice(""); const n = generation.current;
+    try {
+      const current = await who(n, principal.current ?? undefined);
+      if (!current.can_manage) { setScope(current); throw new Error("Для изменения заказа нужны права главного бухгалтера"); }
+      if (sessionStorage.getItem(journalKey)) { setLegacy(true); throw new Error("Старая попытка без UUID требует отдельной проверки"); }
+      const claimed = await editorJournal.claim({ ...current, order_id: orderId }, stored.current, action, payload);
+      if (!active(n)) return;
+      stored.current = claimed.attempt; setAttempt(claimed.attempt);
+      if (!claimed.created) { setNotice("Другая вкладка уже сохранила попытку. Восстановите её с тем же UUID."); return; }
+      await deliver(n, current, claimed.attempt);
+    } catch (e) { if (active(n)) { if (e instanceof MutationUnknown || stored.current?.state === "pending") setUnknownNotice(true); setError(message(e)); } }
+    finally { if (active(n)) { locked.current = false; setBusy(false); } }
   }
-
-  async function onSaveFreight() {
-    const value = Number(freight);
-    if (!Number.isFinite(value) || value < 0) {
-      setError("Фрахт должен быть неотрицательным числом");
-      setFreight(String(order.freight_byn)); // вернуть прежнее, не записывать мусор как 0
-      return;
-    }
-    if (value === order.freight_byn) return;
-    setBusy(true);
-    await apply(await updateFreight(order.id, value), "Не удалось сохранить фрахт");
-    setBusy(false);
+  async function recover(reconcile: boolean) {
+    if (locked.current || busy || legacy || !scope) return;
+    locked.current = true; setBusy(true); setError(""); const n = generation.current;
+    try {
+      const current = await who(n, principal.current ?? undefined);
+      if (!current.can_manage) { setScope(current); throw new Error("Для восстановления нужны права главного бухгалтера"); }
+      const s: Scope = { ...current, order_id: orderId };
+      let pending = await syncJournal(n, current);
+      if (!pending || pending.state !== "pending") return;
+      if (reconcile) pending = await editorJournal.reconcile(s, pending);
+      if (!active(n)) return;
+      stored.current = pending; setAttempt(pending);
+      await deliver(n, current, pending);
+    } catch (e) { if (active(n)) { if (stored.current?.state === "pending") setUnknownNotice(true); setError(message(e)); } }
+    finally { if (active(n)) { locked.current = false; setBusy(false); } }
   }
-
-  const unitBySku = new Map(preview?.lines.map((l) => [l.sku_code, l.unit_landed_cost_byn]));
-
-  return (
-    <div className="flex-1 overflow-auto p-6">
-      {/* Шапка машины */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink">Состав заказа {order.number}</h1>
-          <div className="mt-0.5 text-sm text-muted">
-            {order.supplier || "Поставщик не указан"} ·{" "}
-            <span className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-muted">
-              {STATUS_LABEL[order.status] ?? order.status}
-            </span>
-            {order.eta_date && <span className="ml-2 text-faint">ETA {order.eta_date}</span>}
-          </div>
-        </div>
-        <div className="flex items-end gap-2">
-          <label className="block">
-            <span className="text-[11px] text-muted">Фрахт партии, BYN</span>
-            <input
-              value={freight}
-              onChange={(e) => setFreight(e.target.value)}
-              onBlur={onSaveFreight}
-              disabled={readonly}
-              type="number"
-              className="mt-1 w-40 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent disabled:opacity-60"
-            />
-          </label>
-        </div>
-      </div>
-
-      {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
-      {readonly && (
-        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-          Заказ {STATUS_LABEL[order.status]?.toLowerCase()} — состав не редактируется.
-        </div>
-      )}
-
-      {/* Позиции + landed cost */}
-      <div className="mt-5 overflow-hidden rounded-xl border border-line bg-surface">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-2 font-medium">Номенклатура</th>
-              <th className="px-4 py-2 text-right font-medium">Кол-во</th>
-              <th className="px-4 py-2 text-right font-medium">Товар, BYN</th>
-              <th className="px-4 py-2 text-right font-medium">Вес, кг</th>
-              <th className="px-4 py-2 text-right font-medium">Объём, м³</th>
-              <th className="px-4 py-2 text-right font-medium">Себест/шт, BYN</th>
-              <th className="px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.lines.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-muted">
-                  Позиций нет — добавьте первую ниже.
-                </td>
-              </tr>
-            )}
-            {order.lines.map((ln) => (
-              <tr key={ln.id} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5 font-mono text-xs text-muted">{ln.sku_code}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatNumber(ln.qty)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatNumber(ln.goods_value_byn)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatNumber(ln.weight)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{formatNumber(ln.volume)}</td>
-                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-accent-ink">
-                  {unitBySku.has(ln.sku_code) ? formatNumber(unitBySku.get(ln.sku_code)!) : "—"}
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  {!readonly && (
-                    <button
-                      onClick={() => onDeleteLine(ln.id)}
-                      disabled={busy}
-                      className="text-faint hover:text-red-600 disabled:opacity-50"
-                      aria-label="Удалить позицию"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          {preview && (
-            <tfoot>
-              <tr className="border-t border-line bg-sunken/40 font-semibold">
-                <td className="px-4 py-2.5 text-muted">Итого landed</td>
-                <td></td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {formatNumber(preview.total_goods_byn)}
-                </td>
-                <td colSpan={2}></td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink" colSpan={2}>
-                  {formatByn(preview.total_landed_byn)}
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-
-      {/* Добавление позиции */}
-      {!readonly && (
-        <div className="mt-4 flex flex-wrap items-end gap-2 rounded-xl border border-line bg-surface p-4">
-          <label className="block">
-            <span className="text-[11px] text-muted">Код номенклатуры</span>
-            <input
-              value={draft.sku_code}
-              onChange={(e) => setDraft({ ...draft, sku_code: e.target.value })}
-              className="mt-1 w-44 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-            />
-          </label>
-          {(["qty", "goods_value_byn", "weight", "volume"] as const).map((f) => (
-            <label key={f} className="block">
-              <span className="text-[11px] text-muted">
-                {{ qty: "Кол-во", goods_value_byn: "Товар, BYN", weight: "Вес, кг", volume: "Объём, м³" }[f]}
-              </span>
-              <input
-                type="number"
-                value={String(draft[f])}
-                onChange={(e) => setDraft({ ...draft, [f]: Number(e.target.value) || 0 })}
-                className="mt-1 w-28 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent"
-              />
-            </label>
-          ))}
-          <button
-            onClick={onAddLine}
-            disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
-          >
-            <Plus size={15} /> Добавить
-          </button>
-        </div>
-      )}
-
-      <p className="mt-3 text-[11px] text-faint">
-        Себестоимость/шт считает бэкенд (тот же движок, что на приёмке): фрахт партии разносится
-        на позиции по весу (иначе по стоимости). Фиксация — на приёмке заказа.
-      </p>
-
-      {/* Блоки прототипа без бэкенда — honest-empty */}
-      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <HonestEmpty title="Зал ожидания позиций" reason="Нет бэкенда: пул не-выкупленных позиций — Горизонт 2." />
-        <HonestEmpty title="Версии документов" reason="Нет бэкенда: история инвойсов/ГТД по машине — Горизонт 2." />
-        <HonestEmpty title="Сигнал продавцу (back-signal)" reason="Нет бэкенда: уведомление по сделке об изменении состава — Горизонт 2." />
-      </div>
-    </div>
-  );
+  async function refreshReview() {
+    if (locked.current) return; locked.current = true; setBusy(true); setError(""); const n = generation.current;
+    try { const current = await who(n, principal.current ?? undefined); await syncJournal(n, current); await load(n, current); }
+    catch (e) { if (active(n)) { clearView(); setError(message(e)); } }
+    finally { if (active(n)) { locked.current = false; setBusy(false); } }
+  }
+  const uncertain = legacy || attempt?.state === "pending";
+  const needsPreparation = attempt?.state === "settled" && attempt.result?.outcome === "rejected" && !prepared;
+  const readonly = busy || uncertain || needsPreparation || !scope?.can_manage || !order || ["received", "cancelled"].includes(order.status);
+  const noCommand = busy || uncertain || needsPreparation || !scope?.can_manage || !order;
+  const unit = new Map(preview?.lines.map(x => [x.sku_code, x.unit_landed_cost_byn]));
+  function add() {
+    try { if (!draft.sku_code.trim()) throw new Error("Укажите код номенклатуры позиции"); const line = { sku_code: draft.sku_code.trim(), qty: decimalInput(draft.qty, 2, true), goods_value_byn: decimalInput(draft.goods_value_byn, 2), weight: decimalInput(draft.weight, 3), volume: decimalInput(draft.volume, 4) }; void perform("add_line", line); } catch (e) { setError(message(e)); }
+  }
+  function saveFreight() {
+    if (readonly || !order) return;
+    try { const value = decimalInput(freight, 2); if (value !== decimalInput(order.freight_byn, 2)) void perform("header", { freight_byn: value }); }
+    catch { setError("Фрахт должен быть неотрицательным точным числом с двумя знаками"); setFreight(order.freight_byn); }
+  }
+  async function allocate(lineId: number, candidate: DealDemandOrder["lines"][number]["candidates"][number], freeForClient: string) {
+    if (locked.current || busy || uncertain || needsPreparation || !scope?.can_manage || !order || ["received", "cancelled"].includes(order.status)) return;
+    let qty: string;
+    try { qty = maxReserve(candidate.free_qty, freeForClient); if (qty === "0.00") throw new Error("Свободного количества для распределения нет"); }
+    catch (e) { setError(message(e)); return; }
+    locked.current = true; setBusy(true); setError(""); setNotice(""); setUnknownNotice(false); const n = generation.current;
+    try {
+      const current = await who(n, principal.current ?? undefined);
+      if (!current.can_manage) { setScope(current); throw new Error("Для распределения резерва нужны права главного бухгалтера"); }
+      const allocationScope: DealDemandAllocationScope = { organization_id: org, principal: current.principal, order_id: orderId };
+      const result = await allocateDealDemand(allocationScope, candidate, lineId, qty);
+      if (!active(n)) return;
+      setAllocationRecovery(null);
+      setNotice(`Предварительный резерв ${qty} по ${candidate.sku_code} распределён на сделку №${candidate.deal_id}.`);
+      await load(n, current);
+      if (result.replayed) setNotice(`Подтверждён ранее созданный предварительный резерв ${qty} по сделке №${candidate.deal_id}.`);
+    } catch (e) {
+      if (active(n)) {
+        setError(message(e));
+        if (e instanceof DealDemandError) {
+          try { setAllocationRecovery(loadDealDemandAllocation({ organization_id: org, principal: principal.current ?? "", order_id: orderId }, candidate.demand_id, lineId)); }
+          catch { setAllocationRecovery(null); }
+        }
+      }
+    } finally { if (active(n)) { locked.current = false; setBusy(false); } }
+  }
+  function closeAllocationAttempt() {
+    if (!allocationRecovery) return;
+    try { clearDealDemandAllocation(allocationRecovery); setAllocationRecovery(null); setNotice("Сохранённая команда распределения закрыта без изменения заказа."); }
+    catch (e) { setError(message(e)); }
+  }
+  return <section className="space-y-4" aria-label="Редактор заказа">
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <button disabled={busy} onClick={() => void refreshReview()}>Проверить состав</button>
+    {uncertain && unknownNotice && <p role="status">Исход команды не подтверждён сервером. Обновление состава не разрешает повторную запись.</p>}
+    {!legacy && attempt?.state === "pending" && <div><p>UUID: {JSON.parse(attempt.body).request_key}</p><button disabled={busy || !scope?.can_manage} onClick={() => void recover(false)}>Повторить сохранённую команду</button><button disabled={busy || !scope?.can_manage} onClick={() => void recover(true)}>Сверить и закрыть неисполненную</button></div>}
+    {attempt?.state === "settled" && <p>Квитанция: {attempt.result?.outcome === "applied" ? "выполнено" : "отказ без изменения заказа"}. Это результат сохранённой команды, а не текущее состояние заказа.</p>}
+    {allocationRecovery && <div role="status"><p>Сохранённая команда распределения резерва требует повторной проверки. Повторите кнопку у той же сделки или закройте команду после сверки.</p><button disabled={busy} onClick={closeAllocationAttempt}>Закрыть сохранённую команду</button></div>}
+    {needsPreparation && <button disabled={busy || legacy} onClick={() => { setPrepared(true); setNotice("Проверьте данные и явно отправьте новую команду."); }}>Подготовить новую попытку</button>}
+    {busy && <p>Проверяем данные…</p>}
+    {order && <><h1 className="text-xl font-semibold">Состав заказа {order.number}</h1><p>{order.supplier || "Поставщик не указан"} · {STATUS[order.status]} {order.eta_date && `· ETA ${order.eta_date}`}</p>
+      {!scope?.can_manage && <p>Доступен просмотр. Для изменений нужны права главного бухгалтера.</p>}
+      {["received", "cancelled"].includes(order.status) && <p>Состав принятого или отменённого заказа не редактируется.</p>}
+      <label>Фрахт партии, BYN<input className="ml-2 rounded border p-2" inputMode="decimal" value={freight} onChange={e => setFreight(e.target.value)} onBlur={saveFreight} disabled={readonly} /></label>
+      <table className="w-full text-left"><thead><tr>{["Номенклатура", "Кол-во", "Предварительный резерв", "Товар, BYN", "Вес, кг", "Объём, м³", "Себест/шт", ""].map((s, i) => <th key={i}>{s}</th>)}</tr></thead><tbody>
+        {!order.lines.length && <tr><td colSpan={8}>Позиций нет — добавьте первую ниже.</td></tr>}
+        {order.lines.map(line => { const r = expected?.lines.find(x => x.order_line_id === line.id); const d = demandOrder?.lines.find(x => x.order_line_id === line.id); return <tr key={line.id}><td>{line.sku_code}</td><td>{line.qty}</td><td>{r ? <><span title={`Заказано ${r.ordered}; принято ${r.accepted}`}>клиентам {r.expected_reserved} · свободно {r.free_expected}</span><div className="text-[11px] text-faint">по накладным {r.accepted} · принято складом {r.warehouse_accepted} · уже переведено {r.converted} · доступно после приёмки {r.physical_convertible} · ожидают сверки {r.pending_conversion_count}</div></> : "данные не загружены"}{d && <div className="text-[11px] text-faint">под заказ клиентам {d.client_ordered} · свободно для клиента {d.free_for_client}{r && ` · свободно ожидается ${r.free_expected}`}</div>}{d?.candidates.length ? <div className="mt-1 space-y-1 text-[11px]"><span className="block">Свободные потребности:</span>{d.candidates.map(candidate => { const available = r ? maxReserve(d.free_for_client, r.free_expected) : d.free_for_client; const qty = maxReserve(candidate.free_qty, available); return <div key={candidate.demand_id} className="flex flex-wrap items-center gap-1"><span>сделка №{candidate.deal_id}: {candidate.free_qty} шт.</span><button disabled={noCommand || ["received", "cancelled"].includes(order.status) || qty === "0.00"} onClick={() => void allocate(line.id, candidate, available)}>Распределить {qty}</button></div>; })}</div> : null}</td><td>{line.goods_value_byn}</td><td>{line.weight}</td><td>{line.volume}</td><td>{unit.has(line.sku_code) ? formatNumber(Number(unit.get(line.sku_code))) : "—"}</td><td><button aria-label="Удалить позицию" disabled={readonly} onClick={() => void perform("delete_line", { line_id: line.id })}>Удалить</button></td></tr>; })}
+      </tbody></table>
+      {preview && <p>Итого landed: {preview.total_landed_byn} BYN</p>}
+      <fieldset disabled={readonly} className="flex flex-wrap gap-2"><legend>Новая позиция</legend>{([['sku_code', 'Код номенклатуры'], ['qty', 'Количество'], ['goods_value_byn', 'Стоимость товара'], ['weight', 'Вес'], ['volume', 'Объём']] as const).map(([key, label]) => <label key={key}>{label}<input className="block rounded border p-2" value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })} /></label>)}<button onClick={add}>Добавить позицию</button></fieldset>
+      <fieldset disabled={noCommand || ["received", "cancelled"].includes(order.status)}><legend>Статус машины</legend><label>Новый статус<select value={status} onChange={e => setStatus(e.target.value)}>{Object.entries(STATUS).filter(([s]) => s !== "draft").map(([s, label]) => <option key={s} value={s}>{label}</option>)}</select></label><button onClick={() => void perform("status", { status })}>Изменить статус</button></fieldset>
+      <fieldset disabled={noCommand}><legend>План машины</legend><label>Способ перевозки<select value={method} onChange={e => setMethod(e.target.value)}><option value="truck">Машина</option><option value="container">Контейнер</option></select></label><label>В Минске до<input type="date" value={target} onChange={e => setTarget(e.target.value)} /></label><button onClick={() => { if (!target) { setError("Укажите дату «В Минске до»"); return; } void perform("plan", { transport_method_code: method, target_arrival_date: target }); }}>Пересчитать план</button></fieldset>
+      <p>Клиентские сроки и штрафы не проверены.</p><ProcurementCustomerDeadlines key={`${org}:${orderId}:${JSON.stringify(plan)}:${JSON.stringify(expected)}`} org={org} orderId={orderId} disabled={noCommand} onUseDate={setTarget} />{plan && <><p>Всего дней: {plan.total_days}. Начало: {plan.start_date ?? "не задано"}</p>{plan.schedule_start_in_past && <p>Дата начала собственного графика уже прошла.</p>}{plan.milestones.map(x => <p key={x.stage}>{x.title}: план {x.planned_date ?? "—"}, факт {x.actual_date ?? "—"}</p>)}</>}
+      <ProcurementPurchaseChain org={org} orderId={orderId} />
+    </>}
+  </section>;
 }

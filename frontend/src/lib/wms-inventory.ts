@@ -1,13 +1,33 @@
-// Домен «Инвентаризация» поверх backend-API `/wms/inventory`.
-// Документ читает ожидаемое из 1С (через шлюз), фиксирует факт пересчёта и расхождение.
-// WMS НЕ источник истины остатка (1С — истина, фаза 1): в 1С не пишем.
-// Чистые функции (статусы, тон расхождения) тестируются без React.
-
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export type InventoryStatus = "open" | "done" | "canceled";
 
-export interface InventoryCount {
+export interface InventoryProvenance {
+  organization_id: number | null;
+  expected_source: string | null;
+  source_evidence: string | null;
+  journal_confirmed_by: string | null;
+  journal_confirmed_at: string | null;
+}
+
+export interface InventoryConfirmation {
+  expected_source: "wms_physical";
+  source_evidence: string;
+  journal_complete: true;
+}
+
+export interface InventoryCreate extends InventoryConfirmation {
+  organization_id: number;
+  warehouse: string;
+  note?: string;
+}
+
+export interface InventoryOrganization { id: number; name: string; unp: string }
+
+export interface InventoryCount extends InventoryProvenance {
+  snapshot_version: string | null;
+  snapshot_cutoff: number | null;
+  snapshot_at: string | null;
   id: number;
   number: string;
   warehouse: string;
@@ -35,9 +55,9 @@ export interface InventorySummary {
   counted: number;
   shortages: number;
   surpluses: number;
-  shortage_value: number;
-  surplus_value: number;
-  net_value: number;
+  shortage_value: number | null;
+  surplus_value: number | null;
+  net_value: number | null;
 }
 
 export interface InventoryDetail extends InventoryCount {
@@ -63,116 +83,85 @@ export function varianceTone(variance: number | null): "none" | "ok" | "short" |
   return "ok";
 }
 
-function roleHeaders(roles?: string): Record<string, string> | undefined {
-  return roles ? { "X-User-Roles": roles } : undefined;
-}
-
-// ===== SSR (server components) =====
-
-export async function fetchInventoryListServer(roles?: string): Promise<InventoryCount[]> {
-  try {
-    const res = await fetch(`${BASE}/wms/inventory`, {
-      cache: "no-store",
-      headers: roleHeaders(roles),
-    });
-    if (!res.ok) return [];
-    return (await res.json()) as InventoryCount[];
-  } catch {
-    return [];
+export class InventoryRequestError extends Error {
+  constructor(message: string, public readonly status: number | null = null) {
+    super(message);
+    this.name = "InventoryRequestError";
   }
 }
 
-export async function fetchInventoryDetailServer(
-  id: string,
-  roles?: string,
-): Promise<InventoryDetail | null> {
-  try {
-    const res = await fetch(`${BASE}/wms/inventory/${id}`, {
-      cache: "no-store",
-      headers: roleHeaders(roles),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as InventoryDetail;
-  } catch {
-    return null;
-  }
+export function inventoryErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Не удалось выполнить запрос. Повторите попытку.";
 }
 
-// ===== Клиент (через прокси /api) =====
-
-export async function createInventory(warehouse: string, note = ""): Promise<InventoryCount | null> {
+export async function inventoryRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
+  let response: Response;
   try {
-    const res = await fetch("/api/wms/inventory", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ warehouse, note }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as InventoryCount;
-  } catch {
-    return null;
+    response = await fetch(url, options);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    throw new InventoryRequestError("Ошибка сети. Результат запроса неизвестен; обновите документ перед повтором.");
   }
+  if (!response.ok) {
+    const labels: Record<number, string> = {
+      403: "Нет доступа к юрлицу.",
+      404: "Документ не найден.",
+      409: "Операция отклонена: проверьте документ и снимок; при изменении журнала создайте новый пересчёт.",
+      422: "Проверьте заполнение полей.",
+      503: "Сервис временно недоступен. Повторите запрос позже.",
+    };
+    const body = await response.json().catch(() => null);
+    const detail = typeof body?.detail === "string" ? ` ${body.detail}` : "";
+    throw new InventoryRequestError((labels[response.status] ?? `Ошибка запроса (${response.status}).`) + detail, response.status);
+  }
+  try { return await response.json() as T; }
+  catch { throw new InventoryRequestError("Сервис вернул некорректный ответ. Обновите документ."); }
 }
 
-export async function fetchInventoryDetail(id: number): Promise<InventoryDetail | null> {
-  try {
-    const res = await fetch(`/api/wms/inventory/${id}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as InventoryDetail;
-  } catch {
-    return null;
-  }
+export function inventoryJson(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
-/** Заполнить документ ожидаемыми остатками склада из 1С. Возвращает обновлённый detail. */
-export async function populateInventory(id: number): Promise<InventoryDetail | null> {
-  try {
-    const res = await fetch(`/api/wms/inventory/${id}/populate`, { method: "POST" });
-    if (!res.ok) return null;
-    return (await res.json()) as InventoryDetail;
-  } catch {
-    return null;
-  }
+export function organizationQuery(organizationId?: number | null): string {
+  return organizationId == null ? "" : `?organization_id=${organizationId}`;
 }
 
-export async function updateInventoryLine(
-  lineId: number,
-  patch: { counted_qty?: number | null; note?: string },
-): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/wms/inventory/lines/${lineId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function fetchInventoryOrganizationsServer(headers: Record<string, string>) {
+  return inventoryRequest<InventoryOrganization[]>(`${BASE}/wms/receipt-organizations`, { cache: "no-store", headers });
 }
 
-export async function addInventoryLine(
-  id: number,
-  skuCode: string,
-  countedQty?: number,
-): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/wms/inventory/${id}/lines`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sku_code: skuCode, counted_qty: countedQty ?? null }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function fetchInventoryListServer(headers: Record<string, string>, organizationId?: number | null) {
+  return inventoryRequest<InventoryCount[]>(`${BASE}/wms/inventory${organizationQuery(organizationId)}`, { cache: "no-store", headers });
 }
 
-export async function completeInventory(id: number): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/wms/inventory/${id}/complete`, { method: "POST" });
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function fetchInventoryDetailServer(id: string, headers: Record<string, string>) {
+  return inventoryRequest<InventoryDetail>(`${BASE}/wms/inventory/${encodeURIComponent(id)}`, { cache: "no-store", headers });
+}
+
+export function fetchInventoryList(organizationId: number) {
+  return inventoryRequest<InventoryCount[]>(`/api/wms/inventory${organizationQuery(organizationId)}`, { cache: "no-store" });
+}
+
+export function createInventory(input: InventoryCreate) {
+  return inventoryRequest<InventoryCount>("/api/wms/inventory", inventoryJson("POST", input));
+}
+
+export function fetchInventoryDetail(id: number) {
+  return inventoryRequest<InventoryDetail>(`/api/wms/inventory/${id}`, { cache: "no-store" });
+}
+
+export function populateInventory(id: number) {
+  return inventoryRequest<InventoryDetail>(`/api/wms/inventory/${id}/populate`, { method: "POST" });
+}
+
+export function updateInventoryLine(lineId: number, patch: { counted_qty?: number; note?: string }) {
+  return inventoryRequest<InventoryLine>(`/api/wms/inventory/lines/${lineId}`, inventoryJson("PATCH", patch));
+}
+
+export function addInventoryLine(id: number, skuCode: string, countedQty?: number) {
+  return inventoryRequest<InventoryLine>(`/api/wms/inventory/${id}/lines`, inventoryJson("POST", { sku_code: skuCode, counted_qty: countedQty }));
+}
+
+export function completeInventory(id: number) {
+  return inventoryRequest<InventoryCount>(`/api/wms/inventory/${id}/complete`, { method: "POST" });
 }

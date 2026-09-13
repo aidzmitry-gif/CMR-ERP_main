@@ -1,203 +1,75 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { WmsInventoryDetail } from "./wms-inventory-detail";
+import { deferred, detail, inventory, jsonResponse } from "@/test/inventory-fixtures";
+afterEach(() => vi.unstubAllGlobals());
 
-// Мокаем ТОЛЬКО сетевые функции домена (fetch/populate/complete/updateLine).
-// Чистые хелперы (inventoryStatusLabel, varianceTone) и format.ts — реальные:
-// компонент должен реально маппить статус в подпись и знак расхождения в тон.
-vi.mock("@/lib/wms-inventory", async (importActual) => {
-  const actual = await importActual<typeof import("@/lib/wms-inventory")>();
-  return {
-    ...actual,
-    fetchInventoryDetail: vi.fn(),
-    populateInventory: vi.fn(),
-    completeInventory: vi.fn(),
-    updateInventoryLine: vi.fn(),
-  };
+it("показывает provenance, версию, количественное расхождение и неизвестную стоимость", () => {
+  render(<WmsInventoryDetail initial={detail()} />);
+  expect(screen.getByRole("heading", { name: "ИНВ-7" })).toBeInTheDocument();
+  expect(screen.getByText("Физический журнал WMS")).toBeInTheDocument();
+  expect(screen.getByText("Акт пересчёта")).toBeInTheDocument();
+  expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+  expect(screen.getByText("31")).toBeInTheDocument();
+  expect(screen.getAllByText("Неизвестно")).toHaveLength(3);
+  expect(screen.getByText("-3")).toHaveClass("text-red-600");
+  expect(screen.queryByText("0 BYN")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Ожидается \(1С\)/)).not.toBeInTheDocument();
 });
 
-import { WmsInventoryDetail } from "@/components/erp/wms-inventory-detail";
-import type { InventoryDetail, InventoryLine } from "@/lib/wms-inventory";
-import * as wms from "@/lib/wms-inventory";
-
-const mocked = wms as unknown as {
-  fetchInventoryDetail: ReturnType<typeof vi.fn>;
-  populateInventory: ReturnType<typeof vi.fn>;
-  completeInventory: ReturnType<typeof vi.fn>;
-  updateInventoryLine: ReturnType<typeof vi.fn>;
-};
-
-// Недостача: факт 8 < ожидалось 10 → variance -2, деньги -600 (short/red).
-const shortLine: InventoryLine = {
-  id: 101,
-  sku_code: "6СТ-190",
-  sku_title: "АКБ 190",
-  unit: "шт",
-  expected_qty: 10,
-  counted_qty: 8,
-  unit_cost: 300,
-  variance: -2,
-  variance_value: -600,
-  note: "",
-};
-// Излишек: факт 7 > ожидалось 5 → variance +2, деньги +500 (over/amber).
-const overLine: InventoryLine = {
-  id: 102,
-  sku_code: "ARM-12",
-  sku_title: "Арматура 12",
-  unit: "т",
-  expected_qty: 5,
-  counted_qty: 7,
-  unit_cost: 250,
-  variance: 2,
-  variance_value: 500,
-  note: "",
-};
-
-function makeDoc(over: Partial<InventoryDetail> = {}): InventoryDetail {
-  return {
-    id: 7,
-    number: "ИНВ-0007",
-    warehouse: "Основной склад",
-    status: "open",
-    note: "",
-    created_at: null,
-    completed_at: null,
-    lines: [shortLine, overLine],
-    summary: {
-      lines: 2,
-      counted: 2,
-      shortages: 1,
-      surpluses: 1,
-      shortage_value: 640,
-      surplus_value: 910,
-      net_value: 270,
-    },
-    ...over,
-  };
-}
-
-const emptyDoc = makeDoc({
-  lines: [],
-  summary: { lines: 0, counted: 0, shortages: 0, surpluses: 0, shortage_value: 0, surplus_value: 0, net_value: 0 },
+it("неполный пересчёт и незаполненный снимок нельзя провести", () => {
+  const current = detail(); current.lines[0].counted_qty = null;
+  render(<WmsInventoryDetail initial={current} />);
+  expect(screen.getByRole("button", { name: "Провести" })).toBeDisabled();
 });
 
-const doneDoc = makeDoc({ status: "done", completed_at: "2026-07-18T10:00:00" });
+it("проведение сохраняет статус и блокирует дальнейший ввод", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(inventory({ status: "done" }))));
+  render(<WmsInventoryDetail initial={detail()} />); fireEvent.click(screen.getByRole("button", { name: "Провести" }));
+  await screen.findByText("Проведена");
+  expect(screen.queryByRole("button", { name: "Провести" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Факт SKU")).not.toBeInTheDocument();
+});
 
-function rowOf(title: string): HTMLTableRowElement {
-  return screen.getByText(title).closest("tr") as HTMLTableRowElement;
-}
+it("stale 409 сохраняет снимок, запрещает повторное проведение и предлагает новый пересчёт", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "Журнал изменился" }, 409)));
+  render(<WmsInventoryDetail initial={detail()} />); fireEvent.click(screen.getByRole("button", { name: "Провести" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Журнал изменился");
+  expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Провести" })).toBeDisabled();
+  expect(screen.getByRole("link", { name: "Создать новый пересчёт" })).toHaveAttribute("href", "/erp/wms/inventory?organization_id=1");
+});
 
-beforeEach(() => vi.clearAllMocks());
+it("пустое количество не отправляет ноль или null", () => {
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  render(<WmsInventoryDetail initial={detail()} />);
+  fireEvent.change(screen.getByLabelText("Факт SKU"), { target: { value: "" } }); fireEvent.blur(screen.getByLabelText("Факт SKU"));
+  expect(fetcher).not.toHaveBeenCalled(); expect(screen.getByRole("alert")).toHaveTextContent("не считается нулём");
+});
 
-describe("WmsInventoryDetail", () => {
-  it("открытый документ: шапка, статус «Идёт пересчёт» и сводка недостач/излишков", () => {
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-    expect(screen.getByRole("heading", { name: "ИНВ-0007" })).toBeInTheDocument();
-    expect(screen.getByText(/Основной склад/)).toBeInTheDocument();
-    // статус берётся из реального inventoryStatusLabel("open")
-    expect(screen.getByText("Идёт пересчёт")).toBeInTheDocument();
-    // деньги недостач/излишков (KPI-плитки) — по реальному formatByn
-    expect(screen.getByText("640 BYN")).toBeInTheDocument();
-    expect(screen.getByText("910 BYN")).toBeInTheDocument();
-    // строки / посчитано
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
-  });
+it("неудачная запись сохраняет черновик и не проводит документ", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "Нет доступа" }, 403)));
+  render(<WmsInventoryDetail initial={detail()} />);
+  fireEvent.change(screen.getByLabelText("Факт SKU"), { target: { value: "28" } }); fireEvent.blur(screen.getByLabelText("Факт SKU"));
+  await screen.findByRole("alert"); expect(screen.getByLabelText("Факт SKU")).toHaveValue("28");
+  expect(screen.getByRole("button", { name: "Провести" })).toBeDisabled();
+});
 
-  it("тон строки следует знаку расхождения: недостача — красная, излишек — янтарный", () => {
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-    // 6 колонок; [4]=Расхождение, [5]=В деньгах — тон общий для обеих
-    const shortCells = rowOf("АКБ 190").querySelectorAll("td");
-    const overCells = rowOf("Арматура 12").querySelectorAll("td");
-    expect(shortCells[4].className).toMatch(/text-red-600/);
-    expect(overCells[4].className).toMatch(/text-amber-600/);
-    // излишек отрисован со знаком «+»
-    expect(overCells[4].textContent).toContain("+2");
-  });
+it("успешная запись пересчёта обновляет факт после чтения документа", async () => {
+  const fresh = detail(); fresh.lines[0].counted_qty = 28;
+  const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse(fresh.lines[0])).mockResolvedValueOnce(jsonResponse(fresh)); vi.stubGlobal("fetch", fetcher);
+  render(<WmsInventoryDetail initial={detail()} />);
+  fireEvent.change(screen.getByLabelText("Факт SKU"), { target: { value: "28" } }); fireEvent.blur(screen.getByLabelText("Факт SKU"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Провести" })).toBeEnabled());
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ counted_qty: 28 });
+});
 
-  it("пустой документ: подсказка «Подтянуть из 1С» и скрытая кнопка «Провести»", () => {
-    render(<WmsInventoryDetail initial={emptyDoc} />);
-    expect(screen.getByText(/Строк нет/)).toBeInTheDocument();
-    // «Провести» появляется только когда есть строки
-    expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Подтянуть из 1С/ })).toBeInTheDocument();
-  });
-
-  it("«Подтянуть из 1С» зовёт populateInventory и подставляет пришедшие строки", async () => {
-    mocked.populateInventory.mockResolvedValue(makeDoc());
-    render(<WmsInventoryDetail initial={emptyDoc} />);
-    expect(screen.queryByText("АКБ 190")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Подтянуть из 1С/ }));
-
-    await waitFor(() => expect(mocked.populateInventory).toHaveBeenCalledWith(7));
-    expect(await screen.findByText("АКБ 190")).toBeInTheDocument();
-    expect(screen.getByText("Арматура 12")).toBeInTheDocument();
-  });
-
-  it("правка факта: ввод + blur шлёт counted_qty (запятая → точка) и перечитывает документ", async () => {
-    mocked.updateInventoryLine.mockResolvedValue(true);
-    mocked.fetchInventoryDetail.mockResolvedValue(makeDoc());
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-
-    const input = within(rowOf("Арматура 12")).getByRole("textbox");
-    fireEvent.change(input, { target: { value: "7,5" } });
-    fireEvent.blur(input);
-
-    await waitFor(() =>
-      expect(mocked.updateInventoryLine).toHaveBeenCalledWith(102, { counted_qty: 7.5 }),
-    );
-    // после записи компонент перечитывает detail (refresh)
-    expect(mocked.fetchInventoryDetail).toHaveBeenCalledWith(7);
-  });
-
-  it("пустой факт трактуется как null (сброс пересчёта строки)", async () => {
-    mocked.updateInventoryLine.mockResolvedValue(true);
-    mocked.fetchInventoryDetail.mockResolvedValue(makeDoc());
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-
-    const input = within(rowOf("АКБ 190")).getByRole("textbox");
-    fireEvent.change(input, { target: { value: "" } });
-    fireEvent.blur(input);
-
-    await waitFor(() =>
-      expect(mocked.updateInventoryLine).toHaveBeenCalledWith(101, { counted_qty: null }),
-    );
-  });
-
-  it("нечисловой ввод не отправляется на сервер (защита от порчи факта)", async () => {
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-
-    const input = within(rowOf("АКБ 190")).getByRole("textbox");
-    fireEvent.change(input, { target: { value: "abc" } });
-    fireEvent.blur(input);
-
-    // даём микротаскам отработать — вызова быть не должно
-    await Promise.resolve();
-    expect(mocked.updateInventoryLine).not.toHaveBeenCalled();
-  });
-
-  it("«Провести» зовёт completeInventory и после успеха перечитывает как проведённый", async () => {
-    mocked.completeInventory.mockResolvedValue(true);
-    mocked.fetchInventoryDetail.mockResolvedValue(doneDoc);
-    render(<WmsInventoryDetail initial={makeDoc()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Провести/ }));
-
-    await waitFor(() => expect(mocked.completeInventory).toHaveBeenCalledWith(7));
-    // refresh подтянул проведённый документ → появился баннер и подпись статуса
-    expect(await screen.findByText(/Инвентаризация проведена/)).toBeInTheDocument();
-    expect(screen.getByText("Проведена")).toBeInTheDocument();
-  });
-
-  it("проведённый документ заблокирован: факт — текстом, без инпутов и кнопок действий", () => {
-    render(<WmsInventoryDetail initial={doneDoc} />);
-    expect(screen.getByText("Проведена")).toBeInTheDocument();
-    expect(screen.getByText(/Инвентаризация проведена/)).toBeInTheDocument();
-    // никакого редактирования: инпутов нет
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Подтянуть из 1С/ })).not.toBeInTheDocument();
-    // факт показан как значение
-    expect(within(rowOf("АКБ 190")).getByText("8")).toBeInTheDocument();
-  });
+it("смена документа игнорирует поздний populate предыдущей страницы", async () => {
+  const old = deferred<Response>(); vi.stubGlobal("fetch", vi.fn(() => old.promise));
+  const view = render(<WmsInventoryDetail initial={detail({ lines: [], snapshot_version: null })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Зафиксировать снимок WMS" }));
+  view.rerender(<WmsInventoryDetail initial={detail({ id: 9, number: "ИНВ-9", organization_id: 2 })} />);
+  await act(async () => old.resolve(jsonResponse(detail())));
+  expect(screen.getByRole("heading", { name: "ИНВ-9" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "ИНВ-7" })).not.toBeInTheDocument();
 });

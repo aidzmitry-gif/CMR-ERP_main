@@ -223,10 +223,16 @@ async def test_write_routes_denied_for_unauthorized_role(client, write_routes):
 
 
 async def test_write_routes_allowed_for_owner_role(client, write_routes):
-    """Позитив (sanity): super-роль (director) → НЕ 403 (гейт пропускает; тело может дать 4xx/5xx)."""
+    """Гейт пропускает director; бухгалтерия затем требует личность и доступ к книге."""
     false_blocks: list[str] = []
     for method, url, package, _denier in write_routes:
         resp = await client.request(method, url, headers={"X-User-Roles": _OWNER_ROLE})
+        source_book_route = package == "procurement" and url.startswith("/procurement/organizations/")
+        if (package == "accounting" or source_book_route) and resp.status_code == 403:
+            # Role-only request has no identity. This exact domain refusal proves
+            # the module gate passed; director must not bypass book-level checks.
+            assert resp.json()["detail"] == "An identified user is required", (url, resp.text)
+            continue
         if resp.status_code == 403:
             false_blocks.append(f"{method} {url} [{package}]")
     assert not false_blocks, (

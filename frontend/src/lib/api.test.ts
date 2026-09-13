@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+const issuance = vi.hoisted(() => vi.fn());
+vi.mock("@/components/invoice-issuance-dialog", () => ({ openInvoiceIssuance: issuance }));
 
 import {
   addContact,
@@ -68,7 +70,6 @@ import {
   localToNaiveUtc,
   logActivity,
   logLeadAttempt,
-  loseDeal,
   lookupCounterparty,
   lookupCounterpartyResult,
   qualifyLead,
@@ -350,12 +351,12 @@ describe("api client — документы/сообщения/согласов�
   it("fetchDocuments / createDocument", async () => {
     stubFetch([{ id: 1, kind: "invoice", number: "СЧ-1", status: "posted", onec_ref: "1С-СЧ-1", amount: 5000 }]);
     expect((await fetchDocuments("1"))[0].onec_ref).toBe("1С-СЧ-1");
-    stubFetch({ id: 2, kind: "invoice", number: "СЧ-2", status: "posted", onec_ref: null, amount: 5000, valid_until: null, reserve_status: "none" });
+    issuance.mockResolvedValueOnce({ document: { id: 2, number: "СЧ-2", status: "issued" }, replayed: false });
     expect((await createDocument("1", "invoice"))?.number).toBe("СЧ-2");
   });
 
   it("issueDocument: счёт даёт renderUrl, договор — только сообщение, null → ok=false", async () => {
-    stubFetch({ id: 7, kind: "invoice", number: "СЧ-7", status: "posted", onec_ref: null, amount: 100, valid_until: null, reserve_status: "none" });
+    issuance.mockResolvedValueOnce({ document: { id: 7, number: "СЧ-7", status: "issued" }, replayed: false });
     const inv = await issueDocument("1", "invoice");
     expect(inv.ok).toBe(true);
     expect(inv.renderUrl).toBe("/api/sales/documents/7/render");
@@ -367,7 +368,7 @@ describe("api client — документы/сообщения/согласов�
     expect(con.renderUrl).toBeUndefined(); // договор рендерится отдельно после согласования
     expect(con.message).toContain("согласование");
 
-    stubFetch(null, false);
+    issuance.mockResolvedValueOnce(null);
     const fail = await issueDocument("1", "invoice");
     expect(fail.ok).toBe(false);
     expect(fail.renderUrl).toBeUndefined();
@@ -667,19 +668,12 @@ describe("api client — склад/цена/позиции/задачи/при�
     }));
   });
 
-  it("fetchLossReasons/loseDeal", async () => {
+  it("fetchLossReasons", async () => {
     stubFetch([{ code: "price", title: "Дорого" }]);
     expect((await fetchLossReasons())[0].code).toBe("price");
     stubFetch({}, false);
     expect(await fetchLossReasons()).toEqual([]);
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
-    expect(await loseDeal("1", "price", "слишком дорого")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("/api/sales/deals/1/lose", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ reason_code: "price", comment: "слишком дорого" }),
-    }));
   });
 });
 

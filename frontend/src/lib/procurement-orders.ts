@@ -24,6 +24,9 @@ export interface OpenOrder {
 }
 
 const STATUS_LABEL: Record<string, string> = {
+  draft: "Черновик",
+  received: "Получен",
+  cancelled: "Отменён",
   ordered: "Заказан",
   shipped: "Отгружен",
   customs: "Таможня",
@@ -64,9 +67,9 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
 }
 
 /** Открытые заказы для SSR (server component); при недоступности бэка — пусто. */
-export async function fetchOpenOrdersServer(roles?: string): Promise<OpenOrder[]> {
+export async function fetchOpenOrdersServer(roles?: string, all = false): Promise<OpenOrder[]> {
   try {
-    const res = await fetch(`${BASE}/procurement/open-orders`, {
+    const res = await fetch(`${BASE}/procurement/${all ? "orders" : "open-orders"}`, {
       cache: "no-store",
       headers: roleHeaders(roles),
     });
@@ -78,9 +81,9 @@ export async function fetchOpenOrdersServer(roles?: string): Promise<OpenOrder[]
 }
 
 /** Открытые заказы (клиент, через прокси /api) — для тихого перечитывания. */
-export async function fetchOpenOrders(): Promise<OpenOrder[]> {
+export async function fetchOpenOrders(all = false): Promise<OpenOrder[]> {
   try {
-    const res = await fetch("/api/procurement/open-orders", { cache: "no-store" });
+    const res = await fetch(`/api/procurement/${all ? "orders" : "open-orders"}`, { cache: "no-store" });
     if (!res.ok) return [];
     return (await res.json()) as OpenOrder[];
   } catch {

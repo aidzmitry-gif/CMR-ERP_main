@@ -1,0 +1,72 @@
+{
+  "batch": "DEMO-ORG-1-2026-10-opening",
+  "request_key": "21e77e2a-9b78-4ef9-957a-569a9df251ce",
+  "protocol_version": "opening-balance-v1",
+  "source_system": "synthetic-example-not-real-1c-export",
+  "source_digest": "ad9cc1160d2a5dc0d7ec80a92b77d5128418f1d0332ed190e6738e773591bb02",
+  "cutover_date": "2026-10-01",
+  "evidence": "Synthetic format example only; no accountant acceptance or actual balances. Replace all DEMO identities and policy before preview.",
+  "expected_entry_count": 1,
+  "expected_line_count": 5,
+  "expected_debit_byn": "1700.00",
+  "expected_credit_byn": "1700.00",
+  "entries": [
+    {
+      "source": "DEMO-ORG-1-opening-2026-10",
+      "source_version": 1,
+      "operation": "opening",
+      "document_date": "2026-10-01",
+      "operation_date": "2026-10-01",
+      "posting_date": "2026-10-01",
+      "policy_id": 1,
+      "rule_version": "opening-balance-v1-demo",
+      "explanation": "Synthetic opening balances copied from the companion source; capital is an explicit source balance, never a balancing plug.",
+      "lines": [
+        {
+          "account": "51",
+          "side": "debit",
+          "amount": "1000.00",
+          "dimensions": {}
+        },
+        {
+          "account": "41",
+          "side": "debit",
+          "amount": "500.00",
+          "quantity": "5",
+          "dimensions": {
+            "warehouse": "DEMO-WH-1",
+            "sku": "DEMO-SKU-1",
+            "lot": "DEMO-LOT-1"
+          }
+        },
+        {
+          "account": "62",
+          "side": "debit",
+          "amount": "200.00",
+          "dimensions": {
+            "counterparty": "DEMO-BUYER-1",
+            "contract": "DEMO-SALE-1",
+            "settlement_document": "DEMO-INVOICE-1"
+          }
+        },
+        {
+          "account": "60",
+          "side": "credit",
+          "amount": "300.00",
+          "dimensions": {
+            "counterparty": "DEMO-SUPPLIER-1",
+            "contract": "DEMO-PURCHASE-1",
+            "settlement_document": "DEMO-RECEIPT-1"
+          }
+        },
+        {
+          "account": "80",
+          "side": "credit",
+          "amount": "1400.00",
+          "dimensions": {}
+        }
+      ],
+      "opening": true
+    }
+  ]
+}

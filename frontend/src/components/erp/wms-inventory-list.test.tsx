@@ -1,119 +1,76 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { WmsInventoryList } from "./wms-inventory-list";
+import { deferred, inventory, jsonResponse, organizations } from "@/test/inventory-fixtures";
 
-const push = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
-}));
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+beforeEach(() => { push.mockReset(); });
+afterEach(() => vi.unstubAllGlobals());
+const props = { initial: [], organizations, initialOrganizationId: null };
 
-// Мокаем ТОЛЬКО createInventory (сеть). inventoryStatusLabel — реальный.
-vi.mock("@/lib/wms-inventory", async (importActual) => {
-  const actual = await importActual<typeof import("@/lib/wms-inventory")>();
-  return {
-    ...actual,
-    createInventory: vi.fn(),
-  };
-});
-
-import { WmsInventoryList } from "@/components/erp/wms-inventory-list";
-import type { InventoryCount } from "@/lib/wms-inventory";
-import * as wmsInventory from "@/lib/wms-inventory";
-
-const mocked = wmsInventory as unknown as {
-  createInventory: ReturnType<typeof vi.fn>;
-};
-
-function makeDoc(over: Partial<InventoryCount> = {}): InventoryCount {
-  return {
-    id: 7,
-    number: "ИНВ-0007",
-    warehouse: "Основной склад",
-    status: "open",
-    note: "",
-    created_at: "2026-07-18T10:00:00",
-    completed_at: null,
-    ...over,
-  };
+function confirm() {
+  fireEvent.change(screen.getByLabelText("Источник ожидаемого остатка"), { target: { value: "wms_physical" } });
+  fireEvent.change(screen.getByLabelText("Основание проверки полноты"), { target: { value: "Полнота проверена" } });
+  fireEvent.click(screen.getByRole("checkbox"));
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
+it("ничего не выбирает автоматически; создание требует всех полей", async () => {
+  const fetcher = vi.fn().mockResolvedValue(jsonResponse([])); vi.stubGlobal("fetch", fetcher);
+  render(<WmsInventoryList {...props} />);
+  expect(screen.getByLabelText("Юрлицо")).toHaveValue("");
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Новая инвентаризация" })).toBeDisabled();
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  await screen.findByText("Инвентаризаций пока нет");
+  fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
+  fetcher.mockResolvedValueOnce(jsonResponse(inventory()));
+  fireEvent.click(screen.getByRole("button", { name: "Новая инвентаризация" }));
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/erp/wms/inventory/7"));
+  const [, options] = fetcher.mock.calls.at(-1)!;
+  expect(JSON.parse(options.body)).toEqual({ organization_id: 1, warehouse: "Минск", expected_source: "wms_physical", source_evidence: "Полнота проверена", journal_complete: true });
 });
 
-describe("WmsInventoryList", () => {
-  it("пустой список: подсказка «Инвентаризаций пока нет»", () => {
-    render(<WmsInventoryList initial={[]} />);
-    expect(screen.getByText("Инвентаризаций пока нет")).toBeInTheDocument();
-  });
+it.each([403, 409, 503])("HTTP %s при чтении показывает ошибку вместо пустого списка", async (status) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "Ошибка чтения" }, status)));
+  render(<WmsInventoryList {...props} />);
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка чтения");
+  expect(screen.queryByText("Инвентаризаций пока нет")).not.toBeInTheDocument();
+});
 
-  it("список: рендерит номер, склад, статус (реальный label) и дату", () => {
-    render(<WmsInventoryList initial={[makeDoc()]} />);
-    expect(screen.getByRole("link", { name: "ИНВ-0007" })).toHaveAttribute(
-      "href",
-      "/erp/wms/inventory/7",
-    );
-    expect(screen.getByText("Основной склад")).toBeInTheDocument();
-    // inventoryStatusLabel("open") реальный
-    expect(screen.getByText("Идёт пересчёт")).toBeInTheDocument();
-    expect(screen.getByText("18.07.2026")).toBeInTheDocument();
-  });
+it("смена юрлица игнорирует поздний список и сбрасывает подтверждение", async () => {
+  const old = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("=1") ? old.promise : Promise.resolve(jsonResponse([inventory({ id: 8, number: "ИНВ-Б", organization_id: 2 })]))));
+  render(<WmsInventoryList {...props} />);
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await screen.findByText("ИНВ-Б");
+  await act(async () => old.resolve(jsonResponse([inventory({ number: "СТАРЫЙ" })])));
+  expect(screen.queryByText("СТАРЫЙ")).not.toBeInTheDocument();
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+});
 
-  it("документ без номера получает подпись ИНВ-<id>", () => {
-    render(<WmsInventoryList initial={[makeDoc({ number: "", id: 42 })]} />);
-    expect(screen.getByRole("link", { name: "ИНВ-42" })).toHaveAttribute(
-      "href",
-      "/erp/wms/inventory/42",
-    );
-  });
+it("поздний ответ создания не переводит на документ прежнего юрлица", async () => {
+  const old = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn((url: string, options?: RequestInit) => options?.method === "POST" ? old.promise : Promise.resolve(jsonResponse([]))));
+  render(<WmsInventoryList initial={[]} organizations={organizations} initialOrganizationId={1} />);
+  fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
+  fireEvent.click(screen.getByRole("button", { name: "Новая инвентаризация" }));
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await screen.findByText("Инвентаризаций пока нет");
+  await act(async () => old.resolve(jsonResponse(inventory())));
+  expect(push).not.toHaveBeenCalled();
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+});
 
-  it("документ без даты создания показывает «—»", () => {
-    render(<WmsInventoryList initial={[makeDoc({ created_at: null })]} />);
-    expect(screen.getByText("—")).toBeInTheDocument();
-  });
-
-  it("статус done/canceled маппится в реальные подписи", () => {
-    render(
-      <WmsInventoryList
-        initial={[
-          makeDoc({ id: 1, status: "done" }),
-          makeDoc({ id: 2, status: "canceled" }),
-        ]}
-      />,
-    );
-    expect(screen.getByText("Проведена")).toBeInTheDocument();
-    expect(screen.getByText("Отменена")).toBeInTheDocument();
-  });
-
-  it("пустой ввод склада: клик по кнопке не зовёт createInventory, подсвечивает поле ошибкой", () => {
-    render(<WmsInventoryList initial={[]} />);
-    const input = screen.getByPlaceholderText(/Склад для инвентаризации/);
-    fireEvent.click(screen.getByRole("button", { name: /Новая инвентаризация/ }));
-    expect(mocked.createInventory).not.toHaveBeenCalled();
-    expect(input.className).toMatch(/border-amber-500/);
-  });
-
-  it("заполненный склад: клик зовёт createInventory с обрезанным значением и переходит на страницу документа", async () => {
-    mocked.createInventory.mockResolvedValue(makeDoc({ id: 55 }));
-    render(<WmsInventoryList initial={[]} />);
-
-    const input = screen.getByPlaceholderText(/Склад для инвентаризации/);
-    fireEvent.change(input, { target: { value: "  Минск (центр.)  " } });
-    fireEvent.click(screen.getByRole("button", { name: /Новая инвентаризация/ }));
-
-    await waitFor(() => expect(mocked.createInventory).toHaveBeenCalledWith("Минск (центр.)"));
-    expect(push).toHaveBeenCalledWith("/erp/wms/inventory/55");
-  });
-
-  it("если createInventory вернул null — редиректа не происходит", async () => {
-    mocked.createInventory.mockResolvedValue(null);
-    render(<WmsInventoryList initial={[]} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/Склад для инвентаризации/), {
-      target: { value: "Гомель" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Новая инвентаризация/ }));
-
-    await waitFor(() => expect(mocked.createInventory).toHaveBeenCalledWith("Гомель"));
-    expect(push).not.toHaveBeenCalled();
-  });
+it("сетевая ошибка создания сохраняет введённые данные и видимый сбой", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+  render(<WmsInventoryList initial={[]} organizations={organizations} initialOrganizationId={1} />);
+  fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
+  fireEvent.click(screen.getByRole("button", { name: "Новая инвентаризация" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка сети");
+  expect(screen.getByLabelText("Основание проверки полноты")).toHaveValue("Полнота проверена");
+  expect(push).not.toHaveBeenCalled();
 });

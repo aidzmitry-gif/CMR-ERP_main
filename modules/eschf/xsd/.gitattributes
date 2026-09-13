@@ -1,0 +1,3 @@
+# Preserve the official schema bytes and its published SHA-256 on every OS.
+# The upstream file contains trailing spaces; do not normalize the vendor source.
+*.xsd -text whitespace=-blank-at-eol

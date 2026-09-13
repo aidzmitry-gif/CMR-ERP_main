@@ -1,0 +1,44 @@
+{
+  "basis": "CI069bf3f52failures; static current code inspection at5cffdf5+b9b48be docs only; frozen code6e86b38",
+  "findings": [
+    {
+      "tests": [
+        "tests/test_erp.py::test_procurement",
+        "tests/test_procurement_suppliers.py::test_board_card_shows_supplier_score"
+      ],
+      "evidence": [
+        "tests still call /procurement/board and /procurement/requests global reads",
+        "modules/procurement/routes.py returns410 for these; org-scoped endpoints required"
+      ],
+      "action": "Use explicit organization and current scoped board; keep workflow/score assertions",
+      "resolved": false
+    },
+    {
+      "tests": [
+        "tests/test_procurement_round5_hardening.py::test_plan_unreachable_deadline_risk_no_invalid_dates",
+        "tests/test_procurement_round5_hardening.py::test_actual_receipt_not_overwritten_by_later_estimate",
+        "tests/test_procurement_round5_hardening.py::test_reference_recompute_idempotent_across_batches"
+      ],
+      "evidence": [
+        "Fixture creates unbound order then PATCHes status; current contract requires explicit organization",
+        "Legacy plan/edit routes return410 and refer to durable scoped commands"
+      ],
+      "action": "Build owned fixture and execute supported command/receipt path; preserve actual-versus-estimated and idempotence assertions",
+      "resolved": false
+    },
+    {
+      "tests": [
+        "tests/test_procurement_suppliers.py::test_scorecard_timeliness_real",
+        "tests/test_procurement_suppliers.py::test_scorecard_timeliness_boundary_on_eta"
+      ],
+      "evidence": [
+        "Score calculation requires received status plus received_at and eta_date",
+        "Tests create received orders via legacy payloads; do not yet establish valid current receipt evidence"
+      ],
+      "action": "Verify successful receipt creation first, then preserve expected on-time ratio and inclusive date boundary; do not redefine None as success",
+      "resolved": false
+    }
+  ],
+  "no_product_or_tests_changed": true,
+  "rerun": false
+}

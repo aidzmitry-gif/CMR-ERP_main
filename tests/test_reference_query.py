@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, CounterpartyBranch
 from core.domain.reference import CurrencyRate, Unit, VatRate
 
 
@@ -78,6 +78,7 @@ async def test_query_counterparties_excludes_merged(api, session):
 
 async def test_query_errors(api):
     assert (await api.post("/system/references/query", json={})).status_code == 422
+
     assert (
         await api.post("/system/references/query", json={"ref": "core.unknown"})
     ).status_code == 422
@@ -89,6 +90,41 @@ async def test_query_errors(api):
     assert (
         await api.post("/system/references/query", json={"ref": "core.counterparties"})
     ).status_code == 422
+
+
+async def test_counterparty_search_matches_both_names_and_keeps_identity(api, session):
+    cp = Counterparty(name="Legacy reference", display_name="Удобное имя", legal_name="Полное юридическое название", unp="600187521")
+    session.add(cp)
+    await session.commit()
+    for value in ("Удобное", "юридическое", "Legacy reference"):
+        response = await api.post("/system/references/query", json={"ref": "core.counterparties", "name": value})
+        assert response.status_code == 200, response.text
+        assert response.json()["result"] == [{"id": cp.id, "name": "Удобное имя", "legal_name": "Полное юридическое название", "unp": "600187521", "branches": []}]
+
+
+async def test_branch_search_keeps_parent_and_distinct_branch_ids(api, session):
+    parent = Counterparty(name="Головная", unp="600187521")
+    other = Counterparty(name="Архивная", unp="600187522", is_active=False)
+    session.add_all([parent, other])
+    await session.flush()
+    branches = [
+        CounterpartyBranch(legal_entity_id=parent.id, name="Брест"),
+        CounterpartyBranch(legal_entity_id=parent.id, name="Минск"),
+        CounterpartyBranch(legal_entity_id=parent.id, name="Закрытый", is_active=False),
+        CounterpartyBranch(legal_entity_id=other.id, name="Брест"),
+    ]
+    session.add_all(branches)
+    await session.commit()
+    for query in ({"key": parent.unp}, {"name": "Брест"}):
+        response = await api.post("/system/references/query", json={"ref": "core.counterparties", **query})
+        assert response.status_code == 200
+        rows = response.json()["result"]
+        assert [row["id"] for row in rows] == [parent.id]
+        assert rows[0]["branches"] == [{"id": b.id, "name": b.name} for b in branches[:2]]
+    card = await api.get(f"/system/mdm/counterparty/{parent.id}")
+    assert card.status_code == 200
+    assert {b["id"] for b in card.json()["branches"]} == {b.id for b in branches[:3]}
+    assert all(b["legal_entity_id"] == parent.id for b in card.json()["branches"])
 
 
 async def test_ai_catalog_advertises_query_tool(api):

@@ -2,12 +2,75 @@
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, CounterpartyAlias, CounterpartyBranch, SurvivorshipRule
 from core.services import reference_import
+from core.services.mdm import CounterpartyWriteError
 
 
 async def _count(session, model) -> int:
     return (await session.execute(select(func.count()).select_from(model))).scalar() or 0
+
+
+async def test_alias_conflict_does_not_reassign_to_another_unp(session):
+    first = await reference_import.upsert_counterparty(session, unp="600187521", name="First", external_ref="same-ref")
+    await session.flush()
+    with pytest.raises(CounterpartyWriteError, match="Внешний ID"):
+        await reference_import.upsert_counterparty(session, unp="600187522", name="Other", external_ref="same-ref")
+    assert await _count(session, Counterparty) == 1
+    assert (await session.scalar(select(CounterpartyAlias))).counterparty_id == first.counterparty.id
+
+
+async def test_duplicate_unp_requires_resolution_before_import(session):
+    # Historical malformed UNPs can exist; never select the first candidate.
+    session.add_all([Counterparty(name="A", unp="111"), Counterparty(name="B", unp="111")])
+    await session.flush()
+    with pytest.raises(CounterpartyWriteError, match="Несколько активных"):
+        await reference_import.upsert_counterparty(session, unp="111", name="C", external_ref="new-ref")
+    assert await _count(session, CounterpartyAlias) == 0
+
+
+async def test_import_legal_name_does_not_replace_working_or_manual_names(session):
+    cp = Counterparty(name="Legacy", display_name="Рабочее", unp="600187521")
+    session.add(cp)
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Описание1С", legal_name="Полное1С", external_ref="one")
+    assert (cp.name, cp.display_name, cp.legal_name) == ("Legacy", "Рабочее", "Полное1С")
+    cp.legal_name = "Подтверждено вручную"
+    cp.provenance = {**cp.provenance, "legal_name": {"source": "manual"}}
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Описание2", legal_name="Полное2", external_ref="one")
+    assert cp.legal_name == "Подтверждено вручную"
+
+
+async def test_unverified_branch_feed_is_rejected_without_creating_a_company(session):
+    with pytest.raises(CounterpartyWriteError, match="филиала"):
+        await reference_import.import_counterparties(session, [{"record_kind": "branch", "unp": "600187521", "name": "Branch", "id": "b"}])
+    assert await _count(session, Counterparty) == await _count(session, CounterpartyBranch) == 0
+
+
+async def test_empty_manual_only_legal_name_stays_empty(session):
+    session.add(SurvivorshipRule(entity_type="counterparty", field="legal_name", strategy="manual_only"))
+    cp = Counterparty(name="Legacy", unp="600187521")
+    session.add(cp)
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Imported", legal_name="Must not fill")
+    assert cp.legal_name is None
+
+
+async def test_alias_of_direct_merged_duplicate_resolves_without_reassignment(session):
+    head = Counterparty(name="Head", unp="600187521")
+    session.add(head)
+    await session.flush()
+    duplicate = Counterparty(name="Old", unp="600187521", is_active=False, merged_into_id=head.id)
+    session.add(duplicate)
+    await session.flush()
+    alias = CounterpartyAlias(counterparty_id=duplicate.id, source="1c", external_ref="old-ref")
+    session.add(alias)
+    await session.flush()
+    result = await reference_import.upsert_counterparty(session, unp=head.unp, name="Incoming", external_ref="old-ref")
+    assert result.counterparty.id == head.id
+    assert alias.counterparty_id == duplicate.id
+    assert not result.created and not result.alias_added
 
 
 async def test_upsert_creates_then_matches(session):

@@ -1,0 +1,18 @@
+{
+  "candidate_sha256": "9131cb447d5ca1a544be9719e0f061ebb9ea9963088633fe333da1927c8b9d10",
+  "probe_sha256": "e3236854118bb5f54d4cebba89e75c55e5b9abffbfd2d723561ba44a5f5dc589",
+  "result": "1 passed in 4.96s",
+  "scope": "Actual candidate upgrade called with Alembic Operations on isolated PostgreSQL database containing synthetic closed-month unposted bank binding",
+  "assertions": [
+    "RuntimeError preflight failed",
+    "After rollback none of four new triggers exists",
+    "One original source binding remains",
+    "September period remains closed",
+    "Original bank amount remains120"
+  ],
+  "limits": [
+    "Not registered alembic upgrade head",
+    "Does not prove real-books acceptance"
+  ],
+  "code_freeze_changed": false
+}

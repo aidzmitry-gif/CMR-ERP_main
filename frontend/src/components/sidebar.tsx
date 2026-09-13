@@ -83,7 +83,9 @@ const MODULES: ModuleItem[] = [
     Icon: ShoppingCart,
     href: "/erp/procurement",
     sub: [
-      { label: "Воронка закупок", href: "/erp/procurement" },
+      { label: "План закупок", href: "/erp/procurement/planning" },
+      { label: "Заказы поставщикам", href: "/erp/procurement/orders" },
+      { label: "Накладные на поступление", href: "/erp/procurement/receipts" },
       { label: "Поставщики" },
       { label: "Претензии поставщикам", href: "/erp/procurement/claims" },
       { label: "Номенклатура · SKU" },
@@ -121,6 +123,7 @@ const MODULES: ModuleItem[] = [
       { label: "Приёмка (QC)", href: "/erp/wms/receipts" },
       { label: "Задачи (подбор/размещение)", href: "/erp/wms/tasks" },
       { label: "Движения", href: "/erp/wms/movements" },
+      { label: "Резервы", href: "/erp/wms/reservations" },
       { label: "Размещение (ячейки)", href: "/erp/wms/locations" },
       { label: "Остатки 1С", href: "/erp/wms/stock" },
       { label: "Остаток (движения)", href: "/erp/wms/balances" },
@@ -133,6 +136,7 @@ const MODULES: ModuleItem[] = [
   },
   { slug: "logistics", label: "Логистика", Icon: Truck, href: "/erp/logistics" },
   { slug: "finance", label: "Финансы", Icon: Wallet, href: "/erp/finance" },
+  { slug: "accounting", label: "Бухгалтерия", Icon: Wallet, href: "/erp/accounting" },
   {
     slug: "marketing",
     label: "Маркетинг",
@@ -203,6 +207,7 @@ const MODULES: ModuleItem[] = [
     href: "/erp/spravochniki",
     sub: [
       { label: "Каталог", href: "/erp/spravochniki" },
+      { label: "План счетов", href: "/erp/spravochniki/accounts" },
       { label: "Контрагенты", href: "/erp/spravochniki/counterparty" },
       { label: "Курсы валют · НДС", href: "/erp/spravochniki/rates" },
       { label: "Дедупликация", href: "/erp/spravochniki/merge" },

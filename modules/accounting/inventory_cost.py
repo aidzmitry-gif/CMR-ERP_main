@@ -1,0 +1,276 @@
+"""Read-only inventory cost preview for policy-selected valuation layers."""
+import hashlib
+import json
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+
+from sqlalchemy import select
+
+from modules.accounting.models import Entry, Line, Policy
+from modules.accounting.service import AccountingError, lock_organization
+
+
+async def _inventory_rows(session, org_id, data):
+    await lock_organization(session, org_id)
+    policy = await session.scalar(select(Policy).where(
+        Policy.organization_id == org_id, Policy.effective_from <= data.posting_date,
+    ).order_by(Policy.effective_from.desc()).limit(1))
+    if policy is None or policy.id != data.policy_id:
+        raise AccountingError("Select the applicable accounting policy")
+    if policy.inventory_method not in {"specific", "fifo", "weighted_average"}:
+        raise AccountingError("The selected inventory valuation method is not supported")
+    if data.account.split(".")[0] not in {"10", "41"}:
+        raise AccountingError("Select an owned inventory account 10/41")
+    rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+        Entry.organization_id == org_id, Line.account_code == data.account,
+    ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+    return policy, rows
+
+
+def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset()):
+    """Build chronological available inventory layers for FIFO/average methods.
+
+    The physical identity remains explicit (warehouse/SKU/lot).  A debit adds
+    a layer and a credit consumes earlier layers.  Late value-only adjustments
+    are admitted only through an existing verified late-cost receipt.  The
+    adjustment must match exactly one still-open physical layer; ambiguous
+    same-lot layers are rejected instead of silently changing the wrong layer.
+    """
+    layers = []
+    evidence = []
+    matched = False
+    for entry, line in rows:
+        dimensions = line.dimensions or {}
+        required = ("warehouse", "sku", "lot")
+        if any(not dimensions.get(key) for key in required):
+            raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
+        if line.category != "asset" or line.cash:
+            raise AccountingError("Lot movement is not owned inventory")
+        if line.currency != "BYN":
+            raise AccountingError("Foreign-currency inventory requires a separate issue rule")
+        if entry.posting_date > posting_date:
+            if dimensions.get("warehouse") == target["warehouse"] and dimensions.get("sku") == target["sku"]:
+                raise AccountingError("Selected SKU has later movements; chronological costing is required")
+            continue
+        if dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]:
+            continue
+        if target.get("lot") and dimensions.get("lot") != target["lot"]:
+            continue
+        matched = True
+        value_only = (entry.id, line.id) in verified_value_lines
+        if value_only:
+            if (entry.operation != "inventory_late_cost" or line.side != "debit"
+                or line.quantity is not None or line.amount <= 0):
+                raise AccountingError("Invalid verified inventory value adjustment")
+            matches = [layer for layer in layers
+                       if layer["dimensions"] == dimensions and layer["quantity"] > 0]
+            if len(matches) != 1:
+                raise AccountingError("Late cost must identify exactly one open inventory layer")
+            amount = Decimal(line.amount)
+            matches[0]["amount"] += amount
+            evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
+                             "source_version": entry.source_version, "side": line.side,
+                             "quantity": None, "amount_byn": format(amount, ".2f"),
+                             "lot": dimensions["lot"], "late_cost": True})
+            continue
+        if line.quantity is None:
+            raise AccountingError("Inventory movement needs quantity for FIFO or weighted-average costing")
+        quantity = Decimal(line.quantity)
+        amount = Decimal(line.amount)
+        if quantity <= 0 or amount <= 0:
+            raise AccountingError("Inventory layer quantity and value must be positive")
+        evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
+                         "source_version": entry.source_version, "side": line.side,
+                         "quantity": format(quantity, ".6f"), "amount_byn": format(amount, ".2f"),
+                         "lot": dimensions["lot"]})
+        if line.side == "debit":
+            layers.append({"lot": dimensions["lot"], "quantity": quantity, "amount": amount,
+                           "dimensions": dict(dimensions), "entry_id": entry.id, "line_id": line.id,
+                           "posting_date": entry.posting_date.isoformat()})
+            continue
+        remaining = quantity
+        for layer in layers:
+            if remaining <= 0:
+                break
+            if layer["quantity"] <= 0:
+                continue
+            take = min(layer["quantity"], remaining)
+            unit = layer["amount"] / layer["quantity"]
+            layer["quantity"] -= take
+            layer["amount"] -= unit * take
+            remaining -= take
+        if remaining > 0:
+            raise AccountingError("Inventory history has insufficient quantity for the issue")
+    if not matched:
+        return [], evidence
+    available = [layer for layer in layers if layer["quantity"] > 0 and layer["amount"] > 0]
+    return available, evidence
+
+
+def _layer_payload(layer, quantity, amount):
+    quantity_text = format(quantity.normalize(), "f") if quantity else "0"
+    return {"lot": layer["lot"], "quantity": quantity_text,
+            "amount_byn": format(amount, ".2f"), "dimensions": layer["dimensions"]}
+
+
+def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()):
+    """Caller must authenticate each admitted (entry_id, line_id) cost adjustment.
+
+    Public callers admit none until the durable late-cost verifier is wired.
+    """
+    evidence = []
+    inventory_dimensions = None
+    acquisition = None
+    adjusted = False
+    with localcontext() as context:
+        context.prec = 64
+        quantity, amount = Decimal(0), Decimal(0)
+        for entry, line in rows:
+            dimensions = line.dimensions or {}
+            if any(not dimensions.get(key) for key in target):
+                raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
+            if any(dimensions[key] != value for key, value in target.items()):
+                continue
+            if entry.posting_date > posting_date:
+                raise AccountingError("Selected lot has later movements; chronological costing is required")
+            value_only = (entry.id, line.id) in verified_value_lines
+            if value_only and (entry.operation != "inventory_late_cost" or line.quantity is not None
+                               or line.side != "debit" or quantity <= 0 or line.amount <= 0):
+                raise AccountingError("Invalid verified inventory value adjustment")
+            if line.category != "asset" or line.cash or (line.quantity is None and not value_only):
+                raise AccountingError("Lot movement has no quantity or is not owned inventory")
+            if line.currency != "BYN":
+                raise AccountingError("Foreign-currency inventory requires a separate issue rule")
+            if inventory_dimensions is None:
+                inventory_dimensions = dimensions
+            elif inventory_dimensions != dimensions:
+                raise AccountingError("Mixed lot analytics require explicit inventory layers before costing")
+            if value_only:
+                adjusted = True
+            elif line.side == "debit":
+                if adjusted:
+                    raise AccountingError("Acquisition after cost adjustment requires separate lot layers")
+                if acquisition is None:
+                    acquisition = (line.amount, line.quantity)
+                elif acquisition[0] * line.quantity != line.amount * acquisition[1]:
+                    raise AccountingError("Different acquisition costs require separate lot identification")
+            sign = 1 if line.side == "debit" else -1
+            if not value_only:
+                quantity += sign * line.quantity
+            amount += sign * line.amount
+            if quantity < 0 or amount < 0 or (quantity == 0 and amount != 0):
+                raise AccountingError("Lot history has an invalid quantity/value balance; reconcile first")
+            evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
+                             "source_version": entry.source_version, "side": line.side,
+                             "quantity": None if value_only else format(line.quantity, ".6f"), "amount_byn": format(line.amount, ".2f")})
+        return quantity, amount, inventory_dimensions, evidence
+
+
+async def preview_issue(session, org_id, data, *, procurement=None):
+    from modules.accounting.late_cost_receipts import verified_value_lines
+
+    policy, rows = await _inventory_rows(session, org_id, data)
+    verified = await verified_value_lines(session, org_id, rows, procurement)
+    return issue_result(policy, rows, org_id, data, verified_value_lines=verified)
+
+
+def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()):
+    """Same calculation for live preview and verification of original history."""
+    target = {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot}
+    # Older internal reconstruction callers do not carry the policy method;
+    # their historical contracts are the original specific-lot calculation.
+    method = getattr(policy, "inventory_method", "specific")
+    with localcontext() as context:
+        context.prec = 64
+        inventory_layers = []
+        if method == "specific":
+            if not data.lot:
+                raise AccountingError("Specific costing requires an explicit lot")
+            quantity, amount, inventory_dimensions, evidence = _lot_balance(
+                rows, target, data.posting_date, verified_value_lines=verified_value_lines)
+            if data.quantity > quantity:
+                raise AccountingError("Insufficient book quantity in the selected lot")
+            cost = amount if data.quantity == quantity else (amount * data.quantity / quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            inventory_layers = [_layer_payload({"lot": data.lot, "dimensions": inventory_dimensions}, data.quantity, cost)]
+            method_target = target
+        else:
+            layers, evidence = _valuation_layers(rows, target, data.posting_date,
+                                                 verified_value_lines=verified_value_lines)
+            quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
+            amount = sum((layer["amount"] for layer in layers), Decimal("0"))
+            if not layers or data.quantity > quantity:
+                raise AccountingError("Insufficient book quantity for the selected SKU")
+            method_target = {"warehouse": data.warehouse, "sku": data.sku}
+            remaining = data.quantity
+            if method == "fifo":
+                for layer in layers:
+                    if remaining <= 0:
+                        break
+                    take = min(layer["quantity"], remaining)
+                    layer_cost = layer["amount"] if take == layer["quantity"] else (layer["amount"] * take / layer["quantity"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    inventory_layers.append(_layer_payload(layer, take, layer_cost))
+                    remaining -= take
+            elif method == "weighted_average":
+                average = amount / quantity
+                allocated = Decimal("0")
+                for index, layer in enumerate(layers):
+                    if remaining <= 0:
+                        break
+                    take = min(layer["quantity"], remaining)
+                    layer_cost = (average * take).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    if take == remaining or take == layer["quantity"]:
+                        # Keep the total debit/credit exact after cent rounding.
+                        layer_cost = (data.quantity * average).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) - allocated if take == remaining else layer_cost
+                    inventory_layers.append(_layer_payload(layer, take, layer_cost))
+                    allocated += layer_cost
+                    remaining -= take
+            else:
+                raise AccountingError("The selected inventory valuation method is not supported")
+            cost = sum((Decimal(layer["amount_byn"]) for layer in inventory_layers), Decimal("0"))
+            inventory_dimensions = method_target
+        basis = {"organization_id": org_id, "request": data.model_dump(mode="json"), "evidence": evidence}
+        basis["valuation_method"] = method
+        basis["inventory_layers"] = inventory_layers
+        basis_digest = hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        return {"organization_id": org_id, "policy_id": policy.id, "method": method, "basis_digest": basis_digest,
+                "posting_date": data.posting_date, "account": data.account, "dimensions": method_target,
+                "inventory_dimensions": inventory_dimensions,
+                "book_quantity": format(quantity, ".6f"), "book_value_byn": format(amount, ".2f"),
+                "issue_quantity": format(data.quantity, ".6f"), "issue_cost_byn": format(cost, ".2f"),
+                "remaining_quantity": format(quantity - data.quantity, ".6f"),
+                "remaining_value_byn": format(amount - cost, ".2f"), "inventory_layers": inventory_layers, "evidence": evidence,
+                "status": "preview", "stock_reserved": False, "posted": False,
+                "final_cost_certified": False, "normative_verified": policy.normative_verified}
+
+
+async def available_lots(session, org_id, data, *, procurement=None):
+    from modules.accounting.late_cost_receipts import verified_value_lines
+
+    policy, rows = await _inventory_rows(session, org_id, data)
+    verified = await verified_value_lines(session, org_id, rows, procurement)
+    # Match the issue rule: incomplete analytics anywhere on this account block costing.
+    if any(any(not (line.dimensions or {}).get(key) for key in ("warehouse", "sku", "lot")) for _, line in rows):
+        raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
+    lots = sorted({line.dimensions["lot"] for _, line in rows
+                   if line.dimensions["warehouse"] == data.warehouse and line.dimensions["sku"] == data.sku
+                   and data.search.casefold() in line.dimensions["lot"].casefold()})
+    result = []
+    for lot in lots[:100]:
+        target = {"warehouse": data.warehouse, "sku": data.sku, "lot": lot}
+        try:
+            if policy.inventory_method == "specific":
+                quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified)
+            else:
+                layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified)
+                quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
+                amount = sum((layer["amount"] for layer in layers), Decimal("0"))
+            result.append({"lot": lot, "book_quantity": format(quantity, ".6f"),
+                           "book_value_byn": format(amount, ".2f"),
+                           "selectable": quantity > 0 and amount > 0,
+                           "reason": None if quantity > 0 and amount > 0 else "No positive quantity and value remaining"})
+        except AccountingError as exc:
+            result.append({"lot": lot, "book_quantity": None, "book_value_byn": None,
+                           "selectable": False, "reason": str(exc)})
+    return {"organization_id": org_id, "policy_id": policy.id, "posting_date": data.posting_date,
+            "account": data.account, "warehouse": data.warehouse, "sku": data.sku,
+            "lots": result, "has_more": len(lots) > 100, "stock_reserved": False,
+            "final_cost_certified": False}

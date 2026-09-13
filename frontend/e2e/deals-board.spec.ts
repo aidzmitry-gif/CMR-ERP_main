@@ -14,20 +14,20 @@ test.describe("deals board", () => {
     await expect(page.getByTestId("deals-client-ready")).toBeVisible();
 
     // Создаём сделку для самодостаточности на пустой CI-базе.
-    // Если БД накопила карточки — DRAG берём с ПЕРВОЙ карточки (вверх колонки),
-    // а не с только что созданной (внизу). Это важно: при скролле к нижней карточке
-    // qual-дропзона уходит выше viewport → e.over=null → drop не засчитывается.
+    // Используем собственную сделку, не затрагивая состояние соседних сценариев.
     await page.getByRole("button", { name: /Создать сделку/ }).click();
     const form = page.locator("form.shadow-pop");
     await expect(form).toBeVisible();
-    await form.getByPlaceholder("CRM-2024-0200").fill(`DND-${Date.now()}`);
+    const dealNumber = `DND-${Date.now()}`;
+    await form.getByPlaceholder("CRM-2024-0200").fill(dealNumber);
     await form.getByPlaceholder("ООО ...").fill(`ООО E2E-DND-${Date.now()}`);
     await form.getByPlaceholder("Поставка ...").fill("DnD тест");
     await form.getByRole("button", { name: "Создать" }).click();
     await expect(form).not.toBeVisible();
+    await page.getByPlaceholder("Поиск сделок...").fill(dealNumber);
 
-    // ПЕРВАЯ карточка в new — у верха колонки; qual-дропзона тоже видна в этом viewport.
-    const firstCard = newDropzone.locator('[data-testid^="deal-card-"]').first();
+    // Фильтр оставляет собственную карточку у верха доски.
+    const firstCard = newDropzone.locator('[data-testid^="deal-card-"]').filter({ hasText: dealNumber });
     await expect(firstCard).toBeVisible();
     // Запоминаем testid чтобы найти карточку в qual после drop
     const cardTestId = await firstCard.getAttribute("data-testid");
@@ -44,10 +44,11 @@ test.describe("deals board", () => {
     const qualBox = await qualDropzone.boundingBox();
     if (!qualBox) throw new Error("qual column bounding box not found");
 
-    const startX = cardBox.x + cardBox.width / 2;
-    const startY = cardBox.y + cardBox.height / 2;
+    // Захват за заголовок, вне кнопок быстрых действий внутри карточки.
+    const startX = cardBox.x + 35;
+    const startY = cardBox.y + 18;
     const targetX = qualBox.x + qualBox.width / 2;
-    const targetY = qualBox.y + qualBox.height / 2;
+    const targetY = Math.max(qualBox.y + 50, Math.min(startY, qualBox.y + qualBox.height - 20));
 
     // PointerSensor: activationConstraint { distance: 8 } — двигаемся >8px вправо
     // (qual правее new), активируем drag, затем перемещаем к цели.
@@ -55,10 +56,15 @@ test.describe("deals board", () => {
     await page.mouse.down();
     await page.mouse.move(startX + 15, startY, { steps: 3 }); // >8px → активирует drag
     await page.mouse.move(targetX, targetY, { steps: 20 });
+    const saved = page.waitForResponse(response => response.request().method() === "PATCH" && response.url().endsWith(`/api/sales/deals/${cardTestId.replace("deal-card-", "")}`));
     await page.mouse.up();
+    const response = await saved;
+    expect(response.ok(), await response.text()).toBeTruthy();
 
-    // После drop: moveDealToStage обновляет React-стейт оптимистично
+    // Проверяем собственную сделку: соседняя может иметь активный запрос отказа.
     await expect(qualDropzone.locator(`[data-testid="${cardTestId}"]`)).toBeVisible();
+    await page.reload();
+    await expect(page.locator(`[data-testid="stage-column-qual"] [data-testid="${cardTestId}"]`)).toBeVisible();
   });
 
   test("фильтры: приоритет и «Только висяки»", async ({ page }) => {

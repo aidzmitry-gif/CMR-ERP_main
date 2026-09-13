@@ -1,0 +1,247 @@
+{
+  "head": "069bf3fa69770c3c789559c28889bf70502600d0",
+  "run": 34776294752,
+  "job": 103774932492,
+  "conclusion": "failure",
+  "passed": 4396,
+  "failed": 52,
+  "skipped": 52,
+  "errors": 0,
+  "coveragePercent": 88.9,
+  "requiredCoveragePercent": 90,
+  "seconds": 6545.54,
+  "failureFiles": {
+    "tests/integration/test_document_original_postgres.py": 2,
+    "tests/integration/test_invoice_physical_shipments_postgres.py": 1,
+    "tests/test_coverage_extras.py": 1,
+    "tests/test_document_concurrency.py": 3,
+    "tests/test_document_finance_projection.py": 3,
+    "tests/test_document_immutability.py": 1,
+    "tests/test_edge_cases.py": 2,
+    "tests/test_erp.py": 2,
+    "tests/test_inventory_physical_snapshot.py": 1,
+    "tests/test_logistics_analytics.py": 1,
+    "tests/test_procurement_deficit.py": 1,
+    "tests/test_procurement_rfq.py": 1,
+    "tests/test_procurement_round5_hardening.py": 3,
+    "tests/test_procurement_ship_deadline.py": 8,
+    "tests/test_procurement_suppliers.py": 3,
+    "tests/test_sales_contract.py": 7,
+    "tests/test_sales_deals_v2.py": 7,
+    "tests/test_security_rbac_sweep.py": 1,
+    "tests/test_wms_events.py": 2,
+    "tests/unit/test_event_handlers.py": 1,
+    "tests/unit/test_office_events.py": 1
+  },
+  "failures": [
+    {
+      "test": "tests/integration/test_document_original_postgres.py::test_migrated_originals_approval_packages_and_sql_guards",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\",\"request_key\":\"9c7da2b0e8e748c7a77"
+    },
+    {
+      "test": "tests/integration/test_document_original_postgres.py::test_two_pg_issue_requests_wait_on_same_deal_and_issue_only_once",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/integration/test_invoice_physical_shipments_postgres.py::test_pg_close_and_no_shipment_preview_share_org_lock",
+      "reason": "sqlalchemy.exc.ProgrammingError: (psycopg.errors.RaiseException) Invalid accounting period structure"
+    },
+    {
+      "test": "tests/test_coverage_extras.py::test_document_503_without_onec",
+      "reason": "assert 422 == 503"
+    },
+    {
+      "test": "tests/test_document_concurrency.py::test_concurrent_retries_issue_one_document",
+      "reason": "assert [422, 422] == [201, 201]"
+    },
+    {
+      "test": "tests/test_document_concurrency.py::test_concurrent_revision_and_issue_cannot_duplicate",
+      "reason": "KeyError: 'id'"
+    },
+    {
+      "test": "tests/test_document_concurrency.py::test_edit_against_issuing_draft_is_serialized",
+      "reason": "KeyError: 'id'"
+    },
+    {
+      "test": "tests/test_document_finance_projection.py::test_replacement_retires_old_demand_and_preserves_allocated_cash[10-superseded-False]",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_document_finance_projection.py::test_replacement_retires_old_demand_and_preserves_allocated_cash[190-paid-False]",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_document_finance_projection.py::test_replacement_retires_old_demand_and_preserves_allocated_cash[manual-paid]",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_document_immutability.py::test_issued_invoice_changes_after_new_customer_quote",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/test_edge_cases.py::test_sales_documents_404",
+      "reason": "assert 422 == 404"
+    },
+    {
+      "test": "tests/test_edge_cases.py::test_module_non_terminal_stage_no_event",
+      "reason": "assert (409 == 200)"
+    },
+    {
+      "test": "tests/test_erp.py::test_procurement",
+      "reason": "TypeError: string indices must be integers, not 'str'"
+    },
+    {
+      "test": "tests/test_erp.py::test_office",
+      "reason": "assert (403 == 201)"
+    },
+    {
+      "test": "tests/test_inventory_physical_snapshot.py::test_inventory_and_physical_writer_use_same_organization_lock",
+      "reason": "assert (201 == 201 and [] == [1]"
+    },
+    {
+      "test": "tests/test_logistics_analytics.py::test_cost_insights_endpoint_returns_import_freight",
+      "reason": "assert 409 == 200"
+    },
+    {
+      "test": "tests/test_procurement_deficit.py::test_origin_exposed_in_requests_and_board",
+      "reason": "TypeError: string indices must be integers, not 'str'"
+    },
+    {
+      "test": "tests/test_procurement_rfq.py::test_award_creates_draft_po_and_emits_po_drafted",
+      "reason": "KeyError: 'status'"
+    },
+    {
+      "test": "tests/test_procurement_round5_hardening.py::test_plan_unreachable_deadline_risk_no_invalid_dates",
+      "reason": "AssertionError: {\"detail\":\"Confirm the document organization before editing\"}"
+    },
+    {
+      "test": "tests/test_procurement_round5_hardening.py::test_actual_receipt_not_overwritten_by_later_estimate",
+      "reason": "assert 409 == 200"
+    },
+    {
+      "test": "tests/test_procurement_round5_hardening.py::test_reference_recompute_idempotent_across_batches",
+      "reason": "assert 409 == 200"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_plan_auto_derives_target_from_deadline",
+      "reason": "AssertionError: {\"detail\":\"Confirm the document organization before editing\"}"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_plan_flags_risk_and_penalty_when_late",
+      "reason": "KeyError: 'required_arrival'"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_plan_no_target_no_deadline_422",
+      "reason": "assert 409 == 422"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_unplanned_machine_with_deadline_is_at_risk",
+      "reason": "KeyError: 'target_arrival_date'"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_plan_multi_deal_earliest_deadline_wins",
+      "reason": "KeyError: 'required_by'"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_unparsed_deadline_ignored_in_plan",
+      "reason": "assert 409 == 422"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_past_start_is_at_risk",
+      "reason": "KeyError: 'start_date'"
+    },
+    {
+      "test": "tests/test_procurement_ship_deadline.py::test_slack_days_exact_both_sides",
+      "reason": "KeyError: 'slack_days'"
+    },
+    {
+      "test": "tests/test_procurement_suppliers.py::test_scorecard_timeliness_real",
+      "reason": "assert None == 0.5"
+    },
+    {
+      "test": "tests/test_procurement_suppliers.py::test_scorecard_timeliness_boundary_on_eta",
+      "reason": "assert None == 1.0"
+    },
+    {
+      "test": "tests/test_procurement_suppliers.py::test_board_card_shows_supplier_score",
+      "reason": "KeyError: 'stages'"
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_send_package_one_record",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_package_render_combines_invoice_and_contract",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_package_render_template_less_contract_cover",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_render_invoice_uses_real_deal_data",
+      "reason": "AssertionError: {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"function-after[reservation_confirmation(), function-after[dated_unique_prices(), InvoiceCreate]]\",\"organization_id\"],\"msg\":\"Field required\",\"input\":{\"kind\":\"invoice\"}},{\"type\":\"missing\",\"loc\":[\"body\","
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_render_invoice_escapes_html_in_sku_title",
+      "reason": "KeyError: 'id'"
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_render_invoice_includes_uploaded_logo",
+      "reason": "KeyError: 'id'"
+    },
+    {
+      "test": "tests/test_sales_contract.py::test_render_invoice_no_logo_block_when_not_uploaded",
+      "reason": "KeyError: 'id'"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_lose_requires_reason",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_lose_validates_against_dictionary",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_lost_emits_event",
+      "reason": "AssertionError: assert 'sales.deal.lost' in ['sales.deal.created']"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_lost_column_on_board",
+      "reason": "assert 0 == 1"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_lose_deal_repeat_clients_resolves_rp_lost",
+      "reason": "assert 422 == 200"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_invoice_document_amount_includes_vat",
+      "reason": "KeyError: 'amount'"
+    },
+    {
+      "test": "tests/test_sales_deals_v2.py::test_journal_payment_paid_and_none",
+      "reason": "KeyError: 'number'"
+    },
+    {
+      "test": "tests/test_security_rbac_sweep.py::test_write_routes_allowed_for_owner_role",
+      "reason": "AssertionError: гейт ложно режет владельца 'director' (403) на роутах:"
+    },
+    {
+      "test": "tests/test_wms_events.py::test_shipment_emits_completed_with_doc_ref",
+      "reason": "assert 409 == 201"
+    },
+    {
+      "test": "tests/test_wms_events.py::test_shipment_silent_without_doc_ref",
+      "reason": "assert 409 == 201"
+    },
+    {
+      "test": "tests/unit/test_event_handlers.py::test_cross_module_handlers_missing_context_contract",
+      "reason": "ValueError: Logistics order intake requires event context"
+    },
+    {
+      "test": "tests/unit/test_office_events.py::test_emit_carrier_request_payload",
+      "reason": "ValueError: Prepare an immutable Office shipping request through OfficeShippingProducer"
+    }
+  ],
+  "scope": "Older accounting integration commit; later local fixes and joint CRM integration are not covered by this run"
+}

@@ -1,7 +1,34 @@
 """Тесты ERP-модулей: создание записей и регистрация в ядре."""
+# ruff: noqa: F811 -- imported pytest fixture
+
+import pytest_asyncio
+
+from tests.reservation_source import event_context, invoice
+from tests.test_logistics_invoice_binding import exact as logistics_invoice  # noqa: F401
+
+INVENTORY_CONFIRM = {"expected_source": "wms_physical", "journal_complete": True,
+                     "source_evidence": "Synthetic complete physical journal"}
 
 
-async def test_procurement(api):
+async def physical_receipt(api, org, sku, qty, warehouse):
+    response = await api.post("/wms/receipt", json={"organization_id": org, "sku_code": sku,
+                                                  "qty": qty, "warehouse": warehouse})
+    assert response.status_code == 201, response.text
+
+
+@pytest_asyncio.fixture
+async def erp_organization(api):
+    """Explicit actor and company grant through the real accounting API."""
+    api.headers["X-User"] = "erp-test-owner"
+    response = await api.post(
+        "/accounting/organizations",
+        json={"name": "Synthetic ERP company", "unp": "999999992"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+async def test_procurement(api, erp_organization):
     r = await api.post(
         "/procurement/requests", json={"supplier": "ООО Поставщик", "item": "Болты", "qty": 100}
     )
@@ -15,7 +42,15 @@ async def test_procurement(api):
     assert [s["id"] for s in board["stages"]][0] == "need"
     assert sum(s["count"] for s in board["stages"]) >= 1
     # балл поставщика на карточке — реальный (по supplier_id); без привязки поставщика — пусто
-    await api.patch(f"/procurement/requests/{r.json()['id']}", json={"stage": "nego"})
+    ownership = await api.post(
+        f"/procurement/organizations/{erp_organization}/purchase-ownership",
+        json={"kind": "request", "source_id": r.json()["id"],
+              "evidence": "Synthetic ERP request belongs to this test company"},
+    )
+    assert ownership.status_code == 201, ownership.text
+    moved = await api.patch(f"/procurement/requests/{r.json()['id']}", json={"stage": "nego"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["stage"] == "nego"
     board2 = (await api.get("/procurement/board")).json()
     nego = next(s for s in board2["stages"] if s["id"] == "nego")
     assert nego["cards"][0]["score"] == ""  # supplier_id не задан → балла нет (не заглушка «8.7»)
@@ -30,8 +65,8 @@ async def test_production(api):
     assert [s["id"] for s in board["stages"]][0] == "queue"
 
 
-async def test_wms(api):
-    r = await api.post("/wms/movements", json={"sku_code": "AKB-60", "kind": "in", "qty": 50})
+async def test_wms(api, erp_organization):
+    r = await api.post("/wms/movements", json={"organization_id": erp_organization, "sku_code": "AKB-60", "kind": "in", "qty": 50})
     assert r.status_code == 201
     movements = (await api.get("/wms/movements")).json()
     assert movements[0]["sku_code"] == "AKB-60" and movements[0]["kind"] == "in"
@@ -89,8 +124,8 @@ async def test_wms_stock_no_gateway(api_no_gateways):
     assert data["gateway"] is False and data["rows"] == []
 
 
-async def test_wms_inventory(api, session):
-    """Инвентаризация: populate из 1С → факт → расхождение в деньгах → проведение; RBAC."""
+async def test_wms_inventory(api, session, erp_organization):
+    """Физический журнал юрлица → пересчёт; стоимость из глобального зеркала не используется."""
     from decimal import Decimal
 
     from core.domain.models import Sku
@@ -101,19 +136,20 @@ async def test_wms_inventory(api, session):
                           qty_available=Decimal(41), cost=Decimal(230)))
     await session.commit()
 
-    # создать документ и наполнить ожидаемым из 1С
-    doc = (await api.post("/wms/inventory", json={"warehouse": "Минск"})).json()
+    await physical_receipt(api, erp_organization, "AKB-60", 41, "Минск")
+    payload = {"organization_id": erp_organization, "warehouse": "Минск", **INVENTORY_CONFIRM}
+    doc = (await api.post("/wms/inventory", json=payload)).json()
     assert doc["status"] == "open" and doc["number"].startswith("ИНВ-2026-")
     det = (await api.post(f"/wms/inventory/{doc['id']}/populate")).json()
     line = next(line for line in det["lines"] if line["sku_code"] == "AKB-60")
-    assert line["expected_qty"] == 41.0 and line["unit_cost"] == 230.0
+    assert line["expected_qty"] == 41.0 and line["unit_cost"] is None
     assert line["counted_qty"] is None and line["variance"] is None
 
-    # внести факт → недостача 3 шт = −690 BYN
+    # Недостача известна количественно; бухгалтерская стоимость требует отдельного источника.
     upd = (await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 38})).json()
-    assert upd["variance"] == -3.0 and upd["variance_value"] == -690.0
+    assert upd["variance"] == -3.0 and upd["variance_value"] is None
     det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
-    assert det["summary"]["shortages"] == 1 and det["summary"]["shortage_value"] == -690.0
+    assert det["summary"]["shortages"] == 1 and det["summary"]["shortage_value"] is None
 
     # провести → done; повторная правка строки запрещена (409)
     done = (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()
@@ -122,15 +158,14 @@ async def test_wms_inventory(api, session):
     assert reedit.status_code == 409
 
     # RBAC: пересчёт (wms.count) только у склада; логистика (только wms.read) — 403
-    assert (await api.post("/wms/inventory", json={"warehouse": "Минск"},
+    assert (await api.post("/wms/inventory", json=payload,
                            headers={"X-User-Roles": "warehouse"})).status_code == 201
-    assert (await api.post("/wms/inventory", json={"warehouse": "Минск"},
+    assert (await api.post("/wms/inventory", json=payload,
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_operational(api, session):
+async def test_wms_operational(api, session, erp_organization):
     """Операции (приёмка/отгрузка/перемещение/коррекция) → движения + оперативный остаток."""
-    from types import SimpleNamespace
 
     from modules.wms.events import on_stock_released
 
@@ -138,7 +173,7 @@ async def test_wms_operational(api, session):
     loc2 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-02"})).json()
     assert loc1["is_active"] is True
 
-    base = {"sku_code": "AKB-60", "warehouse": "Минск"}
+    base = {"organization_id": erp_organization, "sku_code": "AKB-60", "warehouse": "Минск"}
     assert (await api.post("/wms/receipt", json={**base, "qty": 10, "location_id": loc1["id"]})).status_code == 201
     assert (await api.post("/wms/shipment", json={**base, "qty": 3, "location_id": loc1["id"]})).status_code == 201
     tr = await api.post("/wms/transfer", json={**base, "qty": 2, "from_location_id": loc1["id"], "to_location_id": loc2["id"]})
@@ -159,19 +194,37 @@ async def test_wms_operational(api, session):
     assert (await api.post("/wms/transfer", json={**base, "qty": 1,
             "from_location_id": loc1["id"], "to_location_id": loc1["id"]})).status_code == 400
 
-    # снятие резерва (событие sales) → приходное движение reason=release
-    await on_stock_released({"items": [{"sku_code": "AKB-60", "warehouse": "Минск", "qty": 5}]},
-                            SimpleNamespace(session=session))
+    # Снятие резерва не создаёт физический приход и не меняет остаток.
+    from sqlalchemy import select
+
+    from modules.wms.events import on_stock_reserved
+    from modules.wms.models import StockMovement, Task
+    from modules.wms.reservation_events import ReservationEventState, ReservationPick
+
+    payload = {"document_id": 7, "organization_id": erp_organization,
+               "items": [{"sku_code": "AKB-60", "warehouse": "Минск", "qty": 5}]}
+    before_ids = list((await session.scalars(select(StockMovement.id).order_by(StockMovement.id))).all())
+    doc = await invoice(session, 7, payload["items"], erp_organization)
+    await on_stock_reserved(payload, event_context(session))
+    doc.reserve_status = "released"
+    await session.flush()
+    await on_stock_released(payload, event_context(session))
+    await on_stock_released(payload, event_context(session))
     await session.commit()
-    rel = (await api.get("/wms/movements?reason=release")).json()
-    assert rel and rel[0]["kind"] == "in" and rel[0]["qty"] == 5.0
+    picks = (await session.scalars(select(Task).join(ReservationPick).where(
+        ReservationPick.document_id == 7))).all()
+    assert len(picks) == 1 and picks[0].status == "canceled"
+    assert (await session.get(ReservationEventState, 7)).state == "released"
+    assert list((await session.scalars(select(StockMovement.id).order_by(StockMovement.id))).all()) == before_ids
+    assert (await api.get("/wms/movements?reason=release")).json() == []
+    assert (await api.get("/wms/balances?sku=AKB-60")).json() == bal
 
     # RBAC: операции (wms.count) только у склада; логистика (wms.read) — 403
     assert (await api.post("/wms/receipt", json={**base, "qty": 1},
             headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_inventory_adjustment_movements(api, session):
+async def test_wms_inventory_adjustment_movements(api, session, erp_organization):
     """Проведение инвентаризации пишет корректирующие движения в журнал WMS (не в 1С)."""
     from decimal import Decimal
 
@@ -183,25 +236,30 @@ async def test_wms_inventory_adjustment_movements(api, session):
                           qty_available=Decimal(30), cost=Decimal(300)))
     await session.commit()
 
-    doc = (await api.post("/wms/inventory", json={"warehouse": "Гомель"})).json()
+    await physical_receipt(api, erp_organization, "ZU-15A", 30, "Гомель")
+    doc = (await api.post("/wms/inventory", json={"organization_id": erp_organization, "warehouse": "Гомель", **INVENTORY_CONFIRM})).json()
     det = (await api.post(f"/wms/inventory/{doc['id']}/populate")).json()
     line = next(line for line in det["lines"] if line["sku_code"] == "ZU-15A")
     await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 27})  # недостача 3
     assert (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()["status"] == "done"
 
-    adj = (await api.get("/wms/movements?reason=adjustment")).json()
-    row = next(m for m in adj if m["sku_code"] == "ZU-15A")
+    response = await api.get("/wms/movements?reason=adjustment")
+    assert response.status_code == 200, response.text
+    adj = response.json()
+    matches = [m for m in adj if m["sku_code"] == "ZU-15A"]
+    assert len(matches) == 1, "Completed inventory must expose one owned adjustment"
+    row = matches[0]
     assert row["kind"] == "out" and row["qty"] == 3.0 and row["doc_ref"] == doc["number"]
 
 
-async def test_wms_receipt_qc(api, session):
+async def test_wms_receipt_qc(api, session, erp_organization):
     """Событие прихода → документ приёмки pending_qc БЕЗ движения; QC фиксирует решение."""
     from types import SimpleNamespace
 
     from modules.wms.events import on_goods_received
 
     await on_goods_received(
-        {"item": "AKB-60", "qty": 20, "warehouse": "Минск", "entity_ref": "purchase:7"},
+        {"organization_id": erp_organization, "item": "AKB-60", "qty": 20, "warehouse": "Минск", "entity_ref": "purchase:7"},
         SimpleNamespace(session=session),
     )
     await session.commit()
@@ -218,10 +276,10 @@ async def test_wms_receipt_qc(api, session):
 
     qc = await api.post(
         f"/wms/receipts/{rid}/qc",
-        json={"decisions": [{"line_id": line["id"], "accepted_qty": 18, "rejected_qty": 2,
+        json={"expected_revision": det["qc_revision"], "decisions": [{"line_id": line["id"], "accepted_qty": 18, "rejected_qty": 2,
                              "reject_reason": "бой"}], "decided_by": "Кладовщик"},
     )
-    assert qc.status_code == 200
+    assert qc.status_code == 200, qc.text
     l2 = qc.json()["lines"][0]
     assert l2["accepted_qty"] == 18.0 and l2["rejected_qty"] == 2.0 and l2["reject_reason"] == "бой"
 
@@ -230,24 +288,26 @@ async def test_wms_receipt_qc(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_receipt_accept(api, session):
+async def test_wms_receipt_accept(api, session, erp_organization):
     """Проведение приёмки: приход по факту QC (брак не на балансе), идемпотентно."""
     from types import SimpleNamespace
 
     from modules.wms.events import on_goods_received
 
     await on_goods_received(
-        {"item": "AKB-100", "qty": 15, "warehouse": "Брест", "entity_ref": "purchase:9"},
+        {"organization_id": erp_organization, "item": "AKB-100", "qty": 15, "warehouse": "Брест", "entity_ref": "purchase:9"},
         SimpleNamespace(session=session),
     )
     await session.commit()
     rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
-    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
-    await api.post(
+    det = (await api.get(f"/wms/receipts/{rid}")).json()
+    line = det["lines"][0]
+    qc = await api.post(
         f"/wms/receipts/{rid}/qc",
-        json={"decisions": [{"line_id": line["id"], "accepted_qty": 12, "rejected_qty": 3,
+        json={"expected_revision": det["qc_revision"], "decisions": [{"line_id": line["id"], "accepted_qty": 12, "rejected_qty": 3,
                              "reject_reason": "скол"}]},
     )
+    assert qc.status_code == 200, qc.text
     acc = await api.post(f"/wms/receipts/{rid}/accept")
     assert acc.status_code == 200 and acc.json()["status"] == "accepted"
 
@@ -263,7 +323,7 @@ async def test_wms_receipt_accept(api, session):
     assert len((await api.get("/wms/movements?reason=receipt")).json()) == len(mv)
 
 
-async def test_wms_tasks(api, session):
+async def test_wms_tasks(api, session, erp_organization):
     """accept приёмки → put-away задача; её завершение перемещает остаток; pick → out."""
     from types import SimpleNamespace
 
@@ -272,15 +332,18 @@ async def test_wms_tasks(api, session):
     recv = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "RECV", "code": "RECV-01"})).json()
     perm = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-10"})).json()
     await on_goods_received(
-        {"item": "REBAR-10", "qty": 100, "warehouse": "Минск", "entity_ref": "purchase:11"},
+        {"organization_id": erp_organization, "item": "REBAR-10", "qty": 100, "warehouse": "Минск", "entity_ref": "purchase:11"},
         SimpleNamespace(session=session),
     )
     await session.commit()
     rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
-    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
-    await api.post(f"/wms/receipts/{rid}/qc",
-                   json={"decisions": [{"line_id": line["id"], "accepted_qty": 100, "location_id": recv["id"]}]})
-    await api.post(f"/wms/receipts/{rid}/accept")
+    det = (await api.get(f"/wms/receipts/{rid}")).json()
+    line = det["lines"][0]
+    qc = await api.post(f"/wms/receipts/{rid}/qc",
+                   json={"expected_revision": det["qc_revision"], "decisions": [{"line_id": line["id"], "accepted_qty": 100, "location_id": recv["id"]}]})
+    assert qc.status_code == 200, qc.text
+    accepted = await api.post(f"/wms/receipts/{rid}/accept")
+    assert accepted.status_code == 200, accepted.text
 
     tasks = (await api.get("/wms/tasks?kind=putaway&status=open")).json()
     t = next(t for t in tasks if t["sku_code"] == "REBAR-10")
@@ -291,12 +354,12 @@ async def test_wms_tasks(api, session):
     assert bal.get("A-10") == 100.0 and bal.get("RECV-01", 0) == 0.0
 
     # put-away done без ячейки назначения → 400
-    t2 = (await api.post("/wms/tasks", json={"kind": "putaway", "sku_code": "X", "qty": 1,
+    t2 = (await api.post("/wms/tasks", json={"organization_id": erp_organization, "kind": "putaway", "sku_code": "X", "qty": 1,
                                              "warehouse": "Минск", "from_location_id": recv["id"]})).json()
     assert (await api.patch(f"/wms/tasks/{t2['id']}", json={"status": "done"})).status_code == 400
 
     # pick → расход reason=pick
-    tp = (await api.post("/wms/tasks", json={"kind": "pick", "sku_code": "REBAR-10", "qty": 20,
+    tp = (await api.post("/wms/tasks", json={"organization_id": erp_organization, "kind": "pick", "sku_code": "REBAR-10", "qty": 20,
                                              "warehouse": "Минск", "from_location_id": perm["id"]})).json()
     await api.patch(f"/wms/tasks/{tp['id']}", json={"status": "done"})
     picks = (await api.get("/wms/movements?reason=pick")).json()
@@ -307,22 +370,34 @@ async def test_wms_tasks(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_outbound(api, session):
+async def test_wms_outbound(api, session, erp_organization):
     """Резерв из sales создаёт pick-задачи; упаковка (/pack) нейтральна для остатка."""
-    from types import SimpleNamespace
 
     from modules.wms.events import on_stock_reserved
 
+    await invoice(session, 5, [{"sku_code": "ROLL-3", "qty": "10"}], erp_organization)
     await on_stock_reserved(
-        {"doc_ref": "DEAL-5", "items": [{"sku_code": "ROLL-3", "warehouse": "Минск", "qty": 10}]},
-        SimpleNamespace(session=session),
+        {"document_id": 5, "organization_id": erp_organization, "doc_ref": "DEAL-5", "items": [{"sku_code": "ROLL-3", "warehouse": "Минск", "qty": 10}]},
+        event_context(session),
     )
     await session.commit()
-    picks = (await api.get("/wms/tasks?kind=pick&status=open")).json()
-    assert any(t["sku_code"] == "ROLL-3" and t["qty"] == 10.0 and t["doc_ref"] == "DEAL-5" for t in picks)
+    from sqlalchemy import select
+
+    from modules.wms.models import StockMovement, Task
+    from modules.wms.reservation_events import ReservationPick
+
+    assert await session.scalar(select(StockMovement.id)) is None
+    linked = (await session.scalars(select(Task).join(ReservationPick).where(
+        ReservationPick.document_id == 5))).all()
+    assert len(linked) == 1 and linked[0].qty == 10
+    assert linked[0].organization_id == erp_organization, "Reservation pick must retain source company"
+    response = await api.get("/wms/tasks?kind=pick&status=open")
+    assert response.status_code == 200, response.text
+    picks = response.json()
+    assert any(t["sku_code"] == "ROLL-3" and t["qty"] == 10.0 and t["doc_ref"] == "sales:document:5" for t in picks)
 
     before = sum(r["qty"] for r in (await api.get("/wms/balances?sku=ROLL-3")).json()["rows"])
-    pk = await api.post("/wms/pack", json={"sku_code": "ROLL-3", "qty": 10, "warehouse": "Минск", "doc_ref": "DEAL-5"})
+    pk = await api.post("/wms/pack", json={"organization_id": erp_organization, "sku_code": "ROLL-3", "qty": 10, "warehouse": "Минск", "doc_ref": "DEAL-5"})
     assert pk.status_code == 201 and len(pk.json()) == 2
     after = sum(r["qty"] for r in (await api.get("/wms/balances?sku=ROLL-3")).json()["rows"])
     assert after == before  # упаковка balance-нейтральна (физический расход — отгрузка)
@@ -331,7 +406,7 @@ async def test_wms_outbound(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_reconciliation(api, session):
+async def test_wms_reconciliation(api, session, erp_organization):
     """Сверка теневого остатка WMS с зеркалом 1С: diff и его денежная оценка."""
     from decimal import Decimal
 
@@ -342,7 +417,7 @@ async def test_wms_reconciliation(api, session):
     session.add(StockItem(sku_code="LFP-12-100", warehouse="Минск",
                           qty_available=Decimal(14), cost=Decimal(1850)))
     await session.commit()
-    await api.post("/wms/receipt", json={"sku_code": "LFP-12-100", "qty": 10, "warehouse": "Минск"})
+    await api.post("/wms/receipt", json={"organization_id": erp_organization, "sku_code": "LFP-12-100", "qty": 10, "warehouse": "Минск"})
 
     rec = (await api.get("/wms/reconciliation")).json()
     assert rec["gateway"] is True
@@ -396,8 +471,8 @@ async def test_wms_alerts(api, session):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_cycle_count(api, session):
-    """Запуск плана цикл-каунта → заполненный из 1С документ инвентаризации + сдвиг срока."""
+async def test_wms_cycle_count(api, session, erp_organization):
+    """Запуск плана → документ по физическому журналу юрлица + сдвиг срока."""
     from decimal import Decimal
 
     from core.domain.models import Sku
@@ -408,9 +483,10 @@ async def test_wms_cycle_count(api, session):
         StockItem(sku_code="ROLL-5", warehouse="Гомель", qty_available=Decimal(30), cost=Decimal(2100)),
     ])
     await session.commit()
+    await physical_receipt(api, erp_organization, "ROLL-5", 30, "Гомель")
     plan = (await api.post("/wms/cycle-plans",
-            json={"warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01"})).json()
-    det = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
+            json={"organization_id": erp_organization, "warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01", **INVENTORY_CONFIRM})).json()
+    det = (await api.post(f"/wms/cycle-plans/{plan['id']}/run", json=INVENTORY_CONFIRM)).json()
     assert det["number"].startswith("ИНВ-") and det["warehouse"] == "Гомель"
     assert any(line["sku_code"] == "ROLL-5" and line["expected_qty"] == 30.0 for line in det["lines"])
 
@@ -441,7 +517,7 @@ async def test_wms_dashboard(api, session):
 # --------------------------------------------------------------------------- #
 #  Круг 5 — тест-харднинг WMS (edge-cases; падают на старом/откаченном коде)
 # --------------------------------------------------------------------------- #
-async def test_wms_accept_idempotent_exactly_one_mirror(api, session):
+async def test_wms_accept_idempotent_exactly_one_mirror(api, session, erp_organization):
     """QC-гейт: pending_qc БЕЗ движения; accept → ровно одно зеркало; повтор accept не плодит.
 
     Падал бы на старом коде, если убрать идемпотентность accept (3 accept → 3 движения =
@@ -452,17 +528,19 @@ async def test_wms_accept_idempotent_exactly_one_mirror(api, session):
     from modules.wms.events import on_goods_received
 
     await on_goods_received(
-        {"item": "AKB-132", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:51"},
+        {"organization_id": erp_organization, "item": "AKB-132", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:51"},
         SimpleNamespace(session=session),
     )
     await session.commit()
     rid = (await api.get("/wms/receipts?status=pending_qc")).json()[0]["id"]
-    line = (await api.get(f"/wms/receipts/{rid}")).json()["lines"][0]
+    det = (await api.get(f"/wms/receipts/{rid}")).json()
+    line = det["lines"][0]
     # гейт: до accept движения прихода нет
     assert (await api.get("/wms/movements?reason=receipt")).json() == []
 
-    await api.post(f"/wms/receipts/{rid}/qc",
-                   json={"decisions": [{"line_id": line["id"], "accepted_qty": 8, "rejected_qty": 2}]})
+    qc = await api.post(f"/wms/receipts/{rid}/qc",
+                   json={"expected_revision": det["qc_revision"], "decisions": [{"line_id": line["id"], "accepted_qty": 8, "rejected_qty": 2}]})
+    assert qc.status_code == 200, qc.text
     assert (await api.post(f"/wms/receipts/{rid}/accept")).json()["status"] == "accepted"
 
     # три повторных accept не должны добавить ни одного лишнего движения
@@ -473,8 +551,11 @@ async def test_wms_accept_idempotent_exactly_one_mirror(api, session):
     assert len(mv) == 1 and mv[0]["qty"] == 8.0  # ровно одно зеркало по принятым 8 (брак 2 вне)
 
     # QC после проведения запрещён (статус уже accepted, не pending_qc)
-    assert (await api.post(f"/wms/receipts/{rid}/qc",
-                           json={"decisions": []})).status_code == 409
+    current = (await api.get(f"/wms/receipts/{rid}")).json()
+    blocked = await api.post(f"/wms/receipts/{rid}/qc",
+                            json={"expected_revision": current["qc_revision"], "decisions": []})
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "Приёмка уже обработана"
 
 
 async def test_wms_alerts_emit_oversell_clamp_and_dedup(api, session):
@@ -529,7 +610,7 @@ async def test_wms_ops_funnel_rbac(api):
     assert (await api.get("/wms/ops", headers={"X-User-Roles": "sales"})).status_code == 403
 
 
-async def test_wms_reconciliation_does_not_overwrite_1c(api, session):
+async def test_wms_reconciliation_does_not_overwrite_1c(api, session, erp_organization):
     """Сверка отдаёт diff, но НЕ перетирает 1С (истина склада): StockItem не меняется.
 
     Падал бы, если бы сверка писала обратно в зеркало 1С (синхронизировала остаток),
@@ -545,7 +626,7 @@ async def test_wms_reconciliation_does_not_overwrite_1c(api, session):
                      qty_available=Decimal(14), cost=Decimal(1850))
     session.add(item)
     await session.commit()
-    await api.post("/wms/receipt", json={"sku_code": "LFP-24-200", "qty": 10, "warehouse": "Минск"})
+    await api.post("/wms/receipt", json={"organization_id": erp_organization, "sku_code": "LFP-24-200", "qty": 10, "warehouse": "Минск"})
 
     rec = (await api.get("/wms/reconciliation")).json()
     row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-24-200")
@@ -556,12 +637,8 @@ async def test_wms_reconciliation_does_not_overwrite_1c(api, session):
     assert float(item.qty_available) == 14.0
 
 
-async def test_wms_cycle_count_correcting_movement_valued(api, session):
-    """Цикл-каунт: расхождение пересчёта → корректирующее движение + деньго-оценка (str-точность).
-
-    Падал бы, если проведение перестанет писать adjustment-движение (теневой остаток не
-    сойдётся) или сломается денежная оценка расхождения.
-    """
+async def test_wms_cycle_count_correcting_movement_unknown_cost(api, session, erp_organization):
+    """Корректировка принадлежит юрлицу; стоимость глобального зеркала не присваивается."""
     from decimal import Decimal
 
     from core.domain.models import Sku
@@ -573,28 +650,32 @@ async def test_wms_cycle_count_correcting_movement_valued(api, session):
                   qty_available=Decimal(30), cost=Decimal("1850.50")),
     ])
     await session.commit()
+    await physical_receipt(api, erp_organization, "ROLL-8", 30, "Гомель")
     plan = (await api.post("/wms/cycle-plans",
-            json={"warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01"})).json()
-    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run")).json()
+            json={"organization_id": erp_organization, "warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01", **INVENTORY_CONFIRM})).json()
+    doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run", json=INVENTORY_CONFIRM)).json()
     line = next(line for line in doc["lines"] if line["sku_code"] == "ROLL-8")
     await api.patch(f"/wms/inventory/lines/{line['id']}", json={"counted_qty": 27})  # недостача 3
     assert (await api.post(f"/wms/inventory/{doc['id']}/complete")).json()["status"] == "done"
 
     # корректирующее движение в журнал WMS (не в 1С)
-    adj = next(m for m in (await api.get("/wms/movements?reason=adjustment")).json()
-               if m["sku_code"] == "ROLL-8")
+    response = await api.get("/wms/movements?reason=adjustment")
+    assert response.status_code == 200, response.text
+    matches = [m for m in response.json() if m["sku_code"] == "ROLL-8"]
+    assert len(matches) == 1, "Completed cycle count must expose one owned adjustment"
+    adj = matches[0]
     assert adj["kind"] == "out" and adj["qty"] == 3.0 and adj["doc_ref"] == doc["number"]
-    # деньго-оценка расхождения: −3 × 1850.50 = −5551.5 (точно, через Decimal(str()))
+    # Неподтверждённая стоимость не подменяется ценой из глобального StockItem.
     det = (await api.get(f"/wms/inventory/{doc['id']}")).json()
     dl = next(line for line in det["lines"] if line["sku_code"] == "ROLL-8")
-    assert dl["variance"] == -3.0 and dl["variance_value"] == -5551.5
-    assert det["summary"]["shortage_value"] == -5551.5
+    assert dl["variance"] == -3.0 and dl["variance_value"] is None
+    assert det["summary"]["shortage_value"] is None
 
 
-async def test_logistics(api):
+async def test_logistics(api, logistics_invoice):
     r = await api.post(
         "/logistics/shipments",
-        json={"customer": "ООО Клиент", "address": "Минск", "carrier": "СДЭК"},
+        json={"customer": "ООО Клиент", "address": "Минск", "carrier": "СДЭК", "invoice": logistics_invoice, "source_key": "erp-logistics"},
     )
     assert r.status_code == 201
     assert (await api.get("/logistics/shipments")).json()[0]["customer"] == "ООО Клиент"

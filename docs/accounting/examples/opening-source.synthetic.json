@@ -1,0 +1,51 @@
+{
+  "synthetic": true,
+  "organization_reference": "DEMO-ORG-1",
+  "cutover_date": "2026-10-01",
+  "currency": "BYN",
+  "balances": [
+    {
+      "account": "51",
+      "side": "debit",
+      "amount": "1000.00",
+      "dimensions": {}
+    },
+    {
+      "account": "41",
+      "side": "debit",
+      "amount": "500.00",
+      "quantity": "5",
+      "dimensions": {
+        "warehouse": "DEMO-WH-1",
+        "sku": "DEMO-SKU-1",
+        "lot": "DEMO-LOT-1"
+      }
+    },
+    {
+      "account": "62",
+      "side": "debit",
+      "amount": "200.00",
+      "dimensions": {
+        "counterparty": "DEMO-BUYER-1",
+        "contract": "DEMO-SALE-1",
+        "settlement_document": "DEMO-INVOICE-1"
+      }
+    },
+    {
+      "account": "60",
+      "side": "credit",
+      "amount": "300.00",
+      "dimensions": {
+        "counterparty": "DEMO-SUPPLIER-1",
+        "contract": "DEMO-PURCHASE-1",
+        "settlement_document": "DEMO-RECEIPT-1"
+      }
+    },
+    {
+      "account": "80",
+      "side": "credit",
+      "amount": "1400.00",
+      "dimensions": {}
+    }
+  ]
+}

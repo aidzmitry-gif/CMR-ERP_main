@@ -1,0 +1,16 @@
+{
+  "database": "acc_install_96efe8d87b444195a7e347c196afba56",
+  "baseline": "pass",
+  "proposal": "pass",
+  "cleanup": true,
+  "registered_revision": "0132",
+  "registered_accounting_upgrade": "pass",
+  "legacy_import_preserved": true,
+  "accounting_tables": 51,
+  "expense_postgres_passed": 6,
+  "expense_seconds": 38.15,
+  "office_selected_passed": 5,
+  "fix": "Parenthesize JSON result extraction before removing approval_digest; remaining guards unchanged",
+  "migration_sha256": "7d4aa5c2402487177a3f3c77ffcf5a93a91464943aff82236ec51fde85fb1e15",
+  "restore": "not rerun for0132"
+}

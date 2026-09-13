@@ -176,6 +176,7 @@ async def resolve_effective_oidc_user(
         row = (
             await session.execute(
                 select(User, managed_crm_invitation).where(User.keycloak_user_id == user.keycloak_user_id)
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
         revoked_at = None
