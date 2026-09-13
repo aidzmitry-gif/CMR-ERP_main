@@ -11,11 +11,11 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.db.base import Base
-from core.domain.models import AuditLog, OutboxEvent
+from core.domain.models import AuditLog, Counterparty, OutboxEvent
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.integrations.telephony import parse_event
 from modules.sales.calls import EVENT_HANDLERS, on_incoming_call
-from modules.sales.models import CallLog, Deal
+from modules.sales.models import CallLog, CrmClient, Deal
 
 IDENTIFIERS = [
     pytest.param(None, None, id="missing"),
@@ -165,13 +165,14 @@ async def test_postgres_identifier_constraint_and_legacy_handler():
 
     schema = "telephony_test_" + uuid4().hex
     engine = create_async_engine(url).execution_options(schema_translate_map={None: schema, "sales": schema})
-    tables = [Deal.__table__, CallLog.__table__, OutboxEvent.__table__, AuditLog.__table__]
+    tables = [Counterparty.__table__, CrmClient.__table__, Deal.__table__,
+              CallLog.__table__, OutboxEvent.__table__, AuditLog.__table__]
     created = False
     try:
         async with engine.begin() as connection:
             await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-            created = True
             await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=tables))
+        created = True
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as session:
             # Prove the original varchar(8) failure without changing the model/schema.

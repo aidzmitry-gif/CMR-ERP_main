@@ -15,13 +15,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from core.db.base import Base
-from core.domain.models import AuditLog, OutboxEvent, User
+from core.domain.models import AuditLog, Counterparty, OutboxEvent, User
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.leads.events import on_deal_created_from_lead
 from modules.leads.models import Lead, LeadItem
 from modules.leads.routes import convert_lead
 from modules.sales.events import on_lead_converted
-from modules.sales.models import Deal
+from modules.sales.models import CrmClient, Deal
 
 
 @pytest_asyncio.fixture
@@ -43,7 +43,8 @@ async def owner_factory():
         async with engine.begin() as conn:
             await conn.execute(CreateSchema(schema))
             await conn.run_sync(Base.metadata.create_all, tables=[
-                User.__table__, Lead.__table__, LeadItem.__table__, Deal.__table__,
+                User.__table__, Lead.__table__, LeadItem.__table__,
+                Counterparty.__table__, CrmClient.__table__, Deal.__table__,
                 OutboxEvent.__table__, AuditLog.__table__,
             ])
         created = True
