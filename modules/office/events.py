@@ -106,22 +106,7 @@ def emit_carrier_request(
     contact: str = "",
     comment: str = "",
 ) -> None:
-    """→ Логистика: заявка перевозчику на доставку по РБ (кнопка из карточки)."""
-    bus.emit(
-        session,
-        "logistics.delivery.requested",
-        _doc_payload(
-            doc,
-            log_ref=log_ref,
-            carrier=carrier,
-            carrier_name=carrier_name,
-            region=region or doc.region,
-            pickup_date=pickup_date,
-            contact=contact,
-            comment=comment,
-            entity_ref=log_ref,
-        ),
-    )
+    raise ValueError("Prepare an immutable Office shipping request through OfficeShippingProducer")
 
 
 def emit_docs_collected(bus, session: AsyncSession, doc: OfficeDoc) -> None:
@@ -228,7 +213,7 @@ def _outstanding(payload: dict) -> Decimal:
         return Decimal("0")
 
 
-async def _find_doc(session: AsyncSession, **by: Any) -> OfficeDoc | None:
+async def _find_doc(session: AsyncSession, *, allow_protected=False, **by: Any) -> OfficeDoc | None:
     """Найти документ по любому из ref-полей (sales/wms/logistics/finance/number/deal_id).
 
     Значения — строки-ссылки либо целочисленный ``deal_id``; пустые (None/"" /0) пропускаем.
@@ -241,9 +226,16 @@ async def _find_doc(session: AsyncSession, **by: Any) -> OfficeDoc | None:
         if col is None:
             continue
         row = (
-            await session.execute(select(OfficeDoc).where(col == value).limit(1))
+            await session.execute(select(OfficeDoc).where(col == value).limit(1).with_for_update().execution_options(populate_existing=True))
         ).scalars().first()
         if row is not None:
+            from modules.office.shipping_associations import ShippingRequest
+
+            protected = await session.scalar(select(ShippingRequest.id).where(ShippingRequest.office_doc_id == row.id))
+            if protected is not None and not allow_protected:
+                # A source/request or execution identity is required for new
+                # shipping records; legacy string refs cannot be such proof.
+                return None
             return row
     return None
 
@@ -257,7 +249,7 @@ async def on_deal_won(payload: dict, ctx) -> None:
     session: AsyncSession = ctx.session
     sales_ref = _first(payload, "deal_ref", "number", "deal_id", "entity_ref")
 
-    existing = await _find_doc(session, sales_ref=sales_ref)
+    existing = await _find_doc(session, allow_protected=True, sales_ref=sales_ref)
     if existing is not None:
         logger.info("office: deal %s уже заведён как %s", sales_ref, existing.number)
         return

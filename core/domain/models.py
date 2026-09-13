@@ -414,7 +414,7 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    actor: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    actor: Mapped[str] = mapped_column(String(200), default="", server_default="")
     action: Mapped[str] = mapped_column(String(128))
     entity_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")
     detail: Mapped[dict] = mapped_column(JSON)

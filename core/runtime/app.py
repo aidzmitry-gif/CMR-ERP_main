@@ -26,7 +26,6 @@ from core.runtime.loader import load_modules
 from core.runtime.reference_registry import register_system_references
 from core.runtime.reference_routes import build_reference_router
 from core.services import build_services
-from core.services.eventbus import EventContext
 from core.services.nbrb import RateUnavailable
 from core.services.nbrb_sync import run as sync_nbrb
 
@@ -70,26 +69,16 @@ async def _background_loop(services, tick_hooks=()) -> None:
         await asyncio.sleep(2)
         try:
             assert services.db.session_factory is not None
-            async with services.db.session_factory() as session:
-                try:
-                    await services.event_bus.relay_once(
-                        session,
-                        EventContext(session, services),
-                        event_types=("intake.lead.received",),
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    await session.rollback()
-                    logger.exception("priority intake relay error")
+            await services.event_bus.relay_pending(
+                services.db.session_factory, services, event_types=("intake.lead.received",),
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("priority intake relay setup error")
+            logger.exception("priority intake relay error")
         try:
             assert services.db.session_factory is not None
-            async with services.db.session_factory() as session:
-                await services.event_bus.relay_once(session, EventContext(session, services))
+            await services.event_bus.relay_pending(services.db.session_factory, services)
             async with services.db.session_factory() as session:
                 await services.approvals.escalate_once(session)
             for hook in tick_hooks:

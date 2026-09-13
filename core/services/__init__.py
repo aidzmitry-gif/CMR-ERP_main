@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 
 from core.services import sku_master
@@ -20,11 +20,13 @@ from core.services.eventbus import OutboxEventBus
 from core.services.gsheets import GSheetsClient, GSheetsGateway
 from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
+from core.services.logistics import LogisticsGateway, ShippingProducerDispatcher
 from core.services.onec import OneCGateway
 from core.services.price_cost import PriceCostGateway
 from core.services.procurement import ProcurementSourceGateway
 from core.services.production import ProductionOutputGateway
 from core.services.registry import RegistryGateway
+from core.services.sales import SalesSourceGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
 from core.services.temporal import TemporalService
@@ -75,6 +77,9 @@ class Services:
     procurement_source: ProcurementSourceGateway | None = None
     wms_reservations: WmsReservationGateway | None = None
     production_output: ProductionOutputGateway | None = None
+    sales_source: SalesSourceGateway | None = None
+    logistics: LogisticsGateway | None = None
+    shipping_producer: ShippingProducerDispatcher = field(default_factory=ShippingProducerDispatcher)
 
 
 def build_services() -> Services:

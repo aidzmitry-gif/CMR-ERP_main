@@ -14,6 +14,7 @@ ENABLED_MODULES: list[str] = [
     "wms",
     "logistics",
     "finance",
+    "accounting",
     "marketing",
     "service",
     "hr",

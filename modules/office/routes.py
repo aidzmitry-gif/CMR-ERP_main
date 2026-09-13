@@ -16,13 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
+from core.services.auth import get_current_user
 from modules.office import events
-from modules.office.carriers import CARRIERS, get_carrier
+from modules.office.carriers import CARRIERS
 from modules.office.models import LegalClaim, LegalContract, OfficeDoc
 from modules.office.schemas import (
     CarrierOut,
-    CarrierRequest,
-    CarrierRequestOut,
     LegalClaimCreate,
     LegalClaimOut,
     LegalClaimPatch,
@@ -33,9 +32,14 @@ from modules.office.schemas import (
     OfficeDocOut,
     StageUpdate,
 )
+from modules.office.shipping_access import current_actor, locked_doc, visible_docs
+from modules.office.shipping_producer import OfficeShippingProducer, RequestInput
+from modules.office.shipping_producer import router as shipping_router
+from modules.office.shipping_producer import transaction as shipping_transaction
 from modules.office.stages import STAGES
 
 router = APIRouter(tags=["office"])
+router.include_router(shipping_router)
 
 
 def _to_card(r: OfficeDoc) -> FunnelCard:
@@ -55,15 +59,15 @@ def _to_card(r: OfficeDoc) -> FunnelCard:
 
 
 @router.get("/docs", response_model=list[OfficeDocOut])
-async def list_docs(session: AsyncSession = Depends(get_session)):
+async def list_docs(session: AsyncSession = Depends(get_session), core: Core = Depends(get_core), user=Depends(get_current_user)):
     """Документы по сделкам (плоский список)."""
-    return (await session.execute(select(OfficeDoc).order_by(OfficeDoc.id.desc()))).scalars().all()
+    return await visible_docs(core, session, user)
 
 
 @router.get("/board", response_model=FunnelBoardOut)
-async def board(session: AsyncSession = Depends(get_session)) -> FunnelBoardOut:
+async def board(session: AsyncSession = Depends(get_session), core: Core = Depends(get_core), user=Depends(get_current_user)) -> FunnelBoardOut:
     """Воронка офис-менеджера: документы сгруппированы по стадиям."""
-    rows = (await session.execute(select(OfficeDoc))).scalars().all()
+    rows = await visible_docs(core, session, user)
     return build_board(STAGES, rows, _to_card)
 
 
@@ -78,8 +82,11 @@ async def create_doc(
     payload: OfficeDocCreate,
     session: AsyncSession = Depends(get_session),
     core: Core = Depends(get_core),
+    user=Depends(get_current_user),
 ):
     """Создать документ по сделке. Номер генерируется автоматически, если не задан."""
+    await current_actor(core, session, user, "office.doc.write")
+    await current_actor(core, session, user, "office.shipping.review.assign")
     data = payload.model_dump()
     data["amount"] = Decimal(str(data["amount"]))
     obj = OfficeDoc(**data)
@@ -99,11 +106,10 @@ async def update_doc(
     payload: StageUpdate,
     session: AsyncSession = Depends(get_session),
     core: Core = Depends(get_core),
+    user=Depends(get_current_user),
 ):
     """Сменить стадию документа. Переход стадии эмитит событие соседнему отделу."""
-    obj = await session.get(OfficeDoc, doc_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail="Документ не найден")
+    obj = await locked_doc(core, session, doc_id, user, "office.stage.move")
     if payload.stage not in {s["id"] for s in STAGES}:
         raise HTTPException(status_code=422, detail="Неизвестная стадия")
 
@@ -122,67 +128,14 @@ async def update_doc(
     return obj
 
 
-@router.post("/docs/{doc_id}/carrier-request", response_model=CarrierRequestOut)
-async def carrier_request(
-    doc_id: int,
-    payload: CarrierRequest,
-    session: AsyncSession = Depends(get_session),
-    core: Core = Depends(get_core),
-):
-    """Создать заявку перевозчику на доставку по РБ из карточки документа.
-
-    Пользователь выбирает перевозчика из справочника (``GET /office/carriers``),
-    указывает направление и дату забора. Роут генерирует номер заявки
-    ``ЛОГ-2026-NNNN``, фиксирует перевозчика в документе и эмитит
-    ``logistics.delivery.requested`` → отдел Логистики.
-
-    Бизнес-правило: заявку можно создать только пока документ на стадии
-    «Готово к отгрузке» — нельзя заказывать доставку для уже отгруженного/
-    оплаченного документа (защита от двойной логистики).
-    """
-    obj = await session.get(OfficeDoc, doc_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail="Документ не найден")
-
-    if not events.is_ready_for_carrier(obj):
-        raise HTTPException(
-            status_code=409,
-            detail="Заявку перевозчику можно создать только на стадии «Готово к отгрузке»",
-        )
-
-    carrier = get_carrier(payload.carrier)
-    if carrier is None:
-        raise HTTPException(status_code=422, detail="Неизвестный перевозчик")
-
-    log_ref = f"ЛОГ-2026-{obj.id:04d}"
-    obj.delivery = carrier["name"]
-    obj.logistics_ref = log_ref
-    if payload.region:
-        obj.region = payload.region
-    obj.docs_status = f"Заявка перевозчику: {carrier['name']}"
-    obj.next_step = "Ожидаем забор груза перевозчиком"
-
-    events.emit_carrier_request(
-        core.event_bus,
-        session,
-        obj,
-        log_ref=log_ref,
-        carrier=carrier["id"],
-        carrier_name=carrier["name"],
-        region=payload.region,
-        pickup_date=payload.pickup_date,
-        contact=payload.contact,
-        comment=payload.comment,
-    )
+@router.post("/docs/{doc_id}/carrier-request")
+async def carrier_request(doc_id: int, payload: RequestInput,
+    session: AsyncSession = Depends(shipping_transaction), core: Core = Depends(get_core),
+    user=Depends(get_current_user)):
+    """Persist one strict v1 request and its outbox event in the same transaction."""
+    result = await OfficeShippingProducer(core).prepare(session, doc_id, payload, user)
     await session.commit()
-    await session.refresh(obj)
-    return CarrierRequestOut(
-        ok=True,
-        log_ref=log_ref,
-        carrier=carrier["name"],
-        region=obj.region,
-        doc=OfficeDocOut.model_validate(obj),
-    )
+    return result
 
 
 # --------------------------------------------------------------------------- #

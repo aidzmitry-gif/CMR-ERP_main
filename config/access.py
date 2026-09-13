@@ -32,7 +32,7 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "director": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge",
-        "analytics", "spravochniki", "it",
+        "analytics", "spravochniki", "it", "accounting",
     ],
     "commercial": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
@@ -49,7 +49,7 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "warehouse": ["home", "wms", "logistics", "knowledge"],
     "logistics": ["home", "wms", "logistics", "knowledge"],
     "production": ["home", "production", "wms", "knowledge"],
-    "finance": ["home", "logistics", "office", "knowledge"],
+    "finance": ["home", "logistics", "office", "knowledge", "accounting"],
     "hr": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge", "spravochniki",
@@ -133,6 +133,7 @@ SLUG_TO_PACKAGE: dict[str, str] = {
     "wms": "wms",
     "logistics": "logistics",
     "finance": "finance",
+    "accounting": "accounting",
     "marketing": "marketing",
     "service": "service",
     "hr": "hr",
