@@ -2,16 +2,16 @@ import Link from "next/link";
 import { ArrowLeft, Mail, Phone, Star, User } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
+import { LeadActivity } from "@/components/leads/lead-activity";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchLead } from "@/lib/api";
+import { validActivityId } from "@/lib/lead-activity";
 import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 /**
  * Полная страница лида (открывается двойным кликом по карточке на канбане).
- * MVP-структура по аналогии с /crm/deals/[id]: AppShell + 2-колонная сетка
- * + блоки (контакт, потребность, сообщение, AI, документы заявки stub,
- * задачи stub, переписка stub). Когда подоспеют lead-detail-API — оживляем
- * каждый stub отдельным коммитом.
+ * Заявка, вложения и следующий шаг лида; активность связанной сделки
+ * загружается отдельно с проверкой доступа к сделке.
  */
 export default async function LeadDetailPage({
   params,
@@ -22,7 +22,7 @@ export default async function LeadDetailPage({
   const role = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
   // Точечный GET /leads/{id} — не тащим всю доску ради одной карточки (переживает объёмы).
-  const lead = Number.isFinite(Number(id)) ? await fetchLead(Number(id), role, token) : null;
+  const lead = validActivityId(Number(id)) ? await fetchLead(Number(id), role, token) : null;
 
   return (
     <AppShell crumbs={["CRM", "Лиды", `ЛИД-${id}`]}>
@@ -38,7 +38,7 @@ export default async function LeadDetailPage({
           {!lead ? (
             <Card className="px-[18px] py-[14px]">
               <div className="text-[13px] text-muted">
-                Лид с id={id} не найден. Возможно, удалён или ещё не приехал с бэкенда.{" "}
+                Лид с id={id} недоступен или не удалось загрузить его данные.{" "}
                 <Link className="font-semibold text-accent-ink" href="/crm/leads">
                   Открыть инбокс
                 </Link>
@@ -123,35 +123,7 @@ export default async function LeadDetailPage({
                     </CardBody>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <span aria-hidden>💬</span>
-                      <span>Переписка</span>
-                    </CardHeader>
-                    <CardBody>
-                      <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-muted">
-                        <span className="font-semibold text-faint">нет данных · </span>
-                        история сообщений (WA/TG/Viber/Email) — отдельный фид <code>
-                          /api/sales/leads/{id}/messages
-                        </code>
-                        ; подключим вместе с конвертацией в сделку.
-                      </div>
-                    </CardBody>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <span aria-hidden>✅</span>
-                      <span>Задачи по лиду</span>
-                    </CardHeader>
-                    <CardBody>
-                      <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-muted">
-                        <span className="font-semibold text-faint">нет данных · </span>
-                        задачи, поставленные из call-popup или вручную — подключим к{" "}
-                        <code>fetchDealTasks(`lead:{id}`)</code>.
-                      </div>
-                    </CardBody>
-                  </Card>
+                  <LeadActivity dealId={lead.dealId} nextStepAt={lead.nextStepAt} nextStepNote={lead.nextStepNote} />
                 </div>
 
                 {/* RIGHT — контактные данные + AI + распределение */}
@@ -221,7 +193,7 @@ export default async function LeadDetailPage({
                     </Card>
                   )}
 
-                  {lead.dealId && (
+                  {validActivityId(lead.dealId) && (
                     <Card>
                       <CardBody>
                         <Link
