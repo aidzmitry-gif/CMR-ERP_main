@@ -19,3 +19,14 @@ it("shows read failure and permits retry", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа");
   await waitFor(() => expect(screen.getByRole("button")).toBeEnabled());
 });
+
+it("refreshes the date before copying it into the unsaved plan", async () => {
+  const onUseDate = vi.fn();
+  const value = { organization_id: 1, order_id: 7, status: "live_review" as const, source: "outstanding_expected_reservations" as const, earliest_required_arrival: "2026-12-28", unresolved_deadlines: 0, complete_customer_demand: false as const, at_risk: true, items: [] };
+  vi.mocked(fetchCustomerDeadlines).mockResolvedValueOnce(value).mockResolvedValueOnce({ ...value, earliest_required_arrival: "2026-12-20" });
+  render(<ProcurementCustomerDeadlines org={1} orderId={7} onUseDate={onUseDate} />);
+  fireEvent.click(screen.getByText("Проверить клиентские сроки"));
+  fireEvent.click(await screen.findByText("Обновить сроки и подставить дату в план"));
+  await waitFor(() => expect(onUseDate).toHaveBeenCalledWith("2026-12-20"));
+  expect(fetchCustomerDeadlines).toHaveBeenCalledTimes(2);
+});
