@@ -8,6 +8,7 @@ const authFile = "e2e/.auth/state.json";
 
 setup("dev-логин (Директор)", async ({ page }) => {
   await page.goto("/login");
+  await page.getByLabel("Сотрудник").selectOption("kharkovich_d");
   // Список сотрудников грузится с backend (/system/users); кнопка активна, когда
   // выбран сотрудник. По умолчанию выбран первый — Директор (полный доступ).
   await page.getByRole("button", { name: "Войти" }).click();

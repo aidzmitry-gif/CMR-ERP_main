@@ -97,7 +97,10 @@ function InvoiceMoney({ items }: { items: DealDoc[] }) {
 
 export function DealDocuments({ dealId }: { dealId: string }) {
   const [documents, setDocuments] = useState<{ dealId: string; items: DealDoc[] } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const activeDealId = useRef(dealId);
+  const loadRequest = useRef(0);
   const items = documents?.dealId === dealId ? documents.items : [];
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
@@ -106,8 +109,21 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   const invoiceRequestKey = useRef<string | null>(null);
 
   async function refresh() {
-    const items = await fetchDocuments(dealId);
-    if (activeDealId.current === dealId) setDocuments({ dealId, items });
+    if (activeDealId.current !== dealId) return;
+    const request = ++loadRequest.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const items = await fetchDocuments(dealId, { throwOnError: true });
+      if (loadRequest.current === request) setDocuments({ dealId, items });
+    } catch {
+      if (loadRequest.current === request) {
+        setDocuments(null);
+        setLoadError(dealId);
+      }
+    } finally {
+      if (loadRequest.current === request) setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -115,10 +131,22 @@ export function DealDocuments({ dealId }: { dealId: string }) {
     // Выбор относится только к открытой сделке.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOnOrder(false);
+    setLoading(true);
+    setLoadError(null);
     invoiceRequestKey.current = null;
+    const request = ++loadRequest.current;
     let ignore = false;
-    void fetchDocuments(dealId).then((items) => { if (!ignore) setDocuments({ dealId, items }); });
-    return () => { ignore = true; };
+    void fetchDocuments(dealId, { throwOnError: true })
+      .then((items) => { if (!ignore && loadRequest.current === request) setDocuments({ dealId, items }); })
+      .catch(() => { if (!ignore && loadRequest.current === request) { setDocuments(null); setLoadError(dealId); } })
+      .finally(() => { if (!ignore && loadRequest.current === request) setLoading(false); });
+    return () => {
+      ignore = true;
+      activeDealId.current = "";
+      // Invalidate the latest request, including refreshes started after this effect.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++loadRequest.current;
+    };
   }, [dealId]);
 
   async function onCreate() {
@@ -179,8 +207,13 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         Под заказ — без резерва
       </label>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {loadError === dealId && <div role="alert">
+        <p>Не удалось загрузить документы.</p>
+        <button type="button" onClick={refresh} disabled={loading}>Повторить загрузку документов</button>
+      </div>}
+      {loading && <p role="status">Загрузка документов…</p>}
       <ul className="mt-3 space-y-2">
-        {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
+        {!loading && loadError !== dealId && documents?.dealId === dealId && items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
         {items.map((d) => {
           const s = STATUS[d.status] ?? STATUS.draft;
           const rb = reserveBadge(d);

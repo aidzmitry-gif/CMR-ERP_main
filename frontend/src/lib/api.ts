@@ -1091,12 +1091,15 @@ export interface DealDoc {
 }
 
 /** Документы сделки (счета/договоры/заказы) — клиент, через /api. */
-export async function fetchDocuments(dealId: string): Promise<DealDoc[]> {
+export async function fetchDocuments(dealId: string, options?: { throwOnError: boolean }): Promise<DealDoc[]> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as DealDoc[];
-  } catch {
+    const documents: unknown = await res.json();
+    if (!Array.isArray(documents)) throw new Error("Invalid documents response");
+    return documents as DealDoc[];
+  } catch (error) {
+    if (options?.throwOnError) throw error;
     return [];
   }
 }

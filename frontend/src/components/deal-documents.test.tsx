@@ -24,6 +24,20 @@ function moneySummary() {
   return within(screen.getByRole("region", { name: "Оплата и деньги" }));
 }
 
+describe("DealDocuments — загрузка", () => {
+  it("показывает ошибку вместо пустоты и восстанавливается после повтора", async () => {
+    mock(api.fetchDocuments).mockRejectedValueOnce(new Error("500")).mockResolvedValue([]);
+    render(<DealDocuments dealId="1" />);
+    expect(screen.queryByText("Документов пока нет")).not.toBeInTheDocument();
+    expect(await screen.findByText("Не удалось загрузить документы.")).toBeInTheDocument();
+    expect(screen.queryByText("Документов пока нет")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку документов" }));
+    expect(await screen.findByText("Документов пока нет")).toBeInTheDocument();
+    expect(screen.queryByText("Не удалось загрузить документы.")).not.toBeInTheDocument();
+    expect(api.fetchDocuments).toHaveBeenLastCalledWith("1", { throwOnError: true });
+  });
+});
+
 describe("DealDocuments — сумма выпущенного счёта", () => {
   it.each(["posted", "paid"])("сумма с НДС 360 берётся из оригинала %s, оплата и остаток неизвестны", async (status) => {
     mock(api.fetchDocuments).mockResolvedValue([{ ...issuedInvoice, status }]);

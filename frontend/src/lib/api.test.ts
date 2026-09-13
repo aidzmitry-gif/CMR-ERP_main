@@ -558,6 +558,16 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchDealDetail("1", "sales", "synthetic-test-token")).toBeNull();
   });
 
+  it.each([403, 500])("strict documents exposes HTTP %i instead of empty data", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status }));
+    await expect(fetchDocuments("1", { throwOnError: true })).rejects.toThrow(String(status));
+  });
+
+  it("strict documents rejects malformed list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    await expect(fetchDocuments("1", { throwOnError: true })).rejects.toThrow("Invalid documents response");
+  });
+
   it("fallback'и при сетевой ошибке (mock-данные/пустые)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
     expect(await fetchDealDetail("1")).toBeNull();
