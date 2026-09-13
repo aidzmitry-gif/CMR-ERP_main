@@ -1,12 +1,12 @@
 # Accounting migration integration
 
-Status (2026-09-13): registered and locally verified through **0131** in the accounting agent branch. Not merged or deployed. Real accounting and statutory cutover acceptance remain open.
+Status (2026-09-13): registered and locally verified through **0132** in the accounting agent branch. Not merged or deployed. Real accounting and statutory cutover acceptance remain open.
 
 ## Registered chain
 
-`0116 → 0120 (SEND) → 0117 → 0118 → 0119 (counterparties) → 0121 (ESCHF) → 0130 (accounting) → 0131 (reservation remainder)`
+`0116 → 0120 (SEND) → 0117 → 0118 → 0119 (counterparties) → 0121 (ESCHF) → 0130 (accounting) → 0131 (reservation remainder) → 0132 (expense approval guard)`
 
-0130 was reserved under the existing shared migration lock after checking other Git worktrees: 0122–0129 are already used elsewhere. Their numbers are skipped here; their features are not claimed to be integrated. The single Alembic head is 0131. The isolated branch reparents 0117 to 0120 and 0121 to 0119; no deployed history was changed. Any future deployment must first inspect the target database revision history and reconcile the other branches.
+0130 was reserved under the existing shared migration lock after checking other Git worktrees: 0122–0129 are already used elsewhere. Their numbers are skipped here; their features are not claimed to be integrated. The single Alembic head is 0132. The isolated branch reparents 0117 to 0120 and 0121 to 0119; no deployed history was changed. Any future deployment must first inspect the target database revision history and reconcile the other branches.
 
 ## Application integration
 
@@ -47,3 +47,7 @@ GitHub CI now provisions a separate ESCHF service matching the strict fixture ad
 The API releases only unshipped reserved quantities after a physical act. For physical stock 10, reservation 6 and shipment 2, releasing 4 leaves physical stock 8, reserved 0 and free 8. The invoice, financial status and shipment act remain unchanged. An explicit reason and current preview digest are required; replay uses the original UUID and body. Invoice cancellation remains separate.
 
 Registered upgrade to 0131 passed on an owned temporary PostgreSQL database, preserving a pre-existing logistics shipment and all 51 accounting tables. This checkpoint has no new restore acceptance: the earlier 0130 restore proof remains scoped to 0130. The existing invoice shipment screen now offers a remainder preview, reason and explicit confirmation. A saved same-key request recovers an unknown response; a verified stale basis requires recalculation. Actual Next/FastAPI browser acceptance passed (invoice quantity 2, ship 1, release 1); this remains synthetic local acceptance, not deployment or real user acceptance.
+
+## Expense approval guard correction
+
+0132 replaces only the ambiguous JSON expression in `guard_expense_receipt`: extract `result` first, then remove `approval_digest`. Without parentheses, PostgreSQL could not select an operator and valid budget approval failed. Published 0130 and 0131 remain unchanged. Six expense PostgreSQL checks passed, including approval/replay, immutable budgets and receipt requirements. Registered upgrade to 0132 preserved a pre-existing logistics record; see [acceptance](acceptance/registered-0132.json). This does not extend the earlier restore drill beyond 0130.

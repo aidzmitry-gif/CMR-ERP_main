@@ -7,12 +7,19 @@
 """
 from types import SimpleNamespace
 
+import pytest_asyncio
 from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
 from core.services.eventbus import OutboxEventBus
 from modules.office import events
 from modules.office.models import OfficeDoc
+
+
+@pytest_asyncio.fixture
+async def office_actor(api):
+    api.headers["X-User"] = "office-test"
+    return api
 
 
 async def _event_types(session) -> list[str]:
@@ -28,7 +35,8 @@ def _ctx(session):
 # --------------------------------------------------------------------------- #
 #  Роуты: CRUD, доска, справочник перевозчиков
 # --------------------------------------------------------------------------- #
-async def test_create_doc_emits_created_and_autonumbers(api, session):
+async def test_create_doc_emits_created_and_autonumbers(office_actor, session):
+    api = office_actor
     r = await api.post("/office/docs", json={"company": "ООО Альфа", "title": "АКБ", "amount": 850000})
     assert r.status_code == 201
     assert r.json()["number"].startswith("ДОК-2026-")
@@ -43,7 +51,8 @@ async def test_carriers_catalog(api):
     assert own["name"] == "Свой транспорт" and own["heavy"] is True
 
 
-async def test_board_groups_by_stage(api):
+async def test_board_groups_by_stage(office_actor):
+    api = office_actor
     await api.post("/office/docs", json={"company": "ООО Бета", "amount": 100})
     board = (await api.get("/office/board")).json()
     assert [s["id"] for s in board["stages"]] == ["ready", "shipped", "docs", "await_pay", "paid"]
@@ -53,7 +62,8 @@ async def test_board_groups_by_stage(api):
 # --------------------------------------------------------------------------- #
 #  Роут смены стадии → события отделам + лестница эскалации
 # --------------------------------------------------------------------------- #
-async def test_update_stage_emits_department_events(api, session):
+async def test_update_stage_emits_department_events(office_actor, session):
+    api = office_actor
     doc_id = (await api.post("/office/docs", json={"company": "ООО Гамма", "amount": 200})).json()["id"]
 
     await api.patch(f"/office/docs/{doc_id}", json={"stage": "ready"})    # → Склад
@@ -63,7 +73,8 @@ async def test_update_stage_emits_department_events(api, session):
     assert "office.docs.collected" in types
 
 
-async def test_update_stage_await_pay_triggers_awaiting_and_ladder(api, session):
+async def test_update_stage_await_pay_triggers_awaiting_and_ladder(office_actor, session):
+    api = office_actor
     doc_id = (await api.post("/office/docs", json={"company": "ООО Дельта", "amount": 50000})).json()["id"]
     # выставляем просрочку напрямую в строке — лестница смотрит overdue_days
     doc = await session.get(OfficeDoc, doc_id)
@@ -82,7 +93,8 @@ async def test_update_stage_await_pay_triggers_awaiting_and_ladder(api, session)
     assert awaiting.payload["large_receivable"] is True  # 50000 > 10000
 
 
-async def test_update_stage_unknown_and_missing(api):
+async def test_update_stage_unknown_and_missing(office_actor):
+    api = office_actor
     doc_id = (await api.post("/office/docs", json={"company": "X", "amount": 1})).json()["id"]
     assert (await api.patch(f"/office/docs/{doc_id}", json={"stage": "bogus"})).status_code == 422
     assert (await api.patch("/office/docs/999999", json={"stage": "paid"})).status_code == 404

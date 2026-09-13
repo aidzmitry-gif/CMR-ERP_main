@@ -160,7 +160,7 @@ BEGIN
        OR r#>>'{result,evidence}' IS DISTINCT FROM a.evidence
        OR r#>>'{result,approved_at}' IS DISTINCT FROM to_char(a.approved_at, 'YYYY-MM-DD"T"HH24:MI:SS')
        OR r#>>'{result,approval_digest}' IS DISTINCT FROM a.approval_digest
-       OR accounting.financial_sha(r->'result'-'approval_digest') IS DISTINCT FROM a.approval_digest
+       OR accounting.financial_sha((r->'result')-'approval_digest') IS DISTINCT FROM a.approval_digest
        OR NEW.actor IS DISTINCT FROM a.actor
        OR r#>>'{command,budget_id}' IS DISTINCT FROM a.budget_id::text
        OR r#>>'{command,expected_revision}' IS DISTINCT FROM a.budget_revision::text

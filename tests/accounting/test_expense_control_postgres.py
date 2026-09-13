@@ -138,7 +138,9 @@ async def test_pg_budget_approval_is_immutable_and_requires_receipt(issuance_pg)
     assert response.status_code == 201, response.text
     org_id = response.json()["id"]
     prefix = f"/accounting/organizations/{org_id}"
-    headers = {"X-Expected-Principal": "tester"}
+    context = await api.get(prefix + "/expense-catalog")
+    assert context.status_code == 200, context.text
+    headers = {"X-Expected-Principal": context.json()["principal"]}
     catalog = await api.post(prefix + "/expense-catalog/commands", headers=headers,
         json=catalog_command().model_dump(mode="json"))
     assert catalog.status_code == 200, catalog.text
