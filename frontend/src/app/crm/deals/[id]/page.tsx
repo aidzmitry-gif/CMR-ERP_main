@@ -1,3 +1,4 @@
+import { DealLossControl } from "@/components/kanban/lose-deal-modal";
 import { DealDocumentRegister } from "@/components/deal-document-register";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -168,6 +169,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <DealContacts dealId={id} />
             <RegStub />
             <DealMessages dealId={id} />
+            <DealLossControl dealId={id} dealLabel={`№ ${d.number} · ${d.company}`} />
             <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
             <DealApprovals dealId={id} />
             <DealActions dealId={id} starred={d.starred} priority={d.priority} />

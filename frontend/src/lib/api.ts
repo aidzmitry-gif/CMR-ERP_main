@@ -878,21 +878,6 @@ export async function fetchLossReasons(): Promise<LossReason[]> {
   }
 }
 
-/** Закрыть сделку в отказ (SALES-40): причина обязательна, комментарий — опционально.
- * Fire-and-forget, как updateDealStage: UI обновляется оптимистично, бэк — best-effort. */
-export async function loseDeal(id: string, reasonCode: string, comment?: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/sales/deals/${id}/lose`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason_code: reasonCode, comment }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 interface ApiKpi {
   key: string;
   title: string;
@@ -1083,16 +1068,21 @@ export interface DocIssueResult {
   ok: boolean;
   message: string;
   renderUrl?: string;
+  replayed?: boolean;
 }
 
 export async function issueDocument(dealId: string, kind: "invoice" | "contract"): Promise<DocIssueResult> {
-  const doc = await createDocument(dealId, kind);
-  if (!doc) {
-    return { ok: false, message: kind === "invoice" ? "⚠️ Не удалось выставить счёт" : "⚠️ Не удалось создать договор" };
+  if (kind === "invoice") {
+    try {
+      const { openInvoiceIssuance } = await import("@/components/invoice-issuance-dialog");
+      const result = await openInvoiceIssuance(dealId);
+      return result ? { ok: true, message: `Счёт ${result.document.number} выпущен`, renderUrl: `/api/sales/documents/${result.document.id}/render`, replayed: result.replayed }
+        : { ok: false, message: "Выпуск не подтверждён; сохранённый запрос можно продолжить." };
+    } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Не удалось открыть выпуск счёта" }; }
   }
-  return kind === "invoice"
-    ? { ok: true, message: `✅ Счёт ${doc.number} выставлен`, renderUrl: `/api/sales/documents/${doc.id}/render` }
-    : { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
+  const doc = await createDocument(dealId, kind);
+  if (!doc) return { ok: false, message: "⚠️ Не удалось создать договор" };
+  return { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
 }
 
 /** Решение по документу на согласовании (договор): провести в 1С или отклонить. */

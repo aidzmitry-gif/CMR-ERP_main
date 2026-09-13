@@ -30,7 +30,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
     cwd: resolve(process.cwd(), ".."),
     input: JSON.stringify({ deal_id: dealId, actor }),
     env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string; buyer: number };
+  })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
   const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
     source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
     currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
@@ -72,4 +72,20 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await clientRegister.getByLabel("Юрлицо документов клиента", { exact: true }).selectOption(String(fixture.organization));
   await expect(clientRegister.getByRole("article", { name: `Документ клиента ${invoices[0].id}`, exact: true })).toBeVisible();
   await clientRegister.screenshot({ path: testInfo.outputPath("client-document-register.png") });
+  await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}`);
+  const beforeLoss = await page.request.get(`/api/sales/deals/${dealId}/loss-context`);
+  expect(beforeLoss.ok()).toBeTruthy();
+  const originalStage = (await beforeLoss.json()).stage;
+  await page.getByRole("button", { name: "Отказ / состояние запроса", exact: true }).click();
+  const loss = page.getByRole("dialog");
+  await loss.getByLabel("Причина отказа", { exact: true }).selectOption(fixture.loss_reason);
+  await loss.getByRole("button", { name: "Запросить отказ", exact: true }).click();
+  await expect(loss.getByText(/ожидает завершения/)).toBeVisible();
+  await loss.getByLabel("Основание завершения или отзыва", { exact: true }).fill("Synthetic review; invoice has not been cancelled");
+  await expect(loss.getByRole("button", { name: "Завершить отказ", exact: true })).toBeDisabled();
+  const afterLoss = await page.request.get(`/api/sales/deals/${dealId}/loss-context`);
+  expect((await afterLoss.json()).stage).toBe(originalStage);
+  const retained = await page.request.get(`/api/sales/deals/${dealId}/documents`);
+  expect((await retained.json()).find((doc: { id: number }) => doc.id === invoices[0].id)).toMatchObject({ status: "issued", reserve_status: "reserved" });
+  await loss.screenshot({ path: testInfo.outputPath("pending-deal-loss.png") });
 });

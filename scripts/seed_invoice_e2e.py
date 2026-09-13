@@ -15,7 +15,7 @@ from core.services.db import Database
 from modules.accounting.models import AccessGrant, Organization
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.client_document_register import DealClientBinding, preview_snapshot
-from modules.sales.models import Deal, DealItem
+from modules.sales.models import Deal, DealItem, LossReason
 from modules.wms.models import StockMovement
 
 
@@ -50,8 +50,10 @@ async def main():
             await session.flush()
             session.add(DealClientBinding(deal_id=deal.id, organization_id=org.id, counterparty_id=buyer.id, snapshot=await preview_snapshot(session, org.id, deal, buyer.id), evidence="Synthetic E2E buyer binding", actor=actor))
             session.add(StockMovement(organization_id=org.id, sku_code=sku.code, warehouse="E2E-W", kind="in", qty=Decimal("10"), reason="receipt"))
+            reason = "e2e-" + token[:24]
+            session.add(LossReason(code=reason, title="Synthetic E2E loss reason", active=True))
             await session.commit()
-            print(json.dumps({"organization": org.id, "item": item.id, "sku": sku.code, "buyer": buyer.id}))
+            print(json.dumps({"organization": org.id, "item": item.id, "sku": sku.code, "buyer": buyer.id, "loss_reason": reason}))
     finally:
         await db.disconnect()
 
