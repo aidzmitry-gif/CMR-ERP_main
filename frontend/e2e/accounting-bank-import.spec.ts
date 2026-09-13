@@ -27,4 +27,9 @@ test("импорт выписки сохраняет аналитику из ф�
   const entry = await entryResponse.json();
   expect(entry.lines.find((line: { account_code: string }) => line.account_code === "62").dimensions).toMatchObject({ counterparty: "BUYER-E2E", contract: "CONTRACT-E2E" });
   await expect(row).toContainText("Проведено");
+  await row.getByRole("button", { name: "Открыть проводку" }).click();
+  const card = page.getByRole("region", { name: "Карточка проводки" });
+  await expect(card.getByRole("heading", { name: `Операция № ${receipt.entry_id}` })).toBeVisible();
+  await expect(card).toContainText("CONTRACT-E2E");
+  await card.screenshot({ path: testInfo.outputPath("bank-entry-card.png") });
 });
