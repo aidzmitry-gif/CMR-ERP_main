@@ -18,6 +18,7 @@ jobs:
           POSTGRES_DB: aios
         ports:
           - "5432:5432"
+          - "15436:5432"
         options: >-
           --health-cmd "pg_isready -U aios -d aios"
           --health-interval 5s
@@ -30,7 +31,7 @@ jobs:
       # CI — не прод: разрешаем dev-дефолтные креды (Settings P0-5 иначе отклоняет aios:aios)
       AIOS_ENVIRONMENT: dev
       # Dedicated admin DB; accounting fixtures create/drop their own UUID databases.
-      ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@localhost:5432/accounting_test
+      ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@localhost:15436/accounting_test
 
     steps:
       - uses: actions/checkout@v5
