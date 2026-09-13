@@ -12,6 +12,12 @@ function response(data: unknown, status = 200) {
 }
 
 describe("CRM directory HTTP contract", () => {
+  it("keeps CRM and master-data identities separate when numeric IDs coincide", async () => {
+    response({ rows: [client, { ...client, source: "crm", deal_id: null }], total: 2 });
+    expect((await loadDirectory("clients", "", 0)).status).toBe("ok");
+    response({ rows: [{ ...client, source: "unknown" }], total: 1 });
+    expect((await loadDirectory("clients", "", 0)).status).toBe("error");
+  });
   it("uses the authenticated proxy with encoded filters and no cache", async () => {
     const fetchMock = response({ rows: [client], total: 51 });
     const signal = new AbortController().signal;

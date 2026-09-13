@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { CreateCrmClient } from "@/components/create-crm-client";
 import { useEffect, useState, type FormEvent } from "react";
 import { DIRECTORY_PAGE_SIZE, loadDirectory, type DirectoryKind, type DirectoryResult } from "@/lib/crm-directory";
 
 export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
   const [draft, setDraft] = useState("");
+  const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState({ q: "", offset: 0, revision: 0 });
   const [loaded, setLoaded] = useState<{ key: string; result: DirectoryResult } | null>(null);
   const key = JSON.stringify([kind, query]);
@@ -37,6 +39,11 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="mt-1 text-sm text-muted">Показаны доступные вам записи. Работу с клиентом можно продолжить в его сделке.</p>
       </div>
+      {!isContacts && (creating ? <CreateCrmClient onCancel={() => setCreating(false)} onCreated={(name) => {
+        setCreating(false);
+        setDraft(name);
+        setQuery((previous) => ({ q: name, offset: 0, revision: previous.revision + 1 }));
+      }} /> : <button type="button" onClick={() => setCreating(true)} className="rounded-lg bg-accent px-4 py-2 text-sm text-white">Новый клиент</button>)}
       <form onSubmit={search} className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-muted">
           {isContacts ? "Имя, компания, телефон или email" : "Название или УНП"}
@@ -68,9 +75,10 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
                 {isContacts && <th scope="col" className="p-3">Связь</th>}
                 <th scope="col" className="p-3">Сделка</th>
               </tr></thead>
-              <tbody>{result.rows.map((row) => <tr key={row.id} className="border-t border-line">
+              <tbody>{result.rows.map((row) => <tr key={`${"source" in row ? row.source : "mdm"}:${row.id}`} className="border-t border-line">
                 <td className="p-3 font-medium text-ink">
                   {"full_name" in row ? row.full_name : row.name}
+                  {"source" in row && row.source === "crm" && <span className="ml-2 text-xs text-muted">Создан в CRM</span>}
                   {"is_primary" in row && row.is_primary && <span className="ml-2 text-xs text-muted">Основной</span>}
                   {"is_active" in row && !row.is_active && <span className="ml-2 text-xs text-muted">Архив</span>}
                 </td>

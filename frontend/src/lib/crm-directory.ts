@@ -7,6 +7,7 @@ export interface ClientRow {
   unp: string | null;
   is_active: boolean;
   deal_id: number | null;
+  source?: "crm";
 }
 
 export interface ContactRow {
@@ -38,6 +39,7 @@ function validRow(value: unknown, kind: DirectoryKind): value is ClientRow | Con
   if (!positiveId(row.id) || (row.deal_id !== null && !positiveId(row.deal_id))) return false;
   return kind === "clients"
     ? typeof row.name === "string" && nullableText(row.unp) && typeof row.is_active === "boolean"
+      && (row.source === undefined || row.source === "crm")
     : typeof row.full_name === "string" && nullableText(row.phone) && nullableText(row.email)
       && typeof row.is_primary === "boolean" && positiveId(row.counterparty_id)
       && typeof row.counterparty_name === "string";
@@ -60,7 +62,7 @@ export async function loadDirectory(
       || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0
       || total < rows.length || (rows.length > 0 && total < offset + rows.length)
       || !rows.every((row) => validRow(row, kind))
-      || new Set(rows.map((row) => row.id)).size !== rows.length) return { status: "error" };
+      || new Set(rows.map((row) => `${"source" in row ? row.source : "mdm"}:${row.id}`)).size !== rows.length) return { status: "error" };
     return { status: "ok", rows, total };
   } catch {
     return { status: "error" };

@@ -114,14 +114,14 @@ async def test_identity_denials_and_query_validation(api, session, endpoint):
 
 
 @pytest.mark.asyncio
-async def test_manager_keeps_no_system_write_and_directory_is_read_only(api, session):
+async def test_manager_keeps_no_system_write_and_shared_contacts_are_read_only(api, session):
     _, clients, _ = await seed(session)
     for headers in [OWN, ALL]:
         response = await api.patch(f"/system/mdm/counterparty/{clients[0].id}",
                                    json={"manual": {"name": "Changed"}, "expected_revision": 1},
                                    headers=headers)
         assert response.status_code == 403
-        for path in ["/sales/clients", "/sales/contacts"]:
-            assert (await api.post(path, json={}, headers=headers)).status_code in {403, 405}
+        assert (await api.post("/sales/contacts", json={}, headers=headers)).status_code in {403, 405}
+        assert (await api.post("/sales/clients", json={}, headers=headers)).status_code == 422
     await session.refresh(clients[0])
     assert clients[0].name == "Own"
