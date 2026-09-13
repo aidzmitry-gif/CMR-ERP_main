@@ -14,6 +14,9 @@ export function WmsReservationEditor({ organizationId, initial, onBusy, onSaved,
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function save() {
+    if (source.trim().startsWith("invoice:")) {
+      setError("Резерв счёта изменяется через отгрузку или аннулирование счёта. Ручная запись запрещена."); return;
+    }
     const amount = qty.trim().replace(",", ".");
     if (!/^\d{1,12}(\.\d{1,2})?$/.test(amount) || (!initial && /^0+(\.0+)?$/.test(amount))) {
       setError("Укажите количество с точностью до двух знаков. Первый резерв должен быть больше нуля."); return;
@@ -38,7 +41,7 @@ export function WmsReservationEditor({ organizationId, initial, onBusy, onSaved,
   }
   return <section className="my-4 rounded border border-line p-4">
     <h2 className="font-semibold">{initial ? "Изменение резерва" : "Новый резерв"} · версия {(initial?.version ?? 0) + 1}</h2>
-    <p className="my-2 text-sm text-muted">Количество — остаток резерва после изменения. Для полного снятия укажите 0. Укажите устойчивый идентификатор строки исходного документа; автоматического сопоставления с продажами пока нет.</p>
+    <p className="my-2 text-sm text-muted">Количество — остаток резерва после изменения. Для полного снятия укажите 0. Укажите устойчивый идентификатор строки исходного документа; резервы счетов создаются при их выпуске и здесь вручную не изменяются.</p>
     <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-2">
       <label>Исходная строка<input aria-label="Исходная строка" className="block w-full rounded border border-line bg-surface p-2" disabled={Boolean(initial)} maxLength={200} value={source} onChange={(e) => setSource(e.target.value)} /></label>
       <label>Код номенклатуры<input aria-label="Код номенклатуры" className="block w-full rounded border border-line bg-surface p-2" disabled={Boolean(initial)} maxLength={64} value={sku} onChange={(e) => setSku(e.target.value)} /></label>

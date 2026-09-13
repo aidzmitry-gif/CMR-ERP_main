@@ -40,7 +40,7 @@ export function WmsReservations() {
   const history = useRows<Reservation>(organization && source ? `/api/wms/reservations/history?organization_id=${organization}&source=${encodeURIComponent(source)}` : null, reload);
   return <main className="min-w-0 flex-1 overflow-auto p-6 lg:pr-24">
     <h1 className="text-xl font-semibold">Резервы товаров</h1>
-    <p className="mt-2 text-sm text-muted">Отдельный регистр резервов. Количество резерва не является физическим остатком. Автоматические резервы продаж и старые записи ещё не перенесены в этот регистр.</p>
+    <p className="mt-2 text-sm text-muted">Отдельный регистр резервов. Количество резерва не является физическим остатком. Включает резервы выпущенных счетов ERP и ручные записи. Старые записи требуют отдельного переноса и сверки. Резерв счёта изменяется через отгрузку или подтверждённое аннулирование счёта.</p>
     <fieldset disabled={busy} className="my-4 flex flex-wrap items-center gap-3">
       <label>Юрлицо <select aria-label="Юрлицо" className="rounded border border-line bg-surface p-2" value={organization} onChange={(event) => { setOrganization(event.target.value); setSource(""); setEditor(null); setSaved(false); }}>
         <option value="">Выберите юрлицо</option>
@@ -56,7 +56,7 @@ export function WmsReservations() {
     {(companies.loading || reservations.loading) && <p role="status">Загрузка…</p>}
     {organization && !reservations.loading && !reservations.error && <table className="w-full text-left text-sm [&_th]:px-3 [&_th]:py-2 [&_td]:px-3">
       <thead><tr><th>Исходная строка</th><th>Номенклатура</th><th>Склад</th><th>Резерв</th><th>Версия</th><th>Действие</th></tr></thead>
-      <tbody>{reservations.rows.map((row) => <tr key={row.id} className="border-b border-line"><td className="max-w-xs break-words py-3">{row.source}</td><td>{row.sku_code}</td><td>{row.warehouse}</td><td>{row.qty}</td><td>{row.version}</td><td><button aria-label={`История ${row.source}`} disabled={busy} className="underline" type="button" onClick={() => setSource(row.source)}>История</button> <button aria-label={`Изменить ${row.source}`} disabled={busy} className="ml-2 underline" type="button" onClick={() => { setEditor({ row }); setSaved(false); }}>Изменить</button></td></tr>)}</tbody>
+      <tbody>{reservations.rows.map((row) => <tr key={row.id} className="border-b border-line"><td className="max-w-xs break-words py-3">{row.source}</td><td>{row.sku_code}</td><td>{row.warehouse}</td><td>{row.qty}</td><td>{row.version}</td><td><button aria-label={`История ${row.source}`} disabled={busy} className="underline" type="button" onClick={() => setSource(row.source)}>История</button> {row.source.startsWith("invoice:") ? <a className="ml-2 underline" href={`/api/sales/documents/${encodeURIComponent(row.source.split(":")[1])}/render`}>Оригинал счёта</a> : <button aria-label={`Изменить ${row.source}`} disabled={busy} className="ml-2 underline" type="button" onClick={() => { setEditor({ row }); setSaved(false); }}>Изменить</button>}</td></tr>)}</tbody>
     </table>}
     {organization && !reservations.loading && !reservations.error && reservations.rows.length === 0 && <p>В этом регистре резервов нет.</p>}
     {organization && <section aria-label="Сводка резервов" className="mt-6">
