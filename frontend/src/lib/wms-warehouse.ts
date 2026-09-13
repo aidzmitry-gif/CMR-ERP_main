@@ -29,6 +29,7 @@ export interface Receipt {
   decided_by: string;
 }
 export interface ReceiptDetail extends Receipt {
+  qc_revision: string;
   lines: ReceiptLine[];
 }
 
@@ -230,8 +231,8 @@ export const fetchThresholdsServer = (r?: string) => ssr<StockThreshold[]>("/wms
 // ---- Client ----
 export const fetchReceipt = (id: number) => api<ReceiptDetail | null>(`/wms/receipts/${id}`, null);
 export const fetchTasks = () => api<WmsTask[]>("/wms/tasks", []);
-export const qcReceipt = (id: number, decisions: unknown[], decidedBy = "") =>
-  post(`/wms/receipts/${id}/qc`, { decisions, decided_by: decidedBy });
+export const qcReceipt = (id: number, decisions: unknown[], decidedBy = "", expectedRevision?: string) =>
+  post(`/wms/receipts/${id}/qc`, { decisions, decided_by: decidedBy, expected_revision: expectedRevision });
 export const acceptReceipt = (id: number) => post(`/wms/receipts/${id}/accept`);
 export const patchTask = (id: number, patch: Record<string, unknown>) =>
   fetch(`/api/wms/tasks/${id}`, {
