@@ -335,6 +335,8 @@ async def validate_close_period(session, org_id, month, data):
     from modules.accounting.closing_controls import snapshot as closing_snapshot
 
     controls = await closing_snapshot(session, org_id, month)
+    if any(item["code"] == "unposted_bank_imports" for item in controls["blockers"]):
+        raise AccountingError("Unposted imported bank transactions prevent closing")
     receipt_gaps = [item for item in controls["review_items"] if item["code"] in {
         "production_cost_receipt_gap", "inventory_late_cost_receipt_gap",
         "payroll_accrual_receipt_gap", "payroll_statutory_receipt_gap",

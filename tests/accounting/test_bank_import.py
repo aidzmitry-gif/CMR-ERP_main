@@ -62,6 +62,10 @@ async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(cl
     settlement_line = await db.scalar(select(Line).where(Line.entry_id == entry_id, Line.account_code == "62"))
     assert settlement_line.dimensions["counterparty"] == "buyer"
     assert settlement_line.dimensions["contract"] == "contract"
+    from modules.accounting.closing_controls import snapshot as closing_snapshot
+
+    controls = await closing_snapshot(db, book[0], "2026-09")
+    assert not any(item["code"] == "unposted_bank_imports" for item in controls["blockers"])
     assert receipt.source_ext_id == "BANK-EXT-1"
     assert receipt.snapshot["source_digest"] == bank_import._digest(snapshot)
 
@@ -195,3 +199,31 @@ async def test_only_chief_can_view_unassigned_bank_sources(client, db, book, rol
     own = await client.get(url)
     assert own.status_code == 200
     assert [x["source_snapshot"]["transaction_id"] for x in own.json()] == [source.id]
+
+
+@pytest.mark.asyncio
+async def test_owned_unposted_bank_source_blocks_month_close(client, db, book):
+    from modules.accounting import closing_controls, service
+    from modules.accounting.schemas import CloseInput
+
+    source = BankTransaction(ext_id="CLOSE-BANK", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+    db.add(source)
+    await db.commit()
+    before = await closing_controls.snapshot(db, book[0], "2026-09")
+    assert not any(item["code"] == "unposted_bank_imports" for item in before["blockers"])
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source.id,
+                         ownership="own", evidence="Explicit synthetic ownership", actor="tester"))
+    await db.commit()
+    controls = await closing_controls.snapshot(db, book[0], "2026-09")
+    assert next(item["count"] for item in controls["blockers"] if item["code"] == "unposted_bank_imports") == 1
+    with pytest.raises(service.AccountingError, match="Unposted imported bank"):
+        await service.validate_close_period(db, book[0], "2026-09", CloseInput(
+            expected_generation=controls["period"]["generation"], evidence={key: "Verified fixture" for key in service.CLOSE_STEPS}))
+    source.occurred_on = date(2026, 10, 1)
+    await db.commit()
+    later = await closing_controls.snapshot(db, book[0], "2026-09")
+    assert not any(item["code"] == "unposted_bank_imports" for item in later["blockers"])
+    source.occurred_on = None
+    await db.commit()
+    undated = await closing_controls.snapshot(db, book[0], "2026-09")
+    assert any(item["code"] == "unposted_bank_imports" for item in undated["blockers"])

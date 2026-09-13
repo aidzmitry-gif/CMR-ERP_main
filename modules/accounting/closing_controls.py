@@ -13,6 +13,7 @@ from datetime import date
 from sqlalchemy import func, or_, select
 
 from modules.accounting.models import (
+    BankImportReceipt,
     Entry,
     FixedAssetDepreciationReceipt,
     FixedAssetRegisterEntry,
@@ -31,6 +32,7 @@ from modules.accounting.models import (
     ProductionOutputTransferReceipt,
     ProductionOverheadReceipt,
     RepairAccountingReceipt,
+    SourceBinding,
     SourceControl,
 )
 from modules.accounting.service import AccountingError, lock_organization
@@ -72,6 +74,19 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     pending_sources = await session.scalar(select(func.count(SourceControl.id)).where(
         SourceControl.organization_id == org_id, SourceControl.month <= month, SourceControl.entry_id.is_(None),
     )) or 0
+
+    from modules.finance.models import BankTransaction
+
+    pending_bank = await session.scalar(select(func.count(BankTransaction.id)).join(
+        SourceBinding, (SourceBinding.source_id == BankTransaction.id)
+        & (SourceBinding.source_type == "finance_bank_transaction")
+        & (SourceBinding.organization_id == org_id)
+        & (SourceBinding.ownership == "own"),
+    ).outerjoin(BankImportReceipt,
+        (BankImportReceipt.source_transaction_id == BankTransaction.id)
+        & (BankImportReceipt.organization_id == org_id),
+    ).where(BankImportReceipt.entry_id.is_(None),
+            or_(BankTransaction.occurred_on <= last, BankTransaction.occurred_on.is_(None)))) or 0
 
     input_lines = await _line_ids(session, org_id, first, last, "18")
     input_registered = set()
@@ -267,6 +282,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if pending_sources:
         blockers.append({"code": "unposted_source_controls", "count": int(pending_sources),
                          "message": "Есть первичные источники без бухгалтерской проводки."})
+    if pending_bank:
+        blockers.append({"code": "unposted_bank_imports", "count": int(pending_bank),
+                         "message": "Есть закреплённые за юрлицом банковские строки без проводки (включая строки без даты)."})
     if policy is None:
         blockers.append({"code": "missing_policy", "count": 1,
                          "message": "На дату месяца нет применимой версии учётной политики."})
