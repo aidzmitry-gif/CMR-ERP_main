@@ -1,3 +1,5 @@
+import { ClientDocumentRegister } from "@/components/client-document-register";
+
 import { AppShell } from "@/components/app-shell";
 import { SpravCard } from "@/components/erp/spravochniki/sprav-card";
 import { SpravCounterpartyEditor } from "@/components/erp/spravochniki/sprav-counterparty-editor";
@@ -64,6 +66,9 @@ export default async function CounterpartyCardPage({
             </Link>
           </div>
           <SpravCard card={result.card} />
+          <div className="mx-auto min-w-0 max-w-5xl px-6 py-4 pr-[74px] lg:pr-6">
+            <ClientDocumentRegister clientId={String(result.card.id)} />
+          </div>
           <SpravCounterpartyEditor
             key={result.card.id}
             mode="edit"

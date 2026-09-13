@@ -1,3 +1,4 @@
+import { DealDocumentRegister } from "@/components/deal-document-register";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -29,8 +30,12 @@ import { currentAccessToken, currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
 
-export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DealDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ org?: string; invoice?: string }> }) {
   const { id } = await params;
+  const query = await searchParams ?? {};
+  const positive = (v: unknown): v is string => typeof v === "string" && /^[1-9]\d*$/.test(v) && Number.isSafeInteger(Number(v));
+  const documentOrg = positive(query.org) ? query.org : undefined;
+  const documentId = documentOrg && positive(query.invoice) ? Number(query.invoice) : undefined;
   const roles = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
   const d = await fetchDealDetail(id, roles, token);
@@ -154,6 +159,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DealItems dealId={id} />
             <DealTasks dealId={id} />
             <DealDocuments dealId={id} />
+            <div id="document-register"><DealDocumentRegister dealId={id} org={documentOrg} initialDocumentId={documentId} /></div>
           </div>
 
           {/* RIGHT — клиент / постоянный / переписка / связанные / действия */}
@@ -400,4 +406,3 @@ function RegStub() {
     </Card>
   );
 }
-

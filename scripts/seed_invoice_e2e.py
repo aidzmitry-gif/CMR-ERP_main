@@ -51,7 +51,7 @@ async def main():
             session.add(DealClientBinding(deal_id=deal.id, organization_id=org.id, counterparty_id=buyer.id, snapshot=await preview_snapshot(session, org.id, deal, buyer.id), evidence="Synthetic E2E buyer binding", actor=actor))
             session.add(StockMovement(organization_id=org.id, sku_code=sku.code, warehouse="E2E-W", kind="in", qty=Decimal("10"), reason="receipt"))
             await session.commit()
-            print(json.dumps({"organization": org.id, "item": item.id, "sku": sku.code}))
+            print(json.dumps({"organization": org.id, "item": item.id, "sku": sku.code, "buyer": buyer.id}))
     finally:
         await db.disconnect()
 

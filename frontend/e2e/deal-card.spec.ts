@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 
 // Критический путь карточки: создать сделку → проверить реквизиты → выпустить счёт ERP с резервом.
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
-test("карточка сделки: выпуск счёта ERP с резервом", async ({ page }) => {
+test("карточка сделки: выпуск счёта ERP с резервом", async ({ page }, testInfo) => {
   const clientName = `ООО E2E-Документ ${Date.now()}`;
   await page.goto("/crm/deals");
   // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
@@ -30,7 +30,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
     cwd: resolve(process.cwd(), ".."),
     input: JSON.stringify({ deal_id: dealId, actor }),
     env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string };
+  })) as { organization: number; item: number; sku: string; buyer: number };
   const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
     source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
     currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
@@ -61,4 +61,15 @@ test("карточка сделки: выпуск счёта ERP с резерв
   const original = await page.request.get(`/api/sales/documents/${invoices[0].id}/render`);
   expect(original.ok()).toBeTruthy();
   expect(await original.text()).toContain("E2E invoice buyer");
+  await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
+  const dealRegister = page.getByRole("region", { name: "Реестр документов сделки", exact: true });
+  await expect(dealRegister.getByRole("button", { name: "Аннулирование счёта", exact: true })).toBeVisible();
+  await expect(dealRegister.getByRole("button", { name: "Фактическая отгрузка и акты", exact: true })).toBeVisible();
+  await expect(dealRegister.getByText(/Зарезервирован/).first()).toBeVisible();
+  await dealRegister.screenshot({ path: testInfo.outputPath("deal-document-register.png") });
+  await page.goto(`/erp/spravochniki/counterparty/${fixture.buyer}`);
+  const clientRegister = page.getByRole("region", { name: "Документы клиента по юрлицу", exact: true });
+  await clientRegister.getByLabel("Юрлицо документов клиента", { exact: true }).selectOption(String(fixture.organization));
+  await expect(clientRegister.getByRole("article", { name: `Документ клиента ${invoices[0].id}`, exact: true })).toBeVisible();
+  await clientRegister.screenshot({ path: testInfo.outputPath("client-document-register.png") });
 });
