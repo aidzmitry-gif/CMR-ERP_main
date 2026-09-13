@@ -97,6 +97,7 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-2 font-medium">Юрлицо</th>
               <th className="px-4 py-2 font-medium">Дата</th>
               <th className="px-4 py-2 font-medium">Тип</th>
               <th className="px-4 py-2 font-medium">SKU</th>
@@ -107,13 +108,14 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted">
                   Движений по фильтру нет
                 </td>
               </tr>
             )}
             {visible.map((m) => (
               <tr key={m.id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2.5 text-xs text-muted">{m.organization_id ? `Юрлицо №${m.organization_id}` : "Не определено"}</td>
                 <td className="px-4 py-2.5 text-xs tabular-nums text-muted">
                   {formatDate(m.created_at)}
                 </td>
@@ -160,10 +162,13 @@ const EMPTY = { sku: "", qty: "", warehouse: "Главный", loc: "", locTo: "
 export function WmsMovements({
   initial,
   locations,
+  organizations = [],
 }: {
   initial: StockMovement[];
   locations: WmsLocation[];
+  organizations?: { id: number; name: string }[];
 }) {
+  const [organizationId, setOrganizationId] = useState("");
   const [rows, setRows] = useState<StockMovement[]>(initial);
   const [op, setOp] = useState<OpKind>("receipt");
   const [f, setF] = useState({ ...EMPTY });
@@ -176,28 +181,56 @@ export function WmsMovements({
   );
 
   async function refresh() {
-    setRows(await fetchMovements());
+    setBusy(true);
+    try {
+      setRows(await fetchMovements());
+      setMsg(null);
+    } catch {
+      setMsg({ ok: false, text: "Не удалось обновить журнал. Показаны ранее загруженные движения." });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit() {
-    const qty = Number(f.qty.replace(",", "."));
+    if (!organizationId) {
+      setMsg({ ok: false, text: "Выберите юрлицо операции" });
+      return;
+    }
+    const quantity = f.qty.trim().replace(",", ".");
+    if (!/^-?\d{1,12}(\.\d{1,2})?$/.test(quantity) || (op !== "adjustment" && quantity.startsWith("-"))) {
+      setMsg({ ok: false, text: "Укажите корректное количество, не более двух знаков после запятой" });
+      return;
+    }
+    const qty = Number(quantity);
     if (!f.sku.trim() || !qty) {
       setMsg({ ok: false, text: "Укажите SKU и количество" });
       return;
     }
     setBusy(true);
     const loc = f.loc ? Number(f.loc) : null;
-    const base = { sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim() || "Главный", batch_ref: f.batch.trim(), note: f.note.trim() };
-    let ok = false;
-    if (op === "receipt") ok = await receipt({ ...base, location_id: loc });
-    else if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
-    else if (op === "adjustment") ok = await adjustment({ ...base, location_id: loc });
-    else ok = await transfer({ ...base, from_location_id: loc, to_location_id: f.locTo ? Number(f.locTo) : null });
-    setBusy(false);
-    setMsg({ ok, text: ok ? "Движение записано" : "Не удалось записать (проверьте данные/права)" });
-    if (ok) {
+    const base = { organization_id: Number(organizationId), sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim() || "Главный", batch_ref: f.batch.trim(), note: f.note.trim() };
+    try {
+      let ok = false;
+      if (op === "receipt") ok = await receipt({ ...base, location_id: loc });
+      else if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
+      else if (op === "adjustment") ok = await adjustment({ ...base, location_id: loc });
+      else ok = await transfer({ ...base, from_location_id: loc, to_location_id: f.locTo ? Number(f.locTo) : null });
+      if (!ok) {
+        setMsg({ ok: false, text: "Не удалось подтвердить запись. Обновите журнал перед повторной отправкой." });
+        return;
+      }
       setF({ ...EMPTY, warehouse: f.warehouse });
-      await refresh();
+      try {
+        setRows(await fetchMovements());
+        setMsg({ ok: true, text: "Движение записано" });
+      } catch {
+        setMsg({ ok: false, text: "Движение записано, но журнал не обновился. Нажмите «Обновить»; повторно записывать операцию не нужно." });
+      }
+    } catch {
+      setMsg({ ok: false, text: "Не удалось подтвердить запись. Обновите журнал перед повторной отправкой." });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -205,21 +238,27 @@ export function WmsMovements({
     <div className="flex-1 overflow-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">
-          Складские операции пишутся движениями в <b>журнал WMS</b> (дубль факта). Остаток 1С
-          не меняется — оперативный остаток смотрите в «Остатках (из движений)».
+          Складские операции записываются в <b>журнал движений ERP</b> с указанием юрлица.
+          Физический остаток рассчитывается по этим движениям. Первичные накладные на поступление находятся в закупках.
         </p>
         <div className="flex items-center gap-2">
           <Link href="/erp/wms/balances" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken">
             Остаток из движений →
           </Link>
-          <button onClick={refresh} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken">
+          <button disabled={busy} onClick={refresh} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken">
             <RefreshCw size={15} /> Обновить
           </button>
         </div>
       </div>
 
+      <label className="mt-4 block text-sm">Юрлицо операции
+        <select aria-label="Юрлицо операции" value={organizationId} disabled={busy} onChange={(event) => setOrganizationId(event.target.value)} className="ml-2 rounded-lg border border-line bg-surface p-2">
+          <option value="">Выберите юрлицо</option>
+          {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+        </select>
+      </label>
       {/* Панель операции */}
-      <div className="mt-4 rounded-xl border border-line bg-surface p-4">
+      <fieldset disabled={busy} className="mt-4 rounded-xl border border-line bg-surface p-4">
         <div className="inline-flex rounded-lg border border-line bg-sunken p-1">
           {OPS.map((o) => (
             <button
@@ -238,7 +277,7 @@ export function WmsMovements({
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           <input value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} placeholder="Код SKU*" className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
           <input value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} inputMode="decimal" placeholder={op === "adjustment" ? "Кол-во (±)" : "Кол-во*"} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
-          <input value={f.warehouse} onChange={(e) => setF({ ...f, warehouse: e.target.value })} placeholder="Склад" className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
+          <input value={f.warehouse} onChange={(e) => setF({ ...f, warehouse: e.target.value, loc: "", locTo: "" })} placeholder="Склад" className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
           <select value={f.loc} onChange={(e) => setF({ ...f, loc: e.target.value })} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent">
             <option value="">{op === "transfer" ? "Из ячейки" : "Ячейка"}</option>
             {locsForWh.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
@@ -256,9 +295,9 @@ export function WmsMovements({
           </button>
         </div>
         {msg && (
-          <p className={clsx("mt-2 text-xs", msg.ok ? "text-green-600" : "text-red-600")}>{msg.text}</p>
+          <p role="alert" className={clsx("mt-2 text-xs", msg.ok ? "text-green-600" : "text-red-600")}>{msg.text}</p>
         )}
-      </div>
+      </fieldset>
 
       {/* Журнал движений */}
       <MovementsLog rows={rows} />

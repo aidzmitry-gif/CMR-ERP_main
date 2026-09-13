@@ -42,6 +42,16 @@ beforeEach(() => {
 });
 
 describe("WmsBalances", () => {
+  it("shows separate owners and preserves rows when reload fails", async () => {
+    asMock(wms.fetchBalances).mockRejectedValueOnce(new Error("unavailable"));
+    render(<WmsBalances initial={{ rows: [row({ organization_id: 7 }), row({ organization_id: 8, qty: 2 })], sku_count: 1 }} />);
+    expect(screen.getByText("Юрлицо №7")).toBeInTheDocument();
+    expect(screen.getByText("Юрлицо №8")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
+    expect(screen.getByText("Юрлицо №7")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Обновить/ })).toBeEnabled();
+  });
   it("рендерит строки остатков: код, номенклатура, склад, ячейка, партия и число", () => {
     const initial: Balances = { rows: [row()], sku_count: 1 };
     render(<WmsBalances initial={initial} />);
@@ -81,10 +91,10 @@ describe("WmsBalances", () => {
     expect(qtyCell.className).toMatch(/text-red-600/);
   });
 
-  it("пустой список показывает заглушку «Движений ещё нет — оперативный остаток пуст»", () => {
+  it("пустой список показывает заглушку «Нет строк по выбранным условиям»", () => {
     render(<WmsBalances initial={{ rows: [], sku_count: 0 }} />);
     expect(
-      screen.getByText("Движений ещё нет — оперативный остаток пуст"),
+      screen.getByText("Нет строк по выбранным условиям"),
     ).toBeInTheDocument();
   });
 
@@ -119,7 +129,7 @@ describe("WmsBalances", () => {
       target: { value: "нет такого" },
     });
     expect(
-      screen.getByText("Движений ещё нет — оперативный остаток пуст"),
+      screen.getByText("Нет строк по выбранным условиям"),
     ).toBeInTheDocument();
   });
 
@@ -137,9 +147,9 @@ describe("WmsBalances", () => {
     expect(screen.getByText("SKU: 1")).toBeInTheDocument();
   });
 
-  it("ссылка «Остатки 1С →» ведёт на /erp/wms/stock", () => {
+  it("ссылка «Сверка с остатками 1С →» ведёт на /erp/wms/stock", () => {
     render(<WmsBalances initial={{ rows: [], sku_count: 0 }} />);
-    const link = screen.getByRole("link", { name: "Остатки 1С →" });
+    const link = screen.getByRole("link", { name: "Сверка с остатками 1С →" });
     expect(link).toHaveAttribute("href", "/erp/wms/stock");
   });
 });
