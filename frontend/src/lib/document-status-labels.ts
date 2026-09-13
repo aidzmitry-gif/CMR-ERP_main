@@ -1,0 +1,2 @@
+export const documentStatusLabels: Record<string, string> = { issued: "Выпущен", draft: "Черновик", posted: "Выпущен / проведён", paid: "Оплачен (статус документа)", pending_approval: "На согласовании", cancelled: "Аннулирован", rejected: "Отклонён" };
+export const reservationStatusLabels: Record<string, string> = { unreserved: "Без резерва", none: "Нет резерва", reserved: "Зарезервирован", consumed: "Исторический статус резерва: требуется сверка", released: "Резерв снят" };

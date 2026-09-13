@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { documentStatusLabels as states } from "@/lib/document-status-labels";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
@@ -9,7 +10,6 @@ import { fetchClientDocument, fetchClientDocuments, fetchClientOriginal, type Cl
 import { ShipmentDocumentDraft } from "@/components/erp/shipment-document-draft";
 
 const kinds: Record<string, string> = { invoice: "Счёт", contract: "Договор", order: "Заказ" };
-const states: Record<string, string> = { issued: "Выпущен", posted: "Выпущен / проведён", draft: "Черновик", paid: "Статус документа: оплачен", cancelled: "Аннулирован", pending_approval: "На согласовании", rejected: "Отклонён" };
 
 export function ClientDocumentRegister({ clientId }: { clientId: string }) {
   return <ClientSelection key={clientId} clientId={clientId} />;

@@ -2,11 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { documentStatusLabels, reservationStatusLabels } from "@/lib/document-status-labels";
 import type { LossReason } from "@/lib/types";
 import { fetchLossReasons } from "@/lib/api";
 import { beginLossCommand, dispatchLoss, fetchLossContext, fetchLossPreview, fetchLossProgress,
   readLossJournal, recoverLoss, requireScope, scopeOf, type Journal, type LossContext, type LossPreview,
   type LossRecord, type LossResolution, type LossAttempt, type RequestBody, type ResolveBody } from "@/lib/deal-loss-api";
+
+const blockerLabels: Record<string, string> = {
+  chief_invoice_cancellation_required: "Главному бухгалтеру нужно подтвердить аннулирование счёта.",
+  funds_not_fully_refunded: "Полученную оплату нужно полностью вернуть перед аннулированием.",
+  funds_not_fully_refunded_or_history_unknown: "Оплата возвращена не полностью либо история оплат ещё не сверена.",
+  money_not_fully_refunded_or_unknown: "Оплата возвращена не полностью либо история оплат ещё не сверена.",
+  physical_shipment_requires_return_workflow: "Товар уже отгружен: сначала оформите его возврат.",
+  accounting_fulfillment_classification_required: "Бухгалтеру нужно сверить документы исполнения счёта.",
+  unexecuted_logistics_withdrawal_required: "Нужно подтвердить остановку запланированной перевозки или торгов.",
+  cancelled_invoice_money_review_required: "Нужно сверить оплаты и возвраты по аннулированному счёту.",
+  missing_or_inconsistent_invoice_history: "История счёта неполная или содержит расхождения — нужна сверка.",
+};
 
 const INPUT = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink";
 const BUTTON = "rounded-lg border border-line px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed";
@@ -169,12 +182,15 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
           const r = rows.find(v => v.document_id === invoice.id);
           return <li key={invoice.id} className="rounded-lg border border-line p-3">
             <strong>Счёт ID {invoice.id} · версия {invoice.version}</strong>
-            <p>Статус: {r?.status ?? "не проверен"}. Резерв: {r?.reserve_status ?? "не проверен"}.</p>
+            <p>Статус: {r?.status ? documentStatusLabels[r.status] ?? "Неизвестен — нужна сверка" : "Не проверен"}. Резерв: {r?.reserve_status ? reservationStatusLabels[r.reserve_status] ?? "Неизвестен — нужна сверка" : "Не проверен"}.</p>
             {r?.money && <p>{moneyLabels[r.money.state] ?? r.money.state}. Получено: {r.money.received}; возвращено: {r.money.refunded}.</p>}
             {r?.ready ? <p className="text-green-700">Отмена и освобождение резерва подтверждены.</p>
               : <p className="text-amber-800">Для закрытия требуется подтверждённая отмена главбухом; оплаченный счёт — только после полного возврата.
                 Черновики и неизвестная история требуют сверки.</p>}
-            {!!r?.blockers?.length && <p className="text-xs text-muted">Основания блокировки: {r.blockers.join("; ")}</p>}
+            {!!r?.blockers?.length && <div className="text-sm text-muted"><p>Что нужно сделать:</p><ul className="list-disc pl-5">{r.blockers.map((code, index) =>
+              <li key={`${index}:${code}`}>{blockerLabels[code] ?? "Бухгалтеру нужно проверить основание блокировки в карточке счёта."}</li>)}</ul>
+              {r.blockers.some(code => !blockerLabels[code]) && <details className="mt-1 text-xs"><summary>Диагностика для поддержки</summary><p>{r.blockers.filter(code => !blockerLabels[code]).join("; ")}</p></details>}
+            </div>}
             {ctx?.organization_id && <a className="underline" href={`/crm/deals/${dealId}?org=${ctx.organization_id}&invoice=${invoice.id}#document-register`}>Открыть счёт и аннулирование</a>}
           </li>;
         })}</ul>

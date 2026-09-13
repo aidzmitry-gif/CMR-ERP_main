@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { documentStatusLabels as statuses, reservationStatusLabels as reserves } from "@/lib/document-status-labels";
 
 import { DealClientBinding } from "@/components/deal-client-binding";
 import { InvoicePhysicalShipment } from "@/components/erp/invoice-physical-shipment";
@@ -14,8 +15,6 @@ import { fetchDocumentRegister, fetchRegisterDocument, fetchRegisterOrganization
   type DocumentRegisterItem, type DocumentRegisterPage, type RegisterOrganization } from "@/lib/document-register-api";
 
 const kinds: Record<string, string> = { invoice: "Счёт", contract: "Договор", order: "Заказ" };
-const statuses: Record<string, string> = { issued: "Выпущен", draft: "Черновик", posted: "Выпущен / проведён", paid: "Статус документа: оплачен", pending_approval: "На согласовании", cancelled: "Аннулирован", rejected: "Отклонён" };
-const reserves: Record<string, string> = { unreserved: "Без резерва", none: "Нет резерва", reserved: "Зарезервирован", consumed: "Исторический статус резерва: требуется сверка", released: "Резерв снят" };
 const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось загрузить документы.";
 
 export function DealDocumentRegister({ dealId, org, initialDocumentId }: { dealId: string; org?: string; initialDocumentId?: number }) {

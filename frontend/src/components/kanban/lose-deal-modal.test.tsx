@@ -75,6 +75,8 @@ it("shows paid/full-refund blockers and provides exact scoped invoice link", asy
   await submit();
   expect(screen.getByRole("button", { name: "Завершить отказ" })).toBeDisabled();
   expect(screen.getByText(/Деньги ещё не возвращены полностью/)).toBeInTheDocument();
+  expect(screen.getByText("Полученную оплату нужно полностью вернуть перед аннулированием.")).toBeInTheDocument();
+  expect(screen.getByText(/Резерв: Зарезервирован/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Открыть счёт и аннулирование" })).toHaveAttribute("href", "/crm/deals/1?org=7&invoice=4#document-register");
   expect(s.posts.every(p => !/cancel|refund|review/.test(p.url))).toBe(true);
   s.ready = true; fireEvent.click(screen.getByRole("button", { name: "Обновить сведения" }));
@@ -119,7 +121,7 @@ it("withdrawal keeps invoice cancellation and a later request gets a new UUID", 
   fireEvent.click(screen.getByRole("button", { name: "Отозвать запрос" }));
   fireEvent.click(await screen.findByRole("button", { name: "Подготовить новый запрос" }));
   await submit(); expect(s.record!.request_id).not.toBe(first);
-  expect(screen.getByText(/Статус: cancelled/)).toBeInTheDocument();
+  expect(screen.getByText(/Статус: Аннулирован/)).toBeInTheDocument();
 });
 it("does not dispatch under a changed principal", async () => {
   const { s } = await server();
