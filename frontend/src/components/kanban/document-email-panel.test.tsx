@@ -56,6 +56,7 @@ async function open() {
   render(<DocumentEmailPanel dealId="1" />);
   fireEvent.click(screen.getByRole("button", { name: "Email документов" }));
   await screen.findByLabelText("Кому (To)");
+  await waitFor(() => expect(screen.getByLabelText("Кому (To)")).toBeEnabled());
 }
 
 describe("Email документов", () => {
@@ -159,6 +160,8 @@ describe("Email документов", () => {
     fireEvent.click(screen.getByRole("button", { name: "Email документов" }));
     fireEvent.click(screen.getByRole("button", { name: "Email документов" }));
     await screen.findByLabelText("Кому (To)");
+    // Reopening keeps fields mounted while sender/history refresh still holds the action lock.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Подготовить и проверить" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Подготовить и проверить" }));
     await screen.findByRole("button", { name: "Подтвердить отправку" });
     expect(prepareBodies).toHaveLength(2);
