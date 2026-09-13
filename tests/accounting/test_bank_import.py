@@ -227,3 +227,39 @@ async def test_owned_unposted_bank_source_blocks_month_close(client, db, book):
     await db.commit()
     undated = await closing_controls.snapshot(db, book[0], "2026-09")
     assert any(item["code"] == "unposted_bank_imports" for item in undated["blockers"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("occurred_on,expected_status", [(date(2026, 9, 3), 409), (date(2026, 8, 31), 409), (None, 409), (date(2026, 10, 1), 201)])
+async def test_new_bank_binding_cannot_invalidate_closed_period(client, db, book, occurred_on, expected_status):
+    from modules.accounting.models import Period
+
+    db.add(Period(organization_id=book[0], month="2026-09", closed=True, generation=0))
+    source = BankTransaction(ext_id="CLOSED-BIND", occurred_on=occurred_on, amount="120.00", currency="BYN")
+    db.add(source)
+    await db.commit()
+    source_id = source.id
+    result = await client.post(f"/accounting/organizations/{book[0]}/source-bindings", json={
+        "source_type": "finance_bank_transaction", "source_id": source.id, "ownership": "own", "evidence": "Synthetic bank ownership decision",
+    })
+    assert result.status_code == expected_status, result.text
+    saved = await db.scalar(select(SourceBinding.id).where(SourceBinding.source_id == source_id))
+    assert (saved is not None) == (expected_status == 201)
+
+
+@pytest.mark.asyncio
+async def test_existing_bank_binding_replays_after_period_closes(client, db, book):
+    from modules.accounting.models import Period
+
+    source = BankTransaction(ext_id="REPLAY-BIND", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN")
+    db.add(source)
+    await db.commit()
+    body = {"source_type": "finance_bank_transaction", "source_id": source.id, "ownership": "own", "evidence": "Synthetic replay decision"}
+    url = f"/accounting/organizations/{book[0]}/source-bindings"
+    first = await client.post(url, json=body)
+    assert first.status_code == 201, first.text
+    db.add(Period(organization_id=book[0], month="2026-09", closed=True, generation=0))
+    await db.commit()
+    replay = await client.post(url, json=body)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == first.json()["id"]
