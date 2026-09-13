@@ -29,6 +29,8 @@ jobs:
       AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@localhost:5432/aios
       # CI — не прод: разрешаем dev-дефолтные креды (Settings P0-5 иначе отклоняет aios:aios)
       AIOS_ENVIRONMENT: dev
+      # Dedicated admin DB; accounting fixtures create/drop their own UUID databases.
+      ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@localhost:5432/accounting_test
 
     steps:
       - uses: actions/checkout@v5
@@ -47,6 +49,13 @@ jobs:
         run: ruff check .
       - name: Apply migrations (Postgres)
         run: alembic upgrade head
+      - name: Create isolated accounting acceptance database
+        run: |
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("postgresql://aios:aios@localhost:5432/aios", autocommit=True) as connection:
+              connection.execute("CREATE DATABASE accounting_test")
+          PY
       - name: Tests with coverage (unit + api + integration)
         run: >-
           pytest -q
