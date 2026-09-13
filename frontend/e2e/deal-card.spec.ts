@@ -85,16 +85,15 @@ test("карточка сделки: выпуск счёта ERP с резерв
     lines: [{ line_no: basis.lines[0].line_no, warehouse: basis.lines[0].warehouse, qty: "1.00" }],
   } });
   expect(shipped.status(), await shipped.text()).toBe(201);
-  const remainderPreview = await page.request.post(`${warehousePath}/remainder-release/preview`, { data: identity });
-  expect(remainderPreview.ok()).toBeTruthy();
-  const released = await page.request.post(`${warehousePath}/remainder-release`, { data: {
-    ...identity, source_key: crypto.randomUUID(), expected_basis_digest: (await remainderPreview.json()).basis_digest,
-    evidence: "Synthetic customer declined unshipped remainder",
-  } });
-  expect(released.status(), await released.text()).toBe(201);
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
   await page.getByRole("button", { name: "Фактическая отгрузка и акты", exact: true }).click();
   const shipmentPanel = page.getByRole("region", { name: "Фактическая отгрузка счёта", exact: true });
+  await shipmentPanel.getByLabel("Причина снятия остатка", { exact: true }).fill("Synthetic customer declined unshipped remainder");
+  await shipmentPanel.getByRole("button", { name: "Рассчитать снятие остатка", exact: true }).click();
+  await expect(shipmentPanel.getByText(/снять 1.00/)).toBeVisible();
+  await shipmentPanel.getByRole("region", { name: "Снятие неотгруженного остатка", exact: true }).screenshot({ path: testInfo.outputPath("remainder-confirmation.png") });
+  await shipmentPanel.getByRole("button", { name: "Подтвердить снятие остатка", exact: true }).click();
+  await expect(shipmentPanel.getByText(/Остаток резерва снят. Квитанция №/)).toBeVisible();
   await expect(shipmentPanel.getByText("Неотгруженный остаток резерва снят", { exact: true })).toBeVisible();
   await expect(shipmentPanel.getByRole("button", { name: "Проверить выбранную отгрузку", exact: true })).toBeDisabled();
   await shipmentPanel.screenshot({ path: testInfo.outputPath("released-remainder.png") });
