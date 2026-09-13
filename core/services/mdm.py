@@ -25,6 +25,7 @@ from core.domain.models import (
     Contact,
     Counterparty,
     CounterpartyAlias,
+    CounterpartyBranch,
     CounterpartyUnpConflict,
     SurvivorshipRule,
     lock_counterparty_unps,
@@ -51,7 +52,7 @@ def _normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 #: поля контрагента, участвующие в survivorship при слиянии
-_SURVIVORSHIP_FIELDS = ("name", "unp")
+_SURVIVORSHIP_FIELDS = ("name", "unp", "display_name", "legal_name")
 
 #: префикс ссылки на контрагента в журнале аудита (``entity_ref``)
 AUDIT_ENTITY_PREFIX = "counterparty:"
@@ -68,6 +69,8 @@ class ManualCounterpartyFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    legal_name: str | None = Field(default=None, min_length=1, max_length=255)
     unp: str | None = None
     legal_address: str | None = Field(default=None, max_length=1000)
     registry_status: str | None = Field(default=None, max_length=255)
@@ -86,7 +89,7 @@ class ManualCounterpartyFields(BaseModel):
             return value or None
         return value
 
-    @field_validator("name")
+    @field_validator("name", "display_name", "legal_name")
     @classmethod
     def name_required_if_supplied(cls, value):
         if value is None:
@@ -192,7 +195,10 @@ class CounterpartyWrite(BaseModel):
         if len(ids) != len(set(ids)) or sum(c.is_primary is True for c in self.contacts) > 1:
             raise ValueError("Повтор контакта или несколько основных контактов")
         if self.registry:
-            overlap = set(self.registry.fields) & self.manual.model_fields_set - {"unp"}
+            registry_targets = set(self.registry.fields)
+            if "name" in registry_targets:
+                registry_targets.add("legal_name")
+            overlap = registry_targets & self.manual.model_fields_set - {"unp"}
             if overlap:
                 raise ValueError("Поле нельзя одновременно менять вручную и из реестра")
             if "unp" in self.manual.model_fields_set and self.manual.unp != self.registry.unp:
@@ -264,29 +270,31 @@ async def save_counterparty(
             raise CounterpartyUnpConflict(ids)
     contacts = list((await session.scalars(select(Contact).where(
         Contact.counterparty_id == counterparty_id,
+        Contact.branch_id.is_(None),
     ))).all()) if cp else []
     by_id = {contact.id: contact for contact in contacts}
     if any(p.id is not None and p.id not in by_id for p in payload.contacts):
         raise CounterpartyWriteError("contact_not_owned", "Контакт не принадлежит этой компании", 422)
     before = None if cp is None else {
         "name": cp.name, "unp": cp.unp, "requisites": deepcopy(cp.requisites or {}),
+        "display_name": cp.display_name, "legal_name": cp.legal_name,
         "provenance": deepcopy(cp.provenance or {}),
         "contacts": [_contact_dict(c) for c in contacts],
     }
     rules = await survivorship.load_rules(session, "counterparty") if registry_data else {}
     if cp is None:
-        name = manual.get("name") or (registry_data["name"] if registry_data and "name" in payload.registry.fields else None)
+        name = manual.get("name") or manual.get("display_name") or manual.get("legal_name") or (registry_data["name"] if registry_data and "name" in payload.registry.fields else None)
         if not name:
             raise CounterpartyWriteError("name_required", "Нужно название компании", 422)
-        cp = Counterparty(name=name, unp=effective_unp, provenance={}, requisites={})
+        cp = Counterparty(name=name, display_name=name, unp=effective_unp, provenance={}, requisites={})
         session.add(cp)
     provenance = dict(cp.provenance or {})
     requisites = dict(cp.requisites or {})
     now = datetime.now(UTC).isoformat()
     for field, value in manual.items():
-        current = getattr(cp, field) if field in {"name", "unp"} else requisites.get(field)
+        current = getattr(cp, field) if field in {"name", "unp", "display_name", "legal_name"} else requisites.get(field)
         if current != value or provenance.get(field, {}).get("source") != "manual":
-            if field in {"name", "unp"}:
+            if field in {"name", "unp", "display_name", "legal_name"}:
                 setattr(cp, field, value)
             else:
                 requisites[field] = value
@@ -294,14 +302,16 @@ async def save_counterparty(
     if registry_data:
         registry_fields = list(payload.registry.fields)
         for field in registry_fields:
-            rule = survivorship.rule_for(rules, field)
+            target = "legal_name" if field == "name" else field
+            rule_field = target if target in rules else field
+            rule = survivorship.rule_for(rules, rule_field)
             if rule.strategy == "manual_only":
                 raise CounterpartyWriteError("protected_field", "Поле закреплено за ручным вводом")
             value = registry_data[_REGISTRY_FIELDS[field]]
-            current = getattr(cp, field) if field in {"name", "unp"} else requisites.get(field)
-            if field in rules and not survivorship.is_empty(current):
+            current = getattr(cp, target) if target in {"legal_name", "unp"} else requisites.get(target)
+            if rule_field in rules and not survivorship.is_empty(current):
                 incoming = survivorship.FieldValue(value, registry_data["source"], registry_data["fetched_at"])
-                current_prov = provenance.get(field, {})
+                current_prov = provenance.get(target, {})
                 winner = survivorship.decide(
                     survivorship.FieldValue(current, current_prov.get("source", "manual"), current_prov.get("at")),
                     incoming, rule,
@@ -309,12 +319,12 @@ async def save_counterparty(
                 if winner is not incoming and (current != value or current_prov.get("source") != incoming.source):
                     raise CounterpartyWriteError("protected_field", "Выбранное поле защищено правилом источников")
             # Явное применение выбранных полей может заменить manual; произвольный синк — нет.
-            if current != value or provenance.get(field, {}).get("source") != registry_data["source"]:
-                if field in {"name", "unp"}:
-                    setattr(cp, field, value)
+            if current != value or provenance.get(target, {}).get("source") != registry_data["source"]:
+                if target in {"legal_name", "unp"}:
+                    setattr(cp, target, value)
                 else:
-                    requisites[field] = value
-                provenance[field] = {"source": registry_data["source"], "at": registry_data["fetched_at"],
+                    requisites[target] = value
+                provenance[target] = {"source": registry_data["source"], "at": registry_data["fetched_at"],
                                      "source_url": registry_data["source_url"]}
     cp.provenance, cp.requisites = provenance, requisites
     if counterparty_id is None:
@@ -341,6 +351,7 @@ async def save_counterparty(
         cp.provenance = {**cp.provenance, "contacts": {"source": "manual", "at": now}}
     await session.flush()
     after = {"name": cp.name, "unp": cp.unp, "requisites": dict(cp.requisites or {}),
+             "display_name": cp.display_name, "legal_name": cp.legal_name,
              "provenance": deepcopy(cp.provenance or {}),
              "contacts": [_contact_dict(c) for c in contacts]}
     if before != after:
@@ -472,7 +483,7 @@ async def link_contact(
     if conds:
         existing = (
             await session.execute(
-                select(Contact).where(Contact.counterparty_id == counterparty_id, or_(*conds))
+                select(Contact).where(Contact.counterparty_id == counterparty_id, Contact.branch_id.is_(None), or_(*conds))
             )
         ).scalars().first()
     if existing is not None:
@@ -589,7 +600,8 @@ def _entity_ref(counterparty_id: int) -> str:
 
 
 async def merge(
-    session: AsyncSession, event_bus, survivor_id: int, duplicate_id: int, *, by: str = ""
+    session: AsyncSession, event_bus, survivor_id: int, duplicate_id: int, *, by: str = "",
+    reference_guard=None,
 ) -> Counterparty:
     """Слить ``duplicate`` в ``survivor``: survivorship + архив дубля + alias. Обратимо.
 
@@ -599,12 +611,30 @@ async def merge(
     """
     if survivor_id == duplicate_id:
         raise ValueError("нельзя слить запись саму с собой")
-    survivor = await session.get(Counterparty, survivor_id)
-    duplicate = await session.get(Counterparty, duplicate_id)
+    ids = (survivor_id, duplicate_id)
+    unps = set(await session.scalars(select(Counterparty.unp).where(Counterparty.id.in_(ids))))
+    await session.run_sync(lambda sync: lock_counterparty_unps(sync, {u for u in unps if u}))
+    locked = (await session.scalars(select(Counterparty).where(Counterparty.id.in_(ids))
+                                   .order_by(Counterparty.id).with_for_update()
+                                   .execution_options(populate_existing=True))).all()
+    by_id = {cp.id: cp for cp in locked}
+    survivor, duplicate = by_id.get(survivor_id), by_id.get(duplicate_id)
     if survivor is None or duplicate is None:
         raise ValueError("контрагент не найден")
-    if duplicate.merged_into_id is not None:
-        raise ValueError("дубль уже слит")
+    if any(cp.unp not in unps for cp in locked):
+        raise ValueError("УНП изменён параллельно; обновите карточки перед объединением")
+    if not survivor.is_active or survivor.merged_into_id is not None:
+        raise ValueError("нельзя объединить с архивным или уже слитым эталоном")
+    if not duplicate.is_active or duplicate.merged_into_id is not None:
+        raise ValueError("дубль архивирован или уже слит")
+    if await session.scalar(select(CounterpartyBranch.id).where(
+        CounterpartyBranch.legal_entity_id.in_(ids),
+    ).limit(1)) is not None:
+        raise ValueError("У контрагента есть филиалы: сначала требуется явное согласование их принадлежности")
+    if reference_guard is None:
+        raise ValueError("Проверка связанных сделок недоступна; объединение запрещено")
+    if await reference_guard(session, ids):
+        raise ValueError("Есть связанные сделки: перед объединением требуется явное согласование их принадлежности")
     _apply_survivorship(survivor, duplicate)
     duplicate.is_active = False
     duplicate.merged_into_id = survivor_id
@@ -687,6 +717,9 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
     if cp is None:
         return None
 
+    from core.services.counterparty_branches import branches_for_parent
+
+    branch_data = await branches_for_parent(session, counterparty_id)
     alias_rows = await aliases(session, counterparty_id)
     merged = (
         await session.execute(
@@ -698,7 +731,7 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
     contacts = (
         await session.execute(
             select(Contact)
-            .where(Contact.counterparty_id == counterparty_id)
+            .where(Contact.counterparty_id == counterparty_id, Contact.branch_id.is_(None))
             .order_by(Contact.is_primary.desc(), Contact.id)
         )
     ).scalars().all()
@@ -714,7 +747,10 @@ async def counterparty_card(session: AsyncSession, counterparty_id: int) -> dict
     return {
         "id": cp.id,
         "name": cp.name,
+        "display_name": cp.display_name or cp.name,
+        "legal_name": cp.legal_name,
         "unp": cp.unp,
+        "branches": branch_data["branches"],
         "is_active": cp.is_active,
         "merged_into_id": cp.merged_into_id,
         "requisites": cp.requisites or {},

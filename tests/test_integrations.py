@@ -9,6 +9,68 @@ from modules.integrations.module import IntegrationsModule
 from modules.integrations.registry import RegistryClient
 
 
+async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity(api, session, monkeypatch):
+    from sqlalchemy import select
+
+    from core.domain.models import Counterparty, CounterpartyBranch, CounterpartyBranchAlias
+    from modules.integrations.client import OneCClient
+
+    parent = '00000000-0000-0000-0000-000000000001'
+    empty = '00000000-0000-0000-0000-000000000000'
+    head = {'Ref_Key': parent, 'Description': 'Working head', 'НаименованиеПолное': 'Legal head',
+            'ИНН': '600187521', 'ОбособленноеПодразделение': False, 'ГоловнойКонтрагент_Key': empty}
+    branch = {'Description': 'First branch', 'ИНН': '600187521', 'ОбособленноеПодразделение': True,
+              'ГоловнойКонтрагент_Key': parent, 'КодФилиала': '0002'}
+    rows = [{**branch, 'Ref_Key': '00000000-0000-0000-0000-000000000002'}, head,
+            {**branch, 'Ref_Key': '00000000-0000-0000-0000-000000000003', 'Description': 'Second branch'}]
+    client = OneCClient('https://onec.test')
+    monkeypatch.setattr(client, '_get_all', lambda *args, **kwargs: rows)
+    gateway = api._transport.app.state.core.services.onec
+    monkeypatch.setattr(gateway, 'fetch_counterparties', client.fetch_counterparties)
+    for _ in range(2):
+        response = await api.post('/integrations/1c/sync')
+        assert response.status_code == 200, response.text
+    parents = list(await session.scalars(select(Counterparty)))
+    branches = list(await session.scalars(select(CounterpartyBranch)))
+    aliases = list(await session.scalars(select(CounterpartyBranchAlias)))
+    assert len(parents) == 1 and parents[0].legal_name == 'Legal head'
+    assert len(branches) == len(aliases) == 2
+    assert {b.name for b in branches} == {'First branch', 'Second branch'}
+    assert all(b.legal_entity_id == parents[0].id and b.portal_branch_code is None for b in branches)
+    assert all(b.provenance['raw_branch_code']['value'] == '0002' for b in branches)
+
+
+@pytest.mark.parametrize('changes', [
+    {'ОбособленноеПодразделение': 'false'},
+    {'ОбособленноеПодразделение': None},
+    {'ГоловнойКонтрагент_Key': 'not-a-guid'},
+    {'ГоловнойКонтрагент_Key': '00000000-0000-0000-0000-000000000000'},
+    {'ГоловнойКонтрагент_Key': '00000000-0000-0000-0000-000000000002'},
+    {'ОбособленноеПодразделение': False},
+    {'Description': ''},
+    {'Ref_Key': ''},
+])
+async def test_onec_ambiguous_branch_wire_is_never_treated_as_legal_entity(api, session, monkeypatch, changes):
+    from sqlalchemy import func, select
+
+    from core.domain.models import Counterparty, CounterpartyBranch, OutboxEvent
+    from modules.integrations.client import OneCClient
+
+    row = {'Ref_Key': '00000000-0000-0000-0000-000000000002', 'Description': 'Branch',
+           'ИНН': '600187521', 'ОбособленноеПодразделение': True,
+           'ГоловнойКонтрагент_Key': '00000000-0000-0000-0000-000000000001', **changes}
+    client = OneCClient('https://onec.test')
+    monkeypatch.setattr(client, '_get_all', lambda *args, **kwargs: [row])
+    gateway = api._transport.app.state.core.services.onec
+    monkeypatch.setattr(gateway, 'fetch_counterparties', client.fetch_counterparties)
+    response = await api.post('/integrations/1c/sync')
+    assert response.status_code in (422, 502), response.text
+    assert response.json()['detail']['code'] in ('invalid_onec_classification', 'invalid_onec_identity', 'branch_mapping_required')
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 0
+    assert await session.scalar(select(func.count()).select_from(CounterpartyBranch)) == 0
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == 0
+
+
 async def test_1c_sync(session, api):
     from sqlalchemy import select
 
@@ -60,6 +122,45 @@ async def test_egr_lookup(api):
 
     # неизвестный УНП → 404
     assert (await api.get("/integrations/egr/000000000")).status_code == 404
+
+
+async def test_sync_conflict_rolls_back_the_whole_import(api, session, monkeypatch):
+    from sqlalchemy import func, select
+
+    from core.domain.models import Counterparty
+    from core.services.mdm import CounterpartyWriteError
+    from modules.integrations import routes
+
+    async def conflicted_sync(session, *_):
+        session.add(Counterparty(name="Uncommitted import"))
+        await session.flush()
+        raise CounterpartyWriteError("ambiguous_unp", "Несколько юридических лиц с одним УНП")
+
+    monkeypatch.setattr(routes, "sync_1c", conflicted_sync)
+    response = await api.post("/integrations/1c/sync")
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ambiguous_unp"
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 0
+
+
+async def test_onec_preserves_both_names_and_rejects_truncated_legal_name(api, monkeypatch):
+    from modules.integrations.client import OneCClient
+
+    client = OneCClient("https://onec.test")
+    ref = '00000000-0000-0000-0000-000000000001'
+    rows = [{"Ref_Key": ref, "Description": "Короткое имя", "НаименованиеПолное": "Полное юридическое имя", "ИНН": "600187521",
+             "ОбособленноеПодразделение": False, "ГоловнойКонтрагент_Key": '00000000-0000-0000-0000-000000000000'}]
+    monkeypatch.setattr(client, "_get_all", lambda *args, **kwargs: rows)
+    mapped = client._fetch_counterparties_sync()
+    assert mapped == [{"id": ref, "name": "Короткое имя", "legal_name": "Полное юридическое имя", "unp": "600187521"}]
+    rows[0]["НаименованиеПолное"] = "Ю" * 256
+    mapped = client._fetch_counterparties_sync()
+    assert len(mapped[0]["legal_name"]) == 256
+    gateway = api._transport.app.state.core.services.onec
+    monkeypatch.setattr(gateway, "fetch_counterparties", AsyncMock(return_value=mapped))
+    response = await api.post("/integrations/1c/sync")
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "invalid_legal_name"
 
 
 @pytest.mark.parametrize(("code", "status"), [

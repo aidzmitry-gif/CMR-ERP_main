@@ -9,8 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date
+from uuid import UUID
 
 import httpx
+
+from core.services.mdm import CounterpartyWriteError
 
 log = logging.getLogger("integrations.onec")
 
@@ -111,18 +114,41 @@ class OneCClient:
     def _fetch_counterparties_sync(self) -> list[dict]:
         rows = self._get_all(
             "Catalog_Контрагенты",
-            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН",
+            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН,ОбособленноеПодразделение,ГоловнойКонтрагент_Key,КодФилиала",
              "$orderby": "Ref_Key"},
             page_size=500,
         )
         out: list[dict] = []
         for row in rows:
-            name = (row.get("НаименованиеПолное") or row.get("Description") or "").strip()
+            if not row:
+                continue
+            is_branch = row.get("ОбособленноеПодразделение")
+            if type(is_branch) is not bool:
+                raise CounterpartyWriteError("invalid_onec_classification", "1С вернула неоднозначный тип контрагента", 502)
+            legal_name = (row.get("НаименованиеПолное") or "").strip() or None
+            name = (row.get("Description") or legal_name or "").strip()
             unp = (row.get("ИНН") or "").strip() or None
             ref = str(row.get("Ref_Key") or "")
             if not name or not ref:
+                if is_branch:
+                    raise CounterpartyWriteError("invalid_onec_identity", "У филиала 1С отсутствует наименование или ID", 502)
                 continue
-            out.append({"name": name[:256], "unp": unp, "id": ref})
+            # Confirmed against the live ka_copy metadata and one branch record.
+            # Missing/ambiguous classification must never flatten a branch into a legal entity.
+            try:
+                source_id = UUID(ref)
+                parent_id = UUID(row.get("ГоловнойКонтрагент_Key"))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise CounterpartyWriteError("invalid_onec_identity", "1С вернула некорректную ссылку контрагента", 502) from exc
+            if not source_id.int or (not is_branch and parent_id.int):
+                raise CounterpartyWriteError("invalid_onec_classification", "1С вернула неоднозначный тип контрагента", 502)
+            if is_branch:
+                if not parent_id.int or parent_id == source_id:
+                    raise CounterpartyWriteError("branch_mapping_required", "У филиала 1С отсутствует корректная ссылка на головное предприятие", 422)
+                out.append({"id": str(source_id), "record_kind": "branch", "name": name,
+                            "parent_external_ref": str(parent_id), "raw_branch_code": row.get("КодФилиала")})
+            else:
+                out.append({"name": name[:255], "legal_name": legal_name, "unp": unp, "id": str(source_id)})
         return out
 
     def _fetch_stock_sync(self) -> list[dict]:
@@ -192,6 +218,8 @@ class OneCClient:
             return list(_MOCK_COUNTERPARTIES)
         try:
             return await asyncio.to_thread(self._fetch_counterparties_sync)
+        except CounterpartyWriteError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("1C fetch_counterparties failed (%s) — empty", exc)
             return []

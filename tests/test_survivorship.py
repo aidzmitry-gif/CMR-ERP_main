@@ -71,13 +71,15 @@ async def test_source_priority_rule_lets_egr_win_over_existing_1c(session):
         entity_type="counterparty", field="name", strategy="source_priority",
         source_priority=["egr", "erp", "manual", "1c", "bitrix"],
     ))
-    cp = Counterparty(name="Имя из 1С", unp="191000003",
-                      provenance={"name": {"source": "1c", "at": "2026-06-02"}})
+    cp = Counterparty(name="Имя из 1С", legal_name="Юридическое1С", unp="191000003",
+                      provenance={"name": {"source": "1c", "at": "2026-06-02"},
+                                  "legal_name": {"source": "1c", "at": "2026-06-02"}})
     session.add(cp)
     await session.flush()
 
     await reference_import.upsert_counterparty(
-        session, unp="191000003", name="ОАО из ЕГР", source="egr", external_ref="z1"
+        session, unp="191000003", name="ОАО из ЕГР", legal_name="ОАО из ЕГР", source="egr", external_ref="z1"
     )
-    assert cp.name == "ОАО из ЕГР"  # ЕГР приоритетнее 1С → перезаписал
-    assert cp.provenance["name"]["source"] == "egr"
+    assert cp.name == "Имя из 1С"  # Старое имя остаётся совместимым с историческими ссылками.
+    assert cp.legal_name == "ОАО из ЕГР"
+    assert cp.provenance["legal_name"]["source"] == "egr"

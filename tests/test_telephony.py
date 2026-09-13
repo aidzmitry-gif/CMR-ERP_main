@@ -101,7 +101,7 @@ async def test_resolve_owner_by_active_deal(session):
     session.add(cp)
     await session.flush()
     session.add(Contact(counterparty_id=cp.id, full_name="Клиент", phone="+375291112233", is_primary=True))
-    deal = Deal(number="RSLV-1", title="t", counterparty="ООО Резолв", owner="Иванов И.И.", stage="new")
+    deal = Deal(number="RSLV-1", title="t", counterparty="ООО Резолв", counterparty_id=cp.id, owner="Иванов И.И.", stage="new")
     session.add(deal)
     await session.commit()
 
@@ -123,7 +123,7 @@ async def test_resolve_owner_closed_deal_no_deal_id(session):
     await session.flush()
     session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291112244", is_primary=True))
     session.add(
-        Deal(number="CLS-1", title="t", counterparty="ООО Закрыт", owner="Петров П.П.", stage="won")
+        Deal(number="CLS-1", title="t", counterparty="ООО Закрыт", counterparty_id=cp.id, owner="Петров П.П.", stage="won")
     )
     await session.commit()
 
@@ -179,7 +179,7 @@ async def test_incoming_logs_resolves_and_pushes(session):
     session.add(cp)
     await session.flush()
     session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291110000", is_primary=True))
-    session.add(Deal(number="PUSH-1", title="t", counterparty="ООО Пуш", owner="Сидоров С.С.", stage="prop"))
+    session.add(Deal(number="PUSH-1", title="t", counterparty="ООО Пуш", counterparty_id=cp.id, owner="Сидоров С.С.", stage="prop"))
     await session.commit()
 
     # продавец подписан на поток своих звонков
@@ -370,7 +370,7 @@ async def test_list_calls_filter_by_deal_id(session, api):
     session.add(cp)
     await session.flush()
     session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291230111", is_primary=True))
-    deal = Deal(number="FLT-1", title="t", counterparty="ООО Фильтр", owner="Орлов О.О.", stage="prop")
+    deal = Deal(number="FLT-1", title="t", counterparty="ООО Фильтр", counterparty_id=cp.id, owner="Орлов О.О.", stage="prop")
     session.add(deal)
     await session.commit()
 

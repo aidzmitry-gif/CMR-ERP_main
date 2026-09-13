@@ -18,17 +18,18 @@ import {
 import { formatAuditDate, sourceMeta } from "@/lib/spravochniki-card";
 
 type RegistryField = CounterpartyRegistryField;
-type ManualField = "name" | "unp" | "legal_address" | "registry_status" | "bank_name" | "bank_account" | "bank_bic";
+type ManualField = "display_name" | "legal_name" | "unp" | "legal_address" | "registry_status" | "bank_name" | "bank_account" | "bank_bic";
 
 const REGISTRY_FIELDS: RegistryField[] = ["name", "unp", "legal_address", "registry_status"];
 const REGISTRY_LABELS: Record<RegistryField, string> = {
-  name: "Наименование",
+  name: "Юридическое наименование",
   unp: "УНП",
   legal_address: "Юридический адрес",
   registry_status: "Статус реестра",
 };
 const MANUAL_FIELDS: ManualField[] = [
-  "name",
+  "display_name",
+  "legal_name",
   "unp",
   "legal_address",
   "registry_status",
@@ -68,7 +69,8 @@ type DraftContact = {
 };
 
 type Draft = {
-  name: string;
+  display_name: string;
+  legal_name: string;
   unp: string;
   legal_address: string;
   registry_status: string;
@@ -90,7 +92,8 @@ function text(value: string | null | undefined): string {
 function draftFromCard(card: CounterpartyCard): Draft {
   const requisites = card.requisites ?? {};
   return {
-    name: card.name,
+    display_name: card.display_name ?? card.name,
+    legal_name: text(card.legal_name),
     unp: text(card.unp),
     legal_address: text(requisites.legal_address),
     registry_status: text(requisites.registry_status),
@@ -110,7 +113,8 @@ function draftFromCard(card: CounterpartyCard): Draft {
 
 function emptyDraft(initialUnp = ""): Draft {
   return {
-    name: "",
+    display_name: "",
+    legal_name: "",
     unp: initialUnp,
     legal_address: "",
     registry_status: "",
@@ -131,7 +135,7 @@ function valuesFromRegistry(data: RegistryInfo): Record<RegistryField, string> {
 }
 
 function currentValue(draft: Draft, field: RegistryField): string {
-  return draft[field];
+  return draft[field === "name" ? "legal_name" : field];
 }
 
 function queryHref(id: number, query?: ReturnQuery): string {
@@ -235,10 +239,11 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
 
   function updateField(field: ManualField, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
-    if (REGISTRY_FIELDS.includes(field as RegistryField)) {
+    const registryField = field === "legal_name" ? "name" : field as RegistryField;
+    if (REGISTRY_FIELDS.includes(registryField)) {
       setSelectedFields((current) => {
         const next = new Set(current);
-        next.delete(field as RegistryField);
+        next.delete(registryField);
         return next;
       });
     }
@@ -321,7 +326,7 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
     const selectedPreview = preview && selectedFields.size > 0 ? preview : null;
     const effectiveName = selectedPreview && selectedFields.has("name")
       ? selectedPreview.values.name
-      : normalize(draft.name);
+      : normalize(draft.display_name) || normalize(draft.legal_name);
     const effectiveUnp = selectedPreview && selectedFields.has("unp")
       ? selectedPreview.values.unp
       : normalize(draft.unp);
@@ -347,7 +352,7 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
     const manual: Record<string, string | null> = {};
     const selected = selectedFields;
     for (const field of MANUAL_FIELDS) {
-      if (selected.has(field as RegistryField)) continue;
+      if (selected.has(field === "legal_name" ? "name" : field as RegistryField)) continue;
       const value = normalize(draft[field]);
       const initialValue = normalize(savedDraft[field]);
       if (!isEdit) {
@@ -528,12 +533,21 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
           <div className="rounded-2xl bg-surface p-5 shadow-card">
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <label className="min-w-0 text-sm text-muted">
-                Наименование
+                Название в системе
                 <input
                   className="mt-1 w-full min-w-0 rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
-                  value={draft.name}
-                  onChange={(event) => updateField("name", event.target.value)}
+                  value={draft.display_name}
+                  onChange={(event) => updateField("display_name", event.target.value)}
                   aria-label="Наименование компании"
+                />
+              </label>
+              <label className="min-w-0 text-sm text-muted">
+                Юридическое наименование для документов
+                <input
+                  className="mt-1 w-full min-w-0 rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
+                  value={draft.legal_name}
+                  onChange={(event) => updateField("legal_name", event.target.value)}
+                  aria-label="Юридическое наименование для документов"
                 />
               </label>
               <label className="min-w-0 text-sm text-muted">

@@ -238,7 +238,10 @@ async def test_orm_cannot_overwrite_a_saved_original(api, session):
 
 
 async def test_missing_price_cannot_issue_a_misleading_zero_invoice(api, session):
-    deal = Deal(number='NO-PRICE', title='Missing price', counterparty='Buyer')
+    cp = Counterparty(name='Buyer')
+    session.add(cp)
+    await session.flush()
+    deal = Deal(number='NO-PRICE', title='Missing price', counterparty='Buyer', counterparty_id=cp.id)
     sku = Sku(code='NO-PRICE', title='Unpriced', unit='шт')
     session.add_all([deal, sku])
     await session.flush()
@@ -249,12 +252,16 @@ async def test_missing_price_cannot_issue_a_misleading_zero_invoice(api, session
 
 
 async def test_external_template_resources_cannot_change_an_original(api, session):
-    deal = Deal(number='REMOTE', title='Remote asset', counterparty='Buyer')
+    cp = Counterparty(name='Buyer')
+    session.add(cp)
+    await session.flush()
+    deal = Deal(number='REMOTE', title='Remote asset', counterparty='Buyer', counterparty_id=cp.id)
     template = ContractTemplate(code='REMOTE', name='Remote', body='<img src="https://example.com/changing.png">')
     session.add_all([deal, template])
     await session.commit()
     result = await api.post(f'/sales/deals/{deal.id}/contract', json={'template_code': 'REMOTE'})
     assert result.status_code == 422
+    assert 'Внешние ресурсы' in result.json()['detail']
 
 async def test_rejected_replacement_does_not_leave_two_active_contracts(api, session):
     deal, _, *_ = await make_invoice(api, session)

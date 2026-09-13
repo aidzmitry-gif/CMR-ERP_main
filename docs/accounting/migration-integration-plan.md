@@ -1,6 +1,6 @@
 # Accounting migration integration proposal
 
-Status: SEND application and revision 0120 integrated in the accounting agent branch; counterparty, ESCHF and accounting revisions remain pending. Not deployed or production-ready.
+Status: SEND application and revision 0120 integrated in the accounting agent branch; counterparty application and revisions 0117–0119 are also integrated; ESCHF and accounting revisions remain pending. Not deployed or production-ready.
 
 The separate worktrees currently branch from different parents. Proposed combined order:
 
@@ -31,7 +31,7 @@ Local evidence: `reports/CRM-ACC-001/acc_install_d37b6fe404bc475cae7221e86a85b42
 
 ## Remaining release work
 
-1. SEND application changes are integrated from root `62cfcdc6` / sales `a5562b4`, preserving accounting routes and proxy cache headers. Counterparty identities and ESCHF application changes remain to integrate; SQL compatibility alone does not prove API/model compatibility.
+1. SEND application changes are integrated from root `62cfcdc6` / sales `a5562b4`, preserving accounting routes and proxy cache headers. Counterparty identities are integrated at the checkpoint below; ESCHF application changes remain to integrate; SQL compatibility alone does not prove API/model compatibility.
 2. Reconcile shared revision reservations against the final upstream branches; recheck source hashes if any migration changes.
 3. Register the accounting revision after the final shared chain and apply the **registered** chain on an isolated PostgreSQL database; verify one head and the resulting alembic_version.
 4. Review correction/downgrade behavior and test a backup/restore of the final registered schema before production authorization.
@@ -44,4 +44,14 @@ The agent branch now registers the unchanged SEND migration 0120 after 0116; `al
 
 Acceptance: 132 selected backend tests passed, one skipped and two subtests passed; 18 frontend tests passed; TypeScript, targeted ESLint and Ruff passed. The actual Next page was inspected with an incoming synthetic request and blocked external requests. These checks do not prove a registered PostgreSQL upgrade or live mailbox delivery. The PostgreSQL routing suite is included for CI.
 
-Next: integrate counterparty and ESCHF application packages, preserve the agreed chain, then register and verify the accounting revision.
+Next: integrate the remaining ESCHF application package, preserve the agreed chain, then register and verify the accounting revision.
+
+## Counterparty integration checkpoint (2026-09-13)
+
+Integrated root `58e6808e` / sales `6de335c4`: stable legal-entity and branch IDs, explicit branch import, contact scope, immutable document party snapshots and reference UI. In this isolated branch only, 0117 follows registered SEND 0120; 0118 and 0119 retain their upstream parents. One Alembic head is 0119. No deployed migration history was changed.
+
+The integration keeps the accounting deal lock and lost-stage coordinator. Additional cross-module checks reject a generic party change or binding preview that disagrees with an existing confirmed buyer. Invoice preview rejects mismatched buyer/branch IDs and captures the legal name and branch facts in the original; later reference edits do not rewrite the original. Legacy deals with no CRM ID still require the existing explicit accounting binding.
+
+52 frontend checks, typecheck and targeted lint passed. Backend branch/reference and invoice acceptance were exercised locally; a focused integration scenario confirms the buyer conflict and frozen invoice branch snapshot. The actual branch form was inspected using synthetic data, preserving the `0001` portal code. PostgreSQL registered-chain execution and concurrency acceptance remain to verify. No production migration or external filing occurred.
+
+Remaining application prerequisite: ESCHF. The frozen accounting SQL proposal still needs registration after the combined chain and verification of a fresh registered PostgreSQL upgrade and recovery.

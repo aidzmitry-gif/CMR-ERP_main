@@ -156,6 +156,8 @@ export interface ReferenceQueryResult {
 export interface CounterpartyRow {
   id: number;
   name: string;
+  legal_name?: string | null;
+  branches?: { id: number; name: string }[];
   unp: string | null;
 }
 
@@ -175,6 +177,9 @@ function isCounterpartyRow(value: unknown): value is CounterpartyRow {
   return (
     typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0 &&
     typeof row.name === "string" &&
+    (row.legal_name === undefined || isNullableString(row.legal_name)) &&
+    (row.branches === undefined || (Array.isArray(row.branches) && row.branches.every((b) =>
+      b && isPositiveId(b.id) && typeof b.name === "string"))) &&
     (typeof row.unp === "string" || row.unp === null)
   );
 }
@@ -744,6 +749,9 @@ export interface TouchSummary {
 export interface CounterpartyCard {
   id: number;
   name: string;
+  display_name?: string | null;
+  legal_name?: string | null;
+  branches?: CounterpartyBranch[];
   unp: string | null;
   is_active: boolean;
   merged_into_id: number | null;
@@ -767,10 +775,49 @@ export interface CounterpartyRequisites {
   bank_bic?: string | null;
 }
 
+export interface CounterpartyBranch {
+  id: number;
+  legal_entity_id: number;
+  name: string;
+  address: string | null;
+  tax_mode: "unknown" | "shared" | "independent";
+  portal_branch_code: string | null;
+  is_active: boolean;
+  revision: number;
+  contacts?: CounterpartyCard["contacts"];
+}
+
+export interface CounterpartyBranchWrite {
+  expected_legal_entity_revision: number;
+  expected_revision?: number;
+  manual: Pick<CounterpartyBranch, "name" | "address" | "tax_mode" | "portal_branch_code" | "is_active">;
+  contacts?: CounterpartyWriteInput["contacts"];
+}
+
+function isCounterpartyBranch(value: unknown, parentId: number): value is CounterpartyBranch {
+  if (!value || typeof value !== "object") return false;
+  const b = value as Record<string, unknown>;
+  return isPositiveId(b.id) && b.legal_entity_id === parentId && isPositiveId(b.revision) &&
+    typeof b.name === "string" && isNullableString(b.address) && typeof b.is_active === "boolean" &&
+    (b.contacts === undefined || (Array.isArray(b.contacts) && b.contacts.every((c) => c && isPositiveId(c.id) && typeof c.full_name === "string" && isNullableString(c.phone) && isNullableString(c.email) && typeof c.is_primary === "boolean"))) &&
+    ["unknown", "shared", "independent"].includes(String(b.tax_mode)) &&
+    (b.portal_branch_code === null || (typeof b.portal_branch_code === "string" && /^[0-9]{4}$/.test(b.portal_branch_code)));
+}
+
+export function saveCounterpartyBranch(parentId: number, branchId: number | null, input: CounterpartyBranchWrite): Promise<CounterpartySaveResult> {
+  if (!isPositiveId(parentId) || !isPositiveId(input.expected_legal_entity_revision) ||
+    (branchId !== null && (!isPositiveId(branchId) || !isPositiveId(input.expected_revision))) ||
+    (branchId === null && input.expected_revision !== undefined)) {
+    return Promise.resolve({ status: "validation-error", message: "Нужны корректные ID и версии головного предприятия и филиала" });
+  }
+  return writeCounterparty(`/api/system/mdm/counterparty/${parentId}/branches${branchId === null ? "" : `/${branchId}`}`,
+    branchId === null ? "POST" : "PATCH", input);
+}
+
 export type CounterpartyRegistryField = "name" | "unp" | "legal_address" | "registry_status";
 export interface CounterpartyWriteInput {
   expected_revision?: number;
-  manual?: CounterpartyRequisites & { name?: string; unp?: string | null };
+  manual?: CounterpartyRequisites & { name?: string; display_name?: string; legal_name?: string; unp?: string | null };
   contacts?: { id?: number; full_name?: string; phone?: string | null; email?: string | null; is_primary?: boolean }[];
   registry?: { unp: string; fields: CounterpartyRegistryField[]; preview: Partial<Record<CounterpartyRegistryField, string>> };
 }
@@ -780,7 +827,7 @@ export type CounterpartySaveResult =
   | { status: "conflict"; code: string; message: string; ids?: number[] }
   | { status: "unauthorized" | "forbidden" | "not-found" | "validation-error" | "service-error"; code?: string; message: string };
 
-async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput): Promise<CounterpartySaveResult> {
+async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput | CounterpartyBranchWrite): Promise<CounterpartySaveResult> {
   try {
     const response = await fetch(path, {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
@@ -842,6 +889,9 @@ function isCounterpartyCardPayload(value: unknown, requestedId: number): value i
     card.id !== requestedId ||
     !isPositiveId(card.id) ||
     typeof card.name !== "string" ||
+    (card.display_name !== undefined && !isNullableString(card.display_name)) ||
+    (card.legal_name !== undefined && !isNullableString(card.legal_name)) ||
+    (card.branches !== undefined && (!Array.isArray(card.branches) || !card.branches.every((b) => isCounterpartyBranch(b, requestedId)))) ||
     !isNullableString(card.unp) ||
     typeof card.is_active !== "boolean" ||
     !(card.merged_into_id === null || isPositiveId(card.merged_into_id)) ||

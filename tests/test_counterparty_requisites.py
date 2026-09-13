@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.domain.models import Contact, Counterparty, CounterpartyUnpConflict, SurvivorshipRule
 from core.services import mdm, reference_import
 from core.services.eventbus import OutboxEventBus
+from modules.sales.touch_history import SalesTouchHistory
 
 MNS = {
     "unp": "100582333", "name": "Название из МНС", "address": "Минск, Советская, 9",
@@ -88,10 +89,11 @@ async def test_registry_selection_only_changes_selected_fields(api, session):
     })
     assert response.status_code == 200, response.text
     saved = await card(api, receipt)
-    assert saved["name"] == MNS["name"] and saved["requisites"]["registry_status"] == MNS["status"]
+    assert saved["legal_name"] == MNS["name"] and saved["requisites"]["registry_status"] == MNS["status"]
+    assert saved["name"] == saved["display_name"] == "Ручная компания"
     assert saved["requisites"]["legal_address"] == "Свой адрес" and saved["requisites"]["bank_name"] == "Свой банк"
     assert saved["provenance"]["unp"]["source"] == "manual"
-    assert saved["provenance"]["name"] == {"source": "mns_grp", "at": MNS["fetched_at"], "source_url": MNS["source_url"]}
+    assert saved["provenance"]["legal_name"] == {"source": "mns_grp", "at": MNS["fetched_at"], "source_url": MNS["source_url"]}
 
 
 @pytest.mark.parametrize("manual", [{}, {"bank_name": "Банк без подтверждения УНП"}])
@@ -108,7 +110,7 @@ async def test_create_from_explicit_registry_selection_labels_actual_source(api,
     registry(api, data)
     receipt = await create(api, manual={}, registry=selection("name", "unp", "legal_address", data=data))
     saved = await card(api, receipt)
-    assert saved["provenance"]["name"]["source"] == source
+    assert saved["provenance"]["legal_name"]["source"] == source
     assert saved["provenance"]["unp"]["source"] == source
     assert "bank_name" not in saved["requisites"]
 
@@ -213,7 +215,11 @@ async def test_legacy_sales_contract_collision_is_safe_409(api, session):
     assert response.status_code == 409 and response.json()["detail"]["code"] == "duplicate_unp"
     assert "ids" not in response.json()["detail"]
     await session.rollback()
-    assert await session.scalar(select(func.count()).select_from(Counterparty).where(Counterparty.name == "Другая компания")) == 0
+    # Creating the deal already established this stub; the rejected contract must
+    # neither remove it nor assign the conflicting taxpayer identity.
+    other = await session.get(Counterparty, deal.json()["counterparty_id"])
+    assert other.name == "Другая компания" and other.unp is None
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 2
 
 
 async def test_merge_empty_unp_and_pending_transfer_preserve_provenance(session):
@@ -222,7 +228,7 @@ async def test_merge_empty_unp_and_pending_transfer_preserve_provenance(session)
     duplicate = Counterparty(name=MNS["name"], unp=MNS["unp"], provenance={"name": source, "unp": source})
     session.add_all([survivor, duplicate])
     await session.commit()
-    await mdm.merge(session, OutboxEventBus(), survivor.id, duplicate.id)
+    await mdm.merge(session, OutboxEventBus(), survivor.id, duplicate.id, reference_guard=SalesTouchHistory().has_deals)
     await session.commit()
     assert survivor.unp == MNS["unp"] and survivor.provenance["name"] == source
     target = Counterparty(name="Перенос", unp=None)
@@ -270,12 +276,13 @@ async def test_mns_survives_1c_with_explicit_legacy_priority_and_metadata(api, s
     await reference_import.upsert_counterparty(session, unp=MNS["unp"], name="Имя 1С", source="1c")
     await session.commit()
     saved = await card(api, receipt)
-    assert saved["name"] == MNS["name"] and saved["provenance"]["name"]["source_url"] == MNS["source_url"]
+    assert saved["legal_name"] == MNS["name"] and saved["provenance"]["legal_name"]["source_url"] == MNS["source_url"]
+    assert saved["display_name"] == MNS["name"]
 
 
 @pytest.mark.parametrize(("strategy", "priority"), [("manual_only", []), ("source_priority", ["manual", "mns_grp", "1c"])])
 async def test_operator_rule_protects_field_on_registry_apply(api, session, strategy, priority):
-    receipt = await create(api)
+    receipt = await create(api, manual={"name": "Ручная компания", "legal_name": "Ручное юридическое имя", "unp": MNS["unp"]})
     session.add(SurvivorshipRule(entity_type="counterparty", field="name", strategy=strategy, source_priority=priority))
     await session.commit()
     registry(api)

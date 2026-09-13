@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select, update
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from core.services.eventbus import OutboxEventBus
 from modules.finance.document_versions import on_original_issued, on_original_superseded
 from modules.finance.models import Payment
@@ -88,7 +88,10 @@ async def test_failed_issue_does_not_retire_the_old_document(api, api_no_gateway
 
 
 async def test_no_item_invoice_keeps_exact_agreed_gross_amount(api, session):
-    deal = Deal(number='ROUND', title='Agreed service', counterparty='Buyer', amount=Decimal('0.03'))
+    cp = Counterparty(name='Buyer')
+    session.add(cp)
+    await session.flush()
+    deal = Deal(number='ROUND', title='Agreed service', counterparty='Buyer', amount=Decimal('0.03'), counterparty_id=cp.id)
     session.add(deal)
     await session.commit()
     result = await api.post(f'/sales/deals/{deal.id}/documents', json={'kind': 'invoice'})

@@ -94,7 +94,7 @@ describe("SpravCounterparties", () => {
     fireEvent.change(screen.getByLabelText("УНП (карточка)"), { target: { value: "190000001" } });
     fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
     expect(await screen.findByText(/Источник: МНС \(ГРП\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Наименование" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать УНП" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 

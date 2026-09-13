@@ -74,7 +74,7 @@ describe("SpravCounterpartyEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
     expect(await screen.findByText(/Источник: МНС \(ГРП\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Наименование" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать УНП" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
@@ -321,14 +321,37 @@ describe("SpravCounterpartyEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
     await screen.findByText(/Источник: МНС \(ГРП\)/);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Наименование" }));
-    fireEvent.change(screen.getByLabelText("Наименование компании"), { target: { value: "Ручное имя" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
+    fireEvent.change(screen.getByLabelText("Юридическое наименование для документов"), { target: { value: "Ручное имя" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(body.manual.name).toBe("Ручное имя");
+    expect(body.manual.legal_name).toBe("Ручное имя");
     expect(body.registry).toBeUndefined();
+  });
+
+  it("рабочее название сохраняется независимо от юридического из МНС", async () => {
+    const fetchMock = vi.fn(async (input: string) =>
+      input.includes("/api/integrations/egr/")
+        ? response(registry)
+        : response({ id: 42, revision: 1 }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SpravCounterpartyEditor mode="create" initialUnp="190000001" />);
+    fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
+    await screen.findByText(/Источник: МНС \(ГРП\)/);
+    const legalChoice = screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" });
+    fireEvent.click(legalChoice);
+    fireEvent.change(screen.getByLabelText("Наименование компании"), { target: { value: "Ромашка для менеджеров" } });
+    expect(legalChoice).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.manual.display_name).toBe("Ромашка для менеджеров");
+    expect(body.manual.legal_name).toBeUndefined();
+    expect(body.registry.fields).toEqual(["name"]);
+    expect(body.registry.preview.name).toBe(registry.name);
   });
 
   it("синхронный latch не допускает двойной PATCH до ответа сервера", async () => {
