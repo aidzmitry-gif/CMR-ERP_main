@@ -384,6 +384,19 @@ async def pg_factory():
                 LossReason.__table__.create(connection)
                 Counterparty.__table__.create(connection)
 
+                # Bank-source completeness is part of month closing; these
+                # existing finance tables precede the accounting migration.
+                from modules.finance.models import (
+                    BankAccount,
+                    BankTransaction,
+                    Payment,
+                    PaymentAllocation,
+                )
+
+                connection.execute(text("CREATE SCHEMA finance"))
+                for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
+                    table.create(connection)
+
                 connection.execute(text("CREATE SCHEMA logistics"))
                 Shipment.__table__.create(connection)
                 CarrierRfq.__table__.create(connection)

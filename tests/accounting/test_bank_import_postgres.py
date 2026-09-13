@@ -10,7 +10,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from core.db.base import Base
-from modules.accounting import bank_import
+from modules.accounting import bank_import, closing_controls, service
 from modules.accounting.models import BankImportReceipt, SourceBinding
 from modules.finance.models import BankAccount, BankTransaction, Payment, PaymentAllocation
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
@@ -53,6 +53,17 @@ async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, p
         await session.commit()
         snapshot = bank_import.source_snapshot(source)
 
+    async with pg_factory() as session:
+        from modules.accounting.schemas import CloseInput
+
+        controls = await closing_controls.snapshot(session, pg_book[0], "2026-09")
+        assert next(item["count"] for item in controls["blockers"] if item["code"] == "unposted_bank_imports") == 1
+        with pytest.raises(service.AccountingError, match="Unposted imported bank"):
+            await service.validate_close_period(session, pg_book[0], "2026-09", CloseInput(
+                expected_generation=controls["period"]["generation"],
+                evidence={key: "Synthetic PG verification" for key in service.CLOSE_STEPS},
+            ))
+
     data = command(source.id, bank_import._digest(snapshot), pg_book[1])
     async with pg_factory() as session:
         preview = await bank_import.prepare(session, pg_book[0], data)
@@ -83,6 +94,8 @@ async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, p
 
     async with pg_factory() as session:
         receipt = await session.scalar(select(BankImportReceipt).where(BankImportReceipt.entry_id == results[0]))
+        controls = await closing_controls.snapshot(session, pg_book[0], "2026-09")
+        assert not any(item["code"] == "unposted_bank_imports" for item in controls["blockers"])
         assert receipt is not None
         assert receipt.snapshot["source_snapshot"]["ext_id"] == "PG-BANK-IMPORT-1"
         assert await session.scalar(select(func.count()).select_from(BankImportReceipt)) == 1
