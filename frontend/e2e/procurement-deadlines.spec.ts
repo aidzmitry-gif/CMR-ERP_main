@@ -28,4 +28,14 @@ test("срок клиента переносится в черновик пла�
   const saved = await get(`/procurement/organizations/${org.id}/orders/${order.id}/plan`);
   expect(saved.target_arrival_date).toBeNull();
   await page.screenshot({ path: testInfo.outputPath("customer-deadline-draft.png"), fullPage: true });
+  const command = page.waitForResponse(r => r.url().includes(`/orders/${order.id}/edit-commands`) && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Пересчитать план", exact: true }).click();
+  expect((await command).ok()).toBeTruthy();
+  await expect(page.getByLabel("В Минске до", { exact: true })).toBeEnabled();
+  const confirmed = await get(`/procurement/organizations/${org.id}/orders/${order.id}/plan`);
+  expect(confirmed.target_arrival_date).toBe("2026-12-28");
+  expect(confirmed.milestones.length).toBeGreaterThan(0);
+  await page.reload();
+  await expect(page.getByLabel("В Минске до", { exact: true })).toHaveValue("2026-12-28");
+  await page.screenshot({ path: testInfo.outputPath("customer-deadline-saved.png"), fullPage: true });
 });
