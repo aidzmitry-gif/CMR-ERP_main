@@ -1629,12 +1629,7 @@ export function DealsWorkspace({
   return (
     <>
       {clientReady && <span data-testid="deals-client-ready" className="sr-only" />}
-      {/* pr увеличен против стандартных p-6: плавающая рейка чатов/уведомлений (AppShell,
-          absolute right-0, w-[68px], во ВСЮ высоту экрана, не резервирует место в layout)
-          перекрывает крайние ~44px контента на ЛЮБОЙ ширине окна (main всегда тянется до
-          истинного правого края) — метрики П1 (8 ячеек) упирались в неё последней ячейкой
-          «Средний чек». Тот же приём уже применён на /crm/deals/analytics. */}
-      <main className="flex-1 overflow-auto p-6 pr-20">
+      <main className="min-w-0 flex-1 overflow-auto p-3 sm:p-6">
         {authError && (
           <div
             role="alert"
@@ -1873,9 +1868,9 @@ export function DealsWorkspace({
             линию по стадиям»; справа — группировка/вид. Поиск/воронки/чипы жили в верхнем
             тулбаре, но по решению оператора вынесены сюда, вплотную к колонкам. */}
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             {/* Поиск сделок — левее «Все вместе», в одну строку (решение оператора). */}
-            <div className="relative w-64 shrink-0">
+            <div className="relative w-64 max-w-full shrink-0">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
               <input
                 value={query}
@@ -2191,7 +2186,7 @@ export function DealsWorkspace({
 
         {/* Итоги — по выбранной воронке; в «Все вместе» единой суммы по разнородным
             воронкам нет (won/lost — разные коды на секцию), поэтому блок скрыт. */}
-        {!combinedStages && <FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} />}
+        {!combinedStages && <div className="[overflow-wrap:anywhere] max-sm:[&_.grid]:grid-cols-1"><FunnelTotals data={computeFunnel(filteredStages)} fmt={fmt} /></div>}
       </main>
 
       {modalOpen && (
