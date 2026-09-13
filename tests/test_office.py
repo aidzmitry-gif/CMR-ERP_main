@@ -10,10 +10,13 @@ from types import SimpleNamespace
 import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import OutboxEvent, User
 from core.services.eventbus import OutboxEventBus
+from core.services.shipping_payload import canonical_shipping_payload
 from modules.office import events
 from modules.office.models import OfficeDoc
+from modules.office.shipping_producer import source_hash
+from tests.test_shipping_payload import payload as shipping_payload
 
 
 @pytest_asyncio.fixture
@@ -103,33 +106,60 @@ async def test_update_stage_unknown_and_missing(office_actor):
 # --------------------------------------------------------------------------- #
 #  Заявка перевозчику: happy-path + гард стадии + ошибки
 # --------------------------------------------------------------------------- #
-async def test_carrier_request_happy_path(api, session):
-    doc_id = (await api.post("/office/docs", json={"company": "ООО Эпсилон", "amount": 9000})).json()["id"]
-    r = await api.post(
-        f"/office/docs/{doc_id}/carrier-request",
-        json={"carrier": "cdek", "region": "Гомель", "pickup_date": "2026-06-15", "contact": "Склад"},
-    )
+@pytest_asyncio.fixture
+async def shipping_doc(office_actor, session):
+    session.add(User(username="office-test", full_name="Reviewer", role="director", status="active"))
+    await session.commit()
+    r = await office_actor.post("/office/docs", json={"company": "ООО Эпсилон", "amount": 9000})
+    assert r.status_code == 201
+    doc = await session.get(OfficeDoc, r.json()["id"])
+    assignment = await office_actor.post(f"/office/docs/{doc.id}/shipping-reviewer", json={
+        "subject": "office-test", "expected_revision": 0, "evidence": "Проверка первичного документа",
+    })
+    assert assignment.status_code == 200
+    return doc
+
+
+def carrier_request_body(doc):
+    return {"request_key": "office-request-1", "expected_source_hash": source_hash(doc),
+            "expected_assignment_revision": 1, "intent": shipping_payload()["intent"]}
+
+
+async def test_carrier_request_happy_path(office_actor, shipping_doc, session):
+    url = f"/office/docs/{shipping_doc.id}/carrier-request"
+    request = carrier_request_body(shipping_doc)
+    r = await office_actor.post(url, json=request)
     assert r.status_code == 200
     body = r.json()
-    assert body["ok"] is True
-    assert body["log_ref"].startswith("ЛОГ-2026-")
-    assert body["carrier"] == "СДЭК"
-    assert body["region"] == "Гомель"
-    assert body["doc"]["logistics_ref"] == body["log_ref"]
-    assert "logistics.delivery.requested" in await _event_types(session)
+    assert body["source_sha256"] == request["expected_source_hash"]
+    assert body["payload"]["intent"] == request["intent"]
+    assert canonical_shipping_payload(body["payload"])[1] == body["payload_sha256"]
+    assert body["payload"]["source_refs"]["document_id"] == shipping_doc.id
+    replay = await office_actor.post(url, json=request)
+    assert replay.status_code == 200 and replay.json() == body
+    assert (await _event_types(session)).count("logistics.delivery.requested") == 1
+    # Preparation alone must not claim an executed delivery.
+    await session.refresh(shipping_doc)
+    assert not shipping_doc.logistics_ref
+    assert shipping_doc.stage == "ready"
 
 
-async def test_carrier_request_guard_non_ready_stage(api):
-    doc_id = (await api.post("/office/docs", json={"company": "ООО Дзета", "amount": 100})).json()["id"]
-    await api.patch(f"/office/docs/{doc_id}", json={"stage": "shipped"})  # уже отгружено
-    r = await api.post(f"/office/docs/{doc_id}/carrier-request", json={"carrier": "cdek"})
-    assert r.status_code == 409  # нельзя заказывать доставку не со стадии «Готово к отгрузке»
+async def test_carrier_request_guard_non_ready_stage(office_actor, shipping_doc, session):
+    r = await office_actor.patch(f"/office/docs/{shipping_doc.id}", json={"stage": "shipped"})
+    assert r.status_code == 200
+    await session.refresh(shipping_doc)
+    r = await office_actor.post(f"/office/docs/{shipping_doc.id}/carrier-request",
+                               json=carrier_request_body(shipping_doc))
+    assert r.status_code == 409
+    assert "logistics.delivery.requested" not in await _event_types(session)
 
 
-async def test_carrier_request_unknown_carrier_and_missing_doc(api):
-    doc_id = (await api.post("/office/docs", json={"company": "ООО Эта", "amount": 100})).json()["id"]
-    assert (await api.post(f"/office/docs/{doc_id}/carrier-request", json={"carrier": "nope"})).status_code == 422
-    assert (await api.post("/office/docs/999999/carrier-request", json={"carrier": "cdek"})).status_code == 404
+async def test_carrier_request_rejects_legacy_payload_and_missing_doc(office_actor, shipping_doc, session):
+    assert (await office_actor.post(f"/office/docs/{shipping_doc.id}/carrier-request",
+                                   json={"carrier": "cdek"})).status_code == 422
+    assert (await office_actor.post("/office/docs/999999/carrier-request",
+                                   json=carrier_request_body(shipping_doc))).status_code == 404
+    assert "logistics.delivery.requested" not in await _event_types(session)
 
 
 # --------------------------------------------------------------------------- #
