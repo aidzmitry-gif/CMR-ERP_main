@@ -16,7 +16,9 @@ export interface ContactRow {
   phone: string | null;
   email: string | null;
   is_primary: boolean;
-  counterparty_id: number;
+  counterparty_id: number | null;
+  crm_client_id?: number;
+  source?: "crm";
   counterparty_name: string;
   deal_id: number | null;
 }
@@ -41,7 +43,9 @@ function validRow(value: unknown, kind: DirectoryKind): value is ClientRow | Con
     ? typeof row.name === "string" && nullableText(row.unp) && typeof row.is_active === "boolean"
       && (row.source === undefined || row.source === "crm")
     : typeof row.full_name === "string" && nullableText(row.phone) && nullableText(row.email)
-      && typeof row.is_primary === "boolean" && positiveId(row.counterparty_id)
+      && typeof row.is_primary === "boolean"
+      && (row.source === "crm" ? row.counterparty_id === null && positiveId(row.crm_client_id)
+        : row.source === undefined && positiveId(row.counterparty_id))
       && typeof row.counterparty_name === "string";
 }
 

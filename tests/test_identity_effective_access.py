@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.domain.models import AuditLog, User
@@ -17,6 +17,26 @@ from core.services.auth import (
     EffectiveIdentityLookupError,
     resolve_effective_oidc_user,
 )
+
+
+@pytest.mark.asyncio
+async def test_named_dev_identity_applies_persisted_scope_before_all_module_gates(api, session):
+    session.add(User(username="dev-own", full_name="Synthetic own", employee_id=654,
+                     role="sales", status="active", deal_visibility="own"))
+    await session.commit()
+    headers = {"X-User": "dev-own", "X-User-Roles": "sales"}
+    assert (await api.get('/sales/clients', headers={'X-User-Roles':'sales'})).status_code == 403
+    assert (await api.get('/sales/clients', headers=headers)).status_code == 200
+    for path in ['/leads', '/service/tickets', '/system/mdm/counterparty']:
+        assert (await api.get(path, headers=headers)).status_code == 403
+    assert (await api.get('/sales/clients', headers={**headers, 'X-User-Roles':'director'})).status_code == 403
+    assert (await api.get('/sales/clients', headers={**headers, 'X-User':'unknown-dev'})).status_code == 403
+    assert (await api.get('/sales/clients', headers={'X-User':'unlinked-director', 'X-User-Roles':'director'})).status_code == 200
+    user = await session.scalar(select(User).where(User.username == 'dev-own'))
+    user.status = 'inactive'
+    await session.commit()
+    assert (await api.get('/sales/clients', headers=headers)).status_code == 403
+    assert (await api.get('/health', headers=headers)).status_code == 200
 
 
 @pytest.mark.asyncio

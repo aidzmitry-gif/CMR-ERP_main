@@ -12,6 +12,16 @@ const stages: Stage[] = [{ id: "new", title: "Новая заявка", color: "
 beforeEach(() => vi.clearAllMocks());
 
 describe("CreateDealModal", () => {
+  it("keeps the numeric client and its owner without MDM lookup", async () => {
+    const onCreate = vi.fn().mockResolvedValue(true);
+    render(<CreateDealModal client={{ id: 12, name: "CRM buyer", owner_id: 34 }} stages={[]} defaultStage="new" onClose={() => {}} onCreate={onCreate} />);
+    expect(screen.queryByPlaceholderText("191234567")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("CRM buyer")).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("CRM-2024-0200"), { target: { value: "CRM-12" } });
+    fireEvent.change(screen.getByPlaceholderText("Поставка ..."), { target: { value: "Order" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ crm_client_id: 12, owner_id: 34, counterparty: "CRM buyer" })));
+  });
   it("заполнение и отправка формы вызывает onCreate", async () => {
     const onCreate = vi.fn().mockResolvedValue(true);
     render(<CreateDealModal stages={stages} defaultStage="new" onClose={() => {}} onCreate={onCreate} />);

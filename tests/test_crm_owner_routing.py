@@ -111,7 +111,7 @@ async def test_conversion_uses_employee_id_and_enforces_deal_visibility(session,
         OutboxEvent.event_type == "leads.lead.converted",
     ))).scalar_one()
     assert event.payload["owner_id"] == 901 and event.payload["owner"] == owner.full_name
-    own_headers = {"X-User": owner.username, "X-User-Roles": "sales"}
+    own_headers = {"X-User": owner.username, "X-User-Roles": role}
     foreign_headers = {"X-User": foreign.username, "X-User-Roles": "sales"}
     assert (await api.get(f"/sales/deals/{deal.id}", headers=own_headers)).status_code == 200
     assert (await api.get(f"/sales/deals/{deal.id}", headers=foreign_headers)).status_code == 404

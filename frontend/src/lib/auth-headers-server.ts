@@ -3,7 +3,7 @@
 
 import { cookies } from "next/headers";
 
-import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
+import { DEFAULT_ROLE, LOGIN_COOKIE, ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
 import { frontendAuthMode } from "@/lib/auth-mode";
 
 /**
@@ -20,6 +20,8 @@ export async function backendAuthHeaders(
   const token = jar.get(TOKEN_COOKIE)?.value;
   const mode = frontendAuthMode();
   const headers: Record<string, string> = {};
+  const username = jar.get(LOGIN_COOKIE)?.value;
+  if (mode === "dev" && username) headers["X-User"] = username;
 
   if (token) {
     headers.Authorization = "Bearer " + token;

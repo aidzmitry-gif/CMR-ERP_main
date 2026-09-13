@@ -4,7 +4,12 @@
 
 import { cookies } from "next/headers";
 
-import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { DEFAULT_ROLE, LOGIN_COOKIE, ROLE_COOKIE, TOKEN_COOKIE, USER_COOKIE } from "@/lib/access";
+import { frontendAuthMode } from "@/lib/auth-mode";
+
+export async function currentDevUsername(): Promise<string | undefined> {
+  return frontendAuthMode() === "dev" ? (await cookies()).get(LOGIN_COOKIE)?.value : undefined;
+}
 
 /** Текущая роль из cookie `aios_role`; по умолчанию — полный доступ (director). */
 export async function currentRole(): Promise<string> {

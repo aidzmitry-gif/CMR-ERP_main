@@ -4,6 +4,7 @@
 export interface BackendProxyHeaderOptions {
   /** Dev role from cookie aios_role. */
   devRole?: string;
+  devUsername?: string;
   /** Future Keycloak httpOnly access token. */
   accessToken?: string;
 }
@@ -21,6 +22,8 @@ export function buildBackendProxyHeaders(
   const headers = new Headers(incoming);
   headers.delete("host");
   headers.delete("connection");
+  headers.delete("X-User");
+  headers.delete("X-User-Roles");
 
   const incomingAuth = incoming.get("authorization");
   headers.delete("authorization");
@@ -33,6 +36,7 @@ export function buildBackendProxyHeaders(
   if (opts.devRole) {
     headers.set("X-User-Roles", opts.devRole);
   }
+  if (opts.devUsername) headers.set("X-User", opts.devUsername);
 
   return headers;
 }

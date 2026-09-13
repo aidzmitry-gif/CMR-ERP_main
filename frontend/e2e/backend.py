@@ -47,10 +47,16 @@ os.environ.update(AIOS_ENVIRONMENT='dev', AIOS_AUTH_MODE='dev',
                   AIOS_DATABASE_URL=f'sqlite+aiosqlite:///{database_path.as_posix()}',
                   AIOS_SALES_EMAIL_ENABLED='false', AIOS_AI_ENABLED='false')
 # Settings and the egress guard must be installed before application imports.
+from config.access import USERS  # noqa: E402
 from core.domain.models import Counterparty, Sku, User  # noqa: E402
 from core.runtime.app import create_app  # noqa: E402
 from modules.integrations.models import StockItem  # noqa: E402
 from modules.sales.models import PriceQuote  # noqa: E402
+
+USERS.extend([
+    {'username':'e2e_owner', 'full_name':'Контрольный менеджер E2E', 'role':'sales'},
+    {'username':'e2e_foreign', 'full_name':'Чужой менеджер E2E', 'role':'sales'},
+])
 
 app = create_app()
 db = app.state.core.services.db
@@ -79,7 +85,9 @@ async def seed():
         ordered = Sku(code='QA-ORDER', title='Контрольный аккумулятор — под заказ', unit='шт')
         owner = User(username='e2e_owner', full_name='Контрольный менеджер E2E', employee_id=2901,
                      department='Продажи', role='sales', status='active', deal_visibility='own')
-        session.add_all([buyer, stocked, ordered, owner])
+        foreign = User(username='e2e_foreign', full_name='Чужой менеджер E2E', employee_id=2902,
+                       department='Продажи', role='sales', status='active', deal_visibility='own')
+        session.add_all([buyer, stocked, ordered, owner, foreign])
         await session.flush()
         session.add_all([StockItem(sku_code=stocked.code, qty_available=10, qty_reserved=0),
                          StockItem(sku_code=ordered.code, qty_available=0, qty_reserved=0),

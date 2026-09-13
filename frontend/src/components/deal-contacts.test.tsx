@@ -28,6 +28,15 @@ function deferred<T>() {
 }
 
 describe("DealContacts", () => {
+  it("routes standalone contacts and primary through the numeric CRM client", async () => {
+    mock(api.fetchContactsResult).mockResolvedValue(ok([{ ...contact(7, "CRM contact"), crm_client_id: 12 }]));
+    mock(api.setPrimaryContact).mockResolvedValue(true);
+    render(<DealContacts clientId={12} />);
+    expect(await screen.findByText("CRM contact")).toBeInTheDocument();
+    expect(api.fetchContactsResult).toHaveBeenCalledWith({ clientId: 12 });
+    fireEvent.click(screen.getByTitle("Сделать основным"));
+    await waitFor(() => expect(api.setPrimaryContact).toHaveBeenCalledWith(7, 12));
+  });
   it("не показывает пустой список во время загрузки", async () => {
     const pending = deferred<ReturnType<typeof ok>>();
     mock(api.fetchContactsResult).mockReturnValueOnce(pending.promise);
@@ -125,7 +134,9 @@ describe("DealContacts", () => {
     expect(await screen.findByText("Анна Иванова")).toBeInTheDocument();
     expect(addContact).toHaveBeenNthCalledWith(2, "1", {
       full_name: "Анна Иванова", phone: "+375291112233", email: "anna@x.by", is_primary: true,
+      request_key: addContact.mock.calls[0][1].request_key,
     });
+    expect(addContact.mock.calls[0][1].request_key).toEqual(expect.any(String));
     expect(screen.queryByPlaceholderText("ФИО контакта")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Добавить"));

@@ -119,18 +119,26 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
             GUEST,
             EffectiveIdentityLookupError,
             get_current_user,
+            resolve_effective_dev_user,
             resolve_effective_oidc_user,
         )
 
         claimed_user = get_current_user(request)
-        if claimed_user.keycloak_user_id:
+        from config.access import is_super
+        if (get_settings().auth_mode == "dev" and claimed_user.username == "anonymous"
+            and CRM_ROLES.intersection(claimed_user.roles) and not is_super(claimed_user.roles)
+            and path not in {"/sales/ping", "/system/access"}):
+            return JSONResponse({"detail": "Войдите заново: не определена учётная запись сотрудника"}, status_code=403)
+        named_dev_user = get_settings().auth_mode == "dev" and claimed_user.username != "anonymous"
+        if claimed_user.keycloak_user_id or named_dev_user:
             db = request.app.state.core.services.db
             try:
                 if db.session_factory is None:
                     db.init_engine()
                 assert db.session_factory is not None
                 async with db.session_factory() as session:
-                    request.state.effective_current_user = await resolve_effective_oidc_user(
+                    resolver = resolve_effective_oidc_user if claimed_user.keycloak_user_id else resolve_effective_dev_user
+                    request.state.effective_current_user = await resolver(
                         claimed_user, session
                     )
             except EffectiveIdentityLookupError:

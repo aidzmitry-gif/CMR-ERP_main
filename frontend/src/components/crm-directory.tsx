@@ -77,12 +77,15 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
               </tr></thead>
               <tbody>{result.rows.map((row) => <tr key={`${"source" in row ? row.source : "mdm"}:${row.id}`} className="border-t border-line">
                 <td className="p-3 font-medium text-ink">
-                  {"full_name" in row ? row.full_name : row.name}
+                  {"full_name" in row ? row.full_name : row.source === "crm"
+                    ? <Link className="underline" href={`/crm/clients/${row.id}`}>{row.name}</Link> : row.name}
                   {"source" in row && row.source === "crm" && <span className="ml-2 text-xs text-muted">Создан в CRM</span>}
                   {"is_primary" in row && row.is_primary && <span className="ml-2 text-xs text-muted">Основной</span>}
                   {"is_active" in row && !row.is_active && <span className="ml-2 text-xs text-muted">Архив</span>}
                 </td>
-                <td className="p-3 text-muted">{"counterparty_name" in row ? row.counterparty_name : row.unp ?? "Не указан"}</td>
+                <td className="p-3 text-muted">{"counterparty_name" in row
+                  ? row.crm_client_id ? <Link className="underline" href={`/crm/clients/${row.crm_client_id}`}>{row.counterparty_name}</Link> : row.counterparty_name
+                  : row.unp ?? "Не указан"}</td>
                 {"full_name" in row && <td className="p-3 text-muted"><div>{row.phone ?? "Телефон не указан"}</div><div>{row.email ?? "Email не указан"}</div></td>}
                 <td className="p-3">{row.deal_id === null ? <span className="text-muted">Нет доступной ссылки</span>
                   : <Link className="whitespace-nowrap underline" href={`/crm/deals/${row.deal_id}`}>Открыть сделку</Link>}</td>

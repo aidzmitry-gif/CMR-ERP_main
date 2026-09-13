@@ -61,10 +61,16 @@ class FakeIdentityGateway:
         self.onboarding_removal_calls.append(kwargs)
 
 
+async def dev_actor(session, username, role):
+    session.add(User(username=username, full_name=username, role=role, status="active"))
+    await session.commit()
+    return {"X-User": username, "X-User-Roles": role}
+
+
 @pytest.mark.asyncio
 async def test_separately_assigned_crm_operator_can_prepare_send_but_never_activate(session, identity_api):
     api, gateway = identity_api
-    headers = {"X-User-Roles": "crm_invitation_operator"}
+    headers = await dev_actor(session, "crm-operator", "crm_invitation_operator")
     catalog = await api.get("/system/users/departments", headers=headers)
     assert catalog.json() == {"departments": {"Продажи": ["sales_head", "sales", "sales_cli"]}}
     created = await api.post("/system/users/crm-staff", headers=headers, json={"full_name": "Synthetic CRM operator test"})
@@ -93,11 +99,16 @@ async def test_separately_assigned_crm_operator_can_prepare_send_but_never_activ
 @pytest.mark.parametrize("roles", ["crm_invitation_operator", "crm_invitation_operator,director"])
 async def test_crm_operator_cannot_prepare_foreign_department_or_privileged_role(session, identity_api, roles):
     api, gateway = identity_api
+    headers = await dev_actor(session, "crm-operator", "crm_invitation_operator")
+    headers["X-User-Roles"] = roles
+    access = await api.get("/system/access", headers=headers)
+    assert access.status_code == 200
+    assert access.json()["current_roles"] == ["crm_invitation_operator"]
     employee = Employee(full_name="Synthetic foreign employee", department="Руководство", status="active")
     session.add(employee)
     await session.commit()
     for path in ["/system/users/preflight", "/system/users/invite"]:
-        response = await api.post(path, headers={"X-User-Roles": roles, "Idempotency-Key": "operator-forbidden-001"}, json={
+        response = await api.post(path, headers={**headers, "Idempotency-Key": "operator-forbidden-001"}, json={
             "employee_id": employee.id, "email": "foreign@example.invalid", "department": "Руководство", "role": "director",
         })
         assert response.status_code == 403
@@ -114,7 +125,7 @@ async def test_crm_operator_cannot_spoof_hr_department_or_read_foreign_pending(s
                      email="finance@example.invalid", role="onboarding", status="onboarding",
                      expected_department="Финансы / офис", expected_role="finance"))
     await session.commit()
-    headers = {"X-User-Roles": "crm_invitation_operator"}
+    headers = await dev_actor(session, "crm-operator", "crm_invitation_operator")
     response = await api.post("/system/users/preflight", headers=headers, json={
         "employee_id": employee.id, "email": "foreign@example.invalid", "department": "Продажи", "role": "sales",
     })
@@ -126,9 +137,12 @@ async def test_crm_operator_cannot_spoof_hr_department_or_read_foreign_pending(s
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("roles", ["hr", "sales_head", "sales", "onboarding"])
-async def test_existing_business_roles_gain_no_invitation_permissions(identity_api, roles):
+async def test_existing_business_roles_gain_no_invitation_permissions(session, identity_api, roles):
     api, gateway = identity_api
-    headers = {"X-User-Roles": roles}
+    headers = await dev_actor(session, "business-actor", roles)
+    access = await api.get("/system/access", headers=headers)
+    assert access.status_code == 200
+    assert access.json()["current_roles"] == [roles]
     assert (await api.get("/system/users/departments", headers=headers)).status_code == 403
     assert (await api.post("/system/users/crm-staff", headers=headers, json={"full_name": "Forbidden"})).status_code == 403
     assert gateway.calls == []
@@ -137,6 +151,7 @@ async def test_existing_business_roles_gain_no_invitation_permissions(identity_a
 @pytest_asyncio.fixture
 async def identity_api(session):
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
     gateway = FakeIdentityGateway()
 
     async def _session():
@@ -511,6 +526,7 @@ async def test_identity_provisioner_can_prepare_and_send_but_has_no_system_or_hr
     session, identity_api
 ):
     api, gateway = identity_api
+    await dev_actor(session, "service-account-aios-inviter", "identity_provisioner")
     employee = Employee(full_name="Сервисный сотрудник", department="Продажи")
     session.add(employee)
     await session.commit()
@@ -546,6 +562,7 @@ async def test_identity_provisioner_can_prepare_and_send_but_has_no_system_or_hr
 @pytest.mark.asyncio
 async def test_invite_preflight_normalizes_identity_without_calling_keycloak(session, identity_api):
     api, gateway = identity_api
+    await dev_actor(session, "service-account-aios-inviter", "identity_provisioner")
     employee = Employee(full_name="Петров Пётр", department="Продажи")
     session.add(employee)
     await session.commit()

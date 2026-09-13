@@ -234,6 +234,15 @@ describe("api client — лиды", () => {
 });
 
 describe("api client — сделки/доска/KPI", () => {
+  it("forwards the explicit server-session identity for own SSR reads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchBoardResult("sales", "new_clients", undefined, "manager");
+    await fetchDealDetail("1", "sales", undefined, "manager");
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(options.headers).toMatchObject({ "X-User": "manager", "X-User-Roles": "sales" });
+    }
+  });
   it("fetchBoardStages маппит стадии и сделки", async () => {
     stubFetch({ stages: [{ id: "new", title: "Новая", color: "#000", count: 1, sum: 500, deals: [apiDeal] }] });
     const stages = await fetchBoardStages();
@@ -491,6 +500,13 @@ describe("api client — прочие операции и fallback'и", () => {
     vi.stubGlobal("fetch", fetchMock);
     expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
     expect(await fetchContacts("1")).toEqual([]);
+  });
+
+  it.each([undefined, 99])("rejects a CRM contact from an unknown or foreign client: %s", async (crm_client_id) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json([
+      { id: 1, crm_client_id, full_name: "Same numeric ID", phone: null, email: null, is_primary: false },
+    ])));
+    expect(await fetchContactsResult({ clientId: 12 })).toEqual({ status: "malformed_response" });
   });
 
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects malformed contact id %s", async (id) => {

@@ -24,7 +24,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
 import { formatNextStep } from "@/lib/format";
-import { currentAccessToken, currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentDevUsername, currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
 
@@ -32,7 +32,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const roles = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
-  const d = await fetchDealDetail(id, roles, token);
+  const username = await currentDevUsername();
+  const d = await fetchDealDetail(id, roles, token, username);
   if (!d) notFound();
   // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 при отсутствии стадии.
   const stageIdx = d.stage?.idx ?? 0;

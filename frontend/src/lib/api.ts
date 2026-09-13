@@ -11,9 +11,10 @@ const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 // заголовком вручную (роль читает серверный хелпер `role-server.ts` из cookie). На клиенте
 // (вызовы через /api/*) роль добавляет прокси `app/api/[...path]/route.ts`.
 // Опциональный accessToken — OIDC Bearer (см. auth-headers-server / TOKEN_COOKIE).
-function roleHeaders(roles?: string, accessToken?: string): Record<string, string> | undefined {
+function roleHeaders(roles?: string, accessToken?: string, devUsername?: string): Record<string, string> | undefined {
   const headers: Record<string, string> = {};
   if (roles) headers["X-User-Roles"] = roles;
+  if (devUsername) headers["X-User"] = devUsername;
   if (accessToken) headers.Authorization = "Bearer " + accessToken;
   return Object.keys(headers).length ? headers : undefined;
 }
@@ -104,12 +105,13 @@ export async function fetchBoardResult(
   roles?: string,
   funnel?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<{ stages: Stage[]; demo: boolean; authError?: boolean }> {
   try {
     const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
     const res = await fetch(`${BASE}/sales/board${qs}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (res.status === 401 || res.status === 403) {
       return { stages: [], demo: false, authError: true };
@@ -264,11 +266,11 @@ export async function fetchFunnels(): Promise<FunnelRow[]> {
 
 /** То же для SSR (page.tsx «Все вместе»): относительный `/api/...` на сервере не работает —
  * ходим на BASE напрямую с ручным пробросом роли (как fetchBoardResult/fetchKpis). */
-export async function fetchFunnelsServer(roles?: string, accessToken?: string): Promise<FunnelRow[]> {
+export async function fetchFunnelsServer(roles?: string, accessToken?: string, devUsername?: string): Promise<FunnelRow[]> {
   try {
     const res = await fetch(`${BASE}/sales/funnels`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as FunnelRow[];
@@ -337,11 +339,12 @@ export async function fetchDealDetail(
   id: string,
   roles?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<DealDetail | null> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
@@ -418,6 +421,7 @@ export async function fetchDealDetail(
 }
 
 export interface DealInput {
+  crm_client_id?: number;
   number: string;
   title: string;
   counterparty: string;
@@ -664,7 +668,14 @@ export async function completeDealTask(taskId: number, result?: string): Promise
   }
 }
 
+export type ContactTarget = string | { clientId: number };
+
+function contactUrl(target: ContactTarget) {
+  return typeof target === "string" ? `/api/sales/deals/${target}/contacts` : `/api/sales/clients/${target.clientId}/contacts`;
+}
+
 export interface DealContact {
+  crm_client_id?: number;
   id: number;
   full_name: string;
   phone: string | null;
@@ -684,6 +695,7 @@ function isDealContact(value: unknown): value is DealContact {
   return typeof contact.id === "number"
     && Number.isSafeInteger(contact.id)
     && contact.id > 0
+    && (contact.crm_client_id === undefined || (typeof contact.crm_client_id === "number" && Number.isSafeInteger(contact.crm_client_id) && contact.crm_client_id > 0))
     && typeof contact.full_name === "string"
     && (typeof contact.phone === "string" || contact.phone === null)
     && (typeof contact.email === "string" || contact.email === null)
@@ -695,9 +707,9 @@ function isDealContactList(value: unknown): value is DealContact[] {
 }
 
 /** Контакты контрагента сделки с различимым результатом загрузки. */
-export async function fetchContactsResult(dealId: string): Promise<FetchContactsResult> {
+export async function fetchContactsResult(dealId: ContactTarget): Promise<FetchContactsResult> {
   try {
-    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, { cache: "no-store" });
+    const res = await fetch(contactUrl(dealId), { cache: "no-store" });
     if (!res.ok) return { status: "http_error", httpStatus: res.status };
     let data: unknown;
     try {
@@ -705,7 +717,7 @@ export async function fetchContactsResult(dealId: string): Promise<FetchContacts
     } catch {
       return { status: "malformed_response" };
     }
-    return isDealContactList(data)
+    return isDealContactList(data) && (typeof dealId === "string" || data.every((contact) => contact.crm_client_id === dealId.clientId))
       ? { status: "ok", data }
       : { status: "malformed_response" };
   } catch {
@@ -721,11 +733,11 @@ export async function fetchContacts(dealId: string): Promise<DealContact[]> {
 
 /** Добавить контакт контрагенту сделки. */
 export async function addContact(
-  dealId: string,
-  contact: { full_name: string; phone?: string; email?: string; is_primary?: boolean },
+  dealId: ContactTarget,
+  contact: { full_name: string; phone?: string; email?: string; is_primary?: boolean; request_key?: string },
 ): Promise<boolean> {
   try {
-    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, {
+    const res = await fetch(contactUrl(dealId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(contact),
@@ -737,9 +749,9 @@ export async function addContact(
 }
 
 /** Назначить контакт основным. */
-export async function setPrimaryContact(contactId: number): Promise<boolean> {
+export async function setPrimaryContact(contactId: number, clientId?: number): Promise<boolean> {
   try {
-    const res = await fetch(`/api/sales/contacts/${contactId}/primary`, { method: "PATCH" });
+    const res = await fetch(clientId === undefined ? `/api/sales/contacts/${contactId}/primary` : `/api/sales/clients/${clientId}/contacts/${contactId}/primary`, { method: "PATCH" });
     return res.ok;
   } catch {
     return false;
@@ -970,11 +982,12 @@ function mapKpi(k: ApiKpi): Kpi {
 export async function fetchKpisResult(
   roles?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<{ kpis: Kpi[]; demo: boolean; authError?: boolean }> {
   try {
     const res = await fetch(`${BASE}/sales/kpis`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (res.status === 401 || res.status === 403) {
       return { kpis: [], demo: false, authError: true };

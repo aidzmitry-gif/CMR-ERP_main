@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { buildBackendProxyHeaders } from "@/lib/api-proxy-headers";
 
 describe("buildBackendProxyHeaders", () => {
+  it("takes dev identity only from the server session and strips forged identity headers", () => {
+    const incoming = new Headers({ "X-User": "foreign", "X-User-Roles": "director" });
+    const scoped = buildBackendProxyHeaders(incoming, { devUsername: "manager", devRole: "sales" });
+    expect(scoped.get("X-User")).toBe("manager");
+    expect(scoped.get("X-User-Roles")).toBe("sales");
+    const anonymous = buildBackendProxyHeaders(incoming);
+    expect(anonymous.has("X-User")).toBe(false);
+    expect(anonymous.has("X-User-Roles")).toBe(false);
+  });
   it("пробрасывает Authorization и добавляет X-User-Roles для dev", () => {
     const incoming = new Headers({
       authorization: "Bearer incoming-token",

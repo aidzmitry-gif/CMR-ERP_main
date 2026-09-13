@@ -1929,9 +1929,16 @@ async def test_rbac_guest_denied_everywhere(session, api):
     ).status_code == 403
 
 
+async def _registered_role_headers(session, role):
+    manager = await session.scalar(select(User).where(User.username == "lead-manager-1"))
+    manager.role = role
+    await session.commit()
+    return {"X-User": manager.username, "X-User-Roles": role}
+
+
 async def test_rbac_sales_reads_and_routes(session, api):
     """Продавец (слаг sales) ведёт воронку целиком: читает, принимает, распределяет."""
-    sales = {"X-User-Roles": "sales"}
+    sales = await _registered_role_headers(session, "sales")
     assert (await api.get("/leads", headers=sales)).status_code == 200
     lead = (
         await api.post(
@@ -1951,7 +1958,7 @@ async def test_rbac_sales_manager_full_funnel(session, api, services):
     """Keycloak-роль sales_manager = sales: qualify → route → convert → сделка на доске."""
     from core.services.eventbus import EventContext
 
-    mgr = {"X-User-Roles": "sales_manager"}
+    mgr = await _registered_role_headers(session, "sales_manager")
     assert (await api.get("/leads", headers=mgr)).status_code == 200
     lead = (
         await api.post(
@@ -1986,7 +1993,7 @@ async def test_rbac_sales_manager_full_funnel(session, api, services):
 
 async def test_rbac_sales_cli_cannot_route(session, api):
     """Клиентская работа (sales_cli) — приём/квалификация без раздачи: route → 403, qualify → 200."""
-    cli = {"X-User-Roles": "sales_cli"}
+    cli = await _registered_role_headers(session, "sales_cli")
     lead = (
         await api.post("/leads", json={"source": "site", "company": "ООО Клиент", "phone": "+375291230202"})
     ).json()

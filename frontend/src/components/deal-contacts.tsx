@@ -1,10 +1,11 @@
 "use client";
 
 import { Mail, Phone, Plus, Star, UserRound } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   addContact,
   type DealContact,
+  type ContactTarget,
   fetchContactsResult,
   setPrimaryContact,
   type FetchContactsResult,
@@ -35,9 +36,11 @@ function refreshFailureMessage(
   return `${outcome}, но список контактов не удалось обновить: ${failureReason(result)}. Повторите попытку.`;
 }
 
-export function DealContacts({ dealId }: { dealId: string }) {
+export function DealContacts({ dealId: dealProp, clientId }: { dealId: string; clientId?: never } | { clientId: number; dealId?: never }) {
+  const dealId = useMemo<ContactTarget>(() => clientId === undefined ? dealProp! : { clientId }, [dealProp, clientId]);
+  const requestKey = useRef<string | null>(null);
   const [items, setItems] = useState<DealContact[]>([]);
-  const [itemsDealId, setItemsDealId] = useState<string | null>(null);
+  const [itemsDealId, setItemsDealId] = useState<ContactTarget | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
   }, [dealId]);
 
   const loadContacts = useCallback(async (
-    targetDealId: string,
+    targetDealId: ContactTarget,
     mode: LoadMode,
     operation: RefreshOperation = "retry",
   ): Promise<void> => {
@@ -115,6 +118,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
   useEffect(() => {
     // A deal change invalidates pending mutations as well as contact loads.
     mutationVersion.current += 1;
+    requestKey.current = null;
     // Deal identity is the boundary for this local interaction state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setBusy(false);
@@ -147,6 +151,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
     setStale(false);
     try {
       const saved = await addContact(targetDealId, {
+        request_key: requestKey.current ??= crypto.randomUUID(),
         full_name: name.trim(),
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
@@ -157,6 +162,7 @@ export function DealContacts({ dealId }: { dealId: string }) {
         setError("Не удалось сохранить контакт. Повторите попытку.");
         return;
       }
+      requestKey.current = null;
       setName("");
       setPhone("");
       setEmail("");
@@ -180,7 +186,10 @@ export function DealContacts({ dealId }: { dealId: string }) {
     setRefreshError(null);
     setStale(false);
     try {
-      const saved = await setPrimaryContact(contactId);
+      const contact = visibleItems.find((item) => item.id === contactId);
+      const primaryClientId = clientId ?? contact?.crm_client_id;
+      const saved = primaryClientId === undefined
+        ? await setPrimaryContact(contactId) : await setPrimaryContact(contactId, primaryClientId);
       if (currentDealId.current !== targetDealId || mutationVersion.current !== operation) return;
       if (!saved) {
         setError("Не удалось назначить основной контакт. Повторите попытку.");
@@ -282,20 +291,20 @@ export function DealContacts({ dealId }: { dealId: string }) {
         <div className="mt-3 space-y-2 rounded-lg border border-line p-3">
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            disabled={busy} onChange={(e) => { setName(e.target.value); requestKey.current = null; }}
             placeholder="ФИО контакта"
             className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
           <div className="flex gap-2">
             <input
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              disabled={busy} onChange={(e) => { setPhone(e.target.value); requestKey.current = null; }}
               placeholder="Телефон"
               className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
             <input
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              disabled={busy} onChange={(e) => { setEmail(e.target.value); requestKey.current = null; }}
               placeholder="Email"
               className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />

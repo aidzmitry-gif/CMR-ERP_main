@@ -74,6 +74,7 @@ AUTHED_HEADERS = {"X-User-Roles": "director"}
 @pytest_asyncio.fixture
 async def api(session):
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session
@@ -90,6 +91,7 @@ async def api(session):
 async def ai_api(session):
     """API-клиент с включённым AI-слоем (mock-режим шлюза) — для AI-эндпоинтов."""
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session
@@ -107,6 +109,7 @@ async def ai_api(session):
 async def api_no_gateways(session):
     """API-клиент с отключёнными шлюзами 1С/склад/ЕГР — для защитных 503-веток."""
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session
