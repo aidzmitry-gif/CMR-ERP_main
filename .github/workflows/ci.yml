@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# Push and pull_request can target the same commit. Keep one run for that SHA;
+# do not cancel a different commit whose backend run still provides useful evidence.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend (unit + api + integration)

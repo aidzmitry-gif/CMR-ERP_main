@@ -14,7 +14,6 @@ import pytest
 from integrations.onec_eschf.isolated import package
 
 HOST = package.HERE / "host"
-POWERSHELL = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
 
 
 def digest(path):
@@ -25,11 +24,12 @@ def digest(path):
 def bundle():
     if os.name != "nt":
         pytest.skip("Win32 Job Object tests require Windows; no native 1C needed")
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     builds = HOST / "builds"
     builds.mkdir(exist_ok=True)
     output = builds / ("build-" + uuid.uuid4().hex)
-    env = dict(os.environ, PSModulePath=str(POWERSHELL.parent / "Modules"))
-    result = subprocess.run([str(POWERSHELL), "-NoProfile", "-NonInteractive", "-File",
+    env = dict(os.environ, PSModulePath=str(powershell.parent / "Modules"))
+    result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-File",
                              str(HOST / "build.ps1"), "-NewOutputDirectory", str(output)],
                             capture_output=True, timeout=30, env=env, check=False)
     assert result.returncode == 0, result.stdout.decode(errors="replace") + result.stderr.decode(errors="replace")

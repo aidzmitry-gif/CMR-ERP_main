@@ -45,6 +45,8 @@ async def main():
             sku = Sku(code="E2E-INV-" + token, title="E2E invoice goods", unit="шт")
             session.add_all([org, buyer, sku])
             await session.flush()
+            # Select the same exact buyer in CRM before its accounting confirmation.
+            deal.counterparty_id, deal.branch_id = buyer.id, None
             item = DealItem(deal_id=deal.id, sku_id=sku.id, qty=Decimal("2"))
             session.add_all([item, AccessGrant(organization_id=org.id, subject=actor, role="chief"), DealOwnership(deal_id=deal.id, organization_id=org.id, snapshot={}, evidence="Synthetic E2E ownership", actor=actor)])
             await session.flush()
