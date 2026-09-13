@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 
 test("own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ", async ({ page, context, browser, baseURL }) => {
   test.setTimeout(180_000);
@@ -62,9 +63,26 @@ test("own: клиент → контакт → сделка → задача/и�
   await page.getByTitle("Срок (необязательно)").fill("2026-09-15T10:00");
   await page.getByRole("button", { name: "Задача", exact: true }).click();
   await expect(page.getByText("Согласовать доставку", { exact: true })).toBeVisible();
+  const tasks = await (await page.request.get(`/api/sales/deals/${deal.id}/tasks`)).json();
+  expect(tasks[0].assignee_id).toBe(2901);
+  let loseHistoryReply = true;
+  const historyKeys: string[] = [];
+  await page.route(`**/api/sales/deals/${deal.id}/messages`, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    historyKeys.push(route.request().postDataJSON().request_key);
+    if (!loseHistoryReply) return route.continue();
+    loseHistoryReply = false;
+    expect((await route.fetch()).status()).toBe(201);
+    await route.abort('failed');
+  });
   await page.getByPlaceholder("Написать сообщение...").fill("Контрольная запись без отправки клиенту");
   await page.getByRole("button", { name: "Сохранить запись в историю", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Не удалось сохранить запись" })).toBeVisible();
+  await page.getByRole("button", { name: "Сохранить запись в историю", exact: true }).click();
   await expect(page.getByText("Контрольная запись без отправки клиенту", { exact: true })).toBeVisible();
+  expect(historyKeys).toHaveLength(2);
+  expect(historyKeys[0]).toBe(historyKeys[1]);
+  expect(await (await page.request.get(`/api/sales/deals/${deal.id}/messages`)).json()).toHaveLength(1);
   const selector = page.getByRole("combobox", { name: "Номенклатура (справочник из 1С через MDM)" });
   const sku = selector.locator('option').filter({ hasText: 'QA-ORDER' });
   await expect(sku).toHaveCount(1);
@@ -94,6 +112,56 @@ test("own: клиент → контакт → сделка → задача/и�
   await originalPage.goto(`/api/sales/documents/${documentId}/render`);
   await originalPage.screenshot({ path: test.info().outputPath('own-invoice-original.png'), fullPage: true });
   await originalPage.close();
+  const contractReply = await page.request.post(`/api/sales/deals/${deal.id}/documents`, {
+    data: {kind:'contract',request_key:`contract-${Date.now()}`},
+  });
+  expect(contractReply.status()).toBe(201);
+  const contract = await contractReply.json();
+  expect(contract.status).toBe('pending_approval');
+  expect((await page.request.post(`/api/sales/documents/${contract.id}/decide`,{data:{approved:true}})).status()).toBe(403);
+  const approver = await browser.newContext({baseURL,storageState:'e2e/.auth/state.json'});
+  try {
+    expect((await approver.request.post(`/api/sales/documents/${contract.id}/decide`,{data:{approved:true}})).status()).toBe(200);
+  } finally { await approver.close(); }
+  await page.reload();
+  await page.getByRole('button',{name:'Email документов',exact:true}).click();
+  const emailPanel = page.getByRole('region',{name:'Отправка документов по email',exact:true});
+  await emailPanel.locator('label').filter({hasText:documents[0].number}).getByRole('checkbox').check();
+  await emailPanel.locator('label').filter({hasText:contract.number}).getByRole('checkbox').check();
+  await emailPanel.getByLabel('Кому (To)',{exact:true}).fill('control@example.invalid');
+  await emailPanel.getByLabel('Тема',{exact:true}).fill('Контрольный пакет — без отправки');
+  const prepared = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/emails/prepare`) && r.request().method()==='POST');
+  await emailPanel.getByRole('button',{name:'Подготовить и проверить',exact:true}).click();
+  const preparedReply = await prepared;
+  expect(preparedReply.status()).toBe(201);
+  const email = await preparedReply.json();
+  expect(email.status).toBe('prepared');
+  expect(email.attempt_count).toBe(0);
+  expect(email.accepted_at).toBeNull();
+  expect(email.attachments).toHaveLength(2);
+  await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toBeDisabled();
+  const pdf = await page.request.get(`/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`);
+  expect(pdf.status()).toBe(200);
+  const bytes = await pdf.body();
+  expect(bytes.subarray(0,5).toString()).toBe('%PDF-');
+  await writeFile(test.info().outputPath('own-prepared-invoice.pdf'),bytes);
+  await emailPanel.scrollIntoViewIfNeeded();
+  await page.screenshot({path:test.info().outputPath('own-prepared-email.png')});
+  await page.reload();
+  const history = await (await page.request.get(`/api/sales/deals/${deal.id}/emails`)).json();
+  expect(history).toHaveLength(1);
+  expect(history[0].status).toBe('prepared');
+  await page.goto(`/crm/clients/${client.id}`);
+  const clientDocuments = page.getByRole("region", { name: "Документы клиента", exact: true });
+  await expect(clientDocuments.getByRole("link", { name: `Оригинал ${documents[0].number}`, exact: true })).toBeVisible();
+  const documentDealLinks = clientDocuments.getByRole("link", { name: `Сделка ${deal.number}`, exact: true });
+  await expect(documentDealLinks).toHaveCount(2);
+  for (const link of await documentDealLinks.all()) {
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", `/crm/deals/${deal.id}`);
+  }
+  await clientDocuments.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('own-client-documents.png') });
   expect((await page.request.get(`/api/sales/clients/${client.id}`, { headers: { 'X-User':'e2e_foreign', 'X-User-Roles':'director' } })).status()).toBe(200);
   for (const path of ['/api/service/tickets', '/api/system/mdm/counterparty']) expect((await page.request.get(path)).status()).toBe(403);
   const foreign = await browser.newContext({ baseURL });
@@ -103,7 +171,7 @@ test("own: клиент → контакт → сделка → задача/и�
     await other.getByLabel('Сотрудник').selectOption('e2e_foreign');
     await other.getByRole('button', { name:'Войти', exact:true }).click();
     await expect(other).not.toHaveURL(/\/login/);
-    for (const path of [`/api/sales/clients/${client.id}`, `/api/sales/clients/${client.id}/contacts`, `/api/sales/deals/${deal.id}`, `/api/sales/documents/${documentId}/render`]) {
+    for (const path of [`/api/sales/clients/${client.id}`, `/api/sales/clients/${client.id}/contacts`, `/api/sales/clients/${client.id}/documents`, `/api/sales/deals/${deal.id}`, `/api/sales/documents/${documentId}/render`, `/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`]) {
       expect((await other.request.get(path, { headers: { 'X-User':'e2e_owner', 'X-User-Roles':'director' } })).status()).toBe(404);
     }
     const hidden = await (await other.request.get(`/api/sales/clients?q=${encodeURIComponent(name)}`)).json();

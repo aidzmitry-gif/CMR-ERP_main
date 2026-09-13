@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -303,11 +303,11 @@ describe("DealDrawerPreview — слайс 6 (B): блок «Документы�
   });
 });
 
-describe("DealDrawerPreview — слайс 8 (C): секция «Написать клиенту»", () => {
+describe("DealDrawerPreview — слайс 8 (C): секция «Запись в историю»", () => {
   it("канал по умолчанию whatsapp; клик по шаблону стадии подставляет текст в textarea", async () => {
     renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    const group = screen.getByRole("group", { name: "Запись в историю" });
     expect(within(group).getByRole("button", { name: "WhatsApp" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -321,8 +321,8 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
 
   it("клик по каналу переключает выбранный канал (aria-pressed)", async () => {
     renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    const group = screen.getByRole("group", { name: "Запись в историю" });
     fireEvent.click(within(group).getByRole("button", { name: "Telegram" }));
     expect(within(group).getByRole("button", { name: "Telegram" })).toHaveAttribute(
       "aria-pressed",
@@ -337,7 +337,7 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
   it("«AI-черновик»: aiDraftReply → текст в textarea", async () => {
     mock(api.aiDraftReply).mockResolvedValue("Черновик от AI");
     renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
     fireEvent.click(screen.getByRole("button", { name: "AI-черновик" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("Черновик от AI"),
@@ -348,7 +348,7 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
   it("«AI-черновик»: null (AI выключен) → честный тост, textarea не трогаем", async () => {
     mock(api.aiDraftReply).mockResolvedValue(null);
     renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
     fireEvent.click(screen.getByRole("button", { name: "AI-черновик" }));
     expect(await screen.findByText("AI-слой выключен — черновик недоступен")).toBeInTheDocument();
     expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
@@ -356,66 +356,95 @@ describe("DealDrawerPreview — слайс 8 (C): секция «Написат�
 
   it("«Отправить» disabled при пустом тексте", () => {
     renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    expect(screen.getByRole("button", { name: "Отправить" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    expect(screen.getByRole("button", { name: "Сохранить запись" })).toBeDisabled();
   });
 
-  it("успешная отправка (у сделки нет шага) → тост + авто-шаг «Дождаться ответа клиента» (+2 дн)", async () => {
+  it("сохранение истории не назначает следующий шаг и не подтверждает прочтение", async () => {
     mock(api.sendMessage).mockResolvedValue(true);
     const { onUpdateFields, onMessageSent } = renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    const group = screen.getByRole("group", { name: "Запись в историю" });
     fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
 
-    expect(await screen.findByText("✅ Отправлено (WhatsApp) · Шаг: Дождаться ответа (2 дн)")).toBeInTheDocument();
+    expect(await screen.findByText("✅ Запись сохранена (WhatsApp). Клиенту не отправлено.")).toBeInTheDocument();
     expect(api.sendMessage).toHaveBeenCalledWith(
       "1",
       "whatsapp",
       "Добрый день! Напоминаю: счёт №… действителен до …. Подтвердите, пожалуйста, оплату.",
+      expect.any(String),
     );
-    expect(onUpdateFields).toHaveBeenCalledWith(
-      "1",
-      expect.objectContaining({
-        next_step: "Дождаться ответа клиента",
-        next_step_at: expect.any(String),
-      }),
-    );
+    expect(onUpdateFields).not.toHaveBeenCalled();
     // Фикс ревью 61fb9e9: updateDeal НЕ зовём напрямую — onUpdateFields уже шлёт PATCH.
     expect(api.updateDeal).not.toHaveBeenCalled();
     // textarea очищается после успешной отправки
     expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
     // Цикл 17: гашение бейджа «клиент ждёт» — вызывающий (deals-workspace.tsx) шлёт
     // messages/read + сбрасывает inboundSignals по этому dealId.
-    expect(onMessageSent).toHaveBeenCalledWith("1");
+    expect(onMessageSent).not.toHaveBeenCalled();
   });
 
   it("успешная отправка (у сделки УЖЕ есть шаг) → тост БЕЗ авто-шага, живой шаг не перетираем", async () => {
     mock(api.sendMessage).mockResolvedValue(true);
     const dealWithStep: Deal = { ...deal, nextStep: "Уже назначенный шаг" };
     const { onUpdateFields } = renderDrawer(vi.fn(), dealWithStep);
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    const group = screen.getByRole("group", { name: "Написать клиенту" });
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    const group = screen.getByRole("group", { name: "Запись в историю" });
     fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
 
-    expect(await screen.findByText("✅ Отправлено (WhatsApp)")).toBeInTheDocument();
+    expect(await screen.findByText("✅ Запись сохранена (WhatsApp). Клиенту не отправлено.")).toBeInTheDocument();
     expect(screen.queryByText(/Шаг: Дождаться ответа/)).toBeNull();
     expect(onUpdateFields).not.toHaveBeenCalled();
   });
 
-  it("ошибка отправки → тост «⚠️ Не отправилось», шаг не ставится", async () => {
-    mock(api.sendMessage).mockResolvedValue(false);
-    const { onUpdateFields, onMessageSent } = renderDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Написать клиенту" }));
-    const group = screen.getByRole("group", { name: "Написать клиенту" });
-    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отправить" }));
+  it.each([false, true])("pending history is isolated after changing deal (close first: %s)", async (closeFirst) => {
+    let finishOld!: (value: boolean) => void;
+    let finishNew!: (value: boolean) => void;
+    mock(api.sendMessage)
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishNew = resolve; }));
+    const { rerender } = renderDrawer();
+    const show = (current: Deal | null) => rerender(<DealDrawerPreview deal={current} stages={stages} onClose={vi.fn()} onMoveStage={vi.fn()} onUpdateFields={vi.fn()} onAddTask={vi.fn()} onWin={vi.fn()} onLose={vi.fn()} now={Date.now()} />);
+    const start = () => {
+      fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+      fireEvent.change(screen.getByLabelText("Текст сообщения клиенту"), { target: { value: "History" } });
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
+    };
+    start();
+    if (closeFirst) show(null);
+    show(closeFirst ? deal : { ...deal, id: "2" });
+    expect(screen.getByRole("button", { name: "Запись в историю" })).toBeEnabled();
+    start();
+    expect(api.sendMessage).toHaveBeenCalledTimes(2);
+    await act(async () => { finishOld(true); });
+    expect(screen.getByRole("button", { name: "Сохранить запись" })).toBeDisabled();
+    expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("History");
+    await act(async () => { finishNew(true); });
+    expect(screen.getByLabelText("Текст сообщения клиенту")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Запись в историю" })).toBeEnabled();
+  });
 
-    expect(await screen.findByText("⚠️ Не отправилось")).toBeInTheDocument();
+  it("failed history can be retried with the same key without claiming delivery", async () => {
+    mock(api.sendMessage).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { onUpdateFields, onMessageSent } = renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Запись в историю" }));
+    const group = screen.getByRole("group", { name: "Запись в историю" });
+    fireEvent.click(within(group).getByRole("button", { name: "Напоминание об оплате" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
+
+    expect(await screen.findByText("⚠️ Не удалось сохранить запись. Повторите попытку.")).toBeInTheDocument();
     expect(onUpdateFields).not.toHaveBeenCalled();
     // Цикл 17: неуспешная отправка не гасит бейдж — клиент так и не получил сообщение.
     expect(onMessageSent).not.toHaveBeenCalled();
+    const key = mock(api.sendMessage).mock.calls[0][3];
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
+    expect(await screen.findByText("✅ Запись сохранена (WhatsApp). Клиенту не отправлено.")).toBeInTheDocument();
+    expect(mock(api.sendMessage).mock.calls[1][3]).toBe(key);
+    expect(key).toEqual(expect.any(String));
+    expect(onMessageSent).not.toHaveBeenCalled();
+    expect(onUpdateFields).not.toHaveBeenCalled();
   });
 });
 

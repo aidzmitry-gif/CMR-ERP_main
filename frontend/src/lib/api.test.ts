@@ -448,6 +448,17 @@ describe("api client — документы/сообщения/согласов�
     expect(await aiDraftReply("1")).toBeNull();
   });
 
+  it("rejects malformed history and sends the caller's replay key", async () => {
+    for (const invalid of [null, {}, [{id:1,text:"Incomplete"}]]) {
+      stubFetch(invalid);
+      await expect(fetchMessages("1")).rejects.toThrow("malformed_response");
+    }
+    stubFetch({},true);
+    expect(await sendMessage("1","phone","History","replay-123")).toBe(true);
+    const options = vi.mocked(fetch).mock.calls.at(-1)?.[1];
+    expect(JSON.parse(String(options?.body)).request_key).toBe("replay-123");
+  });
+
   it("fetchApprovals / requestApproval / decideApproval", async () => {
     stubFetch([{ id: 1, kind: "deal.contract", entity_ref: "deal:1", subject: "s", route: "Юрист", status: "pending", requested_by: "М", decided_by: null }]);
     expect((await fetchApprovals({ status: "pending" }))[0].route).toBe("Юрист");
@@ -589,7 +600,7 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchDealDetail("1")).toBeNull();
     expect((await fetchKpis()).length).toBeGreaterThan(0); // mock-KPI
     expect(await fetchDocuments("1")).toEqual([]);
-    expect(await fetchMessages("1")).toEqual([]);
+    await expect(fetchMessages("1")).rejects.toThrow();
     expect(await fetchApprovals()).toEqual([]);
     expect(await fetchContacts("1")).toEqual([]);
     expect(await fetchEvents()).toEqual([]);

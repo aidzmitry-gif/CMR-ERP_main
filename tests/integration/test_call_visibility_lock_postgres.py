@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from modules.sales.access import DealAccess, locked_call_for_write
-from modules.sales.models import CallLog, Deal
+from modules.sales.models import CallLog, CrmClient, Deal
 
 
 @pytest_asyncio.fixture
@@ -28,6 +28,7 @@ async def call_factory():
     try:
         async with engine.begin() as conn:
             await conn.execute(CreateSchema(schema))
+            await conn.run_sync(CrmClient.__table__.create)
             await conn.run_sync(Deal.__table__.create)
             await conn.run_sync(CallLog.__table__.create)
         yield async_sessionmaker(engine, expire_on_commit=False)

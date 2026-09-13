@@ -45,7 +45,8 @@ test_directory = TemporaryDirectory(prefix='crm-playwright-')
 database_path = Path(test_directory.name) / 'synthetic.db'
 os.environ.update(AIOS_ENVIRONMENT='dev', AIOS_AUTH_MODE='dev',
                   AIOS_DATABASE_URL=f'sqlite+aiosqlite:///{database_path.as_posix()}',
-                  AIOS_SALES_EMAIL_ENABLED='false', AIOS_AI_ENABLED='false')
+                  AIOS_SALES_EMAIL_ENABLED='false', AIOS_AI_ENABLED='false',
+                  AIOS_SMTP_HOST='127.0.0.1', AIOS_SMTP_FROM='crm@example.test', AIOS_SMTP_TLS='false')
 # Settings and the egress guard must be installed before application imports.
 from config.access import USERS  # noqa: E402
 from core.domain.models import Counterparty, Sku, User  # noqa: E402

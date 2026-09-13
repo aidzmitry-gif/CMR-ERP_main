@@ -1192,22 +1192,23 @@ export interface DealMsg {
 
 /** Омниканальная история переписки по сделке (клиент, через /api). */
 export async function fetchMessages(dealId: string): Promise<DealMsg[]> {
-  try {
-    const res = await fetch(`/api/sales/deals/${dealId}/messages`, { cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as DealMsg[];
-  } catch {
-    return [];
+  const res = await fetch(`/api/sales/deals/${dealId}/messages`, { cache: "no-store" });
+  if (!res.ok) throw new Error(String(res.status));
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows) || !rows.every((row) => row && Number.isSafeInteger(row.id) && row.id > 0
+    && [row.channel, row.direction, row.author, row.text, row.created_at].every((value) => typeof value === "string"))) {
+    throw new Error("malformed_response");
   }
+  return rows as DealMsg[];
 }
 
 /** Отправить сообщение по сделке (канал + текст). */
-export async function sendMessage(dealId: string, channel: string, text: string): Promise<boolean> {
+export async function sendMessage(dealId: string, channel: string, text: string, requestKey?: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel, text, author: "Менеджер", direction: "out" }),
+      body: JSON.stringify({ channel, text, author: "Менеджер", direction: "out", request_key: requestKey }),
     });
     return res.ok;
   } catch {

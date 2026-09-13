@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
@@ -38,6 +38,8 @@ describe("DealMessages (история общения)", () => {
     fireEvent.click(save);
     await waitFor(() => expect(input).toHaveValue(""));
     expect(api.sendMessage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.sendMessage).mock.calls[0][3]).toEqual(expect.any(String));
+    expect(vi.mocked(api.sendMessage).mock.calls[1][3]).toBe(vi.mocked(api.sendMessage).mock.calls[0][3]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -75,7 +77,7 @@ describe("DealMessages (история общения)", () => {
     fireEvent.change(input, { target: { value: "Здравствуйте" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("3", "whatsapp", "Здравствуйте"));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("3", "whatsapp", "Здравствуйте", expect.any(String)));
   });
 
   it("AI-черновик подставляется в поле ввода", async () => {
@@ -108,6 +110,47 @@ describe("DealMessages (история общения)", () => {
     const input = screen.getByPlaceholderText("Написать сообщение...");
     fireEvent.change(input, { target: { value: "Привет" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("6", "telegram", "Привет"));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("6", "telegram", "Привет", expect.any(String)));
+  });
+
+  it("distinguishes failed history from empty and retries", async () => {
+    vi.mocked(api.fetchMessages).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce([]);
+    render(<DealMessages dealId="1" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить историю");
+    expect(screen.queryByText("Переписки пока нет")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку истории" }));
+    expect(await screen.findByText("Переписки пока нет")).toBeInTheDocument();
+  });
+
+  it("does not show a late history or AI draft from the previous deal", async () => {
+    let finish!: (rows: api.DealMsg[]) => void;
+    let draft!: (text: string) => void;
+    vi.mocked(api.fetchMessages).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; })).mockResolvedValueOnce([]);
+    vi.mocked(api.aiDraftReply).mockReturnValueOnce(new Promise((resolve) => { draft = resolve; }));
+    const view = render(<DealMessages dealId="1" />);
+    fireEvent.click(screen.getByRole("button", { name: /AI-черновик/ }));
+    view.rerender(<DealMessages dealId="2" />);
+    await screen.findByText("Переписки пока нет");
+    await act(async () => {
+      finish([{id:1,channel:"phone",direction:"in",author:"Old",text:"Foreign history",created_at:"2026-09-13T10:00:00Z"}]);
+      draft("Old AI draft");
+    });
+    expect(screen.queryByText("Foreign history")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Написать сообщение...")).toHaveValue("");
+  });
+
+  it("changes the replay key after the user edits failed input", async () => {
+    vi.mocked(api.fetchMessages).mockResolvedValue([]);
+    vi.mocked(api.sendMessage).mockResolvedValue(false);
+    render(<DealMessages dealId="1" />);
+    const input = screen.getByPlaceholderText("Написать сообщение...");
+    fireEvent.change(input, {target:{value:"First"}});
+    fireEvent.keyDown(input,{key:"Enter"});
+    await screen.findByRole("alert");
+    const first = vi.mocked(api.sendMessage).mock.calls[0][3];
+    fireEvent.change(input,{target:{value:"Changed"}});
+    fireEvent.keyDown(input,{key:"Enter"});
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.sendMessage).mock.calls[1][3]).not.toBe(first);
   });
 });

@@ -3,7 +3,7 @@
 import { Mail, Phone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FaTelegramPlane, FaViber, FaWhatsapp } from "react-icons/fa";
-import { type DealContact, fetchContacts, sendMessage } from "@/lib/api";
+import { type DealContact, fetchContacts } from "@/lib/api";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
 
@@ -78,20 +78,24 @@ export function ChannelRow({ onPhone }: { onPhone?: () => void } = {}) {
 
 /** Крупные кнопки каналов в карточке — открывают связь по основному контакту. */
 export function ChannelButtons({ dealId }: { dealId: string }) {
+  return <ChannelButtonsBody key={dealId} dealId={dealId} />;
+}
+
+function ChannelButtonsBody({ dealId }: { dealId: string }) {
   const [contact, setContact] = useState<DealContact | null>(null);
 
   useEffect(() => {
-    void fetchContacts(dealId).then((cs) =>
-      setContact(cs.find((c) => c.is_primary) ?? cs[0] ?? null),
-    );
+    let current = true;
+    void fetchContacts(dealId).then((cs) => {
+      if (current) setContact(cs.find((c) => c.is_primary) ?? cs[0] ?? null);
+    });
+    return () => { current = false; };
   }, [dealId]);
 
-  function onChannel(channel: string, label: string) {
+  function onChannel(channel: string) {
     const href = channelLink(channel, contact?.phone ?? "", contact?.email ?? "");
     if (href) window.open(href, "_blank", "noopener");
-    // фиксируем контакт в истории переписки
-    const who = contact ? ` — ${contact.full_name}` : "";
-    void sendMessage(dealId, channel, `Связь по каналу «${label}»${who}`);
+    // Opening an external app does not prove that a conversation or delivery happened.
   }
 
   return (
@@ -99,7 +103,8 @@ export function ChannelButtons({ dealId }: { dealId: string }) {
       {CHANNELS.map(({ key, label, color, Icon }) => (
         <button
           key={key}
-          onClick={() => onChannel(key, label)}
+          onClick={() => onChannel(key)}
+          disabled={!channelLink(key, contact?.phone ?? "", contact?.email ?? "")}
           title={contact?.phone || contact?.email || label}
           className="flex flex-col items-center gap-2"
         >
