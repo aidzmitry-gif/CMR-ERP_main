@@ -434,7 +434,7 @@ async def bank_import_register(org_id: int, ctx=Depends(member)):
 
 @router.get("/organizations/{org_id}/bank-import/candidates")
 async def bank_import_candidates(org_id: int, ctx=Depends(member)):
-    return await bank_import.list_candidates(ctx[0], org_id)
+    return await bank_import.list_candidates(ctx[0], org_id, include_unbound=ctx[2] == "chief")
 
 
 @router.post("/organizations/{org_id}/settlement-offsets/preview")

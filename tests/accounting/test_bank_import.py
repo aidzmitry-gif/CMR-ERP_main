@@ -173,3 +173,22 @@ async def test_bank_candidates_exclude_rows_bound_to_another_company(db, book):
     await db.commit()
     result = await bank_import.list_candidates(db, book[0])
     assert all(x["source_snapshot"]["transaction_id"] != source.id for x in result)
+
+
+@pytest.mark.parametrize("role", ["reader", "accountant"])
+async def test_only_chief_can_view_unassigned_bank_sources(client, db, book, role):
+    from modules.accounting.models import AccessGrant
+
+    source = BankTransaction(ext_id="UNASSIGNED", occurred_on=date(2026, 9, 3), amount="80.00", currency="BYN")
+    db.add(source)
+    await db.execute(update(AccessGrant).where(AccessGrant.organization_id == book[0]).values(role=role))
+    await db.commit()
+    url = f"/accounting/organizations/{book[0]}/bank-import/candidates"
+    response = await client.get(url)
+    assert response.status_code == 200 and response.json() == []
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source.id,
+        ownership="own", evidence="Explicit chief mapping", actor="tester"))
+    await db.commit()
+    own = await client.get(url)
+    assert own.status_code == 200
+    assert [x["source_snapshot"]["transaction_id"] for x in own.json()] == [source.id]

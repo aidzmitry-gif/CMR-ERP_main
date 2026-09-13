@@ -263,7 +263,7 @@ async def list_imports(session, org_id: int):
     ).order_by(BankImportReceipt.id.desc()))).all()
 
 
-async def list_candidates(session, org_id: int):
+async def list_candidates(session, org_id: int, *, include_unbound=False):
     """Return source-bound queue facts needed by the accountant workspace.
 
     Finance owns the raw bank rows and has no legal-entity default.  The
@@ -283,6 +283,8 @@ async def list_candidates(session, org_id: int):
     result = []
     for row in rows:
         binding = binding_by_source.get(row.id)
+        if binding is None and not include_unbound:
+            continue
         if binding is not None and binding.organization_id != org_id:
             continue
         snapshot = source_snapshot(row, allow_invalid=True)
