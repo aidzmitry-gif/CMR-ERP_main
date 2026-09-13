@@ -15,7 +15,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from modules.accounting import service
 from modules.accounting.documents import BankDocument, preview_bank
@@ -302,3 +302,17 @@ async def list_candidates(session, org_id: int, *, include_unbound=False):
             "entry_id": receipt.entry_id if receipt is not None else None,
         })
     return result
+
+
+async def pending_count(session, org_id: int, through: date) -> int:
+    """Owned bank sources affecting the report cutoff, including undated rows."""
+    return await session.scalar(select(func.count(BankTransaction.id)).join(
+        SourceBinding, (SourceBinding.source_id == BankTransaction.id)
+        & (SourceBinding.source_type == "finance_bank_transaction")
+        & (SourceBinding.organization_id == org_id)
+        & (SourceBinding.ownership == "own"),
+    ).outerjoin(BankImportReceipt,
+        (BankImportReceipt.source_transaction_id == BankTransaction.id)
+        & (BankImportReceipt.organization_id == org_id),
+    ).where(BankImportReceipt.entry_id.is_(None),
+            or_(BankTransaction.occurred_on <= through, BankTransaction.occurred_on.is_(None)))) or 0

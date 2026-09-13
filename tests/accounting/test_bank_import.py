@@ -263,3 +263,28 @@ async def test_existing_bank_binding_replays_after_period_closes(client, db, boo
     replay = await client.post(url, json=body)
     assert replay.status_code == 201, replay.text
     assert replay.json()["id"] == first.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_report_stays_preliminary_for_owned_unposted_bank_source(db, book):
+    from modules.accounting.models import Period
+    from modules.accounting.reports import report
+
+    # Legacy state before bank closing guards: closed period with an unposted source.
+    db.add(Period(organization_id=book[0], month="2026-09", closed=True, generation=0))
+    source = BankTransaction(ext_id="REPORT-BANK", occurred_on=date(2026, 9, 20), amount="120.00", currency="BYN")
+    db.add(source)
+    await db.flush()
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source.id,
+                         ownership="own", evidence="Synthetic legacy report source", actor="tester"))
+    await db.commit()
+    monthly = await report(db, book[0], date(2026, 9, 1), date(2026, 9, 30))
+    assert monthly["status"] == "preliminary"
+    assert monthly["pending_documents"] == 1
+    before_source = await report(db, book[0], date(2026, 9, 1), date(2026, 9, 19))
+    assert before_source["pending_documents"] == 0
+    source.occurred_on = None
+    await db.commit()
+    undated = await report(db, book[0], date(2026, 9, 1), date(2026, 9, 19))
+    assert undated["pending_documents"] == 1
+    assert undated["status"] == "preliminary"

@@ -88,7 +88,10 @@ async def report(session, org_id, start, end):
         SourceControl.organization_id == org_id, SourceControl.month <= end.strftime("%Y-%m"),
         SourceControl.entry_id.is_(None),
     ))).all()
-    final = final and not primary_pending
+    from modules.accounting.bank_import import pending_count
+
+    bank_pending = await pending_count(session, org_id, end)
+    final = final and not primary_pending and not bank_pending
     review_items = []
     # A closed period is not enough to label a report final: unresolved VAT,
     # foreign-trade, depreciation, production, repair or late-cost evidence
@@ -111,7 +114,7 @@ async def report(session, org_id, start, end):
         "status": "closed_periods" if final else "preliminary",
         "review_items": review_items,
         "statutory_certified": False,
-        "pending_documents": len(pending) + len(primary_pending), "trial_balance": list(trial.values()),
+        "pending_documents": len(pending) + len(primary_pending) + bank_pending, "trial_balance": list(trial.values()),
         "movements": movements,
         "opening_movements": opening_movements,
         "balance": {"assets": money(assets), "liabilities": money(liabilities),
