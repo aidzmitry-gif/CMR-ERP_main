@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AccountingReconciliation } from "./accounting-reconciliation";
 
@@ -49,4 +49,28 @@ it("offers one idempotent accountant acceptance for a closed complete match", as
   expect(await screen.findByText(/Протокол принят бухгалтером/)).toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(JSON.parse(fetcher.mock.calls[1][1].body).request_key).toBe(receipt.request_key);
+});
+
+it("keeps source files and evidence locked until acceptance finishes", async () => {
+  const candidate = { status: "no_numeric_differences", cutover_ready: true, left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" }, right: { sha256: "right", status: "closed_periods" }, differences: [] };
+  let finish!: (response: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => candidate }).mockReturnValueOnce(pending);
+  vi.stubGlobal("fetch", fetcher);
+  vi.stubGlobal("crypto", { randomUUID: () => "00000000-0000-4000-8000-000000000001" });
+  render(<AccountingReconciliation org="7" />);
+  selectFiles();
+  fireEvent.click(screen.getByText("Сравнить ОСВ"));
+  await screen.findByText(/ОСВ совпадают/);
+  fireEvent.change(screen.getByLabelText("Основание принятия сверки"), { target: { value: "Проверено бухгалтером" } });
+  fireEvent.click(screen.getByText("Принять протокол бухгалтером"));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  expect(screen.getByLabelText("Левая ОСВ")).toBeDisabled();
+  expect(screen.getByLabelText("Правая ОСВ")).toBeDisabled();
+  expect(screen.getByText("Сравнить ОСВ")).toBeDisabled();
+  expect(screen.getByLabelText("Основание принятия сверки")).toBeDisabled();
+  await act(async () => finish({ ok: false, json: async () => ({ detail: "Temporary failure" }) }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Temporary failure");
+  expect(screen.getByLabelText("Левая ОСВ")).toBeEnabled();
+  expect(screen.getByLabelText("Основание принятия сверки")).toHaveValue("Проверено бухгалтером");
 });

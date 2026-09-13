@@ -19,7 +19,7 @@ export function AccountingReconciliation({ org }: { org: string }) {
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmKey, setConfirmKey] = useState("");
   const [evidence, setEvidence] = useState("");
   async function compare() {
-    if (!org || !left || !right || busy) return;
+    if (!org || !left || !right || busy || confirmBusy) return;
     setBusy(true); setError(""); setProtocol(null);
     try {
       const [left_base64, right_base64] = await Promise.all([encoded(left), encoded(right)]);
@@ -31,7 +31,7 @@ export function AccountingReconciliation({ org }: { org: string }) {
     finally { setBusy(false); }
   }
   async function confirm() {
-    if (!org || !left || !right || !protocol?.cutover_ready || protocol.accepted_by_accountant || !confirmKey || evidence.trim().length < 10 || confirmBusy) return;
+    if (!org || !left || !right || !protocol?.cutover_ready || protocol.accepted_by_accountant || !confirmKey || evidence.trim().length < 10 || confirmBusy || busy) return;
     setConfirmBusy(true); setError("");
     try {
       const [left_base64, right_base64] = await Promise.all([encoded(left), encoded(right)]);
@@ -56,7 +56,7 @@ export function AccountingReconciliation({ org }: { org: string }) {
     <h2 className="font-semibold">Сверка двух ОСВ</h2>
     <p>Выберите два CSV в формате выгрузки ERP для одного юрлица и периода. Выгрузку 1С сначала приведите к этому формату по утверждённому соответствию счетов и аналитики. До 2 МБ на файл. Файлы отправляются серверу для сравнения; проводки не создаются.</p>
     <p className="text-sm text-muted">Период берётся из файлов. Разница: правая ОСВ минус левая. Отсутствующие строки не считаются нулевыми. Совпадение не заменяет проверку бухгалтера и закрытие месяца.</p>
-    <fieldset disabled={busy || !org} className="space-y-3">
+    <fieldset disabled={busy || confirmBusy || !org} className="space-y-3">
       <label className="block">Левая ОСВ<input className="block" type="file" accept=".csv,text/csv" onChange={(e) => { setLeft(e.target.files?.[0] ?? null); clear(); }} /></label>
       <label className="block">Правая ОСВ<input className="block" type="file" accept=".csv,text/csv" onChange={(e) => { setRight(e.target.files?.[0] ?? null); clear(); }} /></label>
       <Button disabled={!left || !right} onClick={() => void compare()}>Сравнить ОСВ</Button>
@@ -65,7 +65,7 @@ export function AccountingReconciliation({ org }: { org: string }) {
     {protocol && <>
       <p>{protocol.status === "no_numeric_differences" ? "Числовых расхождений не найдено." : `Строк с расхождениями: ${protocol.differences.length}.`}</p>
       <p>{protocol.left.from} — {protocol.left.to} · Левая: {reportStatus(protocol.left.status)} · Правая: {reportStatus(protocol.right.status)}</p>
-      {protocol.accepted_by_accountant ? <p role="status">Протокол принят бухгалтером{protocol.receipt_id ? ` · квитанция №${protocol.receipt_id}` : ""}. Повторная запись не создаётся.</p> : protocol.cutover_ready ? <div className="space-y-2 rounded border border-accent p-3"><p>ОСВ совпадают, оба отчёта закрыты и необработанных документов нет. Перед подтверждением проверьте протокол.</p><label className="block">Основание проверки<input aria-label="Основание принятия сверки" className="mt-1 block w-full rounded border border-line px-2 py-1" value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="Протокол сверки и подпись бухгалтера" /></label><Button disabled={confirmBusy || evidence.trim().length < 10} onClick={() => void confirm()}>{confirmBusy ? "Сохраняем…" : "Принять протокол бухгалтером"}</Button></div> : <p className="text-sm text-muted">Подтверждение недоступно: {(protocol.eligibility_blockers ?? ["нужны закрытые отчёты без необработанных документов"]).join(", ")}.</p>}
+      {protocol.accepted_by_accountant ? <p role="status">Протокол принят бухгалтером{protocol.receipt_id ? ` · квитанция №${protocol.receipt_id}` : ""}. Повторная запись не создаётся.</p> : protocol.cutover_ready ? <div className="space-y-2 rounded border border-accent p-3"><p>ОСВ совпадают, оба отчёта закрыты и необработанных документов нет. Перед подтверждением проверьте протокол.</p><label className="block">Основание проверки<input aria-label="Основание принятия сверки" disabled={busy || confirmBusy} className="mt-1 block w-full rounded border border-line px-2 py-1" value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="Протокол сверки и подпись бухгалтера" /></label><Button disabled={confirmBusy || evidence.trim().length < 10} onClick={() => void confirm()}>{confirmBusy ? "Сохраняем…" : "Принять протокол бухгалтером"}</Button></div> : <p className="text-sm text-muted">Подтверждение недоступно: {(protocol.eligibility_blockers ?? ["нужны закрытые отчёты без необработанных документов"]).join(", ")}.</p>}
       <Button variant="secondary" onClick={download}>Скачать протокол JSON</Button>
       <p className="break-all text-xs">SHA-256 левой: {protocol.left.sha256}<br />SHA-256 правой: {protocol.right.sha256}</p>
       {protocol.differences.slice(0, 100).map((row, index) => <article key={index} className="rounded border border-line p-3">
