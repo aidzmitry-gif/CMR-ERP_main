@@ -19,7 +19,7 @@ it("binds an imported bank source, previews it, and confirms the same package", 
     if (url.endsWith("/source-bindings")) { bound = true; return Promise.resolve({ ok: true, json: async () => ({ id: 2 }) }); }
     if (url.endsWith("/bank-import/preview")) return Promise.resolve({ ok: true, json: async () => ({
       basis_digest: "b".repeat(64), digest: "c".repeat(64), source_snapshot: candidate.source_snapshot,
-      lines: [{ account: "51", title: "Банк", side: "debit", amount: "75.00" }],
+      lines: [{ account: "51", title: "Банк", side: "debit", amount: "75.00", dimensions: { counterparty: "CP-7", contract: "CONTRACT-7" } }],
       confirmation_available: true, normative_verified: true,
     }) });
     if (url.endsWith("/bank-import/confirm")) return Promise.resolve({ ok: true, json: async () => ({ entry_id: 9 }) });
@@ -38,6 +38,7 @@ it("binds an imported bank source, previews it, and confirms the same package", 
   fireEvent.change(screen.getByLabelText("Расчёты: counterparty"), { target: { value: "CP-7" } });
   fireEvent.change(screen.getByLabelText("Расчёты: contract"), { target: { value: "CONTRACT-7" } });
   fireEvent.click(screen.getByRole("button", { name: "Рассчитать проводки" }));
+  expect(await screen.findByText("contract: CONTRACT-7")).toBeVisible();
   fireEvent.click(await screen.findByRole("button", { name: "Подтвердить импорт" }));
   expect(await screen.findByRole("status")).toHaveTextContent("BANK-7");
   expect(posted).toHaveBeenCalledOnce();

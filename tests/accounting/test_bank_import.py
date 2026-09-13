@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select, update
 
 from modules.accounting import bank_import
-from modules.accounting.models import BankImportReceipt, Entry, SourceBinding
+from modules.accounting.models import BankImportReceipt, Entry, Line, SourceBinding
 from modules.finance.models import BankTransaction
 
 
@@ -59,6 +59,9 @@ async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(cl
     entry_id = confirmed.json()["entry_id"]
     assert (await db.scalar(select(Entry).where(Entry.id == entry_id))).operation == "bank_settlement"
     receipt = await db.scalar(select(BankImportReceipt).where(BankImportReceipt.entry_id == entry_id))
+    settlement_line = await db.scalar(select(Line).where(Line.entry_id == entry_id, Line.account_code == "62"))
+    assert settlement_line.dimensions["counterparty"] == "buyer"
+    assert settlement_line.dimensions["contract"] == "contract"
     assert receipt.source_ext_id == "BANK-EXT-1"
     assert receipt.snapshot["source_digest"] == bank_import._digest(snapshot)
 
