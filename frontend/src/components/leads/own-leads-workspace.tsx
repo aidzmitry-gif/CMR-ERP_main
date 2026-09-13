@@ -8,7 +8,7 @@ import { loadDirectory, type ClientRow } from "@/lib/crm-directory";
 import type { Lead } from "@/lib/types";
 import { loadLeadsClient, type LeadsLoadState } from "./leads-load";
 
-const input = "rounded border border-line bg-surface px-3 py-2 text-ink";
+const input = "w-full min-w-0 max-w-full rounded border border-line bg-surface px-3 py-2 text-ink";
 const button = "rounded border border-line px-3 py-2 disabled:opacity-50";
 type Contact = { id: number; full_name: string };
 type Sku = { id: number; code: string; title: string };
@@ -55,14 +55,14 @@ export function OwnLeadsWorkspace({ initialLeads, initialLoadState = "ok" }: {
     setLeads(result.leads); setError("");
   }
   const lead = leads.find((row) => row.id === selected);
-  return <main className="space-y-4 p-6 text-ink">
-    <div className="flex items-center gap-3"><h1 className="text-xl font-semibold">Мои лиды</h1>
+  return <main className="min-w-0 flex-1 space-y-4 overflow-auto p-3 text-ink [overflow-wrap:anywhere] sm:p-6">
+    <div className="flex flex-wrap items-center gap-3"><h1 className="text-xl font-semibold">Мои лиды</h1>
       <button className={button} onClick={() => setCreating(true)}>Новый лид</button>
       <button className={button} onClick={() => void refresh()}>Обновить</button></div>
     {error && <p role="alert">{error}</p>}
     {creating && <CreateOwnLead onCreated={(id) => { setCreating(false); setSelected(id); void refresh(); }} onCancel={() => setCreating(false)} />}
     {!leads.length && !error && <p>Лидов пока нет. Выберите CRM-клиента, чтобы создать первый.</p>}
-    <div className="grid gap-4 lg:grid-cols-2"><div className="space-y-2">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2"><div className="min-w-0 space-y-2">
       {leads.map((row) => <button key={row.id} className={`${button} block w-full text-left`} onClick={() => setSelected(row.id)}>
         <strong>{row.company || row.name}</strong><span className="ml-3">{row.status}</span><p>{row.product || row.message}</p>
       </button>)}
@@ -120,9 +120,9 @@ function CreateOwnLead({ onCreated, onCancel }: { onCreated: (id: number) => voi
     }
     finally { inFlight.current = false; if (alive.current) setBusy(false); }
   }
-  return <form onSubmit={submit} className="space-y-3 rounded border border-line p-4">
+  return <form onSubmit={submit} className="min-w-0 space-y-3 rounded border border-line p-4">
     <h2 className="font-semibold">Лид из CRM-клиента</h2>
-    <fieldset disabled={pending || busy} className="flex flex-wrap gap-3">
+    <fieldset disabled={pending || busy} className="flex min-w-0 flex-wrap gap-3 [&>label]:min-w-0 [&>label]:max-w-full">
       <label>Поиск клиента <input className={input} value={query} onChange={(e) => { setQuery(e.target.value); setOffset(0); selectClient(""); }} /></label>
       <label>CRM-клиент <select aria-label="CRM-клиент" className={input} value={clientId} onChange={(e) => selectClient(e.target.value)} required>
         <option value="">Выберите клиента</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
@@ -184,14 +184,14 @@ function LeadEditorBody({ lead, onUpdated }: { lead: Lead; onUpdated: () => void
   const dirty = rows !== null && JSON.stringify(rows) !== savedRows;
   const terminal = lead.status === "converted" || lead.status === "rejected";
   const validRows = rows !== null && rows.every((r) => r.price.trim() !== "" && Number.isFinite(Number(r.price)) && Number(r.price) >= 0 && Number.isFinite(Number(r.qty)) && Number(r.qty) > 0);
-  return <section className="space-y-3 rounded border border-line p-4">
+  return <section className="min-w-0 space-y-3 rounded border border-line p-4 [overflow-wrap:anywhere]">
     <h2 className="font-semibold">Лид #{lead.id} — {lead.company}</h2>
     <p>{lead.status} · {lead.assignedTo || "Ещё не распределён"}</p>
     <Link href={`/crm/leads/${lead.id}`}>Открыть карточку лида</Link>
     {lead.crmClientId && <Link className="ml-3" href={`/crm/clients/${lead.crmClientId}`}>Клиент и контакты</Link>}
     {error && <p role="alert">{error}</p>}
     <button className={button} disabled={busy} onClick={() => { setRows(null); setRetry(retry + 1); }}>Обновить позиции</button>
-    <fieldset disabled={busy || terminal || rows === null} className="space-y-2">
+    <fieldset disabled={busy || terminal || rows === null} className="min-w-0 space-y-2 [&_label]:block [&_label]:min-w-0 [&_label]:max-w-full">
       <label>Товар <select className={input} value={skuId} onChange={(e) => setSkuId(e.target.value)}><option value="">Выберите товар</option>
         {skus.map((sku) => <option key={sku.id} value={sku.id}>{sku.code} — {sku.title}</option>)}</select></label>
       <button className={button} disabled={!skuId} onClick={() => setRows([...(rows || []), { sku_id: Number(skuId), qty: "1", price: "" }])}>Добавить позицию</button>

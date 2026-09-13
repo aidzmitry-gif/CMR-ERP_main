@@ -264,7 +264,7 @@ export function LeadDrawerPreview({
         role="dialog"
         aria-label={lead ? `Превью лида ЛИД-${lead.id}` : "Превью лида"}
         aria-hidden={!open}
-        className={`fixed inset-y-0 right-0 z-50 flex w-[460px] max-w-[94vw] flex-col border-l border-line bg-surface shadow-pop transition-transform duration-200 ${
+        className={`fixed inset-y-0 right-0 z-50 flex w-[460px] max-w-[94vw] flex-col border-l border-line bg-surface shadow-pop [overflow-wrap:anywhere] transition-transform duration-200 max-sm:block max-sm:overflow-y-auto ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -275,7 +275,7 @@ export function LeadDrawerPreview({
                 <div className="text-[12.5px] text-muted">
                   № ЛИД-{lead.id} · {SOURCE_LABELS[lead.source] ?? lead.source}
                 </div>
-                <h2 className="mt-px truncate text-[17px] font-extrabold text-ink">
+                <h2 className="mt-px text-[17px] font-extrabold text-ink">
                   {lead.company || lead.name || "Лид без имени"}
                 </h2>
                 {lead.region && (
@@ -292,7 +292,7 @@ export function LeadDrawerPreview({
               </button>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-[18px] py-[14px]">
+            <div className="flex-1 overflow-y-auto px-[18px] py-[14px] max-sm:overflow-visible">
               <dl className="space-y-2 text-[13px]">
                 {lead.name && lead.company && (
                   <Row icon={<User size={13} className="text-muted" />} label="Контакт">
@@ -375,13 +375,13 @@ export function LeadDrawerPreview({
                     {savedItems.map((it) => (
                       <div
                         key={it.skuId}
-                        className="flex items-center justify-between gap-2 border-b border-line px-3 py-1.5 text-[12.5px] last:border-0"
+                        className="flex flex-col items-start justify-between gap-2 border-b border-line px-3 py-1.5 text-[12.5px] last:border-0 sm:flex-row sm:items-center"
                       >
-                        <span className="min-w-0 flex-1 truncate text-ink">{it.name || it.skuCode}</span>
+                        <span className="min-w-0 flex-1 text-ink">{it.name || it.skuCode}</span>
                         <span className="shrink-0 tabular-nums text-muted">
                           {it.qty} × {formatByn(it.price)}
                         </span>
-                        <span className="w-24 shrink-0 text-right font-semibold tabular-nums text-ink">
+                        <span className="font-semibold tabular-nums text-ink sm:w-24 sm:shrink-0 sm:text-right">
                           {formatByn(it.qty * it.price)}
                         </span>
                       </div>
@@ -573,7 +573,7 @@ export function LeadDrawerPreview({
               </div>
             </div>
 
-            <footer className="space-y-2 border-t border-line px-[18px] py-3">
+            <footer className="space-y-2 border-t border-line px-[18px] py-3 [&_button]:h-auto [&_button]:min-h-8 [&_button]:whitespace-normal">
               {lead.phone && (
                 <Button
                   variant="call"

@@ -1154,7 +1154,7 @@ function IntakeModal({
 
 export function LeadsWorkspace(props: { initialLeads: Lead[]; initialLoadState?: LeadsLoadState; ownOnly?: boolean }) {
   const router = useRouter();
-  if (props.initialLoadState && props.initialLoadState !== "ok") return <main className="space-y-3 p-6">
+  if (props.initialLoadState && props.initialLoadState !== "ok") return <main className="min-w-0 flex-1 space-y-3 overflow-auto p-3 [overflow-wrap:anywhere] sm:p-6">
     <p role="alert">{props.initialLoadState === "auth" ? "Нет доступа к лидам" : "Не удалось загрузить лиды — проверьте связь с сервером"}</p>
     {props.initialLoadState === "auth" && <Link href="/login">Войти через Keycloak</Link>}
     <button onClick={() => router.refresh()}>Повторить загрузку лидов</button>
@@ -1568,8 +1568,8 @@ function LegacyLeadsWorkspace({
 
   return (
     <>
-      <main className="flex-1 overflow-auto p-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
+      <main className="min-w-0 flex-1 overflow-auto p-3 [overflow-wrap:anywhere] sm:p-6">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold text-ink">Приём лидов</h1>
             <p className="mt-0.5 text-sm text-muted">
@@ -1807,6 +1807,11 @@ function LegacyLeadsWorkspace({
             <Metric label="Конверсия" value={`${conversion}%`} />
           </div>
         )}
+        {leads.length === 0 && (
+          <p className="mt-4 text-sm text-muted">
+            Выберите лид, чтобы квалифицировать и распределить.
+          </p>
+        )}
       </main>
 
       {/* Drawer-preview вместо постоянной правой колонки: 1 клик по лиду открывает,
@@ -1844,15 +1849,6 @@ function LegacyLeadsWorkspace({
         }
         onClose={() => setCallPopupLead(null)}
       />
-
-      {/* Подсказка «Выберите лид» когда нет лидов вовсе — для пустого инбокса. */}
-      {leads.length === 0 && (
-        <aside className="w-[280px] shrink-0 overflow-auto border-l border-line bg-surface">
-          <div className="p-6 text-sm text-muted">
-            Выберите лид, чтобы квалифицировать и распределить.
-          </div>
-        </aside>
-      )}
 
       {modalOpen && <IntakeModal onClose={() => setModalOpen(false)} onCreate={onCreate} />}
     </>
