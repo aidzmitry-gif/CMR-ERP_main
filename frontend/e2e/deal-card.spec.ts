@@ -72,6 +72,32 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await clientRegister.getByLabel("Юрлицо документов клиента", { exact: true }).selectOption(String(fixture.organization));
   await expect(clientRegister.getByRole("article", { name: `Документ клиента ${invoices[0].id}`, exact: true })).toBeVisible();
   await clientRegister.screenshot({ path: testInfo.outputPath("client-document-register.png") });
+  // Partial shipment and release use the same invoice; released stock is not a full shipment.
+  const identity = { expected_version: invoices[0].version, expected_content_sha256: invoices[0].content_sha256 };
+  const warehousePath = `/api/wms/organizations/${fixture.organization}/invoices/${invoices[0].id}`;
+  const shipmentPreview = await page.request.post(`${warehousePath}/physical-shipments/preview`, { data: identity });
+  expect(shipmentPreview.ok()).toBeTruthy();
+  const basis = await shipmentPreview.json();
+  const shipped = await page.request.post(`${warehousePath}/physical-shipments`, { data: {
+    ...identity, source_key: crypto.randomUUID(), expected_reservation_digest: basis.reservation_digest,
+    expected_remaining_digest: basis.remaining_digest, expected_physical_digest: basis.physical_digest,
+    operation_date: new Date().toISOString().slice(0, 10), evidence: "Synthetic partial shipment",
+    lines: [{ line_no: basis.lines[0].line_no, warehouse: basis.lines[0].warehouse, qty: "1.00" }],
+  } });
+  expect(shipped.status(), await shipped.text()).toBe(201);
+  const remainderPreview = await page.request.post(`${warehousePath}/remainder-release/preview`, { data: identity });
+  expect(remainderPreview.ok()).toBeTruthy();
+  const released = await page.request.post(`${warehousePath}/remainder-release`, { data: {
+    ...identity, source_key: crypto.randomUUID(), expected_basis_digest: (await remainderPreview.json()).basis_digest,
+    evidence: "Synthetic customer declined unshipped remainder",
+  } });
+  expect(released.status(), await released.text()).toBe(201);
+  await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
+  await page.getByRole("button", { name: "Фактическая отгрузка и акты", exact: true }).click();
+  const shipmentPanel = page.getByRole("region", { name: "Фактическая отгрузка счёта", exact: true });
+  await expect(shipmentPanel.getByText("Неотгруженный остаток резерва снят", { exact: true })).toBeVisible();
+  await expect(shipmentPanel.getByRole("button", { name: "Проверить выбранную отгрузку", exact: true })).toBeDisabled();
+  await shipmentPanel.screenshot({ path: testInfo.outputPath("released-remainder.png") });
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}`);
   const beforeLoss = await page.request.get(`/api/sales/deals/${dealId}/loss-context`);
   expect(beforeLoss.ok()).toBeTruthy();

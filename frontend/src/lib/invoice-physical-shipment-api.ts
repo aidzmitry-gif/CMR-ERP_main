@@ -2,7 +2,7 @@ import { fetchRegisterDocument } from "./document-register-api";
 
 export type Scope = { organization_id: number; deal_id: number; document_id: number };
 export type Identity = { organization_id: number; document_id: number; document_version: number; content_sha256: string };
-export type Line = { line_no: number; sku_code: string; warehouse: string; original_qty: string; remaining_qty: string; physical: string | null; reserved: string | null; free: string | null; blocking_reason: null | "fully_shipped" | "physical_stock_unknown" | "physical_reserves_exceed_stock" };
+export type Line = { line_no: number; sku_code: string; warehouse: string; original_qty: string; remaining_qty: string; physical: string | null; reserved: string | null; free: string | null; blocking_reason: null | "fully_shipped" | "remainder_released" | "physical_stock_unknown" | "physical_reserves_exceed_stock" };
 export type Preview = { identity: Identity; lines: Line[]; reservation_digest: string; remaining_digest: string; physical_digest: string };
 export type Body = { source_key: string; expected_version: number; expected_content_sha256: string; expected_reservation_digest: string; expected_remaining_digest: string; expected_physical_digest: string; operation_date: string; evidence: string; lines: { line_no: number; warehouse: string; qty: string }[] };
 export type Pending = { scope: Scope; body: Body; skus: { line_no: number; warehouse: string; sku_code: string }[] };
@@ -51,8 +51,9 @@ export function parsePreview(x: unknown, expected: Identity): Preview {
   for (const r of x.lines) {
     if (!obj(r) || !id(r.line_no) || typeof r.sku_code !== "string" || !r.sku_code || typeof r.warehouse !== "string" || !r.warehouse
       || !amount(r.original_qty) || !amount(r.remaining_qty) || ![r.physical,r.reserved,r.free].every(v => v === null || amount(v))
-      || ![null,"fully_shipped","physical_stock_unknown","physical_reserves_exceed_stock"].includes(r.blocking_reason as string | null)) invalid();
+      || ![null,"fully_shipped","remainder_released","physical_stock_unknown","physical_reserves_exceed_stock"].includes(r.blocking_reason as string | null)) invalid();
     if (units(r.original_qty) <= BigInt(0) || units(r.remaining_qty) > units(r.original_qty)) invalid();
+    if (["fully_shipped", "remainder_released"].includes(r.blocking_reason as string) && units(r.remaining_qty) !== BigInt(0)) invalid();
     const key = lineKey(r as Line); if (seen.has(key)) invalid(); seen.add(key);
     if (r.blocking_reason === null && (units(r.remaining_qty) === BigInt(0) || r.physical === null || r.free === null || (r.free as string).startsWith("-"))) invalid();
   }

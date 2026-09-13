@@ -7,7 +7,7 @@ import { clearPending, createShipment, findShipment, lineKey, loadPending, prepa
   type Identity, type Pending, type Preview, type Receipt, type Scope } from "@/lib/invoice-physical-shipment-api";
 
 const message=(e:unknown)=>e instanceof Error?e.message:"Не удалось выполнить действие.";
-const blockers={fully_shipped:"Строка полностью отгружена",physical_stock_unknown:"Физический остаток требует сверки",physical_reserves_exceed_stock:"Недостача: резервы превышают физический остаток"};
+const blockers={remainder_released:"Неотгруженный остаток резерва снят",fully_shipped:"Строка полностью отгружена",physical_stock_unknown:"Физический остаток требует сверки",physical_reserves_exceed_stock:"Недостача: резервы превышают физический остаток"};
 function Act({receipt,org}:{receipt:Receipt;org:number}){
   return <article className="space-y-2 rounded-lg border border-line p-3" aria-label={`Внутренний акт ${receipt.act_id}`}><h3 className="font-semibold">Внутренний акт №{receipt.act_id} · {receipt.snapshot.operation_date}</h3><p>Автор: {receipt.snapshot.actor}</p><p>{receipt.snapshot.evidence}</p><ul>{receipt.snapshot.lines.map(l=><li key={lineKey(l)}>Строка {l.line_no} · {l.sku_code} · {l.warehouse} · {l.qty}</li>)}</ul><AccountingSourceLink org={String(org)} source={`wms:physical-shipment:${org}:${receipt.source_key}`} /></article>;
 }

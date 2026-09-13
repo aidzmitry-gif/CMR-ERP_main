@@ -28,3 +28,10 @@ it("late completion cannot clear a newer request for the same invoice",()=>{
  expect(loadPending(scope)).toEqual(second);
  clearPending(second);expect(loadPending(scope)).toBeNull();
 });
+
+it("accepts released remainder as closed but never as a shippable quantity",()=>{
+ const released:Preview={...preview,lines:[{...preview.lines[0],remaining_qty:"0.00",blocking_reason:"remainder_released"}]};
+ expect(parsePreview(released,preview.identity).lines[0].blocking_reason).toBe("remainder_released");
+ expect(()=>prepare(scope,released,{[lineKey(released.lines[0])]:"1"},"2026-01-01","x")).toThrow();
+ expect(()=>parsePreview({...released,lines:[{...released.lines[0],remaining_qty:"1.00"}]},preview.identity)).toThrow();
+});

@@ -42,3 +42,13 @@ it("preserves K2 when an unmounted K1 completes after A to B to A recovery",asyn
  expect(await screen.findByRole("button",{name:"Проверить результат и повторить тот же запрос"})).toBeInTheDocument();
  expect(api.loadPending(scope)).toEqual(second);
 });
+
+it("shows released remainder separately from fully shipped and prevents another shipment",async()=>{
+ vi.mocked(api.previewShipment).mockResolvedValue({...preview,lines:[{...preview.lines[0],remaining_qty:"0.00",blocking_reason:"remainder_released"}]});
+ render(<InvoicePhysicalShipment scope={scope}/>);
+ await screen.findByText("Неотгруженный остаток резерва снят");
+ expect(screen.queryByText("Строка полностью отгружена")).not.toBeInTheDocument();
+ expect(screen.queryByLabelText("Отгрузить строку 1, склад W")).not.toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"Проверить выбранную отгрузку"})).toBeDisabled();
+ expect(api.createShipment).not.toHaveBeenCalled();
+});
