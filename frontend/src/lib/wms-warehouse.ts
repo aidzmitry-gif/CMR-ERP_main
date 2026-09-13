@@ -217,9 +217,17 @@ export const fetchDashboardServer = (r?: string) =>
     inventories_open: 0, recon_max_diff_value: 0, recon_total_diff_value: 0,
     movements_today_in: 0, movements_today_out: 0, gateway: false,
   });
-export const fetchReceiptsServer = (r?: string) => ssr<Receipt[]>("/wms/receipts", r, []);
-export const fetchReceiptServer = (id: string, r?: string) =>
-  ssr<ReceiptDetail | null>(`/wms/receipts/${id}`, r, null);
+export async function fetchReceiptsServer(r?: string, authHeaders?: Record<string, string>): Promise<Receipt[]> {
+  const response = await fetch(`${BASE}/wms/receipts`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
+  if (!response.ok) throw new Error(`Receipt list unavailable (${response.status})`);
+  return response.json();
+}
+export async function fetchReceiptServer(id: string, r?: string, authHeaders?: Record<string, string>): Promise<ReceiptDetail | null> {
+  const response = await fetch(`${BASE}/wms/receipts/${id}`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Receipt unavailable (${response.status})`);
+  return response.json();
+}
 export const fetchTasksServer = (r?: string) => ssr<WmsTask[]>("/wms/tasks", r, []);
 export const fetchReconServer = (r?: string) =>
   ssr<Reconciliation>("/wms/reconciliation", r, { rows: [], gateway: false, total_abs_diff_value: 0 });

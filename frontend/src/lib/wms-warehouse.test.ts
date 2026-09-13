@@ -132,7 +132,7 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
 
   it("fetchReceiptsServer / fetchTasksServer / fetchCyclePlansServer / fetchThresholdsServer — пустой fallback при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
-    expect(await fetchReceiptsServer()).toEqual([]);
+    await expect(fetchReceiptsServer()).rejects.toThrow("down");
     expect(await fetchTasksServer()).toEqual([]);
     expect(await fetchCyclePlansServer()).toEqual([]);
     expect(await fetchThresholdsServer()).toEqual([]);
@@ -147,8 +147,10 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
     );
     expect(res?.number).toBe("R-9");
 
-    stubFetch({}, false);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
     expect(await fetchReceiptServer("9")).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    await expect(fetchReceiptServer("9")).rejects.toThrow("Receipt unavailable (403)");
   });
 
   it("fetchReconServer: маппит строки и total_abs_diff_value; дефолт при ошибке", async () => {
