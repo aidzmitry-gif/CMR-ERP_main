@@ -23,7 +23,7 @@ from config.access import (
 
 # Префиксы, открытые всегда (системные/инфраструктурные роуты и dev-доки).
 OPEN_PREFIXES: tuple[str, ...] = (
-    "/health", "/system", "/approvals", "/telegram", "/docs", "/redoc", "/openapi.json",
+    "/health", "/ready", "/system", "/approvals", "/telegram", "/docs", "/redoc", "/openapi.json",
     "/marketing/seo/webhook",
 )
 
@@ -31,7 +31,7 @@ OPEN_PREFIXES: tuple[str, ...] = (
 # собственном onboarding-доступе. Даже если ошибочно к токену будет добавлена
 # ещё какая-то роль, presence onboarding остаётся fail-closed до явной смены
 # набора ролей при подтверждении.
-ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access"})
+ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/ready", "/system/access"})
 
 # Технический service-account приглашений не получает общего системного доступа:
 # ``/system`` содержит и маршруты без собственной permission dependency. Presence
@@ -40,6 +40,7 @@ ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access"})
 IDENTITY_PROVISIONER_OPEN_PATHS: frozenset[str] = frozenset(
     {
         "/health",
+        "/ready",
         "/system/users/departments",
         "/system/users/preflight",
         "/system/users/invite",

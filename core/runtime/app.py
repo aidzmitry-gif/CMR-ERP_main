@@ -35,6 +35,18 @@ async def _run_hooks(hooks) -> None:
             await result
 
 
+async def _report_background_failure(services, error: BaseException) -> None:
+    """Передать сбой фонового цикла в настроенный канал, не маскируя исходный сбой."""
+    notifier = getattr(services, "incident_alerts", None)
+    if notifier is None:
+        return
+    try:
+        await notifier.emit("background_loop", error)
+    except Exception:
+        # Уведомления не должны остановить relay/escalation loop.
+        logger.exception("incident notifier failed")
+
+
 def _register_dev_fixtures(services) -> None:
     """Dev-фикстуры за флагами — ТОЛЬКО для локальной разработки/демо, НИКОГДА не в проде.
 
@@ -74,8 +86,9 @@ async def _background_loop(services, tick_hooks=()) -> None:
                     await session.commit()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("background loop error")
+            await _report_background_failure(services, exc)
 
 
 def create_app() -> FastAPI:

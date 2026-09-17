@@ -25,6 +25,7 @@ from core.domain.reference import (
     Unit,
     VatRate,
 )
+from core.reference.account_plan import ACCOUNT_DEFS, ACCOUNT_PLAN_EFFECTIVE_FROM
 from core.services import build_services
 from modules.hr.models import Candidate
 from modules.integrations.models import Batch, StockItem
@@ -187,28 +188,6 @@ CATEGORY_DEFS = [
     ("42", "Работы по тяговой технике", None),
     ("43", "Материалы ООО Аккумуляторные решения", None),
     ("44", "Квадрокоптеры", None),
-]
-
-# План счетов РБ (постановление Минфина №50) — выборка ходовых счетов: синтетика + субсчета.
-# code, title, kind, parent_code
-ACCOUNT_DEFS = [
-    ("10", "Материалы", "актив", None),
-    ("10.1", "Сырьё и материалы", "актив", "10"),
-    ("41", "Товары", "актив", None),
-    ("41.1", "Товары на складах", "актив", "41"),
-    ("43", "Готовая продукция", "актив", None),
-    ("50", "Касса", "актив", None),
-    ("51", "Расчётные счета", "актив", None),
-    ("52", "Валютные счета", "актив", None),
-    ("60", "Расчёты с поставщиками и подрядчиками", "пассив", None),
-    ("60.1", "Расчёты с поставщиками (BYN)", "пассив", "60"),
-    ("60.2", "Расчёты с поставщиками (валюта)", "пассив", "60"),
-    ("62", "Расчёты с покупателями и заказчиками", "активно-пассивный", None),
-    ("62.1", "Расчёты с покупателями (BYN)", "активно-пассивный", "62"),
-    ("68", "Расчёты по налогам и сборам", "пассив", None),
-    ("68.2", "НДС", "пассив", "68"),
-    ("90", "Доходы и расходы по текущей деятельности", "активно-пассивный", None),
-    ("90.1", "Выручка от реализации", "пассив", "90"),
 ]
 
 # Коды ТН ВЭД ЕАЭС (ЕТТ) — демо под номенклатуру (аккумуляторы/металл/провода/зарядные).
@@ -898,11 +877,24 @@ async def main() -> None:
                 ), start=1)
             ])
 
-        # План счетов РБ (постановление Минфина №50) — синтетика + субсчета (иерархия по коду).
-        if (await s.execute(select(Account))).scalars().first() is None:
-            s.add_all([Account(code=c, title=t, kind=k) for c, t, k, _p in ACCOUNT_DEFS])
-            await s.flush()
+        # План счетов РБ — полный именованный типовой набор, идемпотентно.
+        # Существующие строки не перезаписываем: организация может менять рабочие
+        # названия/аналитику поверх типового плана.
         acc_by_code = {a.code: a for a in (await s.execute(select(Account))).scalars().all()}
+        for code, title, kind, _parent_code in ACCOUNT_DEFS:
+            acc = acc_by_code.get(code)
+            if acc is None:
+                acc = Account(
+                    code=code,
+                    title=title,
+                    kind=kind,
+                    effective_from=ACCOUNT_PLAN_EFFECTIVE_FROM,
+                )
+                s.add(acc)
+                acc_by_code[code] = acc
+            elif acc.effective_from is None:
+                acc.effective_from = ACCOUNT_PLAN_EFFECTIVE_FROM
+        await s.flush()
         for code, _t, _k, parent_code in ACCOUNT_DEFS:
             acc, parent = acc_by_code.get(code), acc_by_code.get(parent_code)
             if acc and parent and acc.parent_id is None:

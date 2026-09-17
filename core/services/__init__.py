@@ -17,6 +17,7 @@ from core.services.config import Settings, get_settings
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
 from core.services.gsheets import GSheetsClient, GSheetsGateway
+from core.services.incident_alerts import IncidentAlertSink
 from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
 from core.services.onec import OneCGateway
@@ -41,6 +42,8 @@ class Services:
     db: Database
     auth: AuthService
     llm: LLMGateway
+    # Технические инциденты: no-op с логом без URL, webhook при явной настройке.
+    incident_alerts: IncidentAlertSink
     # шлюзы 1С / складских остатков / реестра ЕГР наполняет модуль integrations
     # при register (часть 6/9/10); None — модуль не подключён
     onec: OneCGateway | None = None
@@ -80,5 +83,10 @@ def build_services() -> Services:
         db=Database(settings),
         auth=AuthService(),
         llm=LLMGateway(settings),
+        incident_alerts=IncidentAlertSink(
+            settings.incident_webhook_url,
+            settings.incident_webhook_token,
+            settings.incident_alert_cooldown_seconds,
+        ),
         gsheets=GSheetsClient(settings) if settings.gsheets_credentials_file else None,
     )

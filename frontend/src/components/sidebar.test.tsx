@@ -213,4 +213,67 @@ describe("Sidebar", () => {
     expect(await screen.findByText("ERP")).toBeInTheDocument();
     expect(screen.queryByText("Черновик")).not.toBeInTheDocument();
   });
+
+  it("показывает rail при наведении и снова сворачивает его после ухода мыши", async () => {
+    localStorage.setItem("aios-sidebar-collapsed", "1");
+    render(<Sidebar />);
+    const logo = await screen.findByTitle("ERP");
+    const shell = logo.closest("div.absolute") as HTMLElement;
+
+    fireEvent.mouseEnter(shell);
+    expect(await screen.findByText("CRM")).toBeInTheDocument();
+    fireEvent.mouseLeave(shell);
+    await waitFor(() => expect(screen.queryByText("CRM")).not.toBeInTheDocument());
+  });
+
+  it("переставляет модуль и подраздел drag-and-drop и сохраняет порядок", async () => {
+    localStorage.setItem("aios-sidebar-collapsed", "0");
+    render(<Sidebar />);
+    await screen.findByText("CRM");
+    fireEvent.click(screen.getByLabelText("Редактировать меню"));
+
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+    };
+    const procurement = screen.getByText("Закупки").closest("div[draggable='true']") as HTMLElement;
+    const crm = screen.getByText("CRM").closest("div[draggable='true']") as HTMLElement;
+    fireEvent.dragStart(procurement, { dataTransfer });
+    fireEvent.dragOver(crm, { dataTransfer });
+    fireEvent.drop(crm, { dataTransfer });
+    fireEvent.dragEnd(procurement, { dataTransfer });
+
+    const moduleOrder = JSON.parse(localStorage.getItem("aios-sidebar-order") ?? "[]") as string[];
+    expect(moduleOrder.indexOf("procurement")).toBeLessThan(moduleOrder.indexOf("crm"));
+    expect(dataTransfer.setData).toHaveBeenCalledWith("text/plain", "module:procurement");
+
+    const sales = screen.getByText("Продажи").closest("div[draggable='true']") as HTMLElement;
+    const leads = screen.getByText("Лиды").closest("div[draggable='true']") as HTMLElement;
+    fireEvent.dragStart(sales, { dataTransfer });
+    fireEvent.dragOver(leads, { dataTransfer });
+    fireEvent.drop(leads, { dataTransfer });
+    fireEvent.dragEnd(sales, { dataTransfer });
+
+    const subOrder = JSON.parse(localStorage.getItem("aios-sidebar-sub-order") ?? "{}") as Record<string, string[]>;
+    expect(subOrder.crm[0]).toBe("Лиды");
+    expect(dataTransfer.setData).toHaveBeenCalledWith("text/plain", "sub:crm:Продажи");
+
+    fireEvent.click(screen.getByTitle("Вернуть исходный порядок (модули + подразделы)"));
+    expect(localStorage.getItem("aios-sidebar-order")).toBeNull();
+    expect(localStorage.getItem("aios-sidebar-sub-order")).toBeNull();
+  });
+
+  it("безопасно переживает повреждённые настройки и возвращает ERP для пустого имени логотипа", async () => {
+    localStorage.setItem("aios-sidebar-collapsed", "0");
+    localStorage.setItem("aios-sidebar-order", "{");
+    localStorage.setItem("aios-sidebar-sub-order", "[]");
+    render(<Sidebar />);
+    const logoBtn = await screen.findByTitle("Клик — переименовать");
+    fireEvent.click(logoBtn);
+    const input = screen.getByDisplayValue("ERP");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText("ERP")).toBeInTheDocument();
+  });
 });

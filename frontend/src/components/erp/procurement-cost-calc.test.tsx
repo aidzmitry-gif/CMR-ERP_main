@@ -92,4 +92,34 @@ describe("ProcurementCostCalc", () => {
     expect(screen.getAllByText("▼").length).toBeGreaterThan(0);
     expect(screen.getByText(/× наценка ▼ ниже стандарта/)).toBeInTheDocument();
   });
+
+  it("редактирует SKU, валютный путь и числовые ячейки строки", () => {
+    render(<ProcurementCostCalc />);
+    const row = rowTr(0);
+    const sku = row.querySelector('input[list="cost-calc-sku-list"]') as HTMLInputElement;
+    fireEvent.change(sku, { target: { value: "Доставка по РБ" } });
+    expect(sku.value).toBe("Доставка по РБ");
+    fireEvent.change(sku, { target: { value: "Своя позиция" } });
+    expect(sku.value).toBe("Своя позиция");
+
+    fireEvent.change(row.querySelector("select") as HTMLSelectElement, { target: { value: "usd" } });
+    const numbers = within(row).getAllByRole("spinbutton");
+    fireEvent.click(numbers[0]);
+    fireEvent.change(numbers[0], { target: { value: "123.45" } });
+    fireEvent.change(numbers[1], { target: { value: "4" } });
+    expect(numbers[0]).toHaveValue(123.45);
+    expect(numbers[1]).toHaveValue(4);
+  });
+
+  it("изменение курса и ставки фрахта пересчитывает таблицу, а возврат сбрасывает правки", () => {
+    render(<ProcurementCostCalc />);
+    const usd = within(screen.getByText("USD → BYN").closest("label") as HTMLElement).getByRole("spinbutton");
+    fireEvent.change(usd, { target: { value: "4" } });
+    const freight = within(screen.getByText("Доставка (фрахт)").closest("label") as HTMLElement).getByRole("combobox");
+    fireEvent.change(freight, { target: { value: "10" } });
+    expect(usd).toHaveValue(4);
+    expect(freight).toHaveValue("10");
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    expect(usd).toHaveValue(3);
+  });
 });

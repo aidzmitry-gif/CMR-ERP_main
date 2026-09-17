@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     # Прод публичен → задавать обязательно (AIOS_SEO_WEBHOOK_SECRET).
     seo_webhook_secret: str = ""
 
+    # Технические инциденты: любой JSON webhook (Slack/Teams/свой relay). Пустой URL
+    # означает только структурированный лог — отсутствие канала не блокирует запуск.
+    incident_webhook_url: str = ""
+    incident_webhook_token: str = ""
+    incident_alert_cooldown_seconds: int = 300
+
     # Базовый URL SEO/GEO UI для deep-link из CRM (AIOS_SEO_UI_BASE_URL).
     seo_ui_base_url: str = "http://localhost:3000"
 

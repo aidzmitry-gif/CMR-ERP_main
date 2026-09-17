@@ -1,10 +1,11 @@
 """Системные роуты ядра: health-check и интроспекция реестра подключённых модулей."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.access import ACCESS_MATRIX, ONBOARDING_ROLE, ROLE_ORDER, ROLE_TITLES, users_with_titles
@@ -35,6 +36,7 @@ _INHERITABLE_ATTR_KEYS = (
 )
 
 router = APIRouter(tags=["system"])
+logger = logging.getLogger("aios.system")
 
 # Системные мутации (MDM/справочники) живут под открытым префиксом /system (его пропускает
 # middleware матрицы доступа), поэтому защищаем их пообъектно на уровне роута: право
@@ -47,6 +49,20 @@ SYSTEM_WRITE = "system.write"
 async def health() -> dict:
     """Проверка живости приложения."""
     return {"status": "ok"}
+
+
+@router.get("/ready")
+async def readiness(session: AsyncSession = Depends(get_session)) -> dict:
+    """Проверка готовности: приложение отвечает только при доступной БД."""
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.warning("readiness database check failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "not_ready", "checks": {"database": "error"}},
+        ) from exc
+    return {"status": "ready", "checks": {"database": "ok"}}
 
 
 @router.get("/system/access")

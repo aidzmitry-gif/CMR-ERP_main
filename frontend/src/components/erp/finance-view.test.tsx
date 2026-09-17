@@ -505,4 +505,104 @@ describe("FinanceView", () => {
 
     expect(await screen.findByText(/Нет данных баланса/)).toBeInTheDocument();
   });
+
+  it("платежи повторно загружаются при входе во вкладку и показывают ошибку backend", async () => {
+    responders["finance/payments"] = [];
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    responders["finance/payments"] = "error";
+    fireEvent.click(screen.getByRole("button", { name: "Платежи" }));
+    expect(await screen.findByText(/Нет связи с финансовым модулем/)).toBeInTheDocument();
+  });
+
+  it("ошибка фиксации поступления остаётся в форме и не маскируется успешным обновлением", async () => {
+    responders["finance/payments"] = [
+      {
+        id: 11,
+        ref: "Счёт №11",
+        amount: "100.00",
+        status: "pending",
+        kind: "receivable",
+        due_date: null,
+        paid_at: null,
+        deal_id: null,
+        counterparty_ref: null,
+        outstanding: "100.00",
+        is_overdue: false,
+      },
+    ];
+    responders["finance/payments/11/allocations"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Платежи" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Зафиксировать поступление/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Зафиксировать" }));
+    expect(await screen.findByText("Не удалось зафиксировать поступление")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByText(/Поступление по/)).not.toBeInTheDocument();
+  });
+
+  it("фильтры и CSV-кнопки P&L, ДДС и баланса формируют новый запрос", async () => {
+    responders["finance/pnl"] = {
+      from_date: "2026-01-01", to_date: "2026-07-18", currency: "BYN",
+      revenue: "1", cogs: "0", freight: "0", gross_profit: "1", payroll: "0",
+      opex: "0", tax: "0", bank_fee: "0", operating_profit: "1",
+    };
+    responders["finance/cashflow"] = {
+      period_from: "2026-01-01", period_to: "2026-07-18", currency: "BYN",
+      inflows: "1", outflows: "0", net_cashflow: "1", bank_balance: "1", breakdown: {},
+    };
+    responders["finance/balance-sheet"] = {
+      as_of: "2026-07-18", currency: "BYN", accounts_receivable: "0", cash: "1",
+      inventory_value: "0", total_assets: "1", accounts_payable: "0", payroll_payable: "0",
+      tax_payable: "0", total_liabilities: "0", equity: "1",
+    };
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+
+    fireEvent.click(screen.getByRole("button", { name: "P&L" }));
+    const pnlDates = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    fireEvent.change(pnlDates[0], { target: { value: "2026-07-01" } });
+    fireEvent.change(pnlDates[1], { target: { value: "2026-07-31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Скачать CSV" }));
+    expect(anchorClick).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
+    const ddsDates = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    fireEvent.change(ddsDates[0], { target: { value: "2026-07-02" } });
+    fireEvent.change(ddsDates[1], { target: { value: "2026-07-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Скачать CSV" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
+    const balanceDate = screen.getByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    fireEvent.change(balanceDate, { target: { value: "2026-07-15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Скачать CSV" }));
+    expect(anchorClick).toHaveBeenCalledTimes(3);
+    anchorClick.mockRestore();
+  });
+
+  it("календарь подсвечивает отрицательный cumulative и показывает ошибку создания счёта", async () => {
+    responders["finance/bank-accounts"] = [];
+    responders["finance/cashflow-forecast"] = {
+      as_of: "2026-07-19", currency: "BYN", opening_balance: "0.00", weeks: [],
+      buckets: [{ bucket_start: "2026-07-20", inflow: "0.00", outflow: "500.00", net: "-500.00", cumulative: "-500.00" }],
+      not_dated: { inflow: "0.00", outflow: "0.00" },
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Календарь" }));
+    expect(await screen.findByText("2026-07-20")).toBeInTheDocument();
+    expect(screen.getByText("2026-07-20").closest("tr")).toHaveClass("bg-rose-50");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "broken" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Broken" } });
+    responders["finance/bank-accounts"] = "error";
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    expect(await screen.findByText(/Не удалось завести счёт/)).toBeInTheDocument();
+  });
 });

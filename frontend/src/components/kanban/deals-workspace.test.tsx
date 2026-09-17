@@ -11,8 +11,9 @@ vi.mock("next/link", () => ({
 // useSearchParams — фильтры читаются из URL (FiltersMenu в шапке); mockSearchParams per-test.
 let mockSearchParams = new URLSearchParams();
 const routerReplace = vi.hoisted(() => vi.fn());
+const routerPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: routerReplace, prefetch: vi.fn() }),
+  useRouter: () => ({ push: routerPush, refresh: vi.fn(), replace: routerReplace, prefetch: vi.fn() }),
   useSearchParams: () => mockSearchParams,
   usePathname: () => "/crm/deals",
 }));
@@ -36,6 +37,8 @@ vi.mock("@/lib/api", () => ({
   requestApproval: vi.fn(),
   fetchApprovals: vi.fn().mockResolvedValue([]), // цикл 14 — батч статуса одобрения РОП
   fetchLastOrder: vi.fn().mockResolvedValue([]), // цикл 14 — «Повторить заказ» (drawer-preview)
+  sendMessage: vi.fn().mockResolvedValue(true),
+  aiDraftReply: vi.fn().mockResolvedValue(null),
   addDealItem: vi.fn().mockResolvedValue(true),
   createPriceQuote: vi.fn().mockResolvedValue(true),
 }));
@@ -909,5 +912,167 @@ describe("DealsWorkspace (канбан)", () => {
   it("с заданным ownerId скорборд стартует с периода «месяц» (не «день»)", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} ownerId={7} />);
     expect(screen.getByRole("combobox", { name: "Период" })).toHaveValue("month");
+  });
+
+  it("период скорборда показывает корректные подписи для недели, квартала и года", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 17, 12, 0, 0));
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const period = screen.getByRole("combobox", { name: "Период" });
+      fireEvent.change(period, { target: { value: "week" } });
+      expect(screen.getByText(/текущая неделя/)).toBeInTheDocument();
+      fireEvent.change(period, { target: { value: "month" } });
+      expect(screen.getByText(/Сентябрь 2026/)).toBeInTheDocument();
+      fireEvent.change(period, { target: { value: "quarter" } });
+      expect(screen.getByText(/3 квартал 2026/)).toBeInTheDocument();
+      fireEvent.change(period, { target: { value: "year" } });
+      expect(screen.getByText(/2026 год/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("двойной клик по карточке открывает полную карточку сделки через router.push", () => {
+    vi.useFakeTimers();
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      const card = screen.getByTestId("deal-card-1");
+      fireEvent.click(card);
+      fireEvent.click(card);
+      expect(routerPush).toHaveBeenCalledWith("/crm/deals/1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("в последнюю рабочую неделю месяца показывает плановый баннер", async () => {
+    vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText(/До конца сентября/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Составить план на/ })).toHaveAttribute(
+        "href",
+        "/crm/rop/planning",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drawer выполняет реальные callbacks: закрепление, шаг, задачу, стадию и сообщение клиенту", async () => {
+    vi.useFakeTimers();
+    stubFetchRouter({
+      chats: () => Promise.resolve({ ok: true, json: async () => [] }),
+      margin: () => Promise.resolve({ ok: false, json: async () => ({}) }),
+    });
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      fireEvent.click(screen.getByTestId("deal-card-1"));
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
+    expect(drawer).toHaveAttribute("aria-hidden", "false");
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "Закрепить" }));
+    expect(api.updateDeal).toHaveBeenCalledWith("1", { starred: true });
+
+    fireEvent.click(within(drawer).getByText("Изменить"));
+    const step = within(drawer).getByPlaceholderText("Опишите следующий шаг…");
+    fireEvent.change(step, { target: { value: "Позвонить клиенту" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Сохранить" }));
+    expect(api.updateDeal).toHaveBeenCalledWith("1", { next_step: "Позвонить клиенту" });
+
+    const task = within(drawer).getByPlaceholderText("Позвонить, отправить КП, …");
+    fireEvent.change(task, { target: { value: "Отправить КП" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Добавить" }));
+    expect(api.createDealTask).toHaveBeenCalledWith("1", { title: "Отправить КП" });
+
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Стадия сделки" }), {
+      target: { value: "new" },
+    });
+    expect(api.updateDealStage).toHaveBeenCalledWith("1", "new");
+
+    fireEvent.click(within(drawer).getByRole("button", { name: /Написать клиенту/ }));
+    const message = within(drawer).getByRole("textbox", { name: "Текст сообщения клиенту" });
+    fireEvent.change(message, { target: { value: "Добрый день, направляю КП" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Отправить" }));
+    await waitFor(() =>
+      expect(api.sendMessage).toHaveBeenCalledWith("1", "whatsapp", "Добрый день, направляю КП"),
+    );
+    expect(api.updateDeal).toHaveBeenCalledWith("1", expect.objectContaining({ next_step: expect.any(String) }));
+  });
+
+  it("drawer: выбор выигранной стадии вызывает канонический POST /win", async () => {
+    const fetchMock = stubWinFetch(200);
+    vi.useFakeTimers();
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      fireEvent.click(screen.getByTestId("deal-card-1"));
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Стадия сделки" }), {
+      target: { value: "won" },
+    });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/sales/deals/1/win",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("drawer: выбор отказа через список открывает модалку причины", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      fireEvent.click(screen.getByTestId("deal-card-1"));
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Стадия сделки" }), {
+      target: { value: "lost" },
+    });
+    expect(screen.getByText("Закрыть сделку в отказ")).toBeInTheDocument();
+    expect(api.updateDealStage).not.toHaveBeenCalledWith("1", "lost");
+  });
+
+  it("drawer: неудачный клик «Выиграна» откатывает карточку и показывает ошибку", async () => {
+    stubWinFetch(500);
+    vi.useFakeTimers();
+    try {
+      render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
+      fireEvent.click(screen.getByTestId("deal-card-1"));
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    const drawer = screen.getByRole("dialog", { hidden: true, name: /Превью сделки/ });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Выиграна" }));
+    expect(await screen.findByText(/Не удалось закрыть сделку как выигранную/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("stage-column-new")).getByText("ООО Доска")).toBeInTheDocument();
   });
 });

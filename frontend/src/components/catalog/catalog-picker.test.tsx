@@ -117,4 +117,28 @@ describe("CatalogPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: /Подобрать/ }));
     expect(screen.getByText(/Опишите задачу/)).toBeInTheDocument();
   });
+
+  it("фильтр «только в наличии» сохраняет услуги без склада и скрывает пустые остатки", () => {
+    render(<CatalogPicker />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "только в наличии" }));
+    expect(screen.getByText("Доставка по РБ")).toBeInTheDocument();
+    expect(screen.getByText(/услуга — без склада/)).toBeInTheDocument();
+  });
+
+  it("скрипт ИИ подтягивает ответ из транскрибации, а корзина меняет количество кнопками", () => {
+    render(<CatalogPicker />);
+    fireEvent.click(screen.getAllByTitle("Подтянуть из транскрибации разговора")[0]);
+    expect(screen.getByDisplayValue("АКБ 6СТ-190")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Сбросить"));
+
+    fireEvent.change(screen.getByPlaceholderText(/поиск: название/), { target: { value: "6СТ-77" } });
+    fireEvent.click(screen.getByRole("button", { name: "В счёт" }));
+    const qty = screen.getByDisplayValue("1");
+    const controls = qty.parentElement?.querySelectorAll("button");
+    expect(controls).toHaveLength(2);
+    fireEvent.click(controls?.[1] as HTMLElement);
+    expect(within(metricTile("В счёте сейчас")).getByText("520 BYN")).toBeInTheDocument();
+    fireEvent.click(controls?.[0] as HTMLElement);
+    expect(within(metricTile("В счёте сейчас")).getByText("260 BYN")).toBeInTheDocument();
+  });
 });

@@ -10,6 +10,8 @@ from config.settings import get_settings
 from core.services import build_services
 from core.services.gsheets import GSheetsClient
 
+pytestmark = pytest.mark.unit
+
 
 class FakeWorksheet:
     def __init__(self, rows: list[list[str]] | None = None) -> None:

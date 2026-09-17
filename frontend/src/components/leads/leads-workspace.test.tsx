@@ -8,8 +8,9 @@ vi.mock("next/link", () => ({
   ),
 }));
 // next/navigation.useRouter — нужен для router.push в двойном клике по лиду (drawer-pattern).
+const leadRouterPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: leadRouterPush, refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("@/lib/api", () => ({
   createLead: vi.fn(),
@@ -207,6 +208,14 @@ describe("LeadsWorkspace", () => {
     expect(link).toHaveAttribute("href", "/crm/deals/42");
   });
 
+  it("двойной клик по карточке ведёт на полную страницу лида", () => {
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    const card = screen.getByRole("button", { name: /Лид ЛИД-1/ });
+    fireEvent.click(card);
+    fireEvent.click(card);
+    expect(leadRouterPush).toHaveBeenCalledWith("/crm/leads/1");
+  });
+
   it("сбой конвертации показывает ошибку, а не молчит (лид не считается обработанным)", async () => {
     (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue(null); // сетевой сбой/ошибка
     render(
@@ -237,6 +246,42 @@ describe("LeadsWorkspace", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Принять" }));
     await waitFor(() => expect(api.createLead).toHaveBeenCalled());
     expect((await screen.findAllByText("ООО Новый Лид")).length).toBeGreaterThan(0);
+  });
+
+  it("форма приёма передаёт все введённые поля, а не только компанию", async () => {
+    (api.createLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 100,
+      company: "ООО Полная заявка",
+    });
+    render(<LeadsWorkspace initialLeads={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Принять лид/ }));
+    const form = screen.getByText("Принять лид", { selector: "h3" }).closest("form") as HTMLElement;
+    fireEvent.change(within(form).getByRole("combobox"), { target: { value: "email" } });
+    fireEvent.change(within(form).getByPlaceholderText("Минск"), { target: { value: "Брест" } });
+    fireEvent.change(within(form).getByPlaceholderText("ООО ..."), { target: { value: "ООО Полная заявка" } });
+    fireEvent.change(within(form).getByPlaceholderText("Имя"), { target: { value: "Ольга" } });
+    fireEvent.change(within(form).getByPlaceholderText("+375 ..."), { target: { value: "+375291112233" } });
+    fireEvent.change(within(form).getByPlaceholderText("mail@..."), { target: { value: "olga@example.com" } });
+    fireEvent.change(within(form).getByPlaceholderText("лист, арматура..."), { target: { value: "арматура" } });
+    fireEvent.change(within(form).getByPlaceholderText("Текст обращения клиента..."), {
+      target: { value: "Нужна цена на арматуру" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Принять" }));
+    await waitFor(() =>
+      expect(api.createLead).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "email",
+          region: "Брест",
+          company: "ООО Полная заявка",
+          name: "Ольга",
+          phone: "+375291112233",
+          email: "olga@example.com",
+          product: "арматура",
+          message: "Нужна цена на арматуру",
+        }),
+      ),
+    );
   });
 
   it("без лидов показывает подсказку выбрать лид", () => {
@@ -481,6 +526,26 @@ describe("LeadsWorkspace", () => {
     );
   });
 
+  it("экспресс — ручной выбор менеджера передаётся в реальный вызов", async () => {
+    (api.expressLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      id: 1,
+      score: 70,
+      qualification: "target",
+      status: "routed",
+      assignedTo: "Петрова А.С.",
+      funnel: "new",
+    });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, score: 70, qualification: "target" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "⚡ Экспресс" }));
+    const manager = await screen.findByRole("combobox");
+    fireEvent.change(manager, { target: { value: "Петрова А.С." } });
+    fireEvent.click(screen.getByRole("button", { name: "Передать" }));
+    await waitFor(() =>
+      expect(api.expressLead).toHaveBeenCalledWith(1, expect.objectContaining({ assignedTo: "Петрова А.С." })),
+    );
+  });
+
   it("экспресс — 422 «не целевой» показывает сообщение в поповере, не двигая лид", async () => {
     (api.expressLead as ReturnType<typeof vi.fn>).mockResolvedValue({
       error: "Лид не целевой (балл 20) — экспресс недоступен, квалифицируй вручную",
@@ -675,6 +740,25 @@ describe("LeadsWorkspace", () => {
     expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
   });
 
+  it("Цикл 14: частичный перенос КП после конвертации явно показывает результат", async () => {
+    (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lead_id: 1,
+      deal_id: 44,
+      status: "converted",
+    });
+    (api.fetchLeadItems as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { skuId: 7, skuCode: "6СТ-190", name: "АКБ 190", qty: 1, price: 300, discountPct: 0 },
+    ]);
+    (api.commitLeadItemsToDeal as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: 0, total: 1 });
+    render(
+      <LeadsWorkspace
+        initialLeads={[{ ...lead, status: "routed", assignedTo: "Иванов И.И.", funnel: "new", itemsCount: 1 }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "⚡ В сделку" }));
+    expect(await screen.findByText(/перенесено 0\/1 позиций КП/)).toBeInTheDocument();
+  });
+
   it("Цикл 15: кнопка «Недозвон» фиксирует попытку и показывает чип перезвона", async () => {
     (api.logLeadAttempt as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...lead,
@@ -688,6 +772,14 @@ describe("LeadsWorkspace", () => {
 
     await waitFor(() => expect(api.logLeadAttempt).toHaveBeenCalledWith(1));
     expect(await screen.findByText(/☎ 1/)).toBeInTheDocument();
+  });
+
+  it("Цикл 15: сбой записи недозвона показывает ошибку и не меняет карточку", async () => {
+    (api.logLeadAttempt as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Недозвон" }));
+    await waitFor(() => expect(api.logLeadAttempt).toHaveBeenCalledWith(1));
+    expect(await screen.findByText(/Не удалось зафиксировать недозвон по ЛИД-1/)).toBeInTheDocument();
   });
 
   it("Цикл 15: просроченный перезвон — красный чип «просрочен»", () => {
@@ -799,6 +891,53 @@ describe("LeadsWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Скрыть/ }));
     fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
     expect(api.fetchLeadSourceStats).toHaveBeenCalledTimes(1);
+  });
+
+  it("панель «Качество источников» честно сообщает об отсутствии данных", async () => {
+    (api.fetchLeadSourceStats as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Качество источников/ }));
+    expect(await screen.findByText("Нет данных за последние 30 дней")).toBeInTheDocument();
+  });
+
+  it("план/факт позволяет изменить все четыре нормы и сохраняет их через API", async () => {
+    (api.fetchLeadPlan as ReturnType<typeof vi.fn>).mockResolvedValue({
+      leadsTarget: 10,
+      qualifiedTarget: 6,
+      convertedTarget: 2,
+      reactionTargetMin: 15,
+      leadsFact: 3,
+      qualifiedFact: 2,
+      convertedFact: 1,
+      reactionFactMin: 20,
+    });
+    (api.saveLeadPlan as ReturnType<typeof vi.fn>).mockResolvedValue({
+      leadsTarget: 12,
+      qualifiedTarget: 7,
+      convertedTarget: 3,
+      reactionTargetMin: 10,
+      leadsFact: 3,
+      qualifiedFact: 2,
+      convertedFact: 1,
+      reactionFactMin: 20,
+    });
+    render(<LeadsWorkspace initialLeads={[lead]} />);
+    expect(await screen.findByText("Мой план на сегодня")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "✎ Норма" }));
+    fireEvent.change(screen.getByLabelText("Обработать"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Целевых"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("В сделку"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Реакция ≤ мин"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить норму" }));
+    await waitFor(() =>
+      expect(api.saveLeadPlan).toHaveBeenCalledWith({
+        leadsTarget: 12,
+        qualifiedTarget: 7,
+        convertedTarget: 3,
+        reactionTargetMin: 10,
+      }),
+    );
+    expect(screen.getByRole("button", { name: "✎ Норма" })).toBeInTheDocument();
   });
 
   it("ошибка загрузки лидов — сообщение о сбое сети, а не «лидов нет»", () => {

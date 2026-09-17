@@ -1,60 +1,59 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { daysToEta, orderTotals, statusLabel, type OpenOrder } from "@/lib/procurement-orders";
+import {
+  daysToEta,
+  fetchOpenOrders,
+  fetchOpenOrdersServer,
+  orderTotals,
+  statusLabel,
+  type OpenOrder,
+} from "@/lib/procurement-orders";
 
-describe("statusLabel", () => {
-  it("переводит известные статусы", () => {
-    expect(statusLabel("ordered")).toBe("Заказан");
-    expect(statusLabel("shipped")).toBe("Отгружен");
-    expect(statusLabel("customs")).toBe("Таможня");
-  });
-  it("неизвестный статус — как есть", () => {
-    expect(statusLabel("received")).toBe("received");
-  });
-});
+afterEach(() => vi.unstubAllGlobals());
 
-describe("daysToEta", () => {
-  const now = Date.parse("2026-07-01T00:00:00Z");
-  it("будущее — положительное", () => {
-    expect(daysToEta("2026-07-15", now)).toBe(14);
-  });
-  it("прошлое — отрицательное (просрочено)", () => {
-    expect(daysToEta("2026-06-25", now)).toBe(-6);
-  });
-  it("нет/битая дата — null", () => {
+const orders: OpenOrder[] = [
+  {
+    id: 1,
+    number: "PO-1",
+    supplier: "Поставщик",
+    status: "ordered",
+    eta_date: "2026-09-20",
+    freight_byn: 100,
+    lines: [{ sku_code: "AKB", qty: 2, goods_value_byn: 500, weight: 1, volume: 1 }],
+  },
+  {
+    id: 2,
+    number: "PO-2",
+    supplier: "Поставщик 2",
+    status: "shipped",
+    eta_date: null,
+    freight_byn: 50,
+    lines: [],
+  },
+];
+
+describe("procurement-orders", () => {
+  it("считает ETA, подписи статусов и итоговые суммы", () => {
+    const now = Date.parse("2026-09-17T00:00:00Z");
+    expect(daysToEta("2026-09-20T00:00:00Z", now)).toBe(3);
     expect(daysToEta(null, now)).toBeNull();
-    expect(daysToEta("не-дата", now)).toBeNull();
+    expect(daysToEta("bad-date", now)).toBeNull();
+    expect(statusLabel("ordered")).toBe("Заказан");
+    expect(statusLabel("custom")).toBe("custom");
+    expect(orderTotals(orders)).toEqual({ orders: 2, positions: 1, goods: 500, freight: 150 });
   });
-});
 
-describe("orderTotals", () => {
-  const orders: OpenOrder[] = [
-    {
-      id: 1,
-      number: "PO-1",
-      supplier: "S1",
-      status: "shipped",
-      eta_date: "2026-07-15",
-      freight_byn: 200,
-      lines: [
-        { sku_code: "A", qty: 10, goods_value_byn: 100, weight: 5, volume: 0 },
-        { sku_code: "B", qty: 5, goods_value_byn: 300, weight: 2, volume: 0 },
-      ],
-    },
-    {
-      id: 2,
-      number: "PO-2",
-      supplier: "S2",
-      status: "customs",
-      eta_date: null,
-      freight_byn: 50,
-      lines: [{ sku_code: "C", qty: 1, goods_value_byn: 600, weight: 1, volume: 0 }],
-    },
-  ];
-  it("считает заказы/позиции/товар/фрахт", () => {
-    expect(orderTotals(orders)).toEqual({ orders: 2, positions: 3, goods: 1000, freight: 250 });
-  });
-  it("пустой список — нули", () => {
-    expect(orderTotals([])).toEqual({ orders: 0, positions: 0, goods: 0, freight: 0 });
+  it("читает SSR/client endpoints и возвращает [] при HTTP/сетевой ошибке", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => orders });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchOpenOrdersServer("sales")).resolves.toEqual(orders);
+    await expect(fetchOpenOrders()).resolves.toEqual(orders);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.stringContaining("/procurement/open-orders"), expect.objectContaining({ headers: { "X-User-Roles": "sales" } }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    await expect(fetchOpenOrdersServer()).resolves.toEqual([]);
+    await expect(fetchOpenOrders()).resolves.toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    await expect(fetchOpenOrdersServer()).resolves.toEqual([]);
+    await expect(fetchOpenOrders()).resolves.toEqual([]);
   });
 });

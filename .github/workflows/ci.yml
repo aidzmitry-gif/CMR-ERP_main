@@ -49,6 +49,23 @@ jobs:
           --cov --cov-branch
           --cov-report=xml --cov-report=term-missing
           --cov-fail-under=90
+      - name: Strict unit tests with line coverage gate
+        run: |
+          pytest -q -m unit \
+            --cov \
+            --cov-report=xml:coverage-unit.xml \
+            --cov-report=json:coverage-unit.json \
+            --cov-report=term-missing
+          python - <<'PY'
+          import json
+          import sys
+
+          totals = json.load(open("coverage-unit.json", encoding="utf-8"))["totals"]
+          line_pct = totals["covered_lines"] / totals["num_statements"] * 100
+          print(f"Strict backend unit line coverage: {line_pct:.2f}%")
+          if line_pct < 91:
+              sys.exit("Backend unit line coverage is below 91%")
+          PY
       - name: Coverage summary
         if: always()
         run: |
@@ -67,7 +84,10 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: coverage-backend
-          path: coverage.xml
+          path: |
+            coverage.xml
+            coverage-unit.xml
+            coverage-unit.json
 
   frontend:
     name: Frontend (unit + component, Vitest + RTL)
@@ -88,6 +108,17 @@ jobs:
         run: npm run lint -- --max-warnings 47
       - name: Tests with coverage (Vitest + RTL)
         run: npm run test:coverage
+      - name: Strict frontend line coverage gate
+        run: |
+          node <<'NODE'
+          const s = require('./coverage/coverage-summary.json').total;
+          const min = 91;
+          if (s.lines.pct < min) {
+            console.error('Frontend line coverage ' + s.lines.pct + '% < ' + min + '%');
+            process.exit(1);
+          }
+          console.log('Frontend line coverage ' + s.lines.pct + '% >= ' + min + '%');
+          NODE
       - name: Coverage summary
         if: always()
         run: |
