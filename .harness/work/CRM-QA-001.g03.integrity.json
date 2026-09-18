@@ -1,0 +1,53 @@
+{
+  "baseline": "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.harness\\work\\CRM-QA-001.g03.regression-baseline.json",
+  "baselineComparison": {
+    "added": [],
+    "baselineCount": 4436,
+    "candidateCount": 4436,
+    "changed": [],
+    "classificationChanged": [],
+    "hasChanges": false,
+    "removed": []
+  },
+  "counts": {
+    "cuj": {
+      "belarus-chart-of-accounts-and-finance-reports": 564,
+      "identity-invitation-and-authorization": 160,
+      "lead-deal-quote-contract-invoice-payment": 1098,
+      "platform-quality-regression": 1116,
+      "procurement-landed-cost-stock": 1276,
+      "reservation-and-concurrency": 14,
+      "webhook-failure-and-recovery": 208
+    },
+    "domain": {
+      "accounting-reference": 532,
+      "data-lifecycle": 19,
+      "finance": 338,
+      "integrations": 215,
+      "inventory": 1233,
+      "platform-quality": 942,
+      "workflow-rbac-audit": 1157
+    },
+    "layer": {
+      "api": 1191,
+      "e2e": 7,
+      "integration": 12,
+      "unit": 3226
+    },
+    "size": {
+      "Large": 7,
+      "Medium": 2808,
+      "Small": 1621
+    }
+  },
+  "duplicateBaselineIdCount": 0,
+  "duplicateIdCount": 0,
+  "evidence": "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.harness\\work\\CRM-QA-001.g03.evidence.json",
+  "inventory": "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.harness\\work\\CRM-QA-001.g03.inventory.json",
+  "issues": [],
+  "mode": "integrity",
+  "notes": [],
+  "ok": true,
+  "recordCount": 4436,
+  "schemaVersion": 1
+}

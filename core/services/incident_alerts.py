@@ -19,16 +19,50 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger("aios.incident_alerts")
 
 AlertSender = Callable[[str, dict[str, object], str], Awaitable[None]]
-_SECRET_RE = re.compile(
-    r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)(\s*[:=]\s*)[^\s,;&]+"
+_SECRET_NAME = r"(?:password|passwd|token|secret|api[_-]?key|authorization|cookie|connection[_-]?string)"
+_QUOTED_SECRET_RE = re.compile(
+    rf'''(?i)(["']{_SECRET_NAME}["']\s*:\s*["'])(.*?)(["'])'''
 )
+_SECRET_RE = re.compile(
+    rf"(?i)(\b{_SECRET_NAME}\b\s*[:=]\s*)(?:[\"']?)(?:bearer\s+)?[^\s,;&}}\]\\\"']+"
+)
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)(password|passwd|token|secret|api[_-]?key|authorization|cookie|connection[_-]?string)"
+)
+
+
+def _redact_text(value: str) -> str:
+    value = _QUOTED_SECRET_RE.sub(r"\1[REDACTED_SECRET]\3", value)
+    return _SECRET_RE.sub(r"\1[REDACTED_SECRET]", value)[:1000]
 
 
 def _safe_error_message(error: BaseException) -> str:
     """Сжать и обезличить текст ошибки перед записью/отправкой наружу."""
     message = f"{type(error).__name__}: {error}".strip()
-    message = _SECRET_RE.sub(r"\1\2[REDACTED_SECRET]", message)
-    return message[:1000]
+    return _redact_text(message)
+
+
+def _safe_detail(value: object, *, depth: int = 0) -> object:
+    """Recursively redact secret-like detail keys and values before delivery."""
+    if depth > 8:
+        return "[TRUNCATED_DETAILS]"
+    if isinstance(value, Mapping):
+        safe: dict[str, object] = {}
+        for key, item in value.items():
+            safe_key = str(key)
+            safe[safe_key] = (
+                "[REDACTED_SECRET]"
+                if _SENSITIVE_KEY_RE.search(safe_key)
+                else _safe_detail(item, depth=depth + 1)
+            )
+        return safe
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_detail(item, depth=depth + 1) for item in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _redact_text(str(value))
 
 
 def _send_webhook_sync(url: str, payload: dict[str, object], token: str) -> None:
@@ -101,7 +135,7 @@ class IncidentAlertSink:
             "source": source,
             "severity": "critical",
             "message": message,
-            "details": dict(details or {}),
+            "details": _safe_detail(details or {}),
             "occurred_at": datetime.now(timezone.utc).isoformat(),
         }
         try:

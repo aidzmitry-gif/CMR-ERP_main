@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "purpose": "Retries are diagnostic only; a retry never converts a failed required check into PASS.",
+  "defaults": {
+    "maxRetries": 0,
+    "mode": "diagnostic_only",
+    "passOnRetry": false
+  },
+  "quarantine": []
+}

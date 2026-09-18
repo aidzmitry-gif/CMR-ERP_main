@@ -132,9 +132,19 @@ async def services(session):
 
 
 def pytest_collection_modifyitems(items) -> None:
-    """Авто-маркировка по слою пирамиды: tests/unit → unit, integration → integration, прочее → api."""
+    """Авто-маркировка по слою пирамиды с уважением к явному marker."""
     for item in items:
         path = str(item.fspath).replace("\\", "/")
+        explicit_layers = {
+            marker.name
+            for marker in item.iter_markers()
+            if marker.name in {"unit", "api", "integration"}
+        }
+        if explicit_layers:
+            # A root-level file may intentionally contain pure unit cases beside
+            # API cases. Do not add the path-derived default on top of that
+            # explicit classification: it creates a false overlap in G03.
+            continue
         if "/tests/unit/" in path:
             item.add_marker("unit")
         elif "/tests/integration/" in path:

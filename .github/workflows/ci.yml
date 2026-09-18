@@ -3,6 +3,10 @@ name: CI
 on:
   push:
   pull_request:
+  merge_group:
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -44,14 +48,44 @@ jobs:
       - name: Apply migrations (Postgres)
         run: alembic upgrade head
       - name: Tests with coverage (unit + api + integration)
-        run: >-
-          pytest -q
-          --cov --cov-branch
-          --cov-report=xml --cov-report=term-missing
-          --cov-fail-under=90
+        run: |
+          mkdir -p .harness/work
+          pytest -q tests \
+            --cov --cov-branch \
+            --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=90 \
+            --junitxml=.harness/work/CRM-QA-001.ci-backend-full.xml
+      - name: Publish backend JUnit summary
+        if: always()
+        run: |
+          python scripts/quality/quality_control.py validate-junit \
+            --junit .harness/work/CRM-QA-001.ci-backend-full.xml \
+            --report .harness/work/CRM-QA-001.ci-backend-full-gate.json || true
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          path = Path(".harness/work/CRM-QA-001.ci-backend-full-gate.json")
+          print("### Backend full test result")
+          if not path.is_file():
+              print("JUnit gate report is missing: **quality gate failed closed**")
+          else:
+              report = json.loads(path.read_text(encoding="utf-8"))
+              tests = report["tests"]
+              passed = report["passed"]
+              failed = report["failed"]
+              errors = report["errors"]
+              skipped = report["skipped"]
+              print(
+                  f"- tests: **{tests}**, passed: **{passed}**, "
+                  f"failed: **{failed}**, errors: **{errors}**, skipped: **{skipped}**"
+              )
+              verdict = "GREEN" if report["ok"] else "RED — inspect the uploaded JUnit artifact"
+              print(f"- verdict: **{verdict}**")
+          PY
       - name: Strict unit tests with line coverage gate
         run: |
-          pytest -q -m unit \
+          pytest -q tests -m unit \
             --cov \
             --cov-report=xml:coverage-unit.xml \
             --cov-report=json:coverage-unit.json \
@@ -63,8 +97,8 @@ jobs:
           totals = json.load(open("coverage-unit.json", encoding="utf-8"))["totals"]
           line_pct = totals["covered_lines"] / totals["num_statements"] * 100
           print(f"Strict backend unit line coverage: {line_pct:.2f}%")
-          if line_pct < 91:
-              sys.exit("Backend unit line coverage is below 91%")
+          if line_pct <= 91:
+              sys.exit("Backend unit line coverage must be greater than 91%")
           PY
       - name: Coverage summary
         if: always()
@@ -88,6 +122,15 @@ jobs:
             coverage.xml
             coverage-unit.xml
             coverage-unit.json
+      - name: Upload full backend JUnit
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: backend-full-junit
+          if-no-files-found: error
+          path: |
+            .harness/work/CRM-QA-001.ci-backend-full.xml
+            .harness/work/CRM-QA-001.ci-backend-full-gate.json
 
   frontend:
     name: Frontend (unit + component, Vitest + RTL)
@@ -101,11 +144,11 @@ jobs:
         with:
           node-version: "20"
       - name: Install deps
-        run: npm install
+        run: npm ci
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
-      - name: Lint (eslint, храповик — потолок не поднимать, только опускать)
-        run: npm run lint -- --max-warnings 47
+      - name: Lint (eslint, fail closed above the recorded 45-warning baseline)
+        run: npm run lint -- --max-warnings 45
       - name: Tests with coverage (Vitest + RTL)
         run: npm run test:coverage
       - name: Strict frontend line coverage gate
@@ -113,11 +156,11 @@ jobs:
           node <<'NODE'
           const s = require('./coverage/coverage-summary.json').total;
           const min = 91;
-          if (s.lines.pct < min) {
-            console.error('Frontend line coverage ' + s.lines.pct + '% < ' + min + '%');
+          if (s.lines.pct <= min) {
+            console.error('Frontend line coverage ' + s.lines.pct + '% must be > ' + min + '%');
             process.exit(1);
           }
-          console.log('Frontend line coverage ' + s.lines.pct + '% >= ' + min + '%');
+          console.log('Frontend line coverage ' + s.lines.pct + '% > ' + min + '%');
           NODE
       - name: Coverage summary
         if: always()
@@ -148,7 +191,7 @@ jobs:
           node-version: "20"
       - name: Install frontend deps
         working-directory: frontend
-        run: npm install
+        run: npm ci
       - name: Install Playwright (chromium)
         working-directory: frontend
         run: npx playwright install --with-deps chromium
@@ -161,3 +204,143 @@ jobs:
         with:
           name: playwright-report
           path: frontend/playwright-report/
+
+  backend-lanes:
+    name: Backend marker gate (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [unit, api, integration]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aios
+          POSTGRES_PASSWORD: aios
+          POSTGRES_DB: aios
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U aios -d aios"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@localhost:5432/aios
+      AIOS_ENVIRONMENT: dev
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements-dev.txt
+      - name: Apply migrations (Postgres)
+        run: alembic upgrade head
+      - name: Run marker lane
+        run: |
+          mkdir -p .harness/work
+          pytest -q tests -m "${{ matrix.lane }}" --junitxml=".harness/work/CRM-QA-001.ci-${{ matrix.lane }}.xml"
+          if [ "${{ matrix.lane }}" = "integration" ]; then
+            python scripts/quality/quality_control.py validate-junit \
+              --junit ".harness/work/CRM-QA-001.ci-${{ matrix.lane }}.xml" \
+              --require-executed
+          fi
+      - name: Upload marker JUnit
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: backend-marker-junit-${{ matrix.lane }}
+          if-no-files-found: error
+          path: .harness/work/CRM-QA-001.ci-${{ matrix.lane }}.xml
+
+  quality-registry:
+    name: Quality registry (fail closed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install backend deps
+        run: pip install -r requirements-dev.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: Install frontend deps from lockfile
+        working-directory: frontend
+        run: npm ci
+      - name: Validate parent/submodule source snapshot
+        run: >-
+          python scripts/quality/source_snapshot.py validate
+          --report .harness/work/CRM-QA-001.source-snapshot.check.json
+      - name: Build native test registry
+        run: python .harness/tools/build_g03_inventory.py
+      - name: Validate diagnostic-only flake policy
+        run: python scripts/quality/flake_control.py validate --policy .harness/policy/flake-policy.json
+      - name: Flake policy self-test
+        run: python scripts/quality/flake_control.py self-test
+      - name: Registry self-test
+        run: >-
+          python scripts/quality/quality_control.py self-test
+          --inventory .harness/work/CRM-QA-001.g03.inventory.json
+          --evidence .harness/work/CRM-QA-001.g03.evidence.json
+          --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json
+      - name: Registry integrity gate
+        run: >-
+          python scripts/quality/quality_control.py validate --mode integrity
+          --inventory .harness/work/CRM-QA-001.g03.inventory.json
+          --evidence .harness/work/CRM-QA-001.g03.evidence.json
+          --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json
+          --report .harness/work/CRM-QA-001.g04.registry-integrity.json
+      - name: Strict classification gate
+        run: >-
+          python scripts/quality/quality_control.py validate --mode strict
+          --inventory .harness/work/CRM-QA-001.g03.inventory.json
+          --evidence .harness/work/CRM-QA-001.g03.evidence.json
+          --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json
+          --report .harness/work/CRM-QA-001.g04.registry-strict.json
+      - name: Upload quality registry evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: quality-registry
+          if-no-files-found: error
+          path: |
+            .harness/work/CRM-QA-001.g03.*
+            .harness/work/CRM-QA-001.g04.*
+            .harness/work/CRM-QA-001.source-snapshot.check.json
+
+  quality-required:
+    name: quality-required
+    if: ${{ always() }}
+    needs: [backend, backend-lanes, frontend, e2e, quality-registry]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail closed on any missing or failed lane
+        if: >-
+          ${{
+            needs.backend.result != 'success' ||
+            needs.backend-lanes.result != 'success' ||
+            needs.frontend.result != 'success' ||
+            needs.e2e.result != 'success' ||
+            needs.quality-registry.result != 'success'
+          }}
+        run: |
+          echo "quality-required: one or more required lanes failed or were skipped"
+          echo "backend=${{ needs.backend.result }}"
+          echo "backend-lanes=${{ needs.backend-lanes.result }}"
+          echo "frontend=${{ needs.frontend.result }}"
+          echo "e2e=${{ needs.e2e.result }}"
+          echo "quality-registry=${{ needs.quality-registry.result }}"
+          exit 1
+      - name: Required quality lanes passed
+        run: echo "quality-required - all required lanes passed"

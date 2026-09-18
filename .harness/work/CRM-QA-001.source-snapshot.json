@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "generatedAt": "2026-09-17T20:05:21Z",
+  "parent": {
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "branch": "feat/identity-provisioner-invites"
+  },
+  "submodules": [
+    {
+      "path": "modules/finance",
+      "parentGitlink": "1616e1c9c81b851f8ac474f3adad6fd35f2eca19",
+      "worktreeHead": "ccc3c2ce960675bd6e38d229653f6d0f029c5fc9",
+      "worktreeBranch": "fix/claim-status-contract",
+      "matchesParentGitlink": false,
+      "expectedObjectPresent": true,
+      "parentToWorktreeDiffStat": "allocation.py 145, events.py 12, margin.py 37, routes.py 1235 changed lines"
+    },
+    {
+      "path": "modules/leads",
+      "parentGitlink": "4eaf13c476605b66643a284c16195bee07fcd5c6",
+      "worktreeHead": "a04feb065d4d14cdbeb27a5fe2dd01f6b120ad29",
+      "worktreeBranch": "main",
+      "matchesParentGitlink": false,
+      "expectedObjectPresent": true,
+      "parentToWorktreeDiffStat": "permissions.py 3, routes.py 21, schemas.py 6 changed lines"
+    },
+    {
+      "path": "modules/marketing",
+      "parentGitlink": "d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282",
+      "worktreeHead": "c40f0cf3605f269df9f52f132767a2b9050a641d",
+      "worktreeBranch": "leads-attribution-fix",
+      "matchesParentGitlink": false,
+      "expectedObjectPresent": true,
+      "parentToWorktreeDiffStat": "not compared: no failing test was attributed to marketing"
+    },
+    {
+      "path": "modules/sales",
+      "parentGitlink": "2dddd8b3bf0803d10c5005d66a87dc7ab23a0af3",
+      "worktreeHead": "aaf899c6920041556b29518b5fec956ea1786f29",
+      "worktreeBranch": "reconcile/sales-2.0-fleet-merge",
+      "matchesParentGitlink": false,
+      "expectedObjectPresent": true,
+      "parentToWorktreeDiffStat": "calls.py 40, events.py 88, permissions.py 2, routes.py 56 changed lines"
+    }
+  ],
+  "preflight": {
+    "path": ".harness/work/CRM-QA-001.source-snapshot.check.json",
+    "parentGitlinkCount": 10,
+    "mismatchCount": 4,
+    "exitCode": 1,
+    "interpretation": "The executable preflight inspected every parent gitlink; the local checkout is intentionally not aligned, so local product verdicts remain source-snapshot dependent."
+  },
+  "interpretation": "The observed test run used the checked-out submodule worktrees, not the parent gitlink targets. Fourteen business-test failures overlap finance/leads/sales behavior in these mismatched worktrees; this artifact prevents a product verdict from being inferred until the source snapshot is explicitly aligned.",
+  "safety": "No submodule checkout, reset, merge, migration, deployment or push was performed."
+}

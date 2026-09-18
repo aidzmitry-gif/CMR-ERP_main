@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -104,15 +106,18 @@ async def test_plan_auto_derives_target_from_deadline(deadline_app, session):
     """План без явной даты: target = самый ранний срок клиента − буфер (3 дня)."""
     client, core = deadline_app
     o = await _order(client)
-    await _emit_deadline(core, session, ship_deadline="2026-12-31")  # позиция A
+    deadline = date.today() + timedelta(days=200)
+    deadline_text = deadline.isoformat()
+    await _emit_deadline(core, session, ship_deadline=deadline_text)  # позиция A
     r = await client.post(
         f"/procurement/orders/{o['id']}/plan", json={"transport_method_code": "container"}
     )
     assert r.status_code == 200, r.text
     plan = r.json()
-    assert plan["required_by"] == "2026-12-31"
-    assert plan["required_arrival"] == "2026-12-28"  # срок − буфер 3
-    assert plan["target_arrival_date"] == "2026-12-28"  # авто-подсказка
+    expected_arrival = (deadline - timedelta(days=3)).isoformat()
+    assert plan["required_by"] == deadline_text
+    assert plan["required_arrival"] == expected_arrival  # срок − буфер 3
+    assert plan["target_arrival_date"] == expected_arrival  # авто-подсказка
     assert plan["at_risk"] is False
     assert plan["slack_days"] == 0
 

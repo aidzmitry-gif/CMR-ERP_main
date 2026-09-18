@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "scorecard": ".harness/work/CRM-QA-001.scorecard.json",
+  "scorecardSha256": "78bb6f087690fb8ab0c23f811d62280215e3b5664c6b25dd652e48de44199a9c",
+  "scorecardSizeBytes": 8153,
+  "validatedAt": "2026-09-18T05:52:49.061279+00:00",
+  "currentHead": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+  "ok": true,
+  "issues": []
+}

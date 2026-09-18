@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "subgoalId": "G06",
+  "generatedAt": "2026-09-18T03:57:00Z",
+  "repository": {
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "branch": "feat/identity-provisioner-invites"
+  },
+  "status": "accepted-local-not-production",
+  "dependencyState": "G04 accepted locally; G06 local control acceptance is complete and does not bypass the independent G05 Postgres prerequisite.",
+  "commands": [
+    {
+      "command": "py -3 -m pytest -q tests/unit/core/test_incident_alerts.py tests/unit/core/test_observability.py tests/unit/core/test_runtime_access.py tests/unit/core/test_system_route_boundary_units.py tests/unit/test_flake_control.py --junitxml=.harness/work/CRM-QA-001.g06.runtime-unit.xml",
+      "exitCode": 0,
+      "tests": 18,
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.g06.runtime-unit.xml --require-executed --report .harness/work/CRM-QA-001.g06.runtime-unit-gate.json",
+      "exitCode": 0,
+      "result": "PASS: executed runtime/readiness JUnit is accepted fail-closed"
+    },
+    {
+      "command": "py -3 scripts/quality/flake_control.py validate --policy .harness/policy/flake-policy.json && py -3 scripts/quality/flake_control.py self-test",
+      "exitCode": 0,
+      "result": "PASS: diagnostic-only retry policy, no green-on-retry bypass, bounded quarantine"
+    }
+  ],
+  "verifiedSignals": [
+    "incident alert sink tests cover disabled mode, structured payload, cooldown/de-duplication, force delivery, sync/thread senders and secret redaction",
+    "readiness tests cover database success and a 503 failure without leaking exception details",
+    "background failure reporting contains notifier failures and does not crash the runtime loop",
+    "health/readiness access boundaries are covered by unit tests",
+    "diagnostic-only flake policy is executed by the quality-registry CI job"
+  ],
+  "notDone": [
+    "no live webhook delivery was claimed",
+    "production alert configuration and credentials were not inspected or changed",
+    "GitHub Actions execution and required-check behavior remain unverified from this checkout",
+    "production alert configuration, credentials and live webhook delivery were not inspected or changed"
+  ],
+  "nextAction": "Keep G05 ready for the next PostgreSQL availability change; before release, run remote CI and verify a non-production alert sink plus production alert configuration without touching production from this chain."
+}

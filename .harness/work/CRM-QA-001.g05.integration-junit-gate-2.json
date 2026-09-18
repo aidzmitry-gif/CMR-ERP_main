@@ -1,0 +1,14 @@
+{
+  "errors": 0,
+  "failed": 0,
+  "issues": [
+    "JUnit has skipped=12; required lane was not executed",
+    "JUnit has no passed executed test case"
+  ],
+  "junit": "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.harness\\work\\CRM-QA-001.ci-integration-local-2.xml",
+  "ok": false,
+  "passed": 0,
+  "schemaVersion": 1,
+  "skipped": 12,
+  "tests": 12
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "validatedAt": "2026-09-18T03:58:00Z",
+  "validator": "D:/6 Проекты/Харнес разработка/goal_runner_validator.py",
+  "command": "py -3 goal_runner_validator.py check D:/6 Проекты/CRM ERP/Сlaude CRM - проект/.harness/work/CRM-QA-001.passport.json",
+  "exitCode": 0,
+  "status": "PASS",
+  "passport": ".harness/work/CRM-QA-001.passport.json",
+  "passportSha256": "129ab45b9e9338ab75079d7ee3472fe51189ed309765659dc5078667e3a37923",
+  "result": "PASS goal passport is valid",
+  "scope": "Read-only local passport validation; no production, migration, deploy, push or remote CI action."
+}

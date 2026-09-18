@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "sourceCommit": "362c8d1c6f13364e74766ec73f58b55c5fb698",
+  "generatedAt": "2026-09-18T05:35:18.3351284Z",
+  "status": "no-sale-release",
+  "decision": "Full regression is red; every listed failure remains a release blocker until reproduced on a source-aligned checkout or explicitly accepted by the owning process owner.",
+  "suite": {
+    "junit": ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+    "gate": ".harness/work/CRM-QA-001.backend-full.marker-fixed-gate.json",
+    "tests": 2100,
+    "passed": 2074,
+    "failed": 14,
+    "skipped": 12,
+    "errors": 0
+  },
+  "sourceSnapshot": {
+    "artifact": ".harness/work/CRM-QA-001.source-snapshot.check.json",
+    "parentGitlinksMismatched": 4,
+    "mismatchPaths": ["modules/finance", "modules/leads", "modules/marketing", "modules/sales"],
+    "interpretation": "All fourteen failures are source-snapshot candidates, not confirmed product defects, until reproduced against the parent gitlinks. The previously identified procurement deadline failure was a stale fixed-date test and now passes with a date relative to today; the scorecard-control and nested-alert-redaction unit tests also pass."
+  },
+  "defects": [
+    {"id": "CRM-QA-001-FULL-001", "testId": "tests/test_finance.py::test_margin_by_deal_hides_gross_when_cogs_unattributed", "domain": "finance", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "KeyError: cogs_known", "nextAction": "Reproduce after finance submodule source alignment; then fix or record an owner-approved exception."},
+    {"id": "CRM-QA-001-FULL-002", "testId": "tests/test_finance.py::test_claim_resolved_is_idempotent_on_redelivery", "domain": "finance", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Two Payment effects were observed instead of one.", "nextAction": "Reproduce against aligned finance source and real Postgres before accepting idempotency."},
+    {"id": "CRM-QA-001-FULL-003", "testId": "tests/test_leads.py::test_lead_convert_creates_deal", "domain": "workflow-rbac-audit", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Expected converted deal was missing.", "nextAction": "Reproduce after leads submodule source alignment."},
+    {"id": "CRM-QA-001-FULL-004", "testId": "tests/test_leads.py::test_lead_converted_event_carries_items", "domain": "workflow-rbac-audit", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Expected converted lead event/items were missing.", "nextAction": "Reproduce after leads submodule source alignment."},
+    {"id": "CRM-QA-001-FULL-005", "testId": "tests/test_leads.py::test_rbac_sales_manager_full_funnel", "domain": "workflow-rbac-audit", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Sales manager workflow returned 403 instead of 200.", "nextAction": "Reproduce against aligned leads/sales source and verify role contract."},
+    {"id": "CRM-QA-001-FULL-006", "testId": "tests/test_leads.py::test_lead_converted_creates_price_quote_for_invoice", "domain": "finance", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Expected price quote was missing.", "nextAction": "Reproduce after leads/sales source alignment."},
+    {"id": "CRM-QA-001-FULL-007", "testId": "tests/test_links.py::test_payment_paid_fallback_prefers_unpaid_invoice", "domain": "finance", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Payment document remained posted instead of paid.", "nextAction": "Reproduce against aligned finance/sales source and verify invoice allocation invariant."},
+    {"id": "CRM-QA-001-FULL-009", "testId": "tests/test_sales_contract.py::test_render_contract_escapes_untrusted_ctx_values", "domain": "workflow-rbac-audit", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Untrusted script markup was present in rendered contract output.", "nextAction": "Reproduce against aligned sales source; treat confirmed HTML injection as a release blocker."},
+    {"id": "CRM-QA-001-FULL-010", "testId": "tests/test_sales_deals_v2.py::test_invoice_document_amount_includes_vat", "domain": "finance", "severity": "P0", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "ImportError for the expected invoice gross helper.", "nextAction": "Reproduce against aligned sales source and verify VAT/gross contract."},
+    {"id": "CRM-QA-001-FULL-011", "testId": "tests/test_telephony.py::test_resolve_owner_by_active_deal", "domain": "integrations", "severity": "P1", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Call owner resolution lacked deal_id.", "nextAction": "Reproduce against aligned sales source and telephony contract."},
+    {"id": "CRM-QA-001-FULL-012", "testId": "tests/test_telephony.py::test_resolve_owner_closed_deal_no_deal_id", "domain": "integrations", "severity": "P1", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Closed-deal owner resolution lacked deal_id.", "nextAction": "Reproduce against aligned sales source and telephony contract."},
+    {"id": "CRM-QA-001-FULL-013", "testId": "tests/test_telephony.py::test_resolve_owner_unknown_number", "domain": "integrations", "severity": "P1", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Unknown-number result omitted deal_id: null.", "nextAction": "Reproduce against aligned sales source and preserve the response schema."},
+    {"id": "CRM-QA-001-FULL-014", "testId": "tests/test_telephony.py::test_incoming_logs_resolves_and_pushes", "domain": "integrations", "severity": "P1", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Incoming call log had no deal_id.", "nextAction": "Reproduce against aligned sales source and verify call/audit propagation."},
+    {"id": "CRM-QA-001-FULL-015", "testId": "tests/test_telephony.py::test_list_calls_filter_by_deal_id", "domain": "integrations", "severity": "P1", "releaseBlocker": true, "triage": "source-snapshot-candidate", "failure": "Call list filter returned no deal_id.", "nextAction": "Reproduce against aligned sales source and verify query/response contract."}
+  ]
+}

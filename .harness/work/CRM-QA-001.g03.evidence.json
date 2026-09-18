@@ -1,0 +1,259 @@
+{
+  "artifacts": [
+    {
+      "path": ".harness/work/CRM-QA-001.g03.inventory.json",
+      "sha256": "8b1bc8d03d868435f650088121c7a5d1f7f60474cbfd63f09c402b8974eb0c6d",
+      "sizeBytes": 6618590
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g03.regression-baseline.json",
+      "sha256": "04e0c15b1e4fbcea1b5c000067029cae2fcd2991c68a6fbd23ea264913914402",
+      "sizeBytes": 3626385
+    },
+    {
+      "path": ".harness/policy/CRM-QA-001.regression-baseline.json",
+      "sha256": "04e0c15b1e4fbcea1b5c000067029cae2fcd2991c68a6fbd23ea264913914402",
+      "sizeBytes": 3626385
+    },
+    {
+      "path": ".harness/policy/quality-risk-map.json",
+      "sha256": "213d8dd488fa67579f3f0523bddf9aabf706200208f66ea959b7da0b030bca0e",
+      "sizeBytes": 35496
+    },
+    {
+      "path": ".harness/policy/cuj-matrix.json",
+      "sha256": "3dbd254cb1533555573e76503c17919c423718df731f4a39989327616e4b5496",
+      "sizeBytes": 13236
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed.xml",
+      "sha256": "08c4c6dcd42d51a8ed18fe493cb82d34ba3f5f9c31a083efa79ab9efcdd0c20e",
+      "sizeBytes": 135857
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+      "sha256": "9d0303d7af1ccbdb373344e4a3daf56d0814be4e24a23ab55cdae7c0f99356a7",
+      "sizeBytes": 271735
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g03.frontend-vitest-list.json",
+      "sha256": "658d858c72573e794967a1f759bce6b7c5b2513e3780f79ad08dc0bfb477f519",
+      "sizeBytes": 772298
+    }
+  ],
+  "blockers": [
+    {
+      "detail": "The separate modules/production Playwright prototype config has no local @playwright/test resolution; CRM frontend e2e uses frontend/playwright.config.ts.",
+      "id": "playwright-production-local-dependency",
+      "status": "unknown"
+    }
+  ],
+  "chainId": "CRM-QA-001",
+  "commands": [
+    {
+      "command": [
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\tests"
+      ],
+      "cwd": ".",
+      "durationMs": 11156,
+      "exitCode": 0,
+      "id": "backend-collect-all",
+      "itemCount": 2100,
+      "nativeCount": 2100,
+      "startedAt": "2026-09-18T05:39:45.718947Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.backend-collect-all.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.backend-collect-all.stdout.txt",
+      "timedOut": false
+    },
+    {
+      "command": [
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\tests",
+        "-m",
+        "unit"
+      ],
+      "cwd": ".",
+      "durationMs": 11172,
+      "exitCode": 0,
+      "id": "backend-collect-unit",
+      "itemCount": 897,
+      "nativeCount": 897,
+      "startedAt": "2026-09-18T05:39:56.913351Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.backend-collect-unit.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.backend-collect-unit.stdout.txt",
+      "timedOut": false
+    },
+    {
+      "command": [
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\tests",
+        "-m",
+        "api"
+      ],
+      "cwd": ".",
+      "durationMs": 10875,
+      "exitCode": 0,
+      "id": "backend-collect-api",
+      "itemCount": 1191,
+      "nativeCount": 1191,
+      "startedAt": "2026-09-18T05:40:08.111703Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.backend-collect-api.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.backend-collect-api.stdout.txt",
+      "timedOut": false
+    },
+    {
+      "command": [
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\tests",
+        "-m",
+        "integration"
+      ],
+      "cwd": ".",
+      "durationMs": 11656,
+      "exitCode": 0,
+      "id": "backend-collect-integration",
+      "itemCount": 12,
+      "nativeCount": 12,
+      "startedAt": "2026-09-18T05:40:19.009545Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.backend-collect-integration.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.backend-collect-integration.stdout.txt",
+      "timedOut": false
+    },
+    {
+      "command": [
+        "node",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\frontend\\node_modules\\vitest\\vitest.mjs",
+        "list",
+        "--json",
+        "--includeTaskLocation",
+        "--no-color"
+      ],
+      "cwd": "frontend",
+      "durationMs": 21094,
+      "exitCode": 0,
+      "id": "frontend-vitest-list",
+      "itemCount": null,
+      "nativeCount": null,
+      "startedAt": "2026-09-18T05:40:35.278649Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.frontend-vitest-list.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.frontend-vitest-list.stdout.txt",
+      "timedOut": false
+    },
+    {
+      "command": [
+        "node",
+        "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\frontend\\node_modules\\@playwright\\test\\cli.js",
+        "test",
+        "--config",
+        "playwright.config.ts",
+        "--list",
+        "--reporter=list"
+      ],
+      "cwd": "frontend",
+      "durationMs": 750,
+      "exitCode": 0,
+      "id": "frontend-playwright-list",
+      "itemCount": null,
+      "nativeCount": null,
+      "startedAt": "2026-09-18T05:41:02.461302Z",
+      "stderrPath": ".harness/work/CRM-QA-001.g03.frontend-playwright-list.stderr.txt",
+      "stdoutPath": ".harness/work/CRM-QA-001.g03.frontend-playwright-list.stdout.txt",
+      "timedOut": false
+    }
+  ],
+  "executionEvidence": {
+    "backendFullJUnit": {
+      "caseCount": 2100,
+      "path": ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+      "statusCounts": {
+        "failed": 14,
+        "passed": 2074,
+        "skipped": 12
+      }
+    },
+    "backendUnitJUnit": {
+      "caseCount": 897,
+      "path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed.xml",
+      "statusCounts": {
+        "passed": 897
+      }
+    },
+    "frontendPlaywright": "list-only; no pass/fail/skip/xfail status claimed",
+    "frontendVitest": "list-only; no pass/fail/skip/xfail status claimed"
+  },
+  "generatedAt": "2026-09-18T05:39:45.604317Z",
+  "limitations": [
+    "pytest --collect-only with --junitxml is not a reliable item-count source; native stdout collection is the count source.",
+    "Vitest list proves discoverability only; skip/xfail/retry and execution status require a separate run.",
+    "Frontend Vitest size is assigned from reviewed source-level I/O or pure-render evidence; current inventory has zero unknown size records.",
+    "Playwright is a Large/e2e inventory only; browser execution and external login/webhook acceptance are not claimed.",
+    "Unclassified and overlap values are retained instead of relabeling tests to improve coverage metrics."
+  ],
+  "nativeArtifactProvenance": {
+    "frontendVitest": {
+      "currentReproduction": {
+        "commandId": "frontend-vitest-list",
+        "exitCode": 0,
+        "limitation": "sandbox spawn EPERM; no test bodies were executed"
+      },
+      "path": ".harness/work/CRM-QA-001.g03.frontend-vitest-list.json",
+      "recordCount": 2329,
+      "sha256": "658d858c72573e794967a1f759bce6b7c5b2513e3780f79ad08dc0bfb477f519",
+      "source": "saved native Vitest list-only artifact from the G03 worker",
+      "workerExitCode": 0
+    }
+  },
+  "nativeCounts": {
+    "backendCollectedUnion": 2100,
+    "backendMarkerCounts": {
+      "all": 2100,
+      "api": 1191,
+      "integration": 12,
+      "unit": 897
+    },
+    "frontendPlaywright": 7,
+    "frontendVitest": 2329
+  },
+  "repository": {
+    "branch": "feat/identity-provisioner-invites",
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "root": "."
+  },
+  "schemaVersion": 1,
+  "subgoalId": "G03",
+  "validation": {
+    "acceptedBaselinePath": ".harness/policy/CRM-QA-001.regression-baseline.json",
+    "baselineAcceptedThisRun": true,
+    "baselineComparison": {
+      "added": [],
+      "baselineCount": 4436,
+      "candidateCount": 4436,
+      "changed": [],
+      "classificationChanged": [],
+      "hasChanges": false,
+      "removed": []
+    },
+    "baselineCountMatchesInventory": true,
+    "duplicateTestIds": [],
+    "inventoryCountMatchesRecords": true,
+    "jsonParse": true,
+    "sourceFingerprintMissing": 0
+  }
+}

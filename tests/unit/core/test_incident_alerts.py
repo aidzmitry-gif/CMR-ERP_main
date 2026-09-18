@@ -56,6 +56,34 @@ async def test_sink_sends_payload_and_suppresses_duplicate_until_forced():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_sink_redacts_nested_secret_details_before_delivery():
+    sent = []
+
+    async def sender(url, payload, token):
+        sent.append(payload)
+
+    sink = IncidentAlertSink("https://alerts.example.test/hook", sender=sender)
+    details = {
+        "job": "relay",
+        "token": "plain-token",
+        "nested": {
+            "password": "plain-password",
+            "message": "authorization=Bearer abc123",
+            "items": [{"api_key": "plain-api-key"}],
+        },
+    }
+
+    assert await sink.emit("worker", RuntimeError("failed"), details=details) is True
+    delivered = sent[0]["details"]
+    assert delivered["job"] == "relay"
+    assert delivered["token"] == "[REDACTED_SECRET]"
+    assert delivered["nested"]["password"] == "[REDACTED_SECRET]"
+    assert "abc123" not in delivered["nested"]["message"]
+    assert delivered["nested"]["items"][0]["api_key"] == "[REDACTED_SECRET]"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_sink_contains_delivery_failures_and_default_sender_uses_thread(monkeypatch):
     async def broken_sender(*args):
         raise OSError("network down")
@@ -112,6 +140,13 @@ def test_sync_webhook_builds_json_and_bearer_header(monkeypatch):
 
 @pytest.mark.unit
 def test_safe_error_message_redacts_secret_like_values():
-    message = incident_alerts._safe_error_message(RuntimeError("token=abc password:xyz api_key=123"))
-    assert "abc" not in message and "xyz" not in message and "123" not in message
-    assert message.count("[REDACTED_SECRET]") == 3
+    message = incident_alerts._safe_error_message(
+        RuntimeError(
+            'token=abc password:xyz api_key=123 '
+            '{"token":"abc123","password":"xyz789"} '
+            'cookie: session-secret connection_string=postgres://user:pw@db/app'
+        )
+    )
+    for secret in ("abc", "xyz", "123", "abc123", "xyz789", "session-secret", "postgres://user:pw@db/app"):
+        assert secret not in message
+    assert message.count("[REDACTED_SECRET]") == 7

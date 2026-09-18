@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "subgoalId": "G04",
+  "generatedAt": "2026-09-18T05:42:06.0796121Z",
+  "repository": {
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "branch": "feat/identity-provisioner-invites"
+  },
+  "changedPaths": [
+    ".github/workflows/ci.yml",
+    "scripts/quality/quality_control.py",
+    "scripts/quality/flake_control.py",
+    "scripts/quality/scorecard_control.py",
+    "core/services/incident_alerts.py",
+    ".harness/policy/flake-policy.json",
+    "tests/unit/test_flake_control.py",
+    "tests/unit/test_scorecard_control.py",
+    "tests/unit/core/test_incident_alerts.py",
+    "scripts/quality/source_snapshot.py",
+    "tests/unit/test_source_snapshot.py",
+    ".harness/tools/build_g03_inventory.py",
+    ".harness/policy/quality-risk-map.json",
+    ".harness/policy/cuj-matrix.json",
+    "tests/unit/test_inventory_classifier.py",
+    "tests/unit/test_quality_control.py",
+    "tests/conftest.py",
+    ".harness/policy/CRM-QA-001.regression-baseline.json",
+    ".harness/work/CRM-QA-001.source-snapshot.json",
+    ".harness/work/CRM-QA-001.source-snapshot.check.json",
+    ".harness/work/CRM-QA-001.g03.inventory.json",
+    ".harness/work/CRM-QA-001.g03.evidence.json",
+    ".harness/work/CRM-QA-001.g03.regression-baseline.json",
+    ".harness/work/CRM-QA-001.g04.evidence.json",
+    ".harness/work/CRM-QA-001.g04.registry-integrity.json",
+    ".harness/work/CRM-QA-001.g04.registry-strict.json",
+    ".harness/work/CRM-QA-001.scorecard.json",
+    ".harness/work/CRM-QA-001.scorecard-gate.json",
+    ".harness/work/CRM-QA-001.backend-api.marker-fixed.xml",
+    ".harness/work/CRM-QA-001.backend-api.marker-fixed-gate.json",
+    ".harness/work/CRM-QA-001.backend-full.xml",
+    ".harness/work/CRM-QA-001.backend-full-gate.json",
+    ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+    ".harness/work/CRM-QA-001.backend-full.marker-fixed-gate.json",
+    ".harness/work/CRM-QA-001.backend-unit.marker-fixed.xml",
+    ".harness/work/CRM-QA-001.backend-unit.marker-fixed-gate.json",
+    ".harness/work/CRM-QA-001.unit-report.marker-fixed.json",
+    ".harness/work/CRM-QA-001.passport-validation.json",
+    ".harness/work/CRM-QA-001.unit-coverage.md",
+    "frontend/src/__tests__/pages.test.tsx",
+    ".harness/work/CRM-QA-001.g03.frontend-vitest-list.json",
+    ".harness/work/CRM-QA-001.frontend-vitest-coverage.xml",
+    ".harness/work/CRM-QA-001.frontend-vitest-coverage-gate.json",
+    "frontend/coverage/coverage-summary.json",
+    ".harness/work/CRM-QA-001.release-defects.json",
+    "docs/TESTING_AND_ALERTING.md"
+  ],
+  "commands": [
+    {
+      "command": "py -3 -m py_compile scripts/quality/quality_control.py scripts/quality/flake_control.py scripts/quality/source_snapshot.py scripts/quality/scorecard_control.py tests/unit/test_source_snapshot.py tests/unit/test_scorecard_control.py .harness/tools/build_g03_inventory.py tests/unit/test_inventory_classifier.py tests/unit/test_quality_control.py",
+      "exitCode": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "py -3 -m pytest -q tests/unit/test_source_snapshot.py tests/unit/test_inventory_classifier.py tests/unit/test_quality_control.py tests/unit/test_scorecard_control.py tests/unit/test_flake_control.py",
+      "exitCode": 0,
+      "result": "PASS: 26 control-plane unit tests"
+    },
+    {
+      "command": "py -3 -m ruff check scripts/quality/source_snapshot.py tests/unit/test_source_snapshot.py scripts/quality/scorecard_control.py tests/unit/test_scorecard_control.py .harness/tools/build_g03_inventory.py tests/unit/test_inventory_classifier.py scripts/quality/quality_control.py tests/unit/test_quality_control.py",
+      "exitCode": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "py -3 scripts/quality/source_snapshot.py self-test",
+      "exitCode": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "py -3 scripts/quality/source_snapshot.py validate --report .harness/work/CRM-QA-001.source-snapshot.check.json",
+      "exitCode": 1,
+      "result": "EXPECTED FAIL CLOSED locally: 10 parent gitlinks inspected, 4 worktree mismatches; the dirty checkout is not treated as parent-source evidence"
+    },
+    {
+      "command": "py -3 -m ruff check .",
+      "exitCode": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "py -3 goal_runner_validator.py check D:/6 Проекты/CRM ERP/Сlaude CRM - проект/.harness/work/CRM-QA-001.passport.json",
+      "exitCode": 0,
+      "result": "PASS goal passport is valid; passport SHA-256 129ab45b9e9338ab75079d7ee3472fe51189ed309765659dc5078667e3a37923"
+    },
+    {
+      "command": "py -3 -m pytest -q tests -m unit --cov --cov-branch --cov-report=term-missing --cov-report=json:.harness/work/CRM-QA-001.unit-report.marker-fixed.json --junitxml=.harness/work/CRM-QA-001.backend-unit.marker-fixed.xml --basetemp .pytest-tmp-marker",
+      "exitCode": 0,
+      "result": "897 passed, 1203 deselected; statement coverage 93.42%, branch coverage 75.16%; unit JUnit gate passed"
+    },
+    {
+      "command": "npm run test:coverage -- --reporter=junit --outputFile=../.harness/work/CRM-QA-001.frontend-vitest-coverage.xml",
+      "exitCode": 0,
+      "result": "2,329 passed, 0 failed, 0 skipped; frontend line coverage 91.02%, statements 89.36%, branches 81.48%, functions 85.99%"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.frontend-vitest-coverage.xml --require-executed --report .harness/work/CRM-QA-001.frontend-vitest-coverage-gate.json",
+      "exitCode": 0,
+      "result": "PASS: frontend JUnit 2,329 executed, failed=0, skipped=0, errors=0"
+    },
+    {
+      "command": "py -3 -m pytest -q tests --tb=no --junitxml=.harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+      "exitCode": 1,
+      "result": "2,074 passed, 14 failed, 12 skipped; 2,100 JUnit cases; the stale fixed-date procurement test, scorecard-control tests and nested-alert-redaction test pass, while the remaining failures are the known finance/leads/RBAC/sales/telephony source-snapshot set"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.backend-full.marker-fixed.xml --report .harness/work/CRM-QA-001.backend-full.marker-fixed-gate.json",
+      "exitCode": 1,
+      "result": "PASS FAIL-CLOSED: rejects failed=14 and records passed=2,074, skipped=12, errors=0"
+    },
+    {
+      "command": "py -3 .harness/tools/build_g03_inventory.py --accept-baseline",
+      "exitCode": 0,
+      "result": "PASS: 4,436 unique IDs; unit 3,226, api 1,191, integration 12, e2e 7, overlap 0; size Small 1,621, Medium 2,808, Large 7, unknown 0; unclassified domain 0, CUJ 0; native Vitest discovery completed outside sandbox"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py self-test --inventory .harness/work/CRM-QA-001.g03.inventory.json --evidence .harness/work/CRM-QA-001.g03.evidence.json --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json",
+      "exitCode": 0,
+      "result": "PASS: accepted integrity, missing inventory, missing evidence, duplicate ID, unknown classification and skipped JUnit negative cases"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate --mode integrity --inventory .harness/work/CRM-QA-001.g03.inventory.json --evidence .harness/work/CRM-QA-001.g03.evidence.json --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json --report .harness/work/CRM-QA-001.g04.registry-integrity.json",
+      "exitCode": 0,
+      "result": "PASS: 4,436 records, zero duplicate IDs, source artifacts and native evidence present; accepted baseline has no added/removed/changed IDs; current layer overlap, size unknown and unclassified domain/CUJ counts are 0; source snapshot preflight is a separate current-worktree gate"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate --mode strict --inventory .harness/work/CRM-QA-001.g03.inventory.json --evidence .harness/work/CRM-QA-001.g03.evidence.json --baseline .harness/work/CRM-QA-001.g03.regression-baseline.json --report .harness/work/CRM-QA-001.g04.registry-strict.json",
+      "exitCode": 0,
+      "result": "PASS: native Vitest list completed outside sandbox; 4,436 records have zero layer overlap, size unknown, domain unclassified or CUJ unclassified debt"
+    },
+    {
+      "command": "py -3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml', encoding='utf-8'))\"",
+      "exitCode": 0,
+      "result": "PASS: workflow YAML parsed; actionlint is unavailable in this environment"
+    },
+    {
+      "command": "npm run lint -- --max-warnings 45",
+      "exitCode": 0,
+      "result": "PASS: 0 errors / 45 warnings; warning 46 or higher fails the CI step"
+    },
+    {
+      "command": "rg -n \"npm install|npm ci|quality-required|quality-registry|backend-lanes|merge_group|needs:\" .github/workflows/ci.yml",
+      "exitCode": 0,
+      "result": "PASS: three npm ci uses, no npm install, marker matrix, registry gate and required aggregator found"
+    },
+    {
+      "command": "py -3 scripts/quality/flake_control.py validate --policy .harness/policy/flake-policy.json && py -3 scripts/quality/flake_control.py self-test",
+      "exitCode": 0,
+      "result": "PASS: diagnostic-only retries, no green-on-retry bypass, and 14-day quarantine rule"
+    },
+    {
+      "command": "py -3 -m pytest -q tests/integration --junitxml=.harness/work/CRM-QA-001.ci-integration-local.xml",
+      "exitCode": 0,
+      "result": "NEGATIVE FIXTURE: 12 skipped; pytest alone exits 0 when Postgres is unavailable"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.ci-integration-local.xml --require-executed --report .harness/work/CRM-QA-001.g05.integration-junit-gate.json",
+      "exitCode": 1,
+      "result": "PASS FAIL-CLOSED: rejects skipped=12 and passed=0 with no fallback"
+    },
+    {
+      "command": "py -3 -m pytest -q tests -m api --tb=no --junitxml=.harness/work/CRM-QA-001.backend-api.marker-fixed.xml",
+      "exitCode": 1,
+      "result": "1,177 passed, 14 failed, 899 deselected; 1,191 API cases executed with no collection INTERNALERROR"
+    },
+    {
+      "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.backend-api.marker-fixed.xml --report .harness/work/CRM-QA-001.backend-api.marker-fixed-gate.json",
+      "exitCode": 1,
+      "result": "PASS FAIL-CLOSED: rejects failed=14, errors=0; executed=1,191"
+    }
+  ],
+  "inputArtifactRule": "G04 acceptance reads these exact source/evidence files; every entry is fingerprinted and must be refreshed together with the report",
+  "inputArtifacts": [
+    {"path": ".harness/work/CRM-QA-001.g03.inventory.json", "sizeBytes": 6618590, "sha256": "8b1bc8d03d868435f650088121c7a5d1f7f60474cbfd63f09c402b8974eb0c6d"},
+    {"path": ".harness/work/CRM-QA-001.g03.evidence.json", "sizeBytes": 9084, "sha256": "732d879a0a719a985b809e60a8abccc779e27355f5f2c0fe6be203c30721220e"},
+    {"path": ".harness/work/CRM-QA-001.g03.regression-baseline.json", "sizeBytes": 3626385, "sha256": "04e0c15b1e4fbcea1b5c000067029cae2fcd2991c68a6fbd23ea264913914402"},
+    {"path": ".harness/policy/CRM-QA-001.regression-baseline.json", "sizeBytes": 3626385, "sha256": "04e0c15b1e4fbcea1b5c000067029cae2fcd2991c68a6fbd23ea264913914402"},
+    {"path": ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml", "sizeBytes": 271735, "sha256": "9d0303d7af1ccbdb373344e4a3daf56d0814be4e24a23ab55cdae7c0f99356a7"},
+    {"path": ".harness/work/CRM-QA-001.backend-full.marker-fixed-gate.json", "sizeBytes": 320, "sha256": "1bf118c74fc8a38099af16bfbf6cda3d0754f0fc4805e1dd60c16c4e2efa2852"},
+    {"path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed.xml", "sizeBytes": 135857, "sha256": "08c4c6dcd42d51a8ed18fe493cb82d34ba3f5f9c31a083efa79ab9efcdd0c20e"},
+    {"path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed-gate.json", "sizeBytes": 275, "sha256": "8d99456cc95658cc26a05df35286ca061dd29884d8486a0318f42f8fb5d9c5a8"},
+    {"path": ".harness/work/CRM-QA-001.unit-report.marker-fixed.json", "sizeBytes": 1536561, "sha256": "862da78354c24a2eecf8500830edac34ebdb3a4716690205013a82d79c6586ea"},
+    {"path": ".harness/work/CRM-QA-001.backend-api.marker-fixed.xml", "sizeBytes": 130402, "sha256": "ca9f56dd1aa1efcebaf5eaf0baf89be787fbb869e0c968e9bb05074a9cd0b1e5"},
+    {"path": ".harness/work/CRM-QA-001.backend-api.marker-fixed-gate.json", "sizeBytes": 318, "sha256": "2d059f4a1164ad0c2c00da819e1bba75615e1f65c67f0cd6c89cf94d976616f0"},
+    {"path": ".harness/work/CRM-QA-001.frontend-vitest-coverage.xml", "sizeBytes": 592272, "sha256": "bd12e2bc1f4fa10dc4388a32ddb6cfbd171f49d9ab92e503ab71bbc6002207e0"},
+    {"path": "frontend/coverage/coverage-summary.json", "sizeBytes": 114202, "sha256": "755188d25d013fa25715ff8a0266a0bb5a47ee5b157a4d97f4a299d9faf25cb5"},
+    {"path": ".github/workflows/ci.yml", "sizeBytes": 12774, "sha256": "f542aad4cc2044fc8e50fb27cb1dcb923f173781bd2c0b153b5c6c5b8f53d616"}
+  ],
+  "ciContract": {
+    "workflowTriggers": [
+      "push",
+      "pull_request",
+      "merge_group"
+    ],
+    "requiredAggregator": "quality-required",
+    "requiredNeeds": [
+      "backend",
+      "backend-lanes",
+      "frontend",
+      "e2e",
+      "quality-registry"
+    ],
+    "failurePropagation": "quality-required runs always and exits 1 unless every required need result is success",
+    "deterministicInstall": "npm ci is used in frontend, e2e and quality-registry jobs; package-lock.json was not regenerated",
+    "markerLanes": [
+      "unit",
+      "api",
+      "integration"
+    ],
+    "integrationExecutionGate": "The integration marker lane emits JUnit XML and validate-junit --require-executed rejects any skipped cases or zero executed passes; this closes pytest's all-skipped exit-0 behavior.",
+    "strictUnknownPolicy": "unknown, unclassified and overlap are errors in strict mode, never warnings",
+    "frontendLintWarningBaseline": 45
+  },
+  "knownRedGates": [
+    "Current full backend regression has 2,074 passed, 14 failing tests and 12 skips (2,100 JUnit cases)",
+    "Current regression verdict is source-snapshot dependent: all 14 failures overlap submodule worktrees that do not match parent gitlinks; the stale fixed-date procurement test and scorecard-control tests were repaired/added and pass",
+    "G04 strict registry gate is green after native Vitest discovery and explicit domain/CUJ fallback rules; product regression and Postgres gates remain separate",
+    "API marker lane is red on the same 14 known regression cases; the JUnit gate preserves the evidence rather than treating the run as green"
+  ],
+  "notRun": [
+    "GitHub Actions was not executed from this local checkout; CI wiring was reviewed statically only",
+    "npm ci was not run locally; the workflow change was YAML/static reviewed",
+    "No remote CI, migration-upgrade against Postgres, production, deploy or push was performed"
+  ],
+  "nextActions": [
+    "G05 must prove Postgres, migration, idempotency and concurrency invariants",
+    "Keep the strict registry baseline fresh when tests or classification policy change",
+    "Run remote CI and verify the quality-required branch-protection check"
+  ],
+  "acceptance": {
+    "registryGateImplemented": true,
+    "negativeCasesProven": true,
+    "workflowParsed": true,
+    "flakePolicyImplemented": true,
+    "sourceSnapshotCaptured": true,
+    "sourceSnapshotPreflightImplemented": true,
+    "frontendLintBaselineEnforced": true,
+    "passportValidationFresh": true,
+    "productGreen": false
+  }
+}

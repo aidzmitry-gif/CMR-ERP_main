@@ -1,0 +1,11 @@
+{
+  "errors": 0,
+  "failed": 0,
+  "issues": [],
+  "junit": "D:\\6 Проекты\\CRM ERP\\Сlaude CRM - проект\\.harness\\work\\CRM-QA-001.backend-unit.marker-fixed.xml",
+  "ok": true,
+  "passed": 897,
+  "schemaVersion": 1,
+  "skipped": 0,
+  "tests": 897
+}

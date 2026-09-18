@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "metricsSchemaVersion": 2,
+  "chainId": "CRM-QA-001",
+  "subgoalId": "G08",
+  "status": "pre-acceptance-blocked",
+  "generatedAt": "2026-09-18T05:42:06.0796121Z",
+  "repository": {
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "branch": "feat/identity-provisioner-invites",
+    "dirty": true,
+    "sourceSnapshot": {
+      "ok": false,
+      "parentHead": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+      "mismatchCount": 4,
+      "mismatchedSubmodules": [
+        "modules/finance",
+        "modules/leads",
+        "modules/marketing",
+        "modules/sales"
+      ]
+    }
+  },
+  "registry": {
+    "totalRecords": 4436,
+    "primaryLayers": {
+      "unit": 3226,
+      "api": 1191,
+      "integration": 12,
+      "e2e": 7,
+      "overlap": 0
+    },
+    "primaryUnitSharePercent": 72.7,
+    "backend": {
+      "total": 2100,
+      "unitMarker": 897,
+      "unitMarkerSharePercent": 42.7,
+      "api": 1191,
+      "integration": 12
+    },
+    "size": {
+      "Small": 1621,
+      "Medium": 2808,
+      "Large": 7,
+      "unknown": 0
+    },
+    "classificationDebt": {
+      "unclassifiedDomain": 0,
+      "unclassifiedCuj": 0,
+      "domainOverlap": 0,
+      "cujOverlap": 0
+    }
+  },
+  "coverage": {
+    "backendUnit": {
+      "tests": 897,
+      "passed": 897,
+      "failed": 0,
+      "skipped": 0,
+      "linePercent": 93.42,
+      "branchPercent": 75.16,
+      "combinedLineBranchPercent": 90.27,
+      "lineGate": "pass"
+    },
+    "frontendVitest": {
+      "tests": 2329,
+      "passed": 2329,
+      "failed": 0,
+      "skipped": 0,
+      "linePercent": 91.02,
+      "statementsPercent": 89.36,
+      "branchPercent": 81.48,
+      "functionsPercent": 85.99,
+      "gate": "pass"
+    }
+  },
+  "regression": {
+    "backendFull": {
+      "tests": 2100,
+      "passed": 2074,
+      "failed": 14,
+      "skipped": 12,
+      "errors": 0,
+      "gate": "fail-closed",
+      "releaseBlockers": 14,
+      "interpretation": "All fourteen failures are source-snapshot candidates until parent gitlinks and checked-out submodules are aligned; they are not silently reclassified as product defects."
+    },
+    "backendApi": {
+      "tests": 1191,
+      "passed": 1177,
+      "failed": 14,
+      "deselected": 899,
+      "errors": 0,
+      "gate": "fail-closed"
+    },
+    "procurementDeadlineTest": {
+      "tests": 14,
+      "passed": 14,
+      "status": "repaired-and-verified"
+    }
+  },
+  "integration": {
+    "postgres": {
+      "collected": 12,
+      "executed": 0,
+      "passed": 0,
+      "skipped": 12,
+      "status": "blocked",
+      "reason": "Docker API is not usable in the current host session and ports 5432, 5433 and 15432 are closed; no SQLite substitution was accepted."
+    }
+  },
+  "controls": {
+    "g03Integrity": "pass",
+    "g03BaselineDrift": "none",
+    "g04StrictRegistry": "pass",
+    "localHarnessSelfTest": "pass",
+    "goalPassport": "valid",
+    "ruff": "pass",
+    "productionAlertDelivery": "unknown",
+    "remoteCiAndBranchProtection": "unknown",
+    "independentReview": "pending"
+  },
+  "alerting": {
+    "localRuntimeControlTests": {
+      "tests": 19,
+      "passed": 19,
+      "failed": 0,
+      "gate": "pass"
+    },
+    "productionWebhook": {
+      "status": "unknown",
+      "reason": "No production receiver/configuration was inspected or changed in this local-only chain."
+    }
+  },
+  "dora": {
+    "deploymentFrequency": "unknown",
+    "leadTimeForChanges": "unknown",
+    "changeFailureRate": "unknown",
+    "failedDeploymentRecoveryTime": "unknown",
+    "reason": "No production deployment or incident history is available in the current scope; unknown is not treated as zero."
+  },
+  "nextVerifiedActions": [
+    "Provide a usable local or CI PostgreSQL service and execute all 12 integration cases.",
+    "Align or explicitly review the four mismatched submodule worktrees, then reproduce the 14 red cases against the parent source snapshot.",
+    "Run remote CI and verify the quality-required branch-protection check.",
+    "Configure and externally verify the production incident receiver.",
+    "Complete the independent read-only review before any completion claim."
+  ],
+  "inputArtifacts": [
+    {
+      "path": ".harness/work/CRM-QA-001.g03.inventory.json",
+      "sizeBytes": 6618590,
+      "sha256": "8b1bc8d03d868435f650088121c7a5d1f7f60474cbfd63f09c402b8974eb0c6d"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g04.evidence.json",
+      "sizeBytes": 15665,
+      "sha256": "53534c9eacf469ff8973c30c49b17ef1a24f5d077a7c5c7589c99002fc78e688"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g04.registry-integrity.json",
+      "sizeBytes": 1585,
+      "sha256": "0a61e8bbb1cd7f8779869c70628dccc881881d7bf28baa8c09023f6caf312b2a"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g04.registry-strict.json",
+      "sizeBytes": 1582,
+      "sha256": "45c68176d7e3a6cf70ca6fc554597571b14b184f83f11755d913eed880c38f6f"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.release-defects.json",
+      "sizeBytes": 6384,
+      "sha256": "e73db91ee9fe77407694263a3865304d59801619855638943cc081e1744ccf0d"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.source-snapshot.check.json",
+      "sizeBytes": 2792,
+      "sha256": "b809ceb6148033ce6321c5cb2e5496cce48b5f5b63c17a022afd025c870e1d09"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-full.marker-fixed.xml",
+      "sizeBytes": 271735,
+      "sha256": "9d0303d7af1ccbdb373344e4a3daf56d0814be4e24a23ab55cdae7c0f99356a7"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-full.marker-fixed-gate.json",
+      "sizeBytes": 320,
+      "sha256": "1bf118c74fc8a38099af16bfbf6cda3d0754f0fc4805e1dd60c16c4e2efa2852"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed.xml",
+      "sizeBytes": 135857,
+      "sha256": "08c4c6dcd42d51a8ed18fe493cb82d34ba3f5f9c31a083efa79ab9efcdd0c20e"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-unit.marker-fixed-gate.json",
+      "sizeBytes": 275,
+      "sha256": "8d99456cc95658cc26a05df35286ca061dd29884d8486a0318f42f8fb5d9c5a8"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-api.marker-fixed.xml",
+      "sizeBytes": 130402,
+      "sha256": "ca9f56dd1aa1efcebaf5eaf0baf89be787fbb869e0c968e9bb05074a9cd0b1e5"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.backend-api.marker-fixed-gate.json",
+      "sizeBytes": 318,
+      "sha256": "2d059f4a1164ad0c2c00da819e1bba75615e1f65c67f0cd6c89cf94d976616f0"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.unit-report.marker-fixed.json",
+      "sizeBytes": 1536561,
+      "sha256": "862da78354c24a2eecf8500830edac34ebdb3a4716690205013a82d79c6586ea"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.frontend-vitest-coverage.xml",
+      "sizeBytes": 592272,
+      "sha256": "bd12e2bc1f4fa10dc4388a32ddb6cfbd171f49d9ab92e503ab71bbc6002207e0"
+    },
+    {
+      "path": "frontend/coverage/coverage-summary.json",
+      "sizeBytes": 114202,
+      "sha256": "755188d25d013fa25715ff8a0266a0bb5a47ee5b157a4d97f4a299d9faf25cb5"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.passport-validation.json",
+      "sizeBytes": 672,
+      "sha256": "77a7f62470b70d6e4a1263090d240ef9ac21b5592a1c9fcff0df221d834ab220"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g06.runtime-unit.xml",
+      "sizeBytes": 2822,
+      "sha256": "e23d288c42b0665b4e305cb8212e1b412fb7e7284358fdc3d2bab8d6ae630f26"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.g06.runtime-unit-gate.json",
+      "sizeBytes": 264,
+      "sha256": "47bb499672b9d75d52dcc830af057a97075c8db87541c1edd71e48d2e3c864bd"
+    },
+    {
+      "path": ".harness/metrics/CRM-QA-001.jsonl",
+      "sizeBytes": 9465,
+      "sha256": "d7bce571e6e956d6951ee5c0315b89fe4e5a8b300cc8632e35dedf57c99bbc25"
+    },
+    {
+      "path": ".harness/work/CRM-QA-001.frontend-vitest-coverage-gate.json",
+      "sizeBytes": 276,
+      "sha256": "caf924b4f2e1140d70034f6be6f54497bb4bf8896d1d08cd8b13b29864863fbb"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sizeBytes": 12774,
+      "sha256": "f542aad4cc2044fc8e50fb27cb1dcb923f173781bd2c0b153b5c6c5b8f53d616"
+    }
+  ]
+}

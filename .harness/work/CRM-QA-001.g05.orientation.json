@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "subgoalId": "G05",
+  "generatedAt": "2026-09-17T20:57:38Z",
+  "repository": {
+    "head": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+    "branch": "feat/identity-provisioner-invites"
+  },
+  "status": "not-accepted-external-prerequisite",
+  "nativeCollection": {
+    "command": "py -3 -m pytest --collect-only -q tests/integration",
+    "exitCode": 0,
+    "testCount": 12,
+    "testFiles": [
+      "tests/integration/test_postgres.py",
+      "tests/integration/test_scd2_partial_unique.py"
+    ]
+  },
+  "postgresProbe": {
+    "aiosDatabaseUrlPresent": false,
+    "port5432Listening": false,
+    "dockerExecutablePresent": true,
+    "dockerInfoExitCode": 1,
+    "dockerDaemonAvailable": false,
+    "startupAttempt": "Docker Desktop launch and com.docker.service start were attempted with local authorization; the service remained stopped and the Docker API was unavailable/permission denied.",
+    "alembicHead": "0110"
+  },
+  "execution": {
+    "command": "py -3 -m pytest -q tests/integration --junitxml=.harness/work/CRM-QA-001.ci-integration-local-2.xml",
+    "exitCode": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 12,
+    "interpretation": "Fail-closed environment probe only; no real Postgres behavior was exercised."
+  },
+  "junitGate": {
+    "command": "py -3 scripts/quality/quality_control.py validate-junit --junit .harness/work/CRM-QA-001.ci-integration-local-2.xml --require-executed --report .harness/work/CRM-QA-001.g05.integration-junit-gate-2.json",
+    "pytestExitCode": 0,
+    "pytestTests": 12,
+    "pytestPassed": 0,
+    "pytestFailed": 0,
+    "pytestSkipped": 12,
+    "validatorExitCode": 1,
+    "validatorIssues": [
+      "JUnit has skipped=12; required lane was not executed",
+      "JUnit has no passed executed test case"
+    ],
+    "interpretation": "The CI control correctly rejects an environment-only all-skipped result; this is not Postgres product evidence."
+  },
+  "independentProbe": {
+    "agent": "Kierkegaard",
+    "status": "not-accepted-external-prerequisite",
+    "testCount": 12,
+    "databaseUrlPresent": false,
+    "listeners": {
+      "5432": 0,
+      "5433": 0,
+      "15432": 0
+    },
+    "dockerInfoExitCode": 1,
+    "sqliteSubstituteUsed": false,
+    "interpretation": "Independent read-only verification reproduced the same external prerequisite blocker; no integration pass was inferred."
+  },
+  "addedRealPostgresCases": [
+    "test_postgres_schema_is_migrated_to_declared_head",
+    "test_sales_route_is_fail_closed_without_role",
+    "test_outbox_relay_concurrency_delivers_an_event_once",
+    "test_stock_reservation_cannot_overcommit_under_concurrency",
+    "test_bank_transaction_external_id_is_unique"
+  ],
+  "existingCoverage": [
+    "real PostgreSQL app/HTTP/outbox/relay/intake tests are present",
+    "partial-unique SCD2, migration-head, RBAC, outbox-lock, stock-concurrency and bank-ledger tests are present"
+  ],
+  "notDone": [
+    "no Postgres concurrency proof",
+    "no fresh migration-upgrade proof",
+    "no new idempotency/concurrency test was claimed without a database",
+    "no product, migration, production or deployment change was made",
+    "Docker startup attempt did not provide a usable local daemon; external CI Postgres or an explicitly available database host is still required"
+  ],
+  "nextAction": "Start a local Docker Postgres daemon or run the CI Postgres service; then execute all 12 integration tests and record pass/fail evidence. The five new cases are collected but not accepted while the database is unavailable."
+}

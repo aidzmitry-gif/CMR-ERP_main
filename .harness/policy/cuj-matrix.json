@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "chainId": "CRM-QA-001",
+  "sourceCommit": "362c8d1c6f13364e74766ffec73f58b55c5fb698",
+  "status": "design-baseline",
+  "rule": "Every critical journey has prepared inputs, an observable outcome, named invariants and Small/Medium/Large evidence. Missing or unknown evidence is not PASS. A case-level evidence path overrides a broader file-level path; two case-level matches remain an explicit overlap.",
+  "classificationRules": {
+    "journeys": [
+      {"id": "identity-invitation-and-authorization", "evidence": {"Small": ["tests/test_access.py", "tests/test_auth_*.py", "tests/test_security_*.py", "tests/test_identity_*.py", "tests/unit/config", "tests/unit/core/test_auth*", "tests/unit/core/test_identity*", "frontend/src/app/api/auth", "frontend/src/app/login", "frontend/src/components/erp/access-admin.test.tsx", "frontend/src/components/erp/employee-invitation-form.test.tsx", "frontend/src/lib/access*.test.ts", "frontend/src/lib/auth-*.test.ts", "frontend/src/lib/keycloak*.test.ts", "frontend/src/lib/oidc-cookies.test.ts", "frontend/src/lib/server-auth-helpers.test.ts"]}},
+      {"id": "lead-deal-quote-contract-invoice-payment", "evidence": {"Small": ["tests/test_leads.py", "tests/test_leads_*.py", "tests/test_sales_*.py", "tests/unit/modules/leads", "tests/unit/modules/sales", "tests/unit/test_leads_planning.py", "frontend/src/components/deal*", "frontend/src/components/leads", "frontend/src/components/kanban", "frontend/src/components/funnel", "frontend/src/components/sales", "frontend/src/lib/board.test.ts", "frontend/src/lib/contracts-api.test.ts", "frontend/src/lib/deal-*.test.ts", "frontend/src/lib/lead-*.test.ts", "frontend/src/lib/funnel-*.test.ts", "frontend/src/lib/sales-*.test.ts", "frontend/e2e/leads.spec.ts", "frontend/e2e/deals-board.spec.ts", "frontend/e2e/deal-card.spec.ts"]}},
+      {"id": "procurement-landed-cost-stock", "evidence": {"Small": ["tests/test_procurement_*.py", "tests/test_logistics_*.py", "tests/test_production.py", "tests/test_production_*.py", "tests/test_wms_*.py", "tests/test_sku_*.py", "tests/test_stock_*.py", "tests/unit/test_logistics_*.py", "tests/unit/modules/procurement", "tests/unit/modules/logistics", "tests/unit/modules/production", "tests/unit/modules/wms", "frontend/src/components/erp/logistics*", "frontend/src/components/erp/procurement*", "frontend/src/components/erp/production*", "frontend/src/components/erp/wms*", "frontend/src/lib/logistics-*.test.ts", "frontend/src/lib/procurement-*.test.ts", "frontend/src/lib/production-*.test.ts", "frontend/src/lib/wms-*.test.ts", "frontend/src/lib/stock.test.ts"]}},
+      {"id": "belarus-chart-of-accounts-and-finance-reports", "evidence": {"Small": ["tests/test_reference_*.py", "tests/unit/test_reference*", "tests/unit/core/test_reference*", "tests/unit/modules/finance/test_finance_reports.py", "tests/unit/modules/finance/test_reconcile_pure.py", "frontend/src/components/erp/spravochniki", "frontend/src/lib/reference-data.test.ts", "frontend/src/lib/spravochniki-*.test.ts"]}},
+      {"id": "webhook-failure-and-recovery", "evidence": {"Small": ["tests/test_connectors_*.py", "tests/test_gsheets.py", "tests/test_onec_*.py", "tests/test_sync_outbound.py", "tests/test_intake.py", "tests/test_integrations*.py", "tests/test_service_intake.py", "tests/unit/modules/integrations", "tests/unit/core/test_sync_outbound_service.py", "frontend/src/components/calls"]}},
+      {"id": "platform-quality-regression", "evidence": {"Small": ["tests", "frontend"]}}
+    ]
+  },
+  "journeys": [
+    {
+      "id": "identity-invitation-and-authorization",
+      "ownerRole": "security_identity_owner",
+      "preparedInputs": ["employee invitation", "activation decision", "sales_manager and unauthorized role", "audit actor"],
+      "action": "Invite employee, activate access, call a protected lead/sales action as an allowed role and as an unauthorized/missing identity.",
+      "expectedObservableOutcome": "Invitation state changes once; allowed action succeeds; unauthorized/missing identity is denied; audit records actor/entity and no duplicate activation occurs.",
+      "invariants": ["SEC-RBAC-001", "WF-TRANS-001", "AUDIT-001", "DATA-CONSTRAINT-001"],
+      "evidence": {"Small": ["tests/unit/core/test_identity_invitation_rules.py", "tests/unit/core/test_identity_route_guards.py", "tests/test_access.py", "tests/test_auth_oidc.py", "tests/unit/config/test_access_rules.py", "tests/unit/core/test_auth_service.py", "tests/unit/core/test_identity_route_units_more.py", "tests/unit/core/test_runtime_access.py", "frontend/src/app/api/auth/login/route.test.ts", "frontend/src/app/api/auth/oidc/callback/route.test.ts", "frontend/src/app/api/auth/oidc/route-handlers.test.ts", "frontend/src/app/login/page.test.tsx", "frontend/src/components/erp/access-admin.test.tsx", "frontend/src/components/erp/employee-invitation-form.test.tsx", "frontend/src/lib/access-admin-data.test.ts", "frontend/src/lib/access.test.ts", "frontend/src/lib/api-proxy-headers.test.ts", "frontend/src/lib/app-role.test.ts", "frontend/src/lib/auth-mode.test.ts", "frontend/src/lib/auth-session-server.test.ts", "frontend/src/lib/keycloak-token.test.ts", "frontend/src/lib/keycloak.test.ts", "frontend/src/lib/oidc-cookies.test.ts", "frontend/src/lib/server-auth-helpers.test.ts"], "Medium": ["tests/test_identity_invitation.py", "tests/test_security_rbac_sweep.py", "tests/test_leads.py::test_rbac_sales_manager_full_funnel"], "Large": ["Playwright invitation/login/role smoke — not yet run"]},
+      "g01Status": "blocked-by-observed-rbac-failure-and-external-browser-prerequisite"
+    },
+    {
+      "id": "lead-deal-quote-contract-invoice-payment",
+      "ownerRole": "finance_process_owner",
+      "preparedInputs": ["qualified routed lead", "counterparty and SKU items", "VAT rate", "one quote/contract/invoice", "payment records"],
+      "action": "Qualify and route lead, convert to deal, create quote/contract/invoice, apply approval and payment, then read the sales/finance journal.",
+      "expectedObservableOutcome": "One lead maps to one deal; items and owner are preserved; contract approval is enforced; invoice gross/VAT is correct; payment allocation selects the right open invoice; journal never invents margin when COGS is unknown.",
+      "invariants": ["FIN-MONEY-001", "FIN-VAT-001", "FIN-IDEMP-001", "FIN-COGS-001", "SEC-RBAC-001", "AUDIT-001"],
+      "evidence": {"Small": ["tests/unit/modules/leads/test_leads_route_units_more.py", "tests/unit/modules/leads/test_lead_routing_rules.py", "tests/unit/modules/leads/test_leads_route_pure_more.py", "tests/unit/modules/sales/test_sales_route_units_more.py", "tests/unit/modules/finance/test_margin_rules.py", "frontend/src/lib/board.test.ts", "frontend/src/components/kanban/deal-drawer-preview.test.tsx", "frontend/src/components/kanban/deals-workspace.test.tsx", "frontend/src/components/leads/leads-workspace.test.tsx", "frontend/src/components/kanban/deal-card.test.tsx", "frontend/e2e/leads.spec.ts", "frontend/e2e/deals-board.spec.ts", "frontend/e2e/deal-card.spec.ts"], "Medium": ["tests/test_leads.py", "tests/test_sales_deals_v2.py", "tests/test_sales_contract.py", "tests/test_links.py"], "Large": ["frontend sales/finance smoke — not yet accepted"]},
+      "g01Status": "blocked-by-5-lead-sales-finance-failures"
+    },
+    {
+      "id": "procurement-landed-cost-stock",
+      "ownerRole": "warehouse_process_owner",
+      "preparedInputs": ["purchase order", "supplier claim", "SKU quantities and batches", "freight and landed-cost inputs", "target deal"],
+      "action": "Receive/allocate procurement cost, resolve a claim, update stock and read finance margin/cost reports.",
+      "expectedObservableOutcome": "Landed amount is conserved and attributed or explicitly unknown; refund replay is idempotent; stock and cost projections agree; partial failure rolls back.",
+      "invariants": ["INV-FEFO-001", "INV-LANDED-001", "FIN-IDEMP-001", "FIN-COGS-001"],
+      "evidence": {"Small": ["tests/unit/modules/procurement/test_landed_cost_service_units.py", "tests/unit/modules/integrations/test_price_cost_and_stock_service.py"], "Medium": ["tests/test_procurement_landed_cost.py", "tests/test_landed_cost_alloc.py", "tests/test_finance.py", "tests/test_logistics_procurement_received.py", "tests/test_procurement_orders_lifecycle.py"], "Large": ["procurement-to-stock browser/API smoke — not yet run"]},
+      "g01Status": "blocked-by-claim-idempotency-and-cogs-attribution-failures"
+    },
+    {
+      "id": "reservation-and-concurrency",
+      "ownerRole": "warehouse_process_owner",
+      "preparedInputs": ["one SKU with finite available quantity", "two concurrent invoice/order requests", "reservation expiry/cancellation"],
+      "action": "Reserve the same SKU concurrently, commit one or both requests, then release an expired reservation and inspect stock.",
+      "expectedObservableOutcome": "Committed reservations never exceed free stock; Postgres locking/constraint decides the race; release is idempotent and quantity conservation holds.",
+      "invariants": ["INV-RESERVE-001", "DATA-CONSTRAINT-001", "FIN-IDEMP-001"],
+      "evidence": {"Small": ["tests/unit/modules/wms/test_wms_reservation_payloads.py", "tests/unit/modules/sales/test_reserve_tick.py"], "Medium": ["tests/integration/test_postgres.py", "new Postgres concurrency test required", "migrations/versions/0042_sales_invoice_reserve.py"], "Large": ["invoice/reservation UI smoke — not yet run"]},
+      "g01Status": "not-yet-proven; current StockService.reserve lacks availability/row-lock proof"
+    },
+    {
+      "id": "belarus-chart-of-accounts-and-finance-reports",
+      "ownerRole": "accounting_process_owner",
+      "preparedInputs": ["Belarus chart source/effective date", "account hierarchy with archived node", "BYN bank/payment records", "report period"],
+      "action": "Load/query chart of accounts, apply effective dating, run cashflow/aging/P&L/balance/reconciliation reports and compare scope.",
+      "expectedObservableOutcome": "Codes and parents are valid; effective view matches report date; reports conserve totals and label unknown/unattributed values; 1C read-only comparison does not mutate the local ledger.",
+      "invariants": ["ACC-PLAN-001", "ACC-EFFECTIVE-001", "ACC-REPORT-001", "FIN-MONEY-001"],
+      "evidence": {"Small": ["tests/unit/test_account_plan.py", "tests/unit/modules/finance/test_finance_reports.py", "tests/unit/modules/finance/test_reconcile_pure.py", "frontend/src/components/erp/spravochniki/sprav-rates.test.tsx", "frontend/src/components/erp/spravochniki/sprav-quality.test.tsx"], "Medium": ["tests/test_reference_account_region.py", "tests/test_reference_effective.py", "tests/test_finance_pnl.py", "tests/test_finance_cashflow.py", "tests/test_finance_balance.py"], "Large": ["period-close/accounting report smoke — not yet run"]},
+      "g01Status": "structural-chart-evidence-present; statutory/report consistency not yet accepted"
+    },
+    {
+      "id": "webhook-failure-and-recovery",
+      "ownerRole": "integration_platform_owner",
+      "preparedInputs": ["valid inbound webhook", "duplicate delivery", "out-of-order delivery", "timeout/5xx", "configured incident receiver"],
+      "action": "Ingest a connector event, replay it, deliver out of order, force a transient failure and observe retry/alert/recovery.",
+      "expectedObservableOutcome": "Authentication fails closed; idempotency prevents duplicate effects; retry is bounded/observable; incident alert is redacted and deduplicated; recovered state is queryable.",
+      "invariants": ["INT-AUTH-001", "INT-DEDUP-001", "INT-TELEPHONY-001", "AUDIT-001"],
+      "evidence": {"Small": ["tests/unit/modules/integrations/test_telephony_rules.py", "tests/unit/core/test_incident_alerts.py", "frontend/src/components/calls/call-window.test.tsx", "frontend/src/components/calls/calls-workspace.test.tsx", "frontend/src/components/calls/incoming-call-card.test.tsx"], "Medium": ["tests/test_eventbus_b1_lock.py", "tests/test_telephony.py", "tests/test_connectors_core.py", "tests/test_connectors_onec.py"], "Large": ["production receiver and recovery smoke — external webhook prerequisite missing"]},
+      "g01Status": "blocked-by-telephony-failures-and-unconfigured-production-receiver"
+    },
+    {
+      "id": "platform-quality-regression",
+      "ownerRole": "release_data_owner",
+      "preparedInputs": ["current source checkout", "native test inventory", "declared quality thresholds", "redacted failure payload"],
+      "action": "Collect the native test registry, execute the applicable local gates and inspect the resulting Harness/CI evidence.",
+      "expectedObservableOutcome": "Cross-cutting tests are discoverable, fingerprinted and classified; failures identify the suite and next action; no skipped or unavailable lane is accepted as green.",
+      "invariants": ["QA-REGISTRY-001", "QA-ALERT-001"],
+      "evidence": {"Small": ["tests", "frontend"], "Medium": ["scripts/quality", ".github/workflows/ci.yml"], "Large": ["release acceptance report — not a product CUJ"]},
+      "g01Status": "supplemental cross-cutting classification; product CUJ acceptance remains separate"
+    }
+  ]
+}

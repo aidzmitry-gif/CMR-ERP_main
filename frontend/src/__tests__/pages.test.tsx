@@ -14,7 +14,18 @@ vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", clas
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
-vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест" }));
+vi.mock("@/components/calls/calls-workspace", () => ({ CallsWorkspace: () => <div>calls-workspace</div> }));
+vi.mock("@/components/catalog/catalog-picker", () => ({ CatalogPicker: () => <div>catalog-picker</div> }));
+vi.mock("@/components/docs/docs-registry", () => ({ DocsRegistry: () => <div>docs-registry</div> }));
+vi.mock("@/components/margin/margin-by-month", () => ({ MarginByMonth: () => <div>margin-by-month</div> }));
+vi.mock("@/components/regular/regular-clients", () => ({ RegularClients: () => <div>regular-clients</div> }));
+vi.mock("@/components/sales/sales-journal", () => ({ SalesJournal: () => <div>sales-journal</div> }));
+vi.mock("@/components/shipments/shipment-status", () => ({ ShipmentStatus: () => <div>shipment-status</div> }));
+vi.mock("@/lib/role-server", () => ({
+  currentRole: vi.fn(async () => "director"),
+  currentAccessToken: vi.fn(async () => null),
+  currentUserName: vi.fn(async () => "Тест"),
+}));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
@@ -82,10 +93,18 @@ vi.mock("@/lib/api", () => ({
 
 import Home from "@/app/page";
 import RootLayout from "@/app/layout";
+import CallsPage from "@/app/crm/calls/page";
+import CatalogPage from "@/app/crm/catalog/page";
 import DealsPage from "@/app/crm/deals/page";
 import DealDetailPage from "@/app/crm/deals/[id]/page";
+import DocsPage from "@/app/crm/docs/page";
 import LeadsPage from "@/app/crm/leads/page";
+import MarginPage from "@/app/crm/margin/page";
 import OwnerPage from "@/app/crm/owner/page";
+import PlanRedirectPage from "@/app/crm/plan/page";
+import RegularPage from "@/app/crm/regular/page";
+import SalesPage from "@/app/crm/sales/page";
+import ShipmentsPage from "@/app/crm/shipments/page";
 import AnalyticsPage from "@/app/erp/analytics/page";
 import FinancePage from "@/app/erp/finance/page";
 import HrPage from "@/app/erp/hr/page";
@@ -100,6 +119,7 @@ import OfficePage from "@/app/erp/office/page";
 import LegalPage from "@/app/erp/legal/page";
 import KnowledgePage from "@/app/erp/knowledge/page";
 import * as api from "@/lib/api";
+import * as roleServer from "@/lib/role-server";
 import { redirect } from "next/navigation";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -109,6 +129,34 @@ describe("страницы (src/app)", () => {
   it("Home редиректит на доску сделок", async () => {
     await Home();
     expect(redirect).toHaveBeenCalledWith("/crm/deals");
+  });
+
+  it("Home отправляет неавторизованного пользователя на логин", async () => {
+    vi.mocked(roleServer.currentUserName).mockResolvedValueOnce(null);
+    await Home();
+    expect(redirect).toHaveBeenCalledWith("/login");
+  });
+
+  it("тонкие CRM-страницы собирают свои рабочие области", () => {
+    const pages = [
+      [CallsPage, "calls-workspace"],
+      [CatalogPage, "catalog-picker"],
+      [DocsPage, "docs-registry"],
+      [MarginPage, "margin-by-month"],
+      [RegularPage, "regular-clients"],
+      [SalesPage, "sales-journal"],
+      [ShipmentsPage, "shipment-status"],
+    ] as const;
+    for (const [Page, text] of pages) {
+      const { unmount } = render(<Page />);
+      expect(screen.getByText(text)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("старый URL конструктора плана перенаправляет на новый экран", () => {
+    PlanRedirectPage();
+    expect(redirect).toHaveBeenCalledWith("/crm/deals/planning");
   });
 
   it("RootLayout оборачивает контент", () => {

@@ -7,24 +7,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
 
 from core.services.price_cost import ItemPriceCost
 from modules.sales import routes
 from modules.sales.models import (
-    Activity,
     CompanyBranding,
-    Deal,
     DealDocument,
-    DealItem,
     DealStageEvent,
-    DealTask,
-    KpiTarget,
     Message,
     PlanItem,
     PlanTarget,
-    PriceQuote,
-    Stage,
 )
 from modules.sales.schemas import (
     ActivityCreate,
@@ -32,23 +24,16 @@ from modules.sales.schemas import (
     CallCommentIn,
     CallLinkDealIn,
     CallResultIn,
-    ContactCreate,
-    ContractTemplateCreate,
-    DealCreate,
-    DealItemUpdate,
     DealUpdate,
     DocumentCreate,
     DocumentDecision,
     LoseRequest,
-    MessageCreate,
     ObjectionReplyIn,
     PlanDecisionIn,
     PlanItemIn,
     PlanReopenIn,
     PlanTargetIn,
     PriceQuoteCreate,
-    PlanTargetIn,
-    TaskUpdate,
 )
 
 
@@ -405,18 +390,6 @@ async def test_plan_items_and_plan_workflow_cover_replace_upsert_and_approval_ev
     assert items[0].owner_id == 7 and items[0].revenue == 100.0
     assert item_session.commits == 1 and item_session.refreshed == item_session.added
 
-    plan = PlanTarget(
-        id=5,
-        owner_id=7,
-        metric="gross_profit",
-        period_type="month",
-        period_key="2026-09",
-        target=Decimal("1000"),
-        status="draft",
-        approved_by=None,
-        approved_at=None,
-        rop_comment=None,
-    )
     created = await routes.upsert_plan(
         PlanTargetIn(owner_id=7, metric="calls", period_type="month", period_key="2026-09", target=10),
         Session(Result()),
@@ -571,7 +544,6 @@ async def test_win_lose_create_and_approval_routes_publish_domain_events():
         )
     assert no_reason.value.status_code == 422
 
-    approval = SimpleNamespace(id=4, status="pending")
     approval_service = SimpleNamespace(request=AsyncMock(return_value=SimpleNamespace(id=9, status="pending")))
     requested = await routes.request_approval(
         11,

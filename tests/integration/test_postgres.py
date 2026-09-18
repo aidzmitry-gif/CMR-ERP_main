@@ -4,11 +4,21 @@
 Postgres (``db.connect``), схемы ``sales.*`` из миграций, фоновый relay в lifespan.
 """
 import asyncio
+from decimal import Decimal
 from uuid import uuid4
 
+import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.settings import get_settings
+from core.domain.models import AuditLog, OutboxEvent
+from core.services.eventbus import OutboxEventBus
+from modules.finance.models import BankTransaction
+from modules.integrations.models import StockItem
+from modules.integrations.stock import StockService
 
 
 async def test_health_and_modules_on_postgres(pg_app):
@@ -16,6 +26,135 @@ async def test_health_and_modules_on_postgres(pg_app):
     mods = (await pg_app.get("/system/modules")).json()
     assert "sales" in mods["loaded_modules"]
     assert "integrations" in mods["loaded_modules"]
+
+
+async def test_postgres_schema_is_migrated_to_declared_head(postgres_url):
+    """The real database must be at Alembic head and retain the partial-unique index."""
+    engine = create_async_engine(postgres_url, future=True)
+    try:
+        async with engine.connect() as conn:
+            versions = (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
+            indexes = (
+                await conn.execute(
+                    text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE schemaname = 'public' AND indexname = 'uq_ref_vat_rate_open'"
+                    )
+                )
+            ).scalars().all()
+        assert versions == ["0110"]
+        assert indexes == ["uq_ref_vat_rate_open"]
+    finally:
+        await engine.dispose()
+
+
+async def test_sales_route_is_fail_closed_without_role(pg_app):
+    """A real Postgres-backed request without a role cannot read the sales board."""
+    denied = await pg_app.get("/sales/board", headers={"X-User-Roles": "guest"})
+    assert denied.status_code == 403
+
+
+async def test_outbox_relay_concurrency_delivers_an_event_once(postgres_url):
+    """Two real Postgres relays must claim disjoint rows through FOR UPDATE SKIP LOCKED."""
+    engine = create_async_engine(postgres_url, future=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    marker = uuid4().hex
+    try:
+        async with factory() as seed:
+            seed.add(
+                OutboxEvent(
+                    event_type="qa.concurrent.relay",
+                    payload={"entity_ref": f"qa:{marker}", "marker": marker},
+                )
+            )
+            await seed.commit()
+
+        async def relay_once() -> int:
+            async with factory() as session:
+                return await OutboxEventBus().relay_once(session)
+
+        delivered = await asyncio.gather(relay_once(), relay_once())
+        assert sorted(delivered) == [0, 1]
+
+        async with factory() as check:
+            event = (
+                await check.execute(
+                    select(OutboxEvent).where(OutboxEvent.payload["marker"].as_string() == marker)
+                )
+            ).scalar_one()
+            audit_count = (
+                await check.execute(
+                    select(AuditLog).where(AuditLog.entity_ref == f"qa:{marker}")
+                )
+            ).scalars().all()
+        assert event.processed_at is not None
+        assert len(audit_count) == 1
+    finally:
+        async with factory() as cleanup:
+            await cleanup.execute(
+                delete(OutboxEvent).where(OutboxEvent.payload["marker"].as_string() == marker)
+            )
+            await cleanup.execute(delete(AuditLog).where(AuditLog.entity_ref == f"qa:{marker}"))
+            await cleanup.commit()
+        await engine.dispose()
+
+
+async def test_stock_reservation_cannot_overcommit_under_concurrency(postgres_url):
+    """Concurrent real reservations must never confirm more than available stock."""
+    engine = create_async_engine(postgres_url, future=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    marker = f"QA-STOCK-{uuid4().hex}"
+    try:
+        async with factory() as seed:
+            seed.add(
+                StockItem(
+                    sku_code=marker,
+                    warehouse="QA",
+                    qty_available=Decimal("5"),
+                    qty_reserved=Decimal("0"),
+                )
+            )
+            await seed.commit()
+
+        async def reserve_once() -> list[dict]:
+            async with factory() as session:
+                result = await StockService().reserve(
+                    session, [{"sku_code": marker, "qty": "4"}]
+                )
+                await session.commit()
+                return result
+
+        results = await asyncio.gather(reserve_once(), reserve_once())
+        confirmed = sum(
+            (Decimal(str(item["qty"])) for result in results for item in result),
+            Decimal("0"),
+        )
+        assert confirmed <= Decimal("5")
+    finally:
+        async with factory() as cleanup:
+            await cleanup.execute(delete(StockItem).where(StockItem.sku_code == marker))
+            await cleanup.commit()
+        await engine.dispose()
+
+
+async def test_bank_transaction_external_id_is_unique(postgres_url):
+    """The real finance ledger rejects a duplicate bank operation id."""
+    engine = create_async_engine(postgres_url, future=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    marker = f"QA-BANK-{uuid4().hex}"
+    try:
+        async with factory() as session:
+            session.add(BankTransaction(ext_id=marker, amount=Decimal("10")))
+            await session.commit()
+            session.add(BankTransaction(ext_id=marker, amount=Decimal("10")))
+            with pytest.raises(IntegrityError):
+                await session.commit()
+            await session.rollback()
+    finally:
+        async with factory() as cleanup:
+            await cleanup.execute(delete(BankTransaction).where(BankTransaction.ext_id == marker))
+            await cleanup.commit()
+        await engine.dispose()
 
 
 async def test_deal_crud_on_postgres(pg_app):
