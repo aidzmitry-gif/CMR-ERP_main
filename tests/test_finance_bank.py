@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from core.domain.models import OutboxEvent
 from core.services.eventbus import OutboxEventBus
 from modules.finance.allocation import sum_allocations
 from modules.finance.bank_ingest import sync_incoming
@@ -42,21 +43,21 @@ async def _receivable(session, ref="СЧ-100", amount="1000", unp="191234567") -
     return p.id
 
 
-async def test_match_by_purpose_and_unp_auto_allocates(session):
+async def test_legacy_incoming_without_organization_owner_stays_unmatched(session):
     pid = await _receivable(session)
     bus = OutboxEventBus()
     summary = await sync_incoming(
         session, FakeBank([_tx("A1", "1000", "Оплата по счёту СЧ-100 за товар")]), bus
     )
     await session.commit()
-    assert summary == {"source_available": True, "fetched": 1, "new": 1, "matched": 1, "unmatched": 0}
+    assert summary == {"source_available": True, "fetched": 1, "new": 1, "matched": 0, "unmatched": 1}
     p = await session.get(Payment, pid)
-    assert p.status == "paid"
+    assert p.status == "pending"
     tx = (await session.execute(select(BankTransaction))).scalar_one()
-    assert tx.match_status == "matched" and tx.payment_id == pid and tx.allocation_id is not None
-    from core.domain.models import OutboxEvent
-    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "finance.payment.received" in types and "finance.payment.paid" in types
+    assert tx.match_status == "unmatched" and "владельцы организаций" in (tx.note or "")
+    assert tx.payment_id is None and tx.allocation_id is None
+    assert await session.scalar(select(func.count()).select_from(PaymentAllocation)) == 0
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == 0
 
 
 async def test_idempotent_double_sync_no_double_allocation(session):
@@ -68,21 +69,21 @@ async def test_idempotent_double_sync_no_double_allocation(session):
     second = await sync_incoming(session, gw, bus)  # тот же ext_id
     await session.commit()
     assert second["new"] == 0 and second["matched"] == 0
-    # ровно одно поступление — деньги клиента НЕ задвоены
+    # Legacy запись не была проведена и повторный опрос не создаёт вторую.
     allocated = await sum_allocations(session, pid)
-    assert allocated == Decimal("1000")
+    assert allocated == Decimal("0")
     cnt = (await session.execute(select(func.count()).select_from(BankTransaction))).scalar_one()
     assert cnt == 1
 
 
-async def test_partial_payment_sets_partial_status(session):
+async def test_legacy_partial_payment_without_owner_keeps_payment_pending(session):
     pid = await _receivable(session, amount="1000")
     bus = OutboxEventBus()
     await sync_incoming(session, FakeBank([_tx("A1", "400", "СЧ-100 частично")]), bus)
     await session.commit()
     p = await session.get(Payment, pid)
-    assert p.status == "partial"
-    assert (Decimal("1000") - await sum_allocations(session, pid)) == Decimal("600")
+    assert p.status == "pending"
+    assert (Decimal("1000") - await sum_allocations(session, pid)) == Decimal("1000")
 
 
 async def test_no_invoice_ref_goes_to_unmatched_queue(session):
@@ -178,3 +179,54 @@ async def test_bank_endpoint_forbidden_for_non_finance_role(api):
     # деньги: чужая роль (продажи) не имеет доступа к /finance → 403 middleware
     r = await api.post("/finance/bank/sync", headers={"X-User-Roles": "sales"})
     assert r.status_code == 403
+
+
+async def test_manual_legacy_match_without_organization_owner_cannot_allocate(api, session):
+    pid = await _receivable(session)
+    tx = BankTransaction(
+        ext_id="LEGACY-MANUAL-UNOWNED", amount=Decimal("1000"), currency="BYN",
+        purpose="Оплата счёт СЧ-100", match_status="unmatched",
+    )
+    session.add(tx)
+    await session.commit()
+
+    response = await api.post(f"/finance/bank/transactions/{tx.id}/match", json={"payment_id": pid})
+
+    assert response.status_code == 409
+    assert "владельцы организаций" in response.json()["detail"]
+    await session.refresh(tx)
+    payment = await session.get(Payment, pid)
+    assert tx.match_status == "unmatched" and tx.payment_id is None and tx.allocation_id is None
+    assert payment is not None and payment.status == "pending"
+    assert await session.scalar(select(func.count()).select_from(PaymentAllocation)) == 0
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == 0
+
+
+async def test_matched_legacy_history_replay_is_a_noop(session):
+    pid = await _receivable(session)
+    allocation = PaymentAllocation(payment_id=pid, amount=Decimal("1000"))
+    session.add(allocation)
+    await session.flush()
+    tx = BankTransaction(
+        ext_id="LEGACY-MATCHED-HISTORY", amount=Decimal("1000"), currency="BYN",
+        purpose="Оплата счёт СЧ-100", match_status="matched", payment_id=pid,
+        allocation_id=allocation.id,
+    )
+    session.add(tx)
+    payment = await session.get(Payment, pid)
+    payment.status = "paid"
+    await session.commit()
+    before = (tx.match_status, tx.payment_id, tx.allocation_id, tx.amount)
+
+    summary = await sync_incoming(
+        session, FakeBank([_tx("LEGACY-MATCHED-HISTORY", "1000", "Оплата счёт СЧ-100")]), OutboxEventBus()
+    )
+    await session.commit()
+
+    await session.refresh(tx)
+    payment = await session.get(Payment, pid)
+    assert summary == {"source_available": True, "fetched": 1, "new": 0, "matched": 0, "unmatched": 0}
+    assert (tx.match_status, tx.payment_id, tx.allocation_id, tx.amount) == before
+    assert payment is not None and payment.status == "paid"
+    assert await session.scalar(select(func.count()).select_from(PaymentAllocation)) == 1
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == 0
