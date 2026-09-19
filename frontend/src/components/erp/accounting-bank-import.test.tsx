@@ -61,3 +61,13 @@ it("shows invalid money without offering posting", async () => {
   expect(screen.queryByRole("button", { name: "Выбрать" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Подтвердить импорт" })).not.toBeInTheDocument();
 });
+
+it("does not enable source selection before accounts are loaded", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [{
+    source_snapshot: { transaction_id: 10, ext_id: "WAIT-ACCOUNTS", occurred_on: "2026-09-05", amount: "25.00", currency: "BYN", payer_name: "Buyer" },
+    source_digest: "d".repeat(64), binding_status: "own", imported: false, entry_id: null,
+  }] }));
+  render(<AccountingBankImport org="1" accounts={[]} policyId={3} date="2026-09-05" onDate={vi.fn()} onPosted={vi.fn()} />);
+  const select = await screen.findByRole("button", { name: "Выбрать" });
+  expect(select).toBeDisabled();
+});
