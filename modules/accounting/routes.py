@@ -28,6 +28,7 @@ from modules.accounting import (
     closing_controls,
     fixed_assets,
     foreign_trade_register,
+    fx_bank_settlement_preview,
     fx_revaluation,
     fx_settlement_preview,
     input_vat,
@@ -461,6 +462,15 @@ async def import_statement_source(org_id: int, data: bank_statement.StatementImp
 async def preview_fx_settlement(org_id: int, data: fx_settlement_preview.SettlementPreviewInput, ctx=Depends(member)):
     try:
         return await fx_settlement_preview.preview(ctx[0], org_id, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/fx-bank-settlement/preview")
+async def preview_fx_bank_settlement(org_id: int, data: fx_bank_settlement_preview.FxBankSettlementPreviewInput,
+                                     ctx=Depends(member)):
+    try:
+        return await fx_bank_settlement_preview.preview(ctx[0], org_id, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
 
