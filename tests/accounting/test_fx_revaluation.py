@@ -58,21 +58,31 @@ def _foreign_posting(policy_id, *, amount="300.00", original="100.00", source="f
     )
 
 
-async def test_preview_requires_explicit_policy_and_builds_balanced_adjustment(db, book):
+@pytest.mark.parametrize("rate,delta,asset_side,liability_side", [
+    ("3.20", "20.00", "debit", "credit"),
+    ("2.80", "-20.00", "credit", "debit"),
+])
+async def test_preview_requires_explicit_policy_and_builds_balanced_adjustment(
+        db, book, rate, delta, asset_side, liability_side):
     policy_id = await _policy(db, book[0])
     await service.post(db, book[0], _foreign_posting(policy_id), "tester")
     await db.commit()
     plan = await fx_revaluation.preview(db, book[0], "2026-09", FxRevaluationInput(
         request_key=uuid4(), policy_id=policy_id, posting_date=date(2026, 9, 30),
         expected_generation=1, rates=[{
-            "currency": "USD", "rate": "3.20", "rate_scale": 1,
+            "currency": "USD", "rate": rate, "rate_scale": 1,
             "rate_date": "2026-09-30", "rate_source": "Synthetic central-bank evidence",
         }], evidence="Synthetic reviewed rate evidence",
     ))
     deltas = {row["account"]: row["delta"] for row in plan["adjustments"]}
-    assert deltas == {"60": "-20.00", "62": "20.00"}
-    assert len(plan["posting_document"]["lines"]) == 4
     from decimal import Decimal
+    assert deltas == {"60": str(-Decimal(delta)), "62": delta}
+    adjustments = {row["account"]: row for row in plan["adjustments"]}
+    assert adjustments["60"]["monetary_side"] == liability_side
+    assert adjustments["62"]["monetary_side"] == asset_side
+    assert adjustments["60"]["counterpart"] == ("91.2" if liability_side == "credit" else "91.1")
+    assert adjustments["62"]["counterpart"] == ("91.1" if asset_side == "debit" else "91.2")
+    assert len(plan["posting_document"]["lines"]) == 4
     assert sum(
         (Decimal(line["amount"]) if line["side"] == "debit" else -Decimal(line["amount"])
          for line in plan["posting_document"]["lines"]),

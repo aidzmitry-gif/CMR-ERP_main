@@ -126,16 +126,15 @@ def _rate_map(rates: list[FxRateInput], last: date, posting_date: date):
     return result
 
 
-def _side(account: Account, delta: Decimal) -> str:
-    if account.category == "asset":
-        return "debit" if delta > 0 else "credit"
-    return "credit" if delta > 0 else "debit"
+def _side(delta: Decimal) -> str:
+    # Both asset and liability buckets use debit-positive ledger balances.
+    return "debit" if delta > 0 else "credit"
 
 
-def _counterpart(account: Account, delta: Decimal, gain_account: Account, loss_account: Account):
-    # Asset appreciation is income; liability appreciation is expense.  The
-    # inverse movement uses the opposite configured result account.
-    gain = (account.category == "asset" and delta > 0) or (account.category == "liability" and delta < 0)
+def _counterpart(delta: Decimal, gain_account: Account, loss_account: Account):
+    # A signed debit increase is offset by income; a credit increase by expense.
+    # Liability balances already carry a minus sign, so do not invert twice.
+    gain = delta > 0
     return gain_account if gain else loss_account, ("credit" if gain else "debit")
 
 
@@ -222,8 +221,8 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
         if delta == 0:
             continue
         account = account_map[bucket["account"]]
-        counterpart, counterpart_side = _counterpart(account, delta, gain, loss)
-        monetary_side = _side(account, delta)
+        counterpart, counterpart_side = _counterpart(delta, gain, loss)
+        monetary_side = _side(delta)
         amount = abs(delta)
         posting_lines.extend([
             LineInput(account=account.code, side=monetary_side, amount=amount,
@@ -248,7 +247,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
     posting = PostingInput(
         source=f"accounting:fx-revaluation:{org_id}:{month}", source_version=source_version,
         operation="fx_revaluation", document_date=data.posting_date, operation_date=data.posting_date,
-        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v1",
+        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v2",
         explanation=f"FX revaluation for {month}: reviewed documented rates", lines=posting_lines,
         correction_of=correction_of,
     ) if posting_lines else None
