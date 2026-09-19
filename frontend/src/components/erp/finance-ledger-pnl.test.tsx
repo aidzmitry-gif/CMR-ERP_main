@@ -5,7 +5,7 @@ import { FinanceLedgerPnl, pnlCsv } from "./finance-ledger-pnl";
 
 const report = { organization_id: 7, from: "2026-09-01", to: "2026-09-30", status: "preliminary", pending_documents: 2,
   review_items: [{ code: "check", count: 1, message: "Нужна проверка" }], pnl: { income: "20.00", expenses: "3.33", profit: "16.67" },
-  pnl_movements: [{ entry_id: 11, source: "sale; one", date: "2026-09-04", account: "90.1", title: "Доход", line_id: 21, currency: "BYN", side: "credit" as const, amount: "20.00", dimensions: { note: "a\"b\nc" }, category: "income" as const }, { entry_id: 11, source: "sale", date: "2026-09-04", account: "90.4", title: "Расход", line_id: 22, currency: "BYN", side: "debit" as const, amount: "3.33", dimensions: {}, category: "expense" as const }] };
+  pnl_movements: [{ entry_id: 11, source: "sale; one", date: "2026-09-04", account: "90.1", title: "Доход", line_id: 21, currency: "USD", side: "credit" as const, amount: "20.00", dimensions: { note: "a\"b\nc" }, category: "income" as const }, { entry_id: 11, source: "sale", date: "2026-09-04", account: "90.4", title: "Расход", line_id: 22, currency: "BYN", side: "debit" as const, amount: "3.33", dimensions: {}, category: "expense" as const }] };
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -30,6 +30,8 @@ it("requires explicit organization and displays only the applied accounting repo
   expect(screen.getByText("sale; one · №11")).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Открыть" })[0]);
   expect(await screen.findByText("Синтетическая операция")).toBeInTheDocument();
+  expect(screen.getByText("20.00 BYN (валюта операции: USD)")).toBeInTheDocument();
+  expect(screen.queryByText("20.00 USD")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith("/api/accounting/organizations/7/entries/11", { cache: "no-store" });
 });
 
