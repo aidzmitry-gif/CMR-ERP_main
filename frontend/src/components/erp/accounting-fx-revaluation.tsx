@@ -110,10 +110,10 @@ function FxRevaluationForm({ org, month, date, policy, disabled, onEntry }: { or
 
   const settlementAccount = settlementAccounts?.find((account) => account.code === settlement.account);
   const eligibleSettlementAccounts = (settlementAccounts || []).filter((account) => policy?.currency_revaluation?.monetary_accounts.includes(account.code));
-  const settlementComplete = !!settlementAccount && !!settlement.amount && !!settlement.rate && Number(settlement.rate) > 0 && Number.isSafeInteger(Number(settlement.rate_scale)) && Number(settlement.rate_scale) > 0 && settlement.rate_source.trim().length >= 10 && settlementAccount.required_dimensions.every((key) => settlement.dimensions[key]?.trim());
+  const settlementComplete = !!settlementAccount && Number.isFinite(Number(settlement.amount)) && Number(settlement.amount) > 0 && Number.isFinite(Number(settlement.rate)) && Number(settlement.rate) > 0 && Number.isSafeInteger(Number(settlement.rate_scale)) && Number(settlement.rate_scale) > 0 && settlement.rate_source.trim().length >= 10 && settlementAccount.required_dimensions.every((key) => settlement.dimensions[key]?.trim());
   function updateSettlement(patch: Partial<typeof settlement>) {
     invalidateSettlement();
-    setSettlement((current) => ({ ...current, ...patch }));
+    setSettlement((current) => ({ ...current, ...patch, ...(patch.currency !== undefined && patch.currency !== current.currency ? { rate: "", rate_source: "" } : {}) }));
   }
   async function previewSettlement() {
     if (!policy?.id || !settlementConfigured || !settlementComplete) return;

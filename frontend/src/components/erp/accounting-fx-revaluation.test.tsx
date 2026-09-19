@@ -21,7 +21,7 @@ it("loads the period generation, previews documented rates and confirms the revi
     })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ entry_id: 88 }) });
   vi.stubGlobal("fetch", fetcher);
-  render(<AccountingFxRevaluation org="7" month="2026-09" policy={policy} />);
+  render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={policy} />);
   expect(await screen.findByText("Валютная переоценка · 2026-09")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Курс 1"), { target: { value: "3.20" } });
   fireEvent.change(screen.getByLabelText("Источник курса 1"), { target: { value: "Synthetic central-bank evidence" } });
@@ -33,7 +33,7 @@ it("loads the period generation, previews documented rates and confirms the revi
 });
 
 it("shows the explicit policy blocker instead of choosing accounts", () => {
-  render(<AccountingFxRevaluation org="7" month="2026-09" policy={{ ...policy, currency_revaluation: null }} />);
+  render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={{ ...policy, currency_revaluation: null }} />);
   expect(screen.getByText(/нет явных денежных счетов/)).toBeInTheDocument();
 });
 
@@ -42,7 +42,7 @@ it("fills the official rate and scale without posting, and invalidates an edited
     .mockResolvedValueOnce({ ok: true, json: async () => ({ currency: "USD", date: "2026-09-30", official_rate: "3.1234", scale: 100, source: "NBRB" }) })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ adjustments: [], source_line_count: 0, confirmation_available: true }) });
   vi.stubGlobal("fetch", fetcher);
-  render(<AccountingFxRevaluation org="7" month="2026-09" policy={policy} />);
+  render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={policy} />);
   fireEvent.click(screen.getByRole("button", { name: "Получить курс НБРБ 1" }));
   expect(await screen.findByRole("status")).toHaveTextContent("Курс НБРБ загружен");
   expect(screen.getByLabelText("Курс 1")).toHaveValue("3.1234");
@@ -61,7 +61,7 @@ it("fills the official rate and scale without posting, and invalidates an edited
 it("rejects mismatched quote data without replacing a manually entered rate", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, json: async () => [] })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ currency: "EUR", date: "2026-09-30", official_rate: "3.2", scale: 1, source: "NBRB" }) }));
-  render(<AccountingFxRevaluation org="7" month="2026-09" policy={policy} />);
+  render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={policy} />);
   fireEvent.change(screen.getByLabelText("Курс 1"), { target: { value: "3.1" } });
   fireEvent.click(screen.getByRole("button", { name: "Получить курс НБРБ 1" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("не соответствует");
@@ -74,11 +74,32 @@ it("does not apply a delayed quote after changing the organization", async () =>
     .mockReturnValueOnce(new Promise((resolve) => { resolveQuote = resolve; }))
     .mockResolvedValueOnce({ ok: true, json: async () => [] });
   vi.stubGlobal("fetch", fetcher);
-  const view = render(<AccountingFxRevaluation org="7" month="2026-09" policy={policy} />);
+  const view = render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={policy} />);
   fireEvent.click(screen.getByRole("button", { name: "Получить курс НБРБ 1" }));
-  view.rerender(<AccountingFxRevaluation org="8" month="2026-09" policy={policy} />);
+  view.rerender(<AccountingFxRevaluation org="8" month="2026-09" date="2026-09-30" policy={policy} />);
   await act(async () => resolveQuote({ ok: true, json: async () => ({ currency: "USD", date: "2026-09-30", official_rate: "3.1234", scale: 100, source: "NBRB" }) }));
   expect(screen.getByLabelText("Курс 1")).toHaveValue("");
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Получить курс НБРБ 1" })).toBeEnabled();
+});
+
+it("requires positive settlement amounts and a new documented rate when currency changes", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("/accounts?") ? [{ code: "62", title: "Customers", required_dimensions: [] }] : [] })));
+  const configured = { ...policy, currency_revaluation: { ...policy.currency_revaluation, settlement_allocation: "proportional_carrying" as const, settlement_rate_date: "posting_date" as const } };
+  render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-30" policy={configured} />);
+  await screen.findByRole("option", { name: "62 · Customers" });
+  fireEvent.change(screen.getByLabelText("Денежный счёт валютного погашения"), { target: { value: "62" } });
+  fireEvent.change(screen.getByLabelText("Курс валютного погашения"), { target: { value: "3.2" } });
+  fireEvent.change(screen.getByLabelText("Источник курса валютного погашения"), { target: { value: "Reviewed rate document" } });
+  const button = screen.getByRole("button", { name: "Рассчитать погашение" });
+  for (const amount of ["0", "-1", "invalid", "Infinity"]) {
+    fireEvent.change(screen.getByLabelText("Сумма валютного погашения"), { target: { value: amount } });
+    expect(button).toBeDisabled();
+  }
+  fireEvent.change(screen.getByLabelText("Сумма валютного погашения"), { target: { value: "50.00" } });
+  expect(button).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("Валюта валютного погашения"), { target: { value: "EUR" } });
+  expect(screen.getByLabelText("Курс валютного погашения")).toHaveValue("");
+  expect(screen.getByLabelText("Источник курса валютного погашения")).toHaveValue("");
+  expect(button).toBeDisabled();
 });
