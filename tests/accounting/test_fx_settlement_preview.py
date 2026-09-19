@@ -80,3 +80,27 @@ async def test_partial_allocation_includes_prior_revaluation(client, db, book):
     assert Decimal(result["documentary_amount"]) == Decimal("170.00")
     assert Decimal(result["exchange_difference"]) == Decimal("10.00")
     assert result["basis"]["prior_valuations"]
+
+async def test_new_account_version_changes_preview_basis_without_changing_value(client, db, book):
+    from modules.accounting.models import Account
+
+    policy = await setup_position(db, book)
+    url = f"/accounting/organizations/{book[0]}/fx-settlement/preview"
+    before = await client.post(url, json=command(policy))
+    assert before.status_code == 200, before.text
+    old = await db.scalar(select(Account).where(
+        Account.organization_id == book[0], Account.code == "62",
+    ).order_by(Account.valid_from.desc()))
+    replacement = Account(organization_id=book[0], code=old.code, title=old.title,
+        category=old.category, valid_from=date(2026, 9, 1),
+        required_dimensions=old.required_dimensions, currency_tracking=old.currency_tracking,
+        quantity_tracking=old.quantity_tracking, cash=old.cash, normative_ref=old.normative_ref)
+    db.add(replacement)
+    await db.commit()
+    after = await client.post(url, json=command(policy))
+    assert after.status_code == 200, after.text
+    first, second = before.json(), after.json()
+    assert first["allocated_book_amount"] == second["allocated_book_amount"]
+    assert first["basis_digest"] != second["basis_digest"]
+    assert {a["code"] for a in second["basis"]["account_versions"]} == {"62", "91.1", "91.2"}
+    assert next(a for a in second["basis"]["account_versions"] if a["code"] == "62")["valid_from"] == "2026-09-01"

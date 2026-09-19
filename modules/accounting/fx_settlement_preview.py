@@ -83,6 +83,12 @@ async def preview(session, org_id, data: SettlementPreviewInput):
     counterpart, side = fx._counterpart(signed_difference, gain, loss)
     basis = {"organization_id": org_id, "organization_generation": org.generation,
              "policy_id": policy.id, "policy": settings.model_dump(mode="json"),
+             "account_versions": [{"id": row.id, "code": row.code,
+                 "valid_from": row.valid_from.isoformat(), "category": row.category,
+                 "required_dimensions": row.required_dimensions,
+                 "currency_tracking": row.currency_tracking,
+                 "quantity_tracking": row.quantity_tracking, "cash": row.cash}
+                 for row in sorted([account, gain, loss], key=lambda item: item.code)],
              "input": data.model_dump(mode="json"), "source_lines": evidence,
              "prior_valuations": valuations}
     return {"status": "preview_only", "posting_available": False, "basis_digest": fx._digest(basis),
