@@ -29,3 +29,16 @@
 Полная регистрация маршрута в приложении проверена под ролью finance:
 кеширование, конвертация по масштабу, отказ неизвестной роли.
 Некорректная валюта/будущая дата возвращают 422, недоступность курса — 503.
+
+## 19 сентября 2026: prerequisites for full FX bank statements
+
+Commit d104a14 fixes the double inversion of liability revaluation: foreign balances and their BYN book values are debit-positive for every account category. A USD100 credit balance at BYN300 revalued at3.20 requires Cr liability20 / Dr FX expense20. Falling rate2.80 reverses that direction. Existing test now checks actual account sides and gain/loss accounts for both directions;7FX workflow tests passed. New calculations use rule version fx-revaluation-v2; historical receipt replay remains unchanged. This is an arithmetic correction, not certification of the selected accounts or tax policy.
+
+Unfinished prerequisites identified by bounded source review:
+
+1. Revaluation preview currently selects foreign-currency lines, while earlier revaluation adjustments are BYN-only. Carrying-basis calculation must incorporate prior authenticated valuation adjustments by currency/position, including corrections, before repeated or next-month revaluation is accepted. Do not infer that the sign fix solves this.
+2. Bank source dimensions currently contain per-operation bank_transaction_id and bank_statement. FX balances need a stable position identity (organization, ledger account, actual bank account/provider, currency and permanent analytical dimensions), with source identity retained separately as evidence. Grouping by full operation-specific dimensions would split one bank balance into unrelated positions.
+3. LineInput requires a foreign line's BYN value to equal rounded original amount times documented rate/scale. Settlement carrying values must use explicit protected valuation adjustments; never fabricate an effective rate to fit a desired total.
+4. Monetary cash revaluation and its report treatment need an explicit exchange-rate-effect representation. Existing generic cash-line reporting must not count valuation-only adjustments as receipts/payments. Current policy excludes cash accounts from revaluation; do not remove that guard prematurely.
+
+Reuse existing immutable review/confirm receipts, policy gain/loss accounts, exact Fraction conversion, dated official-rate evidence, source ownership and period locks. Full FX ingestion/posting remains blocked until these accounting primitives have evidence; BYN imports remain available. Actual bank formats, policies and reconciled balances remain external acceptance inputs.
