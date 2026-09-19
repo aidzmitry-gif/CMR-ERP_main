@@ -37,6 +37,10 @@ async def report(session, org_id, start, end):
     movements = []
     opening_movements = []
     pnl_movements = []
+    cash_movements = []
+    cash_ledger = defaultdict(lambda: Decimal("0"))
+    cash_activities = {name: defaultdict(lambda: Decimal("0"))
+                       for name in ("operating", "investing", "financing")}
     for entry, line in rows:
         if entry.operation in {"period_close", "period_reopen"} and entry.id not in technical:
             raise AccountingError("Technical financial entry has no verified receipt")
@@ -84,6 +88,31 @@ async def report(session, org_id, start, end):
             cash["opening" if before else "movement"] += signed
             if not before:
                 cash[line.cash_activity or "unclassified"] += signed
+            if line.cash and not before:
+                if entry.opening:
+                    cash_ledger["opening_adjustment_net"] += signed
+                    cash_ledger["opening_adjustment_count"] += 1
+                else:
+                    cash_movements.append({
+                        "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
+                        "account": line.account_code, "title": line.account_title, "line_id": line.id,
+                        "currency": position_currency, "side": line.side, "amount": money(line.amount),
+                        "dimensions": line.dimensions, "cash_activity": line.cash_activity,
+                    })
+                    activity = line.cash_activity
+                    if activity in cash_activities:
+                        bucket = cash_activities[activity]
+                        bucket["net"] += signed
+                        bucket["inflow" if signed > 0 else "outflow"] += abs(signed)
+                        cash_ledger["external_net"] += signed
+                        cash_ledger["external_inflow" if signed > 0 else "external_outflow"] += abs(signed)
+                    elif activity == "internal":
+                        cash_ledger["internal_net"] += signed
+                        cash_ledger["internal_count"] += 1
+                    else:
+                        cash_ledger["unclassified_net"] += signed
+                        cash_ledger["unclassified_inflow" if signed > 0 else "unclassified_outflow"] += abs(signed)
+                        cash_ledger["unclassified_count"] += 1
     for bucket in trial.values():
         for prefix in ("", "original_", "quantity_"):
             bucket[prefix + "closing"] = (
@@ -151,6 +180,7 @@ async def report(session, org_id, start, end):
         "movements": movements,
         "opening_movements": opening_movements,
         "pnl_movements": pnl_movements,
+        "cash_movements": cash_movements,
         "balance": {"assets": money(assets), "liabilities": money(liabilities),
                     "equity": money(equity), "current_result": money(current_result),
                     "difference": money(difference)},
@@ -158,4 +188,21 @@ async def report(session, org_id, start, end):
                 "profit": money(-pnl["income"] - pnl["expense"])},
         "cashflow": {**{k: money(v) for k, v in cash.items()},
                      "closing": money(cash["opening"] + cash["movement"])},
+        "cashflow_ledger": {
+            "opening": money(cash["opening"]),
+            "external_inflow": money(cash_ledger["external_inflow"]),
+            "external_outflow": money(cash_ledger["external_outflow"]),
+            "external_net": money(cash_ledger["external_net"]),
+            "internal_net": money(cash_ledger["internal_net"]),
+            "internal_count": int(cash_ledger["internal_count"]),
+            "unclassified_inflow": money(cash_ledger["unclassified_inflow"]),
+            "unclassified_outflow": money(cash_ledger["unclassified_outflow"]),
+            "unclassified_net": money(cash_ledger["unclassified_net"]),
+            "unclassified_count": int(cash_ledger["unclassified_count"]),
+            "opening_adjustment_net": money(cash_ledger["opening_adjustment_net"]),
+            "opening_adjustment_count": int(cash_ledger["opening_adjustment_count"]),
+            "closing": money(cash["opening"] + cash["movement"]),
+            "activities": {name: {key: money(bucket[key]) for key in ("inflow", "outflow", "net")}
+                           for name, bucket in cash_activities.items()},
+        },
     }
