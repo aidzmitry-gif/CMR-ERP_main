@@ -4,6 +4,7 @@ from datetime import date
 
 from sqlalchemy import text
 
+from core.domain.models import User
 from modules.accounting.models import Account
 from tests.accounting.test_bank_documents import document as bank_document
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
@@ -18,6 +19,7 @@ async def test_purchase_sale_settlements_and_reports_use_one_ledger(issuance_pg,
     async with factory() as session:
         await session.execute(text("SELECT setval(pg_get_serial_sequence('accounting.account', 'id'), (SELECT max(id) FROM accounting.account))"))
         path, options = await source_options(api, session, pg_book)
+        session.add(User(username="tester", full_name="Synthetic accountant", role="finance", status="active"))
         for code, category in [("90.2", "income"), ("68.2", "liability")]:
             session.add(Account(organization_id=pg_book[0], code=code, title=code, category=category,
                 valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
