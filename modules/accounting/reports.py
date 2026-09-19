@@ -38,6 +38,7 @@ async def report(session, org_id, start, end):
     opening_movements = []
     pnl_movements = []
     cash_movements = []
+    balance_movements = []
     cash_ledger = defaultdict(lambda: Decimal("0"))
     cash_activities = {name: defaultdict(lambda: Decimal("0"))
                        for name in ("operating", "investing", "financing")}
@@ -77,6 +78,12 @@ async def report(session, org_id, start, end):
                 "side": line.side, "amount": money(line.amount), "dimensions": line.dimensions,
             }
         (opening_movements if before else movements).append(movement)
+        if line.category != "off_balance":
+            balance_movements.append({
+                **movement,
+                "category": line.category,
+                "period_bucket": "opening" if before else "movement",
+            })
         if is_pnl_movement:
             pnl_movements.append({
                 "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
@@ -181,6 +188,7 @@ async def report(session, org_id, start, end):
         "opening_movements": opening_movements,
         "pnl_movements": pnl_movements,
         "cash_movements": cash_movements,
+        "balance_movements": balance_movements,
         "balance": {"assets": money(assets), "liabilities": money(liabilities),
                     "equity": money(equity), "current_result": money(current_result),
                     "difference": money(difference)},

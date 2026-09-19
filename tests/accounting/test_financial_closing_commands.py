@@ -23,18 +23,35 @@ async def close(db, org, month="2026-10"):
     return body, receipt
 
 
+def assert_balance_breakdown(report):
+    signed = lambda row: Decimal(row["amount"]) * (Decimal("1") if row["side"] == "debit" else Decimal("-1"))
+    totals = {category: sum((signed(row) for row in report["balance_movements"] if row["category"] == category), Decimal("0"))
+              for category in ("asset", "liability", "equity", "income", "expense")}
+    balance = report["balance"]
+    assert totals["asset"] == Decimal(balance["assets"])
+    assert -totals["liability"] == Decimal(balance["liabilities"])
+    assert -totals["equity"] == Decimal(balance["equity"])
+    assert -totals["income"] - totals["expense"] == Decimal(balance["current_result"])
+    assert sum(totals.values(), Decimal("0")) == Decimal(balance["difference"])
+
+
 @pytest.mark.parametrize("year_end,income,expense,result,equity", [
-    (12, "180.00", "100.00", "80.00", "0.00"),
-    (10, "180.00", "100.00", "0.00", "80.00"),
-    (10, "80.00", "180.00", "0.00", "-100.00"),
-    (10, "100.00", "100.00", "0.00", "0.00"),
+    (12, "180.00", "100.00", "80.00", "30.00"),
+    (10, "180.00", "100.00", "0.00", "110.00"),
+    (10, "80.00", "180.00", "0.00", "-70.00"),
+    (10, "100.00", "100.00", "0.00", "30.00"),
 ])
 async def test_close_keeps_operating_pnl_and_posts_actual_balance(client, db, book, posting,
                                                                 year_end, income, expense, result, equity):
     prefix, policy = await setup_policy(client, book, year_end, normative_verified=True)
+    await post(client, prefix, posting, policy, "opening", "51", "704", "30.00", opening=True)
     await post(client, prefix, posting, policy, "purchase", "41", "60", "50.00")
     await post(client, prefix, posting, policy, "income", "62", "701", income)
     await post(client, prefix, posting, policy, "expense", "702", "60", expense)
+    off_balance = posting("customer-property", policy_id=policy, lines=[
+        {"account": "003", "side": "debit", "amount": "75.00"},
+    ], document_date="2026-10-01", operation_date="2026-10-01", posting_date="2026-10-01")
+    await service.post(db, book[0], off_balance, "tester")
     before = await reports.report(db, book[0], date(2026, 10, 1), date(2026, 10, 31))
     assert "purchase" not in {row["source"] for row in before["pnl_movements"]}
     assert {row["category"] for row in before["pnl_movements"]} == {"income", "expense"}
@@ -42,6 +59,14 @@ async def test_close_keeps_operating_pnl_and_posts_actual_balance(client, db, bo
                for row in before["pnl_movements"] if row["category"] == "income") == -Decimal(before["pnl"]["income"])
     assert sum(Decimal(row["amount"]) * (Decimal("1") if row["side"] == "debit" else Decimal("-1"))
                for row in before["pnl_movements"] if row["category"] == "expense") == Decimal(before["pnl"]["expenses"])
+    assert {row["category"] for row in before["balance_movements"]} == {
+        "asset", "liability", "equity", "income", "expense",
+    }
+    assert {row["period_bucket"] for row in before["balance_movements"]} == {"opening", "movement"}
+    assert any(row["source"] == "opening" and row["period_bucket"] == "opening"
+               for row in before["balance_movements"])
+    assert "customer-property" not in {row["source"] for row in before["balance_movements"]}
+    assert_balance_breakdown(before)
     body, receipt = await close(db, book[0])
     after = await reports.report(db, book[0], date(2026, 10, 1), date(2026, 10, 31))
     assert after["pnl"] == before["pnl"]
@@ -53,6 +78,9 @@ async def test_close_keeps_operating_pnl_and_posts_actual_balance(client, db, bo
     assert after["balance"]["equity"] == equity
     assert after["balance"]["difference"] == "0.00"
     assert all(row["closing"] == "0.00" for row in after["trial_balance"] if row["account"] in {"701", "702"})
+    assert "customer-property" not in {row["source"] for row in after["balance_movements"]}
+    assert technical_ids.issubset({row["entry_id"] for row in after["balance_movements"]})
+    assert_balance_breakdown(after)
     count = await db.scalar(select(func.count()).select_from(Entry))
     assert (await closing_commands.confirm(db, book[0], "2026-10", body, "tester")).id == receipt.id
     assert await db.scalar(select(func.count()).select_from(Entry)) == count
