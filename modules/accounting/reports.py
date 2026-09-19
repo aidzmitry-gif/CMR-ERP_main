@@ -36,6 +36,7 @@ async def report(session, org_id, start, end):
     cash = defaultdict(lambda: Decimal("0"))
     movements = []
     opening_movements = []
+    pnl_movements = []
     for entry, line in rows:
         if entry.operation in {"period_close", "period_reopen"} and entry.id not in technical:
             raise AccountingError("Technical financial entry has no verified receipt")
@@ -58,14 +59,26 @@ async def report(session, org_id, start, end):
         bucket["original_" + column] += sign * (line.original_amount or Decimal("0"))
         bucket["quantity_" + column] += sign * (line.quantity or Decimal("0"))
         balances[line.category] += signed
-        if entry.id not in technical and not before and not entry.opening and line.category in {"income", "expense"}:
+        is_pnl_movement = (
+            entry.id not in technical and not before and not entry.opening
+            and line.category in {"income", "expense"}
+        )
+        if is_pnl_movement:
             pnl[line.category] += signed
-        (opening_movements if before else movements).append({
+        movement = {
                 "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
                 "account": line.account_code, "title": line.account_title,
                 "line_id": line.id, "currency": position_currency,
                 **({"ledger_currency": line.currency, "valuation_only": True} if line.id in valuation else {}),
                 "side": line.side, "amount": money(line.amount), "dimensions": line.dimensions,
+            }
+        (opening_movements if before else movements).append(movement)
+        if is_pnl_movement:
+            pnl_movements.append({
+                "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
+                "account": line.account_code, "title": line.account_title, "line_id": line.id,
+                "currency": position_currency, "side": line.side, "amount": money(line.amount),
+                "dimensions": line.dimensions, "category": line.category,
             })
         if line.cash:
             cash["opening" if before else "movement"] += signed
@@ -137,6 +150,7 @@ async def report(session, org_id, start, end):
         "pending_documents": len(pending) + len(primary_pending) + bank_pending, "trial_balance": list(trial.values()),
         "movements": movements,
         "opening_movements": opening_movements,
+        "pnl_movements": pnl_movements,
         "balance": {"assets": money(assets), "liabilities": money(liabilities),
                     "equity": money(equity), "current_result": money(current_result),
                     "difference": money(difference)},

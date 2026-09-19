@@ -1,5 +1,6 @@
 """Internal command contract; these tests do not certify pending SQL/API integration."""
 from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -31,12 +32,23 @@ async def close(db, org, month="2026-10"):
 async def test_close_keeps_operating_pnl_and_posts_actual_balance(client, db, book, posting,
                                                                 year_end, income, expense, result, equity):
     prefix, policy = await setup_policy(client, book, year_end, normative_verified=True)
+    await post(client, prefix, posting, policy, "purchase", "41", "60", "50.00")
     await post(client, prefix, posting, policy, "income", "62", "701", income)
     await post(client, prefix, posting, policy, "expense", "702", "60", expense)
     before = await reports.report(db, book[0], date(2026, 10, 1), date(2026, 10, 31))
+    assert "purchase" not in {row["source"] for row in before["pnl_movements"]}
+    assert {row["category"] for row in before["pnl_movements"]} == {"income", "expense"}
+    assert sum(Decimal(row["amount"]) * (Decimal("1") if row["side"] == "debit" else Decimal("-1"))
+               for row in before["pnl_movements"] if row["category"] == "income") == -Decimal(before["pnl"]["income"])
+    assert sum(Decimal(row["amount"]) * (Decimal("1") if row["side"] == "debit" else Decimal("-1"))
+               for row in before["pnl_movements"] if row["category"] == "expense") == Decimal(before["pnl"]["expenses"])
     body, receipt = await close(db, book[0])
     after = await reports.report(db, book[0], date(2026, 10, 1), date(2026, 10, 31))
     assert after["pnl"] == before["pnl"]
+    assert after["pnl_movements"] == before["pnl_movements"]
+    technical_ids = set(await db.scalars(select(Entry.id).where(Entry.operation == "period_close")))
+    assert technical_ids
+    assert not technical_ids.intersection(row["entry_id"] for row in after["pnl_movements"])
     assert after["balance"]["current_result"] == result
     assert after["balance"]["equity"] == equity
     assert after["balance"]["difference"] == "0.00"
