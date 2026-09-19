@@ -22,6 +22,7 @@ from core.services.auth import (
 from core.services.config import get_settings
 from core.services.procurement import ReceiptAccountingConfirmation, ReceiptAccountingOptions
 from modules.accounting import (
+    bank_account_mapping,
     bank_import,
     bank_statement,
     bank_statement_csv,
@@ -118,6 +119,8 @@ from modules.accounting.repair_accounting import (
 )
 from modules.accounting.schemas import (
     AccountInput,
+    BankAccountMappingCloseInput,
+    BankAccountMappingInput,
     CloseInput,
     FinancialCloseInput,
     FinancialReopenConfirmInput,
@@ -413,6 +416,49 @@ async def bind_source(org_id: int, data: SourceBindingInput, ctx=Depends(member)
     await ctx[0].flush()
     service.audit(ctx[0], org_id, ctx[1], "source_ownership_recorded", {"binding_id": row.id, **data.model_dump()})
     return serialize(row)
+
+
+@router.get("/organizations/{org_id}/bank-account-mappings")
+async def bank_account_mappings(org_id: int, provider: str | None = None,
+                                external_account: str | None = None, currency: str | None = None,
+                                at: date | None = None, include_closed: bool = False, ctx=Depends(member)):
+    rows = await bank_account_mapping.list_for(ctx[0], org_id, provider=provider,
+                                               external_account=external_account, currency=currency,
+                                               on=at, include_closed=include_closed)
+    return [bank_account_mapping.result(row) for row in rows]
+
+
+@router.get("/organizations/{org_id}/bank-account-mappings/{mapping_id}")
+async def bank_account_mapping_by_id(org_id: int, mapping_id: int, ctx=Depends(member)):
+    return bank_account_mapping.result(await bank_account_mapping.get_one(ctx[0], org_id, mapping_id))
+
+
+@router.post("/organizations/{org_id}/bank-account-mappings", status_code=201)
+async def create_bank_account_mapping(org_id: int, data: BankAccountMappingInput, ctx=Depends(member)):
+    chief(ctx)
+    await service.lock_organization(ctx[0], org_id)
+    row, predecessor_before, predecessor = await bank_account_mapping.create(ctx[0], org_id, data, ctx[1])
+    if predecessor_before is not None:
+        service.audit(ctx[0], org_id, ctx[1], "bank_account_mapping_closed", {
+            "before": predecessor_before,
+            "after": bank_account_mapping.result(predecessor),
+        })
+    service.audit(ctx[0], org_id, ctx[1], "bank_account_mapping_created",
+                  {"mapping": bank_account_mapping.result(row)})
+    return bank_account_mapping.result(row)
+
+
+@router.post("/organizations/{org_id}/bank-account-mappings/{mapping_id}/close")
+async def close_bank_account_mapping(org_id: int, mapping_id: int, data: BankAccountMappingCloseInput,
+                                     ctx=Depends(member)):
+    chief(ctx)
+    await service.lock_organization(ctx[0], org_id)
+    row, before = await bank_account_mapping.close(ctx[0], org_id, mapping_id, data)
+    service.audit(ctx[0], org_id, ctx[1], "bank_account_mapping_closed", {
+        "before": before,
+        "after": {**bank_account_mapping.result(row), "close_evidence": data.evidence},
+    })
+    return bank_account_mapping.result(row)
 
 
 @router.post("/organizations/{org_id}/preview")

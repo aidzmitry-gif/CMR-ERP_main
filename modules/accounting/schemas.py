@@ -59,6 +59,28 @@ class SourceBindingInput(Input):
     evidence: str = Field(min_length=10, max_length=1000)
 
 
+class BankAccountMappingInput(Input):
+    provider: str = Field(min_length=1, max_length=100)
+    external_account: str = Field(min_length=1, max_length=128)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    valid_from: date
+    ledger_account_id: int = Field(gt=0, strict=True)
+    dimensions: dict[str, str] = Field(default_factory=dict)
+    evidence: str = Field(min_length=10, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_dimensions(self):
+        if any(not key.strip() or not value.strip() or len(key) > 100 or len(value) > 200
+               or "\x00" in key or "\x00" in value for key, value in self.dimensions.items()):
+            raise ValueError("Bank account mapping analytics must be nonempty and bounded")
+        return self
+
+
+class BankAccountMappingCloseInput(Input):
+    valid_to: date
+    evidence: str = Field(min_length=10, max_length=1000)
+
+
 class GrantInput(Input):
     subject: str = Field(min_length=1, max_length=200)
     role: Literal["reader", "accountant", "chief"]

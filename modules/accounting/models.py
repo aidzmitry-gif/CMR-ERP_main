@@ -206,6 +206,36 @@ class SourceBinding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BankAccountMapping(Base):
+    """Versioned accounting configuration; SourceBinding remains source ownership."""
+    __tablename__ = "bank_account_mapping"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", "external_account", "currency", "version",
+                         name="uq_bank_account_mapping_version"),
+        UniqueConstraint("organization_id", "provider", "external_account", "currency", "valid_from",
+                         name="uq_bank_account_mapping_valid_from"),
+        CheckConstraint("version > 0", name="bank_account_mapping_positive_version"),
+        CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="bank_account_mapping_valid_range"),
+        # SQLite is used by the scoped API suite; Pydantic and the PostgreSQL
+        # migration enforce the full ISO-code format.
+        CheckConstraint("length(currency) = 3", name="bank_account_mapping_currency"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(100))
+    external_account: Mapped[str] = mapped_column(String(128))
+    currency: Mapped[str] = mapped_column(String(3))
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    version: Mapped[int] = mapped_column(Integer)
+    ledger_account_id: Mapped[int] = mapped_column(ForeignKey("accounting.account.id"))
+    dimensions: Mapped[dict] = mapped_column(JSON)
+    evidence: Mapped[str] = mapped_column(String(1000))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SourceControl(Base):
     """Current completeness state; source revisions and audit preserve its history."""
     __tablename__ = "source_control"
