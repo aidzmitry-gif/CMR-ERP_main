@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
+import { AccountingBankMapping } from "./accounting-bank-mapping";
 import { AccountingBankStatementSource } from "./accounting-bank-statement-source";
 import { AccountingBankStatementCsv } from "./accounting-bank-statement-csv";
 
-type Account = { code: string; title: string; cash: boolean; category: string; required_dimensions: string[] };
+type Account = { id: number; code: string; title: string; cash: boolean; category: string; valid_from?: string; required_dimensions: string[] };
 type Snapshot = {
   transaction_id: number;
   ext_id: string;
@@ -20,6 +21,7 @@ type Snapshot = {
   account_code: string | null;
   match_status: string;
   direction?: "receipt" | "payment";
+  source_provider?: string;
   source_external_id?: string;
 };
 type Candidate = {
@@ -70,6 +72,10 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const mappingRequest = useRef(0);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingLocked, setMappingLocked] = useState(false);
+  const [mappingError, setMappingError] = useState("");
 
   const selected = candidates.find((candidate) => candidate.source_snapshot.transaction_id === selectedId) ?? null;
   const cashAccounts = useMemo(() => accounts.filter((account) => account.cash), [accounts]);
@@ -101,16 +107,57 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
+  // A changed organisation invalidates the selected source and any in-flight
+  // mapping lookup; a late response must not configure the new organisation.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    mappingRequest.current += 1;
+    setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError("");
+  }, [org]);
+
+  async function resolveMapping(candidate: Candidate) {
+    const source = candidate.source_snapshot;
+    const request = ++mappingRequest.current;
+    setMappingLoading(true); setMappingLocked(false); setMappingError(""); setBankAccount(""); setBankDimensions({});
+    if (!source.source_provider || !source.account_code || !source.currency || !source.occurred_on) {
+      setMappingLoading(false);
+      setMappingError("Для этой строки не указаны источник выписки, внешний счёт или дата для привязки.");
+      return;
+    }
+    const query = new URLSearchParams({ provider: source.source_provider, external_account: source.account_code,
+      currency: source.currency, at: source.occurred_on });
+    try {
+      const response = await fetch(`/api/accounting/organizations/${org}/bank-account-mappings?${query}`, { cache: "no-store" });
+      const body = await response.json();
+      if (request !== mappingRequest.current) return;
+      if (!response.ok) throw new Error(message(body, "Не удалось определить привязку банковского счёта."));
+      const mappings = body as { ledger_account_id: number; dimensions: Record<string, string> }[];
+      if (mappings.length !== 1) throw new Error("Для строки нужна ровно одна действующая привязка банковского счёта.");
+      const accountsResponse = await fetch(`/api/accounting/organizations/${org}/accounts?on=${encodeURIComponent(source.occurred_on)}`, { cache: "no-store" });
+      const accountsBody = await accountsResponse.json();
+      if (request !== mappingRequest.current) return;
+      if (!accountsResponse.ok) throw new Error(message(accountsBody, "Не удалось получить план счетов на дату банковской строки."));
+      const account = (accountsBody as Account[]).find((item) => item.id === mappings[0].ledger_account_id);
+      if (!account) throw new Error("Счёт из привязки отсутствует в плане счетов на дату банковской строки.");
+      setBankAccount(account.code); setBankDimensions(mappings[0].dimensions); setMappingLocked(true);
+    } catch (cause) {
+      if (request === mappingRequest.current) setMappingError(cause instanceof Error ? cause.message : "Не удалось определить привязку банковского счёта.");
+    } finally {
+      if (request === mappingRequest.current) setMappingLoading(false);
+    }
+  }
+
   function select(candidate: Candidate) {
     setSelectedId(candidate.source_snapshot.transaction_id);
     setBankDimensions({}); setSettlementDimensions({});
-    setBankAccount(cashAccounts[0]?.code ?? "");
+    setBankAccount("");
     setSettlementAccount(settlementAccounts[0]?.code ?? "");
     setExplanation(candidate.source_snapshot.purpose || `Банковская строка ${candidate.source_snapshot.ext_id}`);
     setRequestKey(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${candidate.source_snapshot.transaction_id}`);
     setPreview(null);
     setPrepared(null);
-    setNotice("");
+    setNotice(""); setMappingError(""); setMappingLocked(false);
+    void resolveMapping(candidate);
   }
 
   async function bind(candidate: Candidate) {
@@ -180,8 +227,9 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
     </div>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {notice && <p role="status" className="text-money">{notice}</p>}
-    <AccountingBankStatementSource key={org} org={org} disabled={busy} onImported={load} />
+    <AccountingBankStatementSource key={`source-${org}`} org={org} disabled={busy} onImported={load} />
     <AccountingBankStatementCsv key={`csv-${org}`} org={org} disabled={busy} onImported={load} />
+    <AccountingBankMapping key={org} org={org} accounts={accounts} onChanged={() => { mappingRequest.current += 1; setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError(""); void load(); }} />
     <div className="flex items-end gap-3">
       <label className="text-sm">Дата отражения<Input aria-label="Дата отражения импорта" type="date" value={date} disabled={busy} onChange={(event) => { setPreview(null); setPrepared(null); onDate(event.target.value); }} /></label>
       <Button variant="secondary" disabled={busy || loading || !org} onClick={() => void load()}>Обновить очередь</Button>
@@ -194,6 +242,6 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
       const state = candidate.imported ? `Проведено · № ${candidate.entry_id}` : candidate.binding_status === "own" ? "Привязано к юрлицу" : candidate.binding_status === "other" ? "Привязано к другому юрлицу" : "Нужна привязка";
       return <tr key={source.transaction_id} className="border-b border-line last:border-0"><td className="p-2 align-top"><strong>{source.occurred_on || "Без даты"}</strong><br /><span className="text-xs text-muted">{source.source_external_id || source.ext_id}</span></td><td className="p-2 align-top">{source.payer_name || source.payer_unp || "Контрагент не указан"}<br /><span className="text-xs text-muted">{source.purpose || "Назначение не указано"}</span></td><td className="p-2 align-top whitespace-nowrap">{source.direction === "payment" ? "Списание" : "Поступление"}<br />{source.amount ?? "Некорректная сумма"} {source.currency}</td><td className="p-2 align-top"><span className={candidate.imported ? "text-money" : candidate.binding_status === "own" ? "text-accent-ink" : "text-muted"}>{state}</span>{!eligible && <><br /><span className="text-xs text-red-700">Нужны положительная сумма, дата и BYN.</span></>}</td><td className="p-2 align-top text-right"><div className="flex flex-wrap justify-end gap-2">{candidate.imported && Number.isSafeInteger(candidate.entry_id) && candidate.entry_id! > 0 && onEntry && <Button variant="secondary" disabled={busy} onClick={() => onEntry(candidate.entry_id!)}>Открыть проводку</Button>}{candidate.binding_status === "unbound" && <Button variant="secondary" disabled={busy} onClick={() => void bind(candidate)}>Привязать</Button>}{candidate.binding_status === "own" && !candidate.imported && eligible && <Button disabled={busy || accounts.length === 0} onClick={() => select(candidate)}>Выбрать</Button>}</div></td></tr>;
     })}</tbody></table></div>}
-    {selected && !selected.imported && <div className="space-y-3 rounded-xl border border-accent p-3"><h3 className="font-semibold">Проведение строки {selected.source_snapshot.ext_id}</h3><p className="text-sm text-muted">Источник: {selected.source_snapshot.amount} {selected.source_snapshot.currency} · {selected.source_snapshot.purpose || "назначение не указано"}</p><div className="grid gap-3 md:grid-cols-4"><label>Денежный счёт<Select aria-label="Счёт банка импорта" value={bankAccount} disabled={busy || !!preview} onChange={(event) => { setBankAccount(event.target.value); setBankDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{cashAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Счёт расчётов<Select aria-label="Счёт расчётов импорта" value={settlementAccount} disabled={busy || !!preview} onChange={(event) => { setSettlementAccount(event.target.value); setSettlementDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{settlementAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Вид денежного потока<Select aria-label="Поток импорта" value={cashActivity} disabled={busy || !!preview} onChange={(event) => { setCashActivity(event.target.value); setPreview(null); setPrepared(null); }}><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option></Select></label><label className="md:col-span-1">Основание<Input aria-label="Основание импорта" value={explanation} disabled={busy || !!preview} onChange={(event) => { setExplanation(event.target.value); setPreview(null); setPrepared(null); }} /></label></div>{([{ code: bankAccount, title: "Банк", values: bankDimensions, update: setBankDimensions }, { code: settlementAccount, title: "Расчёты", values: settlementDimensions, update: setSettlementDimensions }]).map(({ code, title, values, update }) => <div key={title} className="grid gap-3 md:grid-cols-3">{accounts.find((account) => account.code === code)?.required_dimensions.filter((key) => title !== "Банк" || !["bank_statement", "bank_transaction_id"].includes(key)).map((key) => <label key={key}>{title}: {({ counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение" } as Record<string, string>)[key] || key}<Input aria-label={`${title}: ${key}`} value={values[key] || ""} disabled={busy || !!preview} onChange={(event) => { update({ ...values, [key]: event.target.value }); setPreview(null); setPrepared(null); }} /></label>)}</div>)}<Button disabled={busy || !policyId || !bankAccount || !settlementAccount || !explanation} onClick={() => void execute(false)}>Рассчитать проводки</Button>{preview && <div className="space-y-2 rounded-xl border border-accent p-3"><p className="text-sm">Источник подтверждён: {preview.source_snapshot.ext_id} · {preview.source_snapshot.amount} BYN</p>{preview.lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN{Object.entries(line.dimensions ?? {}).map(([key, value]) => <span key={key} className="ml-3 text-muted">{key}: {value}</span>)}</p>)}{!preview.normative_verified && <p className="text-red-700">Политика не подтверждена нормативно: подтверждение заблокировано.</p>}<Button disabled={busy || !preview.confirmation_available} onClick={() => void execute(true)}>Подтвердить импорт</Button></div>}</div>}
+    {selected && !selected.imported && <div className="space-y-3 rounded-xl border border-accent p-3"><h3 className="font-semibold">Проведение строки {selected.source_snapshot.ext_id}</h3><p className="text-sm text-muted">Источник: {selected.source_snapshot.amount} {selected.source_snapshot.currency} · {selected.source_snapshot.purpose || "назначение не указано"}</p>{mappingLoading && <p role="status" className="text-sm text-muted">Проверка registry mapping…</p>}{mappingError && <p role="alert" className="text-red-700">{mappingError}</p>}<div className="grid gap-3 md:grid-cols-4"><label>Денежный счёт<Select aria-label="Счёт банка импорта" value={bankAccount} disabled={busy || !!preview || mappingLocked} onChange={(event) => { setBankAccount(event.target.value); setBankDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{cashAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Счёт расчётов<Select aria-label="Счёт расчётов импорта" value={settlementAccount} disabled={busy || !!preview} onChange={(event) => { setSettlementAccount(event.target.value); setSettlementDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{settlementAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Вид денежного потока<Select aria-label="Поток импорта" value={cashActivity} disabled={busy || !!preview} onChange={(event) => { setCashActivity(event.target.value); setPreview(null); setPrepared(null); }}><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option></Select></label><label className="md:col-span-1">Основание<Input aria-label="Основание импорта" value={explanation} disabled={busy || !!preview} onChange={(event) => { setExplanation(event.target.value); setPreview(null); setPrepared(null); }} /></label></div>{([{ code: bankAccount, title: "Банк", values: bankDimensions, update: setBankDimensions, locked: mappingLocked }, { code: settlementAccount, title: "Расчёты", values: settlementDimensions, update: setSettlementDimensions, locked: false }]).map(({ code, title, values, update, locked }) => <div key={title} className="grid gap-3 md:grid-cols-3">{accounts.find((account) => account.code === code)?.required_dimensions.filter((key) => title !== "Банк" || !["bank_statement", "bank_transaction_id"].includes(key)).map((key) => <label key={key}>{title}: {({ counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение" } as Record<string, string>)[key] || key}<Input aria-label={`${title}: ${key}`} value={values[key] || ""} disabled={busy || !!preview || locked} onChange={(event) => { update({ ...values, [key]: event.target.value }); setPreview(null); setPrepared(null); }} /></label>)}</div>)}<Button disabled={busy || mappingLoading || !!mappingError || !mappingLocked || !policyId || !bankAccount || !settlementAccount || !explanation} onClick={() => void execute(false)}>Рассчитать проводки</Button>{preview && <div className="space-y-2 rounded-xl border border-accent p-3"><p className="text-sm">Источник подтверждён: {preview.source_snapshot.ext_id} · {preview.source_snapshot.amount} BYN</p>{preview.lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN{Object.entries(line.dimensions ?? {}).map(([key, value]) => <span key={key} className="ml-3 text-muted">{key}: {value}</span>)}</p>)}{!preview.normative_verified && <p className="text-red-700">Политика не подтверждена нормативно: подтверждение заблокировано.</p>}<Button disabled={busy || !preview.confirmation_available} onClick={() => void execute(true)}>Подтвердить импорт</Button></div>}</div>}
   </section>;
 }
