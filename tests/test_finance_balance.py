@@ -1,8 +1,14 @@
 """Тесты Finance Р7 — Баланс: GET /finance/balance-sheet."""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from modules.finance.models import Payment
 
@@ -24,15 +30,15 @@ async def test_assets_receivable_recognized_and_pending(session, api):
 
 
 async def test_total_assets_sum(session, api):
-    """total_assets = accounts_receivable + cash(0 при mock) + inventory(0 при mock)."""
+    """Unknown asset components prevent a complete total."""
     session.add(Payment(ref="ar", amount=Decimal("1000"), status="pending", kind="receivable"))
     await session.commit()
 
     r = await api.get("/finance/balance-sheet")
     assert r.status_code == 200
     body = r.json()
-    # cash=None, inventory=None → обе считаются 0
-    assert body["total_assets"] == body["accounts_receivable"]
+    # Missing components must not silently become zero.
+    assert body["total_assets"] is None
 
 
 # ───────────────────────── liabilities ─────────────────────────
@@ -74,8 +80,8 @@ async def test_total_liabilities_sum(session, api):
 # ───────────────────────── equity ─────────────────────────
 
 
-async def test_equity_assets_minus_liabilities(session, api):
-    """equity = total_assets − total_liabilities."""
+async def test_equity_not_inferred_from_difference(session, api):
+    """Capital requires ledger evidence, not a balancing difference."""
     session.add(Payment(ref="ar1", amount=Decimal("2000"), status="pending", kind="receivable"))
     session.add(Payment(ref="ap1", amount=Decimal("500"), status="pending", kind="landed"))
     await session.commit()
@@ -83,22 +89,22 @@ async def test_equity_assets_minus_liabilities(session, api):
     r = await api.get("/finance/balance-sheet")
     assert r.status_code == 200
     body = r.json()
-    assets = Decimal(body["total_assets"])
-    liabilities = Decimal(body["total_liabilities"])
-    equity = Decimal(body["equity"])
-    assert equity == assets - liabilities
-    assert body["equity"] == "1500.00"
+    assert body["equity"] is None
+    assert body["report_kind"] == "management_snapshot"
+    assert body["preliminary"] is True
+    assert body["statutory_certified"] is False
+    assert body["limitations"]
 
 
-async def test_equity_negative_when_liabilities_exceed(session, api):
-    """Отрицательный капитал — не 500."""
+async def test_equity_unknown_with_liabilities(session, api):
+    """Liabilities alone cannot establish capital."""
     session.add(Payment(ref="ap1", amount=Decimal("5000"), status="pending", kind="landed"))
     await session.commit()
 
     r = await api.get("/finance/balance-sheet")
     assert r.status_code == 200
     body = r.json()
-    assert Decimal(body["equity"]) < 0
+    assert body["equity"] is None
 
 
 # ───────────────────────── cash / inventory = None при mock ─────────────────────────
@@ -133,12 +139,10 @@ async def test_amounts_are_strings(session, api):
     body = r.json()
     for field in (
         "accounts_receivable",
-        "total_assets",
         "accounts_payable",
         "payroll_payable",
         "tax_payable",
         "total_liabilities",
-        "equity",
     ):
         assert isinstance(body[field], str), f"{field} не строка: {type(body[field])}"
 
@@ -186,8 +190,42 @@ async def test_empty_db_zeros(session, api):
     assert r.status_code == 200
     body = r.json()
     assert body["accounts_receivable"] == "0.00"
-    assert body["total_assets"] == "0.00"
+    assert body["total_assets"] is None
     assert body["total_liabilities"] == "0.00"
-    assert body["equity"] == "0.00"
+    assert body["equity"] is None
     assert body["cash"] is None
     assert body["inventory_value"] is None
+
+
+@pytest.mark.parametrize("cash, expected", [("0", "100.50"), ("NaN", None), ("Infinity", None)])
+async def test_gateway_zero_and_nonfinite(session, cash, expected):
+    from modules.finance.balance_sheet import get_balance_sheet
+
+    session.add(Payment(ref="gateway-ar", amount=Decimal("100.50"), status="pending", kind="receivable"))
+    await session.commit()
+    gateway = SimpleNamespace(fetch_bank_balance=AsyncMock(return_value=cash),
+                              fetch_balance_sheet=AsyncMock(return_value={"inventory": "0"}))
+    body = await get_balance_sheet(session, date.today(), SimpleNamespace(onec=gateway))
+    assert body["total_assets"] == expected
+    assert body["cash"] == ("0.00" if expected else None)
+    assert body["inventory_value"] == "0.00"
+    assert body["equity"] is None
+
+
+async def test_csv_unknown_zero_and_escaped_limitations(api, monkeypatch):
+    from modules.finance import balance_sheet
+
+    response = await api.get("/finance/balance-sheet")
+    data = response.json()
+    limitation = 'Источник, "банк"\nдата не подтверждена'
+    data["limitations"] = [limitation]
+    monkeypatch.setattr(balance_sheet, "get_balance_sheet", AsyncMock(return_value=data))
+    response = await api.get("/finance/balance-sheet?format=csv")
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0][:2] == ["Предварительный управленческий обзор", "Не регламентированный баланс"]
+    assert ["Капитал по бухгалтерским остаткам", "", "Нет подтверждённых данных"] in rows
+    assert ["ИТОГО Активы", "", "Нет подтверждённых данных"] in rows
+    assert ["Дебиторская задолженность", "0.00", "Предварительно"] in rows
+    assert ["Ограничение", "", limitation] in rows
+    assert all(len(row) == 3 for row in rows)
