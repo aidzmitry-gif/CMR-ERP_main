@@ -19,6 +19,7 @@ multiple heads → `upgrade` падает в проде (приоритет #1-2
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import sys
@@ -43,14 +44,34 @@ def _scan() -> tuple[set[str], set[str]]:
     revs, downs = set(), set()
     for f in MIGR.glob("*.py"):
         try:
-            txt = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            tree = ast.parse(f.read_text(encoding="utf-8", errors="replace"), filename=str(f))
+        except (OSError, SyntaxError):
             continue
-        if m := re.search(r'^revision\s*=\s*["\']([^"\']+)', txt, re.M):
-            revs.add(m.group(1))
-        if d := re.search(r'^down_revision\s*=\s*["\']([^"\']+)', txt, re.M):
-            downs.add(d.group(1))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            values = _literal_strings(node.value)
+            if "revision" in names and len(values) == 1:
+                revs.update(values)
+            if "down_revision" in names:
+                downs.update(values)
     return revs, downs
+
+
+def _literal_strings(value: ast.AST) -> set[str]:
+    """Return literal Alembic revision references from str, tuple/list, or None."""
+    try:
+        parsed = ast.literal_eval(value)
+    except (ValueError, TypeError):
+        return set()
+    if parsed is None:
+        return set()
+    if isinstance(parsed, str):
+        return {parsed}
+    if isinstance(parsed, (tuple, list)) and all(isinstance(item, str) for item in parsed):
+        return set(parsed)
+    return set()
 
 
 def _nums(strings) -> list[int]:
