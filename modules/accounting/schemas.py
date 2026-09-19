@@ -91,6 +91,8 @@ class CurrencyRevaluationPolicyInput(Input):
     gain_dimensions: dict[str, str] = Field(default_factory=dict)
     loss_dimensions: dict[str, str] = Field(default_factory=dict)
     reference: str = Field(min_length=10, max_length=1000)
+    settlement_allocation: Literal["proportional_carrying"] | None = None
+    settlement_rate_date: Literal["posting_date"] | None = None
 
     @model_validator(mode="after")
     def validate_roles(self):
