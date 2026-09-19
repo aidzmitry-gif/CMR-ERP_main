@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import update
 
+from core.domain.models import User
 from modules.accounting import closing_commands
 from modules.accounting.models import AccessGrant
 from modules.accounting.schemas import FinancialReopenInput
@@ -31,6 +32,8 @@ async def test_reader_sees_verified_close_and_reopening(preview_pg, posting, wit
         _, receipt = await close(session, pg.org)
         receipt_id = receipt.id
         await session.execute(update(AccessGrant).where(AccessGrant.organization_id == pg.org).values(role="reader"))
+        session.add(User(username=pg.api.headers["X-User"], full_name="Synthetic history reader",
+                         role="finance", status="active"))
         await session.commit()
     pg.api.headers["X-User-Roles"] = "finance"
     before = await counts(pg)
