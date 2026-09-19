@@ -24,6 +24,7 @@ from core.services.procurement import ReceiptAccountingConfirmation, ReceiptAcco
 from modules.accounting import (
     bank_import,
     bank_statement,
+    bank_statement_csv,
     closing_controls,
     fixed_assets,
     foreign_trade_register,
@@ -451,6 +452,24 @@ async def import_statement_source(org_id: int, data: bank_statement.StatementImp
         snapshot = bank_import.source_snapshot(row)
         return {"organization_id": org_id, "source_transaction_id": row.id,
                 "source_snapshot": snapshot, "source_digest": bank_import._digest(snapshot)}
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/bank-statement/csv/preview")
+async def preview_statement_csv(org_id: int, data: bank_statement_csv.CsvInput, ctx=Depends(member)):
+    chief(ctx)
+    try:
+        return bank_statement_csv.preview(org_id, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/bank-statement/csv/confirm")
+async def confirm_statement_csv(org_id: int, data: bank_statement_csv.CsvConfirmInput, ctx=Depends(member)):
+    chief(ctx)
+    try:
+        return await bank_statement_csv.confirm(ctx[0], org_id, data, ctx[1])
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
 

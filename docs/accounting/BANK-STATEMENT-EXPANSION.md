@@ -45,3 +45,19 @@
 - Реальный браузер: ручной ввод списания → повторное сохранение без дубля → расчёт → подтверждение → карточка Кт51/Дт60 на125.50BYN. Два теста с авторизацией прошли за50.7с. Проверки TypeScript, ESLint и Ruff прошли.
 
 Локальные протоколы находятся в `reports/bank-statement/` рабочего каталога; они не заменяют CI или приёмку бухгалтером. Автоматическое чтение файла/ответа банка, массовая очередь ошибок, валютная выписка и реальная сверка ещё не реализованы. В интерфейсе сейчас ручной ввод одной строки; это не завершённый импорт полной выписки и не готовность заменить1С. Изменения не развёрнуты на сервере.
+
+## CSV adapter (normalized-csv-v1)
+
+Added a file picker and preview/confirm flow in the existing bank import screen. Input is explicit UTF-8 comma-separated CSV with exactly these columns:
+
+```csv
+external_id,direction,operation_date,amount,currency,counterparty_name,counterparty_identifier,purpose
+BANK-001,receipt,2026-09-01,100.00,BYN,Example customer,,Invoice payment
+BANK-002,payment,2026-09-01,20.50,BYN,Example supplier,,Supplier payment
+```
+
+The chief accountant supplies the bank/provider identifier, owned bank account and ownership evidence for the selected organization. Up to1000 operations, BYN only; no automatic bank-specific format detection. The content SHA256 is retained as source provenance. Preview identifies bad records and valid-row totals without storing sources. Any validation error blocks the entire file. Confirmation binds the organization, exact content and import settings to the preview digest, reuses source identity checks and atomically saves all source rows. A conflict rolls back earlier rows in the same package. Replays return existing sources; ledger posting remains a separate reviewed action.
+
+Six targeted parser/API tests passed, including atomic rollback, idempotence, explicit invalid rows and changed preview settings. TypeScript and focused ESLint passed. Real bank samples, bank-specific adapters, API ingestion and foreign-currency valuation remain outstanding.
+
+Browser CSV scenario plus auth setup: 2 passed in30.8s on synthetic SQLite with real Next/FastAPI. Screenshot inspected: reports/bank-statement/bank-csv-import.png. PostgreSQL concurrency verification of draft0136 remains a separate pending packet.

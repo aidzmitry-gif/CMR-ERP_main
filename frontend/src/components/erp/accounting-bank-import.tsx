@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { AccountingBankStatementSource } from "./accounting-bank-statement-source";
+import { AccountingBankStatementCsv } from "./accounting-bank-statement-csv";
 
 type Account = { code: string; title: string; cash: boolean; category: string; required_dimensions: string[] };
 type Snapshot = {
@@ -180,6 +181,7 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <AccountingBankStatementSource key={org} org={org} disabled={busy} onImported={load} />
+    <AccountingBankStatementCsv key={`csv-${org}`} org={org} disabled={busy} onImported={load} />
     <div className="flex items-end gap-3">
       <label className="text-sm">Дата отражения<Input aria-label="Дата отражения импорта" type="date" value={date} disabled={busy} onChange={(event) => { setPreview(null); setPrepared(null); onDate(event.target.value); }} /></label>
       <Button variant="secondary" disabled={busy || loading || !org} onClick={() => void load()}>Обновить очередь</Button>
