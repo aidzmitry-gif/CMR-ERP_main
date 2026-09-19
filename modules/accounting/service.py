@@ -326,8 +326,10 @@ async def validate_close_period(session, org_id, month, data):
     if primary:
         raise AccountingError("Unposted primary documents prevent closing")
     from modules.accounting.production_cost_posting import validate_overhead_for_close
+    from modules.accounting.production_output_transfer import validate_output_transfers_for_close
 
     await validate_overhead_for_close(session, org_id, month)
+    await validate_output_transfers_for_close(session, org_id, month)
     # A posting without its immutable source-bound calculation receipt is an
     # unprocessed source document, not merely a provisional cost.  Keep
     # provisional-but-receipted production visible in reports, while refusing

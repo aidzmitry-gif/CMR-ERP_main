@@ -10,11 +10,11 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator
 from sqlalchemy import select
 
 from modules.accounting import service
-from modules.accounting.models import Entry, Policy, ProductionOutputTransferReceipt
+from modules.accounting.models import Entry, Line, Policy, ProductionOutputTransferReceipt
 from modules.accounting.production_cost_policy import validate_accounts
 from modules.accounting.production_output_cost import preview_output_cost_basis
 from modules.accounting.schemas import Input, LineInput, PostingInput, ProductionCostPolicyInput
@@ -52,6 +52,82 @@ def _period(month: str):
 
 def _posting_source(org_id: int, order_id: int) -> str:
     return f"production:output-transfer:{org_id}:{order_id}"
+
+
+def _source_trace(entry: Entry, line: Line) -> dict:
+    return {
+        "entry_id": entry.id,
+        "line_id": line.id,
+        "source": entry.source,
+        "posting_date": entry.posting_date.isoformat(),
+        "side": line.side,
+        "amount_byn": format(line.amount, ".2f"),
+        "dimensions": line.dimensions,
+        "opening": entry.opening,
+    }
+
+
+async def output_transfer_source_state(session, receipt: ProductionOutputTransferReceipt, through_month: str) -> str:
+    """Compare the receipt's immutable WIP trace with current source evidence.
+
+    The transfer's own WIP credit is deliberately excluded: it settles the saved
+    basis and must not make that basis stale.  Any other source-line change is
+    material because it can alter either cost or required analytics.
+    """
+    try:
+        _, last = _period(through_month)
+        command = receipt.command
+        basis = receipt.basis
+        if not isinstance(command, dict) or not isinstance(basis, dict):
+            return "unavailable"
+        analytical_order = command.get("analytical_order")
+        policy_id = basis.get("policy_id")
+        wip_account = basis.get("wip", {}).get("account") if isinstance(basis.get("wip"), dict) else None
+        expected = basis.get("wip", {}).get("source_lines") if isinstance(basis.get("wip"), dict) else None
+        if not isinstance(analytical_order, str) or not isinstance(policy_id, int) or not isinstance(wip_account, str) or not isinstance(expected, list):
+            return "unavailable"
+        policy = await session.get(Policy, policy_id)
+        if policy is None or policy.organization_id != receipt.organization_id or policy.production_costing is None:
+            return "unavailable"
+        settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
+        rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+            Entry.organization_id == receipt.organization_id, Entry.posting_date <= last,
+            Line.account_code == wip_account,
+        ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+        current = []
+        required = set(settings.pool_dimensions) | {settings.order_dimension}
+        for entry, line in rows:
+            if not isinstance(line.dimensions, dict):
+                return "unavailable"
+            if entry.id == receipt.entry_id or line.dimensions.get(settings.order_dimension) != analytical_order:
+                continue
+            if (line.currency != "BYN" or line.cash or line.quantity is not None or line.category != "asset"
+                    or set(line.dimensions) != required
+                    or any(not isinstance(value, str) or not value.strip() for value in line.dimensions.values())):
+                return "unavailable"
+            current.append(_source_trace(entry, line))
+        def canonical(rows):
+            required_trace = {"entry_id", "line_id", "source", "posting_date", "side", "amount_byn", "dimensions", "opening"}
+            if any(not isinstance(row, dict) or set(row) != required_trace for row in rows):
+                raise ValueError("Invalid production output source trace")
+            return sorted(rows, key=lambda row: (row["entry_id"], row["line_id"]))
+        return "unchanged" if canonical(current) == canonical(expected) else "changed"
+    except (AccountingError, AttributeError, KeyError, TypeError, ValidationError, ValueError):
+        return "unavailable"
+
+
+async def validate_output_transfers_for_close(session, org_id: int, month: str) -> None:
+    await service.lock_organization(session, org_id)
+    rows = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+        ProductionOutputTransferReceipt.organization_id == org_id,
+        ProductionOutputTransferReceipt.month <= month,
+    ).order_by(ProductionOutputTransferReceipt.month, ProductionOutputTransferReceipt.entry_id))).all()
+    for receipt in rows:
+        state = await output_transfer_source_state(session, receipt, month)
+        if state != "unchanged":
+            raise AccountingError(
+                f"Production output transfer source basis is {state} for order {receipt.order_id}; review output cost before closing"
+            )
 
 
 async def _policy(session, org_id: int, month: str, policy_id: int, posting_date: date):

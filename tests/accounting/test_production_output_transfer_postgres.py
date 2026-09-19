@@ -25,7 +25,9 @@ from modules.accounting.production_output_transfer import (
     ProductionOutputTransferConfirmInput,
     ProductionOutputTransferInput,
     confirm_output_transfer,
+    output_transfer_source_state,
     prepare_output_transfer,
+    validate_output_transfers_for_close,
 )
 from modules.accounting.schemas import LineInput, PostingInput
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
@@ -281,3 +283,40 @@ async def test_reviewed_output_transfer_is_atomic_replayable_and_immutable(pg_fa
         with pytest.raises(DBAPIError, match="WIP credits differ"):
             await session.flush()
         await session.rollback()
+
+
+async def test_output_transfer_basis_becomes_stale_only_when_its_later_source_enters_closing_month(pg_factory, pg_book):
+    policy_id = await _seed_production_book(pg_factory, pg_book)
+    await _seed_wip(pg_factory, pg_book, policy_id)
+    production = SyntheticProduction()
+    command = transfer_input(policy_id)
+    async with pg_factory() as session:
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, production, object())
+        confirmed = ProductionOutputTransferConfirmInput.model_validate({
+            **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"],
+        })
+        await _upgrade_group_guard(session)
+        await session.commit()
+    async with pg_factory() as session:
+        entry = await confirm_output_transfer(session, pg_book[0], "2026-10", confirmed, "tester",
+                                              production=production, warehouse_gateway=object())
+        await session.commit()
+        receipt = await session.get(ProductionOutputTransferReceipt, entry.id)
+        assert await output_transfer_source_state(session, receipt, "2026-10") == "unchanged"
+        future_cost = PostingInput(
+            source="production:late-cost:42", source_version=1, operation="manual",
+            document_date="2026-11-01", operation_date="2026-11-01", posting_date="2026-11-01",
+            policy_id=policy_id, rule_version="synthetic-late-cost-v1", explanation="Synthetic later production cost",
+            lines=[
+                LineInput(account="20", side="debit", amount="10.00", dimensions={"department": "SHOP", "order": "ORDER-42"}),
+                LineInput(account="60", side="credit", amount="10.00", dimensions={}),
+            ],
+        )
+        await service.post(session, pg_book[0], future_cost, "tester")
+        await session.commit()
+    async with pg_factory() as session:
+        receipt = await session.get(ProductionOutputTransferReceipt, entry.id)
+        assert await output_transfer_source_state(session, receipt, "2026-10") == "unchanged"
+        assert await output_transfer_source_state(session, receipt, "2026-11") == "changed"
+        with pytest.raises(service.AccountingError, match="source basis is changed.*order 42"):
+            await validate_output_transfers_for_close(session, pg_book[0], "2026-11")

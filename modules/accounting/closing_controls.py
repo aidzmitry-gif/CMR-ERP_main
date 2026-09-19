@@ -187,6 +187,17 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         ProductionOutputTransferReceipt.organization_id == org_id,
         ProductionOutputTransferReceipt.month == month,
     )) or 0
+    from modules.accounting.production_output_transfer import output_transfer_source_state
+
+    output_transfer_rows = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+        ProductionOutputTransferReceipt.organization_id == org_id,
+        ProductionOutputTransferReceipt.month <= month,
+    ).order_by(ProductionOutputTransferReceipt.month, ProductionOutputTransferReceipt.entry_id))).all()
+    stale_output_transfers = []
+    for row in output_transfer_rows:
+        state = await output_transfer_source_state(session, row, month)
+        if state != "unchanged":
+            stale_output_transfers.append({"entry_id": row.entry_id, "order_id": row.order_id, "state": state})
     production_receipt_gap = sum((
         max(0, int(production_material_postings) - int(production_material_receipts)),
         max(0, int(production_labor_postings) - int(production_labor_receipts)),
@@ -302,6 +313,10 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if production_receipt_gap:
         review.append({"code": "production_cost_receipt_gap", "count": int(production_receipt_gap),
                        "message": "Для части производственных проводок нет соответствующей проверенной квитанции регистра."})
+    if stale_output_transfers:
+        review.append({"code": "production_output_source_stale", "count": len(stale_output_transfers),
+                       "message": "База себестоимости выпуска изменилась или недоступна; проверьте наряд перед закрытием.",
+                       "transfers": stale_output_transfers})
     if payroll_postings:
         review.append({"code": "payroll_accrual_provisional", "count": int(payroll_postings),
                        "message": "Валовое начисление зарплаты импортировано из проверенного источника; нормативный расчёт ещё не сертифицирован."})
@@ -368,6 +383,7 @@ async def snapshot(session, org_id: int, month: str) -> dict:
             "overhead_receipts": int(production_overhead_receipts),
             "output_transfers": int(production_output_postings),
             "output_transfer_receipts": int(production_output_receipts),
+            "stale_output_transfers": stale_output_transfers,
             "receipt_gap": int(production_receipt_gap),
             "final_cost_certified": False,
         },
