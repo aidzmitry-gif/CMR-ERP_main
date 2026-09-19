@@ -158,6 +158,68 @@ async def _policy(session, org_id: int, month: str, data: FxRevaluationInput):
     return first, last, policy, settings, accounts, monetary, gain, loss
 
 
+async def _prior_valuations(session, org_id, last, balances, foreign_entry_ids):
+    """Attribute actual BYN adjustments using their immutable currency receipts."""
+    entries = (await session.scalars(select(Entry).where(
+        Entry.organization_id == org_id, Entry.operation == "fx_revaluation",
+        Entry.posting_date <= last,
+    ).order_by(Entry.id))).all()
+    frontier = set(foreign_entry_ids) | {entry.id for entry in entries}
+    visited = set(frontier)
+    while frontier:
+        corrections = (await session.scalars(select(Entry).where(
+            Entry.organization_id == org_id, Entry.posting_date <= last,
+            Entry.correction_of.in_(frontier),
+        ))).all()
+        for correction in corrections:
+            if correction.operation != "fx_revaluation" and await session.scalar(select(Line.id).where(
+                Line.entry_id == correction.id, Line.currency == "BYN",
+                Line.account_code.in_({key[0] for key in balances}),
+            ).limit(1)) is not None:
+                raise service.AccountingError("Foreign monetary history has an unattributed BYN correction; reconcile its currency position")
+        frontier = {entry.id for entry in corrections} - visited
+        visited.update(frontier)
+    evidence = []
+    for entry in entries:
+        receipt = await session.scalar(select(FxRevaluationReceipt).where(
+            FxRevaluationReceipt.organization_id == org_id, FxRevaluationReceipt.entry_id == entry.id,
+        ))
+        if receipt is None or receipt.digest != _receipt_digest(receipt):
+            raise service.AccountingError("Prior FX valuation receipt is missing or damaged")
+        try:
+            document = PostingInput.model_validate(receipt.snapshot["posting_document"])
+            adjustments = receipt.snapshot["adjustments"]
+            if (service.digest(document) != entry.digest or receipt.snapshot["digest"] != entry.digest
+                    or len(document.lines) != 2 * len(adjustments)):
+                raise ValueError("Posting evidence mismatch")
+            actual = (await session.scalars(select(Line).where(Line.entry_id == entry.id)
+                                            .order_by(Line.id))).all()
+            if len(actual) != len(document.lines):
+                raise ValueError("Ledger line count mismatch")
+            for line, expected in zip(actual, document.lines, strict=True):
+                reconstructed = LineInput(account=line.account_code, **{
+                    key: getattr(line, key) for key in LineInput.model_fields if key != "account"
+                })
+                if reconstructed != expected:
+                    raise ValueError("Ledger line evidence mismatch")
+            for index, adjustment in enumerate(adjustments):
+                line = actual[2 * index]
+                key = (adjustment["account"], _canonical(adjustment["dimensions"]), adjustment["currency"])
+                if (line.account_code != key[0] or _canonical(line.dimensions) != key[1]
+                        or line.currency != "BYN" or line.amount != abs(Decimal(adjustment["delta"]))):
+                    raise ValueError("Currency position evidence mismatch")
+                if key not in balances:
+                    continue  # A position outside the currently selected monetary accounts.
+                # Use the actual side, including old v1 liabilities; never rewrite history.
+                balances[key]["book"] += line.amount if line.side == "debit" else -line.amount
+                balances[key]["line_ids"].append(line.id)
+        except (KeyError, ValueError, TypeError, ArithmeticError) as exc:
+            raise service.AccountingError("Prior FX valuation evidence does not match its ledger") from exc
+        evidence.append({"receipt_id": receipt.id, "receipt_digest": receipt.digest,
+                         "entry_id": entry.id, "entry_digest": entry.digest})
+    return evidence
+
+
 async def preview(session, org_id: int, month: str, data: FxRevaluationInput) -> dict:
     """Build a deterministic, non-posting package for the selected month."""
     org = await service.lock_organization(session, org_id)
@@ -211,6 +273,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
             "amount": format(line.amount, "f"), "posting_date": entry.posting_date.isoformat(),
         })
 
+    prior_valuations = await _prior_valuations(session, org_id, last, balances, {entry.id for entry, _ in rows})
     posting_lines: list[LineInput] = []
     adjustments = []
     for key in sorted(balances):
@@ -243,11 +306,14 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
         FxRevaluationReceipt.organization_id == org_id, FxRevaluationReceipt.month == month,
     ).order_by(FxRevaluationReceipt.source_version.desc()))
     source_version = (previous.source_version + 1) if previous else 1
-    correction_of = previous.entry_id if previous and previous.entry_id is not None else None
+    correction_of = await session.scalar(select(Entry.id).where(
+        Entry.organization_id == org_id, Entry.source == f"accounting:fx-revaluation:{org_id}:{month}",
+        Entry.operation == "fx_revaluation",
+    ).order_by(Entry.source_version.desc()).limit(1))
     posting = PostingInput(
         source=f"accounting:fx-revaluation:{org_id}:{month}", source_version=source_version,
         operation="fx_revaluation", document_date=data.posting_date, operation_date=data.posting_date,
-        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v2",
+        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v3",
         explanation=f"FX revaluation for {month}: reviewed documented rates", lines=posting_lines,
         correction_of=correction_of,
     ) if posting_lines else None
@@ -259,7 +325,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
         "policy_settings": settings.model_dump(mode="json"), "period_generation": period.generation if period else 0,
         "organization_generation": org.generation, "source_version": source_version,
         "correction_of": correction_of, "rates": [rates[key].model_dump(mode="json") for key in sorted(rates)],
-        "source_lines": source_lines, "adjustments": adjustments,
+        "source_lines": source_lines, "prior_valuations": prior_valuations, "adjustments": adjustments,
         "posting": posting.model_dump(mode="json") if posting else None,
         "evidence": data.evidence,
     }

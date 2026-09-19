@@ -7,7 +7,7 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from modules.accounting import fx_revaluation, service
 from modules.accounting.models import Account, Entry, FxRevaluationReceipt, Policy
@@ -116,12 +116,94 @@ async def test_confirm_is_atomic_and_replayable(db, book):
         FxRevaluationReceipt.id == receipt.id)) == book[0]
 
 
+async def test_revaluation_uses_prior_adjustments_and_noop_keeps_correction_chain(db, book):
+    policy_id = await _policy(db, book[0])
+    await service.post(db, book[0], _foreign_posting(policy_id), "tester")
+    await db.commit()
+
+    async def calculate(rate, on):
+        month = on.strftime("%Y-%m")
+        period = await service.period_for(db, book[0], month)
+        command = FxRevaluationInput(request_key=uuid4(), policy_id=policy_id, posting_date=on,
+            expected_generation=period.generation, rates=[{
+                "currency": "USD", "rate": rate, "rate_scale": 1,
+                "rate_date": on, "rate_source": "Synthetic rate",
+            }], evidence="Synthetic repeated valuation")
+        plan = await fx_revaluation.preview(db, book[0], month, command)
+        receipt = await fx_revaluation.confirm(db, book[0], month, FxRevaluationConfirmInput(
+            **command.model_dump(), basis_digest=plan["basis_digest"], digest=plan["digest"]), "tester")
+        await db.commit()
+        return plan, receipt
+
+    first, first_receipt = await calculate("3.20", date(2026, 9, 30))
+    unchanged, noop_receipt = await calculate("3.20", date(2026, 9, 30))
+    assert unchanged["adjustments"] == []
+    assert noop_receipt.entry_id is None
+    corrected, corrected_receipt = await calculate("3.30", date(2026, 9, 30))
+    assert corrected["posting_document"]["correction_of"] == first_receipt.entry_id
+    assert {row["account"]: row["delta"] for row in corrected["adjustments"]} == {"60": "-10.00", "62": "10.00"}
+    following, _ = await calculate("3.40", date(2026, 10, 31))
+    assert {row["account"]: row["book_balance"] for row in following["adjustments"]} == {"60": "-330.00", "62": "330.00"}
+    assert {row["account"]: row["delta"] for row in following["adjustments"]} == {"60": "-10.00", "62": "10.00"}
+    assert corrected_receipt.entry_id != first_receipt.entry_id
+
+
 async def test_generic_posting_cannot_create_fx_revaluation(db, book):
     policy_id = await _policy(db, book[0])
     posting = _foreign_posting(policy_id)
     posting.operation = "fx_revaluation"
     with pytest.raises(service.AccountingError, match="dedicated"):
         await service.post(db, book[0], posting, "tester")
+
+
+async def test_unattributed_byn_correction_of_foreign_source_is_blocked(db, book):
+    policy_id = await _policy(db, book[0])
+    original = await service.post(db, book[0], _foreign_posting(policy_id), "tester")
+    correction = _foreign_posting(policy_id, source="synthetic-correction")
+    correction.correction_of = original.id
+    correction.lines = [LineInput(account="62", side="credit", amount="20.00"),
+                        LineInput(account="91.2", side="debit", amount="20.00")]
+    await service.post(db, book[0], correction, "tester")
+    await db.commit()
+    command = FxRevaluationInput(request_key=uuid4(), policy_id=policy_id,
+        posting_date=date(2026, 9, 30), expected_generation=2, rates=[{
+            "currency": "USD", "rate": "3.20", "rate_scale": 1,
+            "rate_date": "2026-09-30", "rate_source": "Synthetic rate",
+        }], evidence="Synthetic mixed valuation evidence")
+    with pytest.raises(service.AccountingError, match="unattributed BYN correction"):
+        await fx_revaluation.preview(db, book[0], "2026-09", command)
+
+
+async def test_previous_wrong_liability_side_uses_actual_ledger_not_intended_delta(db, book, monkeypatch):
+    policy_id = await _policy(db, book[0])
+    await service.post(db, book[0], _foreign_posting(policy_id), "tester")
+    await db.commit()
+    command = FxRevaluationInput(request_key=uuid4(), policy_id=policy_id,
+        posting_date=date(2026, 9, 30), expected_generation=1, rates=[{
+            "currency": "USD", "rate": "3.20", "rate_scale": 1,
+            "rate_date": "2026-09-30", "rate_source": "Synthetic historical rate",
+        }], evidence="Synthetic old sign behavior")
+    # Reproduce the former liability double inversion without editing a posted entry.
+    with monkeypatch.context() as historical:
+        historical.setattr(fx_revaluation, "_side", lambda delta: "debit")
+        historical.setattr(fx_revaluation, "_counterpart", lambda delta, gain, loss: (gain, "credit"))
+        plan = await fx_revaluation.preview(db, book[0], "2026-09", command)
+        receipt = await fx_revaluation.confirm(db, book[0], "2026-09", FxRevaluationConfirmInput(
+            **command.model_dump(), basis_digest=plan["basis_digest"], digest=plan["digest"]), "tester")
+        await db.commit()
+    old_digest = receipt.digest
+    new_command = command.model_copy(update={"request_key": uuid4(), "expected_generation": 2})
+    repaired = await fx_revaluation.preview(db, book[0], "2026-09", new_command)
+    assert len(repaired["adjustments"]) == 1
+    adjustment = repaired["adjustments"][0]
+    assert (adjustment["account"], adjustment["book_balance"], adjustment["delta"], adjustment["monetary_side"]) == (
+        "60", "-280.00", "-40.00", "credit")
+    assert receipt.digest == old_digest
+    # Corrupt evidence must block further calculation, never be ignored.
+    await db.execute(update(FxRevaluationReceipt).where(FxRevaluationReceipt.id == receipt.id)
+                     .values(snapshot={**receipt.snapshot, "adjustments": []}))
+    with pytest.raises(service.AccountingError, match="missing or damaged"):
+        await fx_revaluation.preview(db, book[0], "2026-09", new_command)
 
 
 async def test_rates_are_explicit_and_unknown_currency_is_rejected(db, book):
