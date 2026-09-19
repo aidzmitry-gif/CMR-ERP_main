@@ -76,7 +76,7 @@ def source_snapshot(row: BankTransaction, *, allow_invalid=False) -> dict:
         if not allow_invalid:
             raise service.AccountingError("Imported bank transaction has an invalid monetary amount") from exc
         amount = None
-    return {
+    snapshot = {
         "transaction_id": row.id,
         "ext_id": row.ext_id,
         "occurred_on": row.occurred_on.isoformat() if row.occurred_on else None,
@@ -88,6 +88,12 @@ def source_snapshot(row: BankTransaction, *, allow_invalid=False) -> dict:
         "account_code": row.account_code,
         "match_status": row.match_status,
     }
+    # Legacy snapshots retain their original shape/digest and saved receipts.
+    if row.source_provider is not None:
+        snapshot.update(direction=row.direction, source_provider=row.source_provider,
+                        source_external_id=row.source_external_id,
+                        source_kind=row.source_kind, source_reference=row.source_reference)
+    return snapshot
 
 
 async def _source(session, org_id: int, source_transaction_id: int) -> tuple[BankTransaction, dict, str]:
@@ -129,7 +135,7 @@ def _posting(data: BankImportInput, snapshot: dict) -> BankDocument:
         operation_date=date.fromisoformat(snapshot["occurred_on"]),
         posting_date=data.posting_date,
         policy_id=data.policy_id,
-        direction="receipt",
+        direction=snapshot.get("direction", "receipt"),
         bank_account=data.bank_account,
         settlement_account=data.settlement_account,
         amount=snapshot["amount"],

@@ -17,6 +17,7 @@ from core.services.auth import get_current_user
 from core.services.procurement import ReceiptAccountingConfirmation, ReceiptAccountingOptions
 from modules.accounting import (
     bank_import,
+    bank_statement,
     closing_controls,
     fixed_assets,
     foreign_trade_register,
@@ -418,6 +419,18 @@ async def bank_confirm(org_id: int, data: BankDocument, ctx=Depends(member), cor
     await service.lock_organization(ctx[0], org_id)
     posting, _, _ = await preview_bank(ctx[0], org_id, data)
     return serialize(await service.post(ctx[0], org_id, posting, ctx[1], core.services.event_bus))
+
+
+@router.post("/organizations/{org_id}/bank-statement/sources", status_code=201)
+async def import_statement_source(org_id: int, data: bank_statement.StatementImportInput, ctx=Depends(member)):
+    chief(ctx)
+    try:
+        row = await bank_statement.ingest(ctx[0], org_id, data.line, evidence=data.evidence, actor=ctx[1])
+        snapshot = bank_import.source_snapshot(row)
+        return {"organization_id": org_id, "source_transaction_id": row.id,
+                "source_snapshot": snapshot, "source_digest": bank_import._digest(snapshot)}
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/organizations/{org_id}/bank-import/preview")
