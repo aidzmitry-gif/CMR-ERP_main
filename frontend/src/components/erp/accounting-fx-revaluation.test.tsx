@@ -103,3 +103,25 @@ it("requires positive settlement amounts and a new documented rate when currency
   expect(screen.getByLabelText("Источник курса валютного погашения")).toHaveValue("");
   expect(button).toBeDisabled();
 });
+
+it("does not show a delayed settlement preview after an operation-date change", async () => {
+  let finish!: (value: unknown) => void;
+  const fetcher = vi.fn((url: string) => {
+    if (url.endsWith("/fx-settlement/preview")) return new Promise((resolve) => { finish = resolve; });
+    return Promise.resolve({ ok: true, json: async () => url.includes("/accounts?") ? [{ code: "62", title: "Customers", required_dimensions: [] }] : [] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const configured = { ...policy, currency_revaluation: { ...policy.currency_revaluation, settlement_allocation: "proportional_carrying" as const, settlement_rate_date: "posting_date" as const } };
+  const view = render(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-15" policy={configured} />);
+  await screen.findByRole("option", { name: "62 · Customers" });
+  for (const [label, value] of [["Денежный счёт валютного погашения", "62"], ["Сумма валютного погашения", "50"], ["Курс валютного погашения", "3.2"], ["Источник курса валютного погашения", "Reviewed rate document"]]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Рассчитать погашение" }));
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/fx-settlement/preview"), expect.objectContaining({ body: expect.stringContaining('"posting_date":"2026-09-15"') }));
+  view.rerender(<AccountingFxRevaluation org="7" month="2026-09" date="2026-09-16" policy={configured} />);
+  await act(async () => finish({ ok: true, json: async () => ({ book_balance: "300", allocated_book_amount: "150", documentary_amount: "160", exchange_difference: "10", remaining_original: "50", remaining_book_amount: "150" }) }));
+  expect(screen.queryByText(/Балансовая стоимость позиции/)).not.toBeInTheDocument();
+  expect(screen.getByText("Дата отражения: 2026-09-16")).toBeInTheDocument();
+  expect(screen.getByLabelText("Сумма валютного погашения")).toHaveValue("");
+});
