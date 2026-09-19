@@ -6,6 +6,7 @@ invent a finished-goods account or post a transfer.  A final transfer is only
 possible after the organisation's policy explicitly supplies the required
 target account and dimensions.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -52,20 +53,25 @@ def _parse_quantity(value: object, label: str) -> Decimal:
 
 
 def _basis_digest(value: dict) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
-def _order_balance(source: dict, wip_account: str, order_dimension: str,
-                   analytical_order: str) -> tuple[Decimal, list[dict]]:
+def _order_balance(
+    source: dict, wip_account: str, order_dimension: str, analytical_order: str
+) -> tuple[Decimal, list[dict], list[dict]]:
     """Return the exact WIP balance and its trace for one analytic order."""
     lines = []
-    balance = Decimal("0")
+    groups: dict[str, dict] = {}
     for line in source["snapshot"]["lines"]:
-        if line["account"] != wip_account or line["dimensions"].get(order_dimension) != analytical_order:
+        if (
+            line["account"] != wip_account
+            or line["dimensions"].get(order_dimension) != analytical_order
+        ):
             continue
         amount = _parse_money(line["amount_byn"], f"line {line['line_id']}")
-        balance += amount if line["side"] == "debit" else -amount
-        lines.append({
+        trace = {
             "entry_id": line["entry_id"],
             "line_id": line["line_id"],
             "source": line["source"],
@@ -74,13 +80,48 @@ def _order_balance(source: dict, wip_account: str, order_dimension: str,
             "amount_byn": _money(amount),
             "dimensions": line["dimensions"],
             "opening": line["opening"],
-        })
-    return balance, lines
+        }
+        lines.append(trace)
+        key = json.dumps(
+            line["dimensions"], sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        group = groups.setdefault(
+            key, {"dimensions": line["dimensions"], "balance": Decimal("0"), "source_lines": []}
+        )
+        group["balance"] += amount if line["side"] == "debit" else -amount
+        group["source_lines"].append(trace)
+    wip_groups = []
+    for group in groups.values():
+        if group["balance"] < 0:
+            raise AccountingError(
+                "WIP balance is negative for one production-order analytic group; reconcile the ledger first"
+            )
+        if group["balance"] > 0:
+            wip_groups.append(
+                {
+                    "dimensions": group["dimensions"],
+                    "balance_byn": _money(group["balance"]),
+                    "source_lines": group["source_lines"],
+                }
+            )
+    return (
+        sum((Decimal(group["balance_byn"]) for group in wip_groups), Decimal("0")),
+        lines,
+        wip_groups,
+    )
 
 
-async def preview_output_cost_basis(session, org_id: int, month: str, policy_id: int,
-                                    order_id: int, analytical_order: str, warehouse: str,
-                                    production, warehouse_gateway):
+async def preview_output_cost_basis(
+    session,
+    org_id: int,
+    month: str,
+    policy_id: int,
+    order_id: int,
+    analytical_order: str,
+    warehouse: str,
+    production,
+    warehouse_gateway,
+):
     """Build a reviewable WIP-to-output basis without creating a ledger entry.
 
     The result remains provisional whenever the accepted quantity is incomplete,
@@ -101,11 +142,18 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
     if production is None or warehouse_gateway is None:
         raise AccountingError("Production and warehouse reconciliation services are unavailable")
 
-    policy = await session.scalar(select(Policy).where(
-        Policy.organization_id == org_id, Policy.effective_from <= last,
-    ).order_by(Policy.effective_from.desc()))
+    policy = await session.scalar(
+        select(Policy)
+        .where(
+            Policy.organization_id == org_id,
+            Policy.effective_from <= last,
+        )
+        .order_by(Policy.effective_from.desc())
+    )
     if policy is None or policy.id != policy_id or policy.effective_from > first:
-        raise AccountingError("Select one applicable production policy for the whole reviewed month")
+        raise AccountingError(
+            "Select one applicable production policy for the whole reviewed month"
+        )
     if policy.production_costing is None:
         raise AccountingError("Production cost configuration is required")
     settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
@@ -115,10 +163,9 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
     # production-order lock then follows the same order as other accounting
     # operations and avoids an org/order versus order/org deadlock.
     source = await cost_sources(session, org_id, month, policy_id)
-    wip_balance, source_lines = _order_balance(source, settings.wip_account,
-                                               settings.order_dimension, analytical_order.strip())
-    if wip_balance < 0:
-        raise AccountingError("WIP balance for the production order is negative; reconcile the ledger first")
+    wip_balance, source_lines, wip_groups = _order_balance(
+        source, settings.wip_account, settings.order_dimension, analytical_order.strip()
+    )
 
     # Both calls verify the organisation-owned production order.  The gateway
     # is queried even when no ledger lines exist so a foreign or stale order
@@ -140,8 +187,12 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
         document_dates = [date.fromisoformat(item["operation_date"]) for item in documents]
     except (KeyError, TypeError, ValueError) as exc:
         raise AccountingError("Production output documents have no valid operation date") from exc
-    aligned = bool(document_dates) and all(item.strftime("%Y-%m") == month for item in document_dates)
-    complete = (confirmed == planned and accepted == planned and rejected == 0 and pending == 0 and aligned)
+    aligned = bool(document_dates) and all(
+        item.strftime("%Y-%m") == month for item in document_dates
+    )
+    complete = (
+        confirmed == planned and accepted == planned and rejected == 0 and pending == 0 and aligned
+    )
 
     target_account = None
     # This key is intentionally read only from a versioned policy snapshot. It
@@ -152,8 +203,16 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
 
     if not source_lines:
         status = "awaiting_wip_cost"
-        explanation = "По аналитике наряда нет проведённой стоимости НЗП. Сумма выпуска не определяется."
-    elif confirmed == planned and accepted == planned and rejected == 0 and pending == 0 and not aligned:
+        explanation = (
+            "По аналитике наряда нет проведённой стоимости НЗП. Сумма выпуска не определяется."
+        )
+    elif (
+        confirmed == planned
+        and accepted == planned
+        and rejected == 0
+        and pending == 0
+        and not aligned
+    ):
         status = "awaiting_output_period_alignment"
         explanation = "Даты подтверждённых выпусков не совпадают с выбранным периодом; стоимость нельзя переносить в него автоматически."
     elif not complete:
@@ -169,11 +228,18 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
     source_digest = source.get("digest")
     if not isinstance(source_digest, str) or len(source_digest) != 64:
         source_digest = _basis_digest(source.get("snapshot", {}))
-    basis_digest = _basis_digest({
-        "organization_id": org_id, "month": month, "policy_id": policy.id,
-        "order": orders[0], "analytical_order": analytical_order.strip(),
-        "warehouse": warehouse.strip(), "source_digest": source_digest, "output": output,
-    })
+    basis_digest = _basis_digest(
+        {
+            "organization_id": org_id,
+            "month": month,
+            "policy_id": policy.id,
+            "order": orders[0],
+            "analytical_order": analytical_order.strip(),
+            "warehouse": warehouse.strip(),
+            "source_digest": source_digest,
+            "output": output,
+        }
+    )
 
     result = {
         "organization_id": org_id,
@@ -198,6 +264,7 @@ async def preview_output_cost_basis(session, org_id: int, month: str, policy_id:
             "account": settings.wip_account,
             "balance_byn": _money(wip_balance),
             "source_lines": source_lines,
+            "groups": wip_groups,
         },
         "target": {"finished_goods_account": target_account},
         "status": status,
