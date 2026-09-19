@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SourceTag } from "@/components/source-tag";
 import { formatByn } from "@/lib/format";
+import { FinanceLedgerBalance } from "./finance-ledger-balance";
 import { FinanceLedgerCashflow } from "./finance-ledger-cashflow";
 import { FinanceLedgerPnl } from "./finance-ledger-pnl";
 
@@ -258,7 +259,7 @@ export function FinanceView() {
         {tab === "margin" && <MarginTab />}
         {tab === "pnl" && <FinanceLedgerPnl />}
         {tab === "dds" && <FinanceLedgerCashflow />}
-        {tab === "balance" && <BalanceTab />}
+        {tab === "balance" && <FinanceLedgerBalance />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>
     </main>

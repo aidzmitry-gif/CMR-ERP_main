@@ -50,6 +50,10 @@ const LEDGER_REPORT = {
   review_items: [],
   pnl: { income: "20.00", expenses: "3.33", profit: "16.67" },
   pnl_movements: [],
+  balance: { assets: "31.67", liabilities: "14.00", equity: "0.00", current_result: "16.67", difference: "1.00" },
+  balance_movements: [
+    { entry_id: 9, source: "opening-import", date: "2026-09-01", account: "51", title: "Банк", line_id: 10, currency: "BYN", side: "debit", amount: "15.00", dimensions: {}, category: "asset", period_bucket: "opening" },
+  ],
   cashflow_ledger: {
     opening: "50.00", external_inflow: "100.00", external_outflow: "40.00", external_net: "60.00",
     internal_net: "0.00", internal_count: 0, unclassified_inflow: "0.00", unclassified_outflow: "0.00",
@@ -221,29 +225,21 @@ describe("FinanceView", () => {
     ).toBe(false);
   });
 
-  it("вкладка «Баланс» рендерит активы/пассивы и «нет связи с 1С» для пустых полей", async () => {
-    responders["finance/balance-sheet"] = {
-      as_of: "2026-07-18",
-      currency: "BYN",
-      accounts_receivable: "9000.00",
-      cash: null,
-      inventory_value: null,
-      total_assets: "9000.00",
-      accounts_payable: "3000.00",
-      payroll_payable: "1000.00",
-      tax_payable: "500.00",
-      total_liabilities: "4500.00",
-      equity: "4500.00",
-    };
+  it("вкладка «Баланс» монтирует отчёт бухгалтерской книги, а не legacy balance-sheet", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    expect(await screen.findByText("Дебиторская задолженность")).toBeInTheDocument();
-    expect(screen.getByText("ИТОГО Активы")).toBeInTheDocument();
-    expect(screen.getByText("Капитал (Equity)")).toBeInTheDocument();
-    // cash и inventory = null → две пометки «нет связи с 1С»
-    expect(screen.getAllByText("нет связи с 1С").length).toBe(2);
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("31.67 BYN")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Расхождение баланса: 1.00 BYN");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/balance-sheet"))).toBe(false);
   });
 
   it("вкладка «P&L» монтирует отчёт бухгалтерской книги, а не legacy P&L", async () => {
@@ -519,11 +515,18 @@ describe("FinanceView", () => {
   });
 
   it("вкладка «Баланс» показывает ошибку при сбое сети", async () => {
-    responders["finance/balance-sheet"] = "error";
+    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+    responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    expect(await screen.findByText(/Нет данных баланса/)).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить баланс бухгалтерской книги");
   });
 });
