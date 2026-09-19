@@ -52,3 +52,9 @@ Ten targeted FX workflow tests passed: rising/falling rates, same-rate no-op, co
 ### Dated valuation cutoff
 
 Rule fx-revaluation-v4 selects foreign postings, prior valuation receipts/corrections, account versions and policy versions no later than the requested posting_date. A September15 calculation excludes September30 postings and September20 configuration changes. Two targeted cutoff cases passed; the ten existing FX workflow cases passed with the cutoff change. Historical receipts are unchanged. Implemented in the bank worktree while the integration a4157c6 verifier retained frozen source files.
+
+### Currency positions in reports
+
+Verified valuation-only BYN lines now contribute to the original currency position in trial balance and opening balances. Attribution reuses receipt/posting/ledger validation; no source line is changed. Drill-down movement currency identifies the position, ledger_currency retains BYN and valuation_only marks the adjustment; the account activity screen labels it Переоценка. Synthetic USD100/BYN300 plus valuation20 reports a single USD position with BYN320 and originalUSD100. Existing ledger/report checks passed25cases; the expanded position test passed both current-period and opening-balance cases. Cash FX valuation remains unsupported by policy; no exchange-effect cash-flow feature is claimed here.
+
+The separate V3 PostgreSQL probe on a4157c6 passed registered0136 migration, repeated/no-op/corrected/next-month calculation, replay, actual old wrong-sided receipt and unknown correction rejection. Previous receipts/lines remained unchanged; owned probe DB cleaned. Evidence: reports/CRM-ERPNext-001/luna-fx-carrying-report.md. Dated cutoff was subsequently integrated as6c14947; that newer change is covered by its two local cutoff cases, not retroactively by the V3 probe.

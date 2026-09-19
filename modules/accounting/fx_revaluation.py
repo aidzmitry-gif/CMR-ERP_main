@@ -158,7 +158,7 @@ async def _policy(session, org_id: int, month: str, data: FxRevaluationInput):
     return first, last, policy, settings, accounts, monetary, gain, loss
 
 
-async def _prior_valuations(session, org_id, as_of, balances, foreign_entry_ids):
+async def _prior_valuations(session, org_id, as_of, balances, foreign_entry_ids, attribution=None):
     """Attribute actual BYN adjustments using their immutable currency receipts."""
     entries = (await session.scalars(select(Entry).where(
         Entry.organization_id == org_id, Entry.operation == "fx_revaluation",
@@ -208,6 +208,8 @@ async def _prior_valuations(session, org_id, as_of, balances, foreign_entry_ids)
                 if (line.account_code != key[0] or _canonical(line.dimensions) != key[1]
                         or line.currency != "BYN" or line.amount != abs(Decimal(adjustment["delta"]))):
                     raise ValueError("Currency position evidence mismatch")
+                if attribution is not None:
+                    attribution[line.id] = key[2]
                 if key not in balances:
                     continue  # A position outside the currently selected monetary accounts.
                 # Use the actual side, including old v1 liabilities; never rewrite history.
@@ -218,6 +220,13 @@ async def _prior_valuations(session, org_id, as_of, balances, foreign_entry_ids)
         evidence.append({"receipt_id": receipt.id, "receipt_digest": receipt.digest,
                          "entry_id": entry.id, "entry_digest": entry.digest})
     return evidence
+
+
+async def valuation_currencies(session, org_id, as_of):
+    """Verified report attribution; the actual ledger currency remains BYN."""
+    attribution = {}
+    await _prior_valuations(session, org_id, as_of, {}, set(), attribution)
+    return attribution
 
 
 async def preview(session, org_id: int, month: str, data: FxRevaluationInput) -> dict:

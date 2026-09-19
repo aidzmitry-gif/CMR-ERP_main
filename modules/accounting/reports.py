@@ -18,6 +18,7 @@ def money(value):
 
 async def report(session, org_id, start, end):
     from modules.accounting.closing_commands import authenticated_entries
+    from modules.accounting.fx_revaluation import valuation_currencies
 
     if end < start:
         raise AccountingError("End precedes start")
@@ -25,6 +26,7 @@ async def report(session, org_id, start, end):
     # A multi-query READ COMMITTED report must not mix old amounts with a new close.
     await lock_organization(session, org_id)
     technical = await authenticated_entries(session, org_id)
+    valuation = await valuation_currencies(session, org_id, end)
     rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
         Entry.organization_id == org_id, Entry.posting_date <= end
     ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
@@ -38,10 +40,11 @@ async def report(session, org_id, start, end):
         if entry.operation in {"period_close", "period_reopen"} and entry.id not in technical:
             raise AccountingError("Technical financial entry has no verified receipt")
         signed = line.amount if line.side == "debit" else -line.amount
-        key = (line.account_code, json.dumps(line.dimensions, sort_keys=True), line.currency)
+        position_currency = valuation.get(line.id, line.currency)
+        key = (line.account_code, json.dumps(line.dimensions, sort_keys=True), position_currency)
         bucket = trial.setdefault(key, {
             "account": line.account_code, "title": line.account_title,
-            "dimensions": line.dimensions, "currency": line.currency,
+            "dimensions": line.dimensions, "currency": position_currency,
             "off_balance": line.category == "off_balance",
             "opening": Decimal("0"), "debit": Decimal("0"), "credit": Decimal("0"),
             "original_opening": Decimal("0"), "original_debit": Decimal("0"),
@@ -60,7 +63,8 @@ async def report(session, org_id, start, end):
         (opening_movements if before else movements).append({
                 "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
                 "account": line.account_code, "title": line.account_title,
-                "line_id": line.id, "currency": line.currency,
+                "line_id": line.id, "currency": position_currency,
+                **({"ledger_currency": line.currency, "valuation_only": True} if line.id in valuation else {}),
                 "side": line.side, "amount": money(line.amount), "dimensions": line.dimensions,
             })
         if line.cash:
