@@ -65,12 +65,12 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
             if dimensions.get("warehouse") == target["warehouse"] and dimensions.get("sku") == target["sku"]:
                 raise AccountingError("Selected SKU has later movements; chronological costing is required")
             continue
-        if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
-            raise AccountingError("Finished-goods layer has no verified production output receipt")
         if dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]:
             continue
         if target.get("lot") and dimensions.get("lot") != target["lot"]:
             continue
+        if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
+            raise AccountingError("Finished-goods layer has no verified production output receipt")
         matched = True
         value_only = (entry.id, line.id) in verified_value_lines
         if value_only:

@@ -77,7 +77,7 @@ def transfer_input(policy_id: int) -> ProductionOutputTransferInput:
     })
 
 
-async def _seed_production_book(factory, pg_book):
+async def _seed_production_book(factory, pg_book, method="specific"):
     """Add only synthetic production accounts and a versioned policy."""
     async with factory() as session:
         await session.execute(text(
@@ -105,7 +105,7 @@ async def _seed_production_book(factory, pg_book):
         await session.flush()
         policy = Policy(
             organization_id=pg_book[0], effective_from=date(2026, 10, 1),
-            reference="Synthetic production transfer policy", inventory_method="specific",
+            reference="Synthetic production transfer policy", inventory_method=method,
             allocation_basis="direct_cost", depreciation_method="straight_line",
             normative_reference="Synthetic only", normative_verified=False, approved_by="tester",
             production_costing={

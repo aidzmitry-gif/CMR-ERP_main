@@ -23,8 +23,8 @@ from tests.accounting.test_production_output_transfer_postgres import (
 pytestmark = pytest.mark.integration
 
 
-async def _confirm_output(factory, book):
-    policy_id = await _seed_production_book(factory, book)
+async def _confirm_output(factory, book, method="specific"):
+    policy_id = await _seed_production_book(factory, book, method)
     await _seed_wip(factory, book, policy_id)
     production = SyntheticProduction()
     command = transfer_input(policy_id)
@@ -112,8 +112,9 @@ async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, p
             ))
 
 
-async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book)
+@pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
+async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book, method):
+    policy_id = await _confirm_output(pg_factory, pg_book, method)
 
     class OtherProduction(SyntheticProduction):
         async def cost_orders(self, _session, _organization_id, _order_ids):
