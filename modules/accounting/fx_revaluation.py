@@ -148,27 +148,27 @@ async def _policy(session, org_id: int, month: str, data: FxRevaluationInput):
     if policy is None or policy.effective_from > first or policy.currency_revaluation is None:
         raise service.AccountingError("The saved currency revaluation policy is not available for this period")
     versions = (await session.scalars(select(Policy).where(
-        Policy.organization_id == org_id, Policy.effective_from <= last,
+        Policy.organization_id == org_id, Policy.effective_from <= data.posting_date,
     ).order_by(Policy.effective_from.desc()))).all()
     if any(row.effective_from > first and row.currency_revaluation != policy.currency_revaluation
            for row in versions):
         raise service.AccountingError("Currency revaluation policy changed within this period; reconcile policy versions")
     settings = CurrencyRevaluationPolicyInput.model_validate(policy.currency_revaluation)
-    accounts, monetary, gain, loss = await validate_policy_accounts(session, org_id, last, settings)
+    accounts, monetary, gain, loss = await validate_policy_accounts(session, org_id, data.posting_date, settings)
     return first, last, policy, settings, accounts, monetary, gain, loss
 
 
-async def _prior_valuations(session, org_id, last, balances, foreign_entry_ids):
+async def _prior_valuations(session, org_id, as_of, balances, foreign_entry_ids):
     """Attribute actual BYN adjustments using their immutable currency receipts."""
     entries = (await session.scalars(select(Entry).where(
         Entry.organization_id == org_id, Entry.operation == "fx_revaluation",
-        Entry.posting_date <= last,
+        Entry.posting_date <= as_of,
     ).order_by(Entry.id))).all()
     frontier = set(foreign_entry_ids) | {entry.id for entry in entries}
     visited = set(frontier)
     while frontier:
         corrections = (await session.scalars(select(Entry).where(
-            Entry.organization_id == org_id, Entry.posting_date <= last,
+            Entry.organization_id == org_id, Entry.posting_date <= as_of,
             Entry.correction_of.in_(frontier),
         ))).all()
         for correction in corrections:
@@ -238,7 +238,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
 
     rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
         Entry.organization_id == org_id,
-        Entry.posting_date <= last,
+        Entry.posting_date <= data.posting_date,
         Line.account_code.in_(settings.monetary_accounts),
         Line.currency != "BYN",
     ).order_by(Entry.id, Line.id))).all()
@@ -273,7 +273,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
             "amount": format(line.amount, "f"), "posting_date": entry.posting_date.isoformat(),
         })
 
-    prior_valuations = await _prior_valuations(session, org_id, last, balances, {entry.id for entry, _ in rows})
+    prior_valuations = await _prior_valuations(session, org_id, data.posting_date, balances, {entry.id for entry, _ in rows})
     posting_lines: list[LineInput] = []
     adjustments = []
     for key in sorted(balances):
@@ -313,7 +313,7 @@ async def preview(session, org_id: int, month: str, data: FxRevaluationInput) ->
     posting = PostingInput(
         source=f"accounting:fx-revaluation:{org_id}:{month}", source_version=source_version,
         operation="fx_revaluation", document_date=data.posting_date, operation_date=data.posting_date,
-        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v3",
+        posting_date=data.posting_date, policy_id=policy.id, rule_version="fx-revaluation-v4",
         explanation=f"FX revaluation for {month}: reviewed documented rates", lines=posting_lines,
         correction_of=correction_of,
     ) if posting_lines else None
