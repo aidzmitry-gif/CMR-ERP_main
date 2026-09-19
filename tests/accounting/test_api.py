@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from core.domain.models import User
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import service
 from modules.accounting.models import Account, Inbox
@@ -31,6 +32,8 @@ async def test_organization_setup_accounts_policy_and_permissions(client, db, bo
     assert (await client.put(prefix + "/members", json={"subject": "reader", "role": "reader"})).status_code == 200
     assert (await client.put(prefix + "/members", json={"subject": "reader", "role": "accountant"})).status_code == 200
     assert (await client.put(prefix + "/members", json={"subject": "reader", "role": "reader"})).status_code == 200
+    db.add(User(username="reader", full_name="Synthetic reader", role="finance", status="active"))
+    await db.commit()
     client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("reader", ["finance"])
     assert (await client.get(prefix + "/accounts?on=2026-09-01")).status_code == 200
     assert (await client.post(prefix + "/accounts", json=account)).status_code == 403

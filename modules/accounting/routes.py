@@ -13,7 +13,13 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse
 
 from core.runtime.deps import get_core, get_session
-from core.services.auth import get_current_user
+from core.services.auth import (
+    EffectiveIdentityLookupError,
+    get_current_user,
+    resolve_effective_dev_user,
+    resolve_effective_oidc_user,
+)
+from core.services.config import get_settings
 from core.services.procurement import ReceiptAccountingConfirmation, ReceiptAccountingOptions
 from modules.accounting import (
     bank_import,
@@ -203,6 +209,22 @@ async def member(request: Request, session=Depends(transaction, scope="function"
     actor = subject(user)
     org_id = int(request.path_params["org_id"])
     role = await organization_role(session, org_id, actor)
+    # Middleware identity predates a possible wait on the organization lock.
+    # Reuse the same local-status/claim policy against current persisted data.
+    from config.access import is_package_allowed
+
+    try:
+        if user.keycloak_user_id:
+            fresh = await resolve_effective_oidc_user(user, session)
+        elif get_settings().auth_mode == "dev":
+            fresh = await resolve_effective_dev_user(user, session)
+        else:
+            fresh = user
+    except EffectiveIdentityLookupError as exc:
+        raise HTTPException(403, "Current accounting access could not be verified") from exc
+    if (subject(fresh) != actor or fresh.local_status not in {None, "active"}
+            or fresh.crm_restricted or not is_package_allowed("accounting", fresh.roles)):
+        raise HTTPException(403, "Accounting access denied")
     if request.method != "GET" and role == "reader":
         raise HTTPException(403, "Read-only accounting access")
     return session, actor, role

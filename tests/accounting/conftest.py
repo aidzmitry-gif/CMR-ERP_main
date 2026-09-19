@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.db.base import Base
-from core.domain.models import Counterparty, Sku
+from core.domain.models import Counterparty, IdentityInvitationRequest, Sku, User
 from core.domain.reference import Currency
 from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, get_current_user
@@ -55,6 +55,7 @@ async def db():
     tables += [SalesFulfillmentReview.__table__, InvoiceCancellationReceipt.__table__]
     tables += [Counterparty.__table__, DealClientBinding.__table__]
     tables += [Sku.__table__]
+    tables += [User.__table__, IdentityInvitationRequest.__table__]
     tables += [BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__]
     tables += [logistics_models.ImportShipment.__table__]
     tables += [deal_demands.DealProcurementDemand.__table__, deal_demands.DealProcurementAllocation.__table__]

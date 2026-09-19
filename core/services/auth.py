@@ -169,7 +169,8 @@ async def resolve_effective_dev_user(user: CurrentUser, session: "AsyncSession")
     from core.domain.models import User
 
     try:
-        row = (await session.execute(select(User, _managed_crm_invitation()).where(User.username == user.username))).one_or_none()
+        row = (await session.execute(select(User, _managed_crm_invitation()).where(User.username == user.username)
+            .execution_options(populate_existing=True))).one_or_none()
     except Exception as exc:
         raise EffectiveIdentityLookupError("effective_identity_lookup_failed") from exc
     if row is None:
