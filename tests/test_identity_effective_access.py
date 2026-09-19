@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.domain.models import AuditLog, User
@@ -32,6 +32,29 @@ async def test_effective_identity_refreshes_a_retained_user(session, changes):
                           .execution_options(synchronize_session=False))
     assert linked.status == "active" and linked.role == "director"
     assert (await resolve_effective_oidc_user(principal, session)).roles == [GUEST]
+
+
+@pytest.mark.asyncio
+async def test_named_dev_identity_applies_persisted_scope_before_all_module_gates(api, session):
+    session.add(User(username="dev-own", full_name="Synthetic own", employee_id=654,
+                     role="sales", status="active", deal_visibility="own"))
+    await session.commit()
+    headers = {"X-User": "dev-own", "X-User-Roles": "sales"}
+    assert (await api.get('/sales/clients', headers={'X-User-Roles':'sales'})).status_code == 403
+    assert (await api.get('/sales/clients', headers=headers)).status_code == 200
+    leads = await api.get('/leads', headers=headers)
+    assert leads.status_code == 200 and leads.json() == []
+    assert leads.headers['X-CRM-Visibility'] == 'own'
+    for path in ['/leads/plan', '/service/tickets', '/system/mdm/counterparty']:
+        assert (await api.get(path, headers=headers)).status_code == 403
+    assert (await api.get('/sales/clients', headers={**headers, 'X-User-Roles':'director'})).status_code == 403
+    assert (await api.get('/sales/clients', headers={**headers, 'X-User':'unknown-dev'})).status_code == 403
+    assert (await api.get('/sales/clients', headers={'X-User':'unlinked-director', 'X-User-Roles':'director'})).status_code == 200
+    user = await session.scalar(select(User).where(User.username == 'dev-own'))
+    user.status = 'inactive'
+    await session.commit()
+    assert (await api.get('/sales/clients', headers=headers)).status_code == 403
+    assert (await api.get('/health', headers=headers)).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -261,6 +284,11 @@ async def test_own_visibility_blocks_neighbor_deal_surfaces_with_same_signed_tok
         role=role, status="active", deal_visibility="all", employee_id=100,
     )
     session.add(user)
+    from modules.leads.models import Lead
+    owned = Lead(name='Owned', owner_id=100)
+    foreign = Lead(name='Foreign', owner_id=200)
+    unassigned = Lead(name='Unassigned')
+    session.add_all([owned, foreign, unassigned])
     await session.commit()
     claimed = CurrentUser("crm-owner", [role], "kc-owner")
     client = await _effective_access_client(session, monkeypatch, claimed)
@@ -276,14 +304,26 @@ async def test_own_visibility_blocks_neighbor_deal_surfaces_with_same_signed_tok
         assert effective.roles == [role]
         assert effective.deal_visibility == "own"
         for method, path in (
-            ("GET", "/leads"), ("GET", "/leads/1"),
-            ("POST", "/leads/1/convert"),
+            ("GET", "/leads/plan"), ("GET", "/leads/managers"),
+            ("GET", "/leads/stats/sources"),
             ("GET", "/service/requests"), ("PATCH", "/service/requests/1"),
             ("GET", "/system/mdm/counterparty/1"),
             ("GET", "/system/mdm/counterparty/1/"),
         ):
             result = await client.request(method, path)
             assert result.status_code == 403, (method, path, result.text)
+        # Leads now resolve the same signed identity through their own numeric
+        # scope; neighboring APIs keep their blanket denial.
+        listing = await client.get('/leads')
+        assert listing.status_code == 200
+        assert [row['id'] for row in listing.json()] == [owned.id]
+        assert listing.headers['X-CRM-Visibility'] == 'own'
+        assert (await client.get(f'/leads/{owned.id}')).status_code == 200
+        for hidden_id in [foreign.id, unassigned.id]:
+            for method, suffix in [('GET', ''), ('GET', '/items'), ('POST', '/qualify'), ('POST', '/route'), ('POST', '/convert')]:
+                result = await client.request(method, f'/leads/{hidden_id}{suffix}')
+                expected = 403 if role == 'sales_cli' and suffix in {'/route', '/convert'} else 404
+                assert result.status_code == expected, (method, hidden_id, result.text)
         assert (await client.get("/system/access")).json()["current_roles"] == [role]
         assert (await client.get("/sales/ping")).status_code == 200
         # Shared catalog prefixes and near-matching names must not be blocked.

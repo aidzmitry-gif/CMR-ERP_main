@@ -1,17 +1,17 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("@/lib/api", () => ({ fetchDocuments: vi.fn(), createDocument: vi.fn(), decideDocument: vi.fn() }));
+vi.mock("@/lib/api", () => ({ fetchDocuments: vi.fn(), createDocumentResult: vi.fn(), decideDocument: vi.fn() }));
 vi.mock("@/components/document-versions", () => ({ DocumentVersions: () => null }));
-import { createDocument, fetchDocuments } from "@/lib/api";
+import { createDocumentResult, fetchDocuments } from "@/lib/api";
 import { DealDocuments } from "./deal-documents";
 import { result } from "@/test/invoice-issuance-fixtures";
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it("shows load failure without claiming there are no documents", async () => {
   vi.mocked(fetchDocuments).mockRejectedValue(new Error("Нет доступа"));
   render(<DealDocuments dealId="1" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить документы");
   expect(screen.queryByText("Документов пока нет")).toBeNull();
-  expect(fetchDocuments).toHaveBeenCalledWith("1", true);
+  expect(fetchDocuments).toHaveBeenCalledWith("1", { throwOnError: true });
 });
 it("labels local issued document correctly", async () => {
   vi.mocked(fetchDocuments).mockResolvedValue([result.document]);
@@ -30,9 +30,9 @@ it("does not show another deal's late document list", async () => {
 });
 
 it.each([false, true])("restores enabled invoice opener without stealing a new focus (%s)", async movedFocus => {
-  let finish!: (value: null) => void;
+  let finish!: (value: { doc: null }) => void;
   vi.mocked(fetchDocuments).mockResolvedValue([]);
-  vi.mocked(createDocument).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  vi.mocked(createDocumentResult).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   render(<><input aria-label="Другой элемент" /><DealDocuments dealId="1" /></>);
   await screen.findByText("Документов пока нет");
   const opener = screen.getByRole("button", { name: "Сформировать" });
@@ -42,7 +42,7 @@ it.each([false, true])("restores enabled invoice opener without stealing a new f
   opener.blur();
   const other = screen.getByLabelText("Другой элемент");
   if (movedFocus) other.focus();
-  await act(async () => finish(null));
+  await act(async () => finish({ doc: null }));
   expect(opener).toBeEnabled();
   expect(movedFocus ? other : opener).toHaveFocus();
 });

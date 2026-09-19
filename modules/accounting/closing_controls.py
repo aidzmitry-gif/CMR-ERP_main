@@ -73,6 +73,10 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         SourceControl.organization_id == org_id, SourceControl.month <= month, SourceControl.entry_id.is_(None),
     )) or 0
 
+    from modules.accounting.bank_import import pending_count
+
+    pending_bank = await pending_count(session, org_id, last)
+
     input_lines = await _line_ids(session, org_id, first, last, "18")
     input_registered = set()
     input_unresolved = 0
@@ -267,6 +271,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if pending_sources:
         blockers.append({"code": "unposted_source_controls", "count": int(pending_sources),
                          "message": "Есть первичные источники без бухгалтерской проводки."})
+    if pending_bank:
+        blockers.append({"code": "unposted_bank_imports", "count": int(pending_bank),
+                         "message": "Есть закреплённые за юрлицом банковские строки без проводки (включая строки без даты)."})
     if policy is None:
         blockers.append({"code": "missing_policy", "count": 1,
                          "message": "На дату месяца нет применимой версии учётной политики."})

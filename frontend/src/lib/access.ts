@@ -11,6 +11,8 @@ export const ROLE_COOKIE = "aios_role";
 export const USER_COOKIE = "aios_user";
 /** Имя стабильного dev-идентификатора, который backend использует как subject книги. */
 export const ACTOR_COOKIE = "aios_actor";
+/** Stable dev identity, separate from the display name. */
+export const LOGIN_COOKIE = "aios_username";
 /** Зарезервировано под httpOnly access token Keycloak (OIDC). */
 export const TOKEN_COOKIE = "aios_access_token";
 /** Роль по умолчанию (полный доступ) — fallback, если роль в cookie отсутствует. */

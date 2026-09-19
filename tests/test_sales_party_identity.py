@@ -134,7 +134,7 @@ async def test_new_document_rejects_unresolved_legacy_party(api, session):
     assert "по ID" in response.json()["detail"]
 
 
-async def test_invoice_rejects_ambiguous_legacy_price_history(api, session):
+async def test_invoice_requires_confirmed_price_instead_of_legacy_history(session, monkeypatch):
     first, second = Counterparty(name="Same price name"), Counterparty(name="Same price name")
     sku = Sku(code="AMBIG-PRICE", title="Item", unit="шт")
     session.add_all([first, second, sku])
@@ -146,13 +146,16 @@ async def test_invoice_rejects_ambiguous_legacy_price_history(api, session):
                      PriceQuote(sku_code=sku.code, counterparty=first.name, price=100)])
     await session.commit()
     from modules.sales.documents import capture
+    from modules.sales import routes
+    monkeypatch.setattr(routes, '_seller_with_facsimile', lambda core, branding: {})
     doc = DealDocument(deal_id=deal.id, kind="invoice", number="LEGACY-AMBIG", amount=100)
     session.add(doc)
     await session.flush()
     with pytest.raises(HTTPException) as conflict:
         await capture(session, None, doc)
-    assert conflict.value.status_code == 409
-    assert "История цен неоднозначна" in conflict.value.detail
+    assert conflict.value.status_code == 422
+    assert "подтвердите" in conflict.value.detail
+    assert doc.snapshot_json is None
 
 
 @pytest.mark.parametrize("patch", [{"counterparty_id": None}, {"counterparty": ""}, {"counterparty": "   "}])

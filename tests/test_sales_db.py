@@ -298,6 +298,57 @@ async def test_deal_contacts(api):
     assert len(primary) == 1 and primary[0]["id"] == c2["id"]
 
 
+async def test_ambiguous_counterparty_name_never_selects_or_changes_arbitrary_record(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import Contact, Counterparty, User
+
+    session.add(User(username="duplicate-owner", full_name="Duplicate Owner", employee_id=301,
+                     department="Продажи", role="sales", status="active", deal_visibility="own"))
+    first = Counterparty(name="Same client", unp="111111111")
+    second = Counterparty(name="Same client", unp="222222222")
+    session.add_all([first, second])
+    await session.flush()
+    primary = Contact(counterparty_id=first.id, full_name="Private first", is_primary=True)
+    candidate = Contact(counterparty_id=first.id, full_name="Private second")
+    foreign = Contact(counterparty_id=second.id, full_name="Other client", is_primary=True)
+    session.add_all([primary, candidate, foreign])
+    await session.commit()
+    rejected = await api.post("/sales/deals", json={
+        "number": "CP-AMBIGUOUS", "title": "Ambiguous client", "counterparty": "Same client",
+        "owner_id": 301,
+    })
+    assert rejected.status_code == 409, rejected.text
+    from modules.sales.models import Deal
+    assert (await session.scalar(select(Deal.id).where(Deal.number == "CP-AMBIGUOUS"))) is None
+    # Historical unresolved row: names alone must never bind shared MDM records.
+    legacy = Deal(number="CP-AMBIGUOUS", title="Ambiguous client", counterparty="Same client", owner_id=301)
+    session.add(legacy)
+    await session.commit()
+    headers = {"X-User": "duplicate-owner", "X-User-Roles": "sales"}
+    detail = await api.get(f"/sales/deals/{legacy.id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["counterparty_ref"] is None
+    contacts = await api.get(f"/sales/deals/{legacy.id}/contacts", headers=headers)
+    assert contacts.status_code == 200 and contacts.json() == []
+    added = await api.post(f"/sales/deals/{legacy.id}/contacts",
+                           json={"full_name": "New", "is_primary": True}, headers=headers)
+    assert added.status_code == 409, added.text
+    changed = await api.patch(f"/sales/contacts/{candidate.id}/primary", headers=headers)
+    assert changed.status_code == 404, changed.text
+    await session.refresh(legacy)
+    assert legacy.counterparty_id is None
+
+    for contact, is_primary in ((primary, True), (candidate, False), (foreign, True)):
+        await session.refresh(contact)
+        assert contact.is_primary == is_primary
+    assert len((await session.execute(select(Contact))).scalars().all()) == 3
+    assert len((await session.execute(select(Counterparty))).scalars().all()) == 2
+    await session.refresh(first)
+    await session.refresh(second)
+    assert (first.unp, second.unp) == ("111111111", "222222222")
+
+
 async def test_skus_for_picker_excludes_demo(session, api):
     from core.domain.models import Sku
 

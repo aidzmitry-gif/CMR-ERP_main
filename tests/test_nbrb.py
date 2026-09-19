@@ -191,7 +191,10 @@ async def test_guest_cannot_trigger_fetch(api):
 
 async def test_valid_employee_can_read_shared_quote(api, session):
     await seed(session)
-    result = await api.get(f"/system/fx/USD?on={DAY}", headers={"X-User-Roles": "sales_manager"})
+    from core.domain.models import User
+    session.add(User(username="fx-reader", full_name="FX reader", role="sales_manager", status="active"))
+    await session.commit()
+    result = await api.get(f"/system/fx/USD?on={DAY}", headers={"X-User": "fx-reader", "X-User-Roles": "sales_manager"})
     assert result.status_code == 200, result.text
 
 

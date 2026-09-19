@@ -22,18 +22,18 @@ function requisiteText(value: unknown): string {
   if (typeof value === "boolean") return value ? "Да" : "Нет";
   return String(value);
 }
-type Props = { dealId: string; documentId?: number; onClose: (result: InvoiceResult | null) => void };
+type Props = { dealId: string; documentId?: number; initialMode?: "stock" | "on_order"; onClose: (result: InvoiceResult | null) => void };
 
-export function InvoiceIssuanceDialog({ dealId, documentId, onClose }: Props) {
-  return <InvoiceDialogForScope key={`${dealId}:${documentId ?? "new"}`} dealId={dealId} documentId={documentId} onClose={onClose} />;
+export function InvoiceIssuanceDialog({ dealId, documentId, initialMode = "stock", onClose }: Props) {
+  return <InvoiceDialogForScope key={`${dealId}:${documentId ?? "new"}`} dealId={dealId} documentId={documentId} initialMode={initialMode} onClose={onClose} />;
 }
 
-function InvoiceDialogForScope({ dealId, documentId, onClose }: Props) {
+function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onClose }: Props) {
   const [organizations, setOrganizations] = useState<RegisterOrganization[]>([]);
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [org, setOrg] = useState("");
   const [preparedOrg, setPreparedOrg] = useState("");
-  const [mode, setMode] = useState<"stock" | "on_order">("stock");
+  const [mode, setMode] = useState<"stock" | "on_order">(initialMode);
   const [currency, setCurrency] = useState("");
   const [documentDate, setDocumentDate] = useState("");
   const [validUntil, setValidUntil] = useState("");
@@ -197,14 +197,14 @@ function InvoiceDialogForScope({ dealId, documentId, onClose }: Props) {
 }
 
 let active: { key: string; promise: Promise<InvoiceResult | null> } | null = null;
-export function openInvoiceIssuance(dealId: string, documentId?: number): Promise<InvoiceResult | null> {
-  const key = `${dealId}:${documentId ?? "new"}`;
+export function openInvoiceIssuance(dealId: string, documentId?: number, initialMode: "stock" | "on_order" = "stock"): Promise<InvoiceResult | null> {
+  const key = `${dealId}:${documentId ?? "new"}:${initialMode}`;
   if (active) return active.key === key ? active.promise : Promise.reject(new InvoiceError("Завершите открытый диалог выпуска другой сделки."));
   const host = document.createElement("div"); document.body.appendChild(host);
   const root = createRoot(host), priorFocus = document.activeElement, overflow = document.body.style.overflow;
   document.body.style.overflow = "hidden";
   const promise = new Promise<InvoiceResult | null>(resolve => {
-    root.render(<InvoiceIssuanceDialog dealId={dealId} documentId={documentId} onClose={result => {
+    root.render(<InvoiceIssuanceDialog dealId={dealId} documentId={documentId} initialMode={initialMode} onClose={result => {
       queueMicrotask(() => { root.unmount(); host.remove(); document.body.style.overflow = overflow; if (priorFocus instanceof HTMLElement) priorFocus.focus(); active = null; resolve(result); });
     }} />);
   });

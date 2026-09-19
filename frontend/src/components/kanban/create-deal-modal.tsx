@@ -23,6 +23,7 @@ export function CreateDealModal({
   onClose,
   onCreate,
   canAssignOwner = false,
+  client,
 }: {
   stages: Stage[];
   defaultStage: string;
@@ -30,10 +31,12 @@ export function CreateDealModal({
   onCreate: (input: DealInput) => Promise<boolean>;
   /** Только admin/director/commercial: право подтверждает сервер, UI лишь не показывает реестр остальным. */
   canAssignOwner?: boolean;
+  client?: { id: number; name: string; owner_id: number };
 }) {
   const [form, setForm] = useState<DealInput>({
     number: "",
-    counterparty: "",
+    counterparty: client?.name ?? "",
+    ...(client ? { crm_client_id: client.id, owner_id: client.owner_id } : {}),
     title: "",
     amount: 0,
     priority: "Средний",
@@ -117,7 +120,7 @@ export function CreateDealModal({
           <Field label="Номер">
             <input required value={form.number} onChange={(e) => set("number", e.target.value)} placeholder="CRM-2024-0200" className={INPUT} />
           </Field>
-          <Field label="УНП (поиск в ГРП МНС)">
+          {!client && <Field label="УНП (поиск в ГРП МНС)">
             <div className="flex gap-2">
               <input
                 value={unp}
@@ -139,10 +142,10 @@ export function CreateDealModal({
                 <Search size={15} /> {looking ? "..." : "Найти"}
               </button>
             </div>
-          </Field>
-          {lookupMsg && <p role="status" className="-mt-1 text-xs text-muted">{lookupMsg}</p>}
+          </Field>}
+          {!client && lookupMsg && <p role="status" className="-mt-1 text-xs text-muted">{lookupMsg}</p>}
           <Field label="Компания">
-            <input required value={form.counterparty} onChange={(e) => {
+            <input required disabled={Boolean(client)} value={form.counterparty} onChange={(e) => {
               lookupId.current += 1;
               setLooking(false);
               set("counterparty", e.target.value);
@@ -152,7 +155,7 @@ export function CreateDealModal({
             <input required value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Поставка ..." className={INPUT} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Сумма, ₽">
+            <Field label="Сумма, BYN">
               <input type="number" min={0} value={form.amount} onChange={(e) => set("amount", Number(e.target.value))} className={INPUT} />
             </Field>
             <Field label="Приоритет">
@@ -165,7 +168,8 @@ export function CreateDealModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Стадия">
-              <select value={form.stage} onChange={(e) => set("stage", e.target.value)} className={INPUT}>
+              <select disabled={Boolean(client)} value={form.stage} onChange={(e) => set("stage", e.target.value)} className={INPUT}>
+                {client && <option value="new">Новая</option>}
                 {stages.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.title}
@@ -193,7 +197,7 @@ export function CreateDealModal({
             ) : (
               <Field label="Ответственный">
                 <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-muted">
-                  Будет назначен автоматически после создания
+                  {client ? "Ответственный клиента" : "Будет назначен автоматически после создания"}
                 </p>
               </Field>
             )}

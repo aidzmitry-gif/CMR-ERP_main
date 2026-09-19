@@ -362,7 +362,10 @@ async def bind_source(org_id: int, data: SourceBindingInput, ctx=Depends(member)
 
         if data.ownership != "own":
             raise HTTPException(422, "A bank transaction can only be bound as an own-company source")
-        if await ctx[0].get(BankTransaction, data.source_id) is None:
+        bank_source = await ctx[0].scalar(select(BankTransaction).where(
+            BankTransaction.id == data.source_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if bank_source is None:
             raise HTTPException(404, "Imported bank transaction was not found; no implicit company assignment is allowed")
     previous = await ctx[0].scalar(select(SourceBinding).where(
         SourceBinding.source_type == data.source_type, SourceBinding.source_id == data.source_id,
@@ -371,6 +374,14 @@ async def bind_source(org_id: int, data: SourceBindingInput, ctx=Depends(member)
         if previous.organization_id == org_id and previous.ownership == data.ownership and previous.evidence == data.evidence:
             return serialize(previous)
         raise HTTPException(409, "Source ownership has already been recorded; review the existing decision")
+    if data.source_type == "finance_bank_transaction":
+        closed_periods = select(Period.id).where(
+            Period.organization_id == org_id, Period.closed.is_(True),
+        )
+        if bank_source.occurred_on is not None:
+            closed_periods = closed_periods.where(Period.month >= bank_source.occurred_on.strftime("%Y-%m"))
+        if await ctx[0].scalar(closed_periods.limit(1)) is not None:
+            raise HTTPException(409, "Bank source affects a closed period; review reopening before binding")
     row = SourceBinding(organization_id=org_id, actor=ctx[1], **data.model_dump())
     ctx[0].add(row)
     await ctx[0].flush()
@@ -434,7 +445,7 @@ async def bank_import_register(org_id: int, ctx=Depends(member)):
 
 @router.get("/organizations/{org_id}/bank-import/candidates")
 async def bank_import_candidates(org_id: int, ctx=Depends(member)):
-    return await bank_import.list_candidates(ctx[0], org_id)
+    return await bank_import.list_candidates(ctx[0], org_id, include_unbound=ctx[2] == "chief")
 
 
 @router.post("/organizations/{org_id}/settlement-offsets/preview")

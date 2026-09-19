@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, OutboxEvent, Sku, User
+from modules.integrations.models import StockItem
 from modules.sales.events import on_payment_paid
 from modules.sales.models import (
     CompanyBranding,
@@ -24,11 +25,12 @@ async def make_invoice(api, session):
     session.add_all([sku, cp])
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('100')))
+    session.add(StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0))
     await session.commit()
     deal = (await api.post('/sales/deals', json={
         'number': 'ORIG', 'title': 'Original deal', 'counterparty': cp.name, 'amount': 200,
     })).json()
-    item = (await api.post(f"/sales/deals/{deal['id']}/items", json={'sku_id': sku.id, 'qty': 2})).json()
+    item = (await api.post(f"/sales/deals/{deal['id']}/items", json={'sku_id': sku.id, 'qty': 2, 'unit_price': '100.00'})).json()
     # Historical persisted fixture: new invoice API deliberately no longer accepts
     # this legacy payload. These tests exercise already-saved originals/consumers.
     from modules.sales import documents
@@ -137,6 +139,7 @@ async def test_revision_draft_issue_history_and_payment_identity(api, session):
     assert changed_key.status_code == 409
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('150')))
     await session.commit()
+    assert (await api.patch(f"/sales/deal-items/{item['id']}", json={'unit_price': '150.00'})).status_code == 200
     issued = await api.post(f"/sales/documents/{new['id']}/issue")
     # New replacement issue requires ERP payload and an implemented exact release.
     assert issued.status_code == 422, issued.text
@@ -279,7 +282,7 @@ async def test_rejected_replacement_does_not_leave_two_active_contracts(api, ses
 
 
 async def test_draft_preview_does_not_freeze_live_data(api, session):
-    deal, old, sku, cp, _ = await make_invoice(api, session)
+    deal, old, sku, cp, item = await make_invoice(api, session)
     new = (await api.post(f"/sales/documents/{old['id']}/revision", json={'reason': 'Preview', 'request_key': 'preview-revision'})).json()
     before = await api.get(f"/sales/documents/{new['id']}/preview")
     assert before.status_code == 409, before.text
@@ -287,6 +290,7 @@ async def test_draft_preview_does_not_freeze_live_data(api, session):
     assert (await session.get(DealDocument, new['id'])).original_html is None
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('175')))
     await session.commit()
+    assert (await api.patch(f"/sales/deal-items/{item['id']}", json={'unit_price': '175.00'})).status_code == 200
     after = await api.get(f"/sales/documents/{new['id']}/preview")
     assert after.status_code == 409
     assert (await session.get(DealDocument, new['id'])).original_html is None

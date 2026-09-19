@@ -77,12 +77,7 @@ const CONTRACT_TEMPLATE_NEXT_STEP = "Проверить согласование
  *  юрист должен успеть вычитать риски/протокол разногласий до подписания, контроль +2 дня. */
 const CONTRACT_CLIENT_NEXT_STEP = "Вычитать договор клиента: риски, протокол разногласий";
 
-/** Слайс 8 (C): авто-шаг после отправки сообщения клиенту — сообщение слабее счёта/договора,
- *  ставится ТОЛЬКО когда у сделки ещё не было своего шага (см. sendClientMessage). */
-const MESSAGE_WAIT_REPLY_STEP = "Дождаться ответа клиента";
-
-/** Слайс 9 (B): авто-шаг после запроса одобрения РОП на скидку — как сообщение клиенту
- *  (MESSAGE_WAIT_REPLY_STEP), НЕ перетирает уже назначенный шаг (см. requestDiscountApproval). */
+/** Авто-шаг после запроса одобрения РОП на скидку сохраняет уже назначенный шаг. */
 const DISCOUNT_APPROVAL_NEXT_STEP = "Дождаться одобрения РОП";
 
 /** Слайс 8 (C): каналы секции «Написать клиенту» — без телефона (звонок — отдельное окно
@@ -131,7 +126,6 @@ export function DealDrawerPreview({
   onWin,
   onLose,
   onCall,
-  onMessageSent,
   now,
   reasonByCode,
   approvals,
@@ -175,6 +169,8 @@ export function DealDrawerPreview({
   const [taskDraft, setTaskDraft] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
   const [packageUrl, setPackageUrl] = useState<string | null>(null);
   const [docMsg, setDocMsg] = useState<string | null>(null);
   // Слайс 6 (B): последний счёт/договор — компактный блок «Документы».
@@ -198,6 +194,7 @@ export function DealDrawerPreview({
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgChannel, setMsgChannel] = useState("whatsapp");
   const [msgText, setMsgText] = useState("");
+  const messageRequest = useRef<{ fingerprint: string; key: string; pending: boolean } | null>(null);
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
   // FIX-R6: «живой» id открытой сделки для async-колбэков документов (issueInvoice/
@@ -209,11 +206,15 @@ export function DealDrawerPreview({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     dealIdRef.current = deal?.id;
+    if (messageRequest.current?.pending) setDocBusy(false);
+    messageRequest.current = null;
     setStepDraft(deal?.nextStep ?? "");
     setStepEditing(false);
     setTaskDraft("");
     setPickerOpen(false);
     setDocMsg(null);
+    setOnOrder(false);
+    invoiceRequestKey.current = null;
     setPackageUrl(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
@@ -352,7 +353,11 @@ export function DealDrawerPreview({
     const win = window.open("about:blank", "_blank");
     setDocBusy(true);
     try {
-      const { ok, message, renderUrl } = await issueDocument(dealId, "invoice");
+      const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
+      const { ok, message, renderUrl } = requestKey
+        ? await issueDocument(dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
+        : await issueDocument(dealId, "invoice");
+      if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
       if (win && ok && renderUrl) win.location.href = renderUrl;
       else win?.close();
       if (ok) {
@@ -468,40 +473,30 @@ export function DealDrawerPreview({
     else setDocMsg("AI-слой выключен — черновик недоступен");
   }
 
-  /** Отправить сообщение клиенту по выбранному каналу. Авто-шаг «Дождаться ответа клиента»
-   *  (+2 дн) — ТОЛЬКО если у сделки сейчас нет своего шага (ни nextStep, ни todo): сообщение —
-   *  более слабое событие, чем счёт/договор (issueInvoice/prepareContractFromTemplate перетирают
-   *  шаг всегда) — уже назначенный менеджером живой шаг не трогаем. */
+  /** Manual history is not delivery and does not acknowledge unread customer messages. */
   async function sendClientMessage() {
     if (!deal) return;
     const text = msgText.trim();
     if (!text) return;
     const dealId = deal.id;
     const channel = msgChannel;
-    const hadNoStep = !deal.nextStep && !deal.todo;
+    const fingerprint = JSON.stringify([dealId, channel, text]);
+    if (messageRequest.current?.pending) return;
+    if (messageRequest.current?.fingerprint !== fingerprint) messageRequest.current = { fingerprint, key: crypto.randomUUID(), pending: false };
+    const operation = messageRequest.current;
+    operation.pending = true;
     setDocBusy(true);
-    const ok = await sendMessage(dealId, channel, text);
+    const ok = await sendMessage(dealId, channel, text, operation.key);
+    operation.pending = false;
+    if (dealIdRef.current !== dealId || messageRequest.current !== operation) return;
     setDocBusy(false);
-    if (ok && hadNoStep) {
-      const nextStepAt = presetDateISO(2, Date.now());
-      onUpdateFields(dealId, { next_step: MESSAGE_WAIT_REPLY_STEP, next_step_at: nextStepAt });
-    }
-    // Цикл 17: сообщение ушло клиенту — гасим бейдж «клиент ждёт» (messages/read + локальный
-    // сброс inboundSignals в deals-workspace.tsx). Не гейтим hadNoStep — гашение относится к
-    // входящим от клиента, не к тому, был ли у сделки следующий шаг.
-    if (ok) onMessageSent?.(dealId);
-    // FIX-R6: тот же гард от гонки со сменой сделки в drawer'е, что и в issueInvoice.
-    if (dealIdRef.current !== dealId) return;
     const channelLabel = MESSAGE_CHANNELS.find((c) => c.key === channel)?.label ?? channel;
     if (ok) {
+      messageRequest.current = null;
       setMsgText("");
-      setDocMsg(
-        hadNoStep
-          ? `✅ Отправлено (${channelLabel}) · Шаг: Дождаться ответа (2 дн)`
-          : `✅ Отправлено (${channelLabel})`,
-      );
+      setDocMsg(`✅ Запись сохранена (${channelLabel}). Клиенту не отправлено.`);
     } else {
-      setDocMsg("⚠️ Не отправилось");
+      setDocMsg("⚠️ Не удалось сохранить запись. Повторите попытку.");
     }
   }
 
@@ -548,8 +543,8 @@ export function DealDrawerPreview({
    *  (addDealItem + createPriceQuote), которой пользуются commitToDeal (product-picker.tsx) и
    *  commitLeadItemsToDeal (api.ts) — не изобретаем новый способ добавить позиции в сделку.
    *  Не заводит СВОЙ picker/остатки (useProductPicker(pickerOpen, …) тут гейтит склад активным
-   *  открытым пикером) — DealItemFull уже несёт `last_price` прошлой цены клиенту, этого
-   *  достаточно для котировки. Честная деградация: прошлых заказов нет → сообщение, не падаем. */
+   *  открытым пикером) — переносим `unit_price` самой прошлой строки, а не историю last/min.
+   *  Честная деградация: прошлых заказов нет → сообщение, не падаем. */
   async function repeatOrder() {
     if (!deal) return;
     const dealId = deal.id;
@@ -568,9 +563,9 @@ export function DealDrawerPreview({
       setDocBusy(false);
       return;
     }
-    const results = await Promise.all(items.map((it) => addDealItem(dealId, it.sku_id, it.qty)));
+    const results = await Promise.all(items.map((it) => addDealItem(dealId, it.sku_id, it.qty, it.unit_price ?? null)));
     await Promise.all(
-      items.map((it) => (it.last_price ? createPriceQuote(it.code, counterparty, it.last_price) : Promise.resolve(true))),
+      items.map((it, index) => (results[index] && it.unit_price != null ? createPriceQuote(it.code, counterparty, it.unit_price) : Promise.resolve(true))),
     );
     setDocBusy(false);
     if (dealIdRef.current !== dealId) return;
@@ -973,6 +968,11 @@ export function DealDrawerPreview({
                     </div>
                   </section>
                 )}
+                <label className="mt-2 flex items-center gap-2 text-[12px] text-ink">
+                  <input type="checkbox" checked={onOrder} disabled={docBusy}
+                    onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }} />
+                  Под заказ — без резерва
+                </label>
                 {docMsg && <div className="mt-1.5 text-[11.5px] text-muted">{docMsg}</div>}
 
                 <DocumentVersions docs={docs} refresh={async () => { if (deal) setDocs(await fetchDocuments(deal.id)); }} />
@@ -1002,7 +1002,12 @@ export function DealDrawerPreview({
                                 {invoiceExpiry.text}
                               </span>
                             )}
-                            {latestInvoice.reserve_status === "reserved" && (
+                            {latestInvoice.reserve_mode === "on_order" && (
+                              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                Под заказ — товар не зарезервирован
+                              </span>
+                            )}
+                            {latestInvoice.reserve_mode !== "on_order" && latestInvoice.reserve_status === "reserved" && (
                               <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:bg-sky-500/15 dark:text-sky-300">
                                 резерв
                               </span>
@@ -1090,21 +1095,23 @@ export function DealDrawerPreview({
                     aria-expanded={msgOpen}
                     icon={<MessageSquare size={15} />}
                   >
-                    Написать клиенту
+                    Запись в историю
                     <ChevronDown size={13} className={clsx("transition-transform", msgOpen && "rotate-180")} />
                   </Button>
 
                   {msgOpen && (
                     <section
                       role="group"
-                      aria-label="Написать клиенту"
+                      aria-label="Запись в историю"
                       className="space-y-2.5 rounded-xl border border-line bg-sunken/60 p-2.5"
                     >
+                      <p className="text-xs text-muted">Запись в историю общения. Клиенту сообщение не отправляется.</p>
                       <div className="flex gap-1.5">
                         {MESSAGE_CHANNELS.map((c) => (
                           <button
                             key={c.key}
                             type="button"
+                            disabled={docBusy}
                             onClick={() => setMsgChannel(c.key)}
                             aria-pressed={msgChannel === c.key}
                             className={clsx(
@@ -1123,6 +1130,7 @@ export function DealDrawerPreview({
                           <button
                             key={t.label}
                             type="button"
+                            disabled={docBusy}
                             onClick={() => setMsgText(t.text)}
                             className="rounded-md border border-line-strong bg-surface px-2 py-1 text-[12px] font-medium text-ink hover:bg-sunken"
                           >
@@ -1131,6 +1139,7 @@ export function DealDrawerPreview({
                         ))}
                       </div>
                       <textarea
+                        disabled={docBusy}
                         value={msgText}
                         onChange={(e) => setMsgText(e.target.value)}
                         placeholder="Текст сообщения клиенту…"
@@ -1154,7 +1163,7 @@ export function DealDrawerPreview({
                           onClick={() => void sendClientMessage()}
                           disabled={docBusy || !msgText.trim()}
                         >
-                          Отправить
+                          Сохранить запись
                         </Button>
                       </div>
                     </section>

@@ -339,7 +339,13 @@ async def pg_factory():
             def upgrade(connection):
                 from sqlalchemy import MetaData
 
-                from core.domain.models import AuditLog, Counterparty, OutboxEvent
+                from core.domain.models import (
+                    AuditLog,
+                    Counterparty,
+                    IdentityInvitationRequest,
+                    OutboxEvent,
+                    User,
+                )
                 from modules.logistics.models import CarrierRfq, ImportShipment, Shipment
                 from modules.office.models import OfficeDoc
                 from modules.procurement.models import (
@@ -349,6 +355,8 @@ async def pg_factory():
                 )
                 from modules.production.models import ProductionOrder
                 from modules.sales.models import (
+                    CrmClient,
+                    CrmClientContact,
                     Deal,
                     DealDocument,
                     DealStageEvent,
@@ -376,13 +384,30 @@ async def pg_factory():
                                 copied._columns.remove(copied.c[name])
                 connection.execute(text("CREATE SCHEMA wms"))
                 baseline.create_all(connection)
+                User.__table__.create(connection)
+                IdentityInvitationRequest.__table__.create(connection)
+                Counterparty.__table__.create(connection)
                 connection.execute(text("CREATE SCHEMA sales"))
+                CrmClient.__table__.create(connection)
+                CrmClientContact.__table__.create(connection)
                 Deal.__table__.create(connection)
                 DealDocument.__table__.create(connection)
                 Stage.__table__.create(connection)
                 DealStageEvent.__table__.create(connection)
                 LossReason.__table__.create(connection)
-                Counterparty.__table__.create(connection)
+
+                # Bank-source completeness is part of month closing; these
+                # existing finance tables precede the accounting migration.
+                from modules.finance.models import (
+                    BankAccount,
+                    BankTransaction,
+                    Payment,
+                    PaymentAllocation,
+                )
+
+                connection.execute(text("CREATE SCHEMA finance"))
+                for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
+                    table.create(connection)
 
                 connection.execute(text("CREATE SCHEMA logistics"))
                 Shipment.__table__.create(connection)

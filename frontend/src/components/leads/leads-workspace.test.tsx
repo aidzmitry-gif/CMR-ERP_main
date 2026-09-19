@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const refreshPage = vi.hoisted(() => vi.fn());
 
 // next/link → простая <a> в jsdom; API модуля — мок (компонент тестируем изолированно)
 vi.mock("next/link", () => ({
@@ -9,7 +10,7 @@ vi.mock("next/link", () => ({
 }));
 // next/navigation.useRouter — нужен для router.push в двойном клике по лиду (drawer-pattern).
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: refreshPage, replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("@/lib/api", () => ({
   createLead: vi.fn(),
@@ -504,7 +505,7 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByText(/2 поз\./)).toBeInTheDocument();
   });
 
-  it("Цикл 3: цепочка «В сделку + счёт» зовёт convert → перенос позиций → счёт по порядку", async () => {
+  it("цепочка выставляет счёт после серверной конвертации без повторной отправки позиций", async () => {
     (api.fetchLeadItems as ReturnType<typeof vi.fn>).mockResolvedValue([
       { skuId: 7, skuCode: "6СТ-190", name: "АКБ 190", qty: 2, price: 300, discountPct: 0 },
     ]);
@@ -528,17 +529,11 @@ describe("LeadsWorkspace", () => {
 
     await waitFor(() => expect(api.issueDocument).toHaveBeenCalledWith("42", "invoice"));
     expect(api.convertLead).toHaveBeenCalledWith(1);
-    expect(api.commitLeadItemsToDeal).toHaveBeenCalledWith(
-      "42",
-      "ООО Тест",
-      expect.arrayContaining([expect.objectContaining({ skuId: 7, qty: 2 })]),
-    );
-    // порядок шагов: convert → позиции → счёт
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+    // Сервер уже перенёс позиции: convert → счёт.
     const convertOrder = (api.convertLead as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-    const commitOrder = (api.commitLeadItemsToDeal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
     const invoiceOrder = (api.issueDocument as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-    expect(convertOrder).toBeLessThan(commitOrder);
-    expect(commitOrder).toBeLessThan(invoiceOrder);
+    expect(convertOrder).toBeLessThan(invoiceOrder);
 
     // после успеха лид помечен converted → в футере ссылка на сделку
     expect(await screen.findByRole("link", { name: /Открыть сделку/ })).toHaveAttribute(
@@ -623,7 +618,7 @@ describe("LeadsWorkspace", () => {
     expect(screen.getByText(/1 висят >24ч/)).toBeInTheDocument();
   });
 
-  it("Цикл 14: «В сделку» с карточки переносит позиции КП в созданную сделку", async () => {
+  it("«В сделку» с карточки не удваивает серверные позиции КП", async () => {
     (api.convertLead as ReturnType<typeof vi.fn>).mockResolvedValue({
       lead_id: 1,
       deal_id: 42,
@@ -649,13 +644,46 @@ describe("LeadsWorkspace", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "⚡ В сделку" }));
-    await waitFor(() =>
-      expect(api.commitLeadItemsToDeal).toHaveBeenCalledWith(
-        "42",
-        "ООО Тест",
-        expect.arrayContaining([expect.objectContaining({ skuId: 7, qty: 2 })]),
-      ),
-    );
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1));
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+    expect(api.fetchLeadItems).not.toHaveBeenCalled();
+  });
+
+  it("ожидающая конвертация проверяется чтением и не отправляет товары повторно", async () => {
+    vi.mocked(api.convertLead).mockResolvedValue({ lead_id: 1, status: "converted", deal_id: 42 });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, status: "converted", itemsCount: 1 }]} />);
+    await openPreview(1);
+    fireEvent.click(screen.getByRole("button", { name: "Проверить создание сделки" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1, true));
+    expect(await screen.findByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/42");
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+  });
+
+  it("повторная проверка не сбрасывает возраст зависшей конвертации", async () => {
+    vi.mocked(api.convertLead).mockResolvedValue({ lead_id: 1, status: "converted" });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, status: "converted", convertedAt: isoMinutesAgo(15) }]} />);
+    await openPreview(1);
+    fireEvent.click(screen.getByRole("button", { name: "Проверить создание сделки" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenCalledWith(1, true));
+    expect(await screen.findByText(/Создание сделки ещё выполняется/)).toBeInTheDocument();
+    expect(screen.getByText("⚠ сделка не создана")).toBeInTheDocument();
+  });
+
+  it("ожидание в цепочке сохраняет converted после закрытия и открытия карточки", async () => {
+    vi.mocked(api.fetchLeadItems).mockResolvedValue([{ skuId: 7, skuCode: "QA", name: "Товар", qty: 2, price: 100, discountPct: 0 }]);
+    vi.mocked(api.convertLead).mockResolvedValueOnce({ lead_id: 1, status: "converted" })
+      .mockResolvedValueOnce({ lead_id: 1, status: "converted", deal_id: 42 });
+    render(<LeadsWorkspace initialLeads={[{ ...lead, id: 1, status: "routed", itemsCount: 1 }]} />);
+    await openPreview(1);
+    fireEvent.click(await screen.findByRole("button", { name: /В сделку \+ счёт/ }));
+    await screen.findByText(/Создание сделки ещё выполняется/);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть превью" }));
+    await openPreview(1);
+    fireEvent.click(screen.getByRole("button", { name: "Проверить создание сделки" }));
+    await waitFor(() => expect(api.convertLead).toHaveBeenNthCalledWith(2, 1, true));
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+    expect(api.issueDocument).not.toHaveBeenCalled();
+    expect(await screen.findByRole("link", { name: /Открыть сделку/ })).toHaveAttribute("href", "/crm/deals/42");
   });
 
   it("Цикл 14: конвертация лида без КП не дёргает перенос позиций", async () => {
@@ -802,11 +830,18 @@ describe("LeadsWorkspace", () => {
   });
 
   it("ошибка загрузки лидов — сообщение о сбое сети, а не «лидов нет»", () => {
-    render(<LeadsWorkspace initialLeads={[]} initialLoadState="error" />);
+    const view = render(<LeadsWorkspace initialLeads={[]} initialLoadState="error" />);
     expect(
       screen.getByText(/Не удалось загрузить лиды — проверьте связь с сервером/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Лидов пока нет/)).not.toBeInTheDocument();
+    expect(api.fetchLeadPlan).not.toHaveBeenCalled();
+    expect(screen.getByText("Повторить загрузку лидов")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Повторить загрузку лидов"));
+    expect(refreshPage).toHaveBeenCalledTimes(1);
+    view.rerender(<LeadsWorkspace initialLeads={[]} initialLoadState="ok" ownOnly />);
+    expect(screen.getByText("Мои лиды")).toBeInTheDocument();
+    expect(api.fetchLeadPlan).not.toHaveBeenCalled();
   });
 
   it("«Передачи продавцам» — пусто, когда за 30 дней никому не передавали", async () => {

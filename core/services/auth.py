@@ -147,6 +147,44 @@ def _roles_from_header(request: Request) -> CurrentUser:
     return CurrentUser(username=username, roles=roles or [GUEST])
 
 
+def _managed_crm_invitation():
+    from sqlalchemy import select
+
+    from core.domain.models import IdentityInvitationRequest, User
+
+    return select(IdentityInvitationRequest.id).where(
+        IdentityInvitationRequest.employee_id == User.employee_id,
+        IdentityInvitationRequest.user_id == User.id,
+        IdentityInvitationRequest.status == "sent",
+        IdentityInvitationRequest.department == "Продажи",
+        IdentityInvitationRequest.role.in_(["sales", "sales_head", "sales_cli"]),
+    ).exists()
+
+
+async def resolve_effective_dev_user(user: CurrentUser, session: "AsyncSession") -> CurrentUser:
+    """Apply persisted scope/status to a named dev user before any module gate."""
+    from sqlalchemy import select
+
+    from config.access import ONBOARDING_ROLE, is_super
+    from core.domain.models import User
+
+    try:
+        row = (await session.execute(select(User, _managed_crm_invitation()).where(User.username == user.username))).one_or_none()
+    except Exception as exc:
+        raise EffectiveIdentityLookupError("effective_identity_lookup_failed") from exc
+    if row is None:
+        return user if is_super(user.roles) else CurrentUser(user.username, [GUEST])
+    linked, managed_crm = row
+    role = linked.role if linked.status == "active" and linked.role in user.roles else GUEST
+    if linked.status == "onboarding" or ONBOARDING_ROLE in user.roles:
+        role = ONBOARDING_ROLE
+    return CurrentUser(user.username, [role], local_status=linked.status or "unknown",
+                       deal_visibility=linked.deal_visibility,
+                       crm_restricted=(managed_crm or (linked.expected_department == "Продажи"
+                           and linked.expected_role in {"sales", "sales_head", "sales_cli"}))
+                           and linked.role in {"sales", "sales_head", "sales_cli"})
+
+
 async def resolve_effective_oidc_user(
     user: CurrentUser, session: "AsyncSession"
 ) -> CurrentUser:
@@ -164,18 +202,11 @@ async def resolve_effective_oidc_user(
         from sqlalchemy import func, select
 
         from config.access import ONBOARDING_ROLE
-        from core.domain.models import AuditLog, IdentityInvitationRequest, User
+        from core.domain.models import AuditLog, User
 
-        managed_crm_invitation = select(IdentityInvitationRequest.id).where(
-            IdentityInvitationRequest.employee_id == User.employee_id,
-            IdentityInvitationRequest.user_id == User.id,
-            IdentityInvitationRequest.status == "sent",
-            IdentityInvitationRequest.department == "Продажи",
-            IdentityInvitationRequest.role.in_(["sales", "sales_head", "sales_cli"]),
-        ).exists()
         row = (
             await session.execute(
-                select(User, managed_crm_invitation).where(User.keycloak_user_id == user.keycloak_user_id)
+                select(User, _managed_crm_invitation()).where(User.keycloak_user_id == user.keycloak_user_id)
                 .execution_options(populate_existing=True)
             )
         ).one_or_none()

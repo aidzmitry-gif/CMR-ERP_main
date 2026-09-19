@@ -1,7 +1,7 @@
 "use client";
 
-import { Bell, HelpCircle, MessageSquareText } from "lucide-react";
-import Link from "next/link";
+import { Bell, HelpCircle } from "lucide-react";
+import { ChatsPanel } from "@/components/chats-panel";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { fetchEvents, type SystemEvent } from "@/lib/api";
@@ -78,16 +78,16 @@ export function Topbar({
     // ЮЛ+Фильтры+Стадии+Лого) на недостаточной ширине окна содержимое переносится на
     // вторую строку внутри шапки, а не выталкивает иконки справа за край экрана —
     // тот же класс бага, что уже чинили в строках доски (не резать, а переносить).
-    <header className="relative flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-y-2 border-b border-line bg-surface px-6 py-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold">
+    <header className="relative flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-y-2 border-b border-line bg-surface px-3 py-3 sm:px-6">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">
+        <h1 className="break-words text-xl font-bold">
           <span className="font-semibold text-muted">{crumbs[0]}</span>
           {crumbs[1] && <span className="px-1.5 text-faint">/</span>}
           {crumbs[1] && <span className="text-ink">{crumbs[1]}</span>}
         </h1>
-        {headerActions}
+        <div className="contents [&_.shadow-pop]:max-h-[50dvh] [&_.shadow-pop]:overflow-y-auto max-sm:[&_.relative]:static max-sm:[&_.shadow-pop]:left-0 max-sm:[&_.shadow-pop]:right-auto max-sm:[&_.shadow-pop]:top-full max-sm:[&_.shadow-pop]:max-w-full">{headerActions}</div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex max-w-full flex-wrap items-center gap-2">
         <ThemeToggle />
         <IconButton
           title="Уведомления"
@@ -97,13 +97,7 @@ export function Topbar({
         >
           <Bell size={19} />
         </IconButton>
-        <Link
-          href="/crm/deals"
-          title="Чаты и сделки"
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-sunken"
-        >
-          <MessageSquareText size={19} />
-        </Link>
+        <ChatsPanel compact />
         <IconButton
           title="Помощь"
           active={open === "help"}
@@ -119,7 +113,7 @@ export function Topbar({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(null)} />
-          <div className="absolute right-6 top-14 z-50 w-80 rounded-xl border border-line bg-surface p-3 shadow-pop">
+          <div className="absolute right-3 top-full z-50 w-80 max-h-[50dvh] max-w-[calc(100%-24px)] overflow-y-auto rounded-xl border border-line bg-surface p-3 shadow-pop">
             {open === "bell" && (
               <>
                 <div className="mb-2 px-1 text-sm font-semibold text-ink">Уведомления</div>

@@ -35,5 +35,5 @@ export const CUR_SIGN: Record<string, string> = {
 export function formatInBase(amountByn: number, base: string, rate = FX[base]): string {
   if (!Number.isFinite(rate) || rate <= 0) return "Курс недоступен";
   const value = amountByn / rate;
-  return new Intl.NumberFormat("ru-RU").format(Math.round(value)) + " " + (CUR_SIGN[base] ?? base);
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value) + " " + (CUR_SIGN[base] ?? base);
 }

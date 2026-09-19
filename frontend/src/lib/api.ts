@@ -1,6 +1,6 @@
 import { daysInStage, ensureLostStage, STUCK_DAYS } from "@/lib/board";
 import { progressionIndex, STAGE_BY_ID, TERMINAL_STAGES } from "@/lib/sales-stages";
-import { DEAL_DETAIL, KPIS, STAGES } from "@/lib/mock-data";
+import { KPIS, STAGES } from "@/lib/mock-data";
 import type { Deal, DealDetail, Kpi, KpiIcon, KpiTone, Lead, LeadAttachment, LeadHandoffStat, LeadPlan, LeadSourceStat, LeadStatus, LossReason, Manager, Stage } from "@/lib/types";
 import { toPriority } from "@/lib/types";
 
@@ -11,9 +11,10 @@ const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 // заголовком вручную (роль читает серверный хелпер `role-server.ts` из cookie). На клиенте
 // (вызовы через /api/*) роль добавляет прокси `app/api/[...path]/route.ts`.
 // Опциональный accessToken — OIDC Bearer (см. auth-headers-server / TOKEN_COOKIE).
-function roleHeaders(roles?: string, accessToken?: string): Record<string, string> | undefined {
+function roleHeaders(roles?: string, accessToken?: string, devUsername?: string): Record<string, string> | undefined {
   const headers: Record<string, string> = {};
   if (roles) headers["X-User-Roles"] = roles;
+  if (devUsername) headers["X-User"] = devUsername;
   if (accessToken) headers.Authorization = "Bearer " + accessToken;
   return Object.keys(headers).length ? headers : undefined;
 }
@@ -104,12 +105,13 @@ export async function fetchBoardResult(
   roles?: string,
   funnel?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<{ stages: Stage[]; demo: boolean; authError?: boolean }> {
   try {
     const qs = funnel ? `?funnel=${encodeURIComponent(funnel)}` : "";
     const res = await fetch(`${BASE}/sales/board${qs}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (res.status === 401 || res.status === 403) {
       return { stages: [], demo: false, authError: true };
@@ -264,11 +266,11 @@ export async function fetchFunnels(): Promise<FunnelRow[]> {
 
 /** То же для SSR (page.tsx «Все вместе»): относительный `/api/...` на сервере не работает —
  * ходим на BASE напрямую с ручным пробросом роли (как fetchBoardResult/fetchKpis). */
-export async function fetchFunnelsServer(roles?: string, accessToken?: string): Promise<FunnelRow[]> {
+export async function fetchFunnelsServer(roles?: string, accessToken?: string, devUsername?: string): Promise<FunnelRow[]> {
   try {
     const res = await fetch(`${BASE}/sales/funnels`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as FunnelRow[];
@@ -337,11 +339,12 @@ export async function fetchDealDetail(
   id: string,
   roles?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<DealDetail | null> {
   try {
     const res = await fetch(`${BASE}/sales/deals/${id}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (!res.ok) throw new Error(String(res.status));
     const d = (await res.json()) as ApiDeal & {
@@ -356,6 +359,10 @@ export async function fetchDealDetail(
       } | null;
     };
     const cp = d.counterparty_ref;
+    // Бэкенд хранит naive UTC; полная SSR-карточка показывает явное время организации.
+    const stepAt = d.next_step_at
+      ? new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(d.next_step_at) ? d.next_step_at : `${d.next_step_at}Z`)
+      : null;
     return {
       number: d.number,
       company: d.counterparty,
@@ -374,9 +381,14 @@ export async function fetchDealDetail(
       // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
       amount: Number(d.amount ?? 0),
       priority: toPriority(d.priority),
-      nextStep: d.next_step ?? DEAL_DETAIL.nextStep,
-      contact: d.owner || DEAL_DETAIL.contact,
-      datetime: `${d.deal_date ?? d.closed_date ?? ""} • 14:00`,
+      nextStep: d.next_step ?? "",
+      contact: d.owner || "",
+      datetime: stepAt && Number.isFinite(stepAt.getTime())
+        ? `${stepAt.toLocaleString("ru-RU", {
+            timeZone: "Europe/Minsk", day: "2-digit", month: "2-digit", year: "numeric",
+            hour: "2-digit", minute: "2-digit",
+          })} (Минск)`
+        : "",
       // позиции номенклатуры с ценами клиенту (Price Engine); сообщения — отдельный блок
       itemsTitle: "Номенклатура",
       items: (d.items ?? []).map((i) => ({
@@ -384,7 +396,7 @@ export async function fetchDealDetail(
         lastPrice: i.last_price ?? undefined,
         minPrice: i.min_price ?? undefined,
       })),
-      messages: DEAL_DETAIL.messages,
+      messages: [],
       focus: d.focus,
       starred: d.starred,
       dealDate: d.deal_date ?? "",
@@ -409,6 +421,7 @@ export async function fetchDealDetail(
 }
 
 export interface DealInput {
+  crm_client_id?: number;
   number: string;
   title: string;
   counterparty: string;
@@ -477,6 +490,8 @@ export interface DealItemFull {
   title: string;
   unit: string;
   qty: number;
+  /** Согласованная цена строки. Отсутствие на старом backend также означает неизвестную цену. */
+  unit_price?: number | null;
   last_price: number | null;
   min_price: number | null;
 }
@@ -517,8 +532,7 @@ export async function fetchStock(): Promise<StockRow[]> {
 
 /**
  * Зафиксировать котировку цены SKU клиенту (Price Engine, POST /prices).
- * Нужна, чтобы позиция сделки знала цену: deal-items берёт last/min из PriceQuote
- * по (sku_code, counterparty). Пишем цену со склада на контрагента сделки.
+ * История last/min по (sku_code, counterparty); согласованная цена хранится в самой позиции.
  */
 export async function createPriceQuote(
   skuCode: string,
@@ -561,12 +575,12 @@ export async function fetchLastOrder(dealId: string): Promise<DealItemFull[]> {
 }
 
 /** Добавить позицию в сделку. */
-export async function addDealItem(dealId: string, skuId: number, qty: number): Promise<boolean> {
+export async function addDealItem(dealId: string, skuId: number, qty: number, unitPrice?: number | null): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sku_id: skuId, qty }),
+      body: JSON.stringify({ sku_id: skuId, qty, unit_price: unitPrice }),
     });
     return res.ok;
   } catch {
@@ -574,13 +588,13 @@ export async function addDealItem(dealId: string, skuId: number, qty: number): P
   }
 }
 
-/** Изменить количество в позиции. */
-export async function updateDealItem(itemId: number, qty: number): Promise<boolean> {
+/** Изменить количество и при явной передаче — согласованную цену позиции. */
+export async function updateDealItem(itemId: number, qty: number, unitPrice?: number | null): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deal-items/${itemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qty }),
+      body: JSON.stringify({ qty, unit_price: unitPrice }),
     });
     return res.ok;
   } catch {
@@ -654,7 +668,14 @@ export async function completeDealTask(taskId: number, result?: string): Promise
   }
 }
 
+export type ContactTarget = string | { clientId: number };
+
+function contactUrl(target: ContactTarget) {
+  return typeof target === "string" ? `/api/sales/deals/${target}/contacts` : `/api/sales/clients/${target.clientId}/contacts`;
+}
+
 export interface DealContact {
+  crm_client_id?: number;
   id: number;
   full_name: string;
   phone: string | null;
@@ -662,24 +683,61 @@ export interface DealContact {
   is_primary: boolean;
 }
 
-/** Контакты контрагента сделки (основной — первым). */
-export async function fetchContacts(dealId: string): Promise<DealContact[]> {
+export type FetchContactsResult =
+  | { status: "ok"; data: DealContact[] }
+  | { status: "http_error"; httpStatus: number }
+  | { status: "network_error" }
+  | { status: "malformed_response" };
+
+function isDealContact(value: unknown): value is DealContact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const contact = value as Record<string, unknown>;
+  return typeof contact.id === "number"
+    && Number.isSafeInteger(contact.id)
+    && contact.id > 0
+    && (contact.crm_client_id === undefined || (typeof contact.crm_client_id === "number" && Number.isSafeInteger(contact.crm_client_id) && contact.crm_client_id > 0))
+    && typeof contact.full_name === "string"
+    && (typeof contact.phone === "string" || contact.phone === null)
+    && (typeof contact.email === "string" || contact.email === null)
+    && typeof contact.is_primary === "boolean";
+}
+
+function isDealContactList(value: unknown): value is DealContact[] {
+  return Array.isArray(value) && value.every(isDealContact);
+}
+
+/** Контакты контрагента сделки с различимым результатом загрузки. */
+export async function fetchContactsResult(dealId: ContactTarget): Promise<FetchContactsResult> {
   try {
-    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as DealContact[];
+    const res = await fetch(contactUrl(dealId), { cache: "no-store" });
+    if (!res.ok) return { status: "http_error", httpStatus: res.status };
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      return { status: "malformed_response" };
+    }
+    return isDealContactList(data) && (typeof dealId === "string" || data.every((contact) => contact.crm_client_id === dealId.clientId))
+      ? { status: "ok", data }
+      : { status: "malformed_response" };
   } catch {
-    return [];
+    return { status: "network_error" };
   }
+}
+
+/** Legacy wrapper: channels and older callers still receive an array. */
+export async function fetchContacts(dealId: string): Promise<DealContact[]> {
+  const result = await fetchContactsResult(dealId);
+  return result.status === "ok" ? result.data : [];
 }
 
 /** Добавить контакт контрагенту сделки. */
 export async function addContact(
-  dealId: string,
-  contact: { full_name: string; phone?: string; email?: string; is_primary?: boolean },
+  dealId: ContactTarget,
+  contact: { full_name: string; phone?: string; email?: string; is_primary?: boolean; request_key?: string },
 ): Promise<boolean> {
   try {
-    const res = await fetch(`/api/sales/deals/${dealId}/contacts`, {
+    const res = await fetch(contactUrl(dealId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(contact),
@@ -691,9 +749,9 @@ export async function addContact(
 }
 
 /** Назначить контакт основным. */
-export async function setPrimaryContact(contactId: number): Promise<boolean> {
+export async function setPrimaryContact(contactId: number, clientId?: number): Promise<boolean> {
   try {
-    const res = await fetch(`/api/sales/contacts/${contactId}/primary`, { method: "PATCH" });
+    const res = await fetch(clientId === undefined ? `/api/sales/contacts/${contactId}/primary` : `/api/sales/clients/${clientId}/contacts/${contactId}/primary`, { method: "PATCH" });
     return res.ok;
   } catch {
     return false;
@@ -909,11 +967,12 @@ function mapKpi(k: ApiKpi): Kpi {
 export async function fetchKpisResult(
   roles?: string,
   accessToken?: string,
+  devUsername?: string,
 ): Promise<{ kpis: Kpi[]; demo: boolean; authError?: boolean }> {
   try {
     const res = await fetch(`${BASE}/sales/kpis`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, devUsername),
     });
     if (res.status === 401 || res.status === 403) {
       return { kpis: [], demo: false, authError: true };
@@ -1019,7 +1078,7 @@ export interface DealDoc {
   amount: number;
   valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
   reserve_mode?: "stock" | "on_order" | null;
-  reserve_status: string; // none | reserved | consumed | released
+  reserve_status: string; // none | unreserved | reserved | consumed | released
   version?: number;
   supersedes_id?: number | null;
   superseded_by_id?: number | null;
@@ -1030,34 +1089,55 @@ export interface DealDoc {
 }
 
 /** Документы сделки (счета/договоры/заказы) — клиент, через /api. */
-export async function fetchDocuments(dealId: string, strict = false): Promise<DealDoc[]> {
+export async function fetchDocuments(dealId: string, options: boolean | { throwOnError: boolean } = false): Promise<DealDoc[]> {
+  const strict = typeof options === "boolean" ? options : options.throwOnError;
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as DealDoc[];
-  } catch {
-    if (strict) throw new Error("Не удалось загрузить документы сделки.");
+    const documents: unknown = await res.json();
+    if (!Array.isArray(documents)) throw new Error("Invalid documents response");
+    return documents as DealDoc[];
+  } catch (error) {
+    if (strict) throw error instanceof Error ? error : new Error("Не удалось загрузить документы сделки.");
     return [];
   }
 }
 
 /** Сформировать документ сделки (счёт/договор/заказ). Договор уходит на согласование. */
-export async function createDocument(dealId: string, kind: string): Promise<DealDoc | null> {
+export interface DocumentCreateOptions {
+  reserve_mode?: "stock" | "on_order";
+  request_key?: string;
+}
+
+export async function createDocumentResult(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<{ doc: DealDoc | null; error?: string }> {
+  const fallback = "Не удалось создать документ. Проверьте данные и состояние версии.";
+  if (options?.reserve_mode === "on_order" && kind !== "invoice") return { doc: null, error: "Под заказ можно выставить только счёт." };
   try {
     if (kind === "invoice") {
       const { openInvoiceIssuance } = await import("@/components/invoice-issuance-dialog");
-      return (await openInvoiceIssuance(dealId))?.document ?? null;
+      const result = await openInvoiceIssuance(dealId, undefined, options?.reserve_mode);
+      return result
+        ? { doc: result.document }
+        : { doc: null, error: "Выпуск не подтверждён; сохранённый запрос можно продолжить." };
     }
     const res = await fetch(`/api/sales/deals/${dealId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, requested_by: "Менеджер" }),
+      body: JSON.stringify({ kind, requested_by: "Менеджер", ...options }),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as DealDoc;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const detail = body?.detail;
+      return { doc: null, error: res.status >= 400 && res.status < 500 && typeof detail === "string" ? detail : fallback };
+    }
+    return { doc: (await res.json()) as DealDoc };
   } catch {
-    return null;
+    return { doc: null, error: fallback };
   }
+}
+
+export async function createDocument(dealId: string, kind: string, options?: DocumentCreateOptions): Promise<DealDoc | null> {
+  return (await createDocumentResult(dealId, kind, options)).doc;
 }
 
 /** Итог выставления документа: сообщение для тоста + URL печатной формы (у счёта).
@@ -1071,16 +1151,16 @@ export interface DocIssueResult {
   replayed?: boolean;
 }
 
-export async function issueDocument(dealId: string, kind: "invoice" | "contract"): Promise<DocIssueResult> {
+export async function issueDocument(dealId: string, kind: "invoice" | "contract", options?: DocumentCreateOptions): Promise<DocIssueResult> {
   if (kind === "invoice") {
     try {
       const { openInvoiceIssuance } = await import("@/components/invoice-issuance-dialog");
-      const result = await openInvoiceIssuance(dealId);
+      const result = await openInvoiceIssuance(dealId, undefined, options?.reserve_mode);
       return result ? { ok: true, message: `Счёт ${result.document.number} выпущен`, renderUrl: `/api/sales/documents/${result.document.id}/render`, replayed: result.replayed }
         : { ok: false, message: "Выпуск не подтверждён; сохранённый запрос можно продолжить." };
     } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Не удалось открыть выпуск счёта" }; }
   }
-  const doc = await createDocument(dealId, kind);
+  const doc = await createDocument(dealId, kind, options);
   if (!doc) return { ok: false, message: "⚠️ Не удалось создать договор" };
   return { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
 }
@@ -1110,22 +1190,23 @@ export interface DealMsg {
 
 /** Омниканальная история переписки по сделке (клиент, через /api). */
 export async function fetchMessages(dealId: string): Promise<DealMsg[]> {
-  try {
-    const res = await fetch(`/api/sales/deals/${dealId}/messages`, { cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as DealMsg[];
-  } catch {
-    return [];
+  const res = await fetch(`/api/sales/deals/${dealId}/messages`, { cache: "no-store" });
+  if (!res.ok) throw new Error(String(res.status));
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows) || !rows.every((row) => row && Number.isSafeInteger(row.id) && row.id > 0
+    && [row.channel, row.direction, row.author, row.text, row.created_at].every((value) => typeof value === "string"))) {
+    throw new Error("malformed_response");
   }
+  return rows as DealMsg[];
 }
 
 /** Отправить сообщение по сделке (канал + текст). */
-export async function sendMessage(dealId: string, channel: string, text: string): Promise<boolean> {
+export async function sendMessage(dealId: string, channel: string, text: string, requestKey?: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel, text, author: "Менеджер", direction: "out" }),
+      body: JSON.stringify({ channel, text, author: "Менеджер", direction: "out", request_key: requestKey }),
     });
     return res.ok;
   } catch {
@@ -1290,6 +1371,9 @@ export async function triggerIncomingCall(payload: Record<string, unknown>): Pro
 }
 
 interface ApiLead {
+  owner_id?: number | null;
+  crm_client_id?: number | null;
+  crm_contact_id?: number | null;
   id: number;
   source: string;
   name: string;
@@ -1329,6 +1413,7 @@ interface ApiLead {
 
 function mapLead(l: ApiLead): Lead {
   return {
+    ownerId: l.owner_id, crmClientId: l.crm_client_id, crmContactId: l.crm_contact_id,
     id: l.id,
     source: l.source,
     name: l.name,
@@ -1400,11 +1485,11 @@ export async function fetchLeads(roles?: string, accessToken?: string): Promise<
 
 /** Один лид по id (SSR, кокпит /crm/leads/[id]) — точечный GET вместо «скачать все и найти».
  *  null — не найден/сбой. Заодно будит созревший «не сейчас» (wake-on-read на бэке). */
-export async function fetchLead(id: number, roles?: string, accessToken?: string): Promise<Lead | null> {
+export async function fetchLead(id: number, roles?: string, accessToken?: string, username?: string): Promise<Lead | null> {
   try {
     const res = await fetch(`${BASE}/leads/${id}`, {
       cache: "no-store",
-      headers: roleHeaders(roles, accessToken),
+      headers: roleHeaders(roles, accessToken, username),
     });
     if (!res.ok) return null;
     return mapLead((await res.json()) as ApiLead);
@@ -1437,6 +1522,10 @@ export async function submitEmailLead(payload: Record<string, string>): Promise<
 }
 
 export interface LeadInput {
+  owner_id?: number;
+  crm_client_id?: number;
+  crm_contact_id?: number | null;
+  request_key?: string;
   source: string;
   name?: string;
   company?: string;
@@ -1818,11 +1907,20 @@ async function pollLeadDealId(id: number, tries = 12): Promise<number | undefine
 /** Конвертировать распределённый лид. Сам convert лишь помечает лид и публикует
  *  `leads.lead.converted`; сделку создаёт модуль sales (§2.4) — её id подтягиваем
  *  поллингом, чтобы вернуть UI готовую ссылку «Открыть сделку». */
-export async function convertLead(id: number): Promise<LeadConvertResult | null> {
+export async function convertLead(id: number, checkOnly = false): Promise<LeadConvertResult | null> {
   try {
-    const res = await fetch(`/api/leads/${id}/convert`, { method: "POST" });
+    let res = checkOnly
+      ? await fetch(`/api/leads/${id}`, { cache: "no-store" })
+      : await fetch(`/api/leads/${id}/convert`, { method: "POST" });
+    // Повтор после потерянного ответа не создаёт вторую сделку: читаем результат первого.
+    if (!checkOnly && res.status === 409) {
+      res = await fetch(`/api/leads/${id}`, { cache: "no-store" });
+    }
     if (!res.ok) return null;
-    const conv = (await res.json()) as { lead_id: number; status: LeadStatus };
+    const data = (await res.json()) as LeadConvertResult;
+    if (data.status !== "converted") return null;
+    const conv: LeadConvertResult = { lead_id: id, status: data.status, deal_id: data.deal_id ?? undefined };
+    if (conv.deal_id) return conv;
     return { ...conv, deal_id: await pollLeadDealId(id) };
   } catch {
     return null;
@@ -1896,18 +1994,16 @@ export async function saveLeadItems(leadId: number, items: LeadCartItem[]): Prom
   }
 }
 
-/** Перенести подбор лида в созданную сделку: позиции (addDealItem) + цена клиенту
- * (createPriceQuote) — тот же контракт, что и `commitToDeal` пикера, но от сохранённых
- * позиций лида (без открытого пикера). Котировки ждём (await), чтобы рендер счёта
- * не прочитал ещё не записанные цены. */
+/** Перенести подбор лида вместе с согласованными ценами в строки сделки.
+ * Котировки сохраняются отдельно только как история цен. */
 export async function commitLeadItemsToDeal(
   dealId: string,
   counterparty: string,
   items: LeadCartItem[],
 ): Promise<{ ok: number; total: number }> {
-  const results = await Promise.all(items.map((it) => addDealItem(dealId, it.skuId, it.qty)));
+  const results = await Promise.all(items.map((it) => addDealItem(dealId, it.skuId, it.qty, it.price ?? null)));
   await Promise.all(
-    items.map((it) => (it.price ? createPriceQuote(it.skuCode, counterparty, it.price) : Promise.resolve(true))),
+    items.map((it, index) => (results[index] && it.price != null ? createPriceQuote(it.skuCode, counterparty, it.price) : Promise.resolve(true))),
   );
   return { ok: results.filter(Boolean).length, total: items.length };
 }

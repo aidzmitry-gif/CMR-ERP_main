@@ -128,7 +128,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
     if data.operation == "inventory_issue" and not inventory_issue:
         raise AccountingError("Inventory issues require the dedicated cost-confirmation rule")
     if data.operation in {"period_close", "period_reopen"} and not financial_transfer:
-        raise AccountingError("Financial-result transfer is not implemented; period_close is reserved")
+        raise AccountingError("Financial-result transfer requires the dedicated closing or reopening command; period_close is reserved")
     if financial_transfer and (data.operation not in {"period_close", "period_reopen"} or data.opening):
         raise AccountingError("Invalid internal financial transfer")
     month = data.posting_date.strftime("%Y-%m")
@@ -203,7 +203,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
             raise AccountingError(f"Unknown or inactive currency: {sorted(foreign - known)}")
     categories = {accounts[line.account].category for line in data.lines if line.account in accounts}
     if not financial_transfer and not data.opening and "equity" in categories and categories & {"income", "expense"}:
-        raise AccountingError("Financial-result transfer between profit/loss and equity is not implemented")
+        raise AccountingError("Financial-result transfer between profit/loss and equity requires the dedicated closing command")
     for line in data.lines:
         account = accounts.get(line.account)
         if account is None:
@@ -335,6 +335,8 @@ async def validate_close_period(session, org_id, month, data):
     from modules.accounting.closing_controls import snapshot as closing_snapshot
 
     controls = await closing_snapshot(session, org_id, month)
+    if any(item["code"] == "unposted_bank_imports" for item in controls["blockers"]):
+        raise AccountingError("Unposted imported bank transactions prevent closing")
     receipt_gaps = [item for item in controls["review_items"] if item["code"] in {
         "production_cost_receipt_gap", "inventory_late_cost_receipt_gap",
         "payroll_accrual_receipt_gap", "payroll_statutory_receipt_gap",

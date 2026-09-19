@@ -10,12 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
 from pydantic import Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from modules.accounting import service
 from modules.accounting.documents import BankDocument, preview_bank
@@ -65,12 +65,22 @@ class BankImportConfirmInput(BankImportInput):
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-def source_snapshot(row: BankTransaction) -> dict:
+def source_snapshot(row: BankTransaction, *, allow_invalid=False) -> dict:
+    try:
+        if row.amount is None or isinstance(row.amount, bool):
+            raise ValueError
+        amount = Decimal(row.amount)
+        if not amount.is_finite():
+            raise ValueError
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        if not allow_invalid:
+            raise service.AccountingError("Imported bank transaction has an invalid monetary amount") from exc
+        amount = None
     return {
         "transaction_id": row.id,
         "ext_id": row.ext_id,
         "occurred_on": row.occurred_on.isoformat() if row.occurred_on else None,
-        "amount": format(Decimal(row.amount), ".2f"),
+        "amount": format(amount, ".2f") if amount is not None else None,
         "currency": row.currency,
         "payer_unp": row.payer_unp,
         "payer_name": row.payer_name,
@@ -92,7 +102,7 @@ async def _source(session, org_id: int, source_transaction_id: int) -> tuple[Ban
         )
     row = await session.scalar(select(BankTransaction).where(
         BankTransaction.id == source_transaction_id,
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise service.AccountingError("Imported bank transaction was not found")
     snapshot = source_snapshot(row)
@@ -253,7 +263,7 @@ async def list_imports(session, org_id: int):
     ).order_by(BankImportReceipt.id.desc()))).all()
 
 
-async def list_candidates(session, org_id: int):
+async def list_candidates(session, org_id: int, *, include_unbound=False):
     """Return source-bound queue facts needed by the accountant workspace.
 
     Finance owns the raw bank rows and has no legal-entity default.  The
@@ -272,12 +282,17 @@ async def list_candidates(session, org_id: int):
     receipt_by_source = {row.source_transaction_id: row for row in receipts}
     result = []
     for row in rows:
-        snapshot = source_snapshot(row)
         binding = binding_by_source.get(row.id)
+        if binding is None and not include_unbound:
+            continue
+        if binding is not None and binding.organization_id != org_id:
+            continue
+        snapshot = source_snapshot(row, allow_invalid=True)
         receipt = receipt_by_source.get(row.id)
         result.append({
             "source_snapshot": snapshot,
-            "source_digest": _digest(snapshot),
+            "source_digest": _digest(snapshot) if snapshot["amount"] is not None else None,
+            "source_error": "invalid_monetary_amount" if snapshot["amount"] is None else None,
             "binding_status": (
                 "own" if binding is not None and binding.organization_id == org_id and binding.ownership == "own"
                 else "other" if binding is not None
@@ -287,3 +302,17 @@ async def list_candidates(session, org_id: int):
             "entry_id": receipt.entry_id if receipt is not None else None,
         })
     return result
+
+
+async def pending_count(session, org_id: int, through: date) -> int:
+    """Owned bank sources affecting the report cutoff, including undated rows."""
+    return await session.scalar(select(func.count(BankTransaction.id)).join(
+        SourceBinding, (SourceBinding.source_id == BankTransaction.id)
+        & (SourceBinding.source_type == "finance_bank_transaction")
+        & (SourceBinding.organization_id == org_id)
+        & (SourceBinding.ownership == "own"),
+    ).outerjoin(BankImportReceipt,
+        (BankImportReceipt.source_transaction_id == BankTransaction.id)
+        & (BankImportReceipt.organization_id == org_id),
+    ).where(BankImportReceipt.entry_id.is_(None),
+            or_(BankTransaction.occurred_on <= through, BankTransaction.occurred_on.is_(None)))) or 0

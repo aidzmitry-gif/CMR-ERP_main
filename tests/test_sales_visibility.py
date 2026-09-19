@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from core.domain.models import User
+from modules.sales.models import CallLog
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -17,6 +18,54 @@ async def _create(api, number: str, **extra) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session):
+    session.add_all([
+        User(username="call-owner", full_name="Call Owner", employee_id=301,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="call-other", full_name="Call Other", employee_id=302,
+             department="Продажи", role="sales", status="active"),
+    ])
+    await session.commit()
+    own = await _create(api, "CALL-VIS-OWN", owner_id=301)
+    other = await _create(api, "CALL-VIS-OTHER", owner_id=302)
+    calls = [
+        CallLog(call_id="VIS-LINK-OWN", deal_id=own["id"], owner_id=302),
+        CallLog(call_id="VIS-LINK-OTHER", deal_id=other["id"], owner_id=301),
+        CallLog(call_id="VIS-UNLINK-OWN", owner_id=301),
+        CallLog(call_id="VIS-UNLINK-OTHER", owner_id=302),
+        CallLog(call_id="VIS-UNCONFIRMED", owner="Call Owner"),
+    ]
+    session.add_all(calls)
+    await session.commit()
+    headers = _sales_headers("call-owner")
+    listed = await api.get("/sales/calls", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert {row["id"] for row in listed.json()} == {calls[0].id, calls[2].id}
+    assert (await api.get(f"/sales/calls?deal_id={other['id']}", headers=headers)).status_code == 404
+    assert len((await api.get("/sales/calls")).json()) == 5
+    for call in (calls[1], calls[3], calls[4]):
+        assert (await api.get(f"/sales/calls/{call.id}", headers=headers)).status_code == 404
+        for action, payload in (("comment", {"comment": "forbidden"}),
+                                ("result", {"result": "forbidden"}),
+                                ("link-deal", {"deal_id": own["id"]})):
+            assert (await api.post(f"/sales/calls/{call.id}/{action}", json=payload, headers=headers)).status_code == 404
+    comment = await api.post(f"/sales/calls/{calls[0].id}/comment", json={"comment": "checked"}, headers=headers)
+    assert comment.status_code == 200 and comment.json()["comment"] == "checked"
+    result = await api.post(f"/sales/calls/{calls[0].id}/result", json={"result": "callback"}, headers=headers)
+    assert result.status_code == 200 and result.json()["result"] == "callback"
+    foreign_link = await api.post(f"/sales/calls/{calls[2].id}/link-deal", json={"deal_id": other["id"]}, headers=headers)
+    assert foreign_link.status_code == 404
+    created = await api.post(f"/sales/calls/{calls[2].id}/link-deal", json={"create": True}, headers=headers)
+    assert created.status_code == 200, created.text
+    deal = await api.get(f"/sales/deals/{created.json()['deal_id']}", headers=headers)
+    assert deal.status_code == 200 and deal.json()["owner_id"] == 301
+    from_visible = await api.post(f"/sales/calls/{calls[0].id}/link-deal", json={"create": True}, headers=headers)
+    assert from_visible.status_code == 200, from_visible.text
+    linked_deal = await api.get(f"/sales/deals/{from_visible.json()['deal_id']}", headers=headers)
+    assert linked_deal.status_code == 200 and linked_deal.json()["owner_id"] == 301
 
 
 @pytest.mark.asyncio
@@ -112,3 +161,95 @@ async def test_own_scope_enforces_visibility_and_runtime_switch(api, session):
     alice.deal_visibility = "own"
     await session.commit()
     assert (await api.get(f"/sales/deals/{other['id']}", headers=headers)).status_code == 404
+
+
+async def _contact_access_users(session):
+    session.add_all([
+        User(username="contact-owner", full_name="Contact Owner", employee_id=201,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="contact-other", full_name="Contact Other", employee_id=202,
+             department="Продажи", role="sales", status="active", deal_visibility="all"),
+        User(username="contact-hr", full_name="Contact HR", department="HR",
+             role="hr", status="active", deal_visibility="all"),
+    ])
+    await session.commit()
+
+
+async def test_primary_contact_own_scope_preserves_foreign_contacts(api, session):
+    from core.domain.models import Contact
+
+    await _contact_access_users(session)
+    headers = _sales_headers("contact-owner")
+    for suffix, owner_id, expected in (("OWN", 201, 200), ("OTHER", 202, 404),
+                                       ("UNASSIGNED", None, 404)):
+        deal = await _create(api, f"CP-{suffix}", counterparty=f"Client {suffix}", owner_id=owner_id)
+        first = await api.post(f"/sales/deals/{deal['id']}/contacts",
+                               json={"full_name": "First", "is_primary": True})
+        second = await api.post(f"/sales/deals/{deal['id']}/contacts",
+                                json={"full_name": "Second"})
+        assert first.status_code == second.status_code == 201
+        response = await api.patch(f"/sales/contacts/{second.json()['id']}/primary", headers=headers)
+        assert response.status_code == expected, response.text
+        for created, was_primary in ((first, True), (second, False)):
+            contact = await session.get(Contact, created.json()["id"])
+            await session.refresh(contact)
+            assert contact.is_primary == (not was_primary if expected == 200 else was_primary)
+
+    orphan = Contact(full_name="Unlinked")
+    session.add(orphan)
+    await session.commit()
+    for contact_id in (orphan.id, 999999):
+        assert (await api.patch(f"/sales/contacts/{contact_id}/primary", headers=headers)).status_code == 404
+    await session.refresh(orphan)
+    assert orphan.is_primary is False
+
+
+async def test_primary_contact_requires_write_permission(api, session):
+    from core.domain.models import Contact
+
+    await _contact_access_users(session)
+    deal = await _create(api, "CP-NO-WRITE", owner_id=201)
+    contact = (await api.post(f"/sales/deals/{deal['id']}/contacts",
+                              json={"full_name": "Protected"})).json()
+    response = await api.patch(f"/sales/contacts/{contact['id']}/primary",
+                               headers={"X-User": "contact-hr", "X-User-Roles": "hr"})
+    assert response.status_code == 403, response.text
+    assert "sales.deal.write" in response.json()["detail"]
+    persisted = await session.get(Contact, contact["id"])
+    await session.refresh(persisted)
+    assert persisted.is_primary is False
+
+
+async def test_own_funnels_have_only_visible_counts_and_open_boards(api, session):
+    await _contact_access_users(session)
+    # Match the materialized stage catalog used by migrations and other board tests.
+    assert (await api.get("/sales/stages")).status_code == 200
+    own = await _create(api, "FUNNEL-OWN", owner_id=201)
+    repeat = await _create(api, "FUNNEL-REPEAT", owner_id=201,
+                           funnel="repeat_clients", stage="rp_request")
+    await _create(api, "FUNNEL-OTHER", owner_id=202)
+    await _create(api, "FUNNEL-UNASSIGNED")
+    await _create(api, "FUNNEL-CLOSED", owner_id=201, stage="won")
+    headers = _sales_headers("contact-owner")
+    response = await api.get("/sales/funnels", headers=headers)
+    assert response.status_code == 200, response.text
+    counts = {row["code"]: row["active_deals"] for row in response.json()}
+    assert counts == {"new_clients": 1, "repeat_clients": 1, "tenders": 0}
+    # The combined page requests each returned board under the same identity.
+    found = set()
+    for code in counts:
+        board = await api.get("/sales/board", params={"funnel": code}, headers=headers)
+        assert board.status_code == 200
+        found.update(deal["id"] for stage in board.json()["stages"] for deal in stage["deals"])
+    assert own["id"] in found and repeat["id"] in found
+    assert len(found) == 3  # Includes the own closed deal, never other/unassigned deals.
+
+    all_scope = await api.get("/sales/funnels", headers=_sales_headers("contact-other"))
+    assert all_scope.status_code == 200
+    assert {row["code"]: row["active_deals"] for row in all_scope.json()} == {
+        "new_clients": 3, "repeat_clients": 1, "tenders": 0,
+    }
+    denied = await api.get("/sales/funnels",
+                           headers={"X-User": "contact-hr", "X-User-Roles": "hr"})
+    assert denied.status_code == 403
+    assert "sales.deal.read" in denied.json()["detail"]

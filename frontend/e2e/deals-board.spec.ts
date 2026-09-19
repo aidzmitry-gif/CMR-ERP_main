@@ -13,21 +13,24 @@ test.describe("deals board", () => {
     // Колонка SSR-видима раньше, чем React подключит onClick; ждём границу гидрации.
     await expect(page.getByTestId("deals-client-ready")).toBeVisible();
 
-    // Создаём сделку для самодостаточности на пустой CI-базе.
-    // Используем собственную сделку, не затрагивая состояние соседних сценариев.
+    // Own test record only: filtering keeps it at the top without touching other deals.
     await page.getByRole("button", { name: /Создать сделку/ }).click();
     const form = page.locator("form.shadow-pop");
     await expect(form).toBeVisible();
-    const dealNumber = `DND-${Date.now()}`;
-    await form.getByPlaceholder("CRM-2024-0200").fill(dealNumber);
-    await form.getByPlaceholder("ООО ...").fill(`ООО E2E-DND-${Date.now()}`);
+    const number = `DND-${Date.now()}`;
+    await form.getByPlaceholder("CRM-2024-0200").fill(number);
+    await form.getByPlaceholder("ООО ...").fill(number);
     await form.getByPlaceholder("Поставка ...").fill("DnD тест");
+    const created = page.waitForResponse((r) => r.url().endsWith("/api/sales/deals") && r.request().method() === "POST");
     await form.getByRole("button", { name: "Создать" }).click();
+    const response = await created;
+    expect(response.status()).toBe(201);
+    const deal = await response.json();
     await expect(form).not.toBeVisible();
-    await page.getByPlaceholder("Поиск сделок...").fill(dealNumber);
+    await page.getByPlaceholder("Поиск сделок...").fill(number);
 
-    // Фильтр оставляет собственную карточку у верха доски.
-    const firstCard = newDropzone.locator('[data-testid^="deal-card-"]').filter({ hasText: dealNumber });
+    // ПЕРВАЯ карточка в new — у верха колонки; qual-дропзона тоже видна в этом viewport.
+    const firstCard = newDropzone.getByTestId(`deal-card-${deal.id}`);
     await expect(firstCard).toBeVisible();
     // Запоминаем testid чтобы найти карточку в qual после drop
     const cardTestId = await firstCard.getAttribute("data-testid");
@@ -58,13 +61,19 @@ test.describe("deals board", () => {
     await page.mouse.move(targetX, targetY, { steps: 20 });
     const saved = page.waitForResponse(response => response.request().method() === "PATCH" && response.url().endsWith(`/api/sales/deals/${cardTestId.replace("deal-card-", "")}`));
     await page.mouse.up();
-    const response = await saved;
-    expect(response.ok(), await response.text()).toBeTruthy();
+    const savedResponse = await saved;
+    expect(savedResponse.ok(), await savedResponse.text()).toBeTruthy();
 
     // Проверяем собственную сделку: соседняя может иметь активный запрос отказа.
     await expect(qualDropzone.locator(`[data-testid="${cardTestId}"]`)).toBeVisible();
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/sales/deals/${deal.id}`);
+      expect(response.ok()).toBe(true);
+      return (await response.json()).stage;
+    }).toBe("qual");
     await page.reload();
-    await expect(page.locator(`[data-testid="stage-column-qual"] [data-testid="${cardTestId}"]`)).toBeVisible();
+    await page.getByPlaceholder("Поиск сделок...").fill(number);
+    await expect(page.getByTestId("stage-column-qual").getByTestId(`deal-card-${deal.id}`)).toBeVisible();
   });
 
   test("фильтры: приоритет и «Только висяки»", async ({ page }) => {
@@ -108,15 +117,9 @@ test.describe("deals board", () => {
     // Проверяем сколько воронок возвращает бэк (через Next.js proxy, с куками сессии страницы).
     // FunnelTabs рендерит null при ≤1 воронке (funnel-tabs.tsx:51) — в этом случае скипаем.
     const resp = await page.request.get("/api/sales/funnels");
-    const funnels: Array<{ code: string; title: string; active_deals: number }> = resp.ok()
-      ? ((await resp.json()) as Array<{ code: string; title: string; active_deals: number }>)
-      : [];
-
-    test.skip(
-      funnels.length < 2,
-      "Настроена только одна воронка — FunnelTabs.tsx:51 скрывает таб-переключатель " +
-        "при funnels.length <= 1. Для активации теста заведи ≥2 воронки через POST /sales/funnels.",
-    );
+    expect(resp.ok()).toBe(true);
+    const funnels: Array<{ code: string; title: string; active_deals: number }> = await resp.json();
+    expect(funnels.length).toBeGreaterThanOrEqual(2);
 
     // Находим кнопку второй воронки (FunnelTabs рендерит их как <button> с title)
     const second = funnels[1];

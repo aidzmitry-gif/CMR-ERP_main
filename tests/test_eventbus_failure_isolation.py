@@ -12,10 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.db.base import Base
-from core.domain.models import AuditLog, OutboxEvent
+from core.domain.models import AuditLog, Counterparty, OutboxEvent
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.sales import calls
-from modules.sales.models import CallLog, Deal
+from modules.sales.models import CallLog, CrmClient, Deal
 
 INCOMING = "telephony.call.incoming"
 ANSWERED = "telephony.call.answered"
@@ -43,14 +43,15 @@ async def relay_factory(request):
     else:
         url = "sqlite+aiosqlite:///:memory:"
     engine = create_async_engine(url).execution_options(schema_translate_map={None: schema, "sales": schema})
-    tables = [Deal.__table__, CallLog.__table__, OutboxEvent.__table__, AuditLog.__table__]
+    tables = [Counterparty.__table__, CrmClient.__table__, Deal.__table__,
+              CallLog.__table__, OutboxEvent.__table__, AuditLog.__table__]
     created = False
     try:
         async with engine.begin() as connection:
             if schema is not None:
                 await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-                created = True
             await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=tables))
+        created = schema is not None
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
         if created:

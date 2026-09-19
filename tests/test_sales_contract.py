@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, Sku
+from modules.integrations.models import StockItem
 from modules.sales.models import DealItem, PriceQuote
 
 TEMPLATE_BODY = (
@@ -197,9 +198,10 @@ async def test_render_invoice_uses_real_deal_data(api, session):
     """kind=invoice → печатная форма счёта (sales-invoice-template.html), не договор."""
     deal = await _make_deal(api, counterparty="ООО «АвтоЗапчасть»")
     session.add(Sku(code="AKB-77", title="АКБ 6СТ-77", unit="шт"))
+    session.add(StockItem(sku_code="AKB-77", qty_available=2, qty_reserved=0))
     await session.flush()
     sku = (await session.execute(select(Sku).where(Sku.code == "AKB-77"))).scalars().first()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("2")))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("2"), unit_price=Decimal("150")))
     session.add(
         PriceQuote(sku_code="AKB-77", counterparty="ООО «АвтоЗапчасть»", price=Decimal("150.00"))
     )
@@ -253,9 +255,10 @@ async def test_render_invoice_escapes_html_in_sku_title(api, session):
     """
     deal = await _make_deal(api, counterparty="ООО «Инъекция»")
     session.add(Sku(code="XSS-1", title='<script>alert(1)</script>', unit="шт"))
+    session.add(StockItem(sku_code="XSS-1", qty_available=1, qty_reserved=0))
     await session.flush()
     sku = (await session.execute(select(Sku).where(Sku.code == "XSS-1"))).scalars().first()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1"), unit_price=Decimal("100")))
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
@@ -321,9 +324,10 @@ async def test_render_invoice_includes_uploaded_logo(api, session):
 
     deal = await _make_deal(api, counterparty="ООО «СЛого»")
     session.add(Sku(code="AKB-99", title="АКБ 6СТ-99", unit="шт"))
+    session.add(StockItem(sku_code="AKB-99", qty_available=1, qty_reserved=0))
     await session.flush()
     sku = (await session.execute(select(Sku).where(Sku.code == "AKB-99"))).scalars().first()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1"), unit_price=Decimal("100")))
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
@@ -338,9 +342,10 @@ async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
     """Лого не загружено — честно нет <div class="logo"> (не битая картинка)."""
     deal = await _make_deal(api, counterparty="ООО «БезЛого»")
     session.add(Sku(code="AKB-100", title="АКБ 6СТ-100", unit="шт"))
+    session.add(StockItem(sku_code="AKB-100", qty_available=1, qty_reserved=0))
     await session.flush()
     sku = (await session.execute(select(Sku).where(Sku.code == "AKB-100"))).scalars().first()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1")))
+    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=Decimal("1"), unit_price=Decimal("100")))
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()

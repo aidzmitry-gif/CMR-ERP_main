@@ -14,7 +14,7 @@ vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", clas
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
-vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест" }));
+vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест", currentDevUsername: async () => "test" }));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
@@ -134,6 +134,22 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText("messages")).toBeInTheDocument();
     expect(screen.getByText("documents")).toBeInTheDocument();
     expect(screen.getByText("deal-calls")).toBeInTheDocument();
+  });
+
+  it("DealDetailPage не выдаёт сумму сделки за счёт и не показывает технические заглушки", async () => {
+    const detail = await api.fetchDealDetail("1");
+    mock(api.fetchDealDetail).mockResolvedValueOnce({ ...detail, amount: 300 });
+    const { container } = render(await DealDetailPage({ params: Promise.resolve({ id: "1" }) }));
+    expect(screen.queryByText("К оплате")).toBeNull();
+    expect(screen.queryByText("из счёта ERP")).toBeNull();
+    expect(container.textContent).not.toMatch(/pay\.|ship\.|memory|invoice-1c|MDM|WMS|logistics|procurement|sales\.deal|d\.regular|бэкенд|API/);
+    expect(screen.queryByText("Постоянный клиент")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Самовывоз" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Доставка по адресу" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Наша машина" })).toBeNull();
+    expect(screen.getByText("Сведения о рейсе и отгрузке пока недоступны.")).toBeInTheDocument();
+    expect(screen.getByText("Способ, адрес и дата доставки пока не получены.")).toBeInTheDocument();
+    expect(screen.getAllByText("documents")).toHaveLength(1);
   });
 
   it("DealDetailPage stops before rendering a denied or missing card", async () => {

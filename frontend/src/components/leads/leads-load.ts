@@ -5,10 +5,14 @@ export type LeadsLoadState = "ok" | "auth" | "error";
 
 export interface LeadsLoadResult {
   state: LeadsLoadState;
+  visibility?: "all" | "own";
   leads: Lead[];
 }
 
 interface ApiLead {
+  owner_id?: number | null;
+  crm_client_id?: number | null;
+  crm_contact_id?: number | null;
   id: number;
   source: string;
   name: string;
@@ -48,6 +52,7 @@ interface ApiLead {
 
 function mapLead(l: ApiLead): Lead {
   return {
+    ownerId: l.owner_id, crmClientId: l.crm_client_id, crmContactId: l.crm_contact_id,
     id: l.id,
     source: l.source,
     name: l.name,
@@ -95,15 +100,16 @@ function classifyResponse(res: Response): LeadsLoadState {
 const SSR_BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 /** SSR: GET /leads с явным разбором 403 (не маскируем под пустой инбокс). */
-export async function loadLeadsServer(role: string, accessToken?: string): Promise<LeadsLoadResult> {
+export async function loadLeadsServer(role: string, accessToken?: string, username?: string): Promise<LeadsLoadResult> {
   try {
     const headers: Record<string, string> = { "X-User-Roles": role };
+    if (username && !accessToken) headers["X-User"] = username;
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
     const res = await fetch(`${SSR_BASE}/leads`, { cache: "no-store", headers });
     const state = classifyResponse(res);
     if (state !== "ok") return { state, leads: [] };
     const leads = ((await res.json()) as ApiLead[]).map(mapLead);
-    return { state: "ok", leads };
+    return { state: "ok", leads, visibility: res.headers.get("X-CRM-Visibility") === "own" ? "own" : "all" };
   } catch {
     return { state: "error", leads: [] };
   }

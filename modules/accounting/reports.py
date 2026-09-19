@@ -88,20 +88,39 @@ async def report(session, org_id, start, end):
         SourceControl.organization_id == org_id, SourceControl.month <= end.strftime("%Y-%m"),
         SourceControl.entry_id.is_(None),
     ))).all()
-    final = final and not primary_pending
+    from modules.accounting.bank_import import pending_count
+
+    bank_pending = await pending_count(session, org_id, end)
+    final = final and not primary_pending and not bank_pending
     review_items = []
-    # A closed period is not enough to label a report final: unresolved VAT,
-    # foreign-trade, depreciation, production, repair or late-cost evidence
-    # keeps the report preliminary.  Reuse the accountant's read-only control
-    # snapshot only for a complete calendar month so arbitrary date-range
-    # reports do not inspect records beyond their requested end date.
-    month_first = end.replace(day=1)
+    # Review every complete month in monthly, quarterly and annual reports.
+    # Partial ranges must not inspect source records beyond their end date.
     month_last = end.replace(day=monthrange(end.year, end.month)[1])
-    if start == month_first and end == month_last:
+    if start.day == 1 and end == month_last:
         from modules.accounting.closing_controls import snapshot as closing_snapshot
 
-        review_items = (await closing_snapshot(session, org_id, end.strftime("%Y-%m")))['review_items']
+        month = start
+        grouped = {}
+        while month <= end:
+            controls = await closing_snapshot(session, org_id, month.strftime("%Y-%m"))
+            items = list(controls["review_items"])
+            if not controls["period"]["closed"]:
+                items.append({"code": "reporting_period_open", "count": 1,
+                              "message": "Не все месяцы отчёта закрыты."})
+            for item in items:
+                if item["code"] not in grouped:
+                    grouped[item["code"]] = {**item, "count": 0, "months": []}
+                grouped[item["code"]]["count"] += item["count"]
+                grouped[item["code"]]["months"].append(month.strftime("%Y-%m"))
+            if month == end.replace(day=1):
+                break
+            month = month.replace(year=month.year + 1, month=1) if month.month == 12 else month.replace(month=month.month + 1)
+        review_items = list(grouped.values())
         final = final and not review_items
+    else:
+        final = False
+        review_items.append({"code": "partial_period_review", "count": 1,
+                             "message": "Диапазон включает неполный месяц; проверки закрытия всего месяца к нему не применены."})
     # Unclosed income/expense account balances remain an explicit current result.
     current_result = -balances["income"] - balances["expense"]
     assets, liabilities, equity = balances["asset"], -balances["liability"], -balances["equity"]
@@ -111,7 +130,7 @@ async def report(session, org_id, start, end):
         "status": "closed_periods" if final else "preliminary",
         "review_items": review_items,
         "statutory_certified": False,
-        "pending_documents": len(pending) + len(primary_pending), "trial_balance": list(trial.values()),
+        "pending_documents": len(pending) + len(primary_pending) + bank_pending, "trial_balance": list(trial.values()),
         "movements": movements,
         "opening_movements": opening_movements,
         "balance": {"assets": money(assets), "liabilities": money(liabilities),

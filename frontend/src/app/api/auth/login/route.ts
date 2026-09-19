@@ -4,7 +4,7 @@
 
 import { cookies } from "next/headers";
 
-import { ACTOR_COOKIE, ROLE_COOKIE, USER_COOKIE, type UserInfo } from "@/lib/access";
+import { ACTOR_COOKIE, LOGIN_COOKIE, ROLE_COOKIE, USER_COOKIE, type UserInfo } from "@/lib/access";
 import { frontendAuthMode } from "@/lib/auth-mode";
 
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
@@ -27,6 +27,7 @@ export async function POST(req: Request): Promise<Response> {
   const opts = { path: "/", httpOnly: true, sameSite: "lax" as const, maxAge: YEAR };
   jar.set(ROLE_COOKIE, user.role, opts);
   jar.set(ACTOR_COOKIE, user.username, opts);
+  jar.set(LOGIN_COOKIE, user.username, opts);
   // Next cookies().set already encodes; do not encodeURIComponent (else %2520).
   jar.set(USER_COOKIE, user.full_name, opts);
   return Response.json({ ok: true, user });

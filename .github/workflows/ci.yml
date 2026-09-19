@@ -31,6 +31,20 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+      crm-postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: joint_test
+          POSTGRES_PASSWORD: joint_test_local_only
+          POSTGRES_DB: joint_acceptance
+        ports:
+          - "15442:5432"
+        options: >-
+          --health-cmd "pg_isready -U joint_test -d joint_acceptance"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
       eschf-postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -52,6 +66,11 @@ jobs:
       AIOS_ENVIRONMENT: dev
       # Dedicated admin DB; accounting fixtures create/drop their own UUID databases.
       ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test
+      # CRM lock fixtures use unique disposable schemas in this isolated service.
+      CRM_JOINT_POSTGRES_ACCEPTANCE: "1"
+      CRM_READY_OWNERS_DATABASE_URL: postgresql+psycopg://joint_test:joint_test_local_only@127.0.0.1:15442/joint_acceptance
+      CRM_READY_CALLS_DATABASE_URL: postgresql+psycopg://joint_test:joint_test_local_only@127.0.0.1:15442/joint_acceptance
+      CRM_READY_G02_DATABASE_URL: postgresql+psycopg://joint_test:joint_test_local_only@127.0.0.1:15442/joint_acceptance
       # Isolated service: ESCHF fixtures reset only this explicitly guarded test DB.
       ESCHF_TEST_DATABASE_URL: postgresql+psycopg://eschf_test:eschf_test@127.0.0.1:15439/eschf_g04_test
 
@@ -71,6 +90,10 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
       - name: Apply migrations (Postgres)
+        run: alembic upgrade head
+      - name: Apply migrations to isolated CRM acceptance database
+        env:
+          AIOS_DATABASE_URL: postgresql+psycopg://joint_test:joint_test_local_only@127.0.0.1:15442/joint_acceptance
         run: alembic upgrade head
       - name: Create isolated accounting acceptance database
         run: |

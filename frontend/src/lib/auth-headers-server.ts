@@ -3,7 +3,8 @@
 
 import { cookies } from "next/headers";
 
-import { ACTOR_COOKIE, DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
+import { DEFAULT_ROLE, ROLE_COOKIE, TOKEN_COOKIE } from "@/lib/access";
+import { currentDevUsername } from "@/lib/role-server";
 import { frontendAuthMode } from "@/lib/auth-mode";
 
 /**
@@ -20,6 +21,8 @@ export async function backendAuthHeaders(
   const token = jar.get(TOKEN_COOKIE)?.value;
   const mode = frontendAuthMode();
   const headers: Record<string, string> = {};
+  const username = await currentDevUsername();
+  if (mode === "dev" && username) headers["X-User"] = username;
 
   if (token) {
     headers.Authorization = "Bearer " + token;
@@ -29,10 +32,6 @@ export async function backendAuthHeaders(
   } else if (role) {
     // oidc + token: optional hint for dual-run diagnostics (backend ignores in oidc)
     headers["X-User-Roles"] = role;
-  }
-  if (mode === "dev") {
-    const actor = jar.get(ACTOR_COOKIE)?.value;
-    if (actor) headers["X-User"] = actor;
   }
   return headers;
 }

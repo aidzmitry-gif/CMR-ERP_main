@@ -6,7 +6,7 @@ import { DealsWorkspace } from "@/components/kanban/deals-workspace";
 import { FiltersMenu } from "@/components/kanban/filters-menu";
 import { FunnelTabs } from "@/components/kanban/funnel-tabs";
 import { fetchBoardResult, fetchFunnelsServer, fetchKpisResult } from "@/lib/api";
-import { currentAccessToken, currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentDevUsername, currentRole } from "@/lib/role-server";
 
 /** Переключатель ЮЛ + «Фильтры» + «Стадии»/«Лого» (иконки) — правее хлебных крошек
  *  «CRM / Сделки», в одну строку (решение оператора: раньше жили в тулбаре доски). */
@@ -44,6 +44,7 @@ export default async function DealsPage({
   // Только визуальный gate: сам CRM-реестр и PATCH owner_id дополнительно проверяются API.
   const canAssignOwner = ["admin", "director", "commercial"].includes(role);
   const token = (await currentAccessToken()) ?? undefined;
+  const username = await currentDevUsername();
   // Владелец плана (dev/демо через ?owner_id=) — «План» скорборда из согласованного PlanTarget.
   // Нет параметра → undefined → доска без изменений (как раньше). ponytail: связать с логином.
   const ownerId = owner_id ? Number.parseInt(owner_id, 10) || undefined : undefined;
@@ -59,14 +60,14 @@ export default async function DealsPage({
     // «Все вместе» (мокап sales-board-mockup.html, COMBINED): доска каждой воронки —
     // одна под другой. Справочник воронок — /sales/funnels (не хардкодим список).
     const [funnels, kpisRes] = await Promise.all([
-      fetchFunnelsServer(role, token),
-      fetchKpisResult(role, token),
+      fetchFunnelsServer(role, token, username),
+      fetchKpisResult(role, token, username),
     ]);
     const sections = await Promise.all(
       funnels.map(async (f) => ({
         code: f.code,
         title: f.title,
-        ...(await fetchBoardResult(role, f.code, token)),
+        ...(await fetchBoardResult(role, f.code, token, username)),
       })),
     );
     const authError = sections.some((s) => s.authError);
@@ -91,8 +92,8 @@ export default async function DealsPage({
   // SSR: стадии для выбранной воронки + KPI; key прокидывает funnel в DealsWorkspace,
   // чтобы клиентский стейт колонок сбрасывался при переключении воронки.
   const [board, kpisRes] = await Promise.all([
-    fetchBoardResult(role, activeFunnel, token),
-    fetchKpisResult(role, token),
+    fetchBoardResult(role, activeFunnel, token, username),
+    fetchKpisResult(role, token, username),
   ]);
   return (
     <AppShell crumbs={["CRM", "Сделки"]} headerActions={<DealsHeaderActions />}>

@@ -1,5 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PickerRow } from "@/components/kanban/product-picker";
+
+const picker = vi.hoisted(() => ({
+  skus: [] as { id: number; code: string; title: string; unit: string }[],
+  stock: {} as Record<string, { price: number; unitPrice?: number | null }>,
+  pickedRows: [] as PickerRow[],
+  agreedPriceOf: vi.fn<(row: PickerRow) => number | null>(),
+  addSkuWithQty: vi.fn(),
+  setRowPrice: vi.fn(),
+  reset: vi.fn(),
+}));
 
 // next/link → простая <a> (jsdom); тяжёлые соседние компоненты глушим — тестируем
 // собственную логику drawer-preview изолированно.
@@ -12,17 +23,15 @@ vi.mock("@/components/leads/lead-attachments", () => ({
   LeadAttachments: () => <div data-testid="attachments" />,
 }));
 vi.mock("@/components/kanban/catalog-picker-modal", () => ({
-  CatalogPickerModal: () => <div data-testid="catalog" />,
+  CatalogPickerModal: ({ onClose, errorMessage, saving }: { onClose: () => void; errorMessage?: string; saving?: boolean }) => (
+    <div data-testid="catalog">
+      {errorMessage && <p role="alert">{errorMessage}</p>}
+      <button onClick={onClose} disabled={saving}>Сохранить подбор</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/kanban/product-picker", () => ({
-  useProductPicker: () => ({
-    skus: [],
-    stock: {},
-    pickedRows: [],
-    addSkuWithQty: vi.fn(),
-    setRowPrice: vi.fn(),
-    reset: vi.fn(),
-  }),
+  useProductPicker: () => picker,
 }));
 vi.mock("@/lib/api", () => ({
   fetchLeadManagers: vi.fn().mockResolvedValue([
@@ -86,9 +95,66 @@ function noopHandlers() {
 beforeEach(() => {
   vi.clearAllMocks();
   mock(api.fetchLeadItems).mockResolvedValue([]);
+  mock(api.saveLeadItems).mockReset().mockResolvedValue(true);
+  picker.skus = [];
+  picker.stock = {};
+  picker.pickedRows = [];
+  picker.agreedPriceOf.mockReset().mockImplementation((row) => row.priceOverride ?? null);
 });
 
 describe("LeadDrawerPreview", () => {
+  it("неизвестная цена блокирует сохранение, оставляет подбор и допускает явный ноль", async () => {
+    const h = { ...noopHandlers(), onItemsSaved: vi.fn() };
+    picker.pickedRows = [{ skuId: 1, code: "A1", title: "Товар", unit: "шт", qty: 2, picked: true }];
+    render(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Укажите цену для «Товар»");
+    expect(screen.getByTestId("catalog")).toBeInTheDocument();
+    expect(api.saveLeadItems).not.toHaveBeenCalled();
+    expect(picker.reset).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(h.onClose).not.toHaveBeenCalled();
+
+    picker.agreedPriceOf.mockReturnValue(0);
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    await waitFor(() => expect(screen.queryByTestId("catalog")).toBeNull());
+    expect(api.saveLeadItems).toHaveBeenCalledWith(7, [{ skuId: 1, skuCode: "A1", name: "Товар", qty: 2, price: 0, discountPct: 0 }]);
+    expect(h.onItemsSaved).toHaveBeenCalledWith(7, 1, 0);
+    expect(picker.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["false", "rejection"])("отказ сохранения %s оставляет net-цену и позволяет повтор", async (failure) => {
+    const h = { ...noopHandlers(), onItemsSaved: vi.fn() };
+    picker.pickedRows = [{ skuId: 1, code: "A1", title: "Товар", unit: "шт", qty: 2, picked: true, priceOverride: 80 }];
+    picker.stock = { A1: { price: 100, unitPrice: 100 } };
+    const save = vi.mocked(api.saveLeadItems);
+    if (failure === "false") save.mockResolvedValueOnce(false);
+    else save.mockRejectedValueOnce(new Error("network"));
+    save.mockResolvedValueOnce(true);
+    render(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось сохранить подбор");
+    expect(screen.getByText("Сохранить подбор")).toBeEnabled();
+    expect(picker.reset).not.toHaveBeenCalled();
+    expect(h.onItemsSaved).not.toHaveBeenCalled();
+    expect(picker.pickedRows[0].priceOverride).toBe(80);
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    await waitFor(() => expect(screen.queryByTestId("catalog")).toBeNull());
+    expect(save).toHaveBeenNthCalledWith(2, 7, [{ skuId: 1, skuCode: "A1", name: "Товар", qty: 2, price: 80, discountPct: 20 }]);
+    expect(h.onItemsSaved).toHaveBeenCalledWith(7, 1, 160);
+  });
+
+  it("восстанавливает сохранённую цену даже без складской базы", async () => {
+    mock(api.fetchLeadItems).mockResolvedValue([items[0]]);
+    picker.skus = [{ id: 1, code: "A1", title: "Лист 5мм", unit: "шт" }];
+    render(<LeadDrawerPreview lead={makeLead()} busy={false} {...noopHandlers()} />);
+    await screen.findByText("Лист 5мм");
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    await waitFor(() => expect(picker.setRowPrice).toHaveBeenCalledWith(1, 100));
+  });
+
   it("Escape закрывает превью открытого лида", () => {
     const h = noopHandlers();
     render(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
@@ -301,15 +367,16 @@ describe("LeadDrawerPreview", () => {
     const invLink = await screen.findByText("Открыть счёт →");
     expect(invLink.closest("a")).toHaveAttribute("href", "/api/inv/55");
     expect(onConverted).toHaveBeenCalledWith(7, 55);
-    expect(api.commitLeadItemsToDeal).toHaveBeenCalledWith("55", "ООО Тест", items);
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
     expect(api.issueDocument).toHaveBeenCalledWith("55", "invoice");
   });
 
-  it("цепочка: сделка не создалась → ошибка, позиции и счёт не трогаются", async () => {
+  it("цепочка: ожидает сделку, проверяет результат без повторной конвертации и затем выставляет счёт", async () => {
     const h = noopHandlers();
     const onConverted = vi.fn();
     mock(api.fetchLeadItems).mockResolvedValue(items);
-    mock(api.convertLead).mockResolvedValue({}); // без deal_id
+    mock(api.convertLead).mockResolvedValueOnce({ status: "converted" }).mockResolvedValueOnce({ status: "converted", deal_id: 55 });
+    mock(api.issueDocument).mockResolvedValue({ ok: true });
 
     render(
       <LeadDrawerPreview
@@ -323,27 +390,16 @@ describe("LeadDrawerPreview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "⚡ В сделку + счёт" }));
 
     expect(
-      await screen.findByText("Сделка не создалась — сервис sales не ответил"),
+      await screen.findByText(/Создание сделки ещё выполняется/),
     ).toBeInTheDocument();
-    expect(onConverted).not.toHaveBeenCalled();
+    expect(onConverted).toHaveBeenCalledWith(7);
     expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
     expect(api.issueDocument).not.toHaveBeenCalled();
-  });
-
-  it("цепочка: часть позиций не перенеслась → стоп до счёта", async () => {
-    const h = noopHandlers();
-    mock(api.fetchLeadItems).mockResolvedValue(items);
-    mock(api.convertLead).mockResolvedValue({ deal_id: 55 });
-    mock(api.commitLeadItemsToDeal).mockResolvedValue({ ok: 1, total: 2 });
-
-    render(<LeadDrawerPreview lead={makeLead({ status: "routed" })} busy={false} {...h} />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "⚡ В сделку + счёт" }));
-
-    expect(
-      await screen.findByText(/Перенеслись 1 из 2 позиций/),
-    ).toBeInTheDocument();
-    expect(api.issueDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить создание сделки" }));
+    await waitFor(() => expect(api.issueDocument).toHaveBeenCalledExactlyOnceWith("55", "invoice"));
+    expect(api.convertLead).toHaveBeenNthCalledWith(2, 7, true);
+    expect(api.commitLeadItemsToDeal).not.toHaveBeenCalled();
+    expect(onConverted).toHaveBeenCalledWith(7, 55);
   });
 
   it("цепочка: счёт не выставился → ошибка при готовых сделке и позициях", async () => {

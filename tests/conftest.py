@@ -125,6 +125,7 @@ async def ai_api(session):
 async def api_no_gateways(session):
     """API-клиент с отключёнными шлюзами 1С/склад/ЕГР — для защитных 503-веток."""
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
     async def _override():
         yield session

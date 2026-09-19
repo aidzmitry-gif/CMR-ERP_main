@@ -27,6 +27,16 @@ const apiLead = {
 };
 
 describe("leads-load", () => {
+  it("preserves SSR own visibility and numeric identity with dev username", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ ...apiLead, owner_id: 901, crm_client_id: 5, crm_contact_id: 9 }]), { headers: { "X-CRM-Visibility": "own" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const result = await loadLeadsServer("sales_manager", undefined, "makarov");
+    expect(result.visibility).toBe("own");
+    expect(result.leads[0]).toMatchObject({ ownerId: 901, crmClientId: 5, crmContactId: 9 });
+    expect(fetcher.mock.calls[0][1].headers["X-User"]).toBe("makarov");
+    await loadLeadsServer("sales_manager", "token", "makarov");
+    expect(fetcher.mock.calls[1][1].headers).toEqual({ "X-User-Roles": "sales_manager", Authorization: "Bearer token" });
+  });
   it("loadLeadsClient → auth при 403, не пустой ok", async () => {
     vi.stubGlobal(
       "fetch",
