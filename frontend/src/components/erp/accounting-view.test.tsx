@@ -126,6 +126,38 @@ describe("AccountingView", () => {
     await waitFor(() => expect(screen.queryByText("№ 5 · Поступление 1")).not.toBeInTheDocument());
     expect(await screen.findByText("За выбранный период нет проводок.")).toBeInTheDocument();
   });
+  it("keeps the in-flight accounts response after reselecting the active organization", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    const pendingAccounts: Array<(value: unknown) => void> = [];
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/accounts?")) return new Promise((resolve) => pendingAccounts.push(resolve));
+      if (url.includes("/bank-import/candidates")) return respond([{
+        source_snapshot: {
+          transaction_id: 9, ext_id: "BANK-9", occurred_on: "2026-09-01", amount: "100.00", currency: "BYN",
+          payer_unp: "999999999", payer_name: "Плательщик", purpose: "Оплата", account_code: null, match_status: "unmatched",
+        },
+        source_digest: "digest-9", binding_status: "own", imported: false, entry_id: null,
+      }]);
+      return original(url, init);
+    });
+
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await waitFor(() => expect(pendingAccounts).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "1" } });
+    await act(async () => pendingAccounts[0](respond([
+      { id: 51, code: "51", title: "Расчётный счёт", cash: true, category: "asset", required_dimensions: [] },
+      { id: 60, code: "60", title: "Расчёты с поставщиками", cash: false, category: "liability", required_dimensions: [] },
+    ])));
+
+    fireEvent.click(screen.getByRole("button", { name: "Импорт выписки", exact: true }));
+    await screen.findByText("BANK-9");
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать", exact: true }));
+
+    expect(screen.getByRole("option", { name: "51 · Расчётный счёт" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "60 · Расчёты с поставщиками" })).toBeInTheDocument();
+  });
   it("shows denied access without fabricated empty balances", async () => {
     fetchMock.mockImplementation(() => respond({ detail: "No access" }, false));
     render(<AccountingView />);
