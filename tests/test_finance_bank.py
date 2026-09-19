@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import func, select
 
 from core.services.eventbus import OutboxEventBus
 from modules.finance.allocation import sum_allocations
 from modules.finance.bank_ingest import sync_incoming
 from modules.finance.models import BankTransaction, Payment, PaymentAllocation
+from modules.finance.official_fx import BankAmountInvalid, bank_source_amount
 
 
 class FakeBank:
@@ -126,15 +128,13 @@ async def test_no_gateway_is_honest_empty(session):
     assert summary == {"source_available": False, "fetched": 0, "new": 0, "matched": 0, "unmatched": 0}
 
 
-async def test_non_finite_amount_goes_to_unmatched_queue(session):
-    await _receivable(session)
-    summary = await sync_incoming(
-        session, FakeBank([_tx("A-NAN", "NaN", "Оплата счёт СЧ-100")]), OutboxEventBus()
-    )
-    await session.commit()
-    assert summary["matched"] == 0 and summary["unmatched"] == 1
-    tx = (await session.execute(select(BankTransaction))).scalar_one()
-    assert tx.amount == Decimal("0") and tx.note == "нет суммы зачисления"
+@pytest.mark.parametrize(
+    "raw",
+    [None, "", "NaN", "Infinity", "-Infinity", "0", "-1", "12.345", 1.5, True],
+)
+def test_invalid_bank_amount_is_rejected_explicitly(raw):
+    with pytest.raises(BankAmountInvalid):
+        bank_source_amount(raw)
 
 
 async def test_alfa_client_without_creds_returns_empty():
@@ -155,6 +155,23 @@ async def test_bank_sync_endpoint_wired_and_honest_empty(api):
     assert body["ok"] and body["fetched"] == 0
     r2 = await api.get("/finance/bank/transactions")
     assert r2.status_code == 200 and r2.json() == []
+
+
+async def test_bank_sync_invalid_amount_rolls_back_prior_rows(api, session):
+    pid = await _receivable(session)
+    api._transport.app.state.core.services.bank = FakeBank([
+        _tx("A-VALID", "1000", "Оплата по счёту СЧ-100"),
+        _tx("A-INVALID", "NaN", "Оплата по счёту СЧ-100"),
+    ])
+
+    response = await api.post("/finance/bank/sync")
+
+    assert response.status_code == 422
+    assert "сумм" in response.json()["detail"].lower()
+    assert await session.scalar(select(func.count()).select_from(BankTransaction)) == 0
+    assert await session.scalar(select(func.count()).select_from(PaymentAllocation)) == 0
+    payment = await session.get(Payment, pid)
+    assert payment is not None and payment.status == "pending"
 
 
 async def test_bank_endpoint_forbidden_for_non_finance_role(api):
