@@ -81,8 +81,8 @@ def commercial_lines(document):
 
 def posting_for(document, cost):
     lines, _, _ = commercial_lines(document)
-    if not belongs(document.account, "41") or not belongs(document.expense_account, "90.4"):
-        raise service.AccountingError("Pilot sale requires goods 41 and cost 90.4")
+    if not belongs(document.expense_account, "90.4"):
+        raise service.AccountingError("Pilot sale requires cost account 90.4")
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
     issue_posting = inventory_issues.posting_for(issue, cost)
     lines += issue_posting.lines

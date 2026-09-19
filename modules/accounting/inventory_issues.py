@@ -77,7 +77,18 @@ async def historical_cost(session, organization_id, entry_id, document, *, procu
     ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
     request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
     verified = await verified_value_lines(session, organization_id, rows, procurement)
-    return inventory_cost.issue_result(policy, rows, organization_id, request, verified_value_lines=verified)
+    from modules.accounting.production_output_inventory import (
+        is_finished_goods_account,
+        verified_output_lines,
+    )
+
+    finished_goods = is_finished_goods_account(policy, document.account)
+    output_lines = await verified_output_lines(
+        session, organization_id, policy, document.account, document.posting_date,
+        {"warehouse": document.warehouse, "sku": document.sku, "lot": document.lot}, before_entry_id=entry_id,
+    ) if finished_goods else frozenset()
+    return inventory_cost.issue_result(policy, rows, organization_id, request, verified_value_lines=verified,
+                                       verified_output_lines=output_lines, finished_goods=finished_goods)
 
 
 async def verify_receipt(session, organization_id, entry_id, *, procurement=None,

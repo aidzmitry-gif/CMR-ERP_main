@@ -67,7 +67,8 @@ def _source_trace(entry: Entry, line: Line) -> dict:
     }
 
 
-async def output_transfer_source_state(session, receipt: ProductionOutputTransferReceipt, through_month: str) -> str:
+async def output_transfer_source_state(session, receipt: ProductionOutputTransferReceipt, through_month: str,
+                                       *, through_date: date | None = None, before_entry_id: int | None = None) -> str:
     """Compare the receipt's immutable WIP trace with current source evidence.
 
     The transfer's own WIP credit is deliberately excluded: it settles the saved
@@ -76,6 +77,7 @@ async def output_transfer_source_state(session, receipt: ProductionOutputTransfe
     """
     try:
         _, last = _period(through_month)
+        cutoff = through_date or last
         command = receipt.command
         basis = receipt.basis
         if not isinstance(command, dict) or not isinstance(basis, dict):
@@ -90,10 +92,13 @@ async def output_transfer_source_state(session, receipt: ProductionOutputTransfe
         if policy is None or policy.organization_id != receipt.organization_id or policy.production_costing is None:
             return "unavailable"
         settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
-        rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
-            Entry.organization_id == receipt.organization_id, Entry.posting_date <= last,
+        query = select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+            Entry.organization_id == receipt.organization_id, Entry.posting_date <= cutoff,
             Line.account_code == wip_account,
-        ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+        )
+        if before_entry_id is not None:
+            query = query.where(Entry.id < before_entry_id)
+        rows = (await session.execute(query.order_by(Entry.posting_date, Entry.id, Line.id))).all()
         current = []
         required = set(settings.pool_dimensions) | {settings.order_dimension}
         for entry, line in rows:

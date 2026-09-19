@@ -18,15 +18,29 @@ async def _inventory_rows(session, org_id, data):
         raise AccountingError("Select the applicable accounting policy")
     if policy.inventory_method not in {"specific", "fifo", "weighted_average"}:
         raise AccountingError("The selected inventory valuation method is not supported")
+    finished_goods = False
     if data.account.split(".")[0] not in {"10", "41"}:
-        raise AccountingError("Select an owned inventory account 10/41")
+        from modules.accounting.production_output_inventory import is_finished_goods_account
+
+        if not is_finished_goods_account(policy, data.account):
+            raise AccountingError("Select an owned inventory account 10/41 or the policy finished-goods account")
+        finished_goods = True
     rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
         Entry.organization_id == org_id, Line.account_code == data.account,
     ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
-    return policy, rows
+    verified_output_lines = frozenset()
+    if finished_goods:
+        from modules.accounting.production_output_inventory import verified_output_lines
+
+        verified_output_lines = await verified_output_lines(
+            session, org_id, policy, data.account, data.posting_date,
+            {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot},
+        )
+    return policy, rows, verified_output_lines, finished_goods
 
 
-def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset()):
+def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset(),
+                      verified_output_lines=frozenset(), finished_goods=False):
     """Build chronological available inventory layers for FIFO/average methods.
 
     The physical identity remains explicit (warehouse/SKU/lot).  A debit adds
@@ -51,6 +65,8 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
             if dimensions.get("warehouse") == target["warehouse"] and dimensions.get("sku") == target["sku"]:
                 raise AccountingError("Selected SKU has later movements; chronological costing is required")
             continue
+        if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
+            raise AccountingError("Finished-goods layer has no verified production output receipt")
         if dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]:
             continue
         if target.get("lot") and dimensions.get("lot") != target["lot"]:
@@ -112,7 +128,8 @@ def _layer_payload(layer, quantity, amount):
             "amount_byn": format(amount, ".2f"), "dimensions": layer["dimensions"]}
 
 
-def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()):
+def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset(),
+                 verified_output_lines=frozenset(), finished_goods=False):
     """Caller must authenticate each admitted (entry_id, line_id) cost adjustment.
 
     Public callers admit none until the durable late-cost verifier is wired.
@@ -132,6 +149,8 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
                 continue
             if entry.posting_date > posting_date:
                 raise AccountingError("Selected lot has later movements; chronological costing is required")
+            if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
+                raise AccountingError("Finished-goods layer has no verified production output receipt")
             value_only = (entry.id, line.id) in verified_value_lines
             if value_only and (entry.operation != "inventory_late_cost" or line.quantity is not None
                                or line.side != "debit" or quantity <= 0 or line.amount <= 0):
@@ -168,12 +187,14 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
 async def preview_issue(session, org_id, data, *, procurement=None):
     from modules.accounting.late_cost_receipts import verified_value_lines
 
-    policy, rows = await _inventory_rows(session, org_id, data)
+    policy, rows, output_lines, finished_goods = await _inventory_rows(session, org_id, data)
     verified = await verified_value_lines(session, org_id, rows, procurement)
-    return issue_result(policy, rows, org_id, data, verified_value_lines=verified)
+    return issue_result(policy, rows, org_id, data, verified_value_lines=verified,
+                        verified_output_lines=output_lines, finished_goods=finished_goods)
 
 
-def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()):
+def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset(),
+                 verified_output_lines=frozenset(), finished_goods=False):
     """Same calculation for live preview and verification of original history."""
     target = {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot}
     # Older internal reconstruction callers do not carry the policy method;
@@ -186,7 +207,8 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
             if not data.lot:
                 raise AccountingError("Specific costing requires an explicit lot")
             quantity, amount, inventory_dimensions, evidence = _lot_balance(
-                rows, target, data.posting_date, verified_value_lines=verified_value_lines)
+                rows, target, data.posting_date, verified_value_lines=verified_value_lines,
+                verified_output_lines=verified_output_lines, finished_goods=finished_goods)
             if data.quantity > quantity:
                 raise AccountingError("Insufficient book quantity in the selected lot")
             cost = amount if data.quantity == quantity else (amount * data.quantity / quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -194,7 +216,9 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
             method_target = target
         else:
             layers, evidence = _valuation_layers(rows, target, data.posting_date,
-                                                 verified_value_lines=verified_value_lines)
+                                                 verified_value_lines=verified_value_lines,
+                                                 verified_output_lines=verified_output_lines,
+                                                 finished_goods=finished_goods)
             quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
             amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             if not layers or data.quantity > quantity:
@@ -245,7 +269,7 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
 async def available_lots(session, org_id, data, *, procurement=None):
     from modules.accounting.late_cost_receipts import verified_value_lines
 
-    policy, rows = await _inventory_rows(session, org_id, data)
+    policy, rows, output_lines, finished_goods = await _inventory_rows(session, org_id, data)
     verified = await verified_value_lines(session, org_id, rows, procurement)
     # Match the issue rule: incomplete analytics anywhere on this account block costing.
     if any(any(not (line.dimensions or {}).get(key) for key in ("warehouse", "sku", "lot")) for _, line in rows):
@@ -258,9 +282,11 @@ async def available_lots(session, org_id, data, *, procurement=None):
         target = {"warehouse": data.warehouse, "sku": data.sku, "lot": lot}
         try:
             if policy.inventory_method == "specific":
-                quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified)
+                quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified,
+                                                       verified_output_lines=output_lines, finished_goods=finished_goods)
             else:
-                layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified)
+                layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified,
+                                               verified_output_lines=output_lines, finished_goods=finished_goods)
                 quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
                 amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             result.append({"lot": lot, "book_quantity": format(quantity, ".6f"),
