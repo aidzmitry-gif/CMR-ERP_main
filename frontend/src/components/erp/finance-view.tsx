@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SourceTag } from "@/components/source-tag";
 import { formatByn } from "@/lib/format";
+import { FinanceLedgerCashflow } from "./finance-ledger-cashflow";
+import { FinanceLedgerPnl } from "./finance-ledger-pnl";
 
 // ──────────────────────────── Контракты ответов /finance/* ────────────────────────────
 
@@ -254,8 +256,8 @@ export function FinanceView() {
         {tab === "cashflow" && <CashflowTab />}
         {tab === "calendar" && <CalendarTab />}
         {tab === "margin" && <MarginTab />}
-        {tab === "pnl" && <PnlTab />}
-        {tab === "dds" && <DdsTab />}
+        {tab === "pnl" && <FinanceLedgerPnl />}
+        {tab === "dds" && <FinanceLedgerCashflow />}
         {tab === "balance" && <BalanceTab />}
         {tab === "reconcile" && <ReconcileTab />}
       </div>

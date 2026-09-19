@@ -41,6 +41,34 @@ const SUMMARY = {
   ],
 };
 
+const LEDGER_REPORT = {
+  organization_id: 7,
+  from: "2026-09-01",
+  to: "2026-09-30",
+  status: "preliminary",
+  pending_documents: 0,
+  review_items: [],
+  pnl: { income: "20.00", expenses: "3.33", profit: "16.67" },
+  pnl_movements: [],
+  cashflow_ledger: {
+    opening: "50.00", external_inflow: "100.00", external_outflow: "40.00", external_net: "60.00",
+    internal_net: "0.00", internal_count: 0, unclassified_inflow: "0.00", unclassified_outflow: "0.00",
+    unclassified_net: "0.00", unclassified_count: 0, opening_adjustment_net: "0.00", opening_adjustment_count: 0,
+    closing: "110.00",
+    activities: {
+      operating: { inflow: "100.00", outflow: "40.00", net: "60.00" },
+      investing: { inflow: "0.00", outflow: "0.00", net: "0.00" },
+      financing: { inflow: "0.00", outflow: "0.00", net: "0.00" },
+    },
+  },
+  cash_movements: [],
+};
+
+function ledgerResponses() {
+  responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+  responders["accounting/organizations/7/reports"] = LEDGER_REPORT;
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockClear();
@@ -218,28 +246,20 @@ describe("FinanceView", () => {
     expect(screen.getAllByText("нет связи с 1С").length).toBe(2);
   });
 
-  it("вкладка «P&L» показывает строки отчёта и итоговую операционную прибыль", async () => {
-    responders["finance/pnl"] = {
-      from_date: "2026-01-01",
-      to_date: "2026-07-18",
-      currency: "BYN",
-      revenue: "50000.00",
-      cogs: "30000.00",
-      freight: "2000.00",
-      gross_profit: "18000.00",
-      payroll: "6000.00",
-      opex: "1000.00",
-      tax: "500.00",
-      bank_fee: "100.00",
-      operating_profit: "10400.00",
-    };
+  it("вкладка «P&L» монтирует отчёт бухгалтерской книги, а не legacy P&L", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    expect(await screen.findByText("Выручка (признанная, accrual)")).toBeInTheDocument();
-    expect(screen.getByText("Операционная прибыль")).toBeInTheDocument();
-    expect(screen.getByText(byn("10400"))).toBeInTheDocument(); // operating_profit
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("16.67 BYN")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/pnl"))).toBe(false);
   });
 
   it("вкладка «Сверка 1С» без источника показывает «сверка не настроена»", async () => {
@@ -395,26 +415,20 @@ describe("FinanceView", () => {
     expect(await screen.findByText(/Не удалось получить сверку/)).toBeInTheDocument();
   });
 
-  it("вкладка «ДДС» рендерит KPI-карточки, разбивку и «нет связи с 1С» для остатка", async () => {
-    responders["finance/cashflow"] = {
-      period_from: "2026-01-01",
-      period_to: "2026-07-19",
-      currency: "BYN",
-      inflows: "12000.00",
-      outflows: "5000.00",
-      net_cashflow: "7000.00",
-      bank_balance: null,
-      breakdown: { receivable: "12000.00", payroll: "3000.00" },
-    };
+  it("вкладка «ДДС» монтирует отчёт бухгалтерской книги, а не legacy ДДС", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
 
-    expect(await screen.findByText("Остаток на счёте")).toBeInTheDocument();
-    expect(screen.getByText("нет связи с 1С")).toBeInTheDocument();
-    expect(screen.getByText("Поступления (счета)")).toBeInTheDocument();
-    expect(screen.getByText("ФОТ")).toBeInTheDocument();
-    expect(screen.getByText(byn("7000"))).toBeInTheDocument(); // net
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация ДДС"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода ДДС"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода ДДС"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("60.00 BYN")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/cashflow"))).toBe(false);
   });
 
   it("вкладка «Сверка 1С» с источником показывает совпавшие и расхождения по сторонам", async () => {
@@ -488,13 +502,20 @@ describe("FinanceView", () => {
     ).toBe(false);
   });
 
-  it("вкладка «P&L» показывает ошибку при сбое сети", async () => {
-    responders["finance/pnl"] = "error";
+  it("вкладка «P&L» показывает ошибку доступа к бухгалтерской книге", async () => {
+    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+    responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    expect(await screen.findByText(/Нет данных P&L/)).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить P&L бухгалтерской книги");
   });
 
   it("вкладка «Баланс» показывает ошибку при сбое сети", async () => {
