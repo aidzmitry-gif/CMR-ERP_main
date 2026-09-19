@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import runpy
 from datetime import date
 from uuid import uuid4
 
@@ -12,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 
 from core.db.base import Base
 from modules.accounting import bank_import, closing_controls, service
-from modules.accounting.models import BankImportReceipt, SourceBinding
+from modules.accounting.models import Account, BankAccountMapping, BankImportReceipt, SourceBinding
 from modules.finance.models import BankAccount, BankTransaction, Payment, PaymentAllocation
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 
@@ -29,6 +30,13 @@ async def bank_period_sql_guards(pg_factory):  # noqa: F811
 
     async with pg_factory() as session:
         connection = await session.connection()
+        migration = runpy.run_path("migrations/versions/0137_bank_account_mapping.py")
+
+        def upgrade(conn):
+            with Operations.context(MigrationContext.configure(conn)):
+                migration["upgrade"]()
+
+        await connection.run_sync(upgrade)
         sql = Path("modules/accounting/bank_period_guards.sql").read_text(encoding="utf-8")
         await connection.run_sync(lambda conn: Operations(MigrationContext.configure(conn)).execute(sql))
         await session.commit()
@@ -45,7 +53,7 @@ def command(source_id: int, source_digest: str, policy_id: int) -> bank_import.B
     return bank_import.BankImportInput(
         request_key=str(uuid4()), source_transaction_id=source_id, source_digest=source_digest,
         policy_id=policy_id, bank_account="51", settlement_account="62",
-        bank_dimensions={"bank_statement": "caller-value"},
+        bank_dimensions={},
         settlement_dimensions={"counterparty": "buyer-pg", "contract": "contract-pg"},
         posting_date=date(2026, 9, 4), cash_activity="operating",
         explanation="Review imported bank receipt in PostgreSQL acceptance",
@@ -58,12 +66,21 @@ async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, p
         source = BankTransaction(
             ext_id="PG-BANK-IMPORT-1", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN",
             payer_unp="191234567", payer_name="PG Buyer", purpose="Advance", account_code="main",
+            source_provider="synthetic-bank",
         )
         session.add(source)
         await session.flush()
         session.add(SourceBinding(
             organization_id=pg_book[0], source_type="finance_bank_transaction", source_id=source.id,
             ownership="own", evidence="PostgreSQL chief mapping for the pilot company", actor="tester",
+        ))
+        account = await session.scalar(select(Account).where(
+            Account.organization_id == pg_book[0], Account.code == "51",
+        ))
+        session.add(BankAccountMapping(
+            organization_id=pg_book[0], provider="synthetic-bank", external_account="main", currency="BYN",
+            valid_from=date(2026, 1, 1), valid_to=None, version=1, ledger_account_id=account.id,
+            dimensions={}, evidence="PostgreSQL synthetic mapping evidence", actor="tester",
         ))
         await session.commit()
         snapshot = bank_import.source_snapshot(source)

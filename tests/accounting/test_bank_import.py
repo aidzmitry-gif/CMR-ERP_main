@@ -2,10 +2,20 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, update
 
-from modules.accounting import bank_import
-from modules.accounting.models import BankImportReceipt, Entry, Line, SourceBinding
+from modules.accounting import bank_account_mapping, bank_import
+from modules.accounting.models import (
+    Account,
+    BankAccountMapping,
+    BankImportReceipt,
+    Entry,
+    Line,
+    Organization,
+    SourceBinding,
+)
+from modules.accounting.schemas import BankAccountMappingCloseInput, BankAccountMappingInput
 from modules.finance.models import BankTransaction
 
 
@@ -27,11 +37,27 @@ def command(book, source_digest, **changes):
     return data
 
 
+async def map_source(db, org_id, source, *, dimensions=None):
+    account = await db.scalar(select(Account).where(
+        Account.organization_id == org_id, Account.code == "51",
+    ))
+    mapping = BankAccountMapping(
+        organization_id=org_id, provider=source.source_provider, external_account=source.account_code,
+        currency=source.currency, valid_from=date(2026, 1, 1), valid_to=None, version=1,
+        ledger_account_id=account.id, dimensions=dimensions or {},
+        evidence="Synthetic bank mapping evidence", actor="tester",
+    )
+    db.add(mapping)
+    await db.commit()
+    return mapping
+
+
 @pytest.mark.asyncio
 async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(client, db, book):
     source = BankTransaction(
         ext_id="BANK-EXT-1", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN",
         payer_unp="191234567", payer_name="Buyer", purpose="Advance", account_code="main",
+        source_provider="synthetic-bank",
     )
     db.add(source)
     await db.commit()
@@ -41,13 +67,15 @@ async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(cl
         actor="tester",
     ))
     await db.commit()
+    await map_source(db, book[0], source)
     snapshot = bank_import.source_snapshot(source)
-    body = command(book, bank_import._digest(snapshot), source_transaction_id=source.id)
+    body = command(book, bank_import._digest(snapshot), source_transaction_id=source.id, bank_dimensions={})
 
     preview = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
     assert preview.status_code == 200, preview.text
     plan = preview.json()
     assert plan["source_snapshot"]["ext_id"] == "BANK-EXT-1"
+    assert plan["mapping"]["bank_account"] == "51"
     assert plan["posting"]["lines"][0]["dimensions"]["bank_statement"] == "BANK-EXT-1"
     assert plan["posted"] is False
 
@@ -68,6 +96,7 @@ async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(cl
     assert not any(item["code"] == "unposted_bank_imports" for item in controls["blockers"])
     assert receipt.source_ext_id == "BANK-EXT-1"
     assert receipt.snapshot["source_digest"] == bank_import._digest(snapshot)
+    assert receipt.snapshot["mapping"] == plan["mapping"]
 
     replay = await client.post(
         f"/accounting/organizations/{book[0]}/bank-import/confirm",
@@ -87,6 +116,169 @@ async def test_imported_bank_transaction_posts_once_and_keeps_source_snapshot(cl
     )
     assert replay_after_match.status_code == 201, replay_after_match.text
     assert replay_after_match.json()["entry_id"] == entry_id
+
+
+async def test_bank_import_requires_own_binding_and_exact_registry_values(client, db, book):
+    source = BankTransaction(
+        ext_id="BANK-MAP-UNBOUND", occurred_on=date(2026, 9, 3), amount="80.00", currency="BYN",
+        account_code="mapping-account", source_provider="synthetic-bank",
+    )
+    db.add(source)
+    await db.commit()
+    source_id = source.id
+    body = command(book, bank_import._digest(bank_import.source_snapshot(source)), source_transaction_id=source_id,
+                   bank_dimensions={})
+    unbound = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    assert unbound.status_code == 422
+    assert "binding" in unbound.json()["detail"]
+
+    other = Organization(name="Synthetic foreign bank owner", unp="888888888")
+    db.add(other)
+    await db.flush()
+    db.add(SourceBinding(organization_id=other.id, source_type="finance_bank_transaction", source_id=source_id,
+                         ownership="own", evidence="Synthetic foreign owner evidence", actor="tester"))
+    await db.commit()
+    foreign = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    assert foreign.status_code == 422
+    assert "binding" in foreign.json()["detail"]
+
+
+async def test_bank_import_rejects_manual_mismatch_and_stale_mapping_confirm(client, db, book):
+    source = BankTransaction(
+        ext_id="BANK-MAP-STALE", occurred_on=date(2026, 9, 3), amount="90.00", currency="BYN",
+        account_code="stale-account", source_provider="synthetic-bank",
+    )
+    db.add(source)
+    await db.flush()
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source.id,
+                         ownership="own", evidence="Synthetic own binding evidence", actor="tester"))
+    await db.commit()
+    mapping = await map_source(db, book[0], source)
+    body = command(book, bank_import._digest(bank_import.source_snapshot(source)), source_transaction_id=source.id,
+                   bank_dimensions={})
+    mismatch = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview",
+                                 json={**body, "bank_account": "41"})
+    assert mismatch.status_code == 422
+    assert "exactly match" in mismatch.json()["detail"]
+    preview = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    await bank_account_mapping.close(
+        db, book[0], mapping.id,
+        BankAccountMappingCloseInput(valid_to=date(2026, 9, 3), evidence="Synthetic stale mapping close evidence"),
+    )
+    await db.commit()
+    stale = await client.post(f"/accounting/organizations/{book[0]}/bank-import/confirm",
+                              json={**body, "basis_digest": preview.json()["basis_digest"],
+                                    "digest": preview.json()["digest"]})
+    assert stale.status_code == 409
+    assert "mapping" in stale.json()["detail"]
+    assert await db.scalar(select(BankImportReceipt.entry_id)) is None
+
+
+async def test_used_mapping_cannot_close_or_create_successor(client, db, book):
+    source = BankTransaction(
+        ext_id="BANK-MAP-USED", occurred_on=date(2026, 9, 3), amount="100.00", currency="BYN",
+        account_code="used-account", source_provider="synthetic-bank",
+    )
+    db.add(source)
+    await db.flush()
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source.id,
+                         ownership="own", evidence="Synthetic own binding evidence", actor="tester"))
+    await db.commit()
+    mapping = await map_source(db, book[0], source)
+    body = command(book, bank_import._digest(bank_import.source_snapshot(source)), source_transaction_id=source.id,
+                   bank_dimensions={})
+    preview = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    confirmed = await client.post(
+        f"/accounting/organizations/{book[0]}/bank-import/confirm",
+        json={**body, "basis_digest": preview.json()["basis_digest"], "digest": preview.json()["digest"]},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    with pytest.raises(HTTPException, match="already used"):
+        await bank_account_mapping.close(
+            db, book[0], mapping.id,
+            BankAccountMappingCloseInput(valid_to=date(2026, 9, 3), evidence="Synthetic used close evidence"),
+        )
+    account = await db.get(Account, mapping.ledger_account_id)
+    with pytest.raises(HTTPException, match="already used"):
+        await bank_account_mapping.create(
+            db, book[0], BankAccountMappingInput(
+                provider=source.source_provider, external_account=source.account_code, currency="BYN",
+                valid_from=date(2026, 9, 3), ledger_account_id=account.id, dimensions={},
+                evidence="Synthetic used successor evidence",
+            ), "tester",
+        )
+
+
+async def test_legacy_receipt_without_mapping_fingerprint_replays(client, db, book):
+    source = BankTransaction(
+        ext_id="BANK-MAP-LEGACY", occurred_on=date(2026, 9, 3), amount="100.00", currency="BYN",
+        account_code="legacy-account", source_provider="synthetic-bank",
+    )
+    db.add(source)
+    await db.flush()
+    source_id = source.id
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source_id,
+                         ownership="own", evidence="Synthetic own binding evidence", actor="tester"))
+    await db.commit()
+    await map_source(db, book[0], source)
+    body = command(book, bank_import._digest(bank_import.source_snapshot(source)), source_transaction_id=source_id,
+                   bank_dimensions={})
+    preview = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    confirmed = await client.post(
+        f"/accounting/organizations/{book[0]}/bank-import/confirm",
+        json={**body, "basis_digest": preview.json()["basis_digest"], "digest": preview.json()["digest"]},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    receipt = await db.scalar(select(BankImportReceipt).where(
+        BankImportReceipt.source_transaction_id == source_id,
+    ))
+    legacy_snapshot = dict(receipt.snapshot)
+    legacy_snapshot.pop("mapping")
+    await db.execute(update(BankImportReceipt).where(BankImportReceipt.entry_id == receipt.entry_id).values(
+        snapshot=legacy_snapshot,
+    ))
+    await db.commit()
+    db.expire_all()
+    replay = await client.post(
+        f"/accounting/organizations/{book[0]}/bank-import/confirm",
+        json={**body, "basis_digest": preview.json()["basis_digest"], "digest": preview.json()["digest"]},
+    )
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["entry_id"] == confirmed.json()["entry_id"]
+
+
+async def test_newer_effective_account_makes_mapping_confirm_stale(client, db, book):
+    source = BankTransaction(
+        ext_id="BANK-MAP-ACCOUNT-STALE", occurred_on=date(2026, 9, 3), amount="100.00", currency="BYN",
+        account_code="account-stale", source_provider="synthetic-bank",
+    )
+    db.add(source)
+    await db.flush()
+    source_id = source.id
+    db.add(SourceBinding(organization_id=book[0], source_type="finance_bank_transaction", source_id=source_id,
+                         ownership="own", evidence="Synthetic own binding evidence", actor="tester"))
+    await db.commit()
+    mapping = await map_source(db, book[0], source)
+    body = command(book, bank_import._digest(bank_import.source_snapshot(source)), source_transaction_id=source_id,
+                   bank_dimensions={})
+    preview = await client.post(f"/accounting/organizations/{book[0]}/bank-import/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    original = await db.get(Account, mapping.ledger_account_id)
+    db.add(Account(organization_id=book[0], code=original.code, title="Newer bank cash account",
+                   category="asset", valid_from=date(2026, 9, 3), required_dimensions=[],
+                   currency_tracking=True, quantity_tracking=False, cash=True,
+                   normative_ref="Synthetic stale-account successor"))
+    await db.commit()
+    stale = await client.post(
+        f"/accounting/organizations/{book[0]}/bank-import/confirm",
+        json={**body, "basis_digest": preview.json()["basis_digest"], "digest": preview.json()["digest"]},
+    )
+    assert stale.status_code == 409
+    assert "mapping" in stale.json()["detail"]
+    assert await db.scalar(select(BankImportReceipt.entry_id).where(
+        BankImportReceipt.source_transaction_id == source_id,
+    )) is None
 
 
 @pytest.mark.asyncio

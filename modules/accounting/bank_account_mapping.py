@@ -7,7 +7,7 @@ import json
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from modules.accounting.models import Account, BankAccountMapping, Period
+from modules.accounting.models import Account, BankAccountMapping, BankImportReceipt, Period
 
 
 def _digest(value):
@@ -58,6 +58,17 @@ async def _assert_open_periods(session, org_id, on):
         raise HTTPException(409, "Bank mapping affects a closed period")
 
 
+async def _assert_unused_after(session, row, valid_to):
+    """Do not let a configuration close exclude a receipt that pinned it."""
+    receipts = (await session.scalars(select(BankImportReceipt).where(
+        BankImportReceipt.organization_id == row.organization_id,
+    ))).all()
+    for receipt in receipts:
+        mapping = receipt.snapshot.get("mapping") if receipt.snapshot else None
+        if mapping and mapping.get("mapping_id") == row.id and receipt.operation_date >= valid_to:
+            raise HTTPException(409, "Bank mapping is already used by an immutable receipt on this date")
+
+
 async def create(session, org_id, data, actor):
     await _assert_open_periods(session, org_id, data.valid_from)
     await _validate_account(session, org_id, data.ledger_account_id, data.valid_from, data.currency, data.dimensions)
@@ -74,6 +85,7 @@ async def create(session, org_id, data, actor):
         if row.valid_to is None or data.valid_from < row.valid_to:
             if (row.organization_id == org_id and row.valid_to is None
                     and row.valid_from < data.valid_from):
+                await _assert_unused_after(session, row, data.valid_from)
                 predecessor_before = result(row)
                 predecessor = row
                 row.valid_to = data.valid_from
@@ -117,12 +129,7 @@ async def list_for(session, org_id, *, provider=None, external_account=None, cur
 
 
 async def close(session, org_id, mapping_id, data):
-    """Close configuration history; receipt-use protection starts with the FX consumer.
-
-    The registry has no receipt consumer in this slice, so it can only guard
-    accounting periods.  FX confirmation must add its persisted mapping
-    snapshot and reject a close that affects an already-used operation date.
-    """
+    """Close configuration history without excluding a receipt that pinned it."""
     row = await get_one(session, org_id, mapping_id)
     await session.refresh(row, with_for_update=True)
     if row.valid_to is not None:
@@ -130,6 +137,7 @@ async def close(session, org_id, mapping_id, data):
     if data.valid_to <= row.valid_from:
         raise HTTPException(422, "Mapping close date must follow its start")
     await _assert_open_periods(session, org_id, data.valid_to)
+    await _assert_unused_after(session, row, data.valid_to)
     before = result(row)
     row.valid_to = data.valid_to
     await session.flush()
@@ -145,3 +153,19 @@ async def resolve(session, org_id, *, provider, external_account, currency, on):
     row = rows[0]
     await _validate_account(session, org_id, row.ledger_account_id, on, currency, row.dimensions)
     return row
+
+
+async def resolve_fingerprint(session, org_id, *, provider, external_account, currency, on):
+    """Return the exact effective cash configuration for a bank-import preview."""
+    row = await resolve(session, org_id, provider=provider, external_account=external_account,
+                        currency=currency, on=on)
+    account = await _effective_account(session, org_id, row.ledger_account_id, on)
+    snapshot = result(row)
+    return {
+        "mapping_id": snapshot["mapping_id"],
+        "version": snapshot["version"],
+        "digest": snapshot["digest"],
+        "ledger_account_id": snapshot["ledger_account_id"],
+        "bank_account": account.code,
+        "dimensions": snapshot["dimensions"],
+    }

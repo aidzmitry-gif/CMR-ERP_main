@@ -14,10 +14,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
+from fastapi import HTTPException
 from pydantic import Field, field_validator
 from sqlalchemy import func, or_, select
 
-from modules.accounting import service
+from modules.accounting import bank_account_mapping, service
 from modules.accounting.documents import BankDocument, preview_bank
 from modules.accounting.models import BankImportReceipt, Entry, SourceBinding
 from modules.accounting.schemas import Code, Input, PostingInput
@@ -101,7 +102,7 @@ async def _source(session, org_id: int, source_transaction_id: int) -> tuple[Ban
         SourceBinding.organization_id == org_id,
         SourceBinding.source_type == "finance_bank_transaction",
         SourceBinding.source_id == source_transaction_id,
-    ))
+    ).with_for_update())
     if binding is None or binding.ownership != "own":
         raise service.AccountingError(
             "Imported bank transaction has no explicit legal-entity binding; map it before posting"
@@ -153,9 +154,26 @@ def _posting(data: BankImportInput, snapshot: dict) -> BankDocument:
     )
 
 
+async def _mapping(session, org_id: int, row: BankTransaction, data: BankImportInput) -> dict:
+    if not row.source_provider or not row.account_code or not row.currency or row.occurred_on is None:
+        raise service.AccountingError("Imported bank transaction lacks registry mapping identity")
+    try:
+        mapping = await bank_account_mapping.resolve_fingerprint(
+            session, org_id, provider=row.source_provider, external_account=row.account_code,
+            currency=row.currency, on=row.occurred_on,
+        )
+    except HTTPException as exc:
+        if exc.status_code in {409, 422}:
+            raise service.AccountingError(f"Imported bank mapping is unavailable: {exc.detail}") from exc
+        raise
+    if data.bank_account != mapping["bank_account"] or data.bank_dimensions != mapping["dimensions"]:
+        raise service.AccountingError("Manual bank account and dimensions must exactly match the registry mapping")
+    return mapping
+
+
 async def prepare(session, org_id: int, data: BankImportInput) -> dict:
     await service.lock_organization(session, org_id)
-    _row, source, actual_digest = await _source(session, org_id, data.source_transaction_id)
+    row, source, actual_digest = await _source(session, org_id, data.source_transaction_id)
     if actual_digest != data.source_digest:
         raise service.AccountingError("Imported bank source changed; refresh the source snapshot")
     existing = await session.scalar(select(BankImportReceipt).where(
@@ -171,9 +189,10 @@ async def prepare(session, org_id: int, data: BankImportInput) -> dict:
             raise service.AccountingError("Imported bank receipt has no matching ledger entry")
         return {**existing.snapshot, "receipt_id": existing.entry_id, "posted": True,
                 "confirmation_available": False}
+    mapping = await _mapping(session, org_id, row, data)
     posting = _posting(data, source)
     posted, accounts, policy = await preview_bank(session, org_id, posting)
-    basis = {"source": source, "source_digest": actual_digest,
+    basis = {"source": source, "source_digest": actual_digest, "mapping": mapping,
              "command": _command_body(data), "posting": posted.model_dump(mode="json")}
     return {
         "organization_id": org_id,
@@ -181,6 +200,7 @@ async def prepare(session, org_id: int, data: BankImportInput) -> dict:
         "source_transaction_id": data.source_transaction_id,
         "source_snapshot": source,
         "source_digest": actual_digest,
+        "mapping": mapping,
         "command_digest": command_digest,
         "basis_digest": _digest(basis),
         "posting": posted.model_dump(mode="json"),
