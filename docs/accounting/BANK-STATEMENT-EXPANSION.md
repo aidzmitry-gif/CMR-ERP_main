@@ -61,3 +61,9 @@ The chief accountant supplies the bank/provider identifier, owned bank account a
 Six targeted parser/API tests passed, including atomic rollback, idempotence, explicit invalid rows and changed preview settings. TypeScript and focused ESLint passed. Real bank samples, bank-specific adapters, API ingestion and foreign-currency valuation remain outstanding.
 
 Browser CSV scenario plus auth setup: 2 passed in30.8s on synthetic SQLite with real Next/FastAPI. Screenshot inspected: reports/bank-statement/bank-csv-import.png. PostgreSQL concurrency verification of draft0136 remains a separate pending packet.
+
+## Reviewed cross-path protection (0136)
+
+Migration0136 fences original bank identities shared by legacy incoming sync and full statements. Concurrent legacy/full insertion waits on the same advisory identity lock; the losing transaction is rejected after the winning source commits. Different full-statement accounts retain their scoped identities. Writes explicitly require READ COMMITTED. A receipt seals its ledger lines even before the creating transaction commits. Application guards provide actionable conflicts; finance sync rolls back on ingest/commit failure and returns409 for integrity conflicts instead of reporting a bank outage.
+
+Luna's disposable PostgreSQL probe passed both race orders with observed advisory waits, different-account identities, unsupported-isolation rejection and same-transaction balanced-line append rejection with preservation of the original posting. Migration SHA256:70EAEC466C0503F517BD543D2F31F00831D697F2DB2BAAD11C3DD51C07039DBA. Registered upgrade reached0136; own probe DB removed after marker verification. Parent inspected report and probe assertions at reports/bank-statement/luna-0136-report.md and luna-0136-verify.py. A separately created old0134 receipt also replayed after registered upgrade with identical snapshot/receipt/ledger. Three API conflict/rollback tests passed. No production schema was changed.

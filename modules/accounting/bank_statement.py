@@ -63,6 +63,11 @@ async def ingest(session, org_id: int, line: BankStatementLine, *, evidence: str
         raise service.AccountingError("Statement ownership requires an identified actor")
     values = source_values(line)
     await service.lock_organization(session, org_id)
+    legacy = await session.scalar(select(BankTransaction.id).where(
+        BankTransaction.source_provider.is_(None), BankTransaction.ext_id == line.external_id,
+    ).limit(1))
+    if legacy is not None:
+        raise service.AccountingError("Bank identity already exists in incoming imports; reconcile that source instead of importing again")
     row = await session.scalar(select(BankTransaction).where(
         BankTransaction.ext_id == values["ext_id"],
     ).with_for_update().execution_options(populate_existing=True))
