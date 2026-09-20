@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.accounting import production_output_transfer
+from modules.accounting.models import ProductionOutputCostRevision
 from modules.accounting.service import AccountingError
 
 
@@ -26,6 +27,8 @@ class Session:
         return self.policy
 
     async def execute(self, _statement):
+        if _statement.column_descriptions[0]["entity"] is ProductionOutputCostRevision:
+            return Result([])
         return Result(self.rows)
 
     async def scalars(self, _statement):

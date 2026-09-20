@@ -108,6 +108,10 @@ from modules.accounting.production_material_cost import (
     ProductionMaterialIssuePostingInput,
     ProductionMaterialIssuePreviewInput,
 )
+from modules.accounting.production_output_cost_workflow import (
+    ProductionOutputCostConfirmInput,
+    ProductionOutputCostPreviewInput,
+)
 from modules.accounting.production_output_transfer import (
     ProductionOutputTransferConfirmInput,
     ProductionOutputTransferInput,
@@ -1046,6 +1050,36 @@ async def production_output_cost_preview(org_id: int, month: str, policy_id: int
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     return result
+
+
+@router.post('/organizations/{org_id}/periods/{month}/production-output-cost-revision-preview')
+async def production_output_cost_revision_preview(org_id: int, month: str, data: ProductionOutputCostPreviewInput,
+        response: Response, ctx=Depends(member)):
+    from modules.accounting.production_output_cost_workflow import preview_output_cost_correction
+
+    valid_month(month)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await preview_output_cost_correction(ctx[0], org_id, month, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/periods/{month}/production-output-cost-revision-confirm', status_code=201)
+async def production_output_cost_confirm(org_id: int, month: str, data: ProductionOutputCostConfirmInput,
+        response: Response, ctx=Depends(member), core=Depends(get_core)):
+    from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
+
+    valid_month(month)
+    if ctx[2] not in {'accountant', 'chief'}:
+        raise HTTPException(403, 'Accounting write access required')
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        revision = await confirm_output_cost_correction(ctx[0], org_id, month, data, ctx[1], core.services.event_bus)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {'organization_id': org_id, 'revision_id': revision.id, 'entry_id': revision.entry_id,
+            'sequence': revision.sequence, 'posted': True, 'final_cost_certified': False}
 
 
 @router.post('/organizations/{org_id}/periods/{month}/production-output-transfer-preview')

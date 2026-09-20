@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    FetchedValue,
     ForeignKey,
     Integer,
     Numeric,
@@ -497,6 +498,31 @@ class ProductionOutputTransferReceipt(Base):
     posting: Mapped[dict] = mapped_column(JSON)
     basis_digest: Mapped[str] = mapped_column(String(64))
     digest: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProductionOutputCostRevision(Base):
+    """Immutable, ordered cost correction evidence for one output transfer."""
+    __tablename__ = 'production_output_cost_revision'
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'request_key', name='uq_output_cost_revision_request'),
+        UniqueConstraint('original_entry_id', 'sequence', name='uq_output_cost_revision_sequence'),
+        UniqueConstraint('registration_token', name='uq_output_cost_revision_registration'),
+        {'schema': 'accounting'},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey('accounting.organization.id'))
+    original_entry_id: Mapped[int] = mapped_column(ForeignKey('accounting.production_output_transfer_receipt.entry_id'))
+    sequence: Mapped[int]
+    previous_id: Mapped[int | None] = mapped_column(ForeignKey('accounting.production_output_cost_revision.id'), nullable=True)
+    entry_id: Mapped[int | None] = mapped_column(ForeignKey('accounting.entry.id'), nullable=True, unique=True)
+    registration_token: Mapped[int] = mapped_column(Integer, server_default=FetchedValue())
+    month: Mapped[str] = mapped_column(String(7))
+    request_key: Mapped[str] = mapped_column(String(36))
+    command: Mapped[dict] = mapped_column(JSON)
+    preview: Mapped[dict] = mapped_column(JSON)
+    posting: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     actor: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -999,6 +1025,6 @@ for _model in (Account, Policy, Entry, Line, Audit, SourceBinding, SellerProfile
                FxRevaluationReceipt,
                LateCostReceipt, SettlementOffsetReceipt, BankImportReceipt, ProductionOverheadReceipt,
                ProductionOverheadWithdrawal,
-               ProductionOverheadRevision, ProductionOverheadCorrectionWithdrawal):
+               ProductionOverheadRevision, ProductionOutputCostRevision, ProductionOverheadCorrectionWithdrawal):
     event.listen(_model, "before_update", immutable)
     event.listen(_model, "before_delete", immutable)

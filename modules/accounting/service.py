@@ -74,11 +74,15 @@ def digest(data):
 
 async def validate_posting(session, org_id, data: PostingInput, *, inventory_issue=False, inventory_sale=False,
                            financial_transfer=False, late_cost=False, production_overhead=False, production_correction=False,
-                           production_output_transfer=False, production_labor_import=False,
+                           production_output_transfer=False, production_output_correction=False, production_labor_import=False,
                            payroll_accrual_import=False,
                            payroll_statutory_import=False,
                            fixed_asset_depreciation=False, repair_accounting=False,
                            fx_revaluation=False, settlement_offset=False):
+    if data.operation == 'production_output_cost_correction' and not production_output_correction:
+        raise AccountingError('Output cost correction requires dedicated reviewed confirmation')
+    if production_output_correction and (data.operation != 'production_output_cost_correction' or data.opening or not data.correction_of):
+        raise AccountingError('Invalid internal output cost correction')
     if data.operation == 'production_overhead_correction' and not production_correction:
         raise AccountingError('Production correction requires its dedicated reviewed confirmation')
     if production_correction and (data.operation != 'production_overhead_correction' or data.opening or not data.correction_of):
@@ -217,6 +221,10 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
         if cost_only and (account.category != "asset" or account.cash or line.currency != "BYN"
                           or line.account.split(".")[0] not in {"10", "41"}):
             raise AccountingError("Late cost requires owned BYN inventory")
+        if production_output_correction and account.quantity_tracking and line.quantity is None:
+            if account.category != "asset" or account.cash or line.currency != "BYN":
+                raise AccountingError("Output cost correction requires owned BYN inventory")
+            cost_only = True
         if not cost_only and account.quantity_tracking != (line.quantity is not None):
             raise AccountingError(f"Account {line.account}: quantity tracking mismatch")
         if account.cash and not data.opening and not line.cash_activity:
@@ -248,7 +256,7 @@ async def preview_posting(session, org_id, data: PostingInput):
 
 async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, inventory_issue=False, inventory_sale=False,
                financial_transfer=False, late_cost=False, production_overhead=False, production_correction=False,
-               production_output_transfer=False, production_labor_import=False,
+               production_output_transfer=False, production_output_correction=False, production_labor_import=False,
                payroll_accrual_import=False,
                payroll_statutory_import=False,
                fixed_asset_depreciation=False, repair_accounting=False,
@@ -267,6 +275,7 @@ async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, in
                                         inventory_sale=inventory_sale, financial_transfer=financial_transfer, late_cost=late_cost,
                                         production_overhead=production_overhead, production_correction=production_correction,
                                         production_output_transfer=production_output_transfer,
+                                        production_output_correction=production_output_correction,
                                         production_labor_import=production_labor_import,
                                         payroll_accrual_import=payroll_accrual_import,
                                         payroll_statutory_import=payroll_statutory_import,

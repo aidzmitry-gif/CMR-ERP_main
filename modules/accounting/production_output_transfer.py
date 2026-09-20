@@ -92,6 +92,10 @@ async def output_transfer_source_state(session, receipt: ProductionOutputTransfe
         if policy is None or policy.organization_id != receipt.organization_id or policy.production_costing is None:
             return "unavailable"
         settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
+        from modules.accounting.production_output_revisions import revisions_through
+
+        revisions = await revisions_through(session, receipt.organization_id, receipt.entry_id, cutoff, before_entry_id)
+        own_corrections = {r.entry_id for r, _ in revisions if r.entry_id is not None}
         query = select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
             Entry.organization_id == receipt.organization_id, Entry.posting_date <= cutoff,
             Line.account_code == wip_account,
@@ -104,13 +108,22 @@ async def output_transfer_source_state(session, receipt: ProductionOutputTransfe
         for entry, line in rows:
             if not isinstance(line.dimensions, dict):
                 return "unavailable"
-            if entry.id == receipt.entry_id or line.dimensions.get(settings.order_dimension) != analytical_order:
+            if entry.id == receipt.entry_id or entry.id in own_corrections or line.dimensions.get(settings.order_dimension) != analytical_order:
                 continue
             if (line.currency != "BYN" or line.cash or line.quantity is not None or line.category != "asset"
                     or set(line.dimensions) != required
                     or any(not isinstance(value, str) or not value.strip() for value in line.dimensions.values())):
                 return "unavailable"
             current.append(_source_trace(entry, line))
+        if revisions:
+            from decimal import Decimal
+
+            expected_revision = revisions[-1][1]["source_lines"]
+            def revised_key(row):
+                return (row["entry_id"], row["line_id"], row["posting_date"], row["side"],
+                        Decimal(str(row["amount"])), sorted(row["dimensions"].items()))
+            live = [{**r, "amount": r["amount_byn"]} for r in current]
+            return "unchanged" if sorted(map(revised_key, live)) == sorted(map(revised_key, expected_revision)) else "changed"
         def canonical(rows):
             required_trace = {"entry_id", "line_id", "source", "posting_date", "side", "amount_byn", "dimensions", "opening"}
             if any(not isinstance(row, dict) or set(row) != required_trace for row in rows):

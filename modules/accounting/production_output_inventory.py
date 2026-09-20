@@ -53,7 +53,8 @@ async def verified_output_lines(session, organization_id: int, policy, account: 
             continue
         dimensions = line.dimensions or {}
         if (dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]
-            or target.get("lot") and dimensions.get("lot") != target["lot"]):
+            or policy.inventory_method != "weighted_average"
+            and target.get("lot") and dimensions.get("lot") != target["lot"]):
             continue
         command = receipt.command if isinstance(receipt.command, dict) else {}
         basis = receipt.basis if isinstance(receipt.basis, dict) else {}

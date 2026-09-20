@@ -438,6 +438,7 @@ async def pg_factory():
                     remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
                     remainder["upgrade"]()
                     runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()
+                    runpy.run_path("migrations/versions/0139_production_output_cost_revision.py")["upgrade"]()
 
             await conn.run_sync(upgrade)
         yield async_sessionmaker(engine, expire_on_commit=False)

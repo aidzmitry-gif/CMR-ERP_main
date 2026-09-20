@@ -18,9 +18,16 @@ async def verified_value_lines(session, organization_id, rows, procurement):
     candidates = [(entry, line) for entry, line in rows if line.quantity is None]
     if not candidates:
         return frozenset()
-    if procurement is None:
+    output_entries = {entry.id for entry, _ in candidates if entry.operation == "production_output_cost_correction"}
+    if output_entries:
+        from modules.accounting.production_output_revisions import verify_value_entry
+
+        for entry_id in sorted(output_entries):
+            await verify_value_entry(session, organization_id, entry_id)
+    procurement_entries = {entry.id for entry, _ in candidates} - output_entries
+    if procurement_entries and procurement is None:
         raise service.AccountingError("Cost adjustments require the procurement source gateway")
-    for entry_id in sorted({entry.id for entry, _ in candidates}):
+    for entry_id in sorted(procurement_entries):
         await verify_receipt(session, organization_id, entry_id, procurement)
     return frozenset((entry.id, line.id) for entry, line in candidates)
 

@@ -2,6 +2,7 @@
 import hashlib
 import json
 from decimal import ROUND_HALF_UP, Decimal, localcontext
+from fractions import Fraction
 
 from sqlalchemy import select
 
@@ -39,8 +40,34 @@ async def _inventory_rows(session, org_id, data):
     return policy, rows, verified_output_lines, finished_goods
 
 
+def _distribute_pool_value(layers, amount):
+    """Keep the actual ledger value on the remaining physical quantities."""
+    active = [layer for layer in layers if layer["quantity"] > 0]
+    cents = Fraction(amount) * 100
+    if cents < 0 or cents.denominator != 1:
+        raise AccountingError("Weighted-average history has an invalid remaining book value")
+    if not active:
+        if cents:
+            raise AccountingError("Empty inventory pool retains book value")
+        for layer in layers:
+            layer["amount"] = Decimal(0)
+        return
+    quantity = sum((Fraction(layer["quantity"]) for layer in active), Fraction())
+    quotas = [cents * Fraction(layer["quantity"]) / quantity for layer in active]
+    values = [quota.numerator // quota.denominator for quota in quotas]
+    residual = cents.numerator - sum(values)
+    ranked = sorted(range(len(active)), key=lambda index: (-(quotas[index] - values[index]), index))
+    for index in ranked[:residual]:
+        values[index] += 1
+    for layer, value in zip(active, values, strict=True):
+        layer["amount"] = Decimal(value) / 100
+    for layer in layers:
+        if layer["quantity"] == 0:
+            layer["amount"] = Decimal(0)
+
+
 def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset(),
-                      verified_output_lines=frozenset(), finished_goods=False):
+                      verified_output_lines=frozenset(), finished_goods=False, method="fifo"):
     """Build chronological available inventory layers for FIFO/average methods.
 
     The physical identity remains explicit (warehouse/SKU/lot).  A debit adds
@@ -67,14 +94,15 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
             continue
         if dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]:
             continue
-        if target.get("lot") and dimensions.get("lot") != target["lot"]:
+        if method != "weighted_average" and target.get("lot") and dimensions.get("lot") != target["lot"]:
             continue
-        if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
+        if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines and (entry.id, line.id) not in verified_value_lines:
             raise AccountingError("Finished-goods layer has no verified production output receipt")
         matched = True
         value_only = (entry.id, line.id) in verified_value_lines
         if value_only:
-            if (entry.operation != "inventory_late_cost" or line.side != "debit"
+            if (entry.operation not in {"inventory_late_cost", "production_output_cost_correction"}
+                or entry.operation == "inventory_late_cost" and line.side != "debit"
                 or line.quantity is not None or line.amount <= 0):
                 raise AccountingError("Invalid verified inventory value adjustment")
             matches = [layer for layer in layers
@@ -82,7 +110,9 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
             if len(matches) != 1:
                 raise AccountingError("Late cost must identify exactly one open inventory layer")
             amount = Decimal(line.amount)
-            matches[0]["amount"] += amount
+            matches[0]["amount"] += amount if line.side == "debit" else -amount
+            if matches[0]["amount"] < 0:
+                raise AccountingError("Output cost revision makes the layer value negative")
             evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
                              "source_version": entry.source_version, "side": line.side,
                              "quantity": None, "amount_byn": format(amount, ".2f"),
@@ -103,22 +133,29 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
                            "dimensions": dict(dimensions), "entry_id": entry.id, "line_id": line.id,
                            "posting_date": entry.posting_date.isoformat()})
             continue
+        pool_value = sum((layer["amount"] for layer in layers), Decimal(0))
         remaining = quantity
         for layer in layers:
             if remaining <= 0:
                 break
-            if layer["quantity"] <= 0:
+            if layer["quantity"] <= 0 or layer["dimensions"] != dimensions:
                 continue
             take = min(layer["quantity"], remaining)
             unit = layer["amount"] / layer["quantity"]
             layer["quantity"] -= take
-            layer["amount"] -= unit * take
+            if method != "weighted_average":
+                layer["amount"] -= unit * take
             remaining -= take
         if remaining > 0:
-            raise AccountingError("Inventory history has insufficient quantity for the issue")
+            raise AccountingError("Inventory history has insufficient quantity in the credited lot")
+        if method == "weighted_average":
+            _distribute_pool_value(layers, pool_value - amount)
     if not matched:
         return [], evidence
-    available = [layer for layer in layers if layer["quantity"] > 0 and layer["amount"] > 0]
+    if method == "weighted_average":
+        _distribute_pool_value(layers, sum((layer["amount"] for layer in layers), Decimal(0)))
+    available = [layer for layer in layers if layer["quantity"] > 0 and layer["amount"] >= 0
+                 and (not target.get("lot") or layer["lot"] == target["lot"])]
     return available, evidence
 
 
@@ -149,11 +186,13 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
                 continue
             if entry.posting_date > posting_date:
                 raise AccountingError("Selected lot has later movements; chronological costing is required")
-            if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines:
+            if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines and (entry.id, line.id) not in verified_value_lines:
                 raise AccountingError("Finished-goods layer has no verified production output receipt")
             value_only = (entry.id, line.id) in verified_value_lines
-            if value_only and (entry.operation != "inventory_late_cost" or line.quantity is not None
-                               or line.side != "debit" or quantity <= 0 or line.amount <= 0):
+            if value_only and (entry.operation not in {"inventory_late_cost", "production_output_cost_correction"}
+                               or line.quantity is not None
+                               or entry.operation == "inventory_late_cost" and line.side != "debit"
+                               or quantity <= 0 or line.amount <= 0):
                 raise AccountingError("Invalid verified inventory value adjustment")
             if line.category != "asset" or line.cash or (line.quantity is None and not value_only):
                 raise AccountingError("Lot movement has no quantity or is not owned inventory")
@@ -218,7 +257,7 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
             layers, evidence = _valuation_layers(rows, target, data.posting_date,
                                                  verified_value_lines=verified_value_lines,
                                                  verified_output_lines=verified_output_lines,
-                                                 finished_goods=finished_goods)
+                                                 finished_goods=finished_goods, method=method)
             quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
             amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             if not layers or data.quantity > quantity:
