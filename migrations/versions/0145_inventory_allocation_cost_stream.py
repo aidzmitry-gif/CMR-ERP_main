@@ -191,6 +191,10 @@ def upgrade():
 
 def downgrade():
     op.execute("""DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM accounting.inventory_issue_receipt WHERE cost::jsonb ? 'source_allocation_version')
+        OR EXISTS (SELECT 1 FROM accounting.inventory_sale_receipt WHERE cost::jsonb ? 'source_allocation_version') THEN
+        RAISE EXCEPTION 'Cannot downgrade 0145 with explicit inventory disposal history';
+      END IF;
       IF EXISTS (SELECT 1 FROM accounting.production_output_cost_revision r
         CROSS JOIN LATERAL jsonb_array_elements(r.preview::jsonb->'ledger_evidence'->'allocation') a
         WHERE a->>'key' LIKE ('allocation'||chr(58)||'%')) THEN

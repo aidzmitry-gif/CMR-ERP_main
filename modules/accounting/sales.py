@@ -42,8 +42,9 @@ class SaleConfirm(SaleDocument):
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-def rule_version(document, basis_digest):
-    return "sale-v1:" + inventory_issues.rule_version(document, basis_digest).split(":")[1]
+def rule_version(document, basis_digest, *, allocation_version=None):
+    issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
+    return "sale-v1:" + issue_rule.removeprefix("inventory-issue-v2:")
 
 
 def belongs(code, root):
@@ -86,17 +87,19 @@ def posting_for(document, cost):
         raise service.AccountingError("Pilot sale requires cost account 90.4")
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
     if Decimal(cost["issue_cost_byn"]) == 0:
+        inventory_issues.explicit_allocation(issue, cost)
         return PostingInput(**issue.model_dump(include={"source", "source_version", "document_date",
             "operation_date", "posting_date", "policy_id", "explanation"}), operation="inventory_sale",
             rule_version=rule_version(document, cost["basis_digest"]), lines=lines)
     issue_posting = inventory_issues.posting_for(issue, cost)
     lines += issue_posting.lines
     return PostingInput(**{**issue_posting.model_dump(exclude={"lines", "operation", "rule_version"}),
-                              "operation": "inventory_sale", "rule_version": rule_version(document, cost["basis_digest"]),
+                              "operation": "inventory_sale", "rule_version": rule_version(document, cost["basis_digest"],
+                                  allocation_version=cost.get("source_allocation_version")),
                               "lines": lines})
 
 
-async def prepare(session, org_id, document, *, procurement=None):
+async def prepare(session, org_id, document, *, procurement=None, source_allocations=False):
     _, vat, gross = commercial_lines(document)
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
     cost_request = InventoryIssuePreviewInput(**issue.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
@@ -105,7 +108,8 @@ async def prepare(session, org_id, document, *, procurement=None):
     if Decimal(cost["issue_cost_byn"]) == 0:
         zero_command = await prepare_zero_command(session, org_id, document, procurement=procurement)
     else:
-        cost, _ = await inventory_issues.prepare(session, org_id, issue, procurement=procurement)
+        cost, _ = await inventory_issues.prepare(session, org_id, issue, procurement=procurement,
+                                                source_allocations=source_allocations)
     posting = posting_for(document, cost)
     accounts, _ = await service.validate_posting(session, org_id, posting, inventory_sale=True)
     roles = {document.buyer_account: "asset", document.revenue_account: "income"}
@@ -152,7 +156,9 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
     if receipt is None or entry is None or receipt.organization_id != organization_id or entry.organization_id != organization_id:
         raise service.AccountingError("Inventory sale has no matching source receipt")
     document = SaleDocument.model_validate(receipt.command)
-    cost = await inventory_issues.historical_cost(session, organization_id, entry_id, document, procurement=procurement)
+    allocation = inventory_issues.explicit_allocation(document, receipt.cost)
+    cost = await inventory_issues.historical_cost(session, organization_id, entry_id, document, procurement=procurement,
+                                                 allocation_version=allocation.allocation_version if allocation else None)
     if Decimal(cost["issue_cost_byn"]) == 0:
         await session.execute(text("SELECT accounting.validate_zero_sale_link(:entry)"), {"entry": entry_id})
     expected = posting_for(document, cost)
@@ -164,7 +170,8 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
     return expected
 
 
-async def confirm(session, org_id, document, basis_digest, digest, actor, event_bus=None, *, procurement=None):
+async def confirm(session, org_id, document, basis_digest, digest, actor, event_bus=None, *, procurement=None,
+                  source_allocations=False):
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == document.source,
@@ -172,11 +179,16 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
     ))
     # Exact replay must succeed even after the stock was consumed or period closed.
     if existing is not None:
-        if existing.rule_version != rule_version(document, basis_digest) or existing.digest != digest:
+        saved = await session.get(InventorySaleReceipt, existing.id)
+        if saved is None:
+            raise service.AccountingError("Inventory sale has no matching source receipt")
+        allocation = inventory_issues.explicit_allocation(SaleDocument.model_validate(saved.command), saved.cost)
+        if existing.rule_version != rule_version(document, basis_digest,
+                allocation_version=allocation.allocation_version if allocation else None) or existing.digest != digest:
             raise service.AccountingError("Sale already posted with different content")
         await verify_receipt(session, org_id, existing.id, procurement=procurement)
         return existing
-    prepared = await prepare(session, org_id, document, procurement=procurement)
+    prepared = await prepare(session, org_id, document, procurement=procurement, source_allocations=source_allocations)
     if prepared["cost"]["basis_digest"] != basis_digest or prepared["digest"] != digest:
         raise service.AccountingError("Sale or inventory cost basis changed; preview again")
     entry = await service.post(session, org_id, PostingInput(**prepared["posting"]), actor, event_bus, inventory_sale=True)
@@ -193,4 +205,11 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
             posting_date=command.posting_date, policy_id=command.policy_id, command=command.model_dump(mode="json"),
             basis_digest=command.basis_digest, digest=receipt_digest(org_id, actor, command), actor=actor))
     await session.flush()
+    if "source_allocation_version" in prepared["cost"]:
+        from modules.accounting.inventory_allocation_loader import (
+            load_authenticated_inventory_dispositions,
+        )
+
+        await load_authenticated_inventory_dispositions(session, org_id, procurement=procurement,
+                                                        inventory_account=document.account)
     return entry

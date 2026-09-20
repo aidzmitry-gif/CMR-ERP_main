@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from modules.accounting.closing_commands import actual_posting
 from modules.accounting.inventory_allocation_receipts import validate_inventory_disposition_binding
@@ -84,7 +84,7 @@ def _replaced_credit_line_ids(lines, account, allocation):
 
 
 async def load_authenticated_inventory_dispositions(session, organization_id: int, *, before_entry_id: int | None = None,
-                                                    procurement=None):
+                                                    procurement=None, inventory_account: str | None = None):
     """Return only strict-marker receipt allocations, authenticated against live DB rows.
 
     This is internal replay groundwork. It neither enables a write path nor
@@ -96,6 +96,12 @@ async def load_authenticated_inventory_dispositions(session, organization_id: in
         raise ValueError("Inventory allocation replay cutoff must be a positive entry id")
     await lock_organization(session, organization_id)
     issue_query, sale_query = _receipt_rows(session, organization_id)
+    if inventory_account is not None:
+        # Include either representation, so a forged command cannot conceal an
+        # actual inventory credit on the requested account (or vice versa).
+        actual = Entry.id.in_(select(Line.entry_id).where(Line.account_code == inventory_account))
+        issue_query = issue_query.where(or_(InventoryIssueReceipt.command["account"].as_string() == inventory_account, actual))
+        sale_query = sale_query.where(or_(InventorySaleReceipt.command["account"].as_string() == inventory_account, actual))
     rows = list((await session.execute(issue_query)).all()) + list((await session.execute(sale_query)).all())
     result = []
     seen_entries, seen_lines = set(), set()

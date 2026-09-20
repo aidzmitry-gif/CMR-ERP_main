@@ -485,7 +485,7 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
         return quantity, amount, inventory_dimensions, evidence
 
 
-async def preview_issue(session, org_id, data, *, procurement=None):
+async def preview_issue(session, org_id, data, *, procurement=None, source_allocations=False):
     from modules.accounting.late_cost_receipts import verified_value_lines
 
     policy, rows, output_lines, finished_goods = await _inventory_rows(session, org_id, data)
@@ -493,9 +493,20 @@ async def preview_issue(session, org_id, data, *, procurement=None):
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
     receipts = await available_authenticated_zero_value_disposals(session, org_id)
-    return issue_result(policy, rows, org_id, data, verified_value_lines=verified,
+    from modules.accounting.inventory_allocation_loader import (
+        load_authenticated_inventory_dispositions,
+    )
+
+    allocations = await load_authenticated_inventory_dispositions(session, org_id, procurement=procurement,
+                                                                  inventory_account=data.account)
+    explicit = source_allocations and policy.inventory_method in {"fifo", "weighted_average"}
+    cost = issue_result(policy, rows, org_id, data, verified_value_lines=verified,
                         verified_output_lines=output_lines, finished_goods=finished_goods,
-                        zero_value_disposals=receipts)
+                        zero_value_disposals=receipts, authenticated_dispositions=allocations,
+                        include_source_identity=explicit)
+    if explicit:
+        cost["source_allocation_version"] = 1
+    return cost
 
 
 async def replay_issue_result(session, policy, rows, org_id, data, *, verified_value_lines=frozenset(),
@@ -590,6 +601,12 @@ async def available_lots(session, org_id, data, *, procurement=None):
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
     receipts = await available_authenticated_zero_value_disposals(session, org_id)
+    from modules.accounting.inventory_allocation_loader import (
+        load_authenticated_inventory_dispositions,
+    )
+
+    allocations = await load_authenticated_inventory_dispositions(session, org_id, procurement=procurement,
+                                                                  inventory_account=data.account)
     # Match the issue rule: incomplete analytics anywhere on this account block costing.
     if any(any(not (line.dimensions or {}).get(key) for key in ("warehouse", "sku", "lot")) for _, line in rows):
         raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
@@ -601,13 +618,17 @@ async def available_lots(session, org_id, data, *, procurement=None):
         target = {"warehouse": data.warehouse, "sku": data.sku, "lot": lot}
         try:
             if policy.inventory_method == "specific":
+                if allocations:
+                    raise AccountingError("Explicit source allocation replay requires FIFO or weighted-average policy")
                 quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified,
                                                        verified_output_lines=output_lines, finished_goods=finished_goods,
                                                        zero_value_disposals=receipts, organization_id=org_id)
             else:
                 layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified,
                                                verified_output_lines=output_lines, finished_goods=finished_goods,
-                                               zero_value_disposals=receipts, organization_id=org_id)
+                                               zero_value_disposals=receipts, organization_id=org_id,
+                                               method=policy.inventory_method, inventory_account=data.account,
+                                               authenticated_dispositions=allocations)
                 quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
                 amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             verified_origins = [(entry.id, line.id) for entry, line in rows

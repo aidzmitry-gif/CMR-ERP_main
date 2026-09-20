@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.accounting.inventory_allocation_receipts import validate_inventory_disposition_binding
-from modules.accounting.inventory_issues import posting_for
+from modules.accounting.inventory_issues import posting_for, rule_version
 from modules.accounting.sales import SaleDocument
 from modules.accounting.sales import posting_for as sale_posting_for
 from modules.accounting.schemas import InventoryIssueDocument, PostingInput
@@ -71,7 +71,37 @@ def test_cash_metadata_rejected_even_with_matching_posting_digest():
 def test_fifo_mixed_zero_and_positive_allocation_binds_only_positive_credit():
     entry, receipt, document, allocation = binding()
     check(entry, receipt, document, allocation)
-    assert [(line.amount, line.quantity) for line in PostingInput.model_validate(receipt.posting).lines] == [(10, None), (10, 1)]
+    posting = posting_for(document, receipt.cost)
+    assert [(line.amount, line.quantity) for line in posting.lines] == [(10, None), (10, 1)]
+    assert posting.rule_version.endswith(":a1")
+
+
+@pytest.mark.parametrize("marker", [None, True, 1.0, "1", 2])
+def test_explicit_builder_rejects_noncanonical_marker(marker):
+    _, receipt, document, _ = binding()
+    receipt.cost["source_allocation_version"] = marker
+    with pytest.raises(AccountingError, match="marker"):
+        posting_for(document, receipt.cost)
+
+
+def test_legacy_issue_rule_and_shape_are_unchanged():
+    _, receipt, document, _ = binding()
+    legacy = {key: value for key, value in receipt.cost.items() if key != "source_allocation_version"}
+    posting = posting_for(document, legacy)
+    assert posting.rule_version == rule_version(document, legacy["basis_digest"])
+    assert len(posting.lines) == 3
+
+
+@pytest.mark.parametrize("marker", [None, True, 1])
+def test_explicit_zero_sale_cannot_bypass_allocation_validation(marker):
+    _, _, issue, _ = binding()
+    document = SaleDocument(**issue.model_dump(), net_amount="10.00", vat_rate="0", vat_basis="Synthetic",
+        buyer_account="62", revenue_account="90.1", vat_revenue_account="90.2", vat_payable_account="68",
+        buyer_dimensions={"counterparty": "C", "contract": "D", "settlement_document": "S"})
+    cost = saved_cost(packet(amount="0.00"))
+    cost["source_allocation_version"] = marker
+    with pytest.raises(AccountingError, match="Explicit allocation"):
+        sale_posting_for(document, cost)
 
 
 @pytest.mark.parametrize("change, match", [
@@ -115,6 +145,7 @@ def test_sale_document_binds_its_inventory_account_credits():
     receipt = SimpleNamespace(entry_id=9, organization_id=1, actor="a", digest=digest(posting),
         command=document.model_dump(mode="json"), posting=posting.model_dump(mode="json"), cost=cost)
     check(entry, receipt, document, allocation)
+    assert posting.rule_version.endswith(":a1")
 
 
 @pytest.mark.parametrize("edit", ["omit", "add"])
