@@ -27,9 +27,24 @@ export type CatalogBody = { request_key: string; expected_revision: number; evid
 export type BudgetBody = { request_key: string; expected_revision: number; expected_catalog_revision: number; evidence: string;
   year: number; currency: "BYN"; basis: "cash" | "accrual"; lines: { article_id: number; months: (string | null)[] }[] };
 export type ApprovalBody = { request_key: string; budget_id: number; expected_revision: number; evidence: string };
+export type AttributionPreviewBody = { source_line_id: number; article_id: number; effective_date: string };
+export type AttributionBody = AttributionPreviewBody & { request_key: string; expected_basis_digest: string; evidence: string; explanation: string };
+export type AttributionArticleSnapshot = { id: number; code: string; title: string; group_id: number; group: Group };
+export type AttributionSourceSnapshot = { entry_id: number; source: string; source_version: number; operation: string;
+  posting_date: string; policy_id: number; entry_digest: string; line_id: number; account_code: string;
+  account_title: string; category: "expense"; cash: boolean; side: "debit" | "credit"; amount: string;
+  currency: "BYN"; dimensions: Record<string, unknown> };
+export type AttributionPreview = { source_entry_id: number; source_line_id: number; article_id: number;
+  supersedes_id: number | null; effective_date: string; basis_digest: string;
+  source_snapshot: AttributionSourceSnapshot; article_snapshot: AttributionArticleSnapshot };
 export type Receipt = { organization_id: number; principal: string; kind: "catalog" | "budget" | "budget_approval"; request_key: string;
   command: CatalogBody | BudgetBody | ApprovalBody; command_hash: string; result: Catalog | Budget | ApprovedPlan; result_digest: string; receipt_digest: string };
-export type Attempt = { scope: Scope; kind: "catalog" | "budget" | "approval"; body: string; hash: string; nonce: string; outcome: "pending" | "uncertain" | "done" | "rejected" };
+export type AttributionReceipt = { organization_id: number; principal: string; kind: "expense_article_attribution"; request_key: string;
+  command: AttributionBody; command_hash: string; result: AttributionPreview & { evidence: string; explanation: string };
+  result_digest: string; receipt_digest: string };
+export type CommandBody = CatalogBody | BudgetBody | ApprovalBody | AttributionBody;
+export type CommandReceipt = Receipt | AttributionReceipt;
+export type Attempt = { scope: Scope; kind: "catalog" | "budget" | "approval" | "attribution"; body: string; hash: string; nonce: string; outcome: "pending" | "uncertain" | "done" | "rejected" };
 export type Journal = { raw: string | null; attempt: Attempt | null };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const positive = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
@@ -95,6 +110,44 @@ function checkActuals(v: unknown): v is ExpenseActuals {
     && (v.unmatched_lines === null || typeof v.unmatched_lines === "number" && Number.isSafeInteger(v.unmatched_lines) && v.unmatched_lines >= 0)
     && Array.isArray(v.rows) && v.rows.every(checkActualRow) && text(v.reason);
 }
+const sha256 = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/i.test(v);
+const dateString = (v: unknown): v is string => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const parsed = new Date(`${v}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === v;
+};
+const boundedText = (v: unknown) => text(v) && v.trim().length <= 1000;
+const sameKeys = (v: unknown, keys: string[]): v is Record<string, unknown> => object(v) && canonical(Object.keys(v).sort()) === canonical([...keys].sort());
+function attributionPreviewBody(v: unknown): v is AttributionPreviewBody {
+  return sameKeys(v, ["source_line_id", "article_id", "effective_date"])
+    && positive(v.source_line_id) && positive(v.article_id) && dateString(v.effective_date);
+}
+function attributionBody(v: unknown): v is AttributionBody {
+  return sameKeys(v, ["request_key", "source_line_id", "article_id", "effective_date", "expected_basis_digest", "evidence", "explanation"])
+    && positive(v.source_line_id) && positive(v.article_id) && dateString(v.effective_date) && uuid(v.request_key)
+    && sha256(v.expected_basis_digest) && boundedText(v.evidence) && boundedText(v.explanation);
+}
+function attributionSource(v: unknown): v is AttributionSourceSnapshot {
+  return object(v) && positive(v.entry_id) && text(v.source) && Number.isSafeInteger(v.source_version) && Number(v.source_version) >= 1
+    && text(v.operation) && dateString(v.posting_date) && positive(v.policy_id) && sha256(v.entry_digest)
+    && positive(v.line_id) && text(v.account_code) && text(v.account_title) && v.category === "expense"
+    && typeof v.cash === "boolean" && ["debit", "credit"].includes(String(v.side)) && signedMoney(v.amount)
+    && v.currency === "BYN" && object(v.dimensions);
+}
+function attributionArticle(v: unknown): v is AttributionArticleSnapshot {
+  return object(v) && positive(v.id) && text(v.code) && text(v.title) && positive(v.group_id) && group(v.group);
+}
+function attributionPreview(v: unknown): v is AttributionPreview {
+  return object(v) && positive(v.source_entry_id) && positive(v.source_line_id) && positive(v.article_id)
+    && (v.supersedes_id === null || positive(v.supersedes_id)) && dateString(v.effective_date)
+    && sha256(v.basis_digest) && attributionSource(v.source_snapshot) && attributionArticle(v.article_snapshot)
+    && v.source_snapshot.entry_id === v.source_entry_id && v.source_snapshot.line_id === v.source_line_id
+    && v.article_snapshot.id === v.article_id && v.source_snapshot.posting_date === v.effective_date;
+}
+function attributionResult(v: unknown): v is AttributionReceipt["result"] {
+  if (!object(v) || !attributionPreview(v)) return false;
+  return boundedText((v as Record<string, unknown>).evidence) && boundedText((v as Record<string, unknown>).explanation);
+}
 async function envelope(v: unknown, org: number, principal?: string) {
   if (object(v) && (v.organization_id !== org || principal && v.principal !== principal)) throw new ExpenseError("Область доступа изменилась. Обновите сведения.", 403);
   if (!object(v) || !text(v.principal)) invalid();
@@ -141,8 +194,21 @@ export async function getUnmatchedActuals(scope: Scope, year: number, month: num
     || (v.next_after_line_id !== null && !positive(v.next_after_line_id))) invalid();
   return v as unknown as UnmatchedExpenseLines;
 }
+export async function previewAttribution(scope: Scope, body: AttributionPreviewBody): Promise<AttributionPreview> {
+  if (!positive(scope.org) || !text(scope.principal) || !attributionPreviewBody(body)) invalid();
+  const v = await envelope(await request(`${prefix(scope.org)}/expense-attributions/preview`, {
+    method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", "X-Expected-Principal": scope.principal },
+  }), scope.org, scope.principal);
+  if (!attributionPreview(v.preview) || v.preview.source_line_id !== body.source_line_id
+    || v.preview.article_id !== body.article_id || v.preview.effective_date !== body.effective_date) invalid();
+  return v.preview;
+}
 function validateBody(kind: Attempt["kind"], v: unknown) {
   if (!object(v) || !uuid(v.request_key) || !text(v.evidence)) invalid();
+  if (kind === "attribution") {
+    if (!attributionBody(v)) invalid();
+    return;
+  }
   if (kind === "approval") {
     if (!revision(v.expected_revision) || !positive(v.expected_revision) || !positive(v.budget_id)
       || canonical(Object.keys(v).sort()) !== canonical(["request_key", "budget_id", "expected_revision", "evidence"].sort())) invalid();
@@ -173,7 +239,7 @@ export async function journal(scope: Scope): Promise<Journal> {
     const raw = sessionStorage.getItem(storageKey(scope));
     if (raw === null) return { raw, attempt: null };
     const a = JSON.parse(raw);
-    if (!object(a) || canonical(a.scope) !== canonical(scope) || !["catalog", "budget", "approval"].includes(String(a.kind)) || !uuid(a.nonce)
+    if (!object(a) || canonical(a.scope) !== canonical(scope) || !["catalog", "budget", "approval", "attribution"].includes(String(a.kind)) || !uuid(a.nonce)
       || !["pending", "uncertain", "done", "rejected"].includes(String(a.outcome)) || typeof a.body !== "string") invalid();
     validateBody(a.kind as Attempt["kind"], JSON.parse(a.body));
     if (await hash(JSON.parse(a.body)) !== a.hash) invalid();
@@ -189,46 +255,66 @@ function cas(old: Journal, next: Attempt): Journal {
     return { raw, attempt: next };
   } catch { throw new ExpenseError("Журнал изменился или не сохраняется. Отправка остановлена."); }
 }
-export async function begin(scope: Scope, kind: Attempt["kind"], body: CatalogBody | BudgetBody | ApprovalBody, expected: string | null) {
+export async function begin(scope: Scope, kind: Attempt["kind"], body: CommandBody, expected: string | null) {
   validateBody(kind, body);
   const saved = await journal(scope);
   if (saved.raw !== expected || saved.attempt && ["pending", "uncertain"].includes(saved.attempt.outcome))
     throw new ExpenseError("Сначала проверьте исходную команду.");
   return cas(saved, { scope, kind, body: JSON.stringify(body), hash: await hash(body), nonce: crypto.randomUUID(), outcome: "pending" });
 }
-export async function validateReceipt(v: unknown, a: Attempt): Promise<Receipt> {
+async function validateAttributionReceipt(v: unknown, scope: Scope, command: AttributionBody): Promise<AttributionReceipt> {
+  if (!object(v) || v.organization_id !== scope.org || v.principal !== scope.principal || v.kind !== "expense_article_attribution"
+    || v.request_key !== command.request_key || !attributionBody(v.command) || canonical(v.command) !== canonical(command)
+    || !attributionResult(v.result) || v.command_hash !== await hash(command) || v.result_digest !== await hash(v.result)) invalid();
+  const result = v.result;
+  if (result.source_line_id !== command.source_line_id || result.article_id !== command.article_id
+    || result.effective_date !== command.effective_date || result.basis_digest !== command.expected_basis_digest
+    || result.evidence !== command.evidence || result.explanation !== command.explanation) invalid();
+  const { receipt_digest, ...unsigned } = v;
+  if (!sha256(receipt_digest) || receipt_digest !== await hash(unsigned)) invalid();
+  return v as AttributionReceipt;
+}
+export async function validateReceipt(v: unknown, a: Attempt): Promise<CommandReceipt> {
+  const command = JSON.parse(a.body) as CommandBody;
+  validateBody(a.kind, command);
+  if (a.kind === "attribution") {
+    return validateAttributionReceipt(v, a.scope, command as AttributionBody);
+  }
   const expectedKind = a.kind === "approval" ? "budget_approval" : a.kind;
   if (!object(v) || v.organization_id !== a.scope.org || v.principal !== a.scope.principal || v.kind !== expectedKind
-    || v.request_key !== JSON.parse(a.body).request_key || canonical(v.command) !== canonical(JSON.parse(a.body))
+    || v.request_key !== command.request_key || canonical(v.command) !== canonical(command)
     || v.command_hash !== a.hash || v.result_digest !== await hash(v.result)) invalid();
   const { receipt_digest, ...unsigned } = v;
   if (receipt_digest !== await hash(unsigned)
     || (a.kind === "catalog" ? !checkCatalog(v.result) : a.kind === "budget" ? !checkBudget(v.result) : !checkApprovedPlan(v.result))) invalid();
-  const command = JSON.parse(a.body);
-  if (a.kind === "catalog" && (v.result as Catalog).revision !== command.expected_revision + 1) invalid();
+  if (a.kind === "catalog" && (v.result as Catalog).revision !== (command as CatalogBody).expected_revision + 1) invalid();
   if (a.kind === "budget") {
+    const budgetCommand = command as BudgetBody;
     const budget = v.result as Budget;
-    if (budget.year !== command.year || budget.currency !== command.currency || budget.basis !== command.basis
-      || budget.catalog_revision !== command.expected_catalog_revision || budget.actor !== a.scope.principal || budget.evidence !== command.evidence
-      || canonical(budget.lines.map(l => ({ article_id: l.article_id, months: l.months }))) !== canonical(command.lines)) invalid();
+    if (budget.year !== budgetCommand.year || budget.currency !== "BYN" || budget.basis !== budgetCommand.basis
+      || budget.catalog_revision !== budgetCommand.expected_catalog_revision || budget.actor !== a.scope.principal || budget.evidence !== budgetCommand.evidence
+      || canonical(budget.lines.map(l => ({ article_id: l.article_id, months: l.months }))) !== canonical(budgetCommand.lines)) invalid();
   }
   if (a.kind === "approval") {
+    const approvalCommand = command as ApprovalBody;
     const approved = v.result as ApprovedPlan;
     const { approval_digest, ...approvalUnsigned } = approved;
     if (approval_digest !== await hash(approvalUnsigned)) invalid();
-    if (approved.budget_id !== command.budget_id || approved.budget_revision !== command.expected_revision
-      || approved.approved_by !== a.scope.principal || approved.evidence !== command.evidence
-      || approved.budget.id !== command.budget_id || approved.budget.revision !== command.expected_revision) invalid();
+    if (approved.budget_id !== approvalCommand.budget_id || approved.budget_revision !== approvalCommand.expected_revision
+      || approved.approved_by !== a.scope.principal || approved.evidence !== approvalCommand.evidence
+      || approved.budget.id !== approvalCommand.budget_id || approved.budget.revision !== approvalCommand.expected_revision) invalid();
   }
-  return v as unknown as Receipt;
+  return v as Receipt;
 }
 export async function dispatch(saved: Journal, mode: "first" | "retry" | "recover") {
   const a = saved.attempt;
   if (!a || !saved.raw || !["pending", "uncertain"].includes(a.outcome)) invalid();
   await context(a.scope.org, a.scope.principal);
   if ((await journal(a.scope)).raw !== saved.raw) throw new ExpenseError("Команда изменилась до отправки.");
-  const url = mode === "recover" ? `${prefix(a.scope.org)}/expense-commands/${JSON.parse(a.body).request_key}`
-    : `${prefix(a.scope.org)}/${a.kind === "catalog" ? "expense-catalog/commands" : a.kind === "budget" ? "expense-budgets/drafts" : "expense-budgets/approve"}`;
+  const requestKey = JSON.parse(a.body).request_key;
+  const url = mode === "recover"
+    ? `${prefix(a.scope.org)}/${a.kind === "attribution" ? "expense-attributions" : "expense-commands"}/${requestKey}`
+    : `${prefix(a.scope.org)}/${a.kind === "catalog" ? "expense-catalog/commands" : a.kind === "budget" ? "expense-budgets/drafts" : a.kind === "approval" ? "expense-budgets/approve" : "expense-attributions"}`;
   try {
     const v = await request(url, mode === "recover" ? undefined : { method: "POST", body: a.body,
       headers: { "Content-Type": "application/json", "X-Expected-Principal": a.scope.principal } });

@@ -32,18 +32,95 @@ const formatDeviationPercent = (actual: string, plan: string | null): string | n
 type ActualSlice = { actuals: api.ExpenseActuals | null; error: string | null };
 const unavailableActuals = (error: unknown): ActualSlice => ({ actuals: null, error: errorText(error) });
 
-function ActualsPanel({ title, actuals, error, scope, onEntry }: { title: string; actuals: api.ExpenseActuals | null; error: string | null; scope: api.Scope; onEntry?: (id: number) => void }) {
+function ActualsPanel({ title, actuals, error, scope, onEntry, catalog, canAttribute, onConfirmAttribution }: {
+  title: string; actuals: api.ExpenseActuals | null; error: string | null; scope: api.Scope; onEntry?: (id: number) => void;
+  catalog: api.Catalog | null; canAttribute: boolean; onConfirmAttribution?: (body: api.AttributionBody) => Promise<api.AttributionReceipt | undefined>;
+}) {
   const [unmatched, setUnmatched] = useState<api.UnmatchedExpenseLines | null>(null);
   const [listError, setListError] = useState("");
+  const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
+  const [articleId, setArticleId] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [explanation, setExplanation] = useState("");
+  const [preview, setPreview] = useState<api.AttributionPreview | null>(null);
+  const [attributionError, setAttributionError] = useState("");
+  const [attributionBusy, setAttributionBusy] = useState(false);
+  const [receipt, setReceipt] = useState<api.AttributionReceipt | null>(null);
   const loading = useRef(false);
   const requestGeneration = useRef(0);
-  const key = actuals ? `${scope.org}/${scope.principal}/${actuals.year}/${actuals.month}/${actuals.basis}` : "";
-  useEffect(() => { requestGeneration.current += 1; setUnmatched(null); setListError(""); loading.current = false; }, [key]);
-  const load = async (after?: number) => { if (!actuals || loading.current) return; loading.current = true; const expected = requestGeneration.current; try { const next = await api.getUnmatchedActuals(scope, actuals.year, actuals.month, actuals.basis, after); if (expected === requestGeneration.current) { setUnmatched(previous => previous && after ? { ...next, items: [...previous.items, ...next.items] } : next); setListError(""); } } catch (e) { if (expected === requestGeneration.current) setListError(errorText(e)); } finally { if (expected === requestGeneration.current) loading.current = false; } };
+  useEffect(() => () => { requestGeneration.current += 1; }, []);
+  const load = async (after?: number) => {
+    if (!actuals || loading.current) return;
+    loading.current = true;
+    const expected = requestGeneration.current;
+    try {
+      const next = await api.getUnmatchedActuals(scope, actuals.year, actuals.month, actuals.basis, after);
+      if (expected === requestGeneration.current) {
+        setUnmatched(previous => previous && after ? { ...next, items: [...previous.items, ...next.items] } : next);
+        setListError("");
+        if (!after) { setSelectedLineId(null); setArticleId(""); setEvidence(""); setExplanation(""); setPreview(null); setAttributionError(""); }
+      }
+    } catch (e) { if (expected === requestGeneration.current) setListError(errorText(e)); }
+    finally { if (expected === requestGeneration.current) loading.current = false; }
+  };
+  const selected = unmatched?.items.find(row => row.line_id === selectedLineId) ?? null;
+  const activeArticles = (catalog?.articles ?? []).filter(article => article.active && catalog?.groups.some(group => group.id === article.group_id && group.active));
+  const attributionEnabled = canAttribute && actuals?.basis === "accrual" && !!onConfirmAttribution;
+  async function prepareAttribution() {
+    if (!selected || !articleId || attributionBusy) return;
+    const expected = requestGeneration.current;
+    setAttributionBusy(true); setAttributionError(""); setReceipt(null);
+    try {
+      const next = await api.previewAttribution(scope, { source_line_id: selected.line_id, article_id: Number(articleId), effective_date: selected.posting_date });
+      if (expected === requestGeneration.current) setPreview(next);
+    } catch (e) { if (expected === requestGeneration.current) setAttributionError(errorText(e)); }
+    finally { if (expected === requestGeneration.current) setAttributionBusy(false); }
+  }
+  async function confirmAttribution() {
+    if (!selected || !preview || !onConfirmAttribution || attributionBusy) return;
+    const expected = requestGeneration.current;
+    setAttributionBusy(true); setAttributionError("");
+    try {
+      const result = await onConfirmAttribution({
+        request_key: crypto.randomUUID(), source_line_id: selected.line_id, article_id: preview.article_id,
+        effective_date: selected.posting_date, expected_basis_digest: preview.basis_digest,
+        evidence: evidence.trim(), explanation: explanation.trim(),
+      });
+      if (expected !== requestGeneration.current || !result) return;
+      setReceipt(result); setPreview(null); setSelectedLineId(null); setArticleId(""); setEvidence(""); setExplanation("");
+      await load();
+    } catch (e) { if (expected === requestGeneration.current) setAttributionError(errorText(e)); }
+    finally { if (expected === requestGeneration.current) setAttributionBusy(false); }
+  }
   if (!actuals && !error) return null;
   return <div aria-label={title} className="rounded border border-line p-3"><h3 className="font-semibold">{title}</h3>
-    {actuals ? <><p className="text-sm text-muted">Покрытие: {actuals.coverage}. {actuals.reason} Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.unmatched_lines ? <button className={button} onClick={() => void load()}>Показать неразнесённые строки</button> : null}{listError && <p role="alert">{listError}</p>}{unmatched && <div><p>Неразнесённых строк: {actuals.unmatched_lines}</p><ul>{unmatched.items.map(row => <li key={row.line_id}>{row.posting_date} · {row.source} · {row.operation} · {row.account_code} · {row.side === "debit" ? "Дт" : "Кт"} {row.amount} BYN · {Object.entries(row.dimensions).map(([name, value]) => `${name}=${value}`).join(", ") || "без аналитики"} · {row.reason} {onEntry && <button className="text-accent underline" onClick={() => onEntry(row.entry_id)}>Открыть проводку</button>}</li>)}</ul>{unmatched.next_after_line_id !== null && <button className={button} onClick={() => void load(unmatched.next_after_line_id ?? undefined)}>Показать ещё</button>}</div>}{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</>
-      : <p role="alert">Покрытие: неизвестно. {error}</p>}
+    {actuals ? <>
+      <p className="text-sm text-muted">Покрытие: {actuals.coverage}. {actuals.reason} Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>
+      {actuals.unmatched_lines ? <button className={button} onClick={() => void load()}>Показать неразнесённые строки</button> : null}
+      {listError && <p role="alert">{listError}</p>}
+      {receipt && <p role="status">Атрибуция сохранена. Квитанция {receipt.request_key}.</p>}
+      {unmatched && <div><p>Неразнесённых строк: {actuals.unmatched_lines}</p><ul>{unmatched.items.map(row => <li key={row.line_id} className="my-2">
+        {row.posting_date} · {row.source} · {row.operation} · {row.account_code} · {row.side === "debit" ? "Дт" : "Кт"} {row.amount} BYN · {Object.entries(row.dimensions).map(([name, value]) => `${name}=${value}`).join(", ") || "без аналитики"} · {row.reason}{" "}
+        {onEntry && <button className="text-accent underline" onClick={() => onEntry(row.entry_id)}>Открыть проводку</button>}{" "}
+        {attributionEnabled && <button className={button} disabled={attributionBusy} onClick={() => { setSelectedLineId(row.line_id); setArticleId(""); setEvidence(""); setExplanation(""); setPreview(null); setAttributionError(""); setReceipt(null); }}>Разнести</button>}
+      </li>)}</ul>
+      {selected && attributionEnabled && <div aria-label="Разнесение расхода" className="my-3 space-y-2 rounded border border-amber-400 p-3">
+        <p>Строка {selected.line_id} от {selected.posting_date}: {selected.amount} BYN. Проводка не изменяется: будет создана отдельная квитанция.</p>
+        {!activeArticles.length ? <p role="alert">Нет активной статьи расходов для выбранного юрлица.</p> : <>
+          <label className="block">Статья расходов <select aria-label="Статья разнесения" className={field} value={articleId} disabled={attributionBusy} onChange={event => { setArticleId(event.target.value); setPreview(null); }}><option value="">Выберите статью</option>{activeArticles.map(article => {
+            const group = catalog?.groups.find(item => item.id === article.group_id);
+            return <option key={article.id} value={article.id}>{group?.title ?? "Без группы"} / {article.title}</option>;
+          })}</select></label>
+          <label className="block">Основание разнесения <input aria-label="Основание разнесения" className={`${field} w-full`} value={evidence} disabled={attributionBusy} onChange={event => setEvidence(event.target.value)} /></label>
+          <label className="block">Пояснение разнесения <input aria-label="Пояснение разнесения" className={`${field} w-full`} value={explanation} disabled={attributionBusy} onChange={event => setExplanation(event.target.value)} /></label>
+          <button className={button} disabled={attributionBusy || !articleId} onClick={() => void prepareAttribution()}>Проверить разнесение</button>
+          {preview && <div aria-label="Предварительный просмотр разнесения" className="rounded border border-line p-2"><p>Подтверждён источник: проводка {preview.source_entry_id}, строка {preview.source_line_id}; статья: {preview.article_snapshot.group.title} / {preview.article_snapshot.title}.</p><p className="text-xs text-muted">Основание проверки: {preview.basis_digest}. Изменение источника, статьи, политики или периода потребует нового просмотра.</p><button className={button} disabled={attributionBusy || !evidence.trim() || !explanation.trim()} onClick={() => void confirmAttribution()}>Подтвердить разнесение</button></div>}
+        </>}
+        {attributionError && <p role="alert">{attributionError}</p>}
+      </div>}
+      {unmatched.next_after_line_id !== null && <button className={button} onClick={() => void load(unmatched.next_after_line_id ?? undefined)}>Показать ещё</button>}</div>}
+      {actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}
+    </> : <p role="alert">Покрытие: неизвестно. {error}</p>}
   </div>;
 }
 
@@ -135,10 +212,10 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org]);
 
-  async function run(action: (token: number) => Promise<void>) {
+  async function run<T>(action: (token: number) => Promise<T>): Promise<T | undefined> {
     if (lock.current) return;
     const token = epoch.current; lock.current = true; setBusy(true); setError(""); setNotice("");
-    try { await action(token); }
+    try { return await action(token); }
     catch (e) {
       if (token === epoch.current) {
         setError(errorText(e));
@@ -151,8 +228,8 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
       }
     } finally { if (token === epoch.current) { lock.current = false; setBusy(false); } }
   }
-  async function send(token: number, kind: api.Attempt["kind"], body: api.CatalogBody | api.BudgetBody | api.ApprovalBody) {
-    if (!ctx) return;
+  async function send(token: number, kind: api.Attempt["kind"], body: api.CommandBody): Promise<api.CommandReceipt | undefined> {
+    if (!ctx) throw new Error("Учётная запись не загружена.");
     const scope = { org, principal: ctx.principal };
     await api.context(org, ctx.principal);
     if (token !== epoch.current) return;
@@ -164,6 +241,7 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
     setSaved(result.journal);
     await load(token);
     if (token === epoch.current) setNotice(`Команда подтверждена. Квитанция ${result.receipt.request_key}.`);
+    return result.receipt;
   }
   function catalog(action: api.CatalogBody["action"], target_id: number | null = null) {
     void run(async token => {
@@ -194,6 +272,14 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
         request_key: crypto.randomUUID(), budget_id: latest.id,
         expected_revision: latest.revision, evidence: evidence.trim(),
       });
+    });
+  }
+  async function confirmAttribution(body: api.AttributionBody): Promise<api.AttributionReceipt | undefined> {
+    return run(async token => {
+      const receipt = await send(token, "attribution", body);
+      if (!receipt) return undefined;
+      if (receipt.kind !== "expense_article_attribution") throw new Error("Сервер вернул квитанцию другого типа.");
+      return receipt;
     });
   }
   function recover(mode: "recover" | "retry") {
@@ -283,8 +369,8 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
       })}
       <div aria-label="Непогашенные обязательства" className="rounded border border-line p-3"><strong>Непогашенные обязательства</strong><p>— Неизвестно</p><p className="text-xs text-muted">Адаптер подтверждённых обязательств не подключён; разность начислений и оплат не используется.</p></div>
     </div>
-    <ActualsPanel title="Фактические начисления расходов" actuals={accrualActuals?.actuals ?? null} error={accrualActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} />
-    <ActualsPanel title="Фактические оплаты расходов" actuals={cashActuals?.actuals ?? null} error={cashActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} />
+    <ActualsPanel key={`accrual/${org}/${ctx?.principal ?? ""}/${accrualActuals?.actuals?.year ?? ""}/${accrualActuals?.actuals?.month ?? ""}/${accrualActuals?.actuals?.basis ?? ""}`} title="Фактические начисления расходов" actuals={accrualActuals?.actuals ?? null} error={accrualActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} catalog={ctx?.catalog ?? null} canAttribute={editable} onConfirmAttribution={confirmAttribution} />
+    <ActualsPanel key={`cash/${org}/${ctx?.principal ?? ""}/${cashActuals?.actuals?.year ?? ""}/${cashActuals?.actuals?.month ?? ""}/${cashActuals?.actuals?.basis ?? ""}`} title="Фактические оплаты расходов" actuals={cashActuals?.actuals ?? null} error={cashActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} catalog={ctx?.catalog ?? null} canAttribute={editable} onConfirmAttribution={confirmAttribution} />
     {planActuals && (planFactRows.length > 0 || planBudget) && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {planActuals.month} месяц</h3><p className="text-sm text-muted">План: {planLabel ?? "не создан"}. Основа: {basis === "cash" ? "денежные выплаты" : "начисления"}. Отклонение = факт минус план; проценты не считаются при нулевом плане.</p>
       {incompleteCoverage && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: покрытие факта {planActuals.coverage}; без статьи расходов: {planActuals.unmatched_lines ?? "не определено"}. План-факт не является полным до разметки этих проводок.</p>}
       {unplannedRows.length > 0 && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: {unplannedRows.length} {unplannedRows.length === 1 ? "статья имеет" : "статей имеют"} факт без плана за выбранный месяц.</p>}

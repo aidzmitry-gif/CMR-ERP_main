@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   context: vi.fn(), getBudgets: vi.fn(), getActuals: vi.fn(), getUnmatchedActuals: vi.fn(), journal: vi.fn(),
+  previewAttribution: vi.fn(), begin: vi.fn(), dispatch: vi.fn(),
 }));
 
 vi.mock("@/lib/expense-control-api", () => ({
@@ -36,6 +37,15 @@ const unmatched = (org: number, month: number, basis: "cash" | "accrual", source
   next_after_line_id: null,
   items: [{ entry_id: org * 1000 + month, line_id: org * 1000 + month, posting_date: `2026-${String(month).padStart(2, "0")}-02`, source,
     operation: "manual", account_code: "90.4", side: "debit" as const, amount: "2.00", dimensions: { analytics: "" }, reason: "нет статьи" as const }],
+});
+
+const attributionPreview = (lineId = 1001) => ({
+  source_entry_id: lineId, source_line_id: lineId, article_id: 1, supersedes_id: null,
+  effective_date: "2026-01-02", basis_digest: "a".repeat(64),
+  source_snapshot: { entry_id: lineId, source: "source", source_version: 1, operation: "manual", posting_date: "2026-01-02", policy_id: 1,
+    entry_digest: "b".repeat(64), line_id: lineId, account_code: "90.4", account_title: "Расходы", category: "expense", cash: false,
+    side: "debit" as const, amount: "2.00", currency: "BYN" as const, dimensions: { analytics: "" } },
+  article_snapshot: { id: 1, code: "supplies", title: "Материалы", group_id: 1, group: context.catalog.groups[0] },
 });
 
 function setupActualMocks() {
@@ -278,4 +288,60 @@ it("keeps the fact visible when the unmatched register request fails", async () 
   expect(await within(panel).findByRole("alert")).toHaveTextContent("registry unavailable");
   expect(screen.getByLabelText("Начислено")).toHaveTextContent("10.00 BYN");
   expect(panel).toHaveTextContent("без статьи: 1");
+});
+
+it("previews and confirms an append-only attribution from an unmatched accrual line", async () => {
+  setupActualMocks();
+  api.getUnmatchedActuals.mockResolvedValueOnce(unmatched(1, 1, "accrual", "source")).mockResolvedValueOnce({
+    year: 2026, month: 1, currency: "BYN", basis: "accrual", items: [], next_after_line_id: null,
+  });
+  api.previewAttribution.mockResolvedValue(attributionPreview());
+  api.begin.mockImplementation((scope: unknown, kind: string, body: unknown) => Promise.resolve({
+    raw: "pending-attribution", attempt: { scope, kind, body: JSON.stringify(body), hash: "x", nonce: "n", outcome: "pending" },
+  }));
+  api.dispatch.mockImplementation((saved: { attempt: { scope: { org: number; principal: string }; body: string } }) => {
+    const command = JSON.parse(saved.attempt.body);
+    const result = { ...attributionPreview(command.source_line_id), evidence: command.evidence, explanation: command.explanation };
+    return Promise.resolve({ receipt: { organization_id: saved.attempt.scope.org, principal: saved.attempt.scope.principal,
+      kind: "expense_article_attribution", request_key: command.request_key, command, command_hash: "c".repeat(64), result,
+      result_digest: "d".repeat(64), receipt_digest: "e".repeat(64) }, journal: { raw: "done-attribution", attempt: null } });
+  });
+
+  render(<ExpenseControl org="1" />);
+  await loadFacts();
+  const panel = screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  fireEvent.click(await within(panel).findByRole("button", { name: "Разнести" }));
+  fireEvent.change(screen.getByLabelText("Статья разнесения"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Основание разнесения"), { target: { value: "Проверен первичный документ" } });
+  fireEvent.change(screen.getByLabelText("Пояснение разнесения"), { target: { value: "Отнесено на материалы" } });
+  fireEvent.click(screen.getByRole("button", { name: "Проверить разнесение" }));
+
+  expect(await screen.findByLabelText("Предварительный просмотр разнесения")).toHaveTextContent("проводка 1001, строка 1001");
+  expect(api.previewAttribution).toHaveBeenCalledWith({ org: 1, principal: "chief" }, {
+    source_line_id: 1001, article_id: 1, effective_date: "2026-01-02",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить разнесение" }));
+
+  await waitFor(() => expect(api.begin).toHaveBeenCalledWith({ org: 1, principal: "chief" }, "attribution", expect.objectContaining({
+    source_line_id: 1001, article_id: 1, effective_date: "2026-01-02", expected_basis_digest: "a".repeat(64),
+    evidence: "Проверен первичный документ", explanation: "Отнесено на материалы",
+  }), null));
+  expect(await screen.findByText(/Атрибуция сохранена\. Квитанция/)).toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "Разнести" })).not.toBeInTheDocument();
+});
+
+it("keeps manual attribution controls hidden from a reader", async () => {
+  setupActualMocks();
+  api.context.mockResolvedValue({ ...context, role: "reader" });
+  api.getUnmatchedActuals.mockResolvedValue(unmatched(1, 1, "accrual", "source"));
+
+  render(<ExpenseControl org="1" />);
+  await loadFacts();
+  const panel = screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  await within(panel).findByText(/source/);
+
+  expect(within(panel).queryByRole("button", { name: "Разнести" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Статья разнесения")).not.toBeInTheDocument();
 });
