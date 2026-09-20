@@ -63,6 +63,21 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
 it("renders header, status and backend preview through scoped reads", async () => { await ready(); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("Черновик"); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("ETA 2026-08-01"); expect(screen.getByText("475")).toBeInTheDocument(); expect(screen.getByText("Итого landed: 950.00 BYN")).toBeInTheDocument(); });
+it("separates expected, client-bound and free quantities without calling them physical stock", async () => {
+  const original = f.getMockImplementation()!;
+  f.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.endsWith("expected-reservations/order/7")) return Promise.resolve(ok({ organization_id: 1, order_id: 7, lines: [{ pending_conversion_count: 0, order_line_id: 11, sku_code: "AKB-190", ordered: "20.00", accepted: "0.00", warehouse_accepted: "0.00", physical_convertible: "0.00", expected: "20.00", converted: "0.00", convertible: "0.00", expected_reserved: "12.00", free_expected: "8.00", uncovered: "0.00", reservations: [] }] }));
+    if (url.endsWith("orders/7/deal-demands")) return Promise.resolve(ok({ organization_id: 1, order_id: 7, lines: [{ order_line_id: 11, sku_code: "AKB-190", ordered: "20.00", client_ordered: "12.00", free_for_client: "12.00", candidates: [{ demand_id: 31, deal_id: 41, deal_item_id: 51, sku_code: "AKB-190", qty: "12.00", free_qty: "12.00", document_id: 61 }], allocations: [] }] }));
+    if (url.endsWith("demands/31/allocations") && init?.method === "POST") { const command = JSON.parse(String(init.body)); return Promise.resolve(ok({ id: 31, organization_id: 1, deal_id: 41, deal_item_id: 51, sku_id: 71, sku_code: "AKB-190", qty: "12.00", ordered_qty: "8.00", free_qty: "4.00", document_id: 61, request_key: "demand-key", allocations: [{ id: 91, order_id: 7, order_line_id: 11, qty: "8.00" }], replayed: false, allocation_request_key: command.request_key, allocation: { id: 91, demand_id: 31, order_id: 7, order_line_id: 11, sku_code: "AKB-190", qty: "8.00" } })); }
+    return original(url, init);
+  });
+  await ready();
+  expect(screen.getByLabelText("Предварительный резерв AKB-190")).toHaveTextContent("Ожидается 20.00 · клиентам 12.00 · свободно 8.00");
+  expect(screen.getByText(/товар ещё не на складе и физический остаток или резерв не изменяются/)).toBeInTheDocument();
+  expect(screen.getByText("сделка №41 · счёт ID 61: 12.00 шт.")).toBeInTheDocument();
+  const reserve = screen.getByRole("button", { name: "Закрепить ожидаемые 8.00" }); expect(reserve).toBeEnabled(); fireEvent.click(reserve);
+  await waitFor(() => expect(f.mock.calls.find(([url]) => String(url).endsWith("demands/31/allocations"))?.[1]?.body).toContain('"qty":"8.00"'));
+});
 it("does not fetch an order without explicit organization", async () => { render(<ProcurementMachineEditor orderId={7} />); await screen.findByRole("option", { name: "A · 1" }); expect(f.mock.calls.map(([url]) => url)).toEqual(["/api/procurement/receipt-organizations"]); });
 it("empty lines show the original add hint", async () => { lines = []; await ready(); expect(screen.getByText(/Позиций нет/)).toBeInTheDocument(); });
 it("missing preview shows a dash and an error, never zero cost", async () => { mode = "no-preview"; await ready(); expect(screen.getByText("—")).toBeInTheDocument(); expect(screen.getByRole("alert")).toHaveTextContent("503"); expect(screen.queryByText(/Итого landed/)).not.toBeInTheDocument(); });
