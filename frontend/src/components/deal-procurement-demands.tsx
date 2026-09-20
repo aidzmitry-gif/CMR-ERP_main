@@ -1,6 +1,7 @@
 "use client";
 
 import { ShoppingCart } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { DealItemFull } from "@/lib/api";
 import { createDealDemand, fetchDealDemands, type DealDemand } from "@/lib/procurement-deal-demand";
@@ -96,7 +97,9 @@ export function DealProcurementDemands({ dealId, items }: Props) {
           const demand = demands.find((row) => row.deal_item_id === item.id);
           return <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-sunken px-3 py-2 text-sm">
             <span className="min-w-0 flex-1 truncate">{item.code} · {item.title}</span>
-            {demand ? <span className="text-muted">Потребность {demand.qty}; закреплено за заказом {demand.ordered_qty}; осталось обеспечить {demand.free_qty}</span> : <>
+            {demand ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-muted"><span>Потребность {demand.qty}; закреплено за заказом {demand.ordered_qty}; осталось обеспечить {demand.free_qty}</span>
+              {demand.allocations.length > 0 ? demand.allocations.map((allocation) => <Link key={allocation.id} title="Открывает заказ; строка указана для сверки." className="text-accent underline" href={`/erp/procurement/orders/${allocation.order_id}?org=${demand.organization_id}`}>Заказ поставщику #{allocation.order_id}, строка #{allocation.order_line_id}</Link>) : <Link className="text-accent underline" href="/erp/procurement/planning">Открыть план закупок юрлица #{demand.organization_id}</Link>}
+            </div> : <>
               <input aria-label={`Количество в потребность ${item.title}`} type="number" min="0.01" step="0.01" value={drafts[item.id] ?? String(item.qty)} onChange={(event) => setDrafts((previous) => ({ ...previous, [item.id]: event.target.value }))} disabled={busy !== null} className="w-24 rounded-lg border border-line bg-surface px-2 py-1" />
               <span className="text-muted">{item.unit}</span>
               <button type="button" onClick={() => void create(item)} disabled={busy !== null} className="rounded-lg bg-accent px-3 py-1 font-medium text-white disabled:opacity-60">В закупки</button>

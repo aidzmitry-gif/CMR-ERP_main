@@ -36,6 +36,18 @@ it("передаёт только выбранную строку сделки �
   expect(screen.getByRole("button", { name: "В закупки" })).toBeInTheDocument();
 });
 
+it("даёт честную навигацию в план без заказа и сохраняет строку для сверки заказа", async () => {
+  vi.mocked(fetchDealDemands).mockResolvedValueOnce([demand]);
+  render(<DealProcurementDemands dealId="5" items={[item]} />);
+  fireEvent.change(await screen.findByLabelText("Юрлицо закупки для потребности"), { target: { value: "1" } });
+  expect(await screen.findByRole("link", { name: "Открыть план закупок юрлица #1" })).toHaveAttribute("href", "/erp/procurement/planning");
+  vi.mocked(fetchDealDemands).mockResolvedValueOnce([{ ...demand, allocations: [{ id: 4, order_id: 12, order_line_id: 34, qty: "1.00" }] }]);
+  fireEvent.change(screen.getByLabelText("Юрлицо закупки для потребности"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Юрлицо закупки для потребности"), { target: { value: "1" } });
+  expect(await screen.findByRole("link", { name: "Заказ поставщику #12, строка #34" })).toHaveAttribute("href", "/erp/procurement/orders/12?org=1");
+  expect(screen.queryByRole("link", { name: "Открыть план закупок юрлица #1" })).toBeNull();
+});
+
 it("при отказе сохраняет количество и повторяет команду с тем же ключом", async () => {
   vi.mocked(createDealDemand).mockRejectedValueOnce(new Error("Не удалось создать потребность закупки (403)"));
   render(<DealProcurementDemands dealId="5" items={[item]} />);
