@@ -436,6 +436,57 @@ def replay_source_allocation(layers, allocation):
         return result
 
 
+def project_source_allocation(baseline_layers, prospective_layers, allocation):
+    """Revalue one authenticated disposition without rewriting its saved cost.
+
+    The caller authenticates the complete chronological history and applies cost
+    overlays to prospective layers. Both pools must retain identical physical
+    origins and quantities. The original allocation still passes strict replay;
+    only the separate prospective allocation may carry different money.
+    This pure step does not authorize posting or authenticate source documents.
+    """
+    from modules.accounting.zero_value_disposals import InventoryDispositionAllocation
+
+    selection = InventoryDispositionAllocation.model_validate(allocation)
+    with localcontext() as context:
+        context.prec = 64
+        def physical(layers):
+            return [{key: value for key, value in layer.items() if key != "amount"} for layer in layers]
+        if physical(baseline_layers) != physical(prospective_layers):
+            raise AccountingError("Prospective cost must preserve the complete physical inventory pool")
+        for layer in [*baseline_layers, *prospective_layers]:
+            amount = layer["amount"]
+            if (not isinstance(amount, Decimal) or not amount.is_finite() or amount < 0
+                    or (Fraction(amount) * 100).denominator != 1):
+                raise AccountingError("Prospective inventory cost must be nonnegative whole cents")
+            if layer["quantity"] < 0 or (layer["quantity"] == 0 and amount != 0):
+                raise AccountingError("An exhausted inventory layer cannot retain value")
+        baseline = replay_source_allocation(baseline_layers, selection)
+        _, _, _, selected = _select_policy_layers(
+            prospective_layers, selection.quantity, selection.valuation_method)
+        # The selector depends on quantities, not the prospective value overlay.
+        # Keep its exact origin ordering and dimensions, including zero portions.
+        expected = [(item.source_entry_id, item.source_line_id, item.inventory_dimensions, item.quantity)
+                    for item in selection.layers]
+        if [(layer["entry_id"], layer["line_id"], layer["dimensions"], take)
+                for layer, take, _ in selected] != expected:
+            raise AccountingError("Prospective cost changed the reviewed physical source selection")
+        projected = InventoryDispositionAllocation.model_validate({
+            **selection.model_dump(),
+            "amount_byn": sum((cost for _, _, cost in selected), Decimal(0)),
+            "layers": [{**item.model_dump(), "amount_byn": cost}
+                       for item, (_, _, cost) in zip(selection.layers, selected, strict=True)],
+        })
+        prospective = replay_source_allocation(prospective_layers, projected)
+        for before, after, disposed in ((baseline_layers, baseline, selection.amount_byn),
+                                        (prospective_layers, prospective, projected.amount_byn)):
+            if (sum(Fraction(layer["amount"]) for layer in before)
+                    != sum(Fraction(layer["amount"]) for layer in after) + Fraction(disposed)):
+                raise AccountingError("Inventory cost projection does not conserve pool value")
+        return {"baseline_layers": baseline, "prospective_layers": prospective,
+                "allocation": projected, "delta_byn": projected.amount_byn - selection.amount_byn}
+
+
 def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset(),
                   verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
                  organization_id=None, before_registration_token=None, inventory_account=None):

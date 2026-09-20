@@ -8,6 +8,7 @@ import pytest
 from modules.accounting.inventory_cost import (
     _valuation_layers,
     issue_result,
+    project_source_allocation,
     replay_source_allocation,
 )
 from modules.accounting.service import AccountingError
@@ -144,6 +145,118 @@ def test_weighted_selection_never_creates_negative_cent_portion():
     _, _, _, selected = _select_policy_layers(layers, Decimal("3.1"), "weighted_average")
     assert [cost for _, _, cost in selected] == [Decimal("0.01"), Decimal("0.01"), Decimal("0.00"), Decimal("0.00")]
     assert sum(cost for _, _, cost in selected) == Decimal("0.02")
+
+
+def projection_pool():
+    return [{"entry_id": identity, "line_id": identity + 1,
+             "dimensions": {"warehouse": "MAIN", "sku": "A", "lot": lot},
+             "lot": lot, "quantity": Decimal(quantity), "amount": Decimal(amount)}
+            for identity, lot, quantity, amount in ((10, "L1", "5", "31.25"), (20, "L2", "3", "30.00"))]
+
+
+def projection_selection(pool, method, quantities, amounts):
+    return InventoryDispositionAllocation.model_validate({
+        "allocation_version": 1, "valuation_method": method,
+        "quantity": sum((Decimal(q) for q in quantities), Decimal(0)),
+        "amount_byn": sum((Decimal(a) for a in amounts), Decimal(0)),
+        "layers": [{"source_entry_id": layer["entry_id"], "source_line_id": layer["line_id"],
+                    "inventory_account": "10.1", "inventory_dimensions": layer["dimensions"],
+                    "quantity": q, "amount_byn": a}
+                   for layer, q, a in zip(pool, quantities, amounts, strict=True)],
+    })
+
+
+@pytest.mark.parametrize("method,amounts,issue_delta,remaining_delta", [
+    ("fifo", ["31.25", "10.00"], "5.00", "0.00"),
+    ("weighted_average", ["38.28", "7.66"], "3.75", "1.25"),
+])
+def test_late_value_projection_preserves_sources_and_revalues_remaining_pool(method, amounts, issue_delta, remaining_delta):
+    from copy import deepcopy
+    from decimal import localcontext
+
+    baseline = projection_pool()
+    prospective = deepcopy(baseline)
+    prospective[0]["amount"] += Decimal("5.00")
+    selection = projection_selection(baseline, method, ["5", "1"], amounts)
+    original = deepcopy((baseline, prospective, selection.model_dump()))
+    with localcontext() as context:
+        context.prec = 4
+        result = project_source_allocation(baseline, prospective, selection)
+    assert result["delta_byn"] == Decimal(issue_delta)
+    assert result["prospective_layers"][0]["quantity"] == 0
+    assert sum(layer["amount"] for layer in result["prospective_layers"]) - sum(
+        layer["amount"] for layer in result["baseline_layers"]) == Decimal(remaining_delta)
+    assert result["delta_byn"] + Decimal(remaining_delta) == Decimal("5.00")
+    assert (baseline, prospective, selection.model_dump()) == original
+    # Strict historical replay still rejects the new money as an old receipt.
+    with pytest.raises(AccountingError, match="policy-selected"):
+        replay_source_allocation(baseline, result["allocation"])
+
+
+def test_projected_weighted_pool_flows_into_next_disposition_without_losing_a_cent():
+    from copy import deepcopy
+
+    baseline = projection_pool()
+    prospective = deepcopy(baseline)
+    prospective[0]["amount"] += Decimal("5.00")
+    first = project_source_allocation(baseline, prospective,
+        projection_selection(baseline, "weighted_average", ["5", "1"], ["38.28", "7.66"]))
+    second = project_source_allocation(first["baseline_layers"], first["prospective_layers"],
+        projection_selection(first["baseline_layers"][1:], "weighted_average", ["1"], ["7.66"]))
+    remaining_delta = sum(layer["amount"] for layer in second["prospective_layers"]) - sum(
+        layer["amount"] for layer in second["baseline_layers"])
+    assert (first["delta_byn"], second["delta_byn"], remaining_delta) == (
+        Decimal("3.75"), Decimal("0.62"), Decimal("0.63"))
+
+
+@pytest.mark.parametrize("method", ["fifo", "weighted_average"])
+def test_zero_cost_allocation_can_gain_value_without_inventing_an_entry(method):
+    baseline = [{**projection_pool()[0], "quantity": Decimal("100"), "amount": Decimal("0.01")}]
+    prospective = [{**baseline[0], "amount": Decimal("1.01")}]
+    selection = projection_selection(baseline, method, ["1"], ["0.00"])
+    result = project_source_allocation(baseline, prospective, selection)
+    assert result["delta_byn"] == Decimal("0.01")
+    assert selection.amount_byn == 0
+    assert result["allocation"].layers[0].source_entry_id == 10
+    assert result["prospective_layers"][0]["amount"] == Decimal("1.00")
+
+
+@pytest.mark.parametrize("change", ["quantity", "identity", "dimensions", "order", "amount", "old_cost"])
+def test_projection_rejects_changed_physical_pool_or_forged_historical_cost(change):
+    from copy import deepcopy
+
+    baseline = projection_pool()
+    prospective = deepcopy(baseline)
+    selection = projection_selection(baseline, "fifo", ["5", "1"], ["31.25", "10.00"])
+    if change == "quantity":
+        prospective[1]["quantity"] += 1
+    elif change == "identity":
+        prospective[0]["line_id"] = 999
+    elif change == "dimensions":
+        prospective[0]["dimensions"]["sku"] = "OTHER"
+    elif change == "order":
+        prospective.reverse()
+    elif change == "amount":
+        prospective[0]["amount"] = Decimal("-0.01")
+    else:
+        selection = projection_selection(baseline, "fifo", ["5", "1"], ["31.24", "10.01"])
+    with pytest.raises(AccountingError):
+        project_source_allocation(baseline, prospective, selection)
+
+
+@pytest.mark.parametrize("method", ["fifo", "weighted_average"])
+@pytest.mark.parametrize("changed_pool", ["baseline", "prospective"])
+def test_projection_never_loses_value_on_exhausted_origin(method, changed_pool):
+    from copy import deepcopy
+
+    baseline = projection_pool()
+    baseline[0].update(quantity=Decimal(0), amount=Decimal(0))
+    baseline[1].update(quantity=Decimal(1), amount=Decimal("1.00"))
+    prospective = deepcopy(baseline)
+    selection = projection_selection(baseline[1:], method, ["1"], ["1.00"])
+    (baseline if changed_pool == "baseline" else prospective)[0]["amount"] = Decimal("5.00")
+    with pytest.raises(AccountingError, match="exhausted"):
+        project_source_allocation(baseline, prospective, selection)
 
 
 def test_specific_replays_zero_disposal_after_negative_correction_and_respects_cutoff():
