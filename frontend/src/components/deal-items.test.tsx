@@ -16,13 +16,19 @@ vi.mock("@/lib/margin", async (importOriginal) => ({
   fetchDealMargin: vi.fn(() => Promise.resolve(null)),
 }));
 
+vi.mock("@/lib/procurement-machine", () => ({ organizations: vi.fn(() => Promise.resolve([])) }));
+vi.mock("@/lib/procurement-deal-demand", () => ({
+  fetchDealDemands: vi.fn(() => Promise.resolve([])),
+  createDealDemand: vi.fn(),
+}));
+
 import { DealItems } from "@/components/deal-items";
 import * as api from "@/lib/api";
 import * as margin from "@/lib/margin";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
   vi.mocked(margin.fetchDealMargin).mockResolvedValue(null);
 });
 

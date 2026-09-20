@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
 import { COST_SRC_LABEL, fetchDealMargin, type MarginLine, marginBySku } from "@/lib/margin";
+import { DealProcurementDemands } from "@/components/deal-procurement-demands";
 
 export function DealItems({ dealId }: { dealId: string }) {
   const { fmt } = useCurrency(); // цены/себес в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
@@ -259,6 +260,7 @@ export function DealItems({ dealId }: { dealId: string }) {
         номенклатура · справочник из 1С (через MDM); себес/маржа — из фасада цены/себеса (как в
         метриках сделки); цены last/мин — из истории сделок CRM / Price Engine
       </div>
+      <DealProcurementDemands dealId={dealId} items={items} />
     </div>
   );
 }

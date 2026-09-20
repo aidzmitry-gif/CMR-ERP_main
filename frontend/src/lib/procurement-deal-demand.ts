@@ -22,6 +22,8 @@ const exact = (value: unknown) =>
 const positiveId = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2147483647;
 const uuid = () => crypto.randomUUID();
+const requestKey = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 
 function validDemand(value: unknown, org: number, dealId: number): value is DealDemand {
   if (!value || typeof value !== "object") return false;
@@ -48,8 +50,10 @@ export async function createDealDemand(
   dealId: number,
   dealItemId: number,
   qty: string,
+  /** Reuse after an uncertain response so the server can return its immutable receipt. */
+  key = uuid(),
 ): Promise<DealDemand> {
-  if (!positiveId(org) || !positiveId(dealId) || !positiveId(dealItemId) || !/^\d+\.\d{2}$/.test(qty)) {
+  if (!positiveId(org) || !positiveId(dealId) || !positiveId(dealItemId) || !/^\d+\.\d{2}$/.test(qty) || !requestKey(key)) {
     throw new Error("Некорректное основание потребности закупки");
   }
   const response = await fetch(`/api/procurement/organizations/${org}/deals/${dealId}/demands`, {
@@ -59,7 +63,7 @@ export async function createDealDemand(
     body: JSON.stringify({
       deal_item_id: dealItemId,
       qty,
-      request_key: uuid(),
+      request_key: key,
       evidence: `CRM deal ${dealId}: order the unavailable item`,
     }),
   });
