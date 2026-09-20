@@ -11,6 +11,7 @@ import {
 } from "@/lib/production-material-journal";
 
 export type PreparedMaterialPosting = {
+  credit_lines?: { account: string; amount: string; quantity?: string | null }[];
   draft: Omit<MaterialPostingCommand, "basis_digest" | "digest">;
   basis_digest: string;
   digest: string;
@@ -59,6 +60,7 @@ export function AccountingProductionMaterialConfirmation({ org, month, disabled,
     <Button disabled={disabled || busy} onClick={() => void run("check")}>Проверить сохранённое проведение материала</Button>
     {prepared && !pending && !receipt && <div className="space-y-2">
       <p>Дт {prepared.debit_account} {prepared.amount_byn} BYN → Кт {prepared.credit_account} {prepared.amount_byn} BYN.</p>
+      {prepared.credit_lines && <ul aria-label="Строки списания материала">{prepared.credit_lines.map((line, index) => <li key={index}>Кт {line.account} · {line.amount} BYN{line.quantity ? ` · Количество ${line.quantity}` : ""}</li>)}</ul>}
       <p className="text-sm text-muted">Основание стоимости: {prepared.basis_digest.slice(0, 12)}… · пакет: {prepared.digest.slice(0, 12)}…</p>
       <Button disabled={disabled || busy} onClick={() => void run("confirm")}>Провести проверенный материал</Button>
     </div>}

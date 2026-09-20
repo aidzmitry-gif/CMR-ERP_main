@@ -46,7 +46,7 @@ it("rejects a forged response scope or non-production movement", async () => {
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("не соответствует"));
 });
 
-it("prepares and confirms the reviewed material package, then opens the immutable entry", async () => {
+it.each([false, true])("prepares and confirms the reviewed material package (multiple credits: %s)", async (multiple) => {
   const values = new Map<string, string>();
   vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
@@ -54,6 +54,9 @@ it("prepares and confirms the reviewed material package, then opens the immutabl
     status: "reviewed_material_cost", explanation: "Списание сверено с WMS и партией.", posting_available: true,
     final_cost_certified: false, basis_digest: "a".repeat(64), digest: "b".repeat(64),
     posting: { lines: [{ side: "debit", account: "20", amount: "12.50" }, { side: "credit", account: "10.1", amount: "12.50" }] } };
+  if (multiple) posted.posting.lines.splice(1, 1,
+    { side: "credit", account: "10.1", amount: "7.00" },
+    { side: "credit", account: "10.1", amount: "5.50" });
   const receipt = { organization_id: 1, month: "2026-10", actor: "chief", order_id: 42, wms_movement_id: 9,
     policy_id: 2, basis_digest: posted.basis_digest, digest: posted.digest, entry_id: 91,
     entry: { id: 91 }, posted: true, final_cost_certified: false };
@@ -74,6 +77,10 @@ it("prepares and confirms the reviewed material package, then opens the immutabl
   await screen.findByText(/Проводка не создана/);
   fireEvent.click(screen.getByText("Подготовить подтверждение проводки"));
   await screen.findByText(/Пакет проводки подготовлен/);
+  if (multiple) {
+    expect(screen.getByText("Кт 10.1 · 7.00 BYN")).toBeInTheDocument();
+    expect(screen.getByText("Кт 10.1 · 5.50 BYN")).toBeInTheDocument();
+  }
   fireEvent.click(screen.getByText("Провести проверенный материал"));
   await screen.findByText(/Материал проведён. Проводка №91/);
   expect(onEntry).toHaveBeenCalledWith(91);

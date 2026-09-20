@@ -65,12 +65,16 @@ export function AccountingProductionMaterialCost({ org, month, policyId, disable
         || typeof data.digest !== "string" || !/^[a-f0-9]{64}$/.test(data.digest)
         || !data.posting?.lines?.length || data.posting.lines.some((line: { amount?: string }) => typeof line.amount !== "string" || !/^\d+\.\d{2}$/.test(line.amount)))
         throw new Error("Пакет проводки не соответствует выбранному юрлицу, периоду или денежному формату.");
-      const debit = data.posting.lines.find((line: { side?: string }) => line.side === "debit");
-      const credit = data.posting.lines.find((line: { side?: string }) => line.side === "credit");
-      if (!debit || !credit || debit.amount !== credit.amount || typeof debit.account !== "string" || typeof credit.account !== "string")
+      const lines = data.posting.lines as { side: string; account: string; amount: string; quantity?: string | null }[];
+      const debits = lines.filter(line => line.side === "debit"), credits = lines.filter(line => line.side === "credit");
+      const debit = debits[0], credit = credits[0];
+      const cents = (amount: string) => BigInt(amount.replace(".", ""));
+      if (debits.length !== 1 || !credit || lines.length !== debits.length + credits.length
+        || typeof debit.account !== "string" || credits.some(line => typeof line.account !== "string" || line.account !== credit.account)
+        || credits.reduce((total, line) => total + cents(line.amount), BigInt(0)) !== cents(debit.amount))
         throw new Error("Пакет проводки не содержит равные дебет и кредит.");
       setPrepared({ draft: command(), basis_digest: data.basis_digest, digest: data.digest, amount_byn: debit.amount,
-        debit_account: debit.account, credit_account: credit.account });
+        debit_account: debit.account, credit_account: credit.account, credit_lines: credits });
     } catch (e) { setError(e instanceof Error ? e.message : "Проводка материала не подготовлена."); }
     finally { setBusy(false); }
   }
