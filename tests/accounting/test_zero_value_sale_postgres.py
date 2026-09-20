@@ -59,13 +59,20 @@ async def test_zero_sale_migration_empty_roundtrip(pg_factory):
 
 
 @pytest.mark.parametrize("vat_rate", ["0", "20"])
-async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book, vat_rate):
+@pytest.mark.parametrize("latest_runtime", [False, True])
+async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book, vat_rate, latest_runtime):
     async with pg_factory() as session:
         for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
                          "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
             await run_migration(session, revision, "upgrade")
         await session.commit()
     policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book)
+    if latest_runtime:
+        async with pg_factory() as session:
+            for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py"):
+                await run_migration(session, revision, "upgrade")
+            await session.commit()
     document = sale_document(policy_id).model_copy(update={"quantity": Decimal("0.5"), "vat_rate": Decimal(vat_rate)})
     async with pg_factory() as session:
         if vat_rate == "20":

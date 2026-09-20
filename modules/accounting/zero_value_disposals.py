@@ -3,14 +3,47 @@ from __future__ import annotations
 
 import hashlib
 import json
+from asyncio import current_task
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date
+from functools import wraps
+from inspect import signature
 from typing import Literal
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select, text
 
 from modules.accounting.schemas import Code, Input, Money, Quantity
+
+_replay_scope = ContextVar("accounting_authenticated_replay", default=None)
+
+
+def scoped_replay(function):
+    """Memoize read-only loader prefixes only during one outer authentication."""
+    parameters = signature(function)
+
+    @wraps(function)
+    async def run(*args, **kwargs):
+        bound = parameters.bind(*args, **kwargs)
+        bound.apply_defaults()
+        scope = _replay_scope.get()
+        owner = current_task()
+        token = None
+        if scope is None or scope[0] is not owner:
+            scope = (owner, {})
+            token = _replay_scope.set(scope)
+        key = (function.__name__, tuple((name, type(value), value if type(value) in (int, str, type(None))
+                                        else id(value)) for name, value in bound.arguments.items()))
+        try:
+            if key not in scope[1]:
+                scope[1][key] = await function(*args, **kwargs)
+            return scope[1][key]
+        finally:
+            if token is not None:
+                _replay_scope.reset(token)
+
+    return run
 
 
 def canonical_json(value: object) -> str:
@@ -267,8 +300,9 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
     Mixed-money commands and sales intentionally remain outside this persistence
     slice.  A receipt id is not an accounting entry id.
     """
-    if isinstance(command, AllocatedZeroValueDisposalCommand):
-        raise ValueError("Allocation zero-value command requires migration and replay integration")
+    allocated = isinstance(command, AllocatedZeroValueDisposalCommand)
+    if allocated:
+        await require_allocated_zero_schema(session)
     from modules.accounting.models import Organization, Period, ZeroValueInventoryDisposalReceipt
     from modules.accounting.service import audit, lock_organization, period_for
 
@@ -289,7 +323,14 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
     if existing is not None:
         if existing.digest != digest or existing.actor != actor:
             raise ValueError("Zero-value disposal identity was already registered with different content")
+        if allocated:
+            await load_authenticated_zero_value_disposals(session, organization_id,
+                before_registration_token=existing.registration_token + 1)
         return existing
+    if allocated and await session.scalar(select(Period.id).where(
+        Period.organization_id == organization_id, Period.month >= command.posting_date.strftime("%Y-%m"),
+        Period.closed.is_(True)).limit(1)) is not None:
+        raise ValueError("Zero-value allocation would change a closed period")
     calculated_basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, locked=True)
     if command.basis_digest != calculated_basis:
         raise ValueError("Zero-value disposal basis changed; preview again")
@@ -324,22 +365,36 @@ async def preview_standalone_zero_value_issue_basis(session, organization_id: in
     callers preparing a command should keep that same transaction open through
     registration, or retry if the basis becomes stale.
     """
-    if isinstance(command, AllocatedZeroValueDisposalCommand):
-        raise ValueError("Allocation zero-value command requires migration and replay integration")
+    allocated = isinstance(command, AllocatedZeroValueDisposalCommand)
+    if allocated:
+        await require_allocated_zero_schema(session)
     from modules.accounting.service import lock_organization
 
-    if command.operation != "inventory_issue" or len(command.inventory_layers) != 1:
+    if command.operation != "inventory_issue" or not allocated and len(command.inventory_layers) != 1:
         raise ValueError("Standalone zero-value preview supports one inventory issue layer only")
     if not locked:
         await lock_organization(session, organization_id)
+    if allocated:
+        prior = await load_authenticated_zero_value_disposals(session, organization_id)
+        await verify_allocated_zero_selection(session, organization_id, command,
+            before_registration_token=2147483647, prior_zeros=prior)
+    basis_function = "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis"
     result = await session.scalar(text(
-        "SELECT accounting.zero_value_disposal_basis(:org, CAST(:command AS jsonb), 2147483647)"
+        f"SELECT accounting.{basis_function}(:org, CAST(:command AS jsonb), 2147483647)"
     ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json"))})
     if not isinstance(result, str) or len(result) != 64:
         raise ValueError("Database did not return a valid zero-value disposal basis")
     return result
 
 
+async def require_allocated_zero_schema(session):
+    if session is None or await session.scalar(text(
+        "SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()') IS NOT NULL"
+    )) is not True:
+        raise ValueError("Allocation zero-value command requires migration and replay integration")
+
+
+@scoped_replay
 async def load_authenticated_zero_value_disposals(session, organization_id: int, *,
                                                   before_registration_token: int | None = None):
     """Load and re-authenticate durable receipts for internal valuation replay.
@@ -372,8 +427,9 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
             command = parse_zero_value_command(row.command)
         except (ValidationError, ValueError) as exc:
             raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
-        if isinstance(command, AllocatedZeroValueDisposalCommand):
-            raise AccountingError("Allocation zero-value command requires migration and replay integration")
+        allocated = isinstance(command, AllocatedZeroValueDisposalCommand)
+        if allocated and command.operation != "inventory_issue":
+            raise AccountingError("Allocated zero-value sale requires commercial receipt integration")
         linked_sale = isinstance(command, ZeroValueSaleCommand) and row.operation == "inventory_sale"
         valid_kind = (linked_sale and row.entry_id == row.registration_token) or (
             row.operation == "inventory_issue" and row.entry_id is None)
@@ -388,12 +444,16 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
         database_digest = await session.scalar(text(
             "SELECT accounting.financial_sha(CAST(:snapshot AS jsonb))"
         ), {"snapshot": canonical_json(snapshot)})
+        basis_function = "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis"
         calculated_basis = await session.scalar(text(
-            "SELECT accounting.zero_value_disposal_basis(:org, CAST(:command AS jsonb), :cutoff)"
+            f"SELECT accounting.{basis_function}(:org, CAST(:command AS jsonb), :cutoff)"
         ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json")),
             "cutoff": row.registration_token})
         if row.digest != database_digest or row.basis_digest != calculated_basis:
             raise AccountingError("Zero-value disposal receipt digest or historical basis changed")
+        if allocated:
+            await verify_allocated_zero_selection(session, organization_id, command,
+                before_registration_token=row.registration_token, prior_zeros=tuple(verified))
         try:
             verified.append(AuthenticatedZeroValueDisposal(
                 receipt_id=row.id, organization_id=row.organization_id, posting_date=row.posting_date,
@@ -402,6 +462,53 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
         except ValueError as exc:
             raise AccountingError("Zero-value disposal receipt cannot be authenticated for replay") from exc
     return tuple(verified)
+
+
+async def verify_allocated_zero_selection(session, organization_id, command, *,
+                                          before_registration_token, prior_zeros):
+    """Recompute the complete selection with the existing historical cost engine."""
+    from modules.accounting.inventory_allocation_loader import (
+        load_authenticated_inventory_dispositions,
+    )
+    from modules.accounting.inventory_cost import issue_result
+    from modules.accounting.late_cost_receipts import verified_value_lines
+    from modules.accounting.models import Entry, Line, Policy
+    from modules.accounting.production_output_inventory import (
+        is_finished_goods_account,
+        verified_output_lines,
+    )
+    from modules.accounting.schemas import InventoryIssuePreviewInput
+    from modules.accounting.service import AccountingError
+
+    data = InventoryIssuePreviewInput.model_validate({key: value for key, value in command.document.items()
+                                                      if key in InventoryIssuePreviewInput.model_fields})
+    policy = await session.scalar(select(Policy).where(Policy.organization_id == organization_id,
+        Policy.effective_from <= command.posting_date).order_by(Policy.effective_from.desc()).limit(1))
+    if policy is None or policy.id != command.policy_id or policy.inventory_method != command.valuation_method:
+        raise AccountingError("Zero allocation policy differs from its historical document")
+    rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+        Entry.organization_id == organization_id, Entry.id < before_registration_token,
+        Line.account_code == data.account).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+    values = await verified_value_lines(session, organization_id, rows, None)
+    finished = is_finished_goods_account(policy, data.account)
+    outputs = await verified_output_lines(session, organization_id, policy, data.account, data.posting_date,
+        {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot},
+        before_entry_id=before_registration_token) if finished else frozenset()
+    dispositions = await load_authenticated_inventory_dispositions(session, organization_id,
+        before_entry_id=before_registration_token, inventory_account=data.account)
+    result = issue_result(policy, rows, organization_id, data, verified_value_lines=values,
+        verified_output_lines=outputs, finished_goods=finished, zero_value_disposals=prior_zeros,
+        authenticated_dispositions=dispositions, before_registration_token=before_registration_token,
+        include_source_identity=True)
+    allocation = InventoryDispositionAllocation.model_validate({
+        "allocation_version": 1, "valuation_method": result["method"],
+        "quantity": result["issue_quantity"], "amount_byn": result["issue_cost_byn"],
+        "layers": [{"source_entry_id": layer["source_entry_id"], "source_line_id": layer["source_line_id"],
+            "inventory_account": data.account, "inventory_dimensions": layer["dimensions"],
+            "quantity": layer["quantity"], "amount_byn": layer["amount_byn"]}
+            for layer in result["inventory_layers"]]})
+    if allocation != command.allocation:
+        raise AccountingError("Zero allocation differs from historical policy-selected quantities or cost")
 
 
 async def require_public_zero_value_schema(session) -> None:

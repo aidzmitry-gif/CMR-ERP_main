@@ -20,7 +20,7 @@ from modules.accounting.models import (
 from modules.accounting.sales import SaleDocument
 from modules.accounting.schemas import InventoryIssueDocument, PostingInput
 from modules.accounting.service import AccountingError, lock_organization
-from modules.accounting.zero_value_disposals import InventoryDispositionAllocation
+from modules.accounting.zero_value_disposals import InventoryDispositionAllocation, scoped_replay
 
 
 def _snapshot_digest(value) -> str:
@@ -83,6 +83,7 @@ def _replaced_credit_line_ids(lines, account, allocation):
     return tuple(line.id for line in credits)
 
 
+@scoped_replay
 async def load_authenticated_inventory_dispositions(session, organization_id: int, *, before_entry_id: int | None = None,
                                                     procurement=None, inventory_account: str | None = None):
     """Return only strict-marker receipt allocations, authenticated against live DB rows.

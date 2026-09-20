@@ -306,7 +306,9 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
                 raise AccountingError("Late cost must identify exactly one open inventory layer")
             amount = Decimal(line.amount)
             matches[0]["amount"] += amount if line.side == "debit" else -amount
-            if matches[0]["amount"] < 0:
+            if method == "weighted_average":
+                _distribute_pool_value(layers, sum((layer["amount"] for layer in layers), Decimal(0)))
+            elif matches[0]["amount"] < 0:
                 raise AccountingError("Output cost revision makes the layer value negative")
             evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
                              "source_version": entry.source_version, "side": line.side,

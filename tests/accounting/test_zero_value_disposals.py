@@ -10,6 +10,7 @@ from modules.accounting.zero_value_disposals import (
     preview_standalone_zero_value_issue_basis,
     receipt_digest,
     register_standalone_zero_value_issue,
+    scoped_replay,
     source_identity,
 )
 
@@ -152,3 +153,51 @@ async def test_v4_runtime_is_fail_closed_before_migration_and_replay_integration
         await preview_standalone_zero_value_issue_basis(None, 1, command)
     with pytest.raises(ValueError, match="migration and replay integration"):
         await register_standalone_zero_value_issue(None, 1, "chief", command)
+
+
+async def test_mutual_replay_checks_each_prefix_once_and_discards_scope():
+    calls = []
+    version = [1]
+
+    @scoped_replay
+    async def zeros(session, organization_id, cutoff):
+        calls.append(("zero", cutoff))
+        for before in range(cutoff):
+            await allocations(session, organization_id, before)
+        return version[0]
+
+    @scoped_replay
+    async def allocations(session, organization_id, cutoff):
+        calls.append(("allocation", cutoff))
+        for before in range(cutoff):
+            await zeros(session, organization_id, before)
+        return version[0]
+
+    session = object()
+    assert await zeros(session, 1, 20) == 1
+    assert len(calls) == len(set(calls)) == 40
+    calls.clear()
+    version[0] = 2
+    assert await zeros(session, 1, 20) == 2
+    assert len(calls) == 40
+
+
+async def test_failed_replay_does_not_preserve_cached_prefixes():
+    calls = []
+
+    @scoped_replay
+    async def prefix(session, organization_id):
+        calls.append(organization_id)
+        return len(calls)
+
+    @scoped_replay
+    async def failing(session, organization_id):
+        await prefix(session, organization_id)
+        await prefix(session, organization_id)
+        raise ValueError("replay failed")
+
+    session = object()
+    with pytest.raises(ValueError, match="replay failed"):
+        await failing(session, 1)
+    assert calls == [1]
+    assert await prefix(session, 1) == 2

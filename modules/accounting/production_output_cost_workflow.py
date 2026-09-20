@@ -73,6 +73,14 @@ async def _prepare(session, organization_id, month, data):
     sequence = previous.sequence + 1 if previous else 1
     if previous and previous.command["posting_date"] > data.posting_date.isoformat():
         raise AccountingError("Correction cannot precede the previous revision")
+    from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
+
+    # SQL fingerprints bind immutable evidence; the shared Python cost engine
+    # independently proves that each source allocation followed its policy.
+    if await session.scalar(text(
+        "SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()') IS NOT NULL"
+    )) is True:
+        await available_authenticated_zero_value_disposals(session, organization_id)
     raw = await session.scalar(text(
         "SELECT accounting.output_cost_revision_evidence(:org,:entry,:cutoff,NULL)::text"
     ), {"org": organization_id, "entry": receipt.entry_id, "cutoff": data.posting_date})
@@ -110,6 +118,9 @@ async def _prepare(session, organization_id, month, data):
             elif kind == "allocation" and len(parts) == 4:
                 destination |= {"entry_id": int(parts[1]), "source_entry_id": int(parts[2]),
                                 "source_line_id": int(parts[3])}
+            elif kind == "zeroallocation" and len(parts) == 5:
+                destination |= {"receipt_id": int(parts[1]), "registration_token": int(parts[2]),
+                                "source_entry_id": int(parts[3]), "source_line_id": int(parts[4])}
             else:
                 raise AccountingError("Output revision has an unknown disposal identity")
             disposals.append(destination)
