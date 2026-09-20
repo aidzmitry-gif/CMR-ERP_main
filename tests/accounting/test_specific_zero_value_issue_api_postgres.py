@@ -19,6 +19,7 @@ from modules.accounting.models import Audit, Organization, Period, ZeroValueInve
 from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 from modules.accounting.schemas import LineInput, PostingInput
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
+from tests.accounting.test_inventory_allocation_api_postgres import output_sources
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import zeroed_output
 
@@ -174,3 +175,70 @@ async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_f
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         denied = await client.post(base + "/posting-preview", json=payload)
         assert denied.status_code == 403
+
+
+@pytest.mark.parametrize("method", ["fifo", "weighted_average"])
+async def test_http_v4_zero_issue_multi_source_confirm_retry_after_late_cost(pg_factory, pg_book, method):
+    """The public issue route persists the complete server-selected V4 packet."""
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+    async with pg_factory() as session:
+        await service.post(session, pg_book[0], PostingInput(
+            source="v4-zero-reverse-wip", source_version=1, operation="manual",
+            document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
+            policy_id=policy_id, rule_version="synthetic", explanation="Reverse initial output cost", lines=[
+                LineInput(account="60", side="debit", amount="0.02"),
+                *[LineInput(account="20", side="credit", amount="0.01",
+                            dimensions={"department": "SHOP", "order": order})
+                  for order in ("ORDER-42", "ORDER-43")],
+            ]), "tester")
+        for output_id in outputs:
+            await confirm_output_cost_correction(session, pg_book[0], "2026-10",
+                                                 await _output_cost_command(session, pg_book[0], output_id), "tester")
+        for revision in ("0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py"):
+            await migrate(session, revision)
+        await session.commit()
+
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/accounting")
+    app.state.core = SimpleNamespace(services=SimpleNamespace(event_bus=None, accounting=AccountingService()))
+
+    async def session_dependency():
+        async with pg_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_dependency
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser("tester", ["director"])
+    base = f"/accounting/organizations/{pg_book[0]}/inventory/issues"
+    payload = {"source": f"v4-zero-issue:{method}", "source_version": 1, "policy_id": policy_id,
+               "document_date": "2026-10-29", "operation_date": "2026-10-30", "posting_date": "2026-10-31",
+               "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET", "lot": "", "quantity": "3.1",
+               "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Reviewed zero allocation issue"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        preview = await client.post(base + "/posting-preview", json=payload)
+        assert preview.status_code == 200, preview.text
+        body = preview.json()
+        assert body["kind"] == "quantity_only_receipt" and body["posting"] is None
+        assert body["command"]["command_version"] == 4
+        assert body["receipt"]["zero_byn"] is True and "source_layer" not in body["receipt"]
+        assert len(body["receipt"]["source_layers"]) == 2
+        confirmation = {**payload, "basis_digest": body["basis_digest"], "digest": body["digest"]}
+        saved = await client.post(base + "/confirm", json=confirmation)
+        assert saved.status_code == 201, saved.text
+        changed = await client.post(base + "/confirm", json={**confirmation, "explanation": "changed"})
+        assert changed.status_code == 422 and "different content" in changed.text
+
+        async with pg_factory() as session:
+            await service.post(session, pg_book[0], PostingInput(
+                source=f"v4-zero-late-wip:{method}", source_version=1, operation="manual",
+                document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
+                policy_id=policy_id, rule_version="synthetic", explanation="Late output cost", lines=[
+                    LineInput(account="20", side="debit", amount="1.00",
+                              dimensions={"department": "SHOP", "order": "ORDER-42"}),
+                    LineInput(account="60", side="credit", amount="1.00"),
+                ]), "tester")
+            await confirm_output_cost_correction(session, pg_book[0], "2026-10",
+                                                 await _output_cost_command(session, pg_book[0], outputs[0]), "tester")
+            await session.commit()
+        retry = await client.post(base + "/confirm", json=confirmation)
+        assert retry.status_code == 201, retry.text
+        assert retry.json()["receipt_id"] == saved.json()["receipt_id"]
