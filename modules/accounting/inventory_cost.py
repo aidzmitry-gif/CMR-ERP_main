@@ -8,7 +8,11 @@ from sqlalchemy import select
 
 from modules.accounting.models import Entry, Line, Policy
 from modules.accounting.service import AccountingError, lock_organization
-from modules.accounting.zero_value_disposals import AuthenticatedZeroValueDisposal, receipt_digest
+from modules.accounting.zero_value_disposals import (
+    AllocatedZeroValueDisposalCommand,
+    AuthenticatedZeroValueDisposal,
+    receipt_digest,
+)
 
 
 def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_registration_token=None,
@@ -71,7 +75,15 @@ def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_reg
     for receipt in zero_value_disposals:
         if before_registration_token is not None and receipt.registration_token >= before_registration_token:
             continue
-        for layer in receipt.command.inventory_layers:
+        command = receipt.command
+        is_v4 = isinstance(command, AllocatedZeroValueDisposalCommand)
+        if is_v4:
+            accounts = {layer.inventory_account for layer in command.allocation.layers}
+            if len(accounts) != 1:
+                raise AccountingError("Allocation zero-value receipt spans more than one account")
+            if inventory_account is not None and accounts != {inventory_account}:
+                continue
+        for layer in command.inventory_layers:
             source = sources.get((layer.source_entry_id, layer.source_line_id))
             if (source is None or source[0].posting_date > receipt.posting_date
                 or source[0].id >= receipt.registration_token or source[1].side != "debit"
@@ -79,7 +91,10 @@ def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_reg
                 or source[1].account_code != layer.inventory_account
                 or (source[1].dimensions or {}) != layer.inventory_dimensions):
                 raise AccountingError("Zero-value disposal source layer does not match ledger history")
-            events.append((receipt.posting_date, receipt.registration_token, receipt.receipt_id, None, None, (receipt, layer)))
+            if not is_v4:
+                events.append((receipt.posting_date, receipt.registration_token, receipt.receipt_id, None, None, (receipt, layer)))
+        if is_v4:
+            events.append((receipt.posting_date, receipt.registration_token, receipt.receipt_id, None, None, receipt))
     for disposition in admitted_dispositions:
         events.append((disposition.posting_date, disposition.registration_token, 0, None, None, disposition))
     return sorted(events, key=lambda item: item[:3])
@@ -157,7 +172,11 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
 
     layers = []
     requested_lot = target.get("lot")
-    if authenticated_dispositions:
+    if authenticated_dispositions or any(
+        isinstance(receipt, AuthenticatedZeroValueDisposal)
+        and isinstance(receipt.command, AllocatedZeroValueDisposalCommand)
+        for receipt in zero_value_disposals
+    ):
         # Replay complete source packets before projecting a requested lot.
         target = {**target, "lot": ""}
     evidence = []
@@ -189,6 +208,30 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
                              "source_version": zero_event.source_version, "side": "credit",
                              "quantity": format(allocation.quantity, ".6f"), "amount_byn": format(allocation.amount_byn, ".2f"),
                              "explicit_allocation": True})
+            matched = True
+            continue
+        if (isinstance(zero_event, AuthenticatedZeroValueDisposal)
+                and isinstance(zero_event.command, AllocatedZeroValueDisposalCommand)):
+            command = zero_event.command
+            allocation = command.allocation
+            first = allocation.layers[0].inventory_dimensions
+            if ((inventory_account is not None and allocation.layers[0].inventory_account != inventory_account)
+                    or first.get("warehouse") != target["warehouse"] or first.get("sku") != target["sku"]):
+                continue
+            if zero_event.posting_date > posting_date:
+                raise AccountingError("Selected SKU has later movements; chronological costing is required")
+            if method != command.valuation_method:
+                raise AccountingError("Allocation zero-value policy differs from replay policy")
+            scope = command.document["lot"] if method == "fifo" else ""
+            selected_layers = [layer for layer in layers if not scope or layer["lot"] == scope]
+            updated = replay_source_allocation(selected_layers, allocation)
+            by_origin = {(layer["entry_id"], layer["line_id"]): layer for layer in updated}
+            layers = [by_origin.get((layer["entry_id"], layer["line_id"]), layer) for layer in layers]
+            evidence.append({"receipt_id": zero_event.receipt_id, "registration_token": zero_event.registration_token,
+                             "entry_id": None, "line_id": None, "source": command.source,
+                             "source_version": command.source_version, "side": "credit",
+                             "quantity": format(allocation.quantity, ".6f"), "amount_byn": "0.00",
+                             "zero_value_disposal": True, "explicit_allocation": True})
             matched = True
             continue
         if zero_event is not None:
@@ -392,8 +435,8 @@ def replay_source_allocation(layers, allocation):
 
 
 def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset(),
-                 verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
-                 organization_id=None, before_registration_token=None):
+                  verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
+                 organization_id=None, before_registration_token=None, inventory_account=None):
     """Caller must authenticate each admitted (entry_id, line_id) cost adjustment.
 
     Public callers admit none until the durable late-cost verifier is wired.
@@ -409,9 +452,13 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
         if organization_id is None and zero_value_disposals:
             raise AccountingError("Zero-value disposal replay needs an organization identity")
         for _, _, _, entry, line, zero_event in _chronological_events(
-            rows, organization_id, posting_date, zero_value_disposals, before_registration_token
+            rows, organization_id, posting_date, zero_value_disposals, before_registration_token,
+            inventory_account=inventory_account
         ):
             if zero_event is not None:
+                if (isinstance(zero_event, AuthenticatedZeroValueDisposal)
+                        and isinstance(zero_event.command, AllocatedZeroValueDisposalCommand)):
+                    raise AccountingError("Allocation zero-value replay requires FIFO or weighted-average policy")
                 receipt, source_layer = zero_event
                 dimensions = source_layer.inventory_dimensions
                 if any(dimensions[key] != value for key, value in target.items()):
@@ -548,7 +595,7 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
                 rows, target, data.posting_date, verified_value_lines=verified_value_lines,
                 verified_output_lines=verified_output_lines, finished_goods=finished_goods,
                 zero_value_disposals=zero_value_disposals, organization_id=org_id,
-                before_registration_token=before_registration_token)
+                before_registration_token=before_registration_token, inventory_account=data.account)
             if data.quantity > quantity:
                 raise AccountingError("Insufficient book quantity in the selected lot")
             cost = amount if data.quantity == quantity else (amount * data.quantity / quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -622,7 +669,8 @@ async def available_lots(session, org_id, data, *, procurement=None):
                     raise AccountingError("Explicit source allocation replay requires FIFO or weighted-average policy")
                 quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified,
                                                        verified_output_lines=output_lines, finished_goods=finished_goods,
-                                                       zero_value_disposals=receipts, organization_id=org_id)
+                                                       zero_value_disposals=receipts, organization_id=org_id,
+                                                       inventory_account=data.account)
             else:
                 layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified,
                                                verified_output_lines=output_lines, finished_goods=finished_goods,

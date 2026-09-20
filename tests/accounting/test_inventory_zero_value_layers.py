@@ -12,6 +12,7 @@ from modules.accounting.inventory_cost import (
 )
 from modules.accounting.service import AccountingError
 from modules.accounting.zero_value_disposals import (
+    AllocatedZeroValueDisposalCommand,
     AuthenticatedZeroValueDisposal,
     InventoryDispositionAllocation,
     ZeroValueDisposalCommand,
@@ -36,6 +37,35 @@ def event(entry_id=10, line_id=11, quantity="1.000000", token=30):
         explanation="Verified zero-value disposal",
     )
     return AuthenticatedZeroValueDisposal(1, 1, date(2026, 10, 3), token, "chief", command, receipt_digest(1, "chief", command))
+
+
+def allocation_event(*, sale=False, method="fifo", token=30, layers=None, account="43"):
+    layers = layers or [
+        {"source_entry_id": 10, "source_line_id": 11, "inventory_account": "43",
+         "inventory_dimensions": {"warehouse": "MAIN", "sku": "A", "lot": "L1"}, "quantity": "1.000000"},
+        {"source_entry_id": 12, "source_line_id": 13, "inventory_account": "43",
+         "inventory_dimensions": {"warehouse": "MAIN", "sku": "A", "lot": "L2"}, "quantity": "0.100000"},
+    ]
+    layers = [{**item, "inventory_account": account} for item in layers]
+    quantity = sum((Decimal(item["quantity"]) for item in layers), Decimal(0))
+    document = {"source": "inventory:zero:v4", "source_version": 1, "document_date": "2026-10-02",
+                "operation_date": "2026-10-03", "posting_date": "2026-10-03", "policy_id": 7,
+                "account": account, "warehouse": "MAIN", "sku": "A", "lot": "", "quantity": str(quantity),
+                "expense_account": "90.4" if sale else "20", "expense_dimensions": {},
+                "explanation": "Verified zero allocation"}
+    if sale:
+        document.update({"net_amount": "100.00", "vat_rate": "20", "vat_basis": "Synthetic reviewed basis",
+                         "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2",
+                         "vat_payable_account": "68.2", "buyer_dimensions": {"counterparty": "C", "contract": "D", "settlement_document": "S"}})
+    command = AllocatedZeroValueDisposalCommand(
+        command_version=4, operation="inventory_sale" if sale else "inventory_issue", source=document["source"],
+        source_version=1, posting_date=document["posting_date"], policy_id=7, basis_digest="a" * 64,
+        destination_account=document["expense_account"], destination_dimensions={}, inventory_layers=layers,
+        explanation=document["explanation"], document_date=document["document_date"], operation_date=document["operation_date"],
+        valuation_method=method, document=document,
+    )
+    return AuthenticatedZeroValueDisposal(9, 1, date(2026, 10, 3), token, "chief", command,
+                                          receipt_digest(1, "chief", command))
 
 
 def data(quantity):
@@ -183,6 +213,80 @@ def test_specific_checks_whole_command_across_same_lot_origins():
     policy = SimpleNamespace(id=7, inventory_method="specific", normative_verified=False)
     with pytest.raises(AccountingError, match="rounded command cost"):
         issue_result(policy, rows, 1, data(1), zero_value_disposals=(saved,))
+
+
+@pytest.mark.parametrize("sale", [False, True])
+@pytest.mark.parametrize("method", ["fifo", "weighted_average"])
+@pytest.mark.parametrize("inventory_account", [None, "43"])
+def test_v4_replays_full_multi_source_selection_and_projects_requested_fifo_lot(sale, method, inventory_account):
+    rows = [row(10, 11, date(2026, 10, 1), quantity=1, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L1"}),
+            row(20, 21, date(2026, 10, 1), quantity=None, amount="0.01", side="credit", operation="production_output_cost_correction", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L1"}),
+            row(12, 13, date(2026, 10, 2), quantity=3, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L2"})]
+    receipt = allocation_event(sale=sale, method=method)
+    original = [(line.quantity, line.amount) for _, line in rows]
+    layers, evidence = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": "L2"}, date(2026, 10, 4),
+                                         method=method, zero_value_disposals=(receipt,), organization_id=1,
+                                         inventory_account=inventory_account, verified_value_lines=frozenset({(20, 21)}))
+    assert [(layer["lot"], layer["quantity"]) for layer in layers] == [("L2", Decimal("2.9"))]
+    assert sum(layer["amount"] for layer in layers) == Decimal("0.01")
+    assert evidence[-1]["receipt_id"] == 9 and evidence[-1]["registration_token"] == 30
+    assert evidence[-1]["quantity"] == "1.100000" and evidence[-1]["amount_byn"] == "0.00"
+    assert [(line.quantity, line.amount) for _, line in rows] == original
+
+
+def test_v4_receipt_for_another_account_skips_missing_foreign_sources():
+    rows = [row(10, 11, date(2026, 10, 1), quantity=3, amount="0.01")]
+    foreign = allocation_event(account="41")
+    layers, _ = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": "L1"}, date(2026, 10, 4),
+                                  method="fifo", zero_value_disposals=(foreign,), organization_id=1,
+                                  inventory_account="43")
+    assert [(layer["quantity"], layer["amount"]) for layer in layers] == [(Decimal("3"), Decimal("0.01"))]
+
+
+def test_v4_weighted_partial_zero_replay_preserves_remaining_pool_value():
+    rows = [row(10, 11, date(2026, 10, 1), quantity=3, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L1"}),
+            row(12, 13, date(2026, 10, 2), quantity=3, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L2"})]
+    receipt = allocation_event(method="weighted_average", layers=[{"source_entry_id": 10, "source_line_id": 11,
+        "inventory_account": "43", "inventory_dimensions": {"warehouse": "MAIN", "sku": "A", "lot": "L1"}, "quantity": "0.100000"}])
+    layers, _ = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": ""}, date(2026, 10, 4),
+                                  method="weighted_average", zero_value_disposals=(receipt,),
+                                  organization_id=1, inventory_account="43")
+    assert sum(layer["quantity"] for layer in layers) == Decimal("5.9")
+    assert sum(layer["amount"] for layer in layers) == Decimal("0.02")
+
+
+def test_v4_rejects_reordered_selection_duplicate_receipt_cutoff_and_method_mismatch():
+    rows = [row(10, 11, date(2026, 10, 1), quantity=1, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L1"}),
+            row(20, 21, date(2026, 10, 1), quantity=None, amount="0.01", side="credit", operation="production_output_cost_correction", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L1"}),
+            row(12, 13, date(2026, 10, 2), quantity=3, amount="0.01", dimensions={"warehouse": "MAIN", "sku": "A", "lot": "L2"})]
+    receipt = allocation_event()
+    reversed_layers = list(reversed([item.model_dump(mode="json") for item in receipt.command.inventory_layers]))
+    forged = allocation_event(layers=reversed_layers)
+    with pytest.raises(AccountingError, match="policy-selected"):
+        _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": ""}, date(2026, 10, 4), method="fifo",
+                          zero_value_disposals=(forged,), organization_id=1, inventory_account="43",
+                          verified_value_lines=frozenset({(20, 21)}))
+    with pytest.raises(AccountingError, match="identity or digest changed"):
+        _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": ""}, date(2026, 10, 4), method="fifo",
+                          zero_value_disposals=(receipt, receipt), organization_id=1, inventory_account="43",
+                          verified_value_lines=frozenset({(20, 21)}))
+    before, _ = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": ""}, date(2026, 10, 4), method="fifo",
+                                    zero_value_disposals=(receipt,), organization_id=1, inventory_account="43",
+                                    before_registration_token=30, verified_value_lines=frozenset({(20, 21)}))
+    assert sum(layer["quantity"] for layer in before) == Decimal("4")
+    with pytest.raises(AccountingError, match="policy differs"):
+        _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": ""}, date(2026, 10, 4), method="weighted_average",
+                          zero_value_disposals=(receipt,), organization_id=1, inventory_account="43",
+                          verified_value_lines=frozenset({(20, 21)}))
+
+
+def test_specific_costing_explicitly_rejects_v4_replay():
+    policy = SimpleNamespace(id=7, inventory_method="specific", normative_verified=False)
+    rows = [row(10, 11, date(2026, 10, 1), quantity=3, amount="0.01")]
+    with pytest.raises(AccountingError, match="requires FIFO"):
+        issue_result(policy, rows, 1, data(1), zero_value_disposals=(allocation_event(layers=[{
+            "source_entry_id": 10, "source_line_id": 11, "inventory_account": "43",
+            "inventory_dimensions": {"warehouse": "MAIN", "sku": "A", "lot": "L1"}, "quantity": "1"}], token=30),))
 
 
 @pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
