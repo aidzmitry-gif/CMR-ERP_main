@@ -89,10 +89,18 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
   const generation = useRef(0);
   const entryGeneration = useRef(0);
   const previewGeneration = useRef(0);
+  const appliedSuggestedOrg = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
-    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizations(rows); setOrg((current) => { const hint = organizationHint(suggestedOrg); if (hint && rows.some((row) => String(row.id) === hint)) return hint; return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : ""; }); } }).catch((e: Error) => { if (active) setError(e.message); });
+    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizations(rows); setOrg((current) => {
+      if (appliedSuggestedOrg.current !== suggestedOrg) {
+        appliedSuggestedOrg.current = suggestedOrg;
+        const hint = organizationHint(suggestedOrg);
+        if (hint && rows.some((row) => String(row.id) === hint)) return hint;
+      }
+      return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : "";
+    }); } }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [organizationRefresh, suggestedOrg]);
 

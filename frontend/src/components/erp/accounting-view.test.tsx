@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./expense-control", () => ({ ExpenseControl: ({org}: {org?: string}) => <section aria-label="Общий экран расходов">Расходы книги {org}</section> }));
+vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged }: { onChanged: () => void }) => <button onClick={onChanged}>Обновить список организаций</button> }));
 
 import { AccountingView } from "./accounting-view";
 
@@ -33,6 +34,17 @@ describe("AccountingView", () => {
     await screen.findByRole("option", { name: "Вторая компания · 888888888" });
     await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/reports?"))).toBe(true);
+  });
+
+  it("не возвращает query-hint после ручного выбора и обновления списка", async () => {
+    render(<AccountingView suggestedOrg="2" />);
+    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "1" } });
+    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("1"));
+    fireEvent.click(screen.getByRole("button", { name: "Управление книгой", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Обновить список организаций" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/organizations"))).toHaveLength(2));
+    expect(screen.getByLabelText("Организация")).toHaveValue("1");
   });
 
   it.each(["0", "not-an-id", "9007199254740992", "3"])("игнорирует недопустимый или недоступный org hint %s", async (suggestedOrg) => {
