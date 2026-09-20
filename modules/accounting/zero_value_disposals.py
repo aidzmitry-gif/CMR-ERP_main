@@ -14,6 +14,7 @@ from datetime import date
 from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
+from sqlalchemy import select, text
 
 from modules.accounting.schemas import Code, Input, Quantity
 
@@ -108,3 +109,66 @@ class AuthenticatedZeroValueDisposal:
             raise ValueError("Authenticated zero-value receipt digest does not match its full snapshot")
         if self.posting_date != self.command.posting_date:
             raise ValueError("Authenticated zero-value receipt date does not match its command")
+
+
+async def register_standalone_zero_value_issue(session, organization_id: int, actor: str,
+                                               command: ZeroValueDisposalCommand):
+    """Persist one entryless, zero-total issue; DB guards authenticate every layer.
+
+    Mixed-money commands and sales intentionally remain outside this persistence
+    slice.  A receipt id is not an accounting entry id.
+    """
+    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+    from modules.accounting.service import lock_organization
+
+    if command.operation != "inventory_issue":
+        raise ValueError("Standalone zero-value persistence supports inventory issues only")
+    await lock_organization(session, organization_id)
+    snapshot = {"organization_id": organization_id, "actor": actor, "command": command.model_dump(mode="json")}
+    digest = await session.scalar(text("SELECT accounting.financial_sha(CAST(:snapshot AS jsonb))"), {
+        "snapshot": canonical_json(snapshot),
+    })
+    identity = command.identity
+    existing = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
+        ZeroValueInventoryDisposalReceipt.organization_id == organization_id,
+        ZeroValueInventoryDisposalReceipt.source == identity[0],
+        ZeroValueInventoryDisposalReceipt.source_version == identity[1],
+        ZeroValueInventoryDisposalReceipt.operation == identity[2],
+    ))
+    if existing is not None:
+        if existing.digest != digest or existing.actor != actor:
+            raise ValueError("Zero-value disposal identity was already registered with different content")
+        return existing
+    calculated_basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, locked=True)
+    if command.basis_digest != calculated_basis:
+        raise ValueError("Zero-value disposal basis changed; preview again")
+    receipt = ZeroValueInventoryDisposalReceipt(
+        organization_id=organization_id, source=identity[0], source_version=identity[1], operation=identity[2],
+        entry_id=None, posting_date=command.posting_date, policy_id=command.policy_id,
+        command=command.model_dump(mode="json"), basis_digest=command.basis_digest, digest=digest, actor=actor,
+    )
+    session.add(receipt)
+    await session.flush()
+    return receipt
+
+
+async def preview_standalone_zero_value_issue_basis(session, organization_id: int,
+                                                    command: ZeroValueDisposalCommand, *, locked: bool = False) -> str:
+    """Return the database-authenticated basis for the single supported issue slice.
+
+    The receipt service takes the organization lock before comparing this value;
+    callers preparing a command should keep that same transaction open through
+    registration, or retry if the basis becomes stale.
+    """
+    from modules.accounting.service import lock_organization
+
+    if command.operation != "inventory_issue" or len(command.inventory_layers) != 1:
+        raise ValueError("Standalone zero-value preview supports one inventory issue layer only")
+    if not locked:
+        await lock_organization(session, organization_id)
+    result = await session.scalar(text(
+        "SELECT accounting.zero_value_disposal_basis(:org, CAST(:command AS jsonb), 2147483647)"
+    ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json"))})
+    if not isinstance(result, str) or len(result) != 64:
+        raise ValueError("Database did not return a valid zero-value disposal basis")
+    return result

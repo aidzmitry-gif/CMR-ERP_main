@@ -1,9 +1,16 @@
 # Zero-value inventory disposals — foundation
 
-This foundation defines a receipt for a physical inventory layer whose allocated
-BYN value is exactly zero. It is **not** production support yet: no migration,
-route, confirmation function, valuation replay, sale integration, or SQL 0139
-change is included in this package.
+This package persistently supports one deliberately narrow case: an immutable,
+entryless `inventory_issue` for one already-authenticated production-output
+layer whose selected **specific** valuation is exactly zero. Migration 0140
+derives its evidence in PostgreSQL (source output, latest effective policy and
+accounts, ordered ledger history, and prior same-layer receipts), then binds it
+to a shared registration sequence. The Python and SQL digest envelopes are
+checked to match in the PostgreSQL acceptance test.
+
+It does not yet provide a route, UI confirmation, valuation replay, mixed-money
+issue, weighted valuation, or sale binding. Those paths fail closed rather than
+creating synthetic zero-money ledger entries.
 
 ## Invariants
 
@@ -21,16 +28,14 @@ change is included in this package.
 
 ## Mandatory next stage
 
-1. Add a migration for the ORM table and enable the SQL guards only together
-   with canonical database hashing and a symmetric entry guard.
-2. Extend `inventory_cost.py` and the SQL 0139 weighted/specific evidence paths
+1. Extend `inventory_cost.py` and the SQL 0139 weighted/specific evidence paths
    to replay authenticated receipt layers chronologically by posting date,
    registration token and receipt id.
-3. Integrate `inventory_issues.py` and sales separately: a zero issue can be
+2. Integrate `inventory_issues.py` and sales separately: a zero issue can be
    entryless; a zero-COGS sale cannot be entryless because revenue/VAT remain.
-4. Add PostgreSQL acceptance evidence for idempotency, conflict with a monetary
+3. Add PostgreSQL acceptance evidence for idempotency, conflict with a monetary
    issue, partial/full disposal, late cost and historical reconstruction.
-5. Extend output-cost revision preview and UI with typed destination identities:
+4. Extend output-cost revision preview and UI with typed destination identities:
    a zero-value receipt is a `receipt_id`, never an `entry_id`/`line_id`. The
    current SQL key parser expects ledger ids and must not be enabled unchanged.
 
