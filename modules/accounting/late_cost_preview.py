@@ -56,15 +56,8 @@ async def preview(session, organization_id, expense_id, data: LateCostPreviewInp
     return calculate(organization_id, expense_id, data, policy, history)
 
 
-def calculate(organization_id, expense_id, data, policy, history):
-    """Reused by live preview and receipt verification after source authentication."""
-    if policy.late_cost_allocation is None:
-        raise service.AccountingError("Late-cost allocation method is not configured in this policy")
-    inventory_method = getattr(policy, "inventory_method", "specific")
-    if inventory_method not in {"specific", "fifo", "weighted_average"}:
-        raise service.AccountingError("The selected inventory valuation method is not supported")
-    rule = LateCostPolicyInput.model_validate(policy.late_cost_allocation)
-    document = history["document"]
+def source_conversion(document, data):
+    """Validate complete document coverage and its explicit accounting FX evidence."""
     source_currency = document["currency"]
     if source_currency == "BYN":
         if data.conversion is not None:
@@ -82,6 +75,20 @@ def calculate(organization_id, expense_id, data, policy, history):
         source_amount_byn = _converted(Decimal(document["amount"]), conversion.rate, conversion.rate_scale)
     if Fraction(data.capitalizable_amount_byn) + Fraction(data.excluded_amount_byn) != Fraction(source_amount_byn):
         raise service.AccountingError("Capitalizable and excluded amounts must cover the source amount exactly")
+    return source_amount_byn, conversion
+
+
+def calculate(organization_id, expense_id, data, policy, history):
+    """Reused by live preview and receipt verification after source authentication."""
+    if policy.late_cost_allocation is None:
+        raise service.AccountingError("Late-cost allocation method is not configured in this policy")
+    inventory_method = getattr(policy, "inventory_method", "specific")
+    if inventory_method not in {"specific", "fifo", "weighted_average"}:
+        raise service.AccountingError("The selected inventory valuation method is not supported")
+    rule = LateCostPolicyInput.model_validate(policy.late_cost_allocation)
+    document = history["document"]
+    source_currency = document["currency"]
+    source_amount_byn, conversion = source_conversion(document, data)
     lots = [{key: lot[key] for key in AllocationLot.model_fields} for lot in history["lots"]]
     calculated = preview_allocation(AllocationInput(**rule.model_dump(), amount_byn=data.capitalizable_amount_byn, lots=lots))
     traces = {(lot["receipt_id"], lot["version"], lot["line_number"]): lot for lot in history["lots"]}

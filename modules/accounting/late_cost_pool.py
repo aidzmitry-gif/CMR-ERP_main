@@ -127,7 +127,99 @@ async def load_expense_pools(session, organization_id, expense_id, version, on, 
             "token": row.registration_token, "digest": row.digest} for row in zeros],
         "policy_id": policy_id, "on": on.isoformat(), "before_entry_id": before_entry_id}
     return {"source": source, "origins": origins, "pools": pools, "method": policy.inventory_method,
+            "policy_id": policy.id, "on": on.isoformat(), "rule": policy.late_cost_allocation,
+            "normative_verified": policy.normative_verified,
             "basis_digest": checksum(fingerprint), "before_registration_token": before_entry_id}
+
+
+async def preview_expense(session, organization_id, expense_id, data, procurement, *, before_entry_id=None):
+    """Calculate a complete document from server-selected sources; never post it."""
+    from modules.accounting.late_cost_preview import validate_currency
+
+    loaded = await load_expense_pools(session, organization_id, expense_id, data.expected_version,
+        data.posting_date, data.policy_id, procurement, before_entry_id=before_entry_id)
+    await validate_currency(session, loaded["source"]["document"]["currency"], data)
+    return calculate_expense(loaded, data)
+
+
+def calculate_expense(loaded, data):
+    """Internal calculation after load_expense_pools and currency validation."""
+    from modules.accounting.closing_commands import checksum
+    from modules.accounting.late_cost_allocation import AllocationInput, preview_allocation
+    from modules.accounting.late_cost_preview import source_conversion
+    from modules.accounting.schemas import LateCostPolicyInput
+
+    source = loaded["source"]
+    if (loaded["policy_id"] != data.policy_id or loaded["on"] != data.posting_date.isoformat()
+            or source["version"] != data.expected_version):
+        raise AccountingError("Expense pool request differs from its authenticated history")
+    if loaded["method"] not in {"fifo", "weighted_average"} or loaded["rule"] is None:
+        raise AccountingError("Expense pool needs an explicit supported valuation and allocation policy")
+    rule = LateCostPolicyInput.model_validate(loaded["rule"])
+    source_amount, conversion = source_conversion(source["document"], data)
+    rows = {(entry.id, line.id): line for pool in loaded["pools"] for entry, line in pool["rows"]}
+    lots = []
+    for primary, origin in sorted(loaded["origins"].items()):
+        line = rows[origin]
+        lots.append({"receipt_id": primary[0], "version": primary[1], "line_number": primary[2],
+            "received_quantity": line.quantity, "received_value_byn": line.amount,
+            "remaining_quantity": line.quantity, "disposed_quantity": "0", "production_quantity": "0"})
+    # First apportion the document between original receipts by approved policy.
+    # Physical disposition proportions must not drive weighted-average money.
+    apportioned = preview_allocation(AllocationInput(**rule.model_dump(),
+        amount_byn=data.capitalizable_amount_byn, lots=lots))
+    additions, origins = {}, []
+    for share in apportioned["shares"]:
+        if share["destination"] != "remaining":
+            continue
+        primary = (share["receipt_id"], share["version"], share["line_number"])
+        origin = loaded["origins"][primary]
+        amount = Decimal(share["amount_byn"])
+        origins.append({"receipt_id": primary[0], "version": primary[1], "line_number": primary[2],
+            "source_entry_id": origin[0], "source_line_id": origin[1], "amount_byn": share["amount_byn"]})
+        if amount:
+            additions[origin] = amount
+    pools, destinations, used = [], [], set()
+    for pool in loaded["pools"]:
+        selected = {origin: amount for origin, amount in additions.items()
+            if rows[origin].account_code == pool["account"]
+            and rows[origin].dimensions["warehouse"] == pool["warehouse"]
+            and rows[origin].dimensions["sku"] == pool["sku"]}
+        if not selected:
+            continue
+        if used & selected.keys():
+            raise AccountingError("Expense source was assigned to more than one inventory pool")
+        used.update(selected)
+        projected = project_pool(pool["rows"], organization_id=source["organization_id"],
+            account=pool["account"], warehouse=pool["warehouse"], sku=pool["sku"], method=loaded["method"],
+            on=data.posting_date, additions=selected, dispositions=pool["dispositions"], zeros=pool["zeros"],
+            verified_values=pool["verified_values"], before_token=loaded["before_registration_token"])
+        for movement in projected["movements"]:
+            identity = (movement["kind"], movement.get("entry_id", movement.get("receipt_id")))
+            destination = pool["destinations"].get(identity)
+            if destination is None:
+                raise AccountingError("Expense disposition lacks an authenticated destination")
+            movement["destination"] = destination
+            destinations.append({"kind": movement["kind"], "identity": identity[1],
+                "account": destination["account"], "dimensions": destination["dimensions"],
+                "delta_byn": movement["delta_byn"]})
+        for remaining in projected["remaining"]:
+            destinations.append({"kind": "inventory", "source_entry_id": remaining["source_entry_id"],
+                "source_line_id": remaining["source_line_id"], "account": pool["account"],
+                "dimensions": remaining["dimensions"], "delta_byn": remaining["delta_byn"]})
+        pools.append({"account": pool["account"], "warehouse": pool["warehouse"], "sku": pool["sku"], **projected})
+    if used != set(additions) or sum(Fraction(row["delta_byn"]) for row in destinations) != Fraction(data.capitalizable_amount_byn):
+        raise AccountingError("Expense destinations must cover the complete capitalizable amount")
+    result = {"calculation_version": 3, "organization_id": source["organization_id"],
+        "expense_id": source["expense_id"], "source_version": source["version"],
+        "document": source["document"], "request": data.model_dump(mode="json"),
+        "inventory_method": loaded["method"], "rule": rule.model_dump(),
+        "normative_verified": loaded["normative_verified"], "history_digest": loaded["basis_digest"],
+        "source_amount_byn": format(source_amount, ".2f"),
+        "conversion": conversion.model_dump(mode="json") if conversion else None,
+        "source_apportionment": origins, "pools": pools, "destinations": destinations,
+        "posted": False, "confirmation_available": False}
+    return {**result, "basis_digest": checksum(result)}
 
 
 def project_pool(rows, *, organization_id, account, warehouse, sku, method, on,

@@ -103,3 +103,44 @@ def material_candidate(calculated, accounts: ExpenseAccounts):
     package coordinator must resolve output revisions before committing it.
     """
     return _candidate(calculated, accounts, material=True)
+
+
+def pool_candidate(calculated, accounts: ExpenseAccounts):
+    """Internal v3 candidate; requires the future atomic pool writer to post.
+
+    Preserve signed cent redistribution between actual surviving origins. A
+    positive total additional cost can contain individual destination credits.
+    """
+    from modules.accounting.closing_commands import checksum
+    from modules.accounting.schemas import LateCostPreviewInput
+
+    if (calculated.get("calculation_version") != 3 or calculated.get("posted") is not False
+            or calculated.get("basis_digest") != checksum({k: v for k, v in calculated.items() if k != "basis_digest"})):
+        raise AccountingError("Pool candidate requires an unchanged internal calculation")
+    request = LateCostPreviewInput.model_validate(calculated["request"])
+    if accounts.settlement_account.split(".")[0] != "60":
+        raise AccountingError("Additional expense requires supplier settlement account 60")
+    if (sum(Fraction(row.amount_byn) for row in accounts.excluded_costs) != Fraction(request.excluded_amount_byn)
+            or any(row.account.split(".")[0] not in {"18", "44", "90", "91"} for row in accounts.excluded_costs)):
+        raise AccountingError("Excluded expense requires complete explicit VAT or expense classification")
+    lines = []
+    for destination in calculated["destinations"]:
+        if destination["account"].split(".")[0] not in {"10", "41", "20", "44", "90", "91"}:
+            raise AccountingError("Pool destination is not a supported inventory, WIP or expense account")
+        amount = Decimal(destination["delta_byn"])
+        if amount:
+            lines.append(LineInput(account=destination["account"], side="debit" if amount > 0 else "credit",
+                amount=amount.copy_abs(), dimensions=destination["dimensions"]))
+    if sum(Fraction(line.amount) * (1 if line.side == "debit" else -1) for line in lines) != Fraction(request.capitalizable_amount_byn):
+        raise AccountingError("Pool posting does not cover the capitalizable document value")
+    lines.extend(LineInput(account=row.account, side="debit", amount=row.amount_byn, dimensions=row.dimensions)
+                 for row in accounts.excluded_costs)
+    document = calculated["document"]
+    lines.append(LineInput(account=accounts.settlement_account, side="credit", amount=calculated["source_amount_byn"],
+        dimensions={"counterparty": document["supplier"], "contract": document["contract"],
+                    "settlement_document": document["invoice_reference"]}))
+    return PostingInput(source=f"procurement:additional-expense:{calculated['expense_id']}",
+        source_version=calculated["source_version"], operation="inventory_late_cost",
+        document_date=document["document_date"], operation_date=document["operation_date"],
+        posting_date=request.posting_date, policy_id=request.policy_id, rule_version="late-cost-pool-v3",
+        explanation=request.classification_evidence, lines=lines)

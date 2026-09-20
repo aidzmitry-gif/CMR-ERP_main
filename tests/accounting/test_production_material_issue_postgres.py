@@ -56,7 +56,9 @@ class SyntheticProduction:
     ("fifo", "2.00", "3.00"), ("weighted_average", "1.25", "3.75"),
 ])
 async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, monkeypatch):
-    from modules.accounting.late_cost_pool import load_expense_pools, project_pool
+    from modules.accounting.late_cost_pool import load_expense_pools, preview_expense, project_pool
+    from modules.accounting.late_cost_posting import ExpenseAccounts, pool_candidate
+    from modules.accounting.schemas import LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
         ReceiptAccounts,
@@ -131,6 +133,14 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         assert await session.scalar(select(func.count()).select_from(Entry)) == before
         repeated = await load_expense_pools(session, pg_book[0], expense.id, 1, date(2026, 10, 11), policy_id, procurement)
         assert repeated["basis_digest"] == loaded["basis_digest"]
+        request = LateCostPreviewInput(expected_version=1, policy_id=policy_id, posting_date="2026-10-11",
+            capitalizable_amount_byn="5.00", excluded_amount_byn="0.00", classification_evidence="Synthetic pool freight")
+        full = await preview_expense(session, pg_book[0], expense.id, request, procurement)
+        candidate = pool_candidate(full, ExpenseAccounts(settlement_account="60"))
+        assert sum(line.amount for line in candidate.lines if line.side == "debit" and line.account == "20") == Decimal(wip_delta)
+        assert sum(line.amount for line in candidate.lines if line.side == "debit") == Decimal("5.00")
+        assert full["confirmation_available"] is False and full["calculation_version"] == 3
+        assert await session.scalar(select(func.count()).select_from(Entry)) == before
         # The unlinked second purchase affects weighted cost too: authenticate
         # its primary document, not merely the receipt named by the freight.
         original_basis = procurement.posted_receipt_basis
