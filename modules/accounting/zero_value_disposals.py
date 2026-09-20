@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select, text
 
-from modules.accounting.schemas import Code, Input, Quantity
+from modules.accounting.schemas import Code, Input, Money, Quantity
 
 
 def canonical_json(value: object) -> str:
@@ -74,6 +74,41 @@ class ZeroValueDisposalCommand(Input):
     @property
     def identity(self) -> tuple[str, int, str]:
         return source_identity(self.source, self.source_version, self.operation)
+
+
+class InventorySourceAllocation(ZeroValueInventoryLayer):
+    """One exact origin's physical quantity and assigned book cost."""
+
+    amount_byn: Money
+
+
+class InventoryDispositionAllocation(Input):
+    """Complete selection, including zero portions; never only monetary lines."""
+
+    allocation_version: Literal[1]
+    valuation_method: Literal["fifo", "weighted_average"]
+    quantity: Quantity
+    amount_byn: Money
+    layers: list[InventorySourceAllocation] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def conserved_selection(self):
+        from decimal import Decimal, localcontext
+
+        identities = [(layer.source_entry_id, layer.source_line_id) for layer in self.layers]
+        if len(set(identities)) != len(identities):
+            raise ValueError("Disposition allocation repeats a source layer")
+        pools = {(layer.inventory_account, layer.inventory_dimensions["warehouse"],
+                  layer.inventory_dimensions["sku"]) for layer in self.layers}
+        if len(pools) != 1:
+            raise ValueError("Disposition allocation must identify one inventory pool")
+        with localcontext() as context:
+            context.prec = 64
+            if sum((layer.quantity for layer in self.layers), Decimal(0)) != self.quantity:
+                raise ValueError("Disposition allocation does not conserve quantity")
+            if sum((layer.amount_byn for layer in self.layers), Decimal(0)) != self.amount_byn:
+                raise ValueError("Disposition allocation does not conserve cost")
+        return self
 
 
 class DatedZeroValueDisposalCommand(ZeroValueDisposalCommand):

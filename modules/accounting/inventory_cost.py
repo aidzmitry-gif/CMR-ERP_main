@@ -238,10 +238,73 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
     return available, evidence
 
 
-def _layer_payload(layer, quantity, amount):
+def _layer_payload(layer, quantity, amount, *, include_source_identity=False):
     quantity_text = format(quantity.normalize(), "f") if quantity else "0"
-    return {"lot": layer["lot"], "quantity": quantity_text,
+    payload = {"lot": layer["lot"], "quantity": quantity_text,
             "amount_byn": format(amount, ".2f"), "dimensions": layer["dimensions"]}
+    if include_source_identity:
+        payload.update(source_entry_id=layer["entry_id"], source_line_id=layer["line_id"])
+    return payload
+
+
+def _select_policy_layers(layers, quantity, method):
+    """Return the deterministic FIFO/weighted allocation without mutating layers."""
+    live = [layer for layer in layers if layer["quantity"] > 0]
+    total_quantity = sum((layer["quantity"] for layer in live), Decimal(0))
+    total_amount = sum((layer["amount"] for layer in live), Decimal(0))
+    if quantity > total_quantity:
+        raise AccountingError("Disposition allocation exceeds the available quantity or cost")
+    remaining, allocated, selected = quantity, Decimal(0), []
+    average = total_amount / total_quantity if method == "weighted_average" else None
+    for layer in live:
+        if remaining <= 0:
+            break
+        take = min(layer["quantity"], remaining)
+        if method == "fifo":
+            cost = layer["amount"] if take == layer["quantity"] else (layer["amount"] * take / layer["quantity"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            cost = (take * average).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if take == remaining:
+                cost = (quantity * average).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) - allocated
+        selected.append((layer, take, cost))
+        allocated += cost
+        remaining -= take
+    return live, total_quantity, total_amount, selected
+
+
+def replay_source_allocation(layers, allocation):
+    """Validate a complete versioned selection and return new layer balances.
+
+    This pure calculation does not authenticate persisted commands. A durable
+    caller must verify organization, source and registration boundary first.
+    Legacy ledger replay is deliberately unchanged.
+    """
+    from modules.accounting.zero_value_disposals import InventoryDispositionAllocation
+
+    selection = InventoryDispositionAllocation.model_validate(allocation)
+    with localcontext() as context:
+        context.prec = 64
+        live, quantity, amount, selected = _select_policy_layers(layers, selection.quantity, selection.valuation_method)
+        if selection.quantity > quantity or selection.amount_byn > amount:
+            raise AccountingError("Disposition allocation exceeds the available quantity or cost")
+        expected = [(layer["entry_id"], layer["line_id"], layer["dimensions"], take, cost)
+                    for layer, take, cost in selected]
+        actual = [(item.source_entry_id, item.source_line_id, item.inventory_dimensions,
+                   item.quantity, item.amount_byn) for item in selection.layers]
+        if actual != expected:
+            raise AccountingError("Disposition allocation differs from the policy-selected sources or cost")
+        result = [{**layer, "dimensions": dict(layer["dimensions"])} for layer in layers]
+        by_source = {(layer["entry_id"], layer["line_id"]): layer for layer in result}
+        if len(by_source) != len(result):
+            raise AccountingError("Inventory history repeats an origin")
+        for item in selection.layers:
+            layer = by_source[item.source_entry_id, item.source_line_id]
+            layer["quantity"] -= item.quantity
+            if selection.valuation_method == "fifo":
+                layer["amount"] -= item.amount_byn
+        if selection.valuation_method == "weighted_average":
+            _distribute_pool_value(result, amount - selection.amount_byn)
+        return result
 
 
 def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset(),
@@ -370,12 +433,14 @@ async def replay_issue_result(session, policy, rows, org_id, data, *, verified_v
 
 def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset(),
                  verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
-                 before_registration_token=None):
+                 before_registration_token=None, include_source_identity=False):
     """Same calculation for live preview and verification of original history."""
     target = {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot}
     # Older internal reconstruction callers do not carry the policy method;
     # their historical contracts are the original specific-lot calculation.
     method = getattr(policy, "inventory_method", "specific")
+    if include_source_identity and method not in {"fifo", "weighted_average"}:
+        raise AccountingError("Explicit source allocation requires FIFO or weighted-average layer selection")
     with localcontext() as context:
         context.prec = 64
         inventory_layers = []
@@ -404,36 +469,19 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
             if not layers or data.quantity > quantity:
                 raise AccountingError("Insufficient book quantity for the selected SKU")
             method_target = {"warehouse": data.warehouse, "sku": data.sku}
-            remaining = data.quantity
-            if method == "fifo":
-                for layer in layers:
-                    if remaining <= 0:
-                        break
-                    take = min(layer["quantity"], remaining)
-                    layer_cost = layer["amount"] if take == layer["quantity"] else (layer["amount"] * take / layer["quantity"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                    inventory_layers.append(_layer_payload(layer, take, layer_cost))
-                    remaining -= take
-            elif method == "weighted_average":
-                average = amount / quantity
-                allocated = Decimal("0")
-                for index, layer in enumerate(layers):
-                    if remaining <= 0:
-                        break
-                    take = min(layer["quantity"], remaining)
-                    layer_cost = (average * take).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                    if take == remaining or take == layer["quantity"]:
-                        # Keep the total debit/credit exact after cent rounding.
-                        layer_cost = (data.quantity * average).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) - allocated if take == remaining else layer_cost
-                    inventory_layers.append(_layer_payload(layer, take, layer_cost))
-                    allocated += layer_cost
-                    remaining -= take
-            else:
+            if method not in {"fifo", "weighted_average"}:
                 raise AccountingError("The selected inventory valuation method is not supported")
+            _, _, _, selected = _select_policy_layers(layers, data.quantity, method)
+            inventory_layers = [_layer_payload(layer, take, layer_cost,
+                                               include_source_identity=include_source_identity)
+                                for layer, take, layer_cost in selected]
             cost = sum((Decimal(layer["amount_byn"]) for layer in inventory_layers), Decimal("0"))
             inventory_dimensions = method_target
         basis = {"organization_id": org_id, "request": data.model_dump(mode="json"), "evidence": evidence}
         basis["valuation_method"] = method
         basis["inventory_layers"] = inventory_layers
+        if include_source_identity:
+            basis["source_allocation_version"] = 1
         basis_digest = hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         return {"organization_id": org_id, "policy_id": policy.id, "method": method, "basis_digest": basis_digest,
                 "posting_date": data.posting_date, "account": data.account, "dimensions": method_target,

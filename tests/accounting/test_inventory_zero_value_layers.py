@@ -5,10 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from modules.accounting.inventory_cost import _valuation_layers, issue_result
+from modules.accounting.inventory_cost import (
+    _valuation_layers,
+    issue_result,
+    replay_source_allocation,
+)
 from modules.accounting.service import AccountingError
 from modules.accounting.zero_value_disposals import (
     AuthenticatedZeroValueDisposal,
+    InventoryDispositionAllocation,
     ZeroValueDisposalCommand,
     receipt_digest,
 )
@@ -36,6 +41,68 @@ def event(entry_id=10, line_id=11, quantity="1.000000", token=30):
 def data(quantity):
     return SimpleNamespace(warehouse="MAIN", sku="A", lot="L1", quantity=Decimal(str(quantity)), posting_date=date(2026, 10, 4),
                            account="43", policy_id=7, model_dump=lambda **_: {"quantity": str(quantity)})
+
+
+@pytest.mark.parametrize("method,amounts", [("fifo", ["0.00", "10.00"]),
+                                          ("weighted_average", ["5.00", "5.00"])])
+def test_versioned_source_allocation_preserves_origin_and_legacy_result(method, amounts):
+    rows = [row(10, 11, date(2026, 10, 1), quantity=1, amount=10),
+            row(20, 21, date(2026, 10, 2), quantity=None, amount=10, side="credit",
+                operation="production_output_cost_correction"),
+            row(30, 31, date(2026, 10, 3), quantity=1, amount=10)]
+    policy = SimpleNamespace(id=7, inventory_method=method, normative_verified=False)
+    options = {"verified_value_lines": frozenset({(20, 21)})}
+    legacy = issue_result(policy, rows, 1, data(2), **options)
+    allocated = issue_result(policy, rows, 1, data(2), include_source_identity=True, **options)
+    assert [(item["source_entry_id"], item["source_line_id"]) for item in allocated["inventory_layers"]] == [(10, 11), (30, 31)]
+    assert [item["amount_byn"] for item in allocated["inventory_layers"]] == amounts
+    assert allocated["issue_cost_byn"] == legacy["issue_cost_byn"] == "10.00"
+    assert allocated["basis_digest"] != legacy["basis_digest"]
+    assert all("source_entry_id" not in item for item in legacy["inventory_layers"])
+    assert issue_result(policy, rows, 1, data(2), **options) == legacy
+    packet = {"allocation_version": 1, "valuation_method": method, "quantity": "2", "amount_byn": "10.00",
+              "layers": [{"source_entry_id": item["source_entry_id"], "source_line_id": item["source_line_id"],
+                          "inventory_account": "43", "inventory_dimensions": item["dimensions"],
+                          "quantity": item["quantity"], "amount_byn": item["amount_byn"]}
+                         for item in allocated["inventory_layers"]]}
+    selection = InventoryDispositionAllocation.model_validate(packet)
+    assert len(selection.layers) == 2
+    live, _ = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": "L1"},
+                                date(2026, 10, 4), method=method, **options)
+    original = [dict(layer) for layer in live]
+    remaining = replay_source_allocation(live, selection)
+    assert all(layer["quantity"] == 0 and layer["amount"] == 0 for layer in remaining)
+    assert live == original
+    with pytest.raises(AccountingError, match="exceeds"):
+        replay_source_allocation(remaining, selection)
+    swapped = {**packet, "layers": list(reversed(packet["layers"]))}
+    with pytest.raises(AccountingError, match="policy-selected"):
+        replay_source_allocation(live, swapped)
+    assert live == original
+    for field, invalid in (("quantity", "1"), ("amount_byn", "9.99")):
+        with pytest.raises(ValueError, match="conserve"):
+            InventoryDispositionAllocation.model_validate({**packet, field: invalid})
+    with pytest.raises(ValueError, match="repeats"):
+        InventoryDispositionAllocation.model_validate({**packet, "layers": [packet["layers"][0]] * 2})
+
+
+def test_weighted_source_allocation_preserves_partial_cent_rounding():
+    rows = [row(10, 11, date(2026, 10, 1), quantity=1, amount="0.01"),
+            row(30, 31, date(2026, 10, 2), quantity=2, amount="0.01")]
+    policy = SimpleNamespace(id=7, inventory_method="weighted_average", normative_verified=False)
+    result = issue_result(policy, rows, 1, data(2), include_source_identity=True)
+    assert [item["amount_byn"] for item in result["inventory_layers"]] == ["0.01", "0.00"]
+    packet = {"allocation_version": 1, "valuation_method": "weighted_average", "quantity": "2",
+              "amount_byn": "0.01", "layers": [{"source_entry_id": item["source_entry_id"],
+              "source_line_id": item["source_line_id"], "inventory_account": "43",
+              "inventory_dimensions": item["dimensions"], "quantity": item["quantity"],
+              "amount_byn": item["amount_byn"]} for item in result["inventory_layers"]]}
+    live, _ = _valuation_layers(rows, {"warehouse": "MAIN", "sku": "A", "lot": "L1"},
+                                date(2026, 10, 3), method="weighted_average")
+    original = [dict(layer) for layer in live]
+    remaining = replay_source_allocation(live, InventoryDispositionAllocation.model_validate(packet))
+    assert [(item["quantity"], item["amount"]) for item in remaining] == [(Decimal("0"), Decimal("0")), (Decimal("1"), Decimal("0.01"))]
+    assert live == original
 
 
 def test_specific_replays_zero_disposal_after_negative_correction_and_respects_cutoff():
