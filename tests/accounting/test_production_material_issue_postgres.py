@@ -52,6 +52,96 @@ class SyntheticProduction:
         return [{"order_id": order_ids[0], "product": "Synthetic widget", "quantity": "2.00"}]
 
 
+@pytest.mark.parametrize("method,wip_delta,remaining_delta", [
+    ("fifo", "2.00", "3.00"), ("weighted_average", "1.25", "3.75"),
+])
+async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, monkeypatch):
+    from modules.accounting.late_cost_pool import load_expense_pools, project_pool
+    from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
+    from modules.procurement.receipt_documents import (
+        ReceiptAccounts,
+        ReceiptConfirm,
+        ReceiptCreate,
+        confirm_receipt,
+        create_document,
+        preview_document,
+    )
+    from modules.procurement.source_gateway import ProcurementSourceService
+
+    policy_id, order_id = await seed_book(pg_factory, pg_book, method, late_cost=True)
+    gateway, procurement = AccountingService(), ProcurementSourceService()
+    user = CurrentUser("tester", ["director"])
+    async with pg_factory() as session:
+        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
+                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
+            await run_migration(session, revision, "upgrade")
+        receipts = []
+        for index, (quantity, amount) in enumerate((("5", "31.25"), ("3", "30.00")), 1):
+            day = f"2026-10-0{index}"
+            primary = ReceiptCreate.model_validate({"key": f"pool-origin-{index}", "document": {
+                "currency": "BYN", "invoice_reference": f"pool-origin-{index}",
+                "document_date": day, "operation_date": day,
+                "supplier": "supplier", "contract": "contract", "warehouse": "Main",
+                "explanation": "Synthetic pool purchase", "items": [{
+                    "sku": "MAT-1", "lot": "LOT-1", "quantity": quantity, "net_amount": amount,
+                    "vat_rate": "0", "vat_amount": "0", "vat_basis": "Synthetic"}]}})
+            receipt = await create_document(pg_book[0], primary, (session, "tester"), (session, gateway, user))
+            options = ReceiptAccounts(expected_version=1, posting_date=day, policy_id=policy_id,
+                settlement_account="60", vat_account=None, inventory_accounts=["10.1"])
+            prepared = await preview_document(pg_book[0], receipt["id"], options, (session, gateway, user))
+            await confirm_receipt(session, pg_book[0], receipt["id"], ReceiptConfirm.model_validate({
+                **options.model_dump(mode="json"), "digest": prepared["digest"]}), user, gateway, None)
+            receipts.append(receipt)
+        await session.commit()
+    _, movement_id, _ = await seed_physical_issue(pg_factory, pg_book, order_id)
+    data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
+    async with pg_factory() as session:
+        prepared = await prepare_material_issue_posting(session, pg_book[0], "2026-10", data,
+            SyntheticProduction(), procurement=procurement)
+        material = await confirm_material_issue_posting(session, pg_book[0], "2026-10",
+            ProductionMaterialIssuePostingConfirmInput.model_validate({**data.model_dump(mode="json"),
+                "basis_digest": prepared["basis_digest"], "digest": prepared["digest"]}),
+            "tester", procurement=procurement)
+        expense, _ = await save_document(session, gateway, user, pg_book[0], AdditionalExpenseCreate.model_validate({
+            "key": "pool-freight", "document": {
+                "invoice_reference": "pool-freight", "document_date": "2026-10-11", "operation_date": "2026-10-11",
+                "supplier": "carrier", "contract": "freight", "currency": "BYN", "amount": "5.00",
+                "explanation": "Synthetic pool freight", "receipt_lines": [{
+                    "receipt_id": receipts[0]["id"], "version": 1, "line_number": 1}]}}))
+        await session.commit()
+        before = await session.scalar(select(func.count()).select_from(Entry))
+        loaded = await load_expense_pools(session, pg_book[0], expense.id, 1, date(2026, 10, 11), policy_id, procurement)
+        pool, = loaded["pools"]
+        origin = loaded["origins"][(receipts[0]["id"], 1, 1)]
+        source_line = await session.get(Line, origin[1])
+        assert source_line.entry_id == origin[0] and source_line.amount == Decimal("31.25")
+        result = project_pool(pool["rows"], organization_id=pg_book[0], account=pool["account"],
+            warehouse=pool["warehouse"], sku=pool["sku"], method=loaded["method"], on=date(2026, 10, 11),
+            additions={origin: Decimal("5.00")}, dispositions=pool["dispositions"], zeros=pool["zeros"],
+            verified_values=pool["verified_values"])
+        movement, = result["movements"]
+        assert movement["entry_id"] == material.id and movement["delta_byn"] == wip_delta
+        destination = pool["destinations"][("entry", material.id)]
+        assert destination["account"] == "20" and destination["dimensions"]["order"] == "ORDER-42"
+        assert sum(Decimal(row["delta_byn"]) for row in result["remaining"]) == Decimal(remaining_delta)
+        assert len(result["remaining"]) == 2  # Same lot, two actual acquisition line IDs.
+        assert await session.scalar(select(func.count()).select_from(Entry)) == before
+        repeated = await load_expense_pools(session, pg_book[0], expense.id, 1, date(2026, 10, 11), policy_id, procurement)
+        assert repeated["basis_digest"] == loaded["basis_digest"]
+        # The unlinked second purchase affects weighted cost too: authenticate
+        # its primary document, not merely the receipt named by the freight.
+        original_basis = procurement.posted_receipt_basis
+        async def changed_basis(session, organization_id, receipt_id, expected_version):
+            result = await original_basis(session, organization_id, receipt_id, expected_version)
+            return {**result, "digest": "0" * 64} if receipt_id == receipts[1]["id"] else result
+        monkeypatch.setattr(procurement, "posted_receipt_basis", changed_basis)
+        with pytest.raises(service.AccountingError, match="authenticated primary"):
+            await load_expense_pools(session, pg_book[0], expense.id, 1, date(2026, 10, 11), policy_id, procurement)
+
+
 def posting_input(policy_id: int) -> ProductionMaterialIssuePostingInput:
     return ProductionMaterialIssuePostingInput.model_validate({
         "policy_id": policy_id,
