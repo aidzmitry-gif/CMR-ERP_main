@@ -20,6 +20,15 @@ const formatCents = (value: bigint): string => {
   const absolute = negative ? -value : value;
   return `${negative ? "-" : ""}${absolute / 100n}.${String(absolute % 100n).padStart(2, "0")}`;
 };
+const formatDeviationPercent = (actual: string, plan: string | null): string | null => {
+  if (plan === null) return null;
+  const actualCents = parseCents(actual);
+  const plannedCents = parseCents(plan);
+  if (actualCents === null || plannedCents === null) return null;
+  if (plannedCents === 0n) return actualCents === 0n ? "0.00%" : null;
+  const basisPoints = (actualCents - plannedCents) * 10000n / (plannedCents < 0n ? -plannedCents : plannedCents);
+  return `${basisPoints < 0n ? "-" : ""}${formatCents(basisPoints < 0n ? -basisPoints : basisPoints)}%`;
+};
 
 export function ExpenseControl({ org }: { org?: string }) {
   const [selected, setSelected] = useState("");
@@ -176,6 +185,28 @@ function Book({ org }: { org: number }) {
   const editable = !busy && !pending && !!ctx && ctx.role !== "reader";
   const chief = editable && ctx?.role === "chief";
   const historyBudget = view?.versions.find(v => String(v.revision) === history);
+  // Fact is compared with the approved immutable version whenever one exists.
+  // A newer draft is visible to the accountant but must not silently replace the approved plan.
+  const planBudget = view?.approved_plan?.budget ?? view?.versions[0] ?? null;
+  const planLabel = view?.approved_plan ? `утверждённая версия ${view.approved_plan.budget_revision}`
+    : planBudget ? `черновик версии ${planBudget.revision}` : null;
+  const planFactRows = (() => {
+    const rows = new Map<number, { article_id: number; group: string; article: string; plan: string | null; actual: string | null; lines: number }>();
+    for (const line of planBudget?.lines ?? []) rows.set(line.article_id, {
+      article_id: line.article_id, group: line.article_snapshot.group.title, article: line.article_snapshot.title,
+      plan: line.months[Number(actualMonth) - 1] ?? null, actual: null, lines: 0,
+    });
+    for (const actual of actuals?.rows ?? []) {
+      const current = rows.get(actual.article_id);
+      rows.set(actual.article_id, {
+        article_id: actual.article_id, group: actual.group_title ?? current?.group ?? "Без группы",
+        article: actual.article_title, plan: current?.plan ?? null, actual: actual.amount, lines: actual.lines,
+      });
+    }
+    return [...rows.values()].sort((left, right) => left.group.localeCompare(right.group, "ru") || left.article.localeCompare(right.article, "ru"));
+  })();
+  const unplannedRows = planFactRows.filter(row => row.actual !== null && row.plan === null && parseCents(row.actual) !== 0n);
+  const incompleteCoverage = actuals !== null && actuals.coverage !== "complete";
   return <div className="space-y-4">
     {busy && <p role="status">Проверка и сохранение…</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
@@ -221,15 +252,18 @@ function Book({ org }: { org: number }) {
     </>}
     <div className="grid gap-3 md:grid-cols-4">{["Утверждённый план", "Начислено", "Оплачено", "Непогашенные обязательства"].map(label => {
       const value = label === "Утверждённый план" && view?.approved_plan ? `Версия ${view.approved_plan.budget_revision}`
-        : label === "Начислено" && actuals?.amount ? `${actuals.amount} BYN` : "— Неизвестно";
+        : label === "Начислено" && actuals?.amount !== null && actuals?.amount !== undefined ? `${actuals.amount} BYN` : "— Неизвестно";
       return <div key={label} className="rounded border border-line p-3"><strong>{label}</strong><p>{value}</p><p className="text-xs text-muted">{label === "Утверждённый план" ? (view?.approved_plan ? `Утвердил: ${view.approved_plan.approved_by}` : "Утверждение ещё не выполнено") : label === "Начислено" && actuals ? actuals.reason : "Адаптер подтверждённых данных не подключён"}</p></div>;
     })}</div>
     {actuals && <div aria-label="Фактические начисления расходов" className="rounded border border-line p-3"><h3 className="font-semibold">Начисленные расходы за {actuals.month} месяц</h3><p className="text-sm text-muted">Покрытие: {actuals.coverage}. Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</div>}
-    {actuals && actuals.rows.length > 0 && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {actuals.month} месяц</h3><p className="text-sm text-muted">Отклонение = факт минус план. При неполном покрытии показана только размеченная часть факта; строки без плана остаются неизвестными.</p><div className="overflow-x-auto"><table className="text-sm"><thead><tr><th className="p-2 text-left">Группа / статья</th><th className="p-2 text-right">План</th><th className="p-2 text-right">Факт</th><th className="p-2 text-right">Отклонение</th></tr></thead><tbody>{actuals.rows.map(row => {
-      const plan = view?.versions[0]?.lines.find(line => line.article_id === row.article_id)?.months[actuals.month - 1] ?? null;
-      const delta = plan === null ? null : (() => { const planned = parseCents(plan); const actual = parseCents(row.amount); return planned === null || actual === null ? null : formatCents(actual - planned); })();
-      return <tr key={row.article_id}><th className="p-2 text-left">{row.group_title ?? "Без группы"} / {row.article_title}</th><td className="p-2 text-right">{plan === null ? "неизвестно" : `${plan} BYN`}</td><td className="p-2 text-right">{row.amount} BYN</td><td className="p-2 text-right">{delta === null ? "неизвестно" : `${delta} BYN`}</td></tr>;
-    })}</tbody></table></div></div>}
+    {actuals && (planFactRows.length > 0 || planBudget) && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {actuals.month} месяц</h3><p className="text-sm text-muted">План: {planLabel ?? "не создан"}. Отклонение = факт минус план; проценты не считаются при нулевом плане.</p>
+      {incompleteCoverage && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: покрытие факта {actuals.coverage}; без статьи расходов: {actuals.unmatched_lines ?? "не определено"}. План-факт не является полным до разметки этих проводок.</p>}
+      {unplannedRows.length > 0 && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: {unplannedRows.length} {unplannedRows.length === 1 ? "статья имеет" : "статей имеют"} факт без плана за выбранный месяц.</p>}
+      <div className="overflow-x-auto"><table className="text-sm"><thead><tr><th className="p-2 text-left">Группа / статья</th><th className="p-2 text-right">План</th><th className="p-2 text-right">Факт</th><th className="p-2 text-right">Отклонение</th><th className="p-2 text-right">Отклонение, %</th></tr></thead><tbody>{planFactRows.map(row => {
+        const delta = row.plan === null || row.actual === null ? null : (() => { const planned = parseCents(row.plan); const actual = parseCents(row.actual); return planned === null || actual === null ? null : formatCents(actual - planned); })();
+        const percent = row.actual === null ? null : formatDeviationPercent(row.actual, row.plan);
+        return <tr key={row.article_id}><th className="p-2 text-left">{row.group} / {row.article}</th><td className="p-2 text-right">{row.plan === null ? "не запланировано" : `${row.plan} BYN`}</td><td className="p-2 text-right">{row.actual === null ? "нет факта" : `${row.actual} BYN`}</td><td className="p-2 text-right">{delta === null ? "—" : `${delta} BYN`}</td><td className="p-2 text-right">{percent ?? (row.plan === "0.00" && row.actual !== null ? "— (план 0)" : "—")}</td></tr>;
+      })}</tbody></table></div></div>}
     {view && ctx && <>
       <h3 className="font-semibold">Черновик {view.year} · BYN · {view.basis === "cash" ? "денежные выплаты" : "начисления"}</h3>
       <p>Последняя версия: {view.versions[0]?.revision ?? "ещё нет"}. Сохранение создаст новую версию; прежние останутся в истории.</p>
