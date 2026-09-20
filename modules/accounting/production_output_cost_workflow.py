@@ -96,10 +96,16 @@ async def _prepare(session, organization_id, month, data):
     for row in allocations:
         destination = None
         if row["key"] != "remaining" and not row["key"].startswith("remaining:"):
-            _, entry_id, line_id = row["key"].split(":")
-            destination = {"entry_id": int(entry_id), "line_id": int(line_id), "receipt_entry_id": int(entry_id),
-                "quantity": f"{Decimal(str(row['quantity'])):.6f}", "applied_cost_byn": f"{Decimal(str(row['book'])):.2f}",
-                "destination_account": row["account"], "destination_dimensions": row["dimensions"]}
+            kind, first, second = row["key"].split(":")
+            destination = {"kind": kind, "quantity": f"{Decimal(str(row['quantity'])):.6f}",
+                "applied_cost_byn": f"{Decimal(str(row['book'])):.2f}", "destination_account": row["account"],
+                "destination_dimensions": row["dimensions"]}
+            if kind == "disposed":
+                destination |= {"entry_id": int(first), "line_id": int(second), "receipt_entry_id": int(first)}
+            elif kind == "zero":
+                destination |= {"receipt_id": int(first), "registration_token": int(second)}
+            else:
+                raise AccountingError("Output revision has an unknown disposal identity")
             disposals.append(destination)
         delta = Decimal(str(row["delta"]))
         destinations.append({"key": row["key"], "kind": "disposed" if destination else "remaining",

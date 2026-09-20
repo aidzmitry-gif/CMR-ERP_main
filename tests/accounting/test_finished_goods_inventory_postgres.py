@@ -54,8 +54,8 @@ async def _run_output_cost_revision_migration(session, action):
     await (await session.connection()).run_sync(run)
 
 
-async def _confirm_output(factory, book, method="specific"):
-    policy_id = await _seed_production_book(factory, book, method)
+async def _confirm_output(factory, book, method="specific", *, normative_verified=False):
+    policy_id = await _seed_production_book(factory, book, method, normative_verified=normative_verified)
     await _seed_wip(factory, book, policy_id)
     production = SyntheticProduction()
     command = transfer_input(policy_id)

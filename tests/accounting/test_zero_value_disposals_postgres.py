@@ -68,8 +68,8 @@ def command(policy_id, output_id, line_id, **changes):
     return ZeroValueDisposalCommand(**body)
 
 
-async def zeroed_output(factory, book):
-    policy_id = await _confirm_output(factory, book)
+async def zeroed_output(factory, book, *, normative_verified=False):
+    policy_id = await _confirm_output(factory, book, normative_verified=normative_verified)
     async with factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(ProductionOutputTransferReceipt.organization_id == book[0]))
         await service.post(session, book[0], PostingInput(source="production:reverse-wip:zero", source_version=1,

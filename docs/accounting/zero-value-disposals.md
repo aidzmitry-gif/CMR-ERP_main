@@ -8,9 +8,22 @@ accounts, ordered ledger history, and prior same-layer receipts), then binds it
 to a shared registration sequence. The Python and SQL digest envelopes are
 checked to match in the PostgreSQL acceptance test.
 
-It does not yet provide a route, UI confirmation, valuation replay, mixed-money
+It does not yet provide a route, UI confirmation, mixed-money
 issue, weighted valuation, or sale binding. Those paths fail closed rather than
 creating synthetic zero-money ledger entries.
+
+Internal database-authenticated valuation replay is implemented. Migration 0141
+adds specific-cost entryless issue destinations to output-cost revisions, with
+typed receipt identities and independent SQL evidence validation. PostgreSQL
+acceptance covers 2 units reduced to zero value, disposal of 0.5, late cost 100
+allocated 75 to stock and 25 to the disposal destination, durable confirmation,
+idempotent retry, another 100 allocated with cumulative values 150/50, and no
+new postings for unchanged inputs. Historical registration cutoffs reproduce
+the earlier evidence. Forged SQL previews and corrections of a closed period
+are rejected. This is synthetic evidence, not a real monthly close.
+
+The loader revalidates historical metadata and fails on a basis mismatch;
+full version-evolution acceptance and public issue/sale integration remain open.
 
 ## Invariants
 
@@ -28,16 +41,15 @@ creating synthetic zero-money ledger entries.
 
 ## Mandatory next stage
 
-1. Extend `inventory_cost.py` and the SQL 0139 weighted/specific evidence paths
-   to replay authenticated receipt layers chronologically by posting date,
-   registration token and receipt id.
+1. Extend weighted, FIFO and mixed-disposal SQL paths beyond the implemented
+   single-origin specific-cost receipt, preserving chronological replay.
 2. Integrate `inventory_issues.py` and sales separately: a zero issue can be
    entryless; a zero-COGS sale cannot be entryless because revenue/VAT remain.
 3. Add PostgreSQL acceptance evidence for idempotency, conflict with a monetary
    issue, partial/full disposal, late cost and historical reconstruction.
-4. Extend output-cost revision preview and UI with typed destination identities:
-   a zero-value receipt is a `receipt_id`, never an `entry_id`/`line_id`. The
-   current SQL key parser expects ledger ids and must not be enabled unchanged.
+4. Extend the UI to consume the typed destination identities now returned by
+   output-cost revision preview: a zero-value receipt is a `receipt_id`, never
+   an `entry_id`/`line_id`. Public enablement still requires UI verification.
 
 The current API/UI contract also assumes every preview has `posting.lines` and
 every confirmation has a ledger `entry_id`: `routes.py` serializes the posted
