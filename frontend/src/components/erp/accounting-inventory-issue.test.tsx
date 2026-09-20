@@ -132,6 +132,25 @@ it("previews sale with exact VAT inputs, invalidates edits and confirms its froz
   expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", buyer_dimensions: { counterparty: "buyer", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
 });
 
+it("shows V4 zero-cost sale sources with commercial revenue and VAT postings", async () => {
+  const zeroSale = { ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00", cost: { ...calculation.cost, issue_quantity: "1.500000", issue_cost_byn: "0.00" }, posting: { lines: [{ side: "debit", account: "62", amount: "24.00", quantity: null, dimensions: {} }, { side: "credit", account: "90.1", amount: "24.00", quantity: null, dimensions: {} }, { side: "debit", account: "90.2", amount: "4.00", quantity: null, dimensions: {} }, { side: "credit", account: "68.2", amount: "4.00", quantity: null, dimensions: {} }] }, zero_value_command: { command_version: 4, inventory_layers: [{ source_entry_id: 11, source_line_id: 21, quantity: "1.000000" }, { source_entry_id: 12, source_line_id: 22, quantity: "0.500000" }] } };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith("confirm") ? { id: 17 } : zeroSale })));
+  const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
+  render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  fill(true);
+  for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Контрагент", "buyer"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  expect(await screen.findByText(/Себестоимость 0.00 BYN. Количество 1.500000/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 11, строка № 21 · Количество 1.000000/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 12, строка № 22 · Количество 0.500000/)).toBeInTheDocument();
+  expect(screen.getByText(/К оплате: 24.00/)).toBeInTheDocument();
+  expect(screen.getByText(/Дт 62 · 24.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Кт 68.2 · 4.00 BYN/)).toBeInTheDocument();
+  expect(screen.queryByText(/проводка не создаётся/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Подтвердить продажу"));
+  expect(await screen.findByText("Продажа № 17 проведена.")).toBeInTheDocument();
+});
+
 it.each(["account", "date"])("drops hidden revenue analytics when %s changes", async (mode) => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => calculation }));
   vi.stubGlobal("fetch", fetcher);
