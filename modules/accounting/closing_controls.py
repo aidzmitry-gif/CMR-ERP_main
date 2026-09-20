@@ -245,14 +245,16 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry.posting_date <= last,
         Entry.operation == "inventory_late_cost",
     )) or 0
-    late_cost_receipts = await session.scalar(text("""
-        SELECT count(*)
-        FROM accounting.entry e
-        WHERE e.organization_id=:org AND e.posting_date >= :first AND e.posting_date <= :last
-          AND e.operation='inventory_late_cost'
-          AND (
-            EXISTS (SELECT 1 FROM accounting.late_cost_receipt receipt
-              WHERE receipt.entry_id=e.id AND receipt.organization_id=e.organization_id)
+    v3_late_pool_schema = await session.scalar(text("""
+        SELECT to_regclass('accounting.late_pool_package') IS NOT NULL
+           AND to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL
+    """))
+    late_cost_receipt_condition = """
+        EXISTS (SELECT 1 FROM accounting.late_cost_receipt receipt
+          WHERE receipt.entry_id=e.id AND receipt.organization_id=e.organization_id)
+    """
+    if v3_late_pool_schema:
+        late_cost_receipt_condition += """
             OR (
               e.rule_version='late-cost-pool-v3'
               AND EXISTS (
@@ -267,7 +269,13 @@ async def snapshot(session, org_id: int, month: str) -> dict:
                                 THEN (destination->>'delta_byn')::numeric END <> 0)
               )
             )
-          )
+        """
+    late_cost_receipts = await session.scalar(text("""
+        SELECT count(*)
+        FROM accounting.entry e
+        WHERE e.organization_id=:org AND e.posting_date >= :first AND e.posting_date <= :last
+          AND e.operation='inventory_late_cost'
+          AND (""" + late_cost_receipt_condition + """)
     """), {"org": org_id, "first": first, "last": last}) or 0
     trade_entries = (await session.scalars(select(ForeignTradeRegisterEntry).where(
         ForeignTradeRegisterEntry.organization_id == org_id,
