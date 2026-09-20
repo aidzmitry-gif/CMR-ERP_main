@@ -241,6 +241,13 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         app = application(pg_factory)
         app.state.core.services.procurement_source = procurement
         pool_api = f"/accounting/organizations/{pg_book[0]}/additional-expenses/{expense.id}/pool"
+        before_preview_entry_count = await session.scalar(select(func.count()).select_from(Entry).where(
+            Entry.organization_id == pg_book[0]
+        ))
+        before_preview_package_count = await session.scalar(text("""
+            SELECT count(*) FROM accounting.late_pool_package WHERE organization_id=:org
+        """), {"org": pg_book[0]})
+        before_preview_outbox_count = await session.scalar(select(func.count()).select_from(OutboxEvent))
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             preview_command = pool_command.model_copy(update={"material_outputs": []}) if with_output else pool_command
             preview_response = await client.post(pool_api + "/posting-preview", json=preview_command.model_dump(mode="json"))
@@ -250,6 +257,13 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             assert preview_response.json()["command"] == pool_package["command"]
             assert preview_response.json()["confirmation_available"] is True
             assert (await client.get(pool_api + "/posting")).status_code == 404
+        assert await session.scalar(select(func.count()).select_from(Entry).where(
+            Entry.organization_id == pg_book[0]
+        )) == before_preview_entry_count
+        assert await session.scalar(text("""
+            SELECT count(*) FROM accounting.late_pool_package WHERE organization_id=:org
+        """), {"org": pg_book[0]}) == before_preview_package_count
+        assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == before_preview_outbox_count
         if with_output:
             original_confirm_output = production_output_cost_workflow.confirm_output_cost_correction
 
@@ -337,6 +351,13 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
                       "expected_basis_digest": pool_package["basis_digest"],
                       "expected_digest": pool_package["posting_digest"]})
             assert rejected_principal.status_code == 409
+            assert await session.scalar(select(func.count()).select_from(Entry).where(
+                Entry.organization_id == pg_book[0]
+            )) == before_entry_count
+            assert await session.scalar(text("""
+                SELECT count(*) FROM accounting.late_pool_package WHERE organization_id=:org
+            """), {"org": pg_book[0]}) == before_package_count
+            assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == before_outbox_count
             retry_response = await client.post(pool_api + "/confirm", headers={"X-Expected-Principal": "tester"},
                 json={**saved_pool["command"], "request_key": saved_pool["request_key"],
                       "expected_basis_digest": pool_package["basis_digest"],
