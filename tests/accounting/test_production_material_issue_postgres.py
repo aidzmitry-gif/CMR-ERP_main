@@ -63,6 +63,7 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
     from modules.accounting.late_cost_pool import load_expense_pools, preview_expense, project_pool
     from modules.accounting.late_cost_posting import ExpenseAccounts, pool_candidate
     from modules.accounting.late_cost_receipts import PoolLateCostCommand, verified_value_lines
+    from modules.accounting.late_cost_receipts import verify_receipt as verify_late_cost
     from modules.accounting.schemas import InventoryIssuePreviewInput, LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
@@ -314,6 +315,22 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             assert readback.status_code == 200, readback.text
             assert readback.headers["cache-control"] == "private, no-store"
             assert readback.json() == saved_pool
+        # A V3 first leg has no legacy LateCostReceipt; the shared receipt
+        # verifier must resolve its immutable package for historical users.
+        assert (await verify_late_cost(session, pg_book[0], confirmed.id, procurement)).model_dump() == PostingInput.model_validate(
+            pool_package["posting"]).model_dump()
+        # A later V3 expense uses the complete saved history on the same
+        # acquisition and must not recost or reject the earlier V3 value lines.
+        follow_up, _ = await save_document(session, gateway, user, pg_book[0], AdditionalExpenseCreate.model_validate({
+            "key": "pool-freight-follow-up", "document": {
+                "invoice_reference": "pool-freight-follow-up", "document_date": "2026-10-12", "operation_date": "2026-10-12",
+                "supplier": "carrier", "contract": "freight", "currency": "BYN", "amount": "1.00",
+                "explanation": "Synthetic follow-up pool freight", "receipt_lines": [{
+                    "receipt_id": receipts[0]["id"], "version": 1, "line_number": 1}]}}))
+        follow_up_request = LateCostPreviewInput(expected_version=1, policy_id=policy_id, posting_date="2026-10-12",
+            capitalizable_amount_byn="1.00", excluded_amount_byn="0.00", classification_evidence="Synthetic follow-up pool freight")
+        follow_up_preview = await preview_expense(session, pg_book[0], follow_up.id, follow_up_request, procurement)
+        assert follow_up_preview["inventory_method"] == method and follow_up_preview["source_version"] == 1
         if with_output:
             saved_revision, = saved_pool["output_revisions"]
             assert saved_revision["output_entry_id"] == output_id

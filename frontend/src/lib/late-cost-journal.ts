@@ -6,6 +6,7 @@ const digest = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 const money = /^\d{1,18}(?:\.\d{1,2})?$/;
 const positiveId = (value: unknown) => Number.isSafeInteger(value) && (value as number) > 0;
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 type MaterialSelection = { output_entry_id: number; amount_byn: string };
 type PoolSelection = { output_entry_id: number; amount_byn: string };
 function materialSelections(value: unknown): value is MaterialSelection[] {
@@ -90,7 +91,13 @@ export function matchesLateCostReceipt(item: LateCostPending, value: unknown): b
       && row.amount_byn === command.material_outputs[index].amount_byn);
   if (!outputLinks || command.command_version !== 3) return outputLinks;
   const inventory = receipt.inventory_value_links;
-  return Array.isArray(inventory) && inventory.length <= 10000
+  const preview = receipt.preview;
+  const calculation = record(preview) ? preview.calculation : null;
+  const expectedInventory = record(calculation) && Array.isArray(calculation.destinations)
+    ? calculation.destinations.filter(row => record(row) && row.kind === "inventory"
+      && typeof row.delta_byn === "string" && /^-?\d{1,18}\.\d{2}$/.test(row.delta_byn)
+      && BigInt(row.delta_byn.replace(".", "")) !== 0n) : null;
+  return Array.isArray(inventory) && expectedInventory !== null && inventory.length === expectedInventory.length && inventory.length <= 10000
     && new Set(inventory.map(row => row && typeof row === "object" ? (row as Record<string, unknown>).value_line_id : null)).size === inventory.length
     && inventory.every(row => !!row && typeof row === "object" && (row as Record<string, unknown>).value_entry_id === receipt.entry_id
       && positiveId((row as Record<string, unknown>).value_line_id)

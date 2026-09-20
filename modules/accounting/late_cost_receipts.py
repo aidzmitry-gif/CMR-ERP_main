@@ -156,10 +156,27 @@ async def verified_value_lines(session, organization_id, rows, procurement):
 async def verify_receipt(session, organization_id, entry_id, procurement):
     """Caller authorizes organization access; no current-period recalculation."""
     await service.lock_organization(session, organization_id)
-    saved = await session.get(LateCostReceipt, entry_id)
     entry = await session.get(Entry, entry_id)
-    if (saved is None or entry is None or saved.organization_id != organization_id
-        or entry.organization_id != organization_id):
+    if entry is None or entry.organization_id != organization_id:
+        raise service.AccountingError("Late cost has no matching source receipt")
+    if entry.operation == "inventory_late_cost" and entry.rule_version == "late-cost-pool-v3":
+        # V3 has no LateCostReceipt: its immutable package is the receipt.
+        # Read it without replaying today's pools so later expenses can verify
+        # the historical value movement that already belongs to this lot.
+        from modules.accounting.late_pool_cost import load_package
+
+        package = await load_package(session, organization_id, entry_id)
+        if package.get("entry_id") != entry_id or package.get("organization_id") != organization_id:
+            raise service.AccountingError("V3 late cost immutable package identity is inconsistent")
+        preview = package.get("preview")
+        if not isinstance(preview, dict):
+            raise service.AccountingError("V3 late cost immutable package is incomplete")
+        try:
+            return PostingInput.model_validate(preview["posting"])
+        except (KeyError, ValueError) as exc:
+            raise service.AccountingError("V3 late cost immutable posting is invalid") from exc
+    saved = await session.get(LateCostReceipt, entry_id)
+    if saved is None or saved.organization_id != organization_id:
         raise service.AccountingError("Late cost has no matching source receipt")
     command = parse_command(saved.command)
     policy = await session.get(Policy, command.allocation.policy_id)
