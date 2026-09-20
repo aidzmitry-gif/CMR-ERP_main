@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -19,6 +19,45 @@ const context = {
   catalog: { revision: 1, groups: [{ id: 1, code: "office", title: "Офис", active: true }], articles: [{ id: 1, group_id: 1, code: "supplies", title: "Материалы", active: true }] },
   template: [],
 };
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(next => { resolve = next; });
+  return { promise, resolve };
+}
+
+const actual = (year: number, month: number, basis: "cash" | "accrual") => ({
+  year, month, currency: "BYN" as const, basis, amount: "10.00", coverage: "partial" as const,
+  matched_lines: 1, unmatched_lines: 1, reason: "partial", rows: [],
+});
+
+const unmatched = (org: number, month: number, basis: "cash" | "accrual", source: string) => ({
+  year: 2026, month, currency: "BYN" as const, basis,
+  next_after_line_id: null,
+  items: [{ entry_id: org * 1000 + month, line_id: org * 1000 + month, posting_date: `2026-${String(month).padStart(2, "0")}-02`, source,
+    operation: "manual", account_code: "90.4", side: "debit" as const, amount: "2.00", dimensions: { analytics: "" }, reason: "нет статьи" as const }],
+});
+
+function setupActualMocks() {
+  api.context.mockImplementation((org: number) => Promise.resolve({ ...context, organization_id: org, principal: org === 1 ? "chief" : `chief-${org}` }));
+  api.journal.mockResolvedValue({ raw: null, attempt: null });
+  api.getBudgets.mockImplementation((scope: { org: number; principal: string }, year: number, basis: "cash" | "accrual") => Promise.resolve({
+    organization_id: scope.org, principal: scope.principal, year, currency: "BYN", basis, versions: [], approved_plan: null,
+    actuals: { accrued: { amount: null, coverage: "unknown", reason: "x" }, paid: { amount: null, coverage: "unknown", reason: "x" }, commitments: { amount: null, coverage: "unknown", reason: "x" } },
+    approval_enabled: true, approval_blocker: null,
+  }));
+  api.getActuals.mockImplementation((_scope: unknown, year: number, month: number, basis: "cash" | "accrual") => Promise.resolve(actual(year, month, basis)));
+}
+
+async function loadFacts(month = "1", basis: "cash" | "accrual" = "accrual") {
+  await screen.findByText(/Книга № \d+\. Учётная запись:/);
+  fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } });
+  fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
+  fireEvent.change(screen.getByLabelText("Основа"), { target: { value: basis } });
+  fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: month } });
+  fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
+  await screen.findAllByRole("button", { name: "Показать неразнесённые строки" });
+}
 
 it("shows a month plan-fact percentage and warnings for partial and unplanned actuals", async () => {
   api.context.mockResolvedValue(context);
@@ -160,4 +199,71 @@ it("opens a listed unmatched entry without replacing the fact on list failure", 
   fireEvent.click(await screen.findByRole("button", { name: "Показать неразнесённые строки" }));
   fireEvent.click(await screen.findByRole("button", { name: "Открыть проводку" }));
   expect(onEntry).toHaveBeenCalledWith(7);
+});
+
+it.each(["month", "basis", "scope"] as const)("drops an unmatched response from the previous %s", async dimension => {
+  setupActualMocks();
+  const old = deferred<ReturnType<typeof unmatched>>();
+  let listCalls = 0;
+  api.getUnmatchedActuals.mockImplementation((scope: { org: number }, _year: number, month: number, basis: "cash" | "accrual") => {
+    listCalls += 1;
+    return listCalls === 1 ? old.promise : Promise.resolve(unmatched(scope.org, month, basis, "new-row"));
+  });
+  const view = render(<ExpenseControl org="1" />);
+  await loadFacts();
+  const panel = () => screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(panel()).getByRole("button", { name: "Показать неразнесённые строки" }));
+
+  if (dimension === "scope") {
+    view.rerender(<ExpenseControl org="2" />);
+    await loadFacts();
+  } else {
+    if (dimension === "month") fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "2" } });
+    if (dimension === "basis") fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "cash" } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
+    await screen.findAllByRole("button", { name: "Показать неразнесённые строки" });
+  }
+  fireEvent.click(within(panel()).getByRole("button", { name: "Показать неразнесённые строки" }));
+  expect(await screen.findByText(/new-row/)).toBeInTheDocument();
+
+  await act(async () => { old.resolve(unmatched(1, 1, "accrual", "old-row")); await old.promise; });
+  expect(screen.queryByText(/old-row/)).not.toBeInTheDocument();
+});
+
+it("does not start a duplicate B while stale A is finishing", async () => {
+  setupActualMocks();
+  const first = deferred<ReturnType<typeof unmatched>>();
+  const second = deferred<ReturnType<typeof unmatched>>();
+  let monthTwoCalls = 0;
+  api.getUnmatchedActuals.mockImplementation((scope: { org: number }, _year: number, month: number, basis: "cash" | "accrual") => {
+    if (month === 1) return first.promise;
+    monthTwoCalls += 1;
+    return monthTwoCalls === 1 ? second.promise : Promise.resolve(unmatched(scope.org, month, basis, "duplicate"));
+  });
+  render(<ExpenseControl org="1" />);
+  await loadFacts();
+  const panel = screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "2" } });
+  fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
+  await screen.findAllByRole("button", { name: "Показать неразнесённые строки" });
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+
+  await act(async () => { first.resolve(unmatched(1, 1, "accrual", "old-A")); await first.promise; });
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  const callsWhileBIsPending = api.getUnmatchedActuals.mock.calls.length;
+  await act(async () => { second.resolve(unmatched(1, 2, "accrual", "new-B")); await second.promise; });
+  expect(callsWhileBIsPending).toBe(2);
+});
+
+it("keeps the fact visible when the unmatched register request fails", async () => {
+  setupActualMocks();
+  api.getUnmatchedActuals.mockRejectedValue(new Error("registry unavailable"));
+  render(<ExpenseControl org="1" />);
+  await loadFacts();
+  const panel = screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  expect(await within(panel).findByRole("alert")).toHaveTextContent("registry unavailable");
+  expect(screen.getByLabelText("Начислено")).toHaveTextContent("10.00 BYN");
+  expect(panel).toHaveTextContent("без статьи: 1");
 });

@@ -1,12 +1,15 @@
+from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
 from core.services.auth import CurrentUser, get_current_user
+from modules.accounting import expenses
 from modules.accounting.expense_models import ExpenseCommandReceipt
 from modules.accounting.expense_routes import router
-from modules.accounting.models import AccessGrant
+from modules.accounting.models import AccessGrant, Account, Entry, Line, Organization, Policy
 
 
 @pytest.fixture
@@ -64,6 +67,167 @@ async def test_context_does_not_create_catalog_and_exposes_approval(expense_clie
     assert actuals.json()["actuals"]["coverage"] == "unknown"
     assert (await expense_client.post(url + "/expense-budgets/approve", json={})).status_code == 422
     assert (await db.scalars(select(ExpenseCommandReceipt))).all() == []
+
+
+async def test_unmatched_actuals_mirrors_actuals_scope_and_never_guesses_article(db, book):
+    catalog = await expenses.execute(db, book[0], "tester", "catalog", body())
+    await db.commit()
+    article_id = catalog["result"]["articles"][0]["id"]
+    policy = await db.get(Policy, book[1])
+    account = await db.scalar(select(Account).where(Account.organization_id == book[0], Account.code == "90.4"))
+    other = Organization(name="Other expense company", unp="888888888")
+    db.add(other)
+    await db.flush()
+
+    def entry(key, *, org_id=book[0], month=10):
+        posting_date = date(2026, month, 5)
+        return Entry(
+            organization_id=org_id, source=f"expense-register-{key}", source_version=1,
+            operation=f"manual-{key}", document_date=posting_date, operation_date=posting_date,
+            posting_date=posting_date, policy_id=policy.id, rule_version="test",
+            explanation="Synthetic unmatched register row", opening=False, correction_of=None,
+            digest=(key + "0" * 64)[:64], actor="tester",
+        )
+
+    entries = {
+        "missing": entry("missing"),
+        "missing_catalog": entry("missing-catalog"),
+        "counterparty": entry("counterparty"),
+        "matched": entry("matched"),
+        "cash_missing": entry("cash-missing"),
+        "cash_matched": entry("cash-matched"),
+        "wrong_month": entry("wrong-month", month=11),
+        "other_org": entry("other-org", org_id=other.id),
+        "wrong_category": entry("wrong-category"),
+        "wrong_currency": entry("wrong-currency"),
+    }
+    db.add_all(entries.values())
+    await db.flush()
+
+    def line(key, *, dimensions=None, cash=False, category="expense", currency="BYN"):
+        row = entries[key]
+        return Line(
+            entry_id=row.id, account_id=account.id, account_code=account.code, account_title=account.title,
+            category=category, cash=cash, side="debit", amount=Decimal("1.00"),
+            dimensions=dimensions or {}, currency=currency,
+        )
+
+    lines = {
+        "missing": line("missing"),
+        "missing_catalog": line("missing_catalog", dimensions={"expense_article_id": "999999"}),
+        "counterparty": line("counterparty", dimensions={"counterparty": "supplier-7"}),
+        "matched": line("matched", dimensions={"expense_article_id": str(article_id)}),
+        "cash_missing": line("cash_missing", cash=True),
+        "cash_matched": line("cash_matched", cash=True, dimensions={"expense_article_id": str(article_id)}),
+        "wrong_month": line("wrong_month"),
+        "other_org": line("other_org"),
+        "wrong_category": line("wrong_category", category="income"),
+        "wrong_currency": line("wrong_currency", currency="USD"),
+    }
+    db.add_all(lines.values())
+    await db.flush()
+
+    accrual = await expenses.actuals(db, book[0], 2026, 10, "accrual")
+    register = await expenses.unmatched_actuals(db, book[0], 2026, 10, "accrual", limit=100)
+    assert accrual["matched_lines"] == 2
+    assert accrual["unmatched_lines"] == 4
+    assert {row["line_id"] for row in register["items"]} == {
+        lines[key].id for key in ("missing", "missing_catalog", "counterparty", "cash_missing")
+    }
+    by_line = {row["line_id"]: row for row in register["items"]}
+    assert by_line[lines["missing"].id]["reason"] == "нет статьи"
+    assert by_line[lines["missing_catalog"].id]["reason"] == "статья отсутствует в текущем справочнике"
+    assert by_line[lines["counterparty"].id]["dimensions"] == {"counterparty": "supplier-7"}
+    assert register["next_after_line_id"] is None
+
+    cash = await expenses.actuals(db, book[0], 2026, 10, "cash")
+    cash_register = await expenses.unmatched_actuals(db, book[0], 2026, 10, "cash", limit=100)
+    assert cash["matched_lines"] == 1 and cash["unmatched_lines"] == 1
+    assert [row["line_id"] for row in cash_register["items"]] == [lines["cash_missing"].id]
+
+
+async def test_unmatched_actuals_pages_by_line_id_without_skipping_between_matched_rows(db, book):
+    catalog = await expenses.execute(db, book[0], "tester", "catalog", body())
+    await db.commit()
+    article_id = catalog["result"]["articles"][0]["id"]
+    policy = await db.get(Policy, book[1])
+    account = await db.scalar(select(Account).where(Account.organization_id == book[0], Account.code == "90.4"))
+
+    def entry(key):
+        posting_date = date(2026, 10, 5)
+        return Entry(
+            organization_id=book[0], source=f"expense-page-{key}", source_version=1,
+            operation=f"manual-{key}", document_date=posting_date, operation_date=posting_date,
+            posting_date=posting_date, policy_id=policy.id, rule_version="test",
+            explanation="Synthetic paging row", opening=False, correction_of=None,
+            digest=(key + "0" * 64)[:64], actor="tester",
+        )
+
+    entries = {key: entry(key) for key in ("u1", "m1", "u2", "m2", "u3")}
+    db.add_all(entries.values())
+    await db.flush()
+
+    def line(key, dimensions):
+        return Line(
+            entry_id=entries[key].id, account_id=account.id, account_code=account.code,
+            account_title=account.title, category="expense", cash=False, side="debit",
+            amount=Decimal("1.00"), dimensions=dimensions, currency="BYN",
+        )
+
+    lines = {
+        key: line(key, {} if key.startswith("u") else {"expense_article_id": str(article_id)})
+        for key in ("u1", "u2", "u3", "m1", "m2")
+    }
+    # Entry order and Line.id order intentionally differ. The cursor must follow
+    # Line.id even when matching rows sit between unmatched rows in the register.
+    db.add_all([lines[key] for key in ("u1", "u2", "u3", "m1", "m2")])
+    await db.flush()
+
+    first = await expenses.unmatched_actuals(db, book[0], 2026, 10, "accrual", limit=1)
+    second = await expenses.unmatched_actuals(
+        db, book[0], 2026, 10, "accrual", after_line_id=first["next_after_line_id"], limit=1
+    )
+    third = await expenses.unmatched_actuals(
+        db, book[0], 2026, 10, "accrual", after_line_id=second["next_after_line_id"], limit=1
+    )
+    assert [row["line_id"] for row in first["items"]] == [lines["u1"].id]
+    assert [row["line_id"] for row in second["items"]] == [lines["u2"].id]
+    assert [row["line_id"] for row in third["items"]] == [lines["u3"].id]
+    assert first["next_after_line_id"] == lines["u1"].id
+    assert second["next_after_line_id"] == lines["u2"].id
+    assert third["next_after_line_id"] is None
+
+
+async def test_unmatched_endpoint_is_organization_principal_scoped_and_signed(expense_client, db, book):
+    policy = await db.get(Policy, book[1])
+    account = await db.scalar(select(Account).where(Account.organization_id == book[0], Account.code == "90.4"))
+    posting_date = date(2026, 10, 5)
+    entry = Entry(
+        organization_id=book[0], source="expense-api-unmatched", source_version=1, operation="manual",
+        document_date=posting_date, operation_date=posting_date, posting_date=posting_date,
+        policy_id=policy.id, rule_version="test", explanation="Synthetic API row", opening=False,
+        correction_of=None, digest="a" * 64, actor="tester",
+    )
+    db.add(entry)
+    await db.flush()
+    line = Line(
+        entry_id=entry.id, account_id=account.id, account_code=account.code, account_title=account.title,
+        category="expense", cash=False, side="debit", amount=Decimal("2.00"), dimensions={}, currency="BYN",
+    )
+    db.add(line)
+    await db.flush()
+
+    url = f"/accounting/organizations/{book[0]}/expense-actuals/unmatched?year=2026&month=10&currency=BYN&basis=accrual"
+    response = await expense_client.get(url)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["organization_id"] == book[0] and payload["principal"] == "tester"
+    assert payload["items"][0]["line_id"] == line.id
+    unsigned = {key: value for key, value in payload.items() if key != "digest"}
+    assert payload["digest"] == expenses.digest(unsigned)
+    assert (await expense_client.get(url.replace(f"organizations/{book[0]}", "organizations/999"))).status_code == 403
+    expense_client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("anonymous", [])
+    assert (await expense_client.get(url)).status_code == 403
 
 
 async def test_header_scope_replay_and_missing_configuration(expense_client, book):
