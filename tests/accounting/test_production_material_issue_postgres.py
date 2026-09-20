@@ -665,6 +665,16 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         repeated = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
             package["basis_digest"], "tester", procurement)
         assert repeated.entry_id == saved_entry_id
+        from modules.accounting.late_material_cost import load_package
+
+        persisted = await load_package(session, pg_book[0], saved_entry_id, procurement)
+        assert persisted["preview"] == package
+        assert persisted["command"] == reviewed.model_dump(mode="json")
+        assert persisted["posted"] is True
+        assert len(persisted["output_revisions"]) == int(with_output)
+        if with_output:
+            assert persisted["output_revisions"][0]["output_entry_id"] == output_id
+            assert persisted["output_revisions"][0]["amount_byn"] == "2.00"
         with pytest.raises(DBAPIError, match="Cannot downgrade late material packages with history"):
             async with session.begin_nested():
                 await run_migration(session, "0151_late_material_output_cost.py", "downgrade")
@@ -698,6 +708,7 @@ async def test_purchased_material_late_expense_authenticates_production_history(
             historical = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
                 package["basis_digest"], "tester", procurement)
             assert historical.entry_id == saved_entry_id
+            assert await load_package(session, pg_book[0], saved_entry_id, procurement) == persisted
             with pytest.raises(service.AccountingError, match="[Cc]losed"):
                 await prepare_package(session, pg_book[0], expense.id, reviewed, procurement)
             assert await session.scalar(select(func.count()).select_from(Entry)) == closed_count

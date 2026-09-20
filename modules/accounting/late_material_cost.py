@@ -1,4 +1,4 @@
-"""Read-only preparation of an atomic late-material/output correction package."""
+"""Prepare, confirm and authenticate atomic late-material/output cost packages."""
 from __future__ import annotations
 
 import json
@@ -93,6 +93,43 @@ def _matrix(rows):
                    Decimal(str(row["amount"]))) for row in rows)
 
 
+async def load_package(session, organization_id, entry_id, procurement):
+    """Read the complete saved result using its historical evidence, never recost it."""
+    from modules.accounting.late_cost_receipts import verify_receipt
+    from modules.accounting.models import LateCostReceipt
+
+    await service.lock_organization(session, organization_id)
+    saved = await session.get(LateCostReceipt, entry_id)
+    if saved is None or saved.organization_id != organization_id:
+        raise service.AccountingError("Late material package was not found in this organization")
+    if saved.command.get("command_version") != 2:
+        raise service.AccountingError("A versioned late material package is required")
+    package = (await session.execute(text(
+        "SELECT basis_digest, preview FROM accounting.late_material_package "
+        "WHERE late_entry_id=:entry AND organization_id=:org"
+    ), {"entry": entry_id, "org": organization_id})).mappings().one_or_none()
+    if package is None:
+        raise service.AccountingError("Late material package evidence is missing")
+    preview = package["preview"]
+    if (not isinstance(preview, dict) or preview.get("basis_digest") != package["basis_digest"]
+        or checksum({key: value for key, value in preview.items() if key != "basis_digest"}) != package["basis_digest"]):
+        raise service.AccountingError("Late material package basis digest is inconsistent")
+    await verify_receipt(session, organization_id, entry_id, procurement)
+    await session.execute(text("SELECT accounting.verify_late_material_package(:entry)"), {"entry": entry_id})
+    links = (await session.execute(text(
+        "SELECT output_entry_id, output_revision_id, amount FROM accounting.late_material_output_cost_link "
+        "WHERE late_entry_id=:entry AND organization_id=:org ORDER BY output_entry_id"
+    ), {"entry": entry_id, "org": organization_id})).mappings().all()
+    return {"organization_id": organization_id, "expense_id": saved.expense_id,
+        "entry_id": entry_id, "source_version": saved.source_version,
+        "request_key": saved.request_key, "digest": saved.digest,
+        "basis_digest": package["basis_digest"], "command": saved.command,
+        "preview": preview, "posted": True,
+        "output_revisions": [{"output_entry_id": row["output_entry_id"],
+            "output_revision_id": row["output_revision_id"], "amount_byn": format(row["amount"], ".2f")}
+            for row in links]}
+
+
 async def confirm(session, organization_id, expense_id, command: MaterialLateCostCommand,
                   request_key, expected_basis_digest, actor, procurement, event_bus=None):
     """Internal atomic package; outer caller owns the final transaction commit."""
@@ -123,8 +160,7 @@ async def confirm(session, organization_id, expense_id, command: MaterialLateCos
             or saved.command != command.model_dump(mode="json") or saved.actor != actor
             or package["basis_digest"] != expected_basis_digest):
             raise service.AccountingError("Late material command conflicts with the saved package")
-        await verify_receipt(session, organization_id, saved.entry_id, procurement)
-        await session.execute(text("SELECT accounting.verify_late_material_package(:entry)"), {"entry": saved.entry_id})
+        await load_package(session, organization_id, saved.entry_id, procurement)
         return saved
     prepared = await prepare(session, organization_id, expense_id, command, procurement)
     if prepared["basis_digest"] != expected_basis_digest:
