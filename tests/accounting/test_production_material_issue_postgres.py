@@ -203,6 +203,18 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             assert {(row["account"], row["side"], Decimal(str(row["amount"])))
                     for row in pool_package["outputs"][0]["prospective_evidence"]["matrix"]} == {
                 ("20", "credit", Decimal(wip_delta)), ("43", "debit", Decimal(wip_delta))}
+            # The correction is posted on the late-cost date.  A later account
+            # revision may therefore require analytics absent from the original
+            # output, and must make the preview fail before it can be confirmed.
+            session.add(Account(
+                organization_id=pg_book[0], code="43", title="Synthetic finished goods with serial",
+                category="asset", valid_from=date(2026, 10, 11),
+                required_dimensions=["warehouse", "sku", "lot", "serial"],
+                currency_tracking=False, quantity_tracking=True, cash=False,
+                normative_ref="Synthetic later analytics requirement"))
+            await session.flush()
+            with pytest.raises(service.AccountingError, match="missing analytics.*serial"):
+                await prepare_pool_package(session, pg_book[0], expense.id, pool_command, procurement)
         else:
             assert pool_package["outputs"] == []
             assert pool_package["wip_origins"][0]["order_id"] == order_id

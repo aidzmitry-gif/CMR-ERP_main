@@ -12,11 +12,12 @@ from modules.accounting.late_cost_commands import validate_account_roles
 from modules.accounting.late_cost_pool import preview_expense
 from modules.accounting.late_cost_posting import pool_candidate
 from modules.accounting.late_cost_receipts import PoolLateCostCommand
-from modules.accounting.models import ProductionOutputTransferReceipt
+from modules.accounting.models import Entry, ProductionOutputTransferReceipt
 from modules.accounting.production_output_cost_workflow import (
     ProductionOutputCostPreviewInput,
     preview_output_cost_correction,
 )
+from modules.accounting.schemas import LineInput, PostingInput
 from modules.wms.production_material_issues import ProductionMaterialIssue
 
 
@@ -98,6 +99,26 @@ async def _resolve_outputs(session, organization_id, command, origins, procureme
             "CAST(:overlay AS jsonb),NULL)::text"
         ), {"org": organization_id, "output": output_id, "day": command.allocation.posting_date,
             "overlay": json.dumps(overlay, sort_keys=True)})
+        evidence = json.loads(raw, parse_float=str)
+        original = await session.get(Entry, output_id)
+        if original is None or original.organization_id != organization_id:
+            raise service.AccountingError("Released output entry is unavailable in this organization")
+        prospective = PostingInput(
+            source=f"accounting:late-pool-preview:{organization_id}:{output_id}",
+            source_version=1,
+            operation="production_output_cost_correction",
+            document_date=command.allocation.posting_date,
+            operation_date=command.allocation.posting_date,
+            posting_date=command.allocation.posting_date,
+            policy_id=original.policy_id,
+            rule_version="production-output-cost-revision-v1",
+            explanation=command.allocation.classification_evidence,
+            correction_of=output_id,
+            lines=[LineInput(**{**row, "amount": f"{Decimal(str(row['amount'])):.2f}"})
+                   for row in evidence["matrix"]],
+        )
+        await service.validate_posting(
+            session, organization_id, prospective, production_output_correction=True)
         outputs.append({
             "output_entry_id": output_id,
             "order_id": receipt.order_id,
@@ -105,7 +126,7 @@ async def _resolve_outputs(session, organization_id, command, origins, procureme
             "original_digest": receipt.digest,
             "original_basis_digest": receipt.basis_digest,
             "current_basis_digest": current["basis_digest"],
-            "prospective_evidence": json.loads(raw, parse_float=str),
+            "prospective_evidence": evidence,
             "origins": item["origins"],
         })
     return outputs, wip
