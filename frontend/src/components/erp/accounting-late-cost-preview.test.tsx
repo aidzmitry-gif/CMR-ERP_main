@@ -45,6 +45,12 @@ it("sends explicit source currency conversion evidence", async () => {
   expect(JSON.parse(writes[0][1].body).conversion).toEqual({ currency: "USD", rate: "3.2", rate_scale: 1,
     rate_date: "2026-09-10", rate_source: "Synthetic official rate evidence" });
 });
+it("marks FIFO shares as preliminary until the separate V3 package is prepared", async () => {
+  setup({ ...result(), inventory_method: "fifo" }); await fill();
+  fireEvent.click(screen.getByRole("button", { name: "Рассчитать распределение" }));
+  await screen.findByText(/Это предварительное распределение/);
+  expect(screen.getByText(/Окончательный V3-пакет для FIFO/)).toBeInTheDocument();
+});
 it("does not fall back to an earlier configured policy", async () => {
   setup(result(), [policy, { ...policy, id: 3, effective_from: "2026-09-10", late_cost_allocation: null }]);
   await screen.findByText(/не настроено распределение/);

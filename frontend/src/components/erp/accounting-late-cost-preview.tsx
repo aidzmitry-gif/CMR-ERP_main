@@ -100,7 +100,11 @@ export function AccountingLateCostPreview({ org, expenseId, version, initialDate
       </fieldset>
     </form>
     {error && <p role="alert">{error}</p>}
-    {current && <><p role="status">Расчёт готов для проверки. Проведение пока недоступно.</p>
+    {current && <><p role="status">Расчёт готов для проверки. Проводки ещё не созданы.</p>
+      {(current.inventory_method === "fifo" || current.inventory_method === "weighted_average") && <p>
+        Это предварительное распределение. Окончательный V3-пакет для {current.inventory_method === "fifo" ? "FIFO" : "средней стоимости"}
+        формируется сервером после выбора счетов; до его подтверждения себестоимость не является окончательной.
+      </p>}
       {!current.normative_verified && <p>Нормативная применимость политики ещё не подтверждена.</p>}
       <p className="text-sm text-muted md:hidden">Прокрутите таблицу вправо, чтобы увидеть количество и сумму.</p>
       <div role="region" aria-label="Доли дополнительных расходов" tabIndex={0} className="max-w-full overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm"><thead><tr><th>Поступление / строка</th><th>Направление</th><th>Количество</th><th>Расход, BYN</th></tr></thead>
