@@ -15,14 +15,24 @@ from sqlalchemy.exc import DBAPIError
 from core.services.auth import CurrentUser
 from modules.accounting import service
 from modules.accounting.gateway import AccountingService
-from modules.accounting.models import Account, Entry, InventoryIssueReceipt, Line, Policy
+from modules.accounting.models import (
+    Account,
+    Entry,
+    InventoryIssueReceipt,
+    Line,
+    Policy,
+    ZeroValueInventoryDisposalReceipt,
+)
 from modules.accounting.production_material_cost import (
     ProductionMaterialIssuePostingConfirmInput,
     ProductionMaterialIssuePostingInput,
     confirm_material_issue_posting,
+    confirm_material_zero_issue,
     prepare_material_issue_posting,
+    prepare_material_zero_issue,
 )
 from modules.accounting.schemas import LineInput, PostingInput
+from modules.accounting.zero_value_disposals import ProductionMaterialZeroValueDisposalCommand
 from modules.production.accounting_ownership import OwnershipCommand, assign_order, order_snapshot
 from modules.production.models import ProductionOrder
 from modules.wms.models import StockMovement
@@ -143,6 +153,19 @@ async def seed_mixed_inventory_value(factory, pg_book, policy_id):
         await session.commit()
 
 
+async def seed_zero_rounding_inventory_value(factory, pg_book, policy_id):
+    async with factory() as session:
+        await service.post(session, pg_book[0], PostingInput(
+            source="inventory:receipt:material-zero-rounding", source_version=1, operation="inventory_purchase",
+            document_date="2026-10-01", operation_date="2026-10-01", posting_date="2026-10-01",
+            policy_id=policy_id, rule_version="synthetic-receipt-v1", explanation="Synthetic zero material origin", lines=[
+                LineInput(account="10.1", side="debit", amount="0.01", quantity="5.00",
+                          dimensions={"warehouse": "Main", "sku": "MAT-1", "lot": "LOT-1"}),
+                LineInput(account="60", side="credit", amount="0.01", dimensions={}),
+            ]), "tester")
+        await session.commit()
+
+
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
 async def test_material_allocation_requires_migration(pg_factory, pg_book, method):
     policy_id, order_id = await seed_book(pg_factory, pg_book, method)
@@ -151,6 +174,8 @@ async def test_material_allocation_requires_migration(pg_factory, pg_book, metho
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
         await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        with pytest.raises(service.AccountingError, match="migration 0150"):
+            await prepare_material_zero_issue(session, pg_book[0], "2026-10", data, SyntheticProduction())
         with pytest.raises(service.AccountingError, match="migration 0149"):
             await prepare_material_issue_posting(session, pg_book[0], "2026-10", data, SyntheticProduction())
         command = ProductionMaterialIssuePostingConfirmInput.model_validate({
@@ -301,3 +326,66 @@ async def test_second_reviewed_material_issue_accepts_prior_production_issue_mov
         assert binding.request_key == str(second.request_id)
         assert movement.reason == "production_issue" and movement.kind == "out"
         assert replay.id == binding.id and replay_movement.id == movement.id
+
+
+@pytest.mark.parametrize("method", ["fifo", "weighted_average"])
+async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factory, pg_book, method):
+    policy_id, order_id = await seed_book(pg_factory, pg_book, method)
+    await seed_zero_rounding_inventory_value(pg_factory, pg_book, policy_id)
+    _, movement_id, _ = await seed_physical_issue(pg_factory, pg_book, order_id)
+    data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
+    async with pg_factory() as session:
+        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
+                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py",
+                         "0150_zero_material_allocations.py"):
+            await run_migration(session, revision, "upgrade")
+        await session.commit()
+        prepared = await prepare_material_zero_issue(session, pg_book[0], "2026-10", data, SyntheticProduction())
+        assert prepared["inventory_cost"]["issue_cost_byn"] == "0.00"
+        command = prepared["zero_value_receipt"]
+        assert command["command_version"] == 5 and len(command["inventory_layers"]) == 1
+        import json
+        for field, value in (("destination_account", "10.1"), ("operation_date", "2026-10-02")):
+            forged = {**command, field: value}
+            with pytest.raises(DBAPIError):
+                async with session.begin_nested():
+                    await session.scalar(text(
+                        "SELECT accounting.zero_value_material_allocation_basis(:org, CAST(:command AS jsonb), 2147483647)"
+                    ), {"org": pg_book[0], "command": json.dumps(forged)})
+        for field, value in (("binding_id", str(command["material_binding"]["binding_id"])), ("quantity", 2)):
+            forged = {**command, "material_binding": {**command["material_binding"], field: value}}
+            with pytest.raises(DBAPIError):
+                async with session.begin_nested():
+                    await session.scalar(text(
+                        "SELECT accounting.zero_value_material_allocation_basis(:org, CAST(:command AS jsonb), 2147483647)"
+                    ), {"org": pg_book[0], "command": json.dumps(forged)})
+        confirmed = ProductionMaterialIssuePostingConfirmInput.model_validate({
+            **data.model_dump(mode="json"), "basis_digest": prepared["basis_digest"],
+            "digest": service.digest(ProductionMaterialZeroValueDisposalCommand.model_validate(command)),
+        })
+        first = await confirm_material_zero_issue(session, pg_book[0], "2026-10", confirmed, "tester", SyntheticProduction())
+        raw_command = json.dumps(command).replace(
+            f'"binding_id": {command["material_binding"]["binding_id"]}',
+            f'"binding_id": {command["material_binding"]["binding_id"]}e0',
+        )
+        with pytest.raises(DBAPIError, match="canonical JSON integer tokens"):
+            async with session.begin_nested():
+                await session.execute(text("""
+                    INSERT INTO accounting.inventory_zero_value_disposal_receipt
+                    (organization_id,source,source_version,operation,entry_id,posting_date,policy_id,
+                     command,basis_digest,digest,actor)
+                    SELECT organization_id,source,source_version,operation,entry_id,posting_date,policy_id,
+                           CAST(:command AS json),basis_digest,digest,actor
+                    FROM accounting.inventory_zero_value_disposal_receipt WHERE id=:id
+                """), {"command": raw_command, "id": first["receipt_id"]})
+        second = await confirm_material_zero_issue(session, pg_book[0], "2026-10", confirmed, "tester", SyntheticProduction())
+        assert first["receipt_id"] == second["receipt_id"] and first["entry_id"] is None
+        receipt = await session.get(ZeroValueInventoryDisposalReceipt, first["receipt_id"])
+        assert receipt is not None and receipt.entry_id is None
+        await session.commit()
+        with pytest.raises(DBAPIError, match="Cannot downgrade V5"):
+            async with session.begin_nested():
+                await run_migration(session, "0150_zero_material_allocations.py", "downgrade")

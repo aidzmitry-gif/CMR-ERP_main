@@ -57,6 +57,19 @@ def explicit_allocation(document, cost):
 async def prepare(session, org_id, document, *, procurement=None, allow_production_material=False,
                   source_allocations=False):
     _guard_production_material_source(document, allow_production_material)
+    zero_schema = document.source.startswith("production:material:") and session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
+        "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
+    )) is True
+    if zero_schema:
+        from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+        conflict = await session.scalar(select(ZeroValueInventoryDisposalReceipt.id).where(
+            ZeroValueInventoryDisposalReceipt.organization_id == org_id,
+            ZeroValueInventoryDisposalReceipt.source == document.source,
+            ZeroValueInventoryDisposalReceipt.source_version == document.source_version,
+            ZeroValueInventoryDisposalReceipt.operation == "inventory_issue",
+        ).limit(1))
+        if conflict is not None:
+            raise service.AccountingError("Material source identity is already reserved by a zero-value receipt")
     if source_allocations and allow_production_material:
         material_present = session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
             "SELECT to_regprocedure('accounting.production_material_allocation_version()') IS NOT NULL"

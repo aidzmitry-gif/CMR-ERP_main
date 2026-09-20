@@ -250,13 +250,52 @@ class AllocatedZeroValueDisposalCommand(DatedZeroValueDisposalCommand):
         )
 
 
+class ProductionMaterialZeroValueDisposalCommand(AllocatedZeroValueDisposalCommand):
+    """V5 is an explicitly separate, WMS-bound material-to-WIP zero issue.
+
+    Keeping this command separate is intentional: V4's fingerprint is output
+    and expense scoped.  A material receipt must never change how that old
+    history is parsed or authenticated.
+    """
+
+    command_version: Literal[5]
+    material_binding: dict
+
+    @field_validator("command_version", mode="before")
+    @classmethod
+    def exact_command_version(cls, value):
+        if type(value) is not int or value != 5:
+            raise ValueError("Material zero allocation command version must be the integer 5")
+        return value
+
+    @model_validator(mode="after")
+    def bind_material_source(self):
+        if not self.source.startswith("production:material:"):
+            raise ValueError("Material zero allocation requires a production material source")
+        required = {"binding_id", "order_id", "movement_id", "request_key", "warehouse", "sku", "lot", "quantity"}
+        if set(self.material_binding) != required:
+            raise ValueError("Material zero allocation needs an exact WMS binding")
+        if any(type(self.material_binding[key]) is not int or self.material_binding[key] <= 0
+               for key in ("binding_id", "order_id", "movement_id")):
+            raise ValueError("Material zero allocation WMS identities must be positive")
+        if (not isinstance(self.material_binding["request_key"], str) or not self.material_binding["request_key"]
+                or self.material_binding["warehouse"] != self.document["warehouse"]
+                or self.material_binding["sku"] != self.document["sku"]
+                or self.material_binding["lot"] != self.document["lot"]
+                or str(self.material_binding["quantity"]) != format(self.allocation.quantity, ".6f")):
+            raise ValueError("Material zero allocation binding differs from its document")
+        return self
+
+
 def parse_zero_value_command(snapshot: object) -> ZeroValueDisposalCommand:
     if not isinstance(snapshot, dict):
         raise ValueError("Zero-value disposal command must be an object")
     if "command_version" not in snapshot:
         return ZeroValueDisposalCommand.model_validate(snapshot)
-    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3, 4):
+    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3, 4, 5):
         raise ValueError("Unsupported zero-value disposal command version")
+    if snapshot["command_version"] == 5:
+        return ProductionMaterialZeroValueDisposalCommand.model_validate(snapshot)
     if snapshot["command_version"] == 4:
         return AllocatedZeroValueDisposalCommand.model_validate(snapshot)
     if snapshot["command_version"] == 3:
@@ -303,6 +342,10 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
     allocated = isinstance(command, AllocatedZeroValueDisposalCommand)
     if allocated:
         await require_allocated_zero_schema(session)
+    if isinstance(command, ProductionMaterialZeroValueDisposalCommand):
+        ready = await session.scalar(text("SELECT to_regprocedure('accounting.production_material_zero_allocation_version()') IS NOT NULL"))
+        if ready is not True:
+            raise ValueError("Material zero allocation requires migration 0150")
     from modules.accounting.models import Organization, Period, ZeroValueInventoryDisposalReceipt
     from modules.accounting.service import audit, lock_organization, period_for
 
@@ -378,7 +421,8 @@ async def preview_standalone_zero_value_issue_basis(session, organization_id: in
         prior = await load_authenticated_zero_value_disposals(session, organization_id)
         await verify_allocated_zero_selection(session, organization_id, command,
             before_registration_token=2147483647, prior_zeros=prior)
-    basis_function = "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis"
+    basis_function = ("zero_value_material_allocation_basis" if isinstance(command, ProductionMaterialZeroValueDisposalCommand)
+                      else "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis")
     result = await session.scalar(text(
         f"SELECT accounting.{basis_function}(:org, CAST(:command AS jsonb), 2147483647)"
     ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json"))})
@@ -442,7 +486,8 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
         database_digest = await session.scalar(text(
             "SELECT accounting.financial_sha(CAST(:snapshot AS jsonb))"
         ), {"snapshot": canonical_json(snapshot)})
-        basis_function = "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis"
+        basis_function = ("zero_value_material_allocation_basis" if isinstance(command, ProductionMaterialZeroValueDisposalCommand)
+                          else "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis")
         calculated_basis = await session.scalar(text(
             f"SELECT accounting.{basis_function}(:org, CAST(:command AS jsonb), :cutoff)"
         ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json")),
@@ -477,6 +522,10 @@ async def verify_allocated_zero_selection(session, organization_id, command, *,
     )
     from modules.accounting.schemas import InventoryIssuePreviewInput
     from modules.accounting.service import AccountingError
+
+    if isinstance(command, ProductionMaterialZeroValueDisposalCommand):
+        from modules.accounting.production_material_cost import verify_material_zero_binding
+        await verify_material_zero_binding(session, organization_id, command)
 
     data = InventoryIssuePreviewInput.model_validate({key: value for key, value in command.document.items()
                                                       if key in InventoryIssuePreviewInput.model_fields})

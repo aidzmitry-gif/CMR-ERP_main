@@ -33,10 +33,12 @@ async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
             "0148_zero_value_allocated_sales.py",
             "0149_production_material_allocations.py",
+            "0150_zero_material_allocations.py",
         ):
             await run_migration(session, revision, "upgrade")
         assert await session.scalar(text("SELECT accounting.zero_value_allocated_sale_version()")) == 4
         assert await session.scalar(text("SELECT accounting.production_material_allocation_version()")) == 1
+        await run_migration(session, "0150_zero_material_allocations.py", "downgrade")
         await run_migration(session, "0149_production_material_allocations.py", "downgrade")
         await run_migration(session, "0148_zero_value_allocated_sales.py", "downgrade")
         assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocated_sale_version()')")) is None
@@ -59,7 +61,8 @@ async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory,
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
         for revision in ("0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py"):
+                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py",
+                         "0150_zero_material_allocations.py"):
             await run_migration(session, revision, "upgrade")
         if vat_rate == "20":
             for code, category in (("90.2", "income"), ("68.2", "liability")):

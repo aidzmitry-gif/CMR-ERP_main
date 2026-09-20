@@ -210,6 +210,41 @@ def material_issue_document(org_id: int, data: ProductionMaterialIssuePreviewInp
     )
 
 
+def material_zero_binding(binding: ProductionMaterialIssue, movement: StockMovement, data: ProductionMaterialIssuePreviewInput):
+    """Frozen WMS identity carried by the V5 receipt, never inferred at replay."""
+    return {"binding_id": binding.id, "order_id": binding.order_id, "movement_id": movement.id,
+            "request_key": binding.request_key, "warehouse": data.warehouse, "sku": data.sku,
+            "lot": data.lot, "quantity": format(data.quantity, ".6f")}
+
+
+async def verify_material_zero_binding(session, organization_id: int, command):
+    """Re-authenticate a V5 command against immutable WMS facts for replay."""
+    from modules.accounting.zero_value_disposals import ProductionMaterialZeroValueDisposalCommand
+    if not isinstance(command, ProductionMaterialZeroValueDisposalCommand):
+        raise AccountingError("Material zero receipt has an invalid command type")
+    b = command.material_binding
+    policy = await session.scalar(select(Policy).where(
+        Policy.organization_id == organization_id, Policy.id == command.policy_id))
+    if policy is None or policy.production_costing is None:
+        raise AccountingError("Material zero receipt production policy is unavailable")
+    settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
+    data = ProductionMaterialIssuePreviewInput(
+        policy_id=command.policy_id, order_id=b["order_id"],
+        order_analytics=command.destination_dimensions.get(settings.order_dimension, ""),
+        department=command.destination_dimensions.get("department", ""), wms_movement_id=b["movement_id"],
+        posting_date=command.posting_date, account=command.document["account"],
+        warehouse=command.document["warehouse"], sku=command.document["sku"],
+        lot=command.document["lot"], quantity=command.document["quantity"],
+    )
+    month = command.posting_date.strftime("%Y-%m")
+    await _load_policy(session, organization_id, month, data, current=False)
+    _, _, binding, movement = await _load_source(session, organization_id, month, data)
+    expected = material_issue_document(organization_id, data, policy, settings, binding)
+    if (b != material_zero_binding(binding, movement, data)
+            or command.document != expected.model_dump(mode="json")):
+        raise AccountingError("Material zero receipt is not bound to its reviewed WMS source")
+
+
 async def preview_material_issue(session, org_id: int, month: str,
                                  data: ProductionMaterialIssuePreviewInput,
                                  production, procurement=None):
@@ -262,3 +297,76 @@ async def preview_material_issue(session, org_id: int, month: str,
         "scope": "production_material_cost_basis",
     }
     return result
+
+
+async def prepare_material_zero_issue(session, org_id: int, month: str, data: ProductionMaterialIssuePostingInput,
+                                      production, procurement=None):
+    """Prepare the typed V5 receipt; callers must not present it as an Entry."""
+    from modules.accounting.zero_value_disposals import (
+        ProductionMaterialZeroValueDisposalCommand,
+        canonical_json,
+    )
+    present = session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
+        "SELECT to_regprocedure('accounting.production_material_zero_allocation_version()') IS NOT NULL"
+    )) is True
+    if not present or await session.scalar(text(
+        "SELECT accounting.production_material_zero_allocation_version()"
+    )) != 5:
+        raise AccountingError("Zero-value production materials require PostgreSQL migration 0150")
+    review = await preview_material_issue(session, org_id, month, data, production, procurement=procurement)
+    if review["inventory_cost"]["issue_cost_byn"] != "0.00":
+        raise AccountingError("Material zero receipt is only valid for an all-zero allocation")
+    _, _, policy, settings = await _load_policy(session, org_id, month, data, current=True)
+    _, _, binding, movement = await _load_source(session, org_id, month, data)
+    document = material_issue_document(org_id, data, policy, settings, binding)
+    cost = review["inventory_cost"]
+    command = ProductionMaterialZeroValueDisposalCommand(
+        command_version=5, operation="inventory_issue", source=document.source, source_version=document.source_version,
+        posting_date=document.posting_date, document_date=document.document_date, operation_date=document.operation_date,
+        policy_id=document.policy_id, basis_digest="0" * 64, destination_account=document.expense_account,
+        destination_dimensions=document.expense_dimensions, explanation=document.explanation,
+        valuation_method=policy.inventory_method, document=document.model_dump(mode="json"),
+        material_binding=material_zero_binding(binding, movement, data),
+        inventory_layers=[{"source_entry_id": layer["source_entry_id"], "source_line_id": layer["source_line_id"],
+                           "inventory_account": document.account, "inventory_dimensions": layer["dimensions"],
+                           "quantity": layer["quantity"]} for layer in cost["inventory_layers"]],
+    )
+    basis = await session.scalar(text("SELECT accounting.zero_value_material_allocation_basis(:org,CAST(:command AS jsonb),2147483647)"),
+        {"org": org_id, "command": canonical_json(command.model_dump(mode="json"))})
+    if not isinstance(basis, str) or len(basis) != 64:
+        raise AccountingError("Material zero allocation basis is unavailable")
+    command = command.model_copy(update={"basis_digest": basis})
+    return {**review, "zero_value_receipt": command.model_dump(mode="json"), "basis_digest": basis,
+            "digest": service.digest(command),
+            "posting_available": False, "quantity_registered": False, "entry_id": None}
+
+
+async def confirm_material_zero_issue(session, org_id: int, month: str, data: ProductionMaterialIssuePostingConfirmInput,
+                                      actor, production, procurement=None):
+    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+    from modules.accounting.zero_value_disposals import (
+        ProductionMaterialZeroValueDisposalCommand,
+        register_standalone_zero_value_issue,
+    )
+    await lock_organization(session, org_id)
+    _, _, policy, settings = await _load_policy(session, org_id, month, data, current=False)
+    _, _, binding, _ = await _load_source(session, org_id, month, data)
+    document = material_issue_document(org_id, data, policy, settings, binding)
+    existing = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
+        ZeroValueInventoryDisposalReceipt.organization_id == org_id,
+        ZeroValueInventoryDisposalReceipt.source == document.source,
+        ZeroValueInventoryDisposalReceipt.source_version == document.source_version,
+        ZeroValueInventoryDisposalReceipt.operation == "inventory_issue",
+    ))
+    if existing is not None:
+        command = ProductionMaterialZeroValueDisposalCommand.model_validate(existing.command)
+        if command.document != document.model_dump(mode="json"):
+            raise AccountingError("Material zero source was already registered with different content")
+    else:
+        prepared = await prepare_material_zero_issue(session, org_id, month, data, production, procurement=procurement)
+        command = ProductionMaterialZeroValueDisposalCommand.model_validate(prepared["zero_value_receipt"])
+    if command.basis_digest != data.basis_digest or data.digest != service.digest(command):
+        raise AccountingError("Material zero receipt confirmation differs from its review")
+    receipt = await register_standalone_zero_value_issue(session, org_id, actor, command)
+    return {"receipt_id": receipt.id, "entry_id": None, "posted": False, "quantity_registered": True,
+            "basis_digest": receipt.basis_digest, "digest": receipt.digest}
