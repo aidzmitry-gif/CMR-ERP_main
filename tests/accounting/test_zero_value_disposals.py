@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from modules.accounting.zero_value_disposals import (
     ZeroValueDisposalCommand,
+    parse_zero_value_command,
     receipt_digest,
     source_identity,
 )
@@ -63,3 +64,22 @@ def test_distinct_source_lines_with_same_analytics_stay_separate():
     value = command(inventory_layers=layers)
     assert len(value.inventory_layers) == 2
     assert receipt_digest(1, "chief", value) != receipt_digest(1, "chief", original)
+
+
+def test_dated_snapshot_preserves_legacy_digest_and_separate_dates():
+    legacy = command()
+    snapshot = legacy.model_dump(mode="json")
+    decoded = parse_zero_value_command(snapshot)
+    assert decoded.model_dump(mode="json") == snapshot
+    assert receipt_digest(1, "chief", decoded) == receipt_digest(1, "chief", legacy)
+    dated = {**snapshot, "command_version": 2, "document_date": "2026-10-29", "operation_date": "2026-10-30"}
+    decoded = parse_zero_value_command(dated)
+    assert decoded.model_dump(mode="json") == dated
+    assert receipt_digest(1, "chief", decoded) != receipt_digest(1, "chief", legacy)
+    changed = parse_zero_value_command({**dated, "document_date": "2026-10-28"})
+    assert receipt_digest(1, "chief", changed) != receipt_digest(1, "chief", decoded)
+    for invalid in ({**dated, "command_version": 3}, {**dated, "command_version": 2.0},
+                    {**dated, "operation_date": "2026-02-30"},
+                    {key: value for key, value in dated.items() if key != "document_date"}):
+        with pytest.raises(ValueError):
+            parse_zero_value_command(invalid)

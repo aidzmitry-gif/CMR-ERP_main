@@ -1,10 +1,4 @@
-"""Foundation contract for immutable zero-value inventory layer disposals.
-
-No confirmation function lives here yet: callers must not emit a zero-amount
-ledger entry.  The later valuation integration will authenticate this command
-against the SQL guard and either create an entryless issue receipt or bind it
-to an existing sale entry.
-"""
+"""Immutable zero-value disposal commands, persistence and authenticated replay."""
 from __future__ import annotations
 
 import hashlib
@@ -82,6 +76,24 @@ class ZeroValueDisposalCommand(Input):
         return source_identity(self.source, self.source_version, self.operation)
 
 
+class DatedZeroValueDisposalCommand(ZeroValueDisposalCommand):
+    """Version two preserves primary-document dates without changing v1 hashes."""
+
+    command_version: Literal[2]
+    document_date: date
+    operation_date: date
+
+
+def parse_zero_value_command(snapshot: object) -> ZeroValueDisposalCommand:
+    if not isinstance(snapshot, dict):
+        raise ValueError("Zero-value disposal command must be an object")
+    if "command_version" not in snapshot:
+        return ZeroValueDisposalCommand.model_validate(snapshot)
+    if type(snapshot["command_version"]) is not int or snapshot["command_version"] != 2:
+        raise ValueError("Unsupported zero-value disposal command version")
+    return DatedZeroValueDisposalCommand.model_validate(snapshot)
+
+
 def receipt_digest(organization_id: int, actor: str, command: ZeroValueDisposalCommand) -> str:
     """Canonical, exact digest for the full immutable receipt snapshot."""
     if type(organization_id) is not int or organization_id <= 0 or not actor or actor != actor.strip():
@@ -92,7 +104,7 @@ def receipt_digest(organization_id: int, actor: str, command: ZeroValueDisposalC
 
 @dataclass(frozen=True)
 class AuthenticatedZeroValueDisposal:
-    """Trusted internal replay input; a future DB loader must authenticate it."""
+    """Internal replay input authenticated by the database loader."""
     receipt_id: int
     organization_id: int
     posting_date: date
@@ -203,8 +215,8 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
     verified = []
     for row in receipts:
         try:
-            command = ZeroValueDisposalCommand.model_validate(row.command)
-        except ValidationError as exc:
+            command = parse_zero_value_command(row.command)
+        except (ValidationError, ValueError) as exc:
             raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
         if (row.operation != "inventory_issue" or row.entry_id is not None or command.operation != row.operation
             or command.source != row.source or command.source_version != row.source_version

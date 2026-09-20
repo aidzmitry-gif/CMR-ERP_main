@@ -9,6 +9,7 @@ from modules.accounting.schemas import InventoryIssuePreviewInput, LineInput, Po
 from modules.accounting.service import AccountingError
 from modules.accounting.zero_value_disposals import (
     load_authenticated_zero_value_disposals,
+    parse_zero_value_command,
     preview_standalone_zero_value_issue_basis,
     register_standalone_zero_value_issue,
 )
@@ -103,3 +104,22 @@ async def test_loader_requires_0140_schema(pg_factory, pg_book):
     async with pg_factory() as session:
         with pytest.raises(AccountingError, match="migration 0140"):
             await load_authenticated_zero_value_disposals(session, pg_book[0])
+
+
+async def test_loader_preserves_dated_command_after_commit(pg_factory, pg_book):
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+    async with pg_factory() as session:
+        await upgrade_0140(session)
+        draft = parse_zero_value_command({
+            **command(policy_id, output_id, line_id).model_dump(mode="json"),
+            "command_version": 2, "document_date": "2026-10-29", "operation_date": "2026-10-30",
+        })
+        saved = await receipt_with_database_basis(session, pg_book[0], draft)
+        snapshot = saved.command
+        await session.commit()
+    async with pg_factory() as session:
+        loaded, = await load_authenticated_zero_value_disposals(session, pg_book[0])
+        assert loaded.command.model_dump(mode="json") == snapshot
+        assert loaded.command.document_date.isoformat() == "2026-10-29"
+        assert loaded.command.operation_date.isoformat() == "2026-10-30"
+        assert loaded.posting_date.isoformat() == "2026-10-31"
