@@ -74,3 +74,34 @@ def test_ambiguous_or_unsupported_history_is_not_classified_as_stock(kind):
         entries[1][1].lines[1].quantity = Decimal("10")
     with pytest.raises(AccountingError):
         trace_specific_lot(entries, 1, 1, date(2026, 9, 10))
+
+
+def test_material_trace_requires_verified_source_and_separates_production():
+    entries = history(account="20")
+    entries[1][1].source = "production:material:1:reviewed"
+    with pytest.raises(AccountingError, match="expense destination"):
+        trace_specific_lot(entries, 1, 1, date(2026, 9, 10))
+    result = trace_specific_lot(entries, 1, 1, date(2026, 9, 10), verified_material_entries=frozenset({2}))
+    assert result["remaining_quantity"] == "6.000000"
+    assert result["production_quantity"] == "4.000000"
+    assert result["disposed_quantity"] == "0.000000" and result["disposals"] == []
+    assert result["production_disposals"][0]["expense_account"] == "20"
+    assert result["production_disposals"][0]["expense_dimensions"] == {"order": "CUSTOMER"}
+    assert result["posted"] is False
+
+
+@pytest.mark.parametrize("kind", ["unbound", "sale", "missing", "foreign_lot"])
+def test_material_trace_rejects_unrelated_verified_identity(kind):
+    entries = history(account="20")
+    entries[1][1].source = "production:material:1:reviewed"
+    identities = frozenset({2})
+    if kind == "unbound":
+        entries[1][1].source = "manual:1"
+    elif kind == "sale":
+        entries[1][1].operation = "inventory_sale"
+    elif kind == "missing":
+        identities = frozenset({3})
+    else:
+        entries[1][1].lines[1].dimensions["lot"] = "OTHER"
+    with pytest.raises(AccountingError):
+        trace_specific_lot(entries, 1, 1, date(2026, 9, 10), verified_material_entries=identities)

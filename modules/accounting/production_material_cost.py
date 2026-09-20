@@ -220,6 +220,48 @@ def material_zero_binding(binding: ProductionMaterialIssue, movement: StockMovem
             "lot": data.lot, "quantity": format(data.quantity, ".6f")}
 
 
+async def verify_material_issue_receipt(session, organization_id: int, entry_id: int, *, procurement=None):
+    """Authenticate the saved monetary issue against its exact physical source."""
+    from modules.accounting.models import Entry, InventoryIssueReceipt
+
+    await lock_organization(session, organization_id)
+    receipt = await session.get(InventoryIssueReceipt, entry_id)
+    entry = await session.get(Entry, entry_id)
+    if (receipt is None or entry is None or receipt.organization_id != organization_id
+            or entry.organization_id != organization_id):
+        raise AccountingError("Material issue receipt is unavailable in this organization")
+    document = InventoryIssueDocument.model_validate(receipt.command)
+    prefix = f"production:material:{organization_id}:"
+    if not document.source.startswith(prefix) or not document.source[len(prefix):]:
+        raise AccountingError("Material issue receipt has an invalid source")
+    binding = (await session.scalars(select(ProductionMaterialIssue).where(
+        ProductionMaterialIssue.organization_id == organization_id,
+        ProductionMaterialIssue.request_key == document.source[len(prefix):],
+    ).with_for_update().execution_options(populate_existing=True))).one_or_none()
+    if binding is None:
+        raise AccountingError("Material issue receipt WMS binding is unavailable")
+    policy = await session.scalar(select(Policy).where(
+        Policy.organization_id == organization_id, Policy.id == document.policy_id))
+    if policy is None or policy.production_costing is None:
+        raise AccountingError("Material issue receipt production policy is unavailable")
+    settings = ProductionCostPolicyInput.model_validate(policy.production_costing)
+    data = ProductionMaterialIssuePreviewInput(
+        policy_id=document.policy_id, order_id=binding.order_id,
+        order_analytics=document.expense_dimensions.get(settings.order_dimension, ""),
+        department=document.expense_dimensions.get("department", ""),
+        wms_movement_id=binding.movement_id, posting_date=document.posting_date,
+        account=document.account, warehouse=document.warehouse, sku=document.sku,
+        lot=document.lot, quantity=document.quantity,
+    )
+    month = document.posting_date.strftime("%Y-%m")
+    await _load_policy(session, organization_id, month, data, current=False)
+    _, _, binding, _ = await _load_source(session, organization_id, month, data)
+    if document != material_issue_document(organization_id, data, policy, settings, binding):
+        raise AccountingError("Material issue receipt is not bound to its reviewed WMS source")
+    return await inventory_issues.verify_receipt(
+        session, organization_id, entry_id, procurement=procurement, allow_production_material=True)
+
+
 async def verify_material_zero_binding(session, organization_id: int, command):
     """Re-authenticate a V5 command against immutable WMS facts for replay."""
     from modules.accounting.zero_value_disposals import ProductionMaterialZeroValueDisposalCommand

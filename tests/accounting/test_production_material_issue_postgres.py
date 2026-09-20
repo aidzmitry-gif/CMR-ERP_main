@@ -30,6 +30,7 @@ from modules.accounting.production_material_cost import (
     confirm_material_zero_issue,
     prepare_material_issue_posting,
     prepare_material_zero_issue,
+    verify_material_issue_receipt,
 )
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.accounting.zero_value_disposals import ProductionMaterialZeroValueDisposalCommand
@@ -249,6 +250,15 @@ async def test_material_issue_posts_one_reviewed_wip_package(pg_factory, pg_book
         assert await session.scalar(select(func.count()).select_from(Entry).where(
             Entry.operation == "inventory_issue")) == 1
         assert await session.scalar(select(func.count()).select_from(InventoryIssueReceipt)) == 1
+        verified = await verify_material_issue_receipt(session, pg_book[0], first)
+        assert service.digest(verified) == entry.digest
+        from modules.accounting.models import Organization
+
+        foreign = Organization(id=9001, name="Synthetic foreign company", unp="888888888")
+        session.add(foreign)
+        await session.flush()
+        with pytest.raises(service.AccountingError, match="unavailable in this organization"):
+            await verify_material_issue_receipt(session, foreign.id, first)
         with pytest.raises(DBAPIError, match="immutable"):
             await session.execute(text(
                 "DELETE FROM accounting.inventory_issue_receipt WHERE entry_id=:entry"
@@ -421,3 +431,62 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
             assert response.json()["entry_id"] is None and response.json()["quantity_registered"] is True
             assert response.json()["digest"] == confirmed.digest
             assert response.json()["posted"] is False
+
+async def test_purchased_material_late_expense_authenticates_production_history(pg_factory, pg_book):
+    from modules.accounting.late_cost_sources import expense_history
+    from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
+    from modules.procurement.receipt_documents import (
+        ReceiptAccounts,
+        ReceiptConfirm,
+        ReceiptCreate,
+        confirm_receipt,
+        create_document,
+        preview_document,
+    )
+    from modules.procurement.source_gateway import ProcurementSourceService
+
+    policy_id, order_id = await seed_book(pg_factory, pg_book)
+    gateway, procurement = AccountingService(), ProcurementSourceService()
+    user = CurrentUser("tester", ["director"])
+    async with pg_factory() as session:
+        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        primary = ReceiptCreate.model_validate({"key": "material-late-origin", "document": {
+            "currency": "BYN", "invoice_reference": "material-late-origin",
+            "document_date": "2026-10-01", "operation_date": "2026-10-01",
+            "supplier": "supplier", "contract": "contract", "warehouse": "Main",
+            "explanation": "Synthetic purchased materials", "items": [{
+                "sku": "MAT-1", "lot": "LOT-1", "quantity": "5", "net_amount": "31.25",
+                "vat_rate": "0", "vat_amount": "0", "vat_basis": "Synthetic"}]}})
+        receipt = await create_document(pg_book[0], primary, (session, "tester"), (session, gateway, user))
+        options = ReceiptAccounts(expected_version=1, posting_date="2026-10-01", policy_id=policy_id,
+                                  settlement_account="60", vat_account=None, inventory_accounts=["10.1"])
+        prepared = await preview_document(pg_book[0], receipt["id"], options, (session, gateway, user))
+        await confirm_receipt(session, pg_book[0], receipt["id"], ReceiptConfirm.model_validate({
+            **options.model_dump(mode="json"), "digest": prepared["digest"]}), user, gateway, None)
+        await session.commit()
+    _, movement_id, _ = await seed_physical_issue(pg_factory, pg_book, order_id)
+    data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
+    async with pg_factory() as session:
+        prepared = await prepare_material_issue_posting(
+            session, pg_book[0], "2026-10", data, SyntheticProduction(), procurement=procurement)
+        material = await confirm_material_issue_posting(session, pg_book[0], "2026-10",
+            ProductionMaterialIssuePostingConfirmInput.model_validate({**data.model_dump(mode="json"),
+                "basis_digest": prepared["basis_digest"], "digest": prepared["digest"]}),
+            "tester", procurement=procurement)
+        expense, _ = await save_document(session, gateway, user, pg_book[0], AdditionalExpenseCreate.model_validate({
+            "key": "material-late-freight", "document": {
+                "invoice_reference": "freight", "document_date": "2026-10-11", "operation_date": "2026-10-11",
+                "supplier": "carrier", "contract": "freight", "currency": "BYN", "amount": "5.00",
+                "explanation": "Synthetic late freight", "receipt_lines": [{
+                    "receipt_id": receipt["id"], "version": 1, "line_number": 1}]}}))
+        await session.commit()
+        history = await expense_history(session, pg_book[0], expense.id, 1, date(2026, 10, 11), procurement)
+        lot = history["lots"][0]
+        assert Decimal(lot["received_quantity"]) == 5
+        assert Decimal(lot["remaining_quantity"]) == 3
+        assert Decimal(lot["production_quantity"]) == 2
+        assert Decimal(lot["disposed_quantity"]) == 0
+        assert lot["production_disposals"][0]["entry_id"] == material.id
+        assert lot["production_disposals"][0]["expense_account"] == "20"
+        replay = await expense_history(session, pg_book[0], expense.id, 1, date(2026, 10, 11), procurement)
+        assert replay == history

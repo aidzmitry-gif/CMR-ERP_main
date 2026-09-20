@@ -113,6 +113,8 @@ async def expense_history(session, organization_id, expense_id, expected_version
         disposals = {entry.id for entry, line in affected if line.side == "credit"}
         from modules.accounting.inventory_issues import verify_receipt
         issue_ids = {entry.id for entry, line in affected if line.side == "credit" and entry.operation == "inventory_issue"}
+        material_ids = {entry.id for entry, _ in affected
+                        if entry.id in issue_ids and entry.source.startswith("production:material:")}
         sale_ids = set((await session.scalars(select(InventorySaleReceipt.entry_id).where(
             InventorySaleReceipt.organization_id == organization_id,
             InventorySaleReceipt.entry_id.in_(disposals - issue_ids)))).all())
@@ -122,12 +124,20 @@ async def expense_history(session, organization_id, expense_id, expected_version
         for sale_id in sale_ids:
             verified[sale_id] = await verify_sale(session, organization_id, sale_id, procurement=procurement)
         for issue_id in issue_ids:
-            verified[issue_id] = await verify_receipt(session, organization_id, issue_id, procurement=procurement)
+            if issue_id in material_ids:
+                from modules.accounting.production_material_cost import (
+                    verify_material_issue_receipt,
+                )
+
+                verified[issue_id] = await verify_material_issue_receipt(
+                    session, organization_id, issue_id, procurement=procurement)
+            else:
+                verified[issue_id] = await verify_receipt(session, organization_id, issue_id, procurement=procurement)
         acquisition = await session.get(Entry, link["entry_id"])
         verified[acquisition.id] = await actual_posting(session, acquisition)
         verified.update(verified_costs)
         trace = trace_specific_lot(list(verified.items()), acquisition.id, link["acquisition_line"], on,
-            verified_cost_entries=frozenset(verified_costs))
+            verified_cost_entries=frozenset(verified_costs), verified_material_entries=frozenset(material_ids))
         traces.append({"receipt_id": link["receipt_id"], "version": link["version"], "line_number": link["line_number"], **trace})
         for entry, _ in affected:
             evidence[entry.id] = entry.digest
