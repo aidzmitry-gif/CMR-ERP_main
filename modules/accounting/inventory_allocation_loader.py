@@ -83,7 +83,8 @@ def _replaced_credit_line_ids(lines, account, allocation):
     return tuple(line.id for line in credits)
 
 
-async def load_authenticated_inventory_dispositions(session, organization_id: int, *, before_entry_id: int | None = None):
+async def load_authenticated_inventory_dispositions(session, organization_id: int, *, before_entry_id: int | None = None,
+                                                    procurement=None):
     """Return only strict-marker receipt allocations, authenticated against live DB rows.
 
     This is internal replay groundwork. It neither enables a write path nor
@@ -98,7 +99,7 @@ async def load_authenticated_inventory_dispositions(session, organization_id: in
     rows = list((await session.execute(issue_query)).all()) + list((await session.execute(sale_query)).all())
     result = []
     seen_entries, seen_lines = set(), set()
-    for entry, receipt in sorted(rows, key=lambda row: (row[0].posting_date, row[0].id)):
+    for entry, receipt in sorted(rows, key=lambda row: row[0].id):
         if before_entry_id is not None and entry.id >= before_entry_id:
             continue
         if not isinstance(receipt.cost, dict):
@@ -157,5 +158,37 @@ async def load_authenticated_inventory_dispositions(session, organization_id: in
                                                   entry.source, entry.source_version, allocation, line_ids,
                                                   _snapshot_digest(snapshot), document.lot)
         event.verify_snapshot()
+        await _verify_historical_cost(session, entry, receipt, document, policy, tuple(result), procurement)
         result.append(event)
     return tuple(result)
+
+
+async def _verify_historical_cost(session, entry, receipt, document, policy, prior_events, procurement):
+    """Rebuild the saved preview from only evidence registered before this entry."""
+    from modules.accounting.inventory_cost import issue_result
+    from modules.accounting.late_cost_receipts import verified_value_lines
+    from modules.accounting.production_output_inventory import (
+        is_finished_goods_account,
+        verified_output_lines,
+    )
+    from modules.accounting.schemas import InventoryIssuePreviewInput
+    from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
+
+    rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+        Entry.organization_id == entry.organization_id, Entry.id < entry.id,
+        Line.account_code == document.account,
+    ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+    values = await verified_value_lines(session, entry.organization_id, rows, procurement)
+    finished = is_finished_goods_account(policy, document.account)
+    outputs = await verified_output_lines(session, entry.organization_id, policy, document.account,
+        entry.posting_date, {"warehouse": document.warehouse, "sku": document.sku, "lot": document.lot},
+        before_entry_id=entry.id) if finished else frozenset()
+    zeros = await available_authenticated_zero_value_disposals(session, entry.organization_id,
+                                                               before_registration_token=entry.id)
+    request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
+    calculated = issue_result(policy, rows, entry.organization_id, request, verified_value_lines=values,
+        verified_output_lines=outputs, finished_goods=finished, zero_value_disposals=zeros,
+        authenticated_dispositions=prior_events, before_registration_token=entry.id, include_source_identity=True)
+    calculated["source_allocation_version"] = 1
+    if json.loads(json.dumps(calculated, default=str)) != receipt.cost:
+        raise AccountingError("Inventory allocation saved cost differs from its historical calculation")

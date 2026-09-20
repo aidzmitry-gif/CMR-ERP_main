@@ -83,6 +83,12 @@ async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_p
                                      method="weighted_average", sale=False):
     """Synthetic immutable mixed-cent receipt -> loader -> next weighted issue replay."""
     async with pg_factory() as session:
+        from sqlalchemy import text
+
+        from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
         policy_id = (await session.scalar(select(func.max(models.Policy.id))) or 0) + 1
         account_id = (await session.scalar(select(func.max(models.Account.id))) or 0) + 1
         policy = models.Policy(id=policy_id, organization_id=pg_book[0], effective_from=date(2026, 2, 1),
