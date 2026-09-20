@@ -347,6 +347,23 @@ async def preview_issue(session, org_id, data, *, procurement=None):
                         verified_output_lines=output_lines, finished_goods=finished_goods)
 
 
+async def replay_issue_result(session, policy, rows, org_id, data, *, verified_value_lines=frozenset(),
+                              verified_output_lines=frozenset(), finished_goods=False,
+                              before_registration_token=None):
+    """Internal-only replay using DB-authenticated entryless zero-value receipts.
+
+    This deliberately is not wired into public preview routes until their
+    correction and late-cost contracts can carry the registration cutoff.
+    """
+    from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
+
+    receipts = await load_authenticated_zero_value_disposals(
+        session, org_id, before_registration_token=before_registration_token)
+    return issue_result(policy, rows, org_id, data, verified_value_lines=verified_value_lines,
+                        verified_output_lines=verified_output_lines, finished_goods=finished_goods,
+                        zero_value_disposals=receipts, before_registration_token=before_registration_token)
+
+
 def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset(),
                  verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
                  before_registration_token=None):

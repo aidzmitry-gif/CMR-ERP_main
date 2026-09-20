@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select, text
 
 from modules.accounting.schemas import Code, Input, Quantity
@@ -172,3 +172,60 @@ async def preview_standalone_zero_value_issue_basis(session, organization_id: in
     if not isinstance(result, str) or len(result) != 64:
         raise ValueError("Database did not return a valid zero-value disposal basis")
     return result
+
+
+async def load_authenticated_zero_value_disposals(session, organization_id: int, *,
+                                                  before_registration_token: int | None = None):
+    """Load and re-authenticate durable receipts for internal valuation replay.
+
+    ``before_registration_token`` excludes registrations made after an original
+    ledger entry, but deliberately does not filter dates: an already-registered
+    future-dated receipt must remain visible to chronological replay validation.
+    """
+    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+    from modules.accounting.service import AccountingError, lock_organization
+
+    if before_registration_token is not None and (type(before_registration_token) is not int
+                                                   or before_registration_token <= 0):
+        raise ValueError("Historical zero-value replay cutoff must be a positive registration token")
+    await lock_organization(session, organization_id)
+    schema_present = await session.scalar(text(
+        "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
+    ))
+    if schema_present is not True:
+        raise AccountingError("Zero-value disposal migration 0140 is required for authenticated replay")
+    query = select(ZeroValueInventoryDisposalReceipt).where(
+        ZeroValueInventoryDisposalReceipt.organization_id == organization_id,
+    ).order_by(ZeroValueInventoryDisposalReceipt.registration_token, ZeroValueInventoryDisposalReceipt.id)
+    if before_registration_token is not None:
+        query = query.where(ZeroValueInventoryDisposalReceipt.registration_token < before_registration_token)
+    receipts = (await session.scalars(query)).all()
+    verified = []
+    for row in receipts:
+        try:
+            command = ZeroValueDisposalCommand.model_validate(row.command)
+        except ValidationError as exc:
+            raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
+        if (row.operation != "inventory_issue" or row.entry_id is not None or command.operation != row.operation
+            or command.source != row.source or command.source_version != row.source_version
+            or command.posting_date != row.posting_date or command.policy_id != row.policy_id
+            or command.basis_digest != row.basis_digest):
+            raise AccountingError("Zero-value disposal receipt header does not match its snapshot")
+        snapshot = {"organization_id": organization_id, "actor": row.actor, "command": command.model_dump(mode="json")}
+        database_digest = await session.scalar(text(
+            "SELECT accounting.financial_sha(CAST(:snapshot AS jsonb))"
+        ), {"snapshot": canonical_json(snapshot)})
+        calculated_basis = await session.scalar(text(
+            "SELECT accounting.zero_value_disposal_basis(:org, CAST(:command AS jsonb), :cutoff)"
+        ), {"org": organization_id, "command": canonical_json(command.model_dump(mode="json")),
+            "cutoff": row.registration_token})
+        if row.digest != database_digest or row.basis_digest != calculated_basis:
+            raise AccountingError("Zero-value disposal receipt digest or historical basis changed")
+        try:
+            verified.append(AuthenticatedZeroValueDisposal(
+                receipt_id=row.id, organization_id=row.organization_id, posting_date=row.posting_date,
+                registration_token=row.registration_token, actor=row.actor, command=command, digest=row.digest,
+            ))
+        except ValueError as exc:
+            raise AccountingError("Zero-value disposal receipt cannot be authenticated for replay") from exc
+    return tuple(verified)
