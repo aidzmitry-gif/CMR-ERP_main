@@ -84,13 +84,46 @@ class DatedZeroValueDisposalCommand(ZeroValueDisposalCommand):
     operation_date: date
 
 
+class ZeroValueSaleCommand(DatedZeroValueDisposalCommand):
+    """Full sale intent; persistence additionally binds its monetary Entry."""
+
+    command_version: Literal[3]
+    operation: Literal["inventory_sale"]
+    sale_document: dict
+
+    @model_validator(mode="after")
+    def bind_sale_document(self):
+        from modules.accounting.sales import SaleDocument, commercial_lines
+
+        sale = SaleDocument.model_validate(self.sale_document)
+        commercial_lines(sale)
+        for name in ("source", "source_version", "document_date", "operation_date",
+                     "posting_date", "policy_id", "explanation"):
+            if getattr(sale, name) != getattr(self, name):
+                raise ValueError(f"Zero-value sale {name} differs from its quantity command")
+        if (sale.expense_account != self.destination_account
+                or sale.expense_dimensions != self.destination_dimensions
+                or not (sale.expense_account == "90.4" or sale.expense_account.startswith("90.4."))):
+            raise ValueError("Zero-value sale must bind its cost destination to account 90.4")
+        if len(self.inventory_layers) != 1:
+            raise ValueError("Zero-value sale currently requires one specific source layer")
+        layer, = self.inventory_layers
+        if (layer.inventory_account != sale.account or layer.quantity != sale.quantity
+                or layer.inventory_dimensions != {"warehouse": sale.warehouse, "sku": sale.sku, "lot": sale.lot}):
+            raise ValueError("Zero-value sale quantity or inventory identity differs")
+        self.sale_document = sale.model_dump(mode="json")
+        return self
+
+
 def parse_zero_value_command(snapshot: object) -> ZeroValueDisposalCommand:
     if not isinstance(snapshot, dict):
         raise ValueError("Zero-value disposal command must be an object")
     if "command_version" not in snapshot:
         return ZeroValueDisposalCommand.model_validate(snapshot)
-    if type(snapshot["command_version"]) is not int or snapshot["command_version"] != 2:
+    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3):
         raise ValueError("Unsupported zero-value disposal command version")
+    if snapshot["command_version"] == 3:
+        return ZeroValueSaleCommand.model_validate(snapshot)
     return DatedZeroValueDisposalCommand.model_validate(snapshot)
 
 
@@ -231,11 +264,16 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
             command = parse_zero_value_command(row.command)
         except (ValidationError, ValueError) as exc:
             raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
-        if (row.operation != "inventory_issue" or row.entry_id is not None or command.operation != row.operation
+        linked_sale = isinstance(command, ZeroValueSaleCommand) and row.operation == "inventory_sale"
+        valid_kind = (linked_sale and row.entry_id == row.registration_token) or (
+            row.operation == "inventory_issue" and row.entry_id is None)
+        if (not valid_kind or command.operation != row.operation
             or command.source != row.source or command.source_version != row.source_version
             or command.posting_date != row.posting_date or command.policy_id != row.policy_id
             or command.basis_digest != row.basis_digest):
             raise AccountingError("Zero-value disposal receipt header does not match its snapshot")
+        if linked_sale:
+            await session.execute(text("SELECT accounting.validate_zero_sale_link(:entry)"), {"entry": row.entry_id})
         snapshot = {"organization_id": organization_id, "actor": row.actor, "command": command.model_dump(mode="json")}
         database_digest = await session.scalar(text(
             "SELECT accounting.financial_sha(CAST(:snapshot AS jsonb))"

@@ -4,14 +4,15 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from modules.accounting import inventory_issues, service
+from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.models import Entry, InventorySaleReceipt
 from modules.accounting.schemas import (
     Code,
     Input,
     InventoryIssueDocument,
+    InventoryIssuePreviewInput,
     LineInput,
     Money,
     PostingInput,
@@ -84,6 +85,10 @@ def posting_for(document, cost):
     if not belongs(document.expense_account, "90.4"):
         raise service.AccountingError("Pilot sale requires cost account 90.4")
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
+    if Decimal(cost["issue_cost_byn"]) == 0:
+        return PostingInput(**issue.model_dump(include={"source", "source_version", "document_date",
+            "operation_date", "posting_date", "policy_id", "explanation"}), operation="inventory_sale",
+            rule_version=rule_version(document, cost["basis_digest"]), lines=lines)
     issue_posting = inventory_issues.posting_for(issue, cost)
     lines += issue_posting.lines
     return PostingInput(**{**issue_posting.model_dump(exclude={"lines", "operation", "rule_version"}),
@@ -94,7 +99,13 @@ def posting_for(document, cost):
 async def prepare(session, org_id, document, *, procurement=None):
     _, vat, gross = commercial_lines(document)
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
-    cost, _ = await inventory_issues.prepare(session, org_id, issue, procurement=procurement)
+    cost_request = InventoryIssuePreviewInput(**issue.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
+    cost = await inventory_cost.preview_issue(session, org_id, cost_request, procurement=procurement)
+    zero_command = None
+    if Decimal(cost["issue_cost_byn"]) == 0:
+        zero_command = await prepare_zero_command(session, org_id, document, procurement=procurement)
+    else:
+        cost, _ = await inventory_issues.prepare(session, org_id, issue, procurement=procurement)
     posting = posting_for(document, cost)
     accounts, _ = await service.validate_posting(session, org_id, posting, inventory_sale=True)
     roles = {document.buyer_account: "asset", document.revenue_account: "income"}
@@ -104,10 +115,32 @@ async def prepare(session, org_id, document, *, procurement=None):
         account = accounts[code]
         if account.category != category or account.cash or account.quantity_tracking:
             raise service.AccountingError("Sale accounts need noncash, nonquantitative roles; VAT 90.2 must reduce income")
-    return {"cost": cost, "posting": posting.model_dump(mode="json"), "digest": service.digest(posting),
+    result = {"cost": cost, "posting": posting.model_dump(mode="json"), "digest": service.digest(posting),
             "net_amount_byn": format(document.net_amount, ".2f"), "vat_amount_byn": format(vat, ".2f"),
             "gross_amount_byn": format(gross, ".2f"), "posted": False, "statutory_certified": False,
             "vat_treatment_verified": False}
+    if zero_command is not None:
+        result["zero_value_command"] = zero_command.model_dump(mode="json")
+    return result
+
+
+async def prepare_zero_command(session, org_id, document, *, procurement=None):
+    from modules.accounting.specific_zero_value_issue import implicit_document, preview
+    from modules.accounting.zero_value_disposals import ZeroValueSaleCommand, canonical_json
+
+    if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_zero_sale_link(integer)') IS NOT NULL")):
+        raise service.AccountingError("Zero-value sale requires migration 0143")
+    issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
+    explicit = await implicit_document(session, org_id, issue, procurement=procurement)
+    if explicit is None:
+        raise service.AccountingError("Zero-value sale requires a zero-cost source")
+    # Reuse source, destination and policy authentication without creating an issue.
+    checked = await preview(session, org_id, explicit, "sale-preview")
+    command = ZeroValueSaleCommand.model_validate({**checked["command"], "command_version": 3,
+        "operation": "inventory_sale", "sale_document": document.model_dump(mode="json")})
+    basis = await session.scalar(text("SELECT accounting.zero_value_disposal_basis(:org,CAST(:command AS jsonb),2147483647)"),
+                                 {"org": org_id, "command": canonical_json(command.model_dump(mode="json"))})
+    return command.model_copy(update={"basis_digest": basis})
 
 
 async def verify_receipt(session, organization_id, entry_id, *, procurement=None):
@@ -120,6 +153,8 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
         raise service.AccountingError("Inventory sale has no matching source receipt")
     document = SaleDocument.model_validate(receipt.command)
     cost = await inventory_issues.historical_cost(session, organization_id, entry_id, document, procurement=procurement)
+    if Decimal(cost["issue_cost_byn"]) == 0:
+        await session.execute(text("SELECT accounting.validate_zero_sale_link(:entry)"), {"entry": entry_id})
     expected = posting_for(document, cost)
     if (json.loads(json.dumps(cost, default=str)) != receipt.cost
         or PostingInput.model_validate(receipt.posting).model_dump() != expected.model_dump()
@@ -148,5 +183,14 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
     session.add(InventorySaleReceipt(entry_id=entry.id, organization_id=org_id,
         command=document.model_dump(mode="json"), cost=json.loads(json.dumps(prepared["cost"], default=str)),
         posting=prepared["posting"], digest=digest, actor=actor))
+    if "zero_value_command" in prepared:
+        from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+        from modules.accounting.zero_value_disposals import ZeroValueSaleCommand, receipt_digest
+
+        command = ZeroValueSaleCommand.model_validate(prepared["zero_value_command"])
+        session.add(ZeroValueInventoryDisposalReceipt(organization_id=org_id, entry_id=entry.id,
+            source=command.source, source_version=command.source_version, operation="inventory_sale",
+            posting_date=command.posting_date, policy_id=command.policy_id, command=command.model_dump(mode="json"),
+            basis_digest=command.basis_digest, digest=receipt_digest(org_id, actor, command), actor=actor))
     await session.flush()
     return entry
