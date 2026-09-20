@@ -4,7 +4,7 @@
 
 - Неразнесённая строка — expense/BYN строка организации в месяце, у которой `expense_article_id` отсутствует либо не найден в текущем справочнике; cash-срез дополнительно требует `Line.cash=true`. См. [expenses.py](../../modules/accounting/expenses.py) и [test_expense_control.py](../../tests/accounting/test_expense_control.py).
 - Реестр ограничен организацией, posting date, basis и keyset `Line.id`; он не выводит статью по счёту или контрагенту. См. [expenses.py](../../modules/accounting/expenses.py).
-- Группы и статьи принадлежат организации; бюджет имеет год, basis и snapshot статьи. См. [expense_control.py](../../modules/accounting/expense_control.py) и [expenses.py](../../modules/accounting/expenses.py).
+- Группы и статьи принадлежат организации; бюджет имеет год, basis и snapshot статьи. См. [expense_models.py](../../modules/accounting/expense_models.py) и [expenses.py](../../modules/accounting/expenses.py).
 - Проведённые `Entry`/`Line` являются историей; прямое изменение строки не является допустимой коррекцией. См. [models.py](../../modules/accounting/models.py) и [test_expense_control.py](../../tests/accounting/test_expense_control.py).
 
 ## PROPOSAL: append-only атрибуция
