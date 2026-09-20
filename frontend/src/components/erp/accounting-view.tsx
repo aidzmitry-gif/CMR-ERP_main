@@ -40,6 +40,7 @@ type Trial = ExportTrial;
 type Movement = AccountMovement;
 type Report = { from: string; to: string; organization_id: number; status: string; pending_documents: number; review_items?: { code: string; count: number; message: string }[]; trial_balance: Trial[]; movements: Movement[]; opening_movements: Movement[]; balance: Record<string, string>; pnl: { income: string; expenses: string; profit: string }; cashflow: Record<string, string> };
 type EntryDetail = { id: number; operation: string; source: string; explanation: string; posting_date: string; document_date: string; operation_date: string; created_at: string; source_version: number; rule_version: string; correction_of: number | null; lines: (CurrencyFields & { id: number; account_code: string; account_title: string; side: string; amount: string; dimensions: Record<string, string> })[] };
+const organizationHint = (value: string | undefined) => value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : undefined;
 
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", employee: "Сотрудник", asset: "Основное средство", department: "Подразделение", owner: "Владелец", serial: "Серийный номер" };
 
@@ -55,7 +56,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-export function AccountingView() {
+export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
   const today = new Date().toISOString().slice(0, 10);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [organizationRefresh, setOrganizationRefresh] = useState(0);
@@ -91,9 +92,9 @@ export function AccountingView() {
 
   useEffect(() => {
     let active = true;
-    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizations(rows); setOrg((current) => rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : ""); } }).catch((e: Error) => { if (active) setError(e.message); });
+    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizations(rows); setOrg((current) => { const hint = organizationHint(suggestedOrg); if (hint && rows.some((row) => String(row.id) === hint)) return hint; return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : ""; }); } }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
-  }, [organizationRefresh]);
+  }, [organizationRefresh, suggestedOrg]);
 
   const refresh = useCallback(async () => {
     const token = ++generation.current;

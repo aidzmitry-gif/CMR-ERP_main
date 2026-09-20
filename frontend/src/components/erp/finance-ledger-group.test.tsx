@@ -27,7 +27,7 @@ it("показывает доступные книги, частичную ош�
   expect(screen.getByText("50.00 BYN")).toBeInTheDocument();
   expect(screen.getByText(/Нет доступа к отчёту второй компании/)).toBeInTheDocument();
   expect(screen.getByText(/Отчёты с ошибкой: 1; они не заменены нулями/)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Открыть отчёт; выберите Первая компания" })).toHaveAttribute("href", "/erp/accounting");
+  expect(screen.getByRole("link", { name: "Открыть отчёт Первая компания" })).toHaveAttribute("href", "/erp/accounting?org=1");
 });
 
 it("явно помечает сумму отдельных результатов как не-консолидацию", async () => {

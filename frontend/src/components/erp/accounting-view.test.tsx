@@ -28,6 +28,20 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingView", () => {
+  it("предвыбирает доступную книгу из org query-hint после загрузки", async () => {
+    render(<AccountingView suggestedOrg="2" />);
+    await screen.findByRole("option", { name: "Вторая компания · 888888888" });
+    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/reports?"))).toBe(true);
+  });
+
+  it.each(["0", "not-an-id", "9007199254740992", "3"])("игнорирует недопустимый или недоступный org hint %s", async (suggestedOrg) => {
+    render(<AccountingView suggestedOrg={suggestedOrg} />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("1"));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/3/reports?"))).toBe(false);
+  });
+
   it("opens an inventory_purchase source inside accounting", async () => {
     const original = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5")

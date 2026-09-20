@@ -56,6 +56,7 @@ vi.mock("@/components/erp/office-view", () => ({
   OfficeView: ({ board }: { board: React.ReactNode }) => <div>{board}</div>,
 }));
 vi.mock("@/components/erp/finance-view", () => ({ FinanceView: () => <div>finance-view</div> }));
+vi.mock("@/components/erp/accounting-view", () => ({ AccountingView: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>accounting-view:{suggestedOrg ?? ""}</div> }));
 // MarketingPage рендерит ModuleBoard + отдельный async-board кампаний — мокаем последний.
 vi.mock("@/components/erp/marketing-campaign-board", () => ({
   MarketingCampaignBoard: () => <div>campaign-board</div>,
@@ -91,6 +92,7 @@ import LeadsPage from "@/app/crm/leads/page";
 import OwnerPage from "@/app/crm/owner/page";
 import AnalyticsPage from "@/app/erp/analytics/page";
 import FinancePage from "@/app/erp/finance/page";
+import AccountingPage from "@/app/erp/accounting/page";
 import HrPage from "@/app/erp/hr/page";
 import LogisticsPage from "@/app/erp/logistics/page";
 import MarketingPage from "@/app/erp/marketing/page";
@@ -222,6 +224,14 @@ describe("страницы (src/app)", () => {
   it("FinancePage монтирует финансовый view (bespoke)", () => {
     render(<FinancePage />);
     expect(screen.getByText("finance-view")).toBeInTheDocument();
+  });
+
+  it("AccountingPage передаёт только одиночный строковый org", async () => {
+    render(await AccountingPage({ searchParams: Promise.resolve({ org: "2" }) }));
+    expect(screen.getByText("accounting-view:2")).toBeInTheDocument();
+
+    render(await AccountingPage({ searchParams: Promise.resolve({ org: ["1", "2"] }) }));
+    expect(screen.getByText("accounting-view:")).toBeInTheDocument();
   });
 
   it("LogisticsPage монтирует вкладки логистики", () => {
