@@ -9,6 +9,7 @@ from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import expenses
 from modules.accounting.expense_models import ExpenseCommandReceipt
 from modules.accounting.expense_routes import router
+from modules.accounting.expense_schemas import CatalogCommand
 from modules.accounting.models import AccessGrant, Account, Entry, Line, Organization, Policy
 
 
@@ -70,7 +71,7 @@ async def test_context_does_not_create_catalog_and_exposes_approval(expense_clie
 
 
 async def test_unmatched_actuals_mirrors_actuals_scope_and_never_guesses_article(db, book):
-    catalog = await expenses.execute(db, book[0], "tester", "catalog", body())
+    catalog = await expenses.execute(db, book[0], "tester", "catalog", CatalogCommand(**body()))
     await db.commit()
     article_id = catalog["result"]["articles"][0]["id"]
     policy = await db.get(Policy, book[1])
@@ -147,7 +148,7 @@ async def test_unmatched_actuals_mirrors_actuals_scope_and_never_guesses_article
 
 
 async def test_unmatched_actuals_pages_by_line_id_without_skipping_between_matched_rows(db, book):
-    catalog = await expenses.execute(db, book[0], "tester", "catalog", body())
+    catalog = await expenses.execute(db, book[0], "tester", "catalog", CatalogCommand(**body()))
     await db.commit()
     article_id = catalog["result"]["articles"][0]["id"]
     policy = await db.get(Policy, book[1])

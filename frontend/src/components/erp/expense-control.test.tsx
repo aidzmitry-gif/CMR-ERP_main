@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -196,7 +196,8 @@ it("opens a listed unmatched entry without replacing the fact on list failure", 
   render(<ExpenseControl org="1" onEntry={onEntry} />);
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } }); fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } }); fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } }); fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "1" } }); fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Показать неразнесённые строки" }));
+  const accrualPanel = await screen.findByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(accrualPanel).getByRole("button", { name: "Показать неразнесённые строки" }));
   fireEvent.click(await screen.findByRole("button", { name: "Открыть проводку" }));
   expect(onEntry).toHaveBeenCalledWith(7);
 });
@@ -234,6 +235,11 @@ it("does not start a duplicate B while stale A is finishing", async () => {
   setupActualMocks();
   const first = deferred<ReturnType<typeof unmatched>>();
   const second = deferred<ReturnType<typeof unmatched>>();
+  const actualMonths: number[] = [];
+  api.getActuals.mockImplementation((_scope: unknown, year: number, month: number, basis: "cash" | "accrual") => {
+    actualMonths.push(month);
+    return Promise.resolve(actual(year, month, basis));
+  });
   let monthTwoCalls = 0;
   api.getUnmatchedActuals.mockImplementation((scope: { org: number }, _year: number, month: number, basis: "cash" | "accrual") => {
     if (month === 1) return first.promise;
@@ -246,8 +252,10 @@ it("does not start a duplicate B while stale A is finishing", async () => {
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
   fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "2" } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
-  await screen.findAllByRole("button", { name: "Показать неразнесённые строки" });
+  await waitFor(() => expect(actualMonths.slice(-2)).toEqual([2, 2]));
+  await waitFor(() => expect(within(panel).getByRole("button", { name: "Показать неразнесённые строки" })).toBeInTheDocument());
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  await waitFor(() => expect(api.getUnmatchedActuals).toHaveBeenCalledTimes(2));
 
   await act(async () => { first.resolve(unmatched(1, 1, "accrual", "old-A")); await first.promise; });
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
