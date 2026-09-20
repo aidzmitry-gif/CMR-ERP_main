@@ -32,15 +32,18 @@ const formatDeviationPercent = (actual: string, plan: string | null): string | n
 type ActualSlice = { actuals: api.ExpenseActuals | null; error: string | null };
 const unavailableActuals = (error: unknown): ActualSlice => ({ actuals: null, error: errorText(error) });
 
-function ActualsPanel({ title, actuals, error }: { title: string; actuals: api.ExpenseActuals | null; error: string | null }) {
+function ActualsPanel({ title, actuals, error, scope, onEntry }: { title: string; actuals: api.ExpenseActuals | null; error: string | null; scope: api.Scope; onEntry?: (id: number) => void }) {
+  const [unmatched, setUnmatched] = useState<api.UnmatchedExpenseLines | null>(null);
+  const [listError, setListError] = useState("");
+  const load = async (after?: number) => { try { const next = await api.getUnmatchedActuals(scope, actuals!.year, actuals!.month, actuals!.basis, after); setUnmatched(previous => previous && after ? { ...next, items: [...previous.items, ...next.items] } : next); setListError(""); } catch (e) { setListError(errorText(e)); } };
   if (!actuals && !error) return null;
   return <div aria-label={title} className="rounded border border-line p-3"><h3 className="font-semibold">{title}</h3>
-    {actuals ? <><p className="text-sm text-muted">Покрытие: {actuals.coverage}. {actuals.reason} Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</>
+    {actuals ? <><p className="text-sm text-muted">Покрытие: {actuals.coverage}. {actuals.reason} Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.unmatched_lines ? <button className={button} onClick={() => void load()}>Показать неразнесённые строки</button> : null}{listError && <p role="alert">{listError}</p>}{unmatched && <div><p>Неразнесённых строк: {unmatched.total}</p><ul>{unmatched.items.map(row => <li key={row.line_id}>{row.posting_date} · {row.account_code} · {row.amount} BYN · {row.reason} {onEntry && <button className="text-accent underline" onClick={() => onEntry(row.entry_id)}>Открыть проводку</button>}</li>)}</ul>{unmatched.next_after_line_id && <button className={button} onClick={() => void load(unmatched.next_after_line_id)}>Показать ещё</button>}</div>}{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</>
       : <p role="alert">Покрытие: неизвестно. {error}</p>}
   </div>;
 }
 
-export function ExpenseControl({ org }: { org?: string }) {
+export function ExpenseControl({ org, onEntry }: { org?: string; onEntry?: (id: number) => void }) {
   const [selected, setSelected] = useState("");
   const [books, setBooks] = useState<{ id: number; name: string; unp: string }[]>([]);
   const [error, setError] = useState("");
@@ -54,15 +57,15 @@ export function ExpenseControl({ org }: { org?: string }) {
   const valid = /^[1-9]\d*$/.test(chosen) && Number.isSafeInteger(Number(chosen));
   return <section aria-label="Контроль расходов" className="space-y-4">
     <h2 className="text-xl font-semibold">Контроль расходов</h2>
-    <p className="text-sm text-muted">Справочник, версии бюджета и утверждение главным бухгалтером. Начисления показываются только при явной аналитике статьи; оплаты и обязательства пока не подключены.</p>
+    <p className="text-sm text-muted">Справочник, версии бюджета и утверждение главным бухгалтером. Начисления и оплаты показываются отдельно только при явной аналитике статьи; обязательства пока не подключены.</p>
     {error && <p role="alert">{error}</p>}
     {org === undefined && <label>Юрлицо расходов <select aria-label="Юрлицо расходов" className={field} value={selected} onChange={e => setSelected(e.target.value)}>
       <option value="">Выберите юрлицо</option>{books.map(b => <option key={b.id} value={b.id}>{b.name} · {b.unp}</option>)}</select></label>}
-    {valid ? <Book key={chosen} org={Number(chosen)} /> : <p>Выберите юридическое лицо. Данные других книг не объединяются.</p>}
+    {valid ? <Book key={chosen} org={Number(chosen)} onEntry={onEntry} /> : <p>Выберите юридическое лицо. Данные других книг не объединяются.</p>}
   </section>;
 }
 
-function Book({ org }: { org: number }) {
+function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void }) {
   const [ctx, setCtx] = useState<api.Context | null>(null);
   const [view, setView] = useState<api.BudgetView | null>(null);
   const [accrualActuals, setAccrualActuals] = useState<ActualSlice | null>(null);
@@ -276,8 +279,8 @@ function Book({ org }: { org: number }) {
       })}
       <div aria-label="Непогашенные обязательства" className="rounded border border-line p-3"><strong>Непогашенные обязательства</strong><p>— Неизвестно</p><p className="text-xs text-muted">Адаптер подтверждённых обязательств не подключён; разность начислений и оплат не используется.</p></div>
     </div>
-    <ActualsPanel title="Фактические начисления расходов" actuals={accrualActuals?.actuals ?? null} error={accrualActuals?.error ?? null} />
-    <ActualsPanel title="Фактические оплаты расходов" actuals={cashActuals?.actuals ?? null} error={cashActuals?.error ?? null} />
+    <ActualsPanel title="Фактические начисления расходов" actuals={accrualActuals?.actuals ?? null} error={accrualActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} />
+    <ActualsPanel title="Фактические оплаты расходов" actuals={cashActuals?.actuals ?? null} error={cashActuals?.error ?? null} scope={{ org, principal: ctx?.principal ?? "" }} onEntry={onEntry} />
     {planActuals && (planFactRows.length > 0 || planBudget) && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {planActuals.month} месяц</h3><p className="text-sm text-muted">План: {planLabel ?? "не создан"}. Основа: {basis === "cash" ? "денежные выплаты" : "начисления"}. Отклонение = факт минус план; проценты не считаются при нулевом плане.</p>
       {incompleteCoverage && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: покрытие факта {planActuals.coverage}; без статьи расходов: {planActuals.unmatched_lines ?? "не определено"}. План-факт не является полным до разметки этих проводок.</p>}
       {unplannedRows.length > 0 && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: {unplannedRows.length} {unplannedRows.length === 1 ? "статья имеет" : "статей имеют"} факт без плана за выбранный месяц.</p>}

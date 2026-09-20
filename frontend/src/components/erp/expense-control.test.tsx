@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
-  context: vi.fn(), getBudgets: vi.fn(), getActuals: vi.fn(), journal: vi.fn(),
+  context: vi.fn(), getBudgets: vi.fn(), getActuals: vi.fn(), getUnmatchedActuals: vi.fn(), journal: vi.fn(),
 }));
 
 vi.mock("@/lib/expense-control-api", () => ({
@@ -146,4 +146,18 @@ it("keeps accrual visible when cash is unavailable and never derives commitments
   expect(screen.getByLabelText("Оплачено")).toHaveTextContent("— Неизвестно");
   expect(screen.getByLabelText("Непогашенные обязательства")).toHaveTextContent("— Неизвестно");
   expect(screen.getByLabelText("Непогашенные обязательства")).toHaveTextContent("разность начислений и оплат не используется");
+});
+
+it("opens a listed unmatched entry without replacing the fact on list failure", async () => {
+  const onEntry = vi.fn();
+  api.context.mockResolvedValue(context); api.journal.mockResolvedValue({ raw: null, attempt: null });
+  api.getBudgets.mockResolvedValue({ organization_id: 1, principal: "chief", year: 2026, currency: "BYN", basis: "accrual", versions: [], approved_plan: null, actuals: { accrued: { amount: null, coverage: "unknown", reason: "x" }, paid: { amount: null, coverage: "unknown", reason: "x" }, commitments: { amount: null, coverage: "unknown", reason: "x" } }, approval_enabled: true, approval_blocker: null });
+  api.getActuals.mockImplementation((_s, year, month, basis) => Promise.resolve({ year, month, currency: "BYN", basis, amount: "10.00", coverage: "partial", matched_lines: 1, unmatched_lines: 1, reason: "partial", rows: [] }));
+  api.getUnmatchedActuals.mockResolvedValue({ year: 2026, month: 1, currency: "BYN", basis: "accrual", total: 1, next_after_line_id: null, items: [{ entry_id: 7, line_id: 8, posting_date: "2026-01-02", source: "source", operation: "manual", account_code: "90.4", side: "debit", amount: "2.00", dimensions: {}, reason: "нет статьи" }] });
+  render(<ExpenseControl org="1" onEntry={onEntry} />);
+  await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
+  fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } }); fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } }); fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } }); fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "1" } }); fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Показать неразнесённые строки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Открыть проводку" }));
+  expect(onEntry).toHaveBeenCalledWith(7);
 });

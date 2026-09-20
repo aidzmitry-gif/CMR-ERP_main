@@ -108,6 +108,16 @@ async def get_actuals(
     )
 
 
+@router.get("/expense-actuals/unmatched")
+async def get_unmatched_actuals(
+    org_id: int, year: int = Query(ge=2000, le=2100), month: int = Query(ge=1, le=12),
+    currency: Literal["BYN"] = Query(), basis: Literal["cash", "accrual"] = Query(),
+    after_line_id: int | None = Query(default=None, ge=1), limit: int = Query(default=50, ge=1, le=100),
+    ctx=Depends(expense_member),
+):
+    return expenses.envelope(org_id, ctx[1], await expenses.unmatched_actuals(ctx[0], org_id, year, month, basis, after_line_id, limit))
+
+
 @router.get("/expense-commands/{request_key}")
 async def get_receipt(org_id: int, request_key: UUID, ctx=Depends(expense_member)):
     row = await ctx[0].scalar(

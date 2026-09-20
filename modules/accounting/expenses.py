@@ -287,6 +287,43 @@ async def actuals(session, org_id, year, month, basis):
     }
 
 
+async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=None, limit=50):
+    """Read-only keyset register of the exact lines excluded by ``actuals``."""
+    first, last = _month_bounds(year, month)
+    articles = {row["id"] for row in (await catalog(session, org_id))["articles"]}
+    conditions = [Entry.organization_id == org_id, Entry.posting_date >= first, Entry.posting_date <= last,
+                  Line.category == "expense", Line.currency == "BYN"]
+    if basis == "cash":
+        conditions.append(Line.cash.is_(True))
+    total = (await actuals(session, org_id, year, month, basis))["unmatched_lines"] or 0
+    items = []
+    cursor = after_line_id
+    exhausted = False
+    while len(items) < limit and not exhausted:
+        query = select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(*conditions)
+        if cursor is not None:
+            query = query.where(Line.id > cursor)
+        chunk = (await session.execute(query.order_by(Entry.id, Line.id).limit(100))).all()
+        if not chunk:
+            exhausted = True
+            break
+        for entry, line in chunk:
+            cursor = line.id
+            dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
+            article_id = _expense_article_id(dimensions.get("expense_article_id"))
+            if article_id in articles:
+                continue
+            items.append({"entry_id": entry.id, "line_id": line.id, "posting_date": entry.posting_date.isoformat(),
+                "source": entry.source, "operation": entry.operation, "account_code": line.account_code, "side": line.side,
+                "amount": _money(line.amount), "dimensions": dimensions,
+                "reason": "нет статьи" if article_id is None else "статья отсутствует в текущем справочнике"})
+            if len(items) == limit:
+                break
+        exhausted = len(chunk) < 100
+    return {"year": year, "month": month, "currency": "BYN", "basis": basis, "total": total, "items": items,
+            "next_after_line_id": cursor if items and not exhausted else None}
+
+
 async def execute(session, org_id, actor, kind, data):
     # HTTP member has acquired this same organization lock and rechecked membership.
     await service.lock_organization(session, org_id)

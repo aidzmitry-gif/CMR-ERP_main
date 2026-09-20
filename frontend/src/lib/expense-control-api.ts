@@ -17,6 +17,10 @@ export type ExpenseActualRow = { article_id: number; article_code: string; artic
 export type ExpenseActuals = { year: number; month: number; currency: "BYN"; basis: "cash" | "accrual";
   amount: string | null; coverage: "unknown" | "partial" | "complete"; matched_lines: number; unmatched_lines: number | null;
   rows: ExpenseActualRow[]; reason: string };
+export type UnmatchedExpenseLine = { entry_id: number; line_id: number; posting_date: string; source: string; operation: string;
+  account_code: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; reason: "нет статьи" | "статья отсутствует в текущем справочнике" };
+export type UnmatchedExpenseLines = { year: number; month: number; currency: "BYN"; basis: "cash" | "accrual"; total: number;
+  items: UnmatchedExpenseLine[]; next_after_line_id: number | null };
 export type CatalogBody = { request_key: string; expected_revision: number; evidence: string;
   action: "template" | "create_group" | "create_article" | "archive_group" | "archive_article";
   code: string | null; title: string | null; group_id: number | null; target_id: number | null };
@@ -126,6 +130,16 @@ export async function getActuals(scope: Scope, year: number, month: number, basi
   const v = await envelope(await request(`${prefix(scope.org)}/expense-actuals?year=${year}&month=${month}&currency=BYN&basis=${basis}`), scope.org, scope.principal);
   if (v.year !== year || v.month !== month || v.currency !== "BYN" || v.basis !== basis || !checkActuals(v.actuals)) invalid();
   return v.actuals as ExpenseActuals;
+}
+export async function getUnmatchedActuals(scope: Scope, year: number, month: number, basis: "cash" | "accrual", after?: number): Promise<UnmatchedExpenseLines> {
+  const cursor = after ? `&after_line_id=${after}` : "";
+  const v = await envelope(await request(`${prefix(scope.org)}/expense-actuals/unmatched?year=${year}&month=${month}&currency=BYN&basis=${basis}${cursor}`), scope.org, scope.principal);
+  const item = (row: unknown): row is UnmatchedExpenseLine => object(row) && positive(row.entry_id) && positive(row.line_id) && text(row.posting_date) && text(row.source) && text(row.operation) && text(row.account_code)
+    && ["debit", "credit"].includes(String(row.side)) && signedMoney(row.amount) && object(row.dimensions) && Object.values(row.dimensions).every(text)
+    && ["нет статьи", "статья отсутствует в текущем справочнике"].includes(String(row.reason));
+  if (v.year !== year || v.month !== month || v.currency !== "BYN" || v.basis !== basis || !revision(v.total) || !Array.isArray(v.items) || !v.items.every(item)
+    || (v.next_after_line_id !== null && !positive(v.next_after_line_id))) invalid();
+  return v as unknown as UnmatchedExpenseLines;
 }
 function validateBody(kind: Attempt["kind"], v: unknown) {
   if (!object(v) || !uuid(v.request_key) || !text(v.evidence)) invalid();
