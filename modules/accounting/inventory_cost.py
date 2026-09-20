@@ -11,15 +11,17 @@ from modules.accounting.service import AccountingError, lock_organization
 from modules.accounting.zero_value_disposals import AuthenticatedZeroValueDisposal, receipt_digest
 
 
-def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_registration_token=None):
+def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_registration_token=None,
+                          authenticated_dispositions=(), inventory_account=None):
     """Merge ledger rows with authenticated, entryless physical credits only."""
+    from modules.accounting.inventory_allocation_loader import AuthenticatedInventoryDisposition
+
     rows = [(entry, line) for entry, line in rows
             if before_registration_token is None or entry.id < before_registration_token]
-    if not zero_value_disposals:
+    if not zero_value_disposals and not authenticated_dispositions:
         return [(entry.posting_date, entry.id, line.id, entry, line, None) for entry, line in rows]
     sources = {(entry.id, line.id): (entry, line) for entry, line in rows}
-    events = [(entry.posting_date, entry.id, line.id, entry, line, None) for entry, line in rows]
-    receipt_ids, tokens = set(), set()
+    receipt_ids, tokens, disposition_entries, replaced, admitted_dispositions = set(), set(), set(), set(), []
     for receipt in zero_value_disposals:
         if not isinstance(receipt, AuthenticatedZeroValueDisposal) or receipt.organization_id != org_id:
             raise AccountingError("Zero-value disposal provenance is not authenticated for this organization")
@@ -28,6 +30,45 @@ def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_reg
             raise AccountingError("Zero-value disposal receipt identity or digest changed during replay")
         receipt_ids.add(receipt.receipt_id)
         tokens.add(receipt.registration_token)
+    for disposition in authenticated_dispositions:
+        if not isinstance(disposition, AuthenticatedInventoryDisposition):
+            raise AccountingError("Inventory allocation replay event has an unsupported type")
+        disposition.verify_snapshot()
+        if disposition.organization_id != org_id:
+            raise AccountingError("Inventory allocation provenance is not authenticated for this organization")
+        accounts = {layer.inventory_account for layer in disposition.allocation.layers}
+        if len(accounts) != 1:
+            raise AccountingError("Inventory allocation spans more than one account")
+        if inventory_account is not None and accounts != {inventory_account}:
+            continue
+        if before_registration_token is not None and disposition.registration_token >= before_registration_token:
+            continue
+        if disposition.entry_id in disposition_entries or disposition.registration_token in tokens:
+            raise AccountingError("Inventory allocation replay registration is duplicated")
+        disposition_entries.add(disposition.entry_id)
+        tokens.add(disposition.registration_token)
+        positive = [layer for layer in disposition.allocation.layers if layer.amount_byn > 0]
+        if len(positive) != len(disposition.replaced_credit_line_ids):
+            raise AccountingError("Inventory allocation replacement count changed")
+        for line_id, layer in zip(disposition.replaced_credit_line_ids, positive, strict=True):
+            replacement = sources.get((disposition.entry_id, line_id))
+            if replacement is None:
+                raise AccountingError("Inventory allocation replacement line is missing from replay history")
+            entry, line = replacement
+            if (entry.id != disposition.entry_id or entry.posting_date != disposition.posting_date
+                    or entry.source != disposition.source or entry.source_version != disposition.source_version
+                    or line.side != "credit" or line.account_code != layer.inventory_account
+                    or line.quantity != layer.quantity or line.amount != layer.amount_byn
+                    or line.dimensions != layer.inventory_dimensions or line.currency != "BYN"
+                    or line.category != "asset" or line.cash):
+                raise AccountingError("Inventory allocation replacement line changed")
+        if any(line_id in replaced for line_id in disposition.replaced_credit_line_ids):
+            raise AccountingError("Inventory allocation replaces a credit more than once")
+        replaced.update(disposition.replaced_credit_line_ids)
+        admitted_dispositions.append(disposition)
+    events = [(entry.posting_date, entry.id, line.id, entry, line, None) for entry, line in rows
+              if line.id not in replaced]
+    for receipt in zero_value_disposals:
         if before_registration_token is not None and receipt.registration_token >= before_registration_token:
             continue
         for layer in receipt.command.inventory_layers:
@@ -39,6 +80,8 @@ def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_reg
                 or (source[1].dimensions or {}) != layer.inventory_dimensions):
                 raise AccountingError("Zero-value disposal source layer does not match ledger history")
             events.append((receipt.posting_date, receipt.registration_token, receipt.receipt_id, None, None, (receipt, layer)))
+    for disposition in admitted_dispositions:
+        events.append((disposition.posting_date, disposition.registration_token, 0, None, None, disposition))
     return sorted(events, key=lambda item: item[:3])
 
 
@@ -100,7 +143,8 @@ def _distribute_pool_value(layers, amount):
 
 def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset(),
                       verified_output_lines=frozenset(), finished_goods=False, method="fifo",
-                      zero_value_disposals=(), organization_id=None, before_registration_token=None):
+                      zero_value_disposals=(), authenticated_dispositions=(), organization_id=None,
+                      before_registration_token=None, inventory_account=None):
     """Build chronological available inventory layers for FIFO/average methods.
 
     The physical identity remains explicit (warehouse/SKU/lot).  A debit adds
@@ -109,15 +153,44 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
     adjustment must match exactly one still-open physical layer; ambiguous
     same-lot layers are rejected instead of silently changing the wrong layer.
     """
+    from modules.accounting.inventory_allocation_loader import AuthenticatedInventoryDisposition
+
     layers = []
+    requested_lot = target.get("lot")
+    if authenticated_dispositions:
+        # Replay complete source packets before projecting a requested lot.
+        target = {**target, "lot": ""}
     evidence = []
     matched = False
     checked_zero_receipts = set()
     if organization_id is None and zero_value_disposals:
         raise AccountingError("Zero-value disposal replay needs an organization identity")
     for _, _, _, entry, line, zero_event in _chronological_events(
-        rows, organization_id, posting_date, zero_value_disposals, before_registration_token
+        rows, organization_id, posting_date, zero_value_disposals, before_registration_token,
+        authenticated_dispositions, inventory_account
     ):
+        if isinstance(zero_event, AuthenticatedInventoryDisposition):
+            allocation = zero_event.allocation
+            first = allocation.layers[0].inventory_dimensions
+            if first.get("warehouse") != target["warehouse"] or first.get("sku") != target["sku"]:
+                continue
+            if zero_event.posting_date > posting_date:
+                raise AccountingError("Selected SKU has later movements; chronological costing is required")
+            if method == "specific":
+                raise AccountingError("Explicit source allocation replay requires FIFO or weighted-average policy")
+            if method != allocation.valuation_method:
+                raise AccountingError("Inventory allocation policy differs from replay policy")
+            scope = zero_event.selection_lot if method == "fifo" else ""
+            selected_layers = [layer for layer in layers if not scope or layer["lot"] == scope]
+            updated = replay_source_allocation(selected_layers, allocation)
+            by_origin = {(layer["entry_id"], layer["line_id"]): layer for layer in updated}
+            layers = [by_origin.get((layer["entry_id"], layer["line_id"]), layer) for layer in layers]
+            evidence.append({"entry_id": zero_event.entry_id, "line_id": None, "source": zero_event.source,
+                             "source_version": zero_event.source_version, "side": "credit",
+                             "quantity": format(allocation.quantity, ".6f"), "amount_byn": format(allocation.amount_byn, ".2f"),
+                             "explicit_allocation": True})
+            matched = True
+            continue
         if zero_event is not None:
             receipt, source_layer = zero_event
             dimensions = source_layer.inventory_dimensions
@@ -234,7 +307,7 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
     if method == "weighted_average":
         _distribute_pool_value(layers, sum((layer["amount"] for layer in layers), Decimal(0)))
     available = [layer for layer in layers if layer["quantity"] > 0 and layer["amount"] >= 0
-                 and (not target.get("lot") or layer["lot"] == target["lot"])]
+                 and (not requested_lot or layer["lot"] == requested_lot)]
     return available, evidence
 
 
@@ -433,12 +506,14 @@ async def replay_issue_result(session, policy, rows, org_id, data, *, verified_v
 
 def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset(),
                  verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
-                 before_registration_token=None, include_source_identity=False):
+                 authenticated_dispositions=(), before_registration_token=None, include_source_identity=False):
     """Same calculation for live preview and verification of original history."""
     target = {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot}
     # Older internal reconstruction callers do not carry the policy method;
     # their historical contracts are the original specific-lot calculation.
     method = getattr(policy, "inventory_method", "specific")
+    if authenticated_dispositions and method == "specific":
+        raise AccountingError("Explicit source allocation replay requires FIFO or weighted-average policy")
     if include_source_identity and method not in {"fifo", "weighted_average"}:
         raise AccountingError("Explicit source allocation requires FIFO or weighted-average layer selection")
     with localcontext() as context:
@@ -463,7 +538,9 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
                                                  verified_output_lines=verified_output_lines,
                                                  finished_goods=finished_goods, method=method,
                                                  zero_value_disposals=zero_value_disposals, organization_id=org_id,
-                                                 before_registration_token=before_registration_token)
+                                                 authenticated_dispositions=authenticated_dispositions,
+                                                 before_registration_token=before_registration_token,
+                                                 inventory_account=data.account)
             quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
             amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             if not layers or data.quantity > quantity:
