@@ -342,6 +342,17 @@ def _select_policy_layers(layers, quantity, method):
         selected.append((layer, take, cost))
         allocated += cost
         remaining -= take
+    if method == "weighted_average" and any(cost < 0 for _, _, cost in selected):
+        # The legacy final-residual formula is preserved unless its per-layer
+        # rounding would create an impossible negative monetary portion.
+        total_cents = int((quantity * average).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100)
+        quotas = [Fraction(total_cents) * Fraction(take) / Fraction(quantity) for _, take, _ in selected]
+        cents = [quota.numerator // quota.denominator for quota in quotas]
+        residual = total_cents - sum(cents)
+        for index in sorted(range(len(cents)), key=lambda item: (-(quotas[item] - cents[item]), item))[:residual]:
+            cents[index] += 1
+        selected = [(layer, take, Decimal(value) / 100)
+                    for (layer, take, _), value in zip(selected, cents, strict=True)]
     return live, total_quantity, total_amount, selected
 
 

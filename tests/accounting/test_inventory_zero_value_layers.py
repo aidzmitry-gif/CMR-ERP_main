@@ -105,6 +105,17 @@ def test_weighted_source_allocation_preserves_partial_cent_rounding():
     assert live == original
 
 
+def test_weighted_selection_never_creates_negative_cent_portion():
+    layers = [{"entry_id": index, "line_id": index + 10, "dimensions": {"warehouse": "MAIN", "sku": "A", "lot": "L1"},
+               "quantity": Decimal(quantity), "amount": Decimal("0.01"), "lot": "L1"}
+              for index, quantity in enumerate(("1", "1", "1", "5"), 1)]
+    from modules.accounting.inventory_cost import _select_policy_layers
+
+    _, _, _, selected = _select_policy_layers(layers, Decimal("3.1"), "weighted_average")
+    assert [cost for _, _, cost in selected] == [Decimal("0.01"), Decimal("0.01"), Decimal("0.00"), Decimal("0.00")]
+    assert sum(cost for _, _, cost in selected) == Decimal("0.02")
+
+
 def test_specific_replays_zero_disposal_after_negative_correction_and_respects_cutoff():
     origin = row(10, 11, date(2026, 10, 1), quantity=2, amount=100)
     correction = row(20, 21, date(2026, 10, 2), quantity=None, amount=100, side="credit", operation="production_output_cost_correction")
