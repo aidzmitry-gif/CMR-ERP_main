@@ -194,3 +194,36 @@ async def test_material_issue_posts_one_reviewed_wip_package(pg_factory, pg_book
                 "DELETE FROM accounting.inventory_issue_receipt WHERE entry_id=:entry"
             ), {"entry": first})
         await session.rollback()
+
+
+async def test_second_reviewed_material_issue_accepts_prior_production_issue_movement(pg_factory, pg_book, monkeypatch):
+    """A real prior production issue is physical history, not an unclassified movement."""
+    from fastapi import HTTPException
+
+    from modules.wms import routes as wms_routes
+
+    policy_id, order_id = await seed_book(pg_factory, pg_book)
+    await seed_inventory_value(pg_factory, pg_book, policy_id)
+    _, _, first = await seed_physical_issue(pg_factory, pg_book, order_id)
+    second = first.model_copy(update={"request_id": uuid4()})
+    original_reasons = wms_routes._INVENTORY_PHYSICAL_REASONS
+
+    monkeypatch.setattr(wms_routes, "_INVENTORY_PHYSICAL_REASONS",
+                        original_reasons - {"production_issue"})
+    async with pg_factory() as session:
+        with pytest.raises(HTTPException, match="неразобранное движение"):
+            await record_material_issue(
+                session, AccountingService(), pg_book[0], CurrentUser("tester", ["director"]), second)
+        await session.rollback()
+
+    monkeypatch.setattr(wms_routes, "_INVENTORY_PHYSICAL_REASONS",
+                        original_reasons)
+    async with pg_factory() as session:
+        binding, movement = await record_material_issue(
+            session, AccountingService(), pg_book[0], CurrentUser("tester", ["director"]), second)
+        replay, replay_movement = await record_material_issue(
+            session, AccountingService(), pg_book[0], CurrentUser("tester", ["director"]), second)
+        await session.commit()
+        assert binding.request_key == str(second.request_id)
+        assert movement.reason == "production_issue" and movement.kind == "out"
+        assert replay.id == binding.id and replay_movement.id == movement.id
