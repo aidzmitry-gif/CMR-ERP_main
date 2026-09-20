@@ -250,6 +250,7 @@ def project_pool(rows, *, organization_id, account, warehouse, sku, method, on,
                 or (Fraction(value) * 100).denominator != 1):
             raise AccountingError("Late-cost additions require exact origins and positive whole cents")
     target = {"warehouse": warehouse, "sku": sku, "lot": ""}
+    pool_value_origins = getattr(verified_values, "pool_origins", {})
     with localcontext() as context:
         context.prec = 64
         expected, _ = _valuation_layers(rows, target, on, method=method,
@@ -281,6 +282,23 @@ def project_pool(rows, *, organization_id, account, warehouse, sku, method, on,
                     continue
                 source = (entry.id, line.id)
                 if source in verified_values:
+                    origin = pool_value_origins.get(source)
+                    if origin is not None:
+                        if (entry.operation != "inventory_late_cost" or entry.rule_version != "late-cost-pool-v3"
+                                or line.quantity is not None or line.amount <= 0
+                                or not isinstance(origin, tuple) or len(origin) != 2
+                                or any(type(item) is not int or item <= 0 for item in origin)):
+                            raise AccountingError("Historical V3 late cost has an invalid immutable origin")
+                        for pool in (baseline, prospective):
+                            matches = [layer for layer in pool
+                                       if (layer["entry_id"], layer["line_id"]) == origin and layer["quantity"] > 0]
+                            if len(matches) != 1 or matches[0]["dimensions"] != dimensions:
+                                raise AccountingError("Historical V3 late cost misses its surviving acquisition layer")
+                            signed_amount = line.amount if line.side == "debit" else -line.amount
+                            if matches[0]["amount"] + signed_amount < 0:
+                                raise AccountingError("Historical V3 late cost exhausts prospective cost")
+                            matches[0]["amount"] += signed_amount
+                        continue
                     for pool in (baseline, prospective):
                         matches = [layer for layer in pool if layer["dimensions"] == dimensions and layer["quantity"] > 0]
                         if len(matches) != 1:

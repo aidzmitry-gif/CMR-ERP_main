@@ -58,10 +58,12 @@ class SyntheticProduction:
 @pytest.mark.parametrize("with_output", [False, True])
 async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, with_output, monkeypatch):
     from modules.accounting import late_pool_cost, production_output_cost_workflow
+    from modules.accounting.closing_controls import snapshot as closing_snapshot
+    from modules.accounting.inventory_cost import issue_result
     from modules.accounting.late_cost_pool import load_expense_pools, preview_expense, project_pool
     from modules.accounting.late_cost_posting import ExpenseAccounts, pool_candidate
-    from modules.accounting.late_cost_receipts import PoolLateCostCommand
-    from modules.accounting.schemas import LateCostPreviewInput
+    from modules.accounting.late_cost_receipts import PoolLateCostCommand, verified_value_lines
+    from modules.accounting.schemas import InventoryIssuePreviewInput, LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
         ReceiptAccounts,
@@ -221,10 +223,11 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             assert pool_package["wip_origins"][0]["order_id"] == order_id
             assert Decimal(pool_package["wip_origins"][0]["amount_byn"]) == Decimal(wip_delta)
         assert await session.scalar(select(func.count()).select_from(Entry)) == before
-        revisions = (("0153_late_pool_atomic_package.py", "0154_late_pool_actual_output_evidence.py") if with_output else (
-            "0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
-            "0152_signed_prospective_wip.py", "0153_late_pool_atomic_package.py",
-            "0154_late_pool_actual_output_evidence.py"))
+        revisions = (("0153_late_pool_atomic_package.py", "0154_late_pool_actual_output_evidence.py",
+                      "0155_late_pool_inventory_value_links.py") if with_output else (
+                "0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
+                "0152_signed_prospective_wip.py", "0153_late_pool_atomic_package.py",
+                "0154_late_pool_actual_output_evidence.py", "0155_late_pool_inventory_value_links.py"))
         for revision in revisions:
             await run_migration(session, revision, "upgrade")
         if with_output:
@@ -240,6 +243,7 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
                     "tester", procurement, expected_digest=pool_package["posting_digest"])
             assert await session.scalar(select(func.count()).select_from(Entry)) == before
             assert await session.scalar(text("SELECT count(*) FROM accounting.late_pool_package")) == 0
+            assert await session.scalar(text("SELECT count(*) FROM accounting.late_pool_inventory_value_link")) == 0
             assert await session.scalar(text("""
                 SELECT entry_id FROM accounting.source_control
                 WHERE organization_id=:org AND source=:source
@@ -253,6 +257,29 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         saved_pool = await late_pool_cost.load_package(session, pg_book[0], confirmed.id)
         assert saved_pool["preview"] == pool_package
         assert len(saved_pool["output_revisions"]) == int(with_output)
+        expected_inventory_origins = {
+            (row["source_entry_id"], row["source_line_id"])
+            for row in pool_package["calculation"]["destinations"]
+            if row["kind"] == "inventory" and Decimal(row["delta_byn"]) != 0
+        }
+        assert {(row["acquisition_entry_id"], row["acquisition_line_id"])
+                for row in saved_pool["inventory_value_links"]} == expected_inventory_origins
+        assert {row["value_entry_id"] for row in saved_pool["inventory_value_links"]} == {confirmed.id}
+        historical_rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
+            Entry.organization_id == pg_book[0], Line.account_code == "10.1",
+        ).order_by(Entry.posting_date, Entry.id, Line.id))).all()
+        verified_values = await verified_value_lines(session, pg_book[0], historical_rows, procurement)
+        assert {(row["acquisition_entry_id"], row["acquisition_line_id"])
+                for row in saved_pool["inventory_value_links"]} == set(verified_values.pool_origins.values())
+        historical_cost = issue_result(await session.get(Policy, policy_id), historical_rows, pg_book[0],
+            InventoryIssuePreviewInput(policy_id=policy_id, posting_date="2026-10-11", account="10.1",
+                warehouse="Main", sku="MAT-1", lot="LOT-1", quantity="1"),
+            verified_value_lines=verified_values)
+        expected_remaining = sum((Decimal(row["prospective_byn"])
+                                  for row in full["pools"][0]["remaining"]), Decimal())
+        assert Decimal(historical_cost["book_value_byn"]) == expected_remaining
+        controls = await closing_snapshot(session, pg_book[0], "2026-10")
+        assert "inventory_late_cost_receipt_gap" not in {item["code"] for item in controls["review_items"]}
         if with_output:
             saved_revision, = saved_pool["output_revisions"]
             assert saved_revision["output_entry_id"] == output_id
@@ -268,7 +295,7 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         await session.commit()
         with pytest.raises(DBAPIError, match="Cannot downgrade V3 pool history"):
             async with session.begin_nested():
-                await run_migration(session, "0154_late_pool_actual_output_evidence.py", "downgrade")
+                await run_migration(session, "0155_late_pool_inventory_value_links.py", "downgrade")
         # The unlinked second purchase affects weighted cost too: authenticate
         # its primary document, not merely the receipt named by the freight.
         original_basis = procurement.posted_receipt_basis

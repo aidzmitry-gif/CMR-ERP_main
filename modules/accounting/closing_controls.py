@@ -10,7 +10,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 
 from modules.accounting.models import (
     Entry,
@@ -20,7 +20,6 @@ from modules.accounting.models import (
     Inbox,
     InputVatRegisterEntry,
     InventoryIssueReceipt,
-    LateCostReceipt,
     Line,
     OutputVatRegisterEntry,
     PayrollAccrualReceipt,
@@ -246,15 +245,30 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry.posting_date <= last,
         Entry.operation == "inventory_late_cost",
     )) or 0
-    late_cost_receipts = await session.scalar(select(func.count(LateCostReceipt.entry_id)).join(
-        Entry, Entry.id == LateCostReceipt.entry_id,
-    ).where(
-        LateCostReceipt.organization_id == org_id,
-        Entry.organization_id == org_id,
-        Entry.posting_date >= first,
-        Entry.posting_date <= last,
-        Entry.operation == "inventory_late_cost",
-    )) or 0
+    late_cost_receipts = await session.scalar(text("""
+        SELECT count(*)
+        FROM accounting.entry e
+        WHERE e.organization_id=:org AND e.posting_date >= :first AND e.posting_date <= :last
+          AND e.operation='inventory_late_cost'
+          AND (
+            EXISTS (SELECT 1 FROM accounting.late_cost_receipt receipt
+              WHERE receipt.entry_id=e.id AND receipt.organization_id=e.organization_id)
+            OR (
+              e.rule_version='late-cost-pool-v3'
+              AND EXISTS (
+                SELECT 1 FROM accounting.late_pool_package package
+                WHERE package.late_entry_id=e.id AND package.organization_id=e.organization_id
+                  AND jsonb_typeof(package.calculation->'destinations')='array'
+                  AND (SELECT count(*) FROM accounting.late_pool_inventory_value_link link
+                    WHERE link.package_id=package.id) =
+                    (SELECT count(*) FROM jsonb_array_elements(package.calculation->'destinations') destination
+                     WHERE destination->>'kind'='inventory'
+                       AND CASE WHEN coalesce(destination->>'delta_byn','') ~ '^-?[0-9]{1,16}[.][0-9]{2}$'
+                                THEN (destination->>'delta_byn')::numeric END <> 0)
+              )
+            )
+          )
+    """), {"org": org_id, "first": first, "last": last}) or 0
     trade_entries = (await session.scalars(select(ForeignTradeRegisterEntry).where(
         ForeignTradeRegisterEntry.organization_id == org_id,
         ForeignTradeRegisterEntry.posting_date >= first,

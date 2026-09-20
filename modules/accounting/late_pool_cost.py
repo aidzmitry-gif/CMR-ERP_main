@@ -71,6 +71,55 @@ async def _resolve_wip_origins(session, organization_id, calculated):
     return origins
 
 
+async def _store_inventory_value_links(session, package_id, entry, posting, calculated):
+    """Bind each posted V3 inventory value line to its reviewed acquisition line.
+
+    ``pool_candidate`` deliberately keeps destination order stable.  Verify the
+    persisted order against the immutable PostingInput before using it as the
+    source-line identity; matching only account and analytics would be unsafe
+    when a package contains equal-looking value adjustments.
+    """
+    actual_lines = (await session.scalars(select(Line).where(Line.entry_id == entry.id)
+                                          .order_by(Line.id))).all()
+    if len(actual_lines) != len(posting.lines):
+        raise service.AccountingError("V3 pool posting line count changed before immutable linking")
+    for actual, expected in zip(actual_lines, posting.lines, strict=True):
+        if (actual.account_code != expected.account or actual.side != expected.side
+                or Decimal(actual.amount) != Decimal(expected.amount)
+                or actual.dimensions != expected.dimensions or actual.quantity != expected.quantity):
+            raise service.AccountingError("V3 pool posting line order changed before immutable linking")
+    expected_index = 0
+    linked = 0
+    for destination in calculated["destinations"]:
+        amount = Decimal(destination["delta_byn"])
+        if not amount:
+            continue
+        if expected_index >= len(actual_lines):
+            raise service.AccountingError("V3 pool destination has no posted ledger line")
+        actual = actual_lines[expected_index]
+        expected_index += 1
+        if destination.get("kind") != "inventory":
+            continue
+        source_entry_id, source_line_id = destination.get("source_entry_id"), destination.get("source_line_id")
+        if (actual.account_code != destination.get("account") or actual.account_code.split(".")[0] not in {"10", "41"}
+                or actual.dimensions != destination.get("dimensions")
+                or actual.side != ("debit" if amount > 0 else "credit")
+                or Decimal(actual.amount) != amount.copy_abs() or actual.quantity is not None
+                or type(source_entry_id) is not int or source_entry_id <= 0
+                or type(source_line_id) is not int or source_line_id <= 0):
+            raise service.AccountingError("V3 inventory destination differs from its reviewed acquisition origin")
+        await session.execute(text("""
+            INSERT INTO accounting.late_pool_inventory_value_link
+              (package_id, value_entry_id, value_line_id, acquisition_entry_id, acquisition_line_id)
+            VALUES (:package,:value_entry,:value_line,:acquisition_entry,:acquisition_line)
+        """), {"package": package_id, "value_entry": entry.id, "value_line": actual.id,
+                "acquisition_entry": source_entry_id, "acquisition_line": source_line_id})
+        linked += 1
+    if expected_index > len(actual_lines):
+        raise service.AccountingError("V3 pool destinations exceed posted ledger lines")
+    return linked
+
+
 async def _resolve_outputs(session, organization_id, command, origins, procurement):
     """Project each released order using the signed, read-only SQL overlay."""
     grouped = {}
@@ -183,6 +232,12 @@ async def load_package(session, organization_id, entry_id):
         WHERE package_id=:package
         ORDER BY output_entry_id
     """), {"package": saved["id"]})).mappings().all()
+    inventory_links = (await session.execute(text("""
+        SELECT value_entry_id, value_line_id, acquisition_entry_id, acquisition_line_id
+        FROM accounting.late_pool_inventory_value_link
+        WHERE package_id=:package
+        ORDER BY value_line_id
+    """), {"package": saved["id"]})).mappings().all()
     return {
         "organization_id": organization_id,
         "expense_id": preview["expense_id"],
@@ -198,6 +253,11 @@ async def load_package(session, organization_id, entry_id):
             "output_revision_id": row["output_revision_id"],
             "amount_byn": format(row["amount"], ".2f"),
         } for row in links],
+        "inventory_value_links": [{
+            "value_entry_id": row["value_entry_id"], "value_line_id": row["value_line_id"],
+            "acquisition_entry_id": row["acquisition_entry_id"],
+            "acquisition_line_id": row["acquisition_line_id"],
+        } for row in inventory_links],
     }
 
 
@@ -214,9 +274,9 @@ async def confirm(session, organization_id, expense_id, command: PoolLateCostCom
     if not isinstance(command, PoolLateCostCommand):
         raise service.AccountingError("A reviewed version 3 pool late-cost command is required")
     await service.lock_organization(session, organization_id)
-    exists = await session.scalar(text("SELECT to_regclass('accounting.late_pool_package') IS NOT NULL"))
+    exists = await session.scalar(text("SELECT to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL"))
     if exists is not True:
-        raise service.AccountingError("Atomic late pool package requires migration 0153")
+        raise service.AccountingError("Atomic late pool package requires migration 0155")
     saved_rows = (await session.execute(text("""
         SELECT id, organization_id, request_key, late_entry_id, command, calculation,
                preview, posting, basis_digest, digest, actor
@@ -271,6 +331,7 @@ async def confirm(session, organization_id, expense_id, command: PoolLateCostCom
             "posting": json.dumps(prepared["posting"], sort_keys=True),
             "basis": expected_basis_digest, "digest": prepared["posting_digest"], "actor": actor,
         })
+        await _store_inventory_value_links(session, package_id, entry, posting, prepared["calculation"])
         for output in prepared["outputs"]:
             data = ProductionOutputCostPreviewInput(
                 original_entry_id=output["output_entry_id"],

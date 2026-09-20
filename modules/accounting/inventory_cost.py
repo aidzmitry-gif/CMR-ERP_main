@@ -182,6 +182,7 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
     evidence = []
     matched = False
     checked_zero_receipts = set()
+    pool_value_origins = getattr(verified_value_lines, "pool_origins", {})
     if organization_id is None and zero_value_disposals:
         raise AccountingError("Zero-value disposal replay needs an organization identity")
     for _, _, _, entry, line, zero_event in _chronological_events(
@@ -294,8 +295,31 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
         if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines and (entry.id, line.id) not in verified_value_lines:
             raise AccountingError("Finished-goods layer has no verified production output receipt")
         matched = True
-        value_only = (entry.id, line.id) in verified_value_lines
+        value_key = (entry.id, line.id)
+        value_only = value_key in verified_value_lines
         if value_only:
+            origin = pool_value_origins.get(value_key)
+            if origin is not None:
+                if (entry.operation != "inventory_late_cost" or entry.rule_version != "late-cost-pool-v3"
+                        or line.quantity is not None or line.amount <= 0
+                        or line.category != "asset" or line.cash or line.currency != "BYN"
+                        or not isinstance(origin, tuple) or len(origin) != 2
+                        or any(type(item) is not int or item <= 0 for item in origin)):
+                    raise AccountingError("Invalid V3 inventory value adjustment")
+                matches = [layer for layer in layers
+                           if (layer["entry_id"], layer["line_id"]) == origin and layer["quantity"] > 0]
+                if len(matches) != 1 or matches[0]["dimensions"] != dimensions:
+                    raise AccountingError("V3 late cost does not identify one open acquisition layer")
+                signed_amount = Decimal(line.amount) if line.side == "debit" else -Decimal(line.amount)
+                if matches[0]["amount"] + signed_amount < 0:
+                    raise AccountingError("V3 late cost makes its acquisition layer value negative")
+                matches[0]["amount"] += signed_amount
+                evidence.append({"entry_id": entry.id, "line_id": line.id, "source": entry.source,
+                                 "source_version": entry.source_version, "side": line.side,
+                                 "quantity": None, "amount_byn": format(Decimal(line.amount), ".2f"),
+                                 "lot": dimensions["lot"], "late_cost": True,
+                                 "acquisition_entry_id": origin[0], "acquisition_line_id": origin[1]})
+                continue
             if (entry.operation not in {"inventory_late_cost", "production_output_cost_correction"}
                 or entry.operation == "inventory_late_cost" and line.side != "debit"
                 or line.quantity is not None or line.amount <= 0):
@@ -498,6 +522,7 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
     inventory_dimensions = None
     acquisition = None
     adjusted = False
+    pool_value_origins = getattr(verified_value_lines, "pool_origins", {})
     with localcontext() as context:
         context.prec = 64
         quantity, amount = Decimal(0), Decimal(0)
@@ -550,7 +575,10 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
                 raise AccountingError("Selected lot has later movements; chronological costing is required")
             if finished_goods and line.side == "debit" and (entry.id, line.id) not in verified_output_lines and (entry.id, line.id) not in verified_value_lines:
                 raise AccountingError("Finished-goods layer has no verified production output receipt")
-            value_only = (entry.id, line.id) in verified_value_lines
+            value_key = (entry.id, line.id)
+            value_only = value_key in verified_value_lines
+            if value_only and value_key in pool_value_origins:
+                raise AccountingError("V3 pool value adjustments require FIFO or weighted-average costing")
             if value_only and (entry.operation not in {"inventory_late_cost", "production_output_cost_correction"}
                                or line.quantity is not None
                                or entry.operation == "inventory_late_cost" and line.side != "debit"

@@ -1,8 +1,10 @@
 """Reproduce a saved late-cost receipt from its original authenticated history."""
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field, model_validator
+from sqlalchemy import text
 
 from modules.accounting import service
 from modules.accounting.closing_commands import actual_posting
@@ -11,6 +13,21 @@ from modules.accounting.late_cost_preview import calculate, validate_currency
 from modules.accounting.late_cost_sources import expense_history
 from modules.accounting.models import Entry, LateCostReceipt, Policy
 from modules.accounting.schemas import Input, LateCostPreviewInput, Money, PostingInput, exact
+
+
+class VerifiedValueLines(frozenset):
+    """Authenticated value-only lines with optional immutable V3 origins.
+
+    It remains a ``frozenset`` so legacy callers keep admitting only the exact
+    verified entry/line pairs.  V3 pool lines additionally identify the one
+    acquisition layer they may adjust; replay must never infer it from
+    analytics alone.
+    """
+
+    def __new__(cls, lines=(), *, pool_origins=None):
+        result = super().__new__(cls, lines)
+        result.pool_origins = MappingProxyType(dict(pool_origins or {}))
+        return result
 
 
 class LateCostCommand(Input):
@@ -80,19 +97,60 @@ async def verified_value_lines(session, organization_id, rows, procurement):
     """Authenticate every value-only line before allowing it into costing."""
     candidates = [(entry, line) for entry, line in rows if line.quantity is None]
     if not candidates:
-        return frozenset()
+        return VerifiedValueLines()
+    candidate_keys = {(entry.id, line.id) for entry, line in candidates}
+    candidate_entries = {entry.id: entry for entry, _ in candidates}
+    v3_entries = {entry.id for entry, _ in candidates
+                  if entry.operation == "inventory_late_cost"
+                  and entry.rule_version == "late-cost-pool-v3"}
+    pool_origins = {}
+    if v3_entries:
+        links_present = await session.scalar(text(
+            "SELECT to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL"))
+        if links_present is not True:
+            raise service.AccountingError("V3 pool value adjustments require immutable acquisition links")
+        link_rows = (await session.execute(text("""
+            SELECT p.id AS package_id, p.late_entry_id,
+                   link.value_entry_id, link.value_line_id,
+                   link.acquisition_entry_id, link.acquisition_line_id
+            FROM accounting.late_pool_package p
+            LEFT JOIN accounting.late_pool_inventory_value_link link ON link.package_id=p.id
+            WHERE p.organization_id=:org
+        """), {"org": organization_id})).mappings().all()
+        package_by_entry = {}
+        for row in link_rows:
+            entry_id = row["late_entry_id"]
+            if entry_id not in v3_entries:
+                continue
+            prior = package_by_entry.setdefault(entry_id, row["package_id"])
+            if prior != row["package_id"]:
+                raise service.AccountingError("V3 pool entry has inconsistent immutable packages")
+            if row["value_line_id"] is not None:
+                key = (row["value_entry_id"], row["value_line_id"])
+                origin = (row["acquisition_entry_id"], row["acquisition_line_id"])
+                if key in pool_origins:
+                    raise service.AccountingError("V3 pool value line has duplicate immutable origins")
+                pool_origins[key] = origin
+        if set(package_by_entry) != v3_entries:
+            raise service.AccountingError("V3 pool value adjustment has no immutable package")
+        for entry_id in sorted(v3_entries):
+            await session.execute(text("SELECT accounting.verify_late_pool_package(:package)"),
+                                  {"package": package_by_entry[entry_id]})
+        missing = {key for key in candidate_keys if key[0] in v3_entries} - set(pool_origins)
+        if missing:
+            raise service.AccountingError("V3 pool value adjustment has no immutable acquisition origin")
     output_entries = {entry.id for entry, _ in candidates if entry.operation == "production_output_cost_correction"}
     if output_entries:
         from modules.accounting.production_output_revisions import verify_value_entry
 
         for entry_id in sorted(output_entries):
             await verify_value_entry(session, organization_id, entry_id)
-    procurement_entries = {entry.id for entry, _ in candidates} - output_entries
+    procurement_entries = set(candidate_entries) - output_entries - v3_entries
     if procurement_entries and procurement is None:
         raise service.AccountingError("Cost adjustments require the procurement source gateway")
     for entry_id in sorted(procurement_entries):
         await verify_receipt(session, organization_id, entry_id, procurement)
-    return frozenset((entry.id, line.id) for entry, line in candidates)
+    return VerifiedValueLines(candidate_keys, pool_origins=pool_origins)
 
 
 async def verify_receipt(session, organization_id, entry_id, procurement):
