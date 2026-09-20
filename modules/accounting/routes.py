@@ -1067,19 +1067,24 @@ async def production_output_cost_revision_preview(org_id: int, month: str, data:
 
 @router.post('/organizations/{org_id}/periods/{month}/production-output-cost-revision-confirm', status_code=201)
 async def production_output_cost_confirm(org_id: int, month: str, data: ProductionOutputCostConfirmInput,
-        response: Response, ctx=Depends(member), core=Depends(get_core)):
+        response: Response, expected_principal: str = Header(alias='X-Expected-Principal'),
+        ctx=Depends(member), core=Depends(get_core)):
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
     valid_month(month)
     if ctx[2] not in {'accountant', 'chief'}:
         raise HTTPException(403, 'Accounting write access required')
+    if expected_principal != ctx[1]:
+        raise HTTPException(409, 'Accounting principal changed; review the command again')
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         revision = await confirm_output_cost_correction(ctx[0], org_id, month, data, ctx[1], core.services.event_bus)
     except service.AccountingError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {'organization_id': org_id, 'revision_id': revision.id, 'entry_id': revision.entry_id,
-            'sequence': revision.sequence, 'posted': True, 'final_cost_certified': False}
+            'sequence': revision.sequence, 'month': month, 'actor': ctx[1],
+            'original_entry_id': data.original_entry_id, 'request_key': str(data.request_key),
+            'basis_digest': data.basis_digest, 'posted': True, 'final_cost_certified': False}
 
 
 @router.post('/organizations/{org_id}/periods/{month}/production-output-transfer-preview')
