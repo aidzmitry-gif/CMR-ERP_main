@@ -687,6 +687,7 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         from modules.accounting.late_material_cost import load_package
 
         persisted = await load_package(session, pg_book[0], saved_entry_id, procurement)
+        assert (await gateway.additional_expense_status(session, pg_book[0], user, expense.id))["command_version"] == 2
         assert persisted["preview"] == package
         assert persisted["command"] == reviewed.model_dump(mode="json")
         assert persisted["posted"] is True

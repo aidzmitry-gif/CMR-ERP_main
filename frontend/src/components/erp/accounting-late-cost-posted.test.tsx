@@ -31,3 +31,22 @@ it("rejects an unbalanced package instead of masking the difference", async () =
   setup(data); fireEvent.click(screen.getByText("Показать проводки"));
   await screen.findByText("Дебет и кредит пакета не сходятся.");
 });
+
+it("reads the complete material package including linked output costs", async () => {
+  const original = packet();
+  original.posting.lines[0].account = "20";
+  const data = { ...original, preview: { posting: original.posting, wip_origins: [],
+    command: { command_version: 2, material_outputs: [{ output_entry_id: 12, amount_byn: "100.00" }] },
+    outputs: [{ output_entry_id: 12, amount_byn: "100.00", prospective_evidence: { matrix: [
+      { account: "43", side: "debit", amount: "50.00", dimensions: {} },
+      { account: "90.4", side: "debit", amount: "50.00", dimensions: {} },
+      { account: "20", side: "credit", amount: "100.00", dimensions: {} }] } }] },
+    output_revisions: [{ output_entry_id: 12, output_revision_id: 19, amount_byn: "100.00" }] };
+  const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => data });
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingLateCostPosted org="1" expenseId={7} version={2} entryId={9} material />);
+  fireEvent.click(screen.getByText("Показать проводки"));
+  await screen.findByText("Дебет 90.4 · 50.00 BYN");
+  expect(screen.getByText("Дебет 43 · 50.00 BYN")).toBeInTheDocument();
+  expect(fetcher.mock.calls[0][0]).toContain("/material/posting");
+});

@@ -106,6 +106,7 @@ export function AccountingLateCostPreview({ org, expenseId, version, initialDate
           <td>№ {share.receipt_id}, версия {share.version}, строка {share.line_number}</td><td>{labels[share.destination]}</td><td>{share.quantity}</td><td>{share.amount_byn}</td>
         </tr>)}</tbody></table></div>
       {policy && <AccountingLateCostAccounts key={key} org={org} expenseId={expenseId} disabled={disabled || busy} onPrepared={onPrepared}
+        material={current.shares.some(share => share.destination === "production" && BigInt(share.amount_byn.replace(".", "")) > 0n)}
         allocation={{ expected_version: version, policy_id: policy.id, posting_date: date, capitalizable_amount_byn: amount,
           excluded_amount_byn: excluded, classification_evidence: evidence.trim(), ...(conversion ? { conversion } : {}) }} />}
     </>}

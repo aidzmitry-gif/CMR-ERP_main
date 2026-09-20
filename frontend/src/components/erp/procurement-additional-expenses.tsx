@@ -16,7 +16,7 @@ type Document = { invoice_reference: string; supplier: string; contract: string;
   operation_date: string; currency: string; amount: string; explanation: string; receipt_lines: Source[] };
 type Revision = { version: number; document: Document; actor: string; created_at: string };
 type Expense = { id: number; organization_id: number; key: string; version: number; posted: boolean;
-  posting?: { entry_id: number; version: number; digest: string } | null; revisions: Revision[] };
+  posting?: { entry_id: number; version: number; digest: string; command_version?: number } | null; revisions: Revision[] };
 type Receipt = { id: number; posting: { version: number } | null;
   revisions: { version: number; document: { invoice_reference: string; items: { sku: string; lot: string; quantity: string }[] } }[] };
 type Context = { organization_id: number; principal: string; can_write: boolean };
@@ -186,7 +186,7 @@ function ExpenseBook({ org, onLock }: { org: string; onLock: (locked: boolean) =
     </form>}
     {selected?.posted && <p role="status">Документ проведён{selected.posting ? ` · операция № ${selected.posting.entry_id}` : ""}. Исправления оформляются отдельной операцией.</p>}
     {selected?.posted && selected.posting && <AccountingLateCostPosted key={`${org}:${selected.id}:${selected.version}:${selected.posting.entry_id}`}
-      org={org} expenseId={selected.id} version={selected.version} entryId={selected.posting.entry_id} />}
+      org={org} expenseId={selected.id} version={selected.version} entryId={selected.posting.entry_id} material={selected.posting.command_version === 2} />}
     {selected && !selected.posted && unsaved && <p role="status">Сохраните изменения документа перед расчётом и подготовкой проводок.</p>}
     {selected && !selected.posted && !unsaved && <AccountingLateCostPreview key={`${org}:${selected.id}:${selected.version}`} org={org} expenseId={selected.id}
       version={selected.version} currency={selected.revisions[selected.revisions.length - 1].document.currency}

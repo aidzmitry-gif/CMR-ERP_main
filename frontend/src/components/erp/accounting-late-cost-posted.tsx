@@ -2,27 +2,35 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { checkedMaterialOutputs, type MaterialOutput } from "@/lib/late-material-package";
 
 type Line = { account: string; side: "debit" | "credit"; amount: string; currency: string; quantity: null; dimensions: Record<string, string> };
 type Package = { organization_id: number; expense_id: number; source_version: number; entry_id: number; posted: boolean;
-  digest: string; basis_digest: string; posting: { source: string; posting_date: string; explanation: string; lines: Line[] } };
+  digest: string; basis_digest: string; outputCorrections?: MaterialOutput[]; posting: { source: string; posting_date: string; explanation: string; lines: Line[] } };
 const dimensionLabels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов",
   warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", department: "Подразделение", vat_rate: "Ставка НДС", vat_basis: "Основание НДС" };
 
-export function AccountingLateCostPosted({ org, expenseId, version, entryId }: {
-  org: string; expenseId: number; version: number; entryId: number;
+export function AccountingLateCostPosted({ org, expenseId, version, entryId, material = false }: {
+  org: string; expenseId: number; version: number; entryId: number; material?: boolean;
 }) {
   const [opened, setOpened] = useState(false);
   const [result, setResult] = useState<{ key: string; data?: Package; error?: string } | null>(null);
-  const key = `${org}:${expenseId}:${version}:${entryId}`;
+  const key = `${org}:${expenseId}:${version}:${entryId}:${material}`;
   const current = result?.key === key ? result : null;
   useEffect(() => {
     if (!opened) return;
     const controller = new AbortController();
-    void fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}/posting`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}${material ? "/material" : ""}/posting`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error("Не удалось проверить проведённый пакет.");
-        const data: Package = await response.json();
+        const raw = await response.json();
+        const data: Package = material ? { ...raw, posting: raw.preview?.posting,
+          outputCorrections: checkedMaterialOutputs(raw.preview) } : raw;
+        if (material && (!Array.isArray(raw.output_revisions) || raw.output_revisions.length !== data.outputCorrections?.length
+          || raw.output_revisions.some((row: { output_entry_id: number; output_revision_id: number; amount_byn: string }, index: number) => !row
+            || !Number.isSafeInteger(row.output_revision_id) || row.output_revision_id <= 0
+            || row.output_entry_id !== data.outputCorrections?.[index].output_entry_id
+            || row.amount_byn !== data.outputCorrections?.[index].amount_byn))) throw new Error("Корректировки выпуска не подтверждены.");
         if (String(data.organization_id) !== org || data.expense_id !== expenseId || data.source_version !== version
           || data.entry_id !== entryId || data.posted !== true || !/^[a-f0-9]{64}$/.test(data.digest)
           || !/^[a-f0-9]{64}$/.test(data.basis_digest) || data.posting?.source !== `procurement:additional-expense:${expenseId}`
@@ -44,7 +52,7 @@ export function AccountingLateCostPosted({ org, expenseId, version, entryId }: {
         if (!controller.signal.aborted) setResult({ key, data });
       }).catch((error: Error) => { if (!controller.signal.aborted) setResult({ key, error: error.message }); });
     return () => controller.abort();
-  }, [opened, org, expenseId, version, entryId, key]);
+  }, [opened, org, expenseId, version, entryId, key, material]);
   return <section className="space-y-3 rounded-xl border border-line p-4">
     <Button variant="secondary" onClick={() => setOpened(value => !value)}>{opened ? "Скрыть проводки" : "Показать проводки"}</Button>
     {opened && <>
@@ -57,6 +65,13 @@ export function AccountingLateCostPosted({ org, expenseId, version, entryId }: {
           <p>{line.side === "debit" ? "Дебет" : "Кредит"} {line.account} · {line.amount} BYN</p>
           {Object.entries(line.dimensions).map(([name, value]) => <p key={name} className="break-words text-sm text-muted">{dimensionLabels[name] ?? name}: {value}</p>)}
         </div>)}
+        {current.data.outputCorrections?.map(output => <section className="space-y-2 border-t border-line pt-3" key={output.output_entry_id}>
+          <h4 className="font-semibold">Корректировка выпуска · операция № {output.output_entry_id} · {output.amount_byn} BYN</h4>
+          {output.lines.map((line, index) => <div key={index}>
+            <p>{line.side === "debit" ? "Дебет" : "Кредит"} {line.account} · {line.amount} BYN</p>
+            {Object.entries(line.dimensions).map(([name, value]) => <p className="break-words text-sm text-muted" key={name}>{dimensionLabels[name] ?? name}: {value}</p>)}
+          </div>)}
+        </section>)}
       </div>}
     </>}
   </section>;

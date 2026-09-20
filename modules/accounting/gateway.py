@@ -24,7 +24,8 @@ class AccountingService:
         if (entry is None or entry.organization_id != organization_id or entry.digest != saved.digest
             or entry.source != f"procurement:additional-expense:{expense_id}" or entry.source_version != saved.source_version):
             raise HTTPException(409, "Additional expense posting identity is inconsistent")
-        return {"entry_id": entry.id, "version": saved.source_version, "digest": saved.digest}
+        return {"entry_id": entry.id, "version": saved.source_version, "digest": saved.digest,
+                **({"command_version": 2} if saved.command.get("command_version") == 2 else {})}
 
     async def physical_shipment_preview(self, session, organization_id, user, receipt, document):
         from pydantic import ValidationError

@@ -3,17 +3,19 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import type { LateCostPending } from "@/lib/late-cost-journal";
+import { checkedMaterialOutputs, type MaterialOutput } from "@/lib/late-material-package";
 
 type Allocation = { expected_version: number; policy_id: number; posting_date: string; capitalizable_amount_byn: string; excluded_amount_byn: string; classification_evidence: string; conversion?: { currency: string; rate: string; rate_scale: number; rate_date: string; rate_source: string } };
 type Account = { code: string; title: string; valid_from: string; category: string; cash: boolean; quantity_tracking: boolean; required_dimensions: string[] };
 type Excluded = { account: string; amount_byn: string; dimensions: Record<string, string> };
 type Line = { account: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string> };
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение", employee: "Сотрудник", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", asset: "Основное средство" };
-export function AccountingLateCostAccounts({ org, expenseId, allocation, disabled, onPrepared }: {
-  org: string; expenseId: number; allocation: Allocation; disabled: boolean; onPrepared?: (command: LateCostPending | null) => void;
+export function AccountingLateCostAccounts({ org, expenseId, allocation, disabled, onPrepared, material = false }: {
+  org: string; expenseId: number; allocation: Allocation; disabled: boolean; onPrepared?: (command: LateCostPending | null) => void; material?: boolean;
 }) {
   const [accounts, setAccounts] = useState<Account[]>([]), [settlement, setSettlement] = useState("");
   const [excluded, setExcluded] = useState<Excluded[]>([]), [lines, setLines] = useState<Line[] | null>(null);
+  const [outputs, setOutputs] = useState<MaterialOutput[]>([]);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const running = useRef(false), request = useRef<AbortController | null>(null);
   useEffect(() => { if (!lines) onPrepared?.(null); }, [lines, onPrepared]);
@@ -35,9 +37,10 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
     running.current = true; setBusy(true); setError(""); setLines(null);
     const controller = new AbortController(); request.current = controller;
     try {
-      const response = await fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}/posting-preview`, {
+      const requested = { allocation, accounts: { settlement_account: settlement, excluded_costs: excluded } };
+      const response = await fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}${material ? "/material" : ""}/posting-preview`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ allocation, accounts: { settlement_account: settlement, excluded_costs: excluded } }),
+        body: JSON.stringify(requested),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Проверьте счета, суммы и аналитику.");
@@ -55,10 +58,12 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
       }
       const cents = (amount: string) => { const [whole, fraction = ""] = amount.split("."); return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0")); };
       if (debit !== credit || debit !== cents(allocation.capitalizable_amount_byn) + cents(allocation.excluded_amount_byn)) throw new Error("Суммы пакета не соответствуют документу.");
+      const outputRows = material ? checkedMaterialOutputs(data, requested) : [];
+      if (material && (data.confirmation_available !== true || data.posting_digest !== data.digest)) throw new Error("Производственный пакет ещё нельзя подтвердить.");
       if (!controller.signal.aborted) {
+        setOutputs(outputRows);
         setLines(data.posting.lines);
-        onPrepared?.({ org, expenseId, principal: data.principal, body: JSON.stringify({ allocation,
-          accounts: { settlement_account: settlement, excluded_costs: excluded }, request_key: crypto.randomUUID(),
+        onPrepared?.({ org, expenseId, principal: data.principal, body: JSON.stringify({ ...(material ? data.command : requested), request_key: crypto.randomUUID(),
           expected_digest: data.digest, expected_basis_digest: data.basis_digest }) });
       }
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
@@ -87,6 +92,17 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
       {lines.map((line, index) => <div key={index} className="border-t border-line py-2"><p>{line.side === "debit" ? "Дебет" : "Кредит"} {line.account} · {line.amount} BYN</p>
         {Object.entries(line.dimensions).map(([name, value]) => <p className="break-words text-sm text-muted" key={name}>{labels[name] ?? name}: {value}</p>)}
       </div>)}
+      {material && <section className="space-y-3" aria-label="Корректировки себестоимости выпусков">
+        <h4 className="font-semibold">Корректировки себестоимости выпусков</h4>
+        {!outputs.length && <p>Производственная часть расходов остаётся в НЗП.</p>}
+        {outputs.map(output => <div key={output.output_entry_id} className="rounded-lg border border-line p-3">
+          <p>Выпуск · операция № {output.output_entry_id} · {output.amount_byn} BYN</p>
+          {output.lines.map((line, index) => <div key={index} className="border-t border-line py-2">
+            <p>{line.side === "debit" ? "Дебет" : "Кредит"} {line.account} · {line.amount} BYN</p>
+            {Object.entries(line.dimensions).map(([name, value]) => <p className="break-words text-sm text-muted" key={name}>{labels[name] ?? name}: {value}</p>)}
+          </div>)}
+        </div>)}
+      </section>}
     </>}
   </section>;
 }
