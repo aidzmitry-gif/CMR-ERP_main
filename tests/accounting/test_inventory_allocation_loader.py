@@ -76,12 +76,17 @@ def test_ordered_credit_replacement_allows_identical_shapes_from_distinct_origin
 
 @pytest.mark.integration
 async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_factory, pg_book, posting):
+    await save_mixed_weighted_receipt(pg_factory, pg_book, posting)
+
+
+async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_packet=None,
+                                     method="weighted_average", sale=False):
     """Synthetic immutable mixed-cent receipt -> loader -> next weighted issue replay."""
     async with pg_factory() as session:
         policy_id = (await session.scalar(select(func.max(models.Policy.id))) or 0) + 1
         account_id = (await session.scalar(select(func.max(models.Account.id))) or 0) + 1
         policy = models.Policy(id=policy_id, organization_id=pg_book[0], effective_from=date(2026, 2, 1),
-            reference="Synthetic weighted-average", inventory_method="weighted_average", allocation_basis="direct_cost",
+            reference="Synthetic allocation policy", inventory_method=method, allocation_basis="direct_cost",
             depreciation_method="straight_line", normative_reference="Synthetic", normative_verified=False,
             approved_by="tester")
         session.add_all([policy, models.Account(id=account_id, organization_id=pg_book[0], code="41.2",
@@ -89,11 +94,11 @@ async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_
             currency_tracking=True, quantity_tracking=True, cash=False, normative_ref="synthetic")])
         await session.commit()
         book = (pg_book[0], policy_id)
-        await move(session, book, posting, "allocation-old", "1", "0.01", day="2026-09-01", lot="old")
-        await move(session, book, posting, "allocation-new", "2", "0.01", day="2026-09-02", lot="new")
+        await move(session, book, posting, "allocation-old", "3" if method == "fifo" else "1", "0.01", day="2026-09-01", lot="old")
+        await move(session, book, posting, "allocation-new", "1" if method == "fifo" else "2", "0.01", day="2026-09-02", lot="new")
         document = InventoryIssueDocument(source="allocation-weighted-cent", source_version=1,
             document_date="2026-09-03", operation_date="2026-09-03", posting_date="2026-09-03", policy_id=policy_id,
-            account="41.2", warehouse="W", sku="SKU", lot="", quantity="2", expense_account="90.4",
+            account="41.2", warehouse="W", sku="SKU", lot="", quantity="3.1" if method == "fifo" else "2", expense_account="90.4",
             expense_dimensions={}, explanation="Synthetic explicit allocation")
         rows = (await session.execute(select(models.Entry, models.Line).join(models.Line, models.Line.entry_id == models.Entry.id).where(
             models.Entry.organization_id == pg_book[0], models.Line.account_code == "41.2").order_by(
@@ -103,10 +108,22 @@ async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_
                                            include_source_identity=True)
         cost["source_allocation_version"] = 1
         assert [layer["amount_byn"] for layer in cost["inventory_layers"]] == ["0.01", "0.00"]
-        package = inventory_issues.posting_for(document, cost)
+        if sale:
+            from modules.accounting import sales
+
+            document = sales.SaleDocument(**document.model_dump(), net_amount="10.00", vat_rate="0",
+                vat_basis="Synthetic exemption", buyer_account="62", revenue_account="90.1",
+                vat_revenue_account="90.2", vat_payable_account="68",
+                buyer_dimensions={"counterparty": "BUYER", "contract": "CONTRACT", "settlement_document": "INVOICE"})
+            package = sales.posting_for(document, cost)
+        else:
+            package = inventory_issues.posting_for(document, cost)
         package = package.model_copy(update={"lines": [line for line in package.lines if line.amount > 0]})
-        entry = await service.post(session, pg_book[0], package, "tester", inventory_issue=True)
-        session.add(models.InventoryIssueReceipt(entry_id=entry.id, organization_id=pg_book[0],
+        if prepare_packet is not None:
+            package = prepare_packet(cost, package)
+        entry = await service.post(session, pg_book[0], package, "tester", inventory_issue=not sale, inventory_sale=sale)
+        receipt_type = models.InventorySaleReceipt if sale else models.InventoryIssueReceipt
+        session.add(receipt_type(entry_id=entry.id, organization_id=pg_book[0],
             command=document.model_dump(mode="json"), cost=json.loads(json.dumps(cost, default=str)), posting=package.model_dump(mode="json"),
             digest=service.digest(package), actor="tester"))
         await session.commit()
@@ -115,7 +132,7 @@ async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_
         assert len(events) == 1 and events[0].entry_id == entry.id
         next_document = document.model_copy(update={
             "source": "allocation-next-weighted", "posting_date": date(2026, 9, 4),
-            "document_date": date(2026, 9, 4), "operation_date": date(2026, 9, 4), "quantity": Decimal("1"),
+            "document_date": date(2026, 9, 4), "operation_date": date(2026, 9, 4), "quantity": Decimal("0.9" if method == "fifo" else "1"),
         })
         next_request = InventoryIssuePreviewInput(**next_document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
         replay_policy, rows, verified, finished_goods = await inventory_cost._inventory_rows(session, pg_book[0], next_request)
