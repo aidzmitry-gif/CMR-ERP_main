@@ -70,7 +70,8 @@ async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book,
     if latest_runtime:
         async with pg_factory() as session:
             for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py"):
+                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                             "0148_zero_value_allocated_sales.py"):
                 await run_migration(session, revision, "upgrade")
             await session.commit()
     document = sale_document(policy_id).model_copy(update={"quantity": Decimal("0.5"), "vat_rate": Decimal(vat_rate)})

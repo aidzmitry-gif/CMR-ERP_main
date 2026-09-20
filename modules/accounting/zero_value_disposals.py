@@ -428,9 +428,7 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
         except (ValidationError, ValueError) as exc:
             raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
         allocated = isinstance(command, AllocatedZeroValueDisposalCommand)
-        if allocated and command.operation != "inventory_issue":
-            raise AccountingError("Allocated zero-value sale requires commercial receipt integration")
-        linked_sale = isinstance(command, ZeroValueSaleCommand) and row.operation == "inventory_sale"
+        linked_sale = isinstance(command, (ZeroValueSaleCommand, AllocatedZeroValueDisposalCommand)) and row.operation == "inventory_sale"
         valid_kind = (linked_sale and row.entry_id == row.registration_token) or (
             row.operation == "inventory_issue" and row.entry_id is None)
         if (not valid_kind or command.operation != row.operation

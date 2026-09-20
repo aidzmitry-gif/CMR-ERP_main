@@ -130,7 +130,11 @@ async def prepare(session, org_id, document, *, procurement=None, source_allocat
 
 async def prepare_zero_command(session, org_id, document, *, procurement=None):
     from modules.accounting.specific_zero_value_issue import implicit_document, preview
-    from modules.accounting.zero_value_disposals import ZeroValueSaleCommand, canonical_json
+    from modules.accounting.zero_value_disposals import (
+        AllocatedZeroValueDisposalCommand,
+        ZeroValueSaleCommand,
+        canonical_json,
+    )
 
     if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_zero_sale_link(integer)') IS NOT NULL")):
         raise service.AccountingError("Zero-value sale requires migration 0143")
@@ -140,6 +144,17 @@ async def prepare_zero_command(session, org_id, document, *, procurement=None):
         raise service.AccountingError("Zero-value sale requires a zero-cost source")
     # Reuse source, destination and policy authentication without creating an issue.
     checked = await preview(session, org_id, explicit, "sale-preview")
+    if checked["command"].get("command_version") == 4:
+        if await session.scalar(text(
+            "SELECT to_regprocedure('accounting.zero_value_allocated_sale_version()') IS NOT NULL"
+        )) is not True:
+            raise service.AccountingError("Allocated zero-value sale requires migration 0148")
+        command = AllocatedZeroValueDisposalCommand.model_validate({**checked["command"],
+            "operation": "inventory_sale", "document": document.model_dump(mode="json")})
+        basis = await session.scalar(text(
+            "SELECT accounting.zero_value_allocation_basis(:org,CAST(:command AS jsonb),2147483647)"
+        ), {"org": org_id, "command": canonical_json(command.model_dump(mode="json"))})
+        return command.model_copy(update={"basis_digest": basis})
     command = ZeroValueSaleCommand.model_validate({**checked["command"], "command_version": 3,
         "operation": "inventory_sale", "sale_document": document.model_dump(mode="json")})
     basis = await session.scalar(text("SELECT accounting.zero_value_disposal_basis(:org,CAST(:command AS jsonb),2147483647)"),
@@ -149,6 +164,12 @@ async def prepare_zero_command(session, org_id, document, *, procurement=None):
 
 async def verify_receipt(session, organization_id, entry_id, *, procurement=None):
     from modules.accounting.closing_commands import actual_posting
+    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+    from modules.accounting.zero_value_disposals import (
+        AllocatedZeroValueDisposalCommand,
+        load_authenticated_zero_value_disposals,
+        parse_zero_value_command,
+    )
 
     await service.lock_organization(session, organization_id)
     receipt = await session.get(InventorySaleReceipt, entry_id)
@@ -161,6 +182,18 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
                                                  allocation_version=allocation.allocation_version if allocation else None)
     if Decimal(cost["issue_cost_byn"]) == 0:
         await session.execute(text("SELECT accounting.validate_zero_sale_link(:entry)"), {"entry": entry_id})
+        zero_receipt = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
+            ZeroValueInventoryDisposalReceipt.organization_id == organization_id,
+            ZeroValueInventoryDisposalReceipt.entry_id == entry_id,
+            ZeroValueInventoryDisposalReceipt.operation == "inventory_sale",
+        ))
+        if (zero_receipt is not None
+                and isinstance(parse_zero_value_command(zero_receipt.command), AllocatedZeroValueDisposalCommand)):
+            # The normal historical cost cutoff excludes this sale to avoid consuming
+            # it twice.  Authenticate the receipt separately at its own boundary.
+            await load_authenticated_zero_value_disposals(
+                session, organization_id, before_registration_token=entry_id + 1,
+            )
     expected = posting_for(document, cost)
     if (json.loads(json.dumps(cost, default=str)) != receipt.cost
         or PostingInput.model_validate(receipt.posting).model_dump() != expected.model_dump()
@@ -197,14 +230,18 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
         posting=prepared["posting"], digest=digest, actor=actor))
     if "zero_value_command" in prepared:
         from modules.accounting.models import ZeroValueInventoryDisposalReceipt
-        from modules.accounting.zero_value_disposals import ZeroValueSaleCommand, receipt_digest
+        from modules.accounting.zero_value_disposals import parse_zero_value_command, receipt_digest
 
-        command = ZeroValueSaleCommand.model_validate(prepared["zero_value_command"])
+        command = parse_zero_value_command(prepared["zero_value_command"])
         session.add(ZeroValueInventoryDisposalReceipt(organization_id=org_id, entry_id=entry.id,
             source=command.source, source_version=command.source_version, operation="inventory_sale",
             posting_date=command.posting_date, policy_id=command.policy_id, command=command.model_dump(mode="json"),
             basis_digest=command.basis_digest, digest=receipt_digest(org_id, actor, command), actor=actor))
     await session.flush()
+    if prepared.get("zero_value_command", {}).get("command_version") == 4:
+        from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
+
+        await load_authenticated_zero_value_disposals(session, org_id)
     if "source_allocation_version" in prepared["cost"]:
         from modules.accounting.inventory_allocation_loader import (
             load_authenticated_inventory_dispositions,
