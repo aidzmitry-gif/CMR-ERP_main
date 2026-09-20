@@ -91,6 +91,13 @@ class InventoryDispositionAllocation(Input):
     amount_byn: Money
     layers: list[InventorySourceAllocation] = Field(min_length=1, max_length=1000)
 
+    @field_validator("allocation_version", mode="before")
+    @classmethod
+    def exact_allocation_version(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("Allocation version must be the integer 1")
+        return value
+
     @model_validator(mode="after")
     def conserved_selection(self):
         from decimal import Decimal, localcontext
