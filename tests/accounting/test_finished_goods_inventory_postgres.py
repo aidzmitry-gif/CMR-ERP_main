@@ -160,6 +160,7 @@ async def test_output_cost_preview_authenticates_late_wip_and_sale_destinations(
         )
         assert preview["source"]["candidate_transfer_byn"] == "120.00"
         assert preview["trace"]["disposals"] == [{
+            "kind": "disposed",
             "entry_id": sale.id, "line_id": preview["trace"]["disposals"][0]["line_id"],
             "receipt_entry_id": sale.id, "quantity": "1.000000", "applied_cost_byn": "50.00",
             "destination_account": "90.4", "destination_dimensions": {},

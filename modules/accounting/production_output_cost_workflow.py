@@ -96,14 +96,20 @@ async def _prepare(session, organization_id, month, data):
     for row in allocations:
         destination = None
         if row["key"] != "remaining" and not row["key"].startswith("remaining:"):
-            kind, first, second = row["key"].split(":")
+            parts = row["key"].split(":")
+            kind = parts[0]
             destination = {"kind": kind, "quantity": f"{Decimal(str(row['quantity'])):.6f}",
                 "applied_cost_byn": f"{Decimal(str(row['book'])):.2f}", "destination_account": row["account"],
                 "destination_dimensions": row["dimensions"]}
-            if kind == "disposed":
+            if kind == "disposed" and len(parts) == 3:
+                _, first, second = parts
                 destination |= {"entry_id": int(first), "line_id": int(second), "receipt_entry_id": int(first)}
-            elif kind == "zero":
+            elif kind == "zero" and len(parts) == 3:
+                _, first, second = parts
                 destination |= {"receipt_id": int(first), "registration_token": int(second)}
+            elif kind == "allocation" and len(parts) == 4:
+                destination |= {"entry_id": int(parts[1]), "source_entry_id": int(parts[2]),
+                                "source_line_id": int(parts[3])}
             else:
                 raise AccountingError("Output revision has an unknown disposal identity")
             disposals.append(destination)
