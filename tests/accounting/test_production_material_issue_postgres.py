@@ -12,10 +12,12 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from core.services.auth import CurrentUser
+from core.domain.models import OutboxEvent
+from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import service
 from modules.accounting.gateway import AccountingService
 from modules.accounting.models import (
+    AccessGrant,
     Account,
     Entry,
     InventoryIssueReceipt,
@@ -298,8 +300,38 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         assert Decimal(historical_cost["book_value_byn"]) == expected_remaining
         controls = await closing_snapshot(session, pg_book[0], "2026-10")
         assert "inventory_late_cost_receipt_gap" not in {item["code"] for item in controls["review_items"]}
+        reader_grant_id = (await session.scalar(select(func.max(AccessGrant.id)))) or 0
+        await session.execute(text("""
+            INSERT INTO accounting.access_grant (id, organization_id, subject, role)
+            VALUES (:id, :organization_id, :subject, :role)
+        """), {"id": reader_grant_id + 1, "organization_id": pg_book[0],
+                "subject": "pool-reader", "role": "reader"})
         await session.commit()
+        before_entry_count = await session.scalar(select(func.count()).select_from(Entry).where(
+            Entry.organization_id == pg_book[0]
+        ))
+        before_package_count = await session.scalar(text("""
+            SELECT count(*) FROM accounting.late_pool_package WHERE organization_id=:org
+        """), {"org": pg_book[0]})
+        before_outbox_count = await session.scalar(select(func.count()).select_from(OutboxEvent))
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            original_user = app.dependency_overrides[get_current_user]
+            app.dependency_overrides[get_current_user] = lambda: CurrentUser("pool-reader", ["director"])
+            try:
+                reader_denied = await client.post(pool_api + "/confirm", headers={"X-Expected-Principal": "pool-reader"},
+                    json={**saved_pool["command"], "request_key": saved_pool["request_key"],
+                          "expected_basis_digest": pool_package["basis_digest"],
+                          "expected_digest": pool_package["posting_digest"]})
+                assert reader_denied.status_code == 403, reader_denied.text
+            finally:
+                app.dependency_overrides[get_current_user] = original_user
+            assert await session.scalar(select(func.count()).select_from(Entry).where(
+                Entry.organization_id == pg_book[0]
+            )) == before_entry_count
+            assert await session.scalar(text("""
+                SELECT count(*) FROM accounting.late_pool_package WHERE organization_id=:org
+            """), {"org": pg_book[0]}) == before_package_count
+            assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == before_outbox_count
             rejected_principal = await client.post(pool_api + "/confirm", headers={"X-Expected-Principal": "other"},
                 json={**saved_pool["command"], "request_key": saved_pool["request_key"],
                       "expected_basis_digest": pool_package["basis_digest"],
