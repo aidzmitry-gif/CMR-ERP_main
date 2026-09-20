@@ -84,7 +84,7 @@ describe("DealItems", () => {
     mock(api.addDealItem).mockResolvedValue(true);
     render(<DealItems dealId="1" />);
     await waitFor(() => expect(api.fetchSkus).toHaveBeenCalled());
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Номенклатура (справочник из 1С через MDM)"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Количество новой позиции"), { target: { value: "4" } });
     fireEvent.click(screen.getByText("Добавить"));
     await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 2, 4, null));
