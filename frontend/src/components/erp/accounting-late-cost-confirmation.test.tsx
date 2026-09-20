@@ -36,3 +36,28 @@ it.each([false, true])("definitive rejection clears only a first attempt (recove
   await screen.findByText("Changed basis");
   expect(pendingLateCost(sessionStorage, "1", "accountant")).toEqual(recovered ? command : null);
 });
+
+it("restores the versioned material route and keeps the command until all output revisions match", async () => {
+  const selection = [{ output_entry_id: 20, amount_byn: "2.00" }];
+  const materialData = { ...data, command_version: 2, material_outputs: selection };
+  const materialCommand = { ...command, body: JSON.stringify(materialData) };
+  const saved = { ...receipt, command: { allocation: data.allocation, accounts: data.accounts,
+    command_version: 2, material_outputs: selection },
+    output_revisions: [{ output_entry_id: 20, output_revision_id: 30, amount_byn: "2.00" }] };
+  rememberLateCost(sessionStorage, materialCommand);
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ ...saved, output_revisions: [] }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => saved });
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingLateCostConfirmation org="1" principal="accountant" prepared={null} onPosted={vi.fn()} onLock={vi.fn()} />);
+  await screen.findByText("Повторить проведение без дубля");
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Проверить результат проведения"));
+  await screen.findByText("Ответ не подтверждает сохранённую команду проведения.");
+  expect(pendingLateCost(sessionStorage, "1", "accountant")).toEqual(materialCommand);
+  fireEvent.click(screen.getByText("Повторить проведение без дубля"));
+  await screen.findByText("Проведение подтверждено.");
+  expect(fetcher.mock.calls[0][0]).toBe("/api/accounting/organizations/1/additional-expenses/7/material/posting");
+  expect(fetcher.mock.calls[1][0]).toBe("/api/accounting/organizations/1/additional-expenses/7/material/confirm");
+  expect(fetcher.mock.calls[1][1].body).toBe(materialCommand.body);
+  expect(pendingLateCost(sessionStorage, "1", "accountant")).toBeNull();
+});

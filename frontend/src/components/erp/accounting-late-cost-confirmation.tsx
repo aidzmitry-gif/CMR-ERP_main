@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { clearRejectedLateCost, pendingLateCost, rememberLateCost, settleLateCost, type LateCostPending } from "@/lib/late-cost-journal";
+import { clearRejectedLateCost, lateCostPath, pendingLateCost, rememberLateCost, settleLateCost, type LateCostPending } from "@/lib/late-cost-journal";
 
 export function AccountingLateCostConfirmation({ org, principal, prepared, onLock, onPosted, disabled = false }: {
   org: string; principal: string; prepared: LateCostPending | null; disabled?: boolean;
@@ -30,7 +30,7 @@ export function AccountingLateCostConfirmation({ org, principal, prepared, onLoc
       // Persist exact bytes before the request can leave this tab.
       rememberLateCost(sessionStorage, command);
       setPending(command); onLock(true);
-      const path = `/api/accounting/organizations/${org}/additional-expenses/${command.expenseId}`;
+      const path = lateCostPath(command);
       const response = await fetch(path + (readback ? "/posting" : "/confirm"), readback ? { cache: "no-store" } : {
         method: "POST", headers: { "Content-Type": "application/json", "X-Expected-Principal": principal }, body: command.body,
       });
