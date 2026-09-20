@@ -366,7 +366,28 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
             **data.model_dump(mode="json"), "basis_digest": prepared["basis_digest"],
             "digest": service.digest(ProductionMaterialZeroValueDisposalCommand.model_validate(command)),
         })
-        first = await confirm_material_zero_issue(session, pg_book[0], "2026-10", confirmed, "tester", SyntheticProduction())
+        await session.rollback()
+        from httpx import ASGITransport, AsyncClient
+
+        from tests.accounting.test_inventory_allocation_api_postgres import application
+        app = application(pg_factory)
+        app.state.core.services.production_output = SyntheticProduction()
+        base = f"/accounting/organizations/{pg_book[0]}/periods/2026-10"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            preview = await client.post(base + "/production-material-issue-posting-preview", json=data.model_dump(mode="json"))
+            assert preview.status_code == 200, preview.text
+            assert preview.json()["zero_value"] is True and preview.json()["digest"] == confirmed.digest
+            response = await client.post(base + "/production-material-issue-confirm",
+                json={**confirmed.model_dump(mode="json"), "zero_value": True})
+            assert response.status_code == 201, response.text
+            first = response.json()
+            altered = await client.post(base + "/production-material-issue-confirm",
+                json={**confirmed.model_dump(mode="json"), "zero_value": True, "quantity": "1.00"})
+            assert altered.status_code == 409, altered.text
+            foreign = await client.get(
+                f"/accounting/organizations/{pg_book[0]+1000}/periods/2026-10/production-material-issue-posting-status/{movement_id}")
+            assert foreign.status_code in {403, 404}, foreign.text
+
         raw_command = json.dumps(command).replace(
             f'"binding_id": {command["material_binding"]["binding_id"]}',
             f'"binding_id": {command["material_binding"]["binding_id"]}e0',
@@ -390,12 +411,6 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
             async with session.begin_nested():
                 await run_migration(session, "0150_zero_material_allocations.py", "downgrade")
         await session.rollback()
-        from httpx import ASGITransport, AsyncClient
-
-        from tests.accounting.test_inventory_allocation_api_postgres import application
-        app = application(pg_factory)
-        app.state.core.services.production_output = SyntheticProduction()
-        base = f"/accounting/organizations/{pg_book[0]}/periods/2026-10"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(base + "/production-material-issue-confirm",
                 json={**confirmed.model_dump(mode="json"), "zero_value": True})
