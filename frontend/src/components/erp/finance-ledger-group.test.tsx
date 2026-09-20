@@ -20,7 +20,8 @@ afterEach(() => vi.unstubAllGlobals());
 it("показывает доступные книги, частичную ошибку и не подменяет её нулём", async () => {
   render(<FinanceLedgerGroup />);
   expect(await screen.findByText("Первая компания · 111111111")).toBeInTheDocument();
-  expect(screen.getAllByText("12.34 BYN")).toHaveLength(2);
+  expect(screen.getByText("12.34 BYN")).toBeInTheDocument();
+  expect(screen.getByText(/Сумма отдельных результатов — не консолидация:.*12\.34 BYN/)).toBeInTheDocument();
   expect(screen.getByText("50.00 BYN")).toBeInTheDocument();
   expect(screen.getByText(/Нет доступа к отчёту второй компании/)).toBeInTheDocument();
   expect(screen.getByText(/Отчёты с ошибкой: 1; они не заменены нулями/)).toBeInTheDocument();
