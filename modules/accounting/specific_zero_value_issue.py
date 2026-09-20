@@ -19,14 +19,14 @@ from modules.accounting.zero_value_disposals import (
 )
 
 
-async def _command(session, organization_id, document):
+async def _command(session, organization_id, document, *, procurement=None):
     inventory_issues._guard_production_material_source(document, False)
     await require_public_zero_value_schema(session)
     policy = await session.get(Policy, document.policy_id)
     if policy is None or policy.organization_id != organization_id:
         raise service.AccountingError("Zero-value issue requires the active inventory policy")
     if policy.inventory_method in {"fifo", "weighted_average"}:
-        cost = await inventory_cost.preview_issue(session, organization_id, document, source_allocations=True)
+        cost = await inventory_cost.preview_issue(session, organization_id, document, source_allocations=True, procurement=procurement)
         if (Decimal(cost["issue_cost_byn"]) != 0
                 or not cost.get("source_allocation_version")
                 or any(Decimal(layer["amount_byn"]) != 0 for layer in cost["inventory_layers"])):
@@ -44,7 +44,7 @@ async def _command(session, organization_id, document):
             document_date=document.document_date, operation_date=document.operation_date,
             valuation_method=policy.inventory_method, document=document.model_dump(mode="json"),
         )
-        basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command)
+        basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, procurement=procurement)
         return command.model_copy(update={"basis_digest": basis}), cost
     if policy.inventory_method != "specific":
         raise service.AccountingError("Zero-value issue supports specific, FIFO, or weighted-average inventory policy")
@@ -57,7 +57,7 @@ async def _command(session, organization_id, document):
             or (source.entry_id, source.id) not in verified
             or source.account_code != document.account or (source.dimensions or {}) != target):
         raise service.AccountingError("Zero-value issue requires one verified production-output source layer")
-    cost = await inventory_cost.preview_issue(session, organization_id, document)
+    cost = await inventory_cost.preview_issue(session, organization_id, document, procurement=procurement)
     if Decimal(cost["issue_cost_byn"]) != 0:
         raise service.AccountingError("Selected source layer is not a zero-cost remaining layer")
     expense = await session.scalar(select(Account).where(
@@ -76,12 +76,12 @@ async def _command(session, organization_id, document):
             inventory_dimensions=target, quantity=document.quantity)], explanation=document.explanation,
         document_date=document.document_date, operation_date=document.operation_date,
     )
-    basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command)
+    basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, procurement=procurement)
     return command.model_copy(update={"basis_digest": basis}), cost
 
 
-async def preview(session, organization_id, document, actor):
-    command, cost = await _command(session, organization_id, document)
+async def preview(session, organization_id, document, actor, *, procurement=None):
+    command, cost = await _command(session, organization_id, document, procurement=procurement)
     cost = {**cost, "valuation_basis_digest": cost["basis_digest"], "basis_digest": command.basis_digest}
     if isinstance(command, AllocatedZeroValueDisposalCommand):
         receipt = {"source_layers": [{"entry_id": layer.source_entry_id, "line_id": layer.source_line_id,
@@ -147,10 +147,10 @@ async def implicit_confirm(session, organization_id, document, basis_digest, dig
         explicit = await implicit_document(session, organization_id, document, procurement=procurement)
         if explicit is None:
             return None
-    return await confirm(session, organization_id, explicit, basis_digest, digest, actor)
+    return await confirm(session, organization_id, explicit, basis_digest, digest, actor, procurement=procurement)
 
 
-async def confirm(session, organization_id, document, basis_digest, digest, actor):
+async def confirm(session, organization_id, document, basis_digest, digest, actor, *, procurement=None):
     await service.lock_organization(session, organization_id)
     existing = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
         ZeroValueInventoryDisposalReceipt.organization_id == organization_id,
@@ -181,16 +181,16 @@ async def confirm(session, organization_id, document, basis_digest, digest, acto
         if isinstance(saved, AllocatedZeroValueDisposalCommand):
             # V4 retry must re-authenticate its historical cutoff before it can
             # report the durable receipt as successful.
-            await register_standalone_zero_value_issue(session, organization_id, actor, saved)
+            await register_standalone_zero_value_issue(session, organization_id, actor, saved, procurement=procurement)
         return {"kind": "quantity_only_receipt", "posting": None,
                 "cost": {"issue_cost_byn": "0.00", "issue_quantity": format(document.quantity, ".6f")},
                 "receipt_id": existing.id, "registration_token": existing.registration_token,
                 "basis_digest": existing.basis_digest, "digest": existing.digest, "posted": True}
-    command, cost = await _command(session, organization_id, document)
+    command, cost = await _command(session, organization_id, document, procurement=procurement)
     expected_digest = receipt_digest(organization_id, actor, command)
     if command.basis_digest != basis_digest or expected_digest != digest:
         raise service.AccountingError("Zero-value issue basis or document changed; preview again")
-    receipt = await register_standalone_zero_value_issue(session, organization_id, actor, command)
+    receipt = await register_standalone_zero_value_issue(session, organization_id, actor, command, procurement=procurement)
     return {"kind": "quantity_only_receipt", "posting": None, "cost": cost,
             "receipt_id": receipt.id, "registration_token": receipt.registration_token,
             "basis_digest": command.basis_digest, "digest": expected_digest, "posted": True}

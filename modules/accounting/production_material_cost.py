@@ -412,7 +412,7 @@ async def confirm_material_zero_issue(session, org_id: int, month: str, data: Pr
         command = ProductionMaterialZeroValueDisposalCommand.model_validate(prepared["zero_value_receipt"])
     if command.basis_digest != data.basis_digest or data.digest != service.digest(command):
         raise AccountingError("Material zero receipt confirmation differs from its review")
-    receipt = await register_standalone_zero_value_issue(session, org_id, actor, command)
+    receipt = await register_standalone_zero_value_issue(session, org_id, actor, command, procurement=procurement)
     return material_zero_outcome(receipt, command)
 
 
@@ -426,7 +426,7 @@ def material_zero_outcome(receipt, command):
             "receipt_digest": receipt.digest}
 
 
-async def material_zero_status(session, org_id, source, month):
+async def material_zero_status(session, org_id, source, month, *, procurement=None):
     from modules.accounting.models import ZeroValueInventoryDisposalReceipt
     from modules.accounting.zero_value_disposals import (
         ProductionMaterialZeroValueDisposalCommand,
@@ -446,5 +446,5 @@ async def material_zero_status(session, org_id, source, month):
         return None
     command = ProductionMaterialZeroValueDisposalCommand.model_validate(saved.command)
     await load_authenticated_zero_value_disposals(session, org_id,
-        before_registration_token=saved.registration_token + 1)
+        before_registration_token=saved.registration_token + 1, procurement=procurement)
     return material_zero_outcome(saved, command)

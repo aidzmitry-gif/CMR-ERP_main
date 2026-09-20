@@ -1014,7 +1014,8 @@ async def preview_issue_posting(org_id: int, data: InventoryIssueDocument, ctx=D
     explicit = await specific_zero_value_issue.implicit_document(
         ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
     if explicit is not None:
-        return await specific_zero_value_issue.preview(ctx[0], org_id, explicit, ctx[1])
+        return await specific_zero_value_issue.preview(ctx[0], org_id, explicit, ctx[1],
+            procurement=getattr(core.services, "procurement_source", None))
     cost, posting = await inventory_issues.prepare(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None),
                                                  source_allocations=True)
     return {"cost": cost, "digest": service.digest(posting), "posting": posting.model_dump(mode="json")}
@@ -1142,13 +1143,14 @@ async def production_output_cost_preview(org_id: int, month: str, policy_id: int
 
 @router.post('/organizations/{org_id}/periods/{month}/production-output-cost-revision-preview')
 async def production_output_cost_revision_preview(org_id: int, month: str, data: ProductionOutputCostPreviewInput,
-        response: Response, ctx=Depends(member)):
+        response: Response, ctx=Depends(member), core=Depends(get_core)):
     from modules.accounting.production_output_cost_workflow import preview_output_cost_correction
 
     valid_month(month)
     response.headers['Cache-Control'] = 'private, no-store'
     try:
-        return await preview_output_cost_correction(ctx[0], org_id, month, data)
+        return await preview_output_cost_correction(ctx[0], org_id, month, data,
+            procurement=getattr(core.services, "procurement_source", None))
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -1166,7 +1168,8 @@ async def production_output_cost_confirm(org_id: int, month: str, data: Producti
         raise HTTPException(409, 'Accounting principal changed; review the command again')
     response.headers['Cache-Control'] = 'private, no-store'
     try:
-        revision = await confirm_output_cost_correction(ctx[0], org_id, month, data, ctx[1], core.services.event_bus)
+        revision = await confirm_output_cost_correction(ctx[0], org_id, month, data, ctx[1], core.services.event_bus,
+            procurement=getattr(core.services, "procurement_source", None))
     except service.AccountingError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {'organization_id': org_id, 'revision_id': revision.id, 'entry_id': revision.entry_id,
@@ -1516,7 +1519,7 @@ async def production_material_issue_posting_confirm(org_id: int, month: str,
 
 @router.get('/organizations/{org_id}/periods/{month}/production-material-issue-posting-status/{movement_id}')
 async def production_material_issue_posting_status(org_id: int, month: str, movement_id: int,
-        response: Response, ctx=Depends(member)):
+        response: Response, ctx=Depends(member), core=Depends(get_core)):
     """Independent receipt used to recover a material posting after a lost response."""
     from modules.accounting.schemas import InventoryIssueDocument
     from modules.wms.production_material_issues import ProductionMaterialIssue
@@ -1536,7 +1539,8 @@ async def production_material_issue_posting_status(org_id: int, month: str, move
     if entry is None:
         from modules.accounting.production_material_cost import material_zero_status
         try:
-            zero = await material_zero_status(ctx[0], org_id, source, month)
+            zero = await material_zero_status(ctx[0], org_id, source, month,
+                procurement=getattr(core.services, "procurement_source", None))
         except (ValueError, service.AccountingError) as exc:
             raise HTTPException(409, str(exc)) from exc
         if zero is not None:

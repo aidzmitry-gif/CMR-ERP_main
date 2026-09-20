@@ -143,7 +143,7 @@ async def prepare_zero_command(session, org_id, document, *, procurement=None):
     if explicit is None:
         raise service.AccountingError("Zero-value sale requires a zero-cost source")
     # Reuse source, destination and policy authentication without creating an issue.
-    checked = await preview(session, org_id, explicit, "sale-preview")
+    checked = await preview(session, org_id, explicit, "sale-preview", procurement=procurement)
     if checked["command"].get("command_version") == 4:
         if await session.scalar(text(
             "SELECT to_regprocedure('accounting.zero_value_allocated_sale_version()') IS NOT NULL"
@@ -192,7 +192,7 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
             # The normal historical cost cutoff excludes this sale to avoid consuming
             # it twice.  Authenticate the receipt separately at its own boundary.
             await load_authenticated_zero_value_disposals(
-                session, organization_id, before_registration_token=entry_id + 1,
+                session, organization_id, before_registration_token=entry_id + 1, procurement=procurement,
             )
     expected = posting_for(document, cost)
     if (json.loads(json.dumps(cost, default=str)) != receipt.cost
@@ -241,7 +241,7 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
     if prepared.get("zero_value_command", {}).get("command_version") == 4:
         from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
 
-        await load_authenticated_zero_value_disposals(session, org_id)
+        await load_authenticated_zero_value_disposals(session, org_id, procurement=procurement)
     if "source_allocation_version" in prepared["cost"]:
         from modules.accounting.inventory_allocation_loader import (
             load_authenticated_inventory_dispositions,

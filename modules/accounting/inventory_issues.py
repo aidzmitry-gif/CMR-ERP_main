@@ -163,7 +163,7 @@ async def historical_cost(session, organization_id, entry_id, document, *, procu
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
     receipts = await available_authenticated_zero_value_disposals(
-        session, organization_id, before_registration_token=entry_id)
+        session, organization_id, before_registration_token=entry_id, procurement=procurement)
     from modules.accounting.inventory_allocation_loader import (
         load_authenticated_inventory_dispositions,
     )

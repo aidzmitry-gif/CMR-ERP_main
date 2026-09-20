@@ -39,7 +39,7 @@ class ProductionOutputCostConfirmInput(ProductionOutputCostPreviewInput):
     basis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-async def _prepare(session, organization_id, month, data):
+async def _prepare(session, organization_id, month, data, *, procurement=None):
     await service.lock_organization(session, organization_id)
     first = date.fromisoformat(month + "-01")
     last = first.replace(day=monthrange(first.year, first.month)[1])
@@ -80,7 +80,7 @@ async def _prepare(session, organization_id, month, data):
     if await session.scalar(text(
         "SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()') IS NOT NULL"
     )) is True:
-        await available_authenticated_zero_value_disposals(session, organization_id)
+        await available_authenticated_zero_value_disposals(session, organization_id, procurement=procurement)
     raw = await session.scalar(text(
         "SELECT accounting.output_cost_revision_evidence(:org,:entry,:cutoff,NULL)::text"
     ), {"org": organization_id, "entry": receipt.entry_id, "cutoff": data.posting_date})
@@ -142,12 +142,12 @@ async def _prepare(session, organization_id, month, data):
 
 
 async def preview_output_cost_correction(session, organization_id: int, month: str,
-                                         data: ProductionOutputCostPreviewInput) -> dict:
-    return (await _prepare(session, organization_id, month, data))[0]
+                                         data: ProductionOutputCostPreviewInput, *, procurement=None) -> dict:
+    return (await _prepare(session, organization_id, month, data, procurement=procurement))[0]
 
 
 async def confirm_output_cost_correction(session, organization_id: int, month: str,
-                                         data: ProductionOutputCostConfirmInput, actor, event_bus=None):
+                                         data: ProductionOutputCostConfirmInput, actor, event_bus=None, *, procurement=None):
     org = await service.lock_organization(session, organization_id)
     command = data.model_dump(mode="json")
     existing = await session.scalar(select(ProductionOutputCostRevision).where(
@@ -162,7 +162,7 @@ async def confirm_output_cost_correction(session, organization_id: int, month: s
             if entry is None or (await actual_posting(session, entry)).model_dump() != saved.model_dump():
                 raise AccountingError("Saved output cost revision package changed")
         return existing
-    preview, raw, posting, previous = await _prepare(session, organization_id, month, data)
+    preview, raw, posting, previous = await _prepare(session, organization_id, month, data, procurement=procurement)
     if preview["basis_digest"] != data.basis_digest:
         raise AccountingError("Output cost basis changed; preview again")
     entry = await service.post(session, organization_id, posting, actor, event_bus,

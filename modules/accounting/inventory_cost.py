@@ -541,7 +541,7 @@ async def preview_issue(session, org_id, data, *, procurement=None, source_alloc
     verified = await verified_value_lines(session, org_id, rows, procurement)
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
-    receipts = await available_authenticated_zero_value_disposals(session, org_id)
+    receipts = await available_authenticated_zero_value_disposals(session, org_id, procurement=procurement)
     from modules.accounting.inventory_allocation_loader import (
         load_authenticated_inventory_dispositions,
     )
@@ -560,7 +560,7 @@ async def preview_issue(session, org_id, data, *, procurement=None, source_alloc
 
 async def replay_issue_result(session, policy, rows, org_id, data, *, verified_value_lines=frozenset(),
                               verified_output_lines=frozenset(), finished_goods=False,
-                              before_registration_token=None):
+                              before_registration_token=None, procurement=None):
     """Internal-only replay using DB-authenticated entryless zero-value receipts.
 
     This deliberately is not wired into public preview routes until their
@@ -569,7 +569,7 @@ async def replay_issue_result(session, policy, rows, org_id, data, *, verified_v
     from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
 
     receipts = await load_authenticated_zero_value_disposals(
-        session, org_id, before_registration_token=before_registration_token)
+        session, org_id, before_registration_token=before_registration_token, procurement=procurement)
     return issue_result(policy, rows, org_id, data, verified_value_lines=verified_value_lines,
                         verified_output_lines=verified_output_lines, finished_goods=finished_goods,
                         zero_value_disposals=receipts, before_registration_token=before_registration_token)
@@ -649,7 +649,7 @@ async def available_lots(session, org_id, data, *, procurement=None):
     verified = await verified_value_lines(session, org_id, rows, procurement)
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
-    receipts = await available_authenticated_zero_value_disposals(session, org_id)
+    receipts = await available_authenticated_zero_value_disposals(session, org_id, procurement=procurement)
     from modules.accounting.inventory_allocation_loader import (
         load_authenticated_inventory_dispositions,
     )

@@ -333,7 +333,7 @@ class AuthenticatedZeroValueDisposal:
 
 
 async def register_standalone_zero_value_issue(session, organization_id: int, actor: str,
-                                                command: ZeroValueDisposalCommand):
+                                                command: ZeroValueDisposalCommand, *, procurement=None):
     """Persist one entryless, zero-total issue; DB guards authenticate every layer.
 
     Mixed-money commands and sales intentionally remain outside this persistence
@@ -368,13 +368,13 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
             raise ValueError("Zero-value disposal identity was already registered with different content")
         if allocated:
             await load_authenticated_zero_value_disposals(session, organization_id,
-                before_registration_token=existing.registration_token + 1)
+                before_registration_token=existing.registration_token + 1, procurement=procurement)
         return existing
     if allocated and await session.scalar(select(Period.id).where(
         Period.organization_id == organization_id, Period.month >= command.posting_date.strftime("%Y-%m"),
         Period.closed.is_(True)).limit(1)) is not None:
         raise ValueError("Zero-value allocation would change a closed period")
-    calculated_basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, locked=True)
+    calculated_basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, locked=True, procurement=procurement)
     if command.basis_digest != calculated_basis:
         raise ValueError("Zero-value disposal basis changed; preview again")
     receipt = ZeroValueInventoryDisposalReceipt(
@@ -401,7 +401,7 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
 
 
 async def preview_standalone_zero_value_issue_basis(session, organization_id: int,
-                                                    command: ZeroValueDisposalCommand, *, locked: bool = False) -> str:
+                                                    command: ZeroValueDisposalCommand, *, locked: bool = False, procurement=None) -> str:
     """Return the database-authenticated basis for the single supported issue slice.
 
     The receipt service takes the organization lock before comparing this value;
@@ -418,9 +418,9 @@ async def preview_standalone_zero_value_issue_basis(session, organization_id: in
     if not locked:
         await lock_organization(session, organization_id)
     if allocated:
-        prior = await load_authenticated_zero_value_disposals(session, organization_id)
+        prior = await load_authenticated_zero_value_disposals(session, organization_id, procurement=procurement)
         await verify_allocated_zero_selection(session, organization_id, command,
-            before_registration_token=2147483647, prior_zeros=prior)
+            before_registration_token=2147483647, prior_zeros=prior, procurement=procurement)
     basis_function = ("zero_value_material_allocation_basis" if isinstance(command, ProductionMaterialZeroValueDisposalCommand)
                       else "zero_value_allocation_basis" if allocated else "zero_value_disposal_basis")
     result = await session.scalar(text(
@@ -440,7 +440,7 @@ async def require_allocated_zero_schema(session):
 
 @scoped_replay
 async def load_authenticated_zero_value_disposals(session, organization_id: int, *,
-                                                  before_registration_token: int | None = None):
+                                                  before_registration_token: int | None = None, procurement=None):
     """Load and re-authenticate durable receipts for internal valuation replay.
 
     ``before_registration_token`` excludes registrations made after an original
@@ -496,7 +496,7 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
             raise AccountingError("Zero-value disposal receipt digest or historical basis changed")
         if allocated:
             await verify_allocated_zero_selection(session, organization_id, command,
-                before_registration_token=row.registration_token, prior_zeros=tuple(verified))
+                before_registration_token=row.registration_token, prior_zeros=tuple(verified), procurement=procurement)
         try:
             verified.append(AuthenticatedZeroValueDisposal(
                 receipt_id=row.id, organization_id=row.organization_id, posting_date=row.posting_date,
@@ -508,7 +508,7 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
 
 
 async def verify_allocated_zero_selection(session, organization_id, command, *,
-                                          before_registration_token, prior_zeros):
+                                          before_registration_token, prior_zeros, procurement=None):
     """Recompute the complete selection with the existing historical cost engine."""
     from modules.accounting.inventory_allocation_loader import (
         load_authenticated_inventory_dispositions,
@@ -536,13 +536,13 @@ async def verify_allocated_zero_selection(session, organization_id, command, *,
     rows = (await session.execute(select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
         Entry.organization_id == organization_id, Entry.id < before_registration_token,
         Line.account_code == data.account).order_by(Entry.posting_date, Entry.id, Line.id))).all()
-    values = await verified_value_lines(session, organization_id, rows, None)
+    values = await verified_value_lines(session, organization_id, rows, procurement)
     finished = is_finished_goods_account(policy, data.account)
     outputs = await verified_output_lines(session, organization_id, policy, data.account, data.posting_date,
         {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot},
         before_entry_id=before_registration_token) if finished else frozenset()
     dispositions = await load_authenticated_inventory_dispositions(session, organization_id,
-        before_entry_id=before_registration_token, inventory_account=data.account)
+        before_entry_id=before_registration_token, inventory_account=data.account, procurement=procurement)
     result = issue_result(policy, rows, organization_id, data, verified_value_lines=values,
         verified_output_lines=outputs, finished_goods=finished, zero_value_disposals=prior_zeros,
         authenticated_dispositions=dispositions, before_registration_token=before_registration_token,
@@ -570,7 +570,7 @@ async def require_public_zero_value_schema(session) -> None:
         raise AccountingError("Zero-value issue API requires migrations 0140 through 0142")
 
 
-async def available_authenticated_zero_value_disposals(session, organization_id: int, *, before_registration_token=None):
+async def available_authenticated_zero_value_disposals(session, organization_id: int, *, before_registration_token=None, procurement=None):
     """Return replay events only where the PostgreSQL receipt schema exists.
 
     SQLite legacy tests never model this PostgreSQL-only durable receipt.  The
@@ -587,5 +587,5 @@ async def available_authenticated_zero_value_disposals(session, organization_id:
 
         raise AccountingError("Zero-value receipt migration 0140 is required for PostgreSQL inventory replay")
     return await load_authenticated_zero_value_disposals(
-        session, organization_id, before_registration_token=before_registration_token
+        session, organization_id, before_registration_token=before_registration_token, procurement=procurement
     )

@@ -71,7 +71,7 @@ async def prepare(session, organization_id, expense_id, command, procurement):
         data = ProductionOutputCostPreviewInput(original_entry_id=output_id,
             posting_date=command.allocation.posting_date, request_evidence=command.allocation.classification_evidence)
         current = await preview_output_cost_correction(session, organization_id,
-            command.allocation.posting_date.strftime("%Y-%m"), data)
+            command.allocation.posting_date.strftime("%Y-%m"), data, procurement=procurement)
         if current["ledger_evidence"]["matrix"]:
             raise service.AccountingError("Reconcile existing output cost differences before adding late material costs")
         raw = await session.scalar(text(
@@ -200,13 +200,13 @@ async def confirm(session, organization_id, expense_id, command: MaterialLateCos
                 posting_date=command.allocation.posting_date,
                 request_evidence=f"Late material expense {expense_id}; entry {entry.id}")
             month = data.posting_date.strftime("%Y-%m")
-            actual = await preview_output_cost_correction(session, organization_id, month, data)
+            actual = await preview_output_cost_correction(session, organization_id, month, data, procurement=procurement)
             if _matrix(actual["ledger_evidence"]["matrix"]) != _matrix(output["prospective_evidence"]["matrix"]):
                 raise service.AccountingError("Actual output correction differs from reviewed prospective matrix")
             revision = await confirm_output_cost_correction(session, organization_id, month,
                 ProductionOutputCostConfirmInput(**data.model_dump(),
                     request_key=uuid5(request_key, f"output:{output['output_entry_id']}"),
-                    basis_digest=actual["basis_digest"]), actor, event_bus)
+                    basis_digest=actual["basis_digest"]), actor, event_bus, procurement=procurement)
             await session.execute(text("""INSERT INTO accounting.late_material_output_cost_link
                 (late_entry_id, output_revision_id, organization_id, output_entry_id, amount, digest, source)
                 VALUES (:entry,:revision,:org,:output,:amount,:digest,CAST(:source AS jsonb))"""),

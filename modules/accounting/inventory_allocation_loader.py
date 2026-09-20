@@ -191,7 +191,7 @@ async def _verify_historical_cost(session, entry, receipt, document, policy, pri
         entry.posting_date, {"warehouse": document.warehouse, "sku": document.sku, "lot": document.lot},
         before_entry_id=entry.id) if finished else frozenset()
     zeros = await available_authenticated_zero_value_disposals(session, entry.organization_id,
-                                                               before_registration_token=entry.id)
+                                                               before_registration_token=entry.id, procurement=procurement)
     request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
     calculated = issue_result(policy, rows, entry.organization_id, request, verified_value_lines=values,
         verified_output_lines=outputs, finished_goods=finished, zero_value_disposals=zeros,
