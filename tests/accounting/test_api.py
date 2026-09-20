@@ -168,14 +168,15 @@ async def test_event_adapter_and_registration(db, book, posting):
 async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(client):
     catalog = (await client.get("/accounting/catalog")).json()
     assert catalog["current_normative_verified"] is False
-    assert catalog["version"] == "BY-MF50-2026-01-01-review-required"
+    assert catalog["chart_codes_verified"] is True
+    assert catalog["version"] == "BY-MF50-2026-01-01-chart-verified-instruction-review-required"
     assert catalog["current_revision_reference"] == "2025-10-31"
-    assert catalog["verified_through"] == "2025-08-25 для перечня счетов; 2025-10-31 частично"
+    assert catalog["verified_through"] == "2026-01-01 для перечня счетов и субсчетов; Инструкция частично проверена по 2025-10-31"
     review = catalog["normative_review"]
-    assert review["status"] == "requires_primary_edition_review"
+    assert review["status"] == "chart_verified_instruction_requires_primary_review"
     assert review["checked_at"] == "2026-09-20"
-    assert review["verified_through"] == "2025-08-25 (полный текст); 2025-10-31 (опубликованная область)"
-    assert review["source_access"] == "official_2022_pdf_and_2025_legal_database_review"
+    assert review["verified_through"] == "2026-01-01 для приложения 1; 2025-10-31 для доступной области Инструкции"
+    assert review["source_access"] == "official_2022_pdf_and_current_consolidated_legal_database"
     assert review["evidence"][1] == {
         "document": "Постановление Минфина № 73",
         "url": "https://base2.spinform.ru/show_doc.fwx?rgn=171243",
@@ -183,15 +184,22 @@ async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(cli
         "coverage": "Полный опубликованный текст: пункт 1.7 меняет преамбулу и Инструкцию, но не приложение 1 с номерами счетов и субсчетами.",
         "full_text_verified": True,
     }
-    assert review["evidence"][2]["full_text_verified"] is False
+    assert review["evidence"][2] == {
+        "document": "Постановление Минфина № 126",
+        "url": "https://base.spinform.ru/show_doc.fwx?rgn=48715",
+        "source_kind": "legal_database_current_consolidated_text",
+        "coverage": "Текущая редакция № 50 действует с 01.01.2026, включает № 126 в перечне изменений и у приложения 1 указывает только изменения 2012 и 2013 годов; полный первичный текст Инструкции не получен.",
+        "full_text_verified": False,
+    }
     assert "Полный первичный текст" in review["blocking_reasons"][1]
     amendments = catalog["known_amendments"]
     assert [(item["document"], item["impact_on_chart"], item["full_text_verified"]) for item in amendments] == [
         ("Постановление Минфина № 73", "no_chart_code_change", True),
-        ("Постановление Минфина № 126", "instruction_scope_only", False),
+        ("Постановление Минфина № 126", "no_chart_code_change", False),
     ]
     assert amendments[0]["source_kind"] == "legal_database_full_text"
-    assert amendments[1]["source_kind"] == "legal_database_published_scope"
+    assert amendments[1]["chart_appendix_verified"] is True
+    assert amendments[1]["source_kind"] == "legal_database_current_consolidated_text"
     accounts = (await client.get("/accounting/catalog/accounts")).json()
     assert len(accounts) == len(catalog["accounts"])
     assert len({row["code"] for row in accounts}) == len(accounts)

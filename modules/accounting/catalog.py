@@ -1,26 +1,27 @@
 """Belarusian chart with an explicit, evidence-backed 2026 review boundary.
 
 The public Ministry PDF is a complete historical text through 2022-12-28.  The
-published full text of amendment 73 was reviewed on 2026-09-20: it changes the
-preamble and application instruction, but not Appendix 1 account numbers or
-subaccounts.  The available record for amendment 126 identifies an instruction
-change only, but its primary full text has not been obtained.  Therefore the
-catalogue remains blocked from claiming a fully certified 2026 normative edition.
+current consolidated legal-database edition of decree 50 is effective from
+2026-01-01, includes amendment 126 in its change list, and identifies only the
+2012 and 2013 acts as changes to Appendix 1.  This verifies the chart's account
+numbers and subaccounts for the current edition.  The primary full text of
+amendment 126 has not been obtained, so the application instruction and the
+complete 2026 normative edition must remain explicitly unverified.
 Unused numbers are not accounts. Analytics and reporting classifications belong to
 the organization's approved policy, not to guessed defaults in this catalogue.
 """
 
 SOURCE = "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf"
-VERSION = "BY-MF50-2026-01-01-review-required"
+VERSION = "BY-MF50-2026-01-01-chart-verified-instruction-review-required"
 NORMATIVE_REVIEW = {
-    "status": "requires_primary_edition_review",
+    "status": "chart_verified_instruction_requires_primary_review",
     "checked_at": "2026-09-20",
-    "verified_through": "2025-08-25 (полный текст); 2025-10-31 (опубликованная область)",
-    "source_access": "official_2022_pdf_and_2025_legal_database_review",
-    "note": "В проверенном тексте № 73 номера счетов и субсчета приложения 1 не изменены; первичный полный текст изменения № 126 ещё не получен.",
+    "verified_through": "2026-01-01 для приложения 1; 2025-10-31 для доступной области Инструкции",
+    "source_access": "official_2022_pdf_and_current_consolidated_legal_database",
+    "note": "Текущая консолидированная редакция № 50 включает № 126 и показывает, что приложение 1 после 2013 года не менялось; первичный полный текст изменения № 126 для Инструкции ещё не получен.",
     "blocking_reasons": [
         "Официальный PDF Минфина содержит полный доступный текст только до 28.12.2022.",
-        "Полный первичный текст изменения № 126 от 31.10.2025 не получен; доступна только опубликованная область изменения инструкции.",
+        "Полный первичный текст изменения № 126 от 31.10.2025 для Инструкции не получен; это не отменяет сверку приложения 1 текущей консолидированной редакции.",
         "Рабочий план и учётная политика каждого юридического лица ещё не утверждены бухгалтером.",
     ],
     "evidence": [
@@ -40,9 +41,9 @@ NORMATIVE_REVIEW = {
         },
         {
             "document": "Постановление Минфина № 126",
-            "url": "https://base.spinform.ru/show_doc.fwx?rgn=174918",
-            "source_kind": "legal_database_published_scope",
-            "coverage": "Опубликованная область текущей редакции указывает изменение пункта 73 Инструкции; первичный полный текст не получен.",
+            "url": "https://base.spinform.ru/show_doc.fwx?rgn=48715",
+            "source_kind": "legal_database_current_consolidated_text",
+            "coverage": "Текущая редакция № 50 действует с 01.01.2026, включает № 126 в перечне изменений и у приложения 1 указывает только изменения 2012 и 2013 годов; полный первичный текст Инструкции не получен.",
             "full_text_verified": False,
         },
     ],
@@ -65,14 +66,15 @@ AMENDMENTS = [
         "document": "Постановление Минфина № 126",
         "date": "2025-10-31",
         "effective_from": "2026-01-01",
-        "status": "requires_primary_text_review",
-        "impact_on_chart": "instruction_scope_only",
+        "status": "chart_appendix_verified_instruction_primary_review_pending",
+        "impact_on_chart": "no_chart_code_change",
+        "chart_appendix_verified": True,
         "full_text_verified": False,
         "checked_at": "2026-09-20",
-        "evidence": "Опубликованная область текущей редакции указывает на пункт 73 Инструкции; итоговая сверка требует первичного полного текста.",
-        "source_url": "https://base.spinform.ru/show_doc.fwx?rgn=174918",
-        "source_kind": "legal_database_published_scope",
-        "review_scope": "Доступная область касается инструкции по учёту запасов; изменения номеров и субсчетов не подтверждены полным первичным текстом.",
+        "evidence": "Текущая консолидированная редакция № 50 действует с 01.01.2026, включает № 126 и у приложения 1 показывает только изменения 2012 и 2013 годов.",
+        "source_url": "https://base.spinform.ru/show_doc.fwx?rgn=48715",
+        "source_kind": "legal_database_current_consolidated_text",
+        "review_scope": "Номера счетов и субсчета приложения 1 сверены с текущей консолидированной редакцией; применение счетов по Инструкции требует первичного полного текста № 126.",
     },
 ]
 
@@ -187,10 +189,11 @@ def catalogue():
     return {
         "version": VERSION,
         "source": SOURCE,
-        "verified_through": "2025-08-25 для перечня счетов; 2025-10-31 частично",
+        "verified_through": "2026-01-01 для перечня счетов и субсчетов; Инструкция частично проверена по 2025-10-31",
         "current_revision_reference": "2025-10-31",
         "current_normative_verified": False,
-        "verification_note": "Перечень счетов сверён с полным опубликованным текстом № 73; выпуск нормативной редакции блокирует отсутствующий первичный полный текст № 126.",
+        "chart_codes_verified": True,
+        "verification_note": "Перечень счетов и субсчетов приложения 1 сверён с текущей консолидированной редакцией, действующей с 01.01.2026. Полный первичный текст № 126 для Инструкции и утверждённая политика каждого юрлица остаются обязательными до регламентированного применения.",
         "normative_review": NORMATIVE_REVIEW,
         "known_amendments": AMENDMENTS,
         "accounts": accounts,
