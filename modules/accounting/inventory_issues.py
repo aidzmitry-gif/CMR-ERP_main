@@ -58,7 +58,14 @@ async def prepare(session, org_id, document, *, procurement=None, allow_producti
                   source_allocations=False):
     _guard_production_material_source(document, allow_production_material)
     if source_allocations and allow_production_material:
-        raise service.AccountingError("Production material allocation requires its complete source workflow")
+        material_present = session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
+            "SELECT to_regprocedure('accounting.production_material_allocation_version()') IS NOT NULL"
+        )) is True
+        material_ready = material_present and await session.scalar(text(
+            "SELECT accounting.production_material_allocation_version()"
+        )) == 1
+        if material_ready is not True:
+            raise service.AccountingError("Production material allocation requires PostgreSQL migration 0149")
     cost_request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
     guarded_allocations = source_allocations and session.get_bind().dialect.name == "postgresql" and bool(await session.scalar(text(
         "SELECT to_regprocedure('accounting.validate_inventory_allocation_link(integer)') IS NOT NULL "

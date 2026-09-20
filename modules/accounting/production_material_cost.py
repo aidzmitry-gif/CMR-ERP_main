@@ -11,7 +11,7 @@ from calendar import monthrange
 from datetime import date
 
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.models import Policy
@@ -68,7 +68,8 @@ async def prepare_material_issue_posting(session, org_id: int, month: str,
     _, _, binding, _ = await _load_source(session, org_id, month, data)
     document = material_issue_document(org_id, data, policy, settings, binding)
     cost, posting = await inventory_issues.prepare(
-        session, org_id, document, procurement=procurement, allow_production_material=True)
+        session, org_id, document, procurement=procurement, allow_production_material=True,
+        source_allocations=await _material_source_allocations(session, policy))
     if cost["basis_digest"] != review["inventory_cost"]["basis_digest"]:
         raise AccountingError("Inventory cost basis changed while preparing the material posting")
     return {
@@ -90,7 +91,25 @@ async def confirm_material_issue_posting(session, org_id: int, month: str,
     document = material_issue_document(org_id, data, policy, settings, binding)
     return await inventory_issues.confirm(
         session, org_id, document, data.basis_digest, data.digest, actor, event_bus,
-        procurement=procurement, allow_production_material=True)
+        procurement=procurement, allow_production_material=True,
+        # ``inventory_issues.confirm`` checks a saved receipt before preparing
+        # a new one.  Keep legacy FIFO/weighted retries reachable; new postings
+        # still fail closed in ``prepare`` without migration 0149.
+        source_allocations=policy.inventory_method in {"fifo", "weighted_average"})
+
+
+async def _material_source_allocations(session, policy: Policy) -> bool:
+    if policy.inventory_method not in {"fifo", "weighted_average"}:
+        return False
+    present = session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
+        "SELECT to_regprocedure('accounting.production_material_allocation_version()') IS NOT NULL"
+    )) is True
+    ready = present and await session.scalar(text(
+        "SELECT accounting.production_material_allocation_version()"
+    )) == 1
+    if not ready:
+        raise AccountingError("Production material allocation requires PostgreSQL migration 0149")
+    return True
 
 
 async def _load_source(session, org_id: int, month: str, data: ProductionMaterialIssuePreviewInput):
@@ -211,7 +230,10 @@ async def preview_material_issue(session, org_id: int, month: str,
         policy_id=data.policy_id, posting_date=data.posting_date, account=data.account,
         warehouse=data.warehouse, sku=data.sku, lot=data.lot, quantity=data.quantity,
     )
-    cost = await inventory_cost.preview_issue(session, org_id, cost_request, procurement=procurement)
+    cost = await inventory_cost.preview_issue(
+        session, org_id, cost_request, procurement=procurement,
+        source_allocations=await _material_source_allocations(session, policy),
+    )
     amount = cost["issue_cost_byn"]
     wip_dimensions = {"department": data.department.strip(), settings.order_dimension: data.order_analytics.strip()}
     result = {
