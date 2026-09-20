@@ -170,3 +170,13 @@ def test_one_cent_expense_preserves_signed_weighted_remainder_redistribution():
     assert [(line.account, line.side, line.amount) for line in posting.lines] == [
         ("10.1", "credit", Decimal("0.01")), ("10.1", "debit", Decimal("0.01")),
         ("10.1", "debit", Decimal("0.01")), ("60", "credit", Decimal("0.01"))]
+
+
+def test_saved_registration_boundary_does_not_change_economic_preview():
+    from modules.accounting.late_cost_pool import calculate_expense
+
+    loaded, request = expense_input("weighted_average", "quantity")
+    live = calculate_expense(loaded, request)
+    historical = calculate_expense({**loaded, "before_registration_token": 100}, request)
+    assert historical == live
+    assert all("before_registration_token" not in pool for pool in historical["pools"])

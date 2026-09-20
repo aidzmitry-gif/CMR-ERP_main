@@ -125,7 +125,10 @@ async def load_expense_pools(session, organization_id, expense_id, version, on, 
     fingerprint = {"source": source, "origins": [{"primary": key, "ledger": value} for key, value in sorted(origins.items())],
         "entries": sorted(evidence.items()), "zero_receipts": [{"id": row.receipt_id,
             "token": row.registration_token, "digest": row.digest} for row in zeros],
-        "policy_id": policy_id, "on": on.isoformat(), "before_entry_id": before_entry_id}
+        # The authenticated rows identify the economic history. The replay
+        # boundary is validated above, but None in a fresh preview becomes the
+        # saved entry ID on readback and must not change its economic digest.
+        "policy_id": policy_id, "on": on.isoformat()}
     return {"source": source, "origins": origins, "pools": pools, "method": policy.inventory_method,
             "policy_id": policy.id, "on": on.isoformat(), "rule": policy.late_cost_allocation,
             "normative_verified": policy.normative_verified,
@@ -207,7 +210,8 @@ def calculate_expense(loaded, data):
             destinations.append({"kind": "inventory", "source_entry_id": remaining["source_entry_id"],
                 "source_line_id": remaining["source_line_id"], "account": pool["account"],
                 "dimensions": remaining["dimensions"], "delta_byn": remaining["delta_byn"]})
-        pools.append({"account": pool["account"], "warehouse": pool["warehouse"], "sku": pool["sku"], **projected})
+        pools.append({"account": pool["account"], "warehouse": pool["warehouse"], "sku": pool["sku"],
+            **{key: value for key, value in projected.items() if key != "before_registration_token"}})
     if used != set(additions) or sum(Fraction(row["delta_byn"]) for row in destinations) != Fraction(data.capitalizable_amount_byn):
         raise AccountingError("Expense destinations must cover the complete capitalizable amount")
     result = {"calculation_version": 3, "organization_id": source["organization_id"],

@@ -597,6 +597,10 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         assert lot["production_disposals"][0]["expense_account"] == "20"
         replay = await expense_history(session, pg_book[0], expense.id, 1, date(2026, 10, 11), procurement)
         assert replay == history
+        from modules.accounting.late_cost_pool import load_expense_pools
+
+        original_pool = await load_expense_pools(session, pg_book[0], expense.id, 1,
+            date(2026, 10, 31), policy_id, procurement)
         from modules.accounting.late_cost_posting import ExpenseAccounts
         from modules.accounting.late_cost_receipts import LateCostCommand, MaterialLateCostCommand
         from modules.accounting.late_material_cost import prepare as prepare_package
@@ -787,6 +791,12 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         from modules.accounting.late_material_cost import load_package
 
         persisted = await load_package(session, pg_book[0], saved_entry_id, procurement)
+        historical_pool = await load_expense_pools(session, pg_book[0], expense.id, 1,
+            date(2026, 10, 31), policy_id, procurement, before_entry_id=saved_entry_id)
+        assert historical_pool["basis_digest"] == original_pool["basis_digest"]
+        with pytest.raises(service.AccountingError, match="exact expense"):
+            await load_expense_pools(session, pg_book[0], expense.id, 1,
+                date(2026, 10, 31), policy_id, procurement, before_entry_id=material.id)
         assert (await gateway.additional_expense_status(session, pg_book[0], user, expense.id))["command_version"] == 2
         assert persisted["preview"] == package
         assert persisted["command"] == reviewed.model_dump(mode="json")
