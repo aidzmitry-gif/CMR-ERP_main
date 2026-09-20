@@ -19,7 +19,7 @@ export type ExpenseActuals = { year: number; month: number; currency: "BYN"; bas
   rows: ExpenseActualRow[]; reason: string };
 export type UnmatchedExpenseLine = { entry_id: number; line_id: number; posting_date: string; source: string; operation: string;
   account_code: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; reason: "нет статьи" | "статья отсутствует в текущем справочнике" };
-export type UnmatchedExpenseLines = { year: number; month: number; currency: "BYN"; basis: "cash" | "accrual"; total: number;
+export type UnmatchedExpenseLines = { year: number; month: number; currency: "BYN"; basis: "cash" | "accrual";
   items: UnmatchedExpenseLine[]; next_after_line_id: number | null };
 export type CatalogBody = { request_key: string; expected_revision: number; evidence: string;
   action: "template" | "create_group" | "create_article" | "archive_group" | "archive_article";
@@ -135,9 +135,9 @@ export async function getUnmatchedActuals(scope: Scope, year: number, month: num
   const cursor = after ? `&after_line_id=${after}` : "";
   const v = await envelope(await request(`${prefix(scope.org)}/expense-actuals/unmatched?year=${year}&month=${month}&currency=BYN&basis=${basis}${cursor}`), scope.org, scope.principal);
   const item = (row: unknown): row is UnmatchedExpenseLine => object(row) && positive(row.entry_id) && positive(row.line_id) && text(row.posting_date) && text(row.source) && text(row.operation) && text(row.account_code)
-    && ["debit", "credit"].includes(String(row.side)) && signedMoney(row.amount) && object(row.dimensions) && Object.values(row.dimensions).every(text)
+    && ["debit", "credit"].includes(String(row.side)) && signedMoney(row.amount) && object(row.dimensions) && Object.values(row.dimensions).every(value => typeof value === "string")
     && ["нет статьи", "статья отсутствует в текущем справочнике"].includes(String(row.reason));
-  if (v.year !== year || v.month !== month || v.currency !== "BYN" || v.basis !== basis || !revision(v.total) || !Array.isArray(v.items) || !v.items.every(item)
+  if (v.year !== year || v.month !== month || v.currency !== "BYN" || v.basis !== basis || !Array.isArray(v.items) || !v.items.every(item)
     || (v.next_after_line_id !== null && !positive(v.next_after_line_id))) invalid();
   return v as unknown as UnmatchedExpenseLines;
 }

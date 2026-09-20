@@ -295,7 +295,6 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
                   Line.category == "expense", Line.currency == "BYN"]
     if basis == "cash":
         conditions.append(Line.cash.is_(True))
-    total = (await actuals(session, org_id, year, month, basis))["unmatched_lines"] or 0
     items = []
     cursor = after_line_id
     exhausted = False
@@ -303,7 +302,7 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
         query = select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(*conditions)
         if cursor is not None:
             query = query.where(Line.id > cursor)
-        chunk = (await session.execute(query.order_by(Entry.id, Line.id).limit(100))).all()
+        chunk = (await session.execute(query.order_by(Line.id).limit(100))).all()
         if not chunk:
             exhausted = True
             break
@@ -320,7 +319,7 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
             if len(items) == limit:
                 break
         exhausted = len(chunk) < 100
-    return {"year": year, "month": month, "currency": "BYN", "basis": basis, "total": total, "items": items,
+    return {"year": year, "month": month, "currency": "BYN", "basis": basis, "items": items,
             "next_after_line_id": cursor if items and not exhausted else None}
 
 
