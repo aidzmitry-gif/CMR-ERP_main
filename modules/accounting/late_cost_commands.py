@@ -21,13 +21,19 @@ async def prepare(session, organization_id, expense_id, command, procurement):
     calculated = await preview(session, organization_id, expense_id, command.allocation, procurement)
     posting = candidate(calculated, command.accounts)
     accounts, _ = await service.validate_posting(session, organization_id, posting, late_cost=True)
+    validate_account_roles(posting, accounts)
+    return calculated, posting
+
+
+def validate_account_roles(posting, accounts, *, material=False):
+    """Keep settlement, expense and inventory semantics shared by both writers."""
     for line in posting.lines:
         account = accounts[line.account]
         root = line.account.split(".")[0]
-        category = "asset" if root in {"10", "41", "18"} else "liability" if root == "60" else "expense"
+        asset_roots = {"10", "41", "18", "20"} if material else {"10", "41", "18"}
+        category = "asset" if root in asset_roots else "liability" if root == "60" else "expense"
         if account.category != category or account.cash or account.quantity_tracking != (root in {"10", "41"}):
             raise service.AccountingError("Late-cost account role or quantity tracking is inconsistent")
-    return calculated, posting
 
 
 async def confirm(session, organization_id, expense_id, command: LateCostCommand, request_key: UUID,

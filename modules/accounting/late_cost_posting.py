@@ -25,6 +25,10 @@ class ExpenseAccounts(Input):
 
 def candidate(calculated, accounts: ExpenseAccounts):
     """Caller must obtain calculated from the internal authenticated preview."""
+    return _candidate(calculated, accounts, material=False)
+
+
+def _candidate(calculated, accounts: ExpenseAccounts, *, material):
     history = calculated["history"]
     document = history["document"]
     conversion_verified = calculated.get("conversion_verified")
@@ -53,8 +57,20 @@ def candidate(calculated, accounts: ExpenseAccounts):
             link = links[(share["receipt_id"], share["version"], share["line_number"])]
             lines.append(LineInput(account=link["account"], side="debit", amount=amount,
                                    dimensions=link["inventory_dimensions"]))
-        elif share["destination"] == "disposed":
-            destinations = share["expense_destinations"]
+        elif share["destination"] == "disposed" or material and share["destination"] == "production":
+            production = share["destination"] == "production"
+            destinations = share.get("production_origins" if production else "expense_destinations")
+            if not isinstance(destinations, list) or not destinations:
+                raise AccountingError("Cost allocation requires authenticated destinations")
+            if production:
+                identities = [(row.get("entry_id"), row.get("inventory_line")) for row in destinations]
+                if (any(type(value) is not int or value <= 0 for pair in identities for value in pair)
+                    or len(set(identities)) != len(identities)
+                    or any(row.get("expense_account", "").split(".")[0] != "20"
+                           or not row.get("expense_dimensions") for row in destinations)):
+                    raise AccountingError("Production origins must identify reviewed WIP postings")
+            if any(Fraction(row["amount_byn"]) < 0 for row in destinations):
+                raise AccountingError("Cost destination amount cannot be negative")
             if sum(Fraction(row["amount_byn"]) for row in destinations) != Fraction(amount):
                 raise AccountingError("Expense destinations do not cover the disposed share")
             for row in destinations:
@@ -78,3 +94,12 @@ def candidate(calculated, accounts: ExpenseAccounts):
                         posting_date=calculated["posting_date"], policy_id=calculated["policy_id"],
                         rule_version="late-cost-fx-v1" if document["currency"] != "BYN" else "late-cost-byn-v1",
                         explanation=calculated["classification_evidence"], lines=lines)
+
+
+def material_candidate(calculated, accounts: ExpenseAccounts):
+    """Internal first leg of an atomic package, never standalone posting approval.
+
+    Uses only origins already included in the authenticated calculation. The
+    package coordinator must resolve output revisions before committing it.
+    """
+    return _candidate(calculated, accounts, material=True)

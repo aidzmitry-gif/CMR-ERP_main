@@ -1,16 +1,46 @@
 """Reproduce a saved late-cost receipt from its original authenticated history."""
+from pydantic import Field, model_validator
+
 from modules.accounting import service
 from modules.accounting.closing_commands import actual_posting
-from modules.accounting.late_cost_posting import ExpenseAccounts, candidate
+from modules.accounting.late_cost_posting import ExpenseAccounts, candidate, material_candidate
 from modules.accounting.late_cost_preview import calculate, validate_currency
 from modules.accounting.late_cost_sources import expense_history
 from modules.accounting.models import Entry, LateCostReceipt, Policy
-from modules.accounting.schemas import Input, LateCostPreviewInput, PostingInput
+from modules.accounting.schemas import Input, LateCostPreviewInput, Money, PostingInput
 
 
 class LateCostCommand(Input):
     allocation: LateCostPreviewInput
     accounts: ExpenseAccounts
+
+
+class MaterialOutputSelection(Input):
+    output_entry_id: int = Field(gt=0, strict=True)
+    amount_byn: Money = Field(gt=0)
+
+
+class MaterialLateCostCommand(LateCostCommand):
+    """Versioned opt-in; legacy receipt snapshots never gain these fields."""
+    command_version: int = Field(default=2, strict=True, ge=2, le=2)
+    material_outputs: list[MaterialOutputSelection] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_outputs(self):
+        identities = [row.output_entry_id for row in self.material_outputs]
+        if len(set(identities)) != len(identities):
+            raise ValueError("Material output selections must be unique")
+        return self
+
+
+def parse_command(snapshot):
+    if not isinstance(snapshot, dict):
+        raise service.AccountingError("Late cost command snapshot is invalid")
+    if "command_version" not in snapshot:
+        return LateCostCommand.model_validate(snapshot)
+    if snapshot.get("command_version") != 2:
+        raise service.AccountingError("Late cost command version is unsupported")
+    return MaterialLateCostCommand.model_validate(snapshot)
 
 
 async def verified_value_lines(session, organization_id, rows, procurement):
@@ -40,7 +70,7 @@ async def verify_receipt(session, organization_id, entry_id, procurement):
     if (saved is None or entry is None or saved.organization_id != organization_id
         or entry.organization_id != organization_id):
         raise service.AccountingError("Late cost has no matching source receipt")
-    command = LateCostCommand.model_validate(saved.command)
+    command = parse_command(saved.command)
     policy = await session.get(Policy, command.allocation.policy_id)
     if (policy is None or policy.organization_id != organization_id
         or policy.inventory_method not in {"specific", "fifo", "weighted_average"}
@@ -50,7 +80,7 @@ async def verify_receipt(session, organization_id, entry_id, procurement):
         command.allocation.posting_date, procurement, before_entry_id=entry_id)
     await validate_currency(session, history["document"]["currency"], command.allocation)
     calculated = calculate(organization_id, saved.expense_id, command.allocation, policy, history)
-    expected = candidate(calculated, command.accounts)
+    expected = (material_candidate if isinstance(command, MaterialLateCostCommand) else candidate)(calculated, command.accounts)
     if (calculated != saved.calculation or PostingInput.model_validate(saved.posting).model_dump() != expected.model_dump()
         or service.digest(expected) != saved.digest or entry.digest != saved.digest or entry.actor != saved.actor
         or (await actual_posting(session, entry)).model_dump() != expected.model_dump()):

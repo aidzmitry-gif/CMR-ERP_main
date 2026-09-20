@@ -68,7 +68,7 @@ def posting_input(policy_id: int) -> ProductionMaterialIssuePostingInput:
     })
 
 
-async def seed_book(factory, pg_book, method="specific"):
+async def seed_book(factory, pg_book, method="specific", *, late_cost=False):
     async with factory() as session:
         await session.execute(text(
             "SELECT setval(pg_get_serial_sequence('accounting.account','id'), "
@@ -93,12 +93,18 @@ async def seed_book(factory, pg_book, method="specific"):
                     quantity_tracking=False, cash=False, normative_ref="Synthetic"),
         ])
         await session.flush()
+        if late_cost:
+            session.add(Account(organization_id=pg_book[0], code="43", title="Synthetic finished goods",
+                category="asset", valid_from=date(2026, 1, 1), required_dimensions=["warehouse", "sku", "lot"],
+                currency_tracking=False, quantity_tracking=True, cash=False, normative_ref="Synthetic"))
         policy = Policy(
             organization_id=pg_book[0], effective_from=date(2026, 10, 1),
             reference="Synthetic material issue policy", inventory_method=method,
             allocation_basis="direct_cost", depreciation_method="straight_line",
-            normative_reference="Synthetic only", normative_verified=False, approved_by="tester",
+            normative_reference="Synthetic only", normative_verified=late_cost, approved_by="tester",
+            late_cost_allocation={"basis": "quantity", "rounding": "largest_remainder_cent"} if late_cost else None,
             production_costing={
+                **({"finished_goods_account": "43"} if late_cost else {}),
                 "overhead_accounts": ["25"], "wip_account": "20",
                 "pool_dimensions": ["department"], "order_dimension": "order",
                 "rounding": "largest_remainder_cent", "reference": "Synthetic reviewed material issue",
@@ -432,7 +438,8 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
             assert response.json()["digest"] == confirmed.digest
             assert response.json()["posted"] is False
 
-async def test_purchased_material_late_expense_authenticates_production_history(pg_factory, pg_book):
+@pytest.mark.parametrize("with_output,with_sale", [(False, False), (True, False), (True, True)])
+async def test_purchased_material_late_expense_authenticates_production_history(pg_factory, pg_book, with_output, with_sale, monkeypatch):
     from modules.accounting.late_cost_sources import expense_history
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
@@ -445,7 +452,7 @@ async def test_purchased_material_late_expense_authenticates_production_history(
     )
     from modules.procurement.source_gateway import ProcurementSourceService
 
-    policy_id, order_id = await seed_book(pg_factory, pg_book)
+    policy_id, order_id = await seed_book(pg_factory, pg_book, late_cost=True)
     gateway, procurement = AccountingService(), ProcurementSourceService()
     user = CurrentUser("tester", ["director"])
     async with pg_factory() as session:
@@ -490,3 +497,207 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         assert lot["production_disposals"][0]["expense_account"] == "20"
         replay = await expense_history(session, pg_book[0], expense.id, 1, date(2026, 10, 11), procurement)
         assert replay == history
+        from modules.accounting.late_cost_posting import ExpenseAccounts
+        from modules.accounting.late_cost_receipts import LateCostCommand, MaterialLateCostCommand
+        from modules.accounting.late_material_cost import prepare as prepare_package
+        from modules.accounting.schemas import LateCostPreviewInput
+
+        output_id = None
+        if with_output:
+            from pathlib import Path
+
+            from modules.accounting.production_output_transfer import (
+                ProductionOutputTransferConfirmInput,
+                confirm_output_transfer,
+                prepare_output_transfer,
+            )
+            from tests.accounting.test_production_output_transfer_postgres import (
+                SyntheticProduction as OutputProduction,
+            )
+            from tests.accounting.test_production_output_transfer_postgres import (
+                transfer_input,
+            )
+
+            for path in sorted(Path("migrations/versions").glob("*.py")):
+                if "0141" <= path.name[:4] <= "0151":
+                    await run_migration(session, path.name, "upgrade")
+            output_data = transfer_input(policy_id).model_copy(update={"order_id": order_id})
+            output_preview = await prepare_output_transfer(session, pg_book[0], "2026-10", output_data, OutputProduction(), object())
+            output = await confirm_output_transfer(session, pg_book[0], "2026-10",
+                ProductionOutputTransferConfirmInput.model_validate({**output_data.model_dump(mode="json"),
+                    "basis_digest": output_preview["basis_digest"], "digest": output_preview["digest"]}),
+                "tester", production=OutputProduction(), warehouse_gateway=object())
+            output_id = output.id
+            await session.commit()
+            if with_sale:
+                from modules.accounting import sales
+
+                sale = sales.SaleDocument(source="material-output-sale", source_version=1,
+                    document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
+                    policy_id=policy_id, account="43", warehouse="Main", sku="SYN-WIDGET", lot="LOT-1",
+                    quantity="1", expense_account="90.4", expense_dimensions={}, explanation="Synthetic sale",
+                    net_amount="20.00", vat_rate="0", vat_basis="Synthetic", buyer_account="62",
+                    revenue_account="90.1", vat_revenue_account="90.2", vat_payable_account="68",
+                    buyer_dimensions={"counterparty": "buyer", "contract": "contract", "settlement_document": "sale-1"})
+                sale_preview = await sales.prepare(session, pg_book[0], sale)
+                await sales.confirm(session, pg_book[0], sale, sale_preview["cost"]["basis_digest"], sale_preview["digest"], "tester")
+                await session.commit()
+
+        command = LateCostCommand(allocation=LateCostPreviewInput(expected_version=1, policy_id=policy_id,
+            posting_date="2026-10-31", capitalizable_amount_byn="5.00", excluded_amount_byn="0.00",
+            classification_evidence="Synthetic reviewed material freight"), accounts=ExpenseAccounts(settlement_account="60"))
+        session.add(Account(organization_id=pg_book[0], code="60.99", title="Invalid settlement role",
+            category="income", valid_from=date(2026, 1, 1), required_dimensions=[],
+            currency_tracking=False, quantity_tracking=False, cash=False, normative_ref="Synthetic"))
+        await session.flush()
+        invalid_role = LateCostCommand(allocation=command.allocation,
+            accounts=ExpenseAccounts(settlement_account="60.99"))
+        with pytest.raises(service.AccountingError, match="account role or quantity tracking"):
+            await prepare_package(session, pg_book[0], expense.id, invalid_role, procurement)
+        before_count = await session.scalar(select(func.count()).select_from(Entry))
+        package = await prepare_package(session, pg_book[0], expense.id, command, procurement)
+        if with_output:
+            assert package["wip_origins"] == []
+            assert package["outputs"][0]["output_entry_id"] == output_id
+            assert package["outputs"][0]["amount_byn"] == "2.00"
+        else:
+            assert package["outputs"] == []
+            assert package["wip_origins"][0]["order_id"] == order_id
+            assert package["wip_origins"][0]["amount_byn"] == "2.00"
+        assert [(line["account"], line["amount"]) for line in package["posting"]["lines"]] == [
+            ("10.1", "3.00"), ("20", "2.00"), ("60", "5.00")]
+        assert await session.scalar(select(func.count()).select_from(Entry)) == before_count
+        forged = MaterialLateCostCommand(allocation=command.allocation, accounts=command.accounts,
+            material_outputs=[{"output_entry_id": material.id, "amount_byn": "2.00"}])
+        with pytest.raises(service.AccountingError, match="Selected outputs differ"):
+            await prepare_package(session, pg_book[0], expense.id, forged, procurement)
+        from modules.accounting.late_material_cost import confirm as confirm_package
+
+        if not with_output:
+            from pathlib import Path
+
+            for path in sorted(Path("migrations/versions").glob("*.py")):
+                if "0141" <= path.name[:4] <= "0151":
+                    await run_migration(session, path.name, "upgrade")
+        reviewed = MaterialLateCostCommand.model_validate(package["command"])
+        request_key = uuid4()
+        import json
+        from copy import deepcopy
+
+        from modules.accounting.models import LateCostReceipt
+
+        for attack in ("missing_package", "legacy_marker", "empty_origins"):
+            forged_command = reviewed.model_dump(mode="json")
+            forged_calculation = deepcopy(package["calculation"])
+            forged_preview = deepcopy(package)
+            if attack == "legacy_marker":
+                forged_command.pop("command_version")
+                forged_command.pop("material_outputs")
+            if attack == "empty_origins":
+                forged_command["material_outputs"] = []
+                forged_calculation["shares"] = []
+                forged_preview.update(command=forged_command, calculation=forged_calculation, outputs=[])
+            with pytest.raises(DBAPIError, match="package evidence is incomplete|requires versioned command|origins differ from actual WIP"):
+                async with session.begin_nested():
+                    orphan = await service.post(session, pg_book[0], PostingInput.model_validate(package["posting"]), "tester", late_cost=True)
+                    session.add(LateCostReceipt(entry_id=orphan.id, organization_id=pg_book[0], expense_id=expense.id,
+                        source_version=1, request_key=str(uuid4()), command=forged_command,
+                        calculation=forged_calculation, posting=package["posting"], digest=package["posting_digest"], actor="tester"))
+                    await session.flush()
+                    await session.execute(text("UPDATE accounting.source_control SET entry_id=:entry WHERE organization_id=:org AND source=:source"),
+                        {"entry": orphan.id, "org": pg_book[0], "source": f"procurement:additional-expense:{expense.id}"})
+                    if attack == "empty_origins":
+                        await session.execute(text("INSERT INTO accounting.late_material_package(late_entry_id,organization_id,basis_digest,preview) VALUES (:entry,:org,:basis,CAST(:preview AS jsonb))"),
+                            {"entry": orphan.id, "org": pg_book[0], "basis": package["basis_digest"], "preview": json.dumps(forged_preview)})
+                    await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        if with_output:
+            from modules.accounting import production_output_cost_workflow
+
+            async def fail_revision(*args, **kwargs):
+                raise RuntimeError("Injected output revision failure")
+
+            baseline_entries = await session.scalar(select(func.count()).select_from(Entry))
+            with monkeypatch.context() as patch:
+                patch.setattr(production_output_cost_workflow, "confirm_output_cost_correction", fail_revision)
+                with pytest.raises(RuntimeError, match="Injected output revision failure"):
+                    await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
+                        package["basis_digest"], "tester", procurement)
+            assert await session.scalar(select(func.count()).select_from(Entry)) == baseline_entries
+            assert await session.scalar(text("SELECT count(*) FROM accounting.late_material_package")) == 0
+            assert await session.scalar(text("SELECT count(*) FROM accounting.late_cost_receipt")) == 0
+            assert await session.scalar(text("SELECT entry_id FROM accounting.source_control WHERE organization_id=:org AND source=:source"),
+                {"org": pg_book[0], "source": f"procurement:additional-expense:{expense.id}"}) is None
+        if with_output:
+            import asyncio
+
+            expense_id = expense.id
+            await session.commit()
+            ready = asyncio.Event()
+
+            async def competing_confirmation(key):
+                async with pg_factory() as competing:
+                    await ready.wait()
+                    result = await confirm_package(competing, pg_book[0], expense_id, reviewed, key,
+                        package["basis_digest"], "tester", procurement)
+                    await competing.commit()
+                    return result.entry_id, key
+
+            contenders = [asyncio.create_task(competing_confirmation(key)) for key in
+                (request_key, uuid4() if with_sale else request_key)]
+            ready.set()
+            outcomes = await asyncio.wait_for(asyncio.gather(*contenders, return_exceptions=True), timeout=30)
+            successes = [outcome for outcome in outcomes if isinstance(outcome, tuple)]
+            failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+            assert len(successes) == (1 if with_sale else 2), outcomes
+            assert len({outcome[0] for outcome in successes}) == 1
+            if with_sale:
+                assert len(failures) == 1
+                assert isinstance(failures[0], service.AccountingError)
+                assert "conflicts with the saved package" in str(failures[0])
+            else:
+                assert failures == []
+            saved_entry_id, request_key = successes[0]
+        else:
+            saved = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
+                package["basis_digest"], "tester", procurement)
+            await session.commit()
+            saved_entry_id = saved.entry_id
+        repeated = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
+            package["basis_digest"], "tester", procurement)
+        assert repeated.entry_id == saved_entry_id
+        with pytest.raises(DBAPIError, match="Cannot downgrade late material packages with history"):
+            async with session.begin_nested():
+                await run_migration(session, "0151_late_material_output_cost.py", "downgrade")
+        assert await session.scalar(text("SELECT count(*) FROM accounting.late_material_package")) == 1
+        assert await session.scalar(text("SELECT count(*) FROM accounting.late_material_output_cost_link")) == int(with_output)
+        balances = dict((await session.execute(text("""SELECT account_code,
+            sum(CASE WHEN side='debit' THEN amount ELSE -amount END)
+            FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id
+            WHERE e.organization_id=:org AND account_code IN ('10.1','20','43','90.4') GROUP BY account_code"""),
+            {"org": pg_book[0]})).all())
+        assert balances["10.1"] == Decimal("21.75")
+        assert balances["20"] == (Decimal("0") if with_output else Decimal("14.50"))
+        if with_output:
+            assert balances["43"] == Decimal("7.25" if with_sale else "14.50")
+        if with_sale:
+            assert balances["90.4"] == Decimal("7.25")
+        if with_output:
+            from modules.accounting.schemas import CloseInput
+
+            # Synthetic verified policy exercises the real period lifecycle;
+            # it does not assert approval of a legal accounting policy.
+            await session.commit()
+            for closing_month in ("2026-09", "2026-10"):
+                closing_period = await service.period_for(session, pg_book[0], closing_month)
+                await service.close_period(session, pg_book[0], closing_month, CloseInput(
+                    expected_generation=closing_period.generation,
+                    evidence={step: "Synthetic material package reconciliation" for step in service.CLOSE_STEPS}),
+                    "tester")
+                await session.commit()
+            closed_count = await session.scalar(select(func.count()).select_from(Entry))
+            historical = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
+                package["basis_digest"], "tester", procurement)
+            assert historical.entry_id == saved_entry_id
+            with pytest.raises(service.AccountingError, match="[Cc]losed"):
+                await prepare_package(session, pg_book[0], expense.id, reviewed, procurement)
+            assert await session.scalar(select(func.count()).select_from(Entry)) == closed_count
