@@ -468,6 +468,40 @@ class InventoryIssueReceipt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ZeroValueInventoryDisposalReceipt(Base):
+    """Immutable physical disposal when a selected layer carries exactly zero BYN.
+
+    This model is intentionally not reachable until its dedicated migration and
+    valuation integration land.  ``entry_id`` is null only for an inventory
+    issue; a sale keeps its revenue/VAT entry and binds this receipt to it.
+    """
+    __tablename__ = "inventory_zero_value_disposal_receipt"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source", "source_version", "operation",
+                         name="uq_inventory_zero_value_disposal_identity"),
+        UniqueConstraint("registration_token", name="uq_inventory_zero_value_disposal_registration"),
+        CheckConstraint("source_version > 0", name="inventory_zero_value_disposal_source_version_positive"),
+        CheckConstraint("registration_token > 0", name="inventory_zero_value_disposal_registration_positive"),
+        CheckConstraint("operation IN ('inventory_issue', 'inventory_sale')",
+                        name="inventory_zero_value_disposal_operation"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"), index=True)
+    source: Mapped[str] = mapped_column(String(160))
+    source_version: Mapped[int] = mapped_column(Integer)
+    operation: Mapped[str] = mapped_column(String(60))
+    entry_id: Mapped[int | None] = mapped_column(ForeignKey("accounting.entry.id"), nullable=True, unique=True)
+    registration_token: Mapped[int] = mapped_column(Integer, server_default=FetchedValue())
+    posting_date: Mapped[date] = mapped_column(Date, index=True)
+    policy_id: Mapped[int] = mapped_column(ForeignKey("accounting.policy.id"))
+    command: Mapped[dict] = mapped_column(JSON)
+    basis_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class InventorySaleReceipt(Base):
     """Original sale terms and costing evidence saved with the ledger package."""
     __tablename__ = "inventory_sale_receipt"

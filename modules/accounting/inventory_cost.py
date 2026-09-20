@@ -8,6 +8,38 @@ from sqlalchemy import select
 
 from modules.accounting.models import Entry, Line, Policy
 from modules.accounting.service import AccountingError, lock_organization
+from modules.accounting.zero_value_disposals import AuthenticatedZeroValueDisposal, receipt_digest
+
+
+def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_registration_token=None):
+    """Merge ledger rows with authenticated, entryless physical credits only."""
+    rows = [(entry, line) for entry, line in rows
+            if before_registration_token is None or entry.id < before_registration_token]
+    if not zero_value_disposals:
+        return [(entry.posting_date, entry.id, line.id, entry, line, None) for entry, line in rows]
+    sources = {(entry.id, line.id): (entry, line) for entry, line in rows}
+    events = [(entry.posting_date, entry.id, line.id, entry, line, None) for entry, line in rows]
+    receipt_ids, tokens = set(), set()
+    for receipt in zero_value_disposals:
+        if not isinstance(receipt, AuthenticatedZeroValueDisposal) or receipt.organization_id != org_id:
+            raise AccountingError("Zero-value disposal provenance is not authenticated for this organization")
+        if (receipt.receipt_id in receipt_ids or receipt.registration_token in tokens
+            or receipt.digest != receipt_digest(receipt.organization_id, receipt.actor, receipt.command)):
+            raise AccountingError("Zero-value disposal receipt identity or digest changed during replay")
+        receipt_ids.add(receipt.receipt_id)
+        tokens.add(receipt.registration_token)
+        if receipt.posting_date > cutoff or (before_registration_token is not None and receipt.registration_token >= before_registration_token):
+            continue
+        for layer in receipt.command.inventory_layers:
+            source = sources.get((layer.source_entry_id, layer.source_line_id))
+            if (source is None or source[0].posting_date > receipt.posting_date
+                or source[0].id >= receipt.registration_token or source[1].side != "debit"
+                or source[1].quantity is None or source[1].quantity <= 0
+                or source[1].account_code != layer.inventory_account
+                or (source[1].dimensions or {}) != layer.inventory_dimensions):
+                raise AccountingError("Zero-value disposal source layer does not match ledger history")
+            events.append((receipt.posting_date, receipt.registration_token, receipt.receipt_id, None, None, (receipt, layer)))
+    return sorted(events, key=lambda item: item[:3])
 
 
 async def _inventory_rows(session, org_id, data):
@@ -67,7 +99,8 @@ def _distribute_pool_value(layers, amount):
 
 
 def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozenset(),
-                      verified_output_lines=frozenset(), finished_goods=False, method="fifo"):
+                      verified_output_lines=frozenset(), finished_goods=False, method="fifo",
+                      zero_value_disposals=(), organization_id=None, before_registration_token=None):
     """Build chronological available inventory layers for FIFO/average methods.
 
     The physical identity remains explicit (warehouse/SKU/lot).  A debit adds
@@ -79,7 +112,51 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
     layers = []
     evidence = []
     matched = False
-    for entry, line in rows:
+    checked_zero_receipts = set()
+    if organization_id is None and zero_value_disposals:
+        raise AccountingError("Zero-value disposal replay needs an organization identity")
+    for _, _, _, entry, line, zero_event in _chronological_events(
+        rows, organization_id, posting_date, zero_value_disposals, before_registration_token
+    ):
+        if zero_event is not None:
+            receipt, source_layer = zero_event
+            dimensions = source_layer.inventory_dimensions
+            if dimensions.get("warehouse") != target["warehouse"] or dimensions.get("sku") != target["sku"]:
+                continue
+            if method != "weighted_average" and target.get("lot") and dimensions.get("lot") != target["lot"]:
+                continue
+            matches = [layer for layer in layers if layer["entry_id"] == source_layer.source_entry_id
+                       and layer["line_id"] == source_layer.source_line_id and layer["quantity"] >= source_layer.quantity]
+            if len(matches) != 1:
+                raise AccountingError("Zero-value disposal exceeds or misses its source inventory layer")
+            pool_value = sum((layer["amount"] for layer in layers), Decimal(0))
+            pool_quantity = sum((layer["quantity"] for layer in layers), Decimal(0))
+            layer = matches[0]
+            if method == "weighted_average" and receipt.receipt_id not in checked_zero_receipts:
+                command_quantity = sum((item.quantity for item in receipt.command.inventory_layers
+                                        if item.inventory_dimensions.get("warehouse") == target["warehouse"]
+                                        and item.inventory_dimensions.get("sku") == target["sku"]), Decimal(0))
+                expected_cost = (pool_value * command_quantity / pool_quantity).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if expected_cost != 0:
+                    raise AccountingError("Zero-value disposal command still carries rounded pool value")
+                checked_zero_receipts.add(receipt.receipt_id)
+            expected_cost = (layer["amount"] if source_layer.quantity == layer["quantity"]
+                             else (layer["amount"] * source_layer.quantity / layer["quantity"]).quantize(
+                                 Decimal("0.01"), rounding=ROUND_HALF_UP)) if method != "weighted_average" else Decimal(0)
+            if expected_cost != 0:
+                raise AccountingError("Zero-value disposal source layer still carries book value")
+            layer["quantity"] -= source_layer.quantity
+            if method != "weighted_average":
+                layer["amount"] -= expected_cost
+            if method == "weighted_average":
+                _distribute_pool_value(layers, pool_value)
+            evidence.append({"receipt_id": receipt.receipt_id, "entry_id": None, "line_id": None,
+                             "source": receipt.command.source, "source_version": receipt.command.source_version,
+                             "side": "credit", "quantity": format(source_layer.quantity, ".6f"),
+                             "amount_byn": "0.00", "lot": dimensions["lot"], "zero_value_disposal": True})
+            matched = True
+            continue
         dimensions = line.dimensions or {}
         required = ("warehouse", "sku", "lot")
         if any(not dimensions.get(key) for key in required):
@@ -166,7 +243,8 @@ def _layer_payload(layer, quantity, amount):
 
 
 def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset(),
-                 verified_output_lines=frozenset(), finished_goods=False):
+                 verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
+                 organization_id=None, before_registration_token=None):
     """Caller must authenticate each admitted (entry_id, line_id) cost adjustment.
 
     Public callers admit none until the durable late-cost verifier is wired.
@@ -178,7 +256,29 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
     with localcontext() as context:
         context.prec = 64
         quantity, amount = Decimal(0), Decimal(0)
-        for entry, line in rows:
+        if organization_id is None and zero_value_disposals:
+            raise AccountingError("Zero-value disposal replay needs an organization identity")
+        for _, _, _, entry, line, zero_event in _chronological_events(
+            rows, organization_id, posting_date, zero_value_disposals, before_registration_token
+        ):
+            if zero_event is not None:
+                receipt, source_layer = zero_event
+                dimensions = source_layer.inventory_dimensions
+                if any(dimensions[key] != value for key, value in target.items()):
+                    continue
+                if quantity < source_layer.quantity:
+                    raise AccountingError("Zero-value disposal cannot reduce a valued or exhausted specific lot")
+                expected_cost = amount if quantity == source_layer.quantity else (amount * source_layer.quantity / quantity).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if expected_cost != 0:
+                    raise AccountingError("Zero-value disposal cannot reduce a valued or exhausted specific lot")
+                quantity -= source_layer.quantity
+                amount -= expected_cost
+                evidence.append({"receipt_id": receipt.receipt_id, "entry_id": None, "line_id": None,
+                                 "source": receipt.command.source, "source_version": receipt.command.source_version,
+                                 "side": "credit", "quantity": format(source_layer.quantity, ".6f"),
+                                 "amount_byn": "0.00", "zero_value_disposal": True})
+                continue
             dimensions = line.dimensions or {}
             if any(not dimensions.get(key) for key in target):
                 raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
@@ -233,7 +333,8 @@ async def preview_issue(session, org_id, data, *, procurement=None):
 
 
 def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset(),
-                 verified_output_lines=frozenset(), finished_goods=False):
+                 verified_output_lines=frozenset(), finished_goods=False, zero_value_disposals=(),
+                 before_registration_token=None):
     """Same calculation for live preview and verification of original history."""
     target = {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot}
     # Older internal reconstruction callers do not carry the policy method;
@@ -247,7 +348,9 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
                 raise AccountingError("Specific costing requires an explicit lot")
             quantity, amount, inventory_dimensions, evidence = _lot_balance(
                 rows, target, data.posting_date, verified_value_lines=verified_value_lines,
-                verified_output_lines=verified_output_lines, finished_goods=finished_goods)
+                verified_output_lines=verified_output_lines, finished_goods=finished_goods,
+                zero_value_disposals=zero_value_disposals, organization_id=org_id,
+                before_registration_token=before_registration_token)
             if data.quantity > quantity:
                 raise AccountingError("Insufficient book quantity in the selected lot")
             cost = amount if data.quantity == quantity else (amount * data.quantity / quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -257,7 +360,9 @@ def issue_result(policy, rows, org_id, data, *, verified_value_lines=frozenset()
             layers, evidence = _valuation_layers(rows, target, data.posting_date,
                                                  verified_value_lines=verified_value_lines,
                                                  verified_output_lines=verified_output_lines,
-                                                 finished_goods=finished_goods, method=method)
+                                                 finished_goods=finished_goods, method=method,
+                                                 zero_value_disposals=zero_value_disposals, organization_id=org_id,
+                                                 before_registration_token=before_registration_token)
             quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
             amount = sum((layer["amount"] for layer in layers), Decimal("0"))
             if not layers or data.quantity > quantity:
