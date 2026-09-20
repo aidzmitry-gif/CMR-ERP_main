@@ -57,10 +57,10 @@ class SyntheticProduction:
 ])
 @pytest.mark.parametrize("with_output", [False, True])
 async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, with_output, monkeypatch):
+    from modules.accounting import late_pool_cost, production_output_cost_workflow
     from modules.accounting.late_cost_pool import load_expense_pools, preview_expense, project_pool
     from modules.accounting.late_cost_posting import ExpenseAccounts, pool_candidate
     from modules.accounting.late_cost_receipts import PoolLateCostCommand
-    from modules.accounting.late_pool_cost import prepare as prepare_pool_package
     from modules.accounting.schemas import LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
@@ -194,7 +194,7 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         pool_command = PoolLateCostCommand(command_version=3, allocation=request,
             accounts=ExpenseAccounts(settlement_account="60"), material_outputs=(
                 [{"output_entry_id": output_id, "amount_byn": wip_delta}] if with_output else []))
-        pool_package = await prepare_pool_package(session, pg_book[0], expense.id, pool_command, procurement)
+        pool_package = await late_pool_cost.prepare(session, pg_book[0], expense.id, pool_command, procurement)
         assert pool_package["command"] == pool_command.model_dump(mode="json")
         if with_output:
             assert pool_package["wip_origins"] == []
@@ -206,20 +206,69 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             # The correction is posted on the late-cost date.  A later account
             # revision may therefore require analytics absent from the original
             # output, and must make the preview fail before it can be confirmed.
-            session.add(Account(
-                organization_id=pg_book[0], code="43", title="Synthetic finished goods with serial",
-                category="asset", valid_from=date(2026, 10, 11),
-                required_dimensions=["warehouse", "sku", "lot", "serial"],
-                currency_tracking=False, quantity_tracking=True, cash=False,
-                normative_ref="Synthetic later analytics requirement"))
-            await session.flush()
             with pytest.raises(service.AccountingError, match="missing analytics.*serial"):
-                await prepare_pool_package(session, pg_book[0], expense.id, pool_command, procurement)
+                async with session.begin_nested():
+                    session.add(Account(
+                        organization_id=pg_book[0], code="43", title="Synthetic finished goods with serial",
+                        category="asset", valid_from=date(2026, 10, 11),
+                        required_dimensions=["warehouse", "sku", "lot", "serial"],
+                        currency_tracking=False, quantity_tracking=True, cash=False,
+                        normative_ref="Synthetic later analytics requirement"))
+                    await session.flush()
+                    await late_pool_cost.prepare(session, pg_book[0], expense.id, pool_command, procurement)
         else:
             assert pool_package["outputs"] == []
             assert pool_package["wip_origins"][0]["order_id"] == order_id
             assert Decimal(pool_package["wip_origins"][0]["amount_byn"]) == Decimal(wip_delta)
         assert await session.scalar(select(func.count()).select_from(Entry)) == before
+        revisions = (("0153_late_pool_atomic_package.py", "0154_late_pool_actual_output_evidence.py") if with_output else (
+            "0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
+            "0152_signed_prospective_wip.py", "0153_late_pool_atomic_package.py",
+            "0154_late_pool_actual_output_evidence.py"))
+        for revision in revisions:
+            await run_migration(session, revision, "upgrade")
+        if with_output:
+            original_confirm_output = production_output_cost_workflow.confirm_output_cost_correction
+
+            async def reject_output(*_args, **_kwargs):
+                raise service.AccountingError("Synthetic linked-output failure")
+
+            monkeypatch.setattr(production_output_cost_workflow, "confirm_output_cost_correction", reject_output)
+            with pytest.raises(service.AccountingError, match="Synthetic linked-output failure"):
+                await late_pool_cost.confirm(
+                    session, pg_book[0], expense.id, pool_command, uuid4(), pool_package["basis_digest"],
+                    "tester", procurement, expected_digest=pool_package["posting_digest"])
+            assert await session.scalar(select(func.count()).select_from(Entry)) == before
+            assert await session.scalar(text("SELECT count(*) FROM accounting.late_pool_package")) == 0
+            assert await session.scalar(text("""
+                SELECT entry_id FROM accounting.source_control
+                WHERE organization_id=:org AND source=:source
+            """), {"org": pg_book[0], "source": pool_package["posting"]["source"]}) is None
+            monkeypatch.setattr(production_output_cost_workflow,
+                                "confirm_output_cost_correction", original_confirm_output)
+        confirmed = await late_pool_cost.confirm(
+            session, pg_book[0], expense.id, pool_command, uuid4(), pool_package["basis_digest"], "tester",
+            procurement, expected_digest=pool_package["posting_digest"])
+        assert confirmed.operation == "inventory_late_cost"
+        saved_pool = await late_pool_cost.load_package(session, pg_book[0], confirmed.id)
+        assert saved_pool["preview"] == pool_package
+        assert len(saved_pool["output_revisions"]) == int(with_output)
+        if with_output:
+            saved_revision, = saved_pool["output_revisions"]
+            assert saved_revision["output_entry_id"] == output_id
+            assert saved_revision["amount_byn"] == wip_delta
+            assert await session.scalar(text("""
+                SELECT entry_id FROM accounting.production_output_cost_revision WHERE id=:revision
+            """), {"revision": saved_revision["output_revision_id"]}) > confirmed.id
+        repeated_confirmation = await late_pool_cost.confirm(
+            session, pg_book[0], expense.id, pool_command, saved_pool["request_key"],
+            pool_package["basis_digest"], "tester", procurement,
+            expected_digest=pool_package["posting_digest"])
+        assert repeated_confirmation.id == confirmed.id
+        await session.commit()
+        with pytest.raises(DBAPIError, match="Cannot downgrade V3 pool history"):
+            async with session.begin_nested():
+                await run_migration(session, "0154_late_pool_actual_output_evidence.py", "downgrade")
         # The unlinked second purchase affects weighted cost too: authenticate
         # its primary document, not merely the receipt named by the freight.
         original_basis = procurement.posted_receipt_basis

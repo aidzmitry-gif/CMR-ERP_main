@@ -1,4 +1,4 @@
-"""Prepare a complete, signed late-cost pool package without writing it."""
+"""Prepare and confirm a complete, signed late-cost pool package."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,7 @@ from modules.accounting.late_cost_commands import validate_account_roles
 from modules.accounting.late_cost_pool import preview_expense
 from modules.accounting.late_cost_posting import pool_candidate
 from modules.accounting.late_cost_receipts import PoolLateCostCommand
-from modules.accounting.models import Entry, ProductionOutputTransferReceipt
+from modules.accounting.models import Entry, Line, ProductionOutputTransferReceipt, SourceControl
 from modules.accounting.production_output_cost_workflow import (
     ProductionOutputCostPreviewInput,
     preview_output_cost_correction,
@@ -48,8 +48,18 @@ async def _resolve_wip_origins(session, organization_id, calculated):
             amount = Decimal(movement["delta_byn"])
             if not amount:
                 continue
+            source_lines = (await session.scalars(select(Line).where(
+                Line.entry_id == movement["entry_id"],
+                Line.side == "debit",
+                Line.account_code == destination["account"],
+            ))).all()
+            source_lines = [line for line in source_lines if line.dimensions == destination["dimensions"]]
+            if len(source_lines) != 1:
+                raise service.AccountingError(
+                    "WIP late-cost movement must resolve to one immutable material issue line")
             origins.append({
-                "entry_id": movement["entry_id"],
+                "source_entry_id": movement["entry_id"],
+                "source_line_id": source_lines[0].id,
                 "order_id": binding.order_id,
                 "source": source,
                 "source_version": destination.get("source_version"),
@@ -130,6 +140,180 @@ async def _resolve_outputs(session, organization_id, command, origins, procureme
             "origins": item["origins"],
         })
     return outputs, wip
+
+
+def _matrix(rows):
+    return sorted((row["account"], row["side"], json.dumps(row["dimensions"], sort_keys=True),
+                   Decimal(str(row["amount"]))) for row in rows)
+
+
+def _verified_preview(saved):
+    """Reject a malformed stored package before returning historical evidence."""
+    preview = saved["preview"]
+    if (not isinstance(preview, dict) or preview.get("basis_digest") != saved["basis_digest"]
+            or checksum({key: value for key, value in preview.items() if key != "basis_digest"})
+            != saved["basis_digest"]):
+        raise service.AccountingError("Late pool package basis digest is inconsistent")
+    if (preview.get("organization_id") != saved["organization_id"]
+            or preview.get("posting_digest") != saved["digest"]
+            or preview.get("command") != saved["command"]
+            or preview.get("calculation") != saved["calculation"]
+            or preview.get("posting") != saved["posting"]):
+        raise service.AccountingError("Late pool package evidence is incomplete")
+    return preview
+
+
+async def load_package(session, organization_id, entry_id):
+    """Read an immutable V3 package without recosting current source documents."""
+    await service.lock_organization(session, organization_id)
+    saved = (await session.execute(text("""
+        SELECT id, organization_id, request_key, late_entry_id, command, calculation,
+               preview, posting, basis_digest, digest, actor
+        FROM accounting.late_pool_package
+        WHERE late_entry_id=:entry AND organization_id=:org
+    """), {"entry": entry_id, "org": organization_id})).mappings().one_or_none()
+    if saved is None:
+        raise service.AccountingError("Late pool package was not found in this organization")
+    preview = _verified_preview(saved)
+    await session.execute(text("SELECT accounting.verify_late_pool_package(:package)"),
+                          {"package": saved["id"]})
+    links = (await session.execute(text("""
+        SELECT output_entry_id, output_revision_id, amount
+        FROM accounting.late_pool_output_cost_link
+        WHERE package_id=:package
+        ORDER BY output_entry_id
+    """), {"package": saved["id"]})).mappings().all()
+    return {
+        "organization_id": organization_id,
+        "expense_id": preview["expense_id"],
+        "entry_id": saved["late_entry_id"],
+        "request_key": str(saved["request_key"]),
+        "digest": saved["digest"],
+        "basis_digest": saved["basis_digest"],
+        "command": saved["command"],
+        "preview": preview,
+        "posted": True,
+        "output_revisions": [{
+            "output_entry_id": row["output_entry_id"],
+            "output_revision_id": row["output_revision_id"],
+            "amount_byn": format(row["amount"], ".2f"),
+        } for row in links],
+    }
+
+
+async def confirm(session, organization_id, expense_id, command: PoolLateCostCommand,
+                  request_key, expected_basis_digest, actor, procurement, event_bus=None, *, expected_digest=None):
+    """Atomically post the V3 pool ledger entry, output revisions and evidence package."""
+    from uuid import uuid5
+
+    from modules.accounting.production_output_cost_workflow import (
+        ProductionOutputCostConfirmInput,
+        confirm_output_cost_correction,
+    )
+
+    if not isinstance(command, PoolLateCostCommand):
+        raise service.AccountingError("A reviewed version 3 pool late-cost command is required")
+    await service.lock_organization(session, organization_id)
+    exists = await session.scalar(text("SELECT to_regclass('accounting.late_pool_package') IS NOT NULL"))
+    if exists is not True:
+        raise service.AccountingError("Atomic late pool package requires migration 0153")
+    saved_rows = (await session.execute(text("""
+        SELECT id, organization_id, request_key, late_entry_id, command, calculation,
+               preview, posting, basis_digest, digest, actor
+        FROM accounting.late_pool_package
+        WHERE organization_id=:org
+          AND (request_key=CAST(:request_key AS uuid) OR preview->>'expense_id'=:expense_id)
+    """), {"org": organization_id, "request_key": str(request_key),
+            "expense_id": str(expense_id)})).mappings().all()
+    if saved_rows:
+        if len(saved_rows) != 1:
+            raise service.AccountingError("Late pool package identity is inconsistent")
+        saved = saved_rows[0]
+        if (str(saved["request_key"]) != str(request_key)
+                or saved["command"] != command.model_dump(mode="json")
+                or saved["actor"] != actor
+                or saved["basis_digest"] != expected_basis_digest
+                or expected_digest is not None and saved["digest"] != expected_digest
+                or _verified_preview(saved).get("expense_id") != expense_id):
+            raise service.AccountingError("Late pool command conflicts with the saved package")
+        await load_package(session, organization_id, saved["late_entry_id"])
+        return await session.get(Entry, saved["late_entry_id"])
+    prepared = await prepare(session, organization_id, expense_id, command, procurement)
+    if prepared["basis_digest"] != expected_basis_digest:
+        raise service.AccountingError("Late pool basis changed; preview again")
+    if expected_digest is not None and prepared["posting_digest"] != expected_digest:
+        raise service.AccountingError("Late pool posting changed; preview again")
+    posting = PostingInput.model_validate(prepared["posting"])
+    control = await session.scalar(select(SourceControl).where(
+        SourceControl.organization_id == organization_id,
+        SourceControl.source == posting.source,
+    ))
+    if control is None or control.version != posting.source_version or control.entry_id is not None:
+        raise service.AccountingError("Late pool primary completeness state is inconsistent")
+    # The package guard is deferred.  The savepoint makes every linked output
+    # revision and the source-control resolution disappear on any failure.
+    async with session.begin_nested():
+        entry = await service.post(session, organization_id, posting, actor, event_bus, late_cost=True)
+        control.entry_id = entry.id
+        package_id = await session.scalar(text("""
+            INSERT INTO accounting.late_pool_package
+              (organization_id, request_key, late_entry_id, command, calculation, preview,
+               posting, basis_digest, digest, actor)
+            VALUES (:org,CAST(:request_key AS uuid),:entry,CAST(:command AS jsonb),
+                    CAST(:calculation AS jsonb),CAST(:preview AS jsonb),CAST(:posting AS jsonb),
+                    :basis,:digest,:actor)
+            RETURNING id
+        """), {
+            "org": organization_id, "request_key": str(request_key), "entry": entry.id,
+            "command": json.dumps(prepared["command"], sort_keys=True),
+            "calculation": json.dumps(prepared["calculation"], sort_keys=True),
+            "preview": json.dumps(prepared, sort_keys=True),
+            "posting": json.dumps(prepared["posting"], sort_keys=True),
+            "basis": expected_basis_digest, "digest": prepared["posting_digest"], "actor": actor,
+        })
+        for output in prepared["outputs"]:
+            data = ProductionOutputCostPreviewInput(
+                original_entry_id=output["output_entry_id"],
+                posting_date=command.allocation.posting_date,
+                request_evidence=f"Late pool expense {expense_id}; entry {entry.id}",
+            )
+            month = data.posting_date.strftime("%Y-%m")
+            actual = await preview_output_cost_correction(
+                session, organization_id, month, data, procurement=procurement)
+            actual_raw = await session.scalar(text(
+                "SELECT accounting.output_cost_revision_evidence(:org,:output,:day,NULL)::text"
+            ), {"org": organization_id, "output": output["output_entry_id"],
+                "day": data.posting_date})
+            actual_evidence = json.loads(actual_raw, parse_float=str)
+            if _matrix(actual_evidence["matrix"]) != _matrix(
+                    output["prospective_evidence"]["matrix"]):
+                raise service.AccountingError(
+                    "Actual output correction differs from reviewed prospective matrix")
+            revision = await confirm_output_cost_correction(
+                session, organization_id, month,
+                ProductionOutputCostConfirmInput(
+                    **data.model_dump(),
+                    request_key=uuid5(request_key, f"output:{output['output_entry_id']}"),
+                    basis_digest=actual["basis_digest"],
+                ), actor, event_bus, procurement=procurement)
+            if revision.entry_id is None:
+                raise service.AccountingError("Late pool output correction has no ledger entry")
+            await session.execute(text("""
+                INSERT INTO accounting.late_pool_output_cost_link
+                  (package_id, output_entry_id, output_revision_id, amount, evidence, origins)
+                VALUES (:package,:output,:revision,:amount,CAST(:evidence AS jsonb),CAST(:origins AS jsonb))
+            """), {
+                "package": package_id, "output": output["output_entry_id"],
+                "revision": revision.id, "amount": Decimal(output["amount_byn"]),
+                "evidence": actual_raw,
+                "origins": json.dumps(output["origins"], sort_keys=True),
+            })
+        await session.flush()
+        await session.execute(text("SELECT procurement.check_additional_expense(:expense)"),
+                              {"expense": expense_id})
+        await session.execute(text("SELECT accounting.verify_late_pool_package(:package)"),
+                              {"package": package_id})
+        return entry
 
 
 async def prepare(session, organization_id, expense_id, command, procurement):
