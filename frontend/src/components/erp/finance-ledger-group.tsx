@@ -19,7 +19,7 @@ type Period = { start: string; end: string };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (value: unknown): value is string => typeof value === "string" && /^-?\d+\.\d{2}$/.test(value);
-const positiveId = (value: unknown): value is number => Number.isSafeInteger(value) && value > 0;
+const positiveId = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const cents = (value: string) => {
   const [whole, fraction] = value.replace("-", "").split(".");
   const amount = BigInt(whole) * 100n + BigInt(fraction);
@@ -40,7 +40,7 @@ function reportFor(value: unknown, organization: Organization, period: Period): 
   const validReviews = row.review_items === undefined || (Array.isArray(row.review_items) && row.review_items.every(item =>
     item && typeof item.code === "string" && typeof item.message === "string" && Number.isSafeInteger(item.count) && item.count >= 0));
   if (!row || row.organization_id !== organization.id || row.from !== period.start || row.to !== period.end
-    || typeof row.status !== "string" || !Number.isSafeInteger(row.pending_documents) || row.pending_documents < 0
+    || typeof row.status !== "string" || typeof row.pending_documents !== "number" || !Number.isSafeInteger(row.pending_documents) || row.pending_documents < 0
     || !pnl || !cashflow || !balance || !money(pnl.profit) || !money(cashflow.closing)
     || !money(balance.equity) || !money(balance.difference) || !validReviews) {
     throw new Error("Ответ бухгалтерского отчёта не соответствует организации или периоду.");
