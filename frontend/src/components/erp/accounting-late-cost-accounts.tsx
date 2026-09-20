@@ -4,18 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import type { LateCostPending } from "@/lib/late-cost-journal";
 import { checkedMaterialOutputs, type MaterialOutput } from "@/lib/late-material-package";
+import { checkedPoolOutputs, type PoolOutput } from "@/lib/late-pool-package";
 
 type Allocation = { expected_version: number; policy_id: number; posting_date: string; capitalizable_amount_byn: string; excluded_amount_byn: string; classification_evidence: string; conversion?: { currency: string; rate: string; rate_scale: number; rate_date: string; rate_source: string } };
 type Account = { code: string; title: string; valid_from: string; category: string; cash: boolean; quantity_tracking: boolean; required_dimensions: string[] };
 type Excluded = { account: string; amount_byn: string; dimensions: Record<string, string> };
 type Line = { account: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string> };
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение", employee: "Сотрудник", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", asset: "Основное средство" };
-export function AccountingLateCostAccounts({ org, expenseId, allocation, disabled, onPrepared, material = false }: {
-  org: string; expenseId: number; allocation: Allocation; disabled: boolean; onPrepared?: (command: LateCostPending | null) => void; material?: boolean;
+type CostMode = "legacy" | "material" | "pool";
+export function AccountingLateCostAccounts({ org, expenseId, allocation, disabled, onPrepared, mode = "legacy" }: {
+  org: string; expenseId: number; allocation: Allocation; disabled: boolean; onPrepared?: (command: LateCostPending | null) => void; mode?: CostMode;
 }) {
   const [accounts, setAccounts] = useState<Account[]>([]), [settlement, setSettlement] = useState("");
   const [excluded, setExcluded] = useState<Excluded[]>([]), [lines, setLines] = useState<Line[] | null>(null);
-  const [outputs, setOutputs] = useState<MaterialOutput[]>([]);
+  const [outputs, setOutputs] = useState<(MaterialOutput | PoolOutput)[]>([]);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const running = useRef(false), request = useRef<AbortController | null>(null);
   useEffect(() => { if (!lines) onPrepared?.(null); }, [lines, onPrepared]);
@@ -31,14 +33,17 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
   const effective = [...new Map(accounts.filter(row => row.valid_from <= allocation.posting_date)
     .sort((a, b) => a.valid_from.localeCompare(b.valid_from)).map(row => [row.code, row])).values()];
   const available = effective.filter(row => !row.cash && !row.quantity_tracking);
+  const material = mode === "material", pool = mode === "pool", versioned = material || pool;
   const change = (index: number, update: Partial<Excluded>) => { setLines(null); setExcluded(rows => rows.map((row, i) => i === index ? { ...row, ...update } : row)); };
   async function prepare() {
     if (running.current || disabled) return;
     running.current = true; setBusy(true); setError(""); setLines(null);
     const controller = new AbortController(); request.current = controller;
     try {
-      const requested = { allocation, accounts: { settlement_account: settlement, excluded_costs: excluded } };
-      const response = await fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}${material ? "/material" : ""}/posting-preview`, {
+      const requested = { allocation, accounts: { settlement_account: settlement, excluded_costs: excluded },
+        ...(pool ? { command_version: 3, material_outputs: [] as never[] } : {}) };
+      const route = pool ? "/pool" : material ? "/material" : "";
+      const response = await fetch(`/api/accounting/organizations/${org}/additional-expenses/${expenseId}${route}/posting-preview`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify(requested),
       });
@@ -57,13 +62,17 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
         if (line.side === "debit") debit += cents; else credit += cents;
       }
       const cents = (amount: string) => { const [whole, fraction = ""] = amount.split("."); return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0")); };
-      if (debit !== credit || debit !== cents(allocation.capitalizable_amount_byn) + cents(allocation.excluded_amount_byn)) throw new Error("Суммы пакета не соответствуют документу.");
-      const outputRows = material ? checkedMaterialOutputs(data, requested) : [];
-      if (material && (data.confirmation_available !== true || data.posting_digest !== data.digest)) throw new Error("Производственный пакет ещё нельзя подтвердить.");
+      const sourceAmount = cents(allocation.capitalizable_amount_byn) + cents(allocation.excluded_amount_byn);
+      const settlementCredit = (data.posting.lines as Line[]).reduce((sum, line) => sum + (line.side === "credit" && line.account === settlement ? cents(line.amount) : 0n), 0n);
+      if (debit !== credit || (!pool && debit !== sourceAmount) || (pool && settlementCredit !== sourceAmount)) {
+        throw new Error("Суммы пакета не соответствуют документу.");
+      }
+      const outputRows = material ? checkedMaterialOutputs(data, requested) : pool ? checkedPoolOutputs(data, requested) : [];
+      if (versioned && (data.confirmation_available !== true || data.posting_digest !== data.digest)) throw new Error("Версионированный пакет ещё нельзя подтвердить.");
       if (!controller.signal.aborted) {
         setOutputs(outputRows);
         setLines(data.posting.lines);
-        onPrepared?.({ org, expenseId, principal: data.principal, body: JSON.stringify({ ...(material ? data.command : requested), request_key: crypto.randomUUID(),
+        onPrepared?.({ org, expenseId, principal: data.principal, body: JSON.stringify({ ...(versioned ? data.command : requested), request_key: crypto.randomUUID(),
           expected_digest: data.digest, expected_basis_digest: data.basis_digest }) });
       }
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
@@ -92,7 +101,7 @@ export function AccountingLateCostAccounts({ org, expenseId, allocation, disable
       {lines.map((line, index) => <div key={index} className="border-t border-line py-2"><p>{line.side === "debit" ? "Дебет" : "Кредит"} {line.account} · {line.amount} BYN</p>
         {Object.entries(line.dimensions).map(([name, value]) => <p className="break-words text-sm text-muted" key={name}>{labels[name] ?? name}: {value}</p>)}
       </div>)}
-      {material && <section className="space-y-3" aria-label="Корректировки себестоимости выпусков">
+      {versioned && <section className="space-y-3" aria-label="Корректировки себестоимости выпусков">
         <h4 className="font-semibold">Корректировки себестоимости выпусков</h4>
         {!outputs.length && <p>Производственная часть расходов остаётся в НЗП.</p>}
         {outputs.map(output => <div key={output.output_entry_id} className="rounded-lg border border-line p-3">

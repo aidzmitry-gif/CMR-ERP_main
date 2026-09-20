@@ -49,7 +49,7 @@ it("shows the whole material and sold-output package before preparing its versio
   const fetcher = vi.fn().mockImplementation((_url, options) => Promise.resolve({ ok: true, json: async () => options?.method === "POST" ? packet
     : [{ code: "60", title: "Поставщики", valid_from: "2026-01-01", category: "liability", cash: false, quantity_tracking: false, required_dimensions: [] }] }));
   vi.stubGlobal("fetch", fetcher);
-  render(<AccountingLateCostAccounts org="1" expenseId={7} allocation={inputs} material disabled={false} onPrepared={onPrepared} />);
+  render(<AccountingLateCostAccounts org="1" expenseId={7} allocation={inputs} mode="material" disabled={false} onPrepared={onPrepared} />);
   await screen.findByText("60 · Поставщики");
   fireEvent.change(screen.getByLabelText("Счёт расчётов с поставщиком"), { target: { value: "60" } });
   fireEvent.click(screen.getByText("Подготовить проводки"));
@@ -58,4 +58,36 @@ it("shows the whole material and sold-output package before preparing its versio
   const prepared = onPrepared.mock.calls.find(([item]) => item)?.[0];
   expect(JSON.parse(prepared.body)).toMatchObject(command);
   expect(fetcher.mock.calls.find(([, options]) => options?.method === "POST")?.[0]).toContain("/material/posting-preview");
+});
+
+it("uses the separate V3 pool route and accepts a signed output correction derived by the server", async () => {
+  const inputs = { ...allocation, capitalizable_amount_byn: "5.00", excluded_amount_byn: "0.00" };
+  const accounts = { settlement_account: "60", excluded_costs: [] };
+  const command = { allocation: { ...inputs, conversion: null }, accounts, command_version: 3,
+    material_outputs: [{ output_entry_id: 12, amount_byn: "-2.00" }] };
+  const packet = { organization_id: 1, expense_id: 7, posted: false, principal: "accountant", digest: "a".repeat(64),
+    posting_digest: "a".repeat(64), basis_digest: "b".repeat(64), command, confirmation_available: true, wip_origins: [],
+    posting: { source: "procurement:additional-expense:7", source_version: 1, lines: [
+      { account: "41", side: "debit", amount: "7.00", dimensions: {} },
+      { account: "20", side: "credit", amount: "2.00", dimensions: {} },
+      { account: "60", side: "credit", amount: "5.00", dimensions: {} }] },
+    outputs: [{ output_entry_id: 12, amount_byn: "-2.00", prospective_evidence: { matrix: [
+      { account: "43", side: "credit", amount: "1.00", dimensions: {} },
+      { account: "90.4", side: "credit", amount: "1.00", dimensions: {} },
+      { account: "20", side: "debit", amount: "2.00", dimensions: {} }] } }],
+    calculation: { destinations: [] } };
+  const onPrepared = vi.fn();
+  const fetcher = vi.fn().mockImplementation((_url, options) => Promise.resolve({ ok: true, json: async () => options?.method === "POST" ? packet
+    : [{ code: "60", title: "Поставщики", valid_from: "2026-01-01", category: "liability", cash: false, quantity_tracking: false, required_dimensions: [] }] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingLateCostAccounts org="1" expenseId={7} allocation={inputs} mode="pool" disabled={false} onPrepared={onPrepared} />);
+  await screen.findByText("60 · Поставщики");
+  fireEvent.change(screen.getByLabelText("Счёт расчётов с поставщиком"), { target: { value: "60" } });
+  fireEvent.click(screen.getByText("Подготовить проводки"));
+  await screen.findByText("Кредит 90.4 · 1.00 BYN");
+  const prepared = onPrepared.mock.calls.find(([item]) => item)?.[0];
+  expect(JSON.parse(prepared.body)).toMatchObject(command);
+  const [path, options] = fetcher.mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(path).toContain("/pool/posting-preview");
+  expect(JSON.parse(options.body).material_outputs).toEqual([]);
 });

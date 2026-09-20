@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from uuid import UUID
 
+from pydantic import Field
 from sqlalchemy import select, text
 
 from modules.accounting import service
@@ -19,6 +21,14 @@ from modules.accounting.production_output_cost_workflow import (
 )
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.wms.production_material_issues import ProductionMaterialIssue
+
+
+class PoolLateCostConfirmation(PoolLateCostCommand):
+    """Exact reviewed V3 pool command accepted by the accountant API."""
+
+    request_key: UUID
+    expected_basis_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _wip_destination(destination):
@@ -238,9 +248,13 @@ async def load_package(session, organization_id, entry_id):
         WHERE package_id=:package
         ORDER BY value_line_id
     """), {"package": saved["id"]})).mappings().all()
+    source_version = preview.get("calculation", {}).get("source_version") if isinstance(preview.get("calculation"), dict) else None
+    if type(source_version) is not int or source_version <= 0:
+        raise service.AccountingError("Late pool package source version is inconsistent")
     return {
         "organization_id": organization_id,
         "expense_id": preview["expense_id"],
+        "source_version": source_version,
         "entry_id": saved["late_entry_id"],
         "request_key": str(saved["request_key"]),
         "digest": saved["digest"],
@@ -377,8 +391,8 @@ async def confirm(session, organization_id, expense_id, command: PoolLateCostCom
         return entry
 
 
-async def prepare(session, organization_id, expense_id, command, procurement):
-    """Return an immutable-review candidate. This function never posts or saves."""
+async def _prepare(session, organization_id, expense_id, command, procurement, *, require_output_selection):
+    """Build the server-derived V3 package without creating ledger state."""
     if not isinstance(command, PoolLateCostCommand):
         raise service.AccountingError("A reviewed version 3 pool late-cost command is required")
     await service.lock_organization(session, organization_id)
@@ -390,7 +404,7 @@ async def prepare(session, organization_id, expense_id, command, procurement):
     outputs, wip = await _resolve_outputs(session, organization_id, command, origins, procurement)
     expected_outputs = [{"output_entry_id": row["output_entry_id"], "amount_byn": row["amount_byn"]} for row in outputs]
     actual_outputs = [row.model_dump(mode="json") for row in command.material_outputs]
-    if actual_outputs != expected_outputs:
+    if require_output_selection and actual_outputs != expected_outputs:
         raise service.AccountingError("Selected pool outputs differ from authenticated WIP history")
     reviewed = PoolLateCostCommand(
         command_version=3,
@@ -411,3 +425,15 @@ async def prepare(session, organization_id, expense_id, command, procurement):
         "confirmation_available": False,
     }
     return {**result, "basis_digest": checksum(result)}
+
+
+async def prepare(session, organization_id, expense_id, command, procurement):
+    """Require a reviewed exact output selection for confirmation readiness."""
+    return await _prepare(session, organization_id, expense_id, command, procurement,
+                          require_output_selection=True)
+
+
+async def prepare_preview(session, organization_id, expense_id, command, procurement):
+    """Derive output selection on the server before a client can confirm it."""
+    return await _prepare(session, organization_id, expense_id, command, procurement,
+                          require_output_selection=False)

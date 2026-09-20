@@ -61,3 +61,23 @@ it("restores the versioned material route and keeps the command until all output
   expect(fetcher.mock.calls[1][1].body).toBe(materialCommand.body);
   expect(pendingLateCost(sessionStorage, "1", "accountant")).toBeNull();
 });
+
+it("uses the isolated V3 pool route and verifies signed linked output corrections", async () => {
+  const selection = [{ output_entry_id: 20, amount_byn: "-2.00" }];
+  const poolData = { ...data, command_version: 3, material_outputs: selection };
+  const poolCommand = { ...command, body: JSON.stringify(poolData) };
+  const saved = { ...receipt, command: { allocation: data.allocation, accounts: data.accounts,
+    command_version: 3, material_outputs: selection },
+    output_revisions: [{ output_entry_id: 20, output_revision_id: 30, amount_byn: "-2.00" }],
+    inventory_value_links: [] };
+  rememberLateCost(sessionStorage, poolCommand);
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => saved })
+    .mockResolvedValueOnce({ ok: true, json: async () => saved });
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingLateCostConfirmation org="1" principal="accountant" prepared={null} onPosted={vi.fn()} onLock={vi.fn()} />);
+  await screen.findByText("Повторить проведение без дубля");
+  fireEvent.click(screen.getByText("Проверить результат проведения"));
+  await screen.findByText("Проведение подтверждено.");
+  expect(fetcher.mock.calls[0][0]).toBe("/api/accounting/organizations/1/additional-expenses/7/pool/posting");
+  expect(pendingLateCost(sessionStorage, "1", "accountant")).toBeNull();
+});

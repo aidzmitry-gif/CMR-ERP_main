@@ -44,9 +44,33 @@ it("reads the complete material package including linked output costs", async ()
     output_revisions: [{ output_entry_id: 12, output_revision_id: 19, amount_byn: "100.00" }] };
   const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => data });
   vi.stubGlobal("fetch", fetcher);
-  render(<AccountingLateCostPosted org="1" expenseId={7} version={2} entryId={9} material />);
+  render(<AccountingLateCostPosted org="1" expenseId={7} version={2} entryId={9} mode="material" />);
   fireEvent.click(screen.getByText("Показать проводки"));
   await screen.findByText("Дебет 90.4 · 50.00 BYN");
   expect(screen.getByText("Дебет 43 · 50.00 BYN")).toBeInTheDocument();
   expect(fetcher.mock.calls[0][0]).toContain("/material/posting");
+});
+
+it("reads the immutable V3 pool package with signed output and inventory-value evidence", async () => {
+  const original = packet();
+  const poolPosting = { ...original.posting, lines: [
+    { account: "41", side: "debit", amount: "102.00", currency: "BYN", quantity: null, dimensions: {} },
+    { account: "20", side: "credit", amount: "2.00", currency: "BYN", quantity: null, dimensions: {} },
+    { account: "60", side: "credit", amount: "100.00", currency: "BYN", quantity: null, dimensions: {} },
+  ] };
+  const data = { ...original, preview: { posting: poolPosting, wip_origins: [], calculation: { destinations: [] },
+    command: { command_version: 3, material_outputs: [{ output_entry_id: 12, amount_byn: "-2.00" }] },
+    outputs: [{ output_entry_id: 12, amount_byn: "-2.00", prospective_evidence: { matrix: [
+      { account: "43", side: "credit", amount: "1.00", dimensions: {} },
+      { account: "90.4", side: "credit", amount: "1.00", dimensions: {} },
+      { account: "20", side: "debit", amount: "2.00", dimensions: {} }] } }] },
+    command: { command_version: 3, material_outputs: [{ output_entry_id: 12, amount_byn: "-2.00" }] },
+    output_revisions: [{ output_entry_id: 12, output_revision_id: 19, amount_byn: "-2.00" }], inventory_value_links: [] };
+  const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => data });
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingLateCostPosted org="1" expenseId={7} version={2} entryId={9} mode="pool" />);
+  fireEvent.click(screen.getByText("Показать проводки"));
+  await screen.findByText("Кредит 90.4 · 1.00 BYN");
+  expect(screen.getByText("Дебет 20 · 2.00 BYN")).toBeInTheDocument();
+  expect(fetcher.mock.calls[0][0]).toContain("/pool/posting");
 });

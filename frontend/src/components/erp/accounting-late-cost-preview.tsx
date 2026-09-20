@@ -9,7 +9,8 @@ type Policy = { id: number; effective_from: string; reference: string; late_cost
 type Conversion = { currency: string; rate: string; rate_scale: number; rate_date: string; rate_source: string };
 type Share = { receipt_id: number; version: number; line_number: number; destination: "remaining" | "disposed" | "production"; quantity: string; amount_byn: string };
 type Result = { organization_id: number; expense_id: number; source_version: number; policy_id: number; basis_digest: string;
-  posted: boolean; confirmation_available: boolean; shares: Share[]; normative_verified: boolean; totals_byn: Record<string, string> };
+  posted: boolean; confirmation_available: boolean; inventory_method: "specific" | "fifo" | "weighted_average";
+  shares: Share[]; normative_verified: boolean; totals_byn: Record<string, string> };
 const labels = { remaining: "Остаток", disposed: "Выбытие", production: "Производство" };
 
 export function AccountingLateCostPreview({ org, expenseId, version, initialDate, disabled, currency, onPrepared }: {
@@ -51,6 +52,7 @@ export function AccountingLateCostPreview({ org, expenseId, version, initialDate
       if (String(data.organization_id) !== org || data.expense_id !== expenseId || data.source_version !== version
         || data.policy_id !== policy.id || data.posted !== false || data.confirmation_available !== false
         || !/^[a-f0-9]{64}$/.test(data.basis_digest) || !Array.isArray(data.shares) || !data.shares.length
+        || !["specific", "fifo", "weighted_average"].includes(data.inventory_method)
         || !data.shares.every((share: Share) => share && Object.hasOwn(labels, share.destination)
           && Number.isSafeInteger(share.receipt_id) && share.receipt_id > 0
           && Number.isSafeInteger(share.version) && share.version > 0
@@ -106,7 +108,8 @@ export function AccountingLateCostPreview({ org, expenseId, version, initialDate
           <td>№ {share.receipt_id}, версия {share.version}, строка {share.line_number}</td><td>{labels[share.destination]}</td><td>{share.quantity}</td><td>{share.amount_byn}</td>
         </tr>)}</tbody></table></div>
       {policy && <AccountingLateCostAccounts key={key} org={org} expenseId={expenseId} disabled={disabled || busy} onPrepared={onPrepared}
-        material={current.shares.some(share => share.destination === "production" && BigInt(share.amount_byn.replace(".", "")) > 0n)}
+        mode={current.inventory_method === "fifo" || current.inventory_method === "weighted_average" ? "pool"
+          : current.shares.some(share => share.destination === "production" && BigInt(share.amount_byn.replace(".", "")) > 0n) ? "material" : "legacy"}
         allocation={{ expected_version: version, policy_id: policy.id, posting_date: date, capitalizable_amount_byn: amount,
           excluded_amount_byn: excluded, classification_evidence: evidence.trim(), ...(conversion ? { conversion } : {}) }} />}
     </>}

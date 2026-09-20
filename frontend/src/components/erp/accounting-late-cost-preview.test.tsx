@@ -5,7 +5,7 @@ import { AccountingLateCostPreview } from "./accounting-late-cost-preview";
 const fetchMock = vi.fn();
 const policy = { id: 2, effective_from: "2026-09-01", reference: "Policy", late_cost_allocation: { basis: "quantity", rounding: "largest_remainder_cent" } };
 const result = () => ({ organization_id: 1, expense_id: 7, source_version: 3, policy_id: 2, basis_digest: "a".repeat(64),
-  posted: false, confirmation_available: false, normative_verified: false,
+  posted: false, confirmation_available: false, inventory_method: "specific", normative_verified: false,
   shares: [{ receipt_id: 4, version: 1, line_number: 1, destination: "remaining", quantity: "6.000000", amount_byn: "60.00" },
     { receipt_id: 4, version: 1, line_number: 1, destination: "disposed", quantity: "4.000000", amount_byn: "40.00" }] });
 beforeEach(() => { vi.stubGlobal("fetch", fetchMock); });

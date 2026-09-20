@@ -186,7 +186,8 @@ function ExpenseBook({ org, onLock }: { org: string; onLock: (locked: boolean) =
     </form>}
     {selected?.posted && <p role="status">Документ проведён{selected.posting ? ` · операция № ${selected.posting.entry_id}` : ""}. Исправления оформляются отдельной операцией.</p>}
     {selected?.posted && selected.posting && <AccountingLateCostPosted key={`${org}:${selected.id}:${selected.version}:${selected.posting.entry_id}`}
-      org={org} expenseId={selected.id} version={selected.version} entryId={selected.posting.entry_id} material={selected.posting.command_version === 2} />}
+      org={org} expenseId={selected.id} version={selected.version} entryId={selected.posting.entry_id}
+      mode={selected.posting.command_version === 3 ? "pool" : selected.posting.command_version === 2 ? "material" : "legacy"} />}
     {selected && !selected.posted && unsaved && <p role="status">Сохраните изменения документа перед расчётом и подготовкой проводок.</p>}
     {selected && !selected.posted && !unsaved && <AccountingLateCostPreview key={`${org}:${selected.id}:${selected.version}`} org={org} expenseId={selected.id}
       version={selected.version} currency={selected.revisions[selected.revisions.length - 1].document.currency}

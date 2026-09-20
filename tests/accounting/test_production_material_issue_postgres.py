@@ -230,6 +230,23 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
                 "0154_late_pool_actual_output_evidence.py", "0155_late_pool_inventory_value_links.py"))
         for revision in revisions:
             await run_migration(session, revision, "upgrade")
+        await session.commit()
+        from httpx import ASGITransport, AsyncClient
+
+        from tests.accounting.test_inventory_allocation_api_postgres import application
+
+        app = application(pg_factory)
+        app.state.core.services.procurement_source = procurement
+        pool_api = f"/accounting/organizations/{pg_book[0]}/additional-expenses/{expense.id}/pool"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            preview_command = pool_command.model_copy(update={"material_outputs": []}) if with_output else pool_command
+            preview_response = await client.post(pool_api + "/posting-preview", json=preview_command.model_dump(mode="json"))
+            assert preview_response.status_code == 200, preview_response.text
+            assert preview_response.headers["cache-control"] == "private, no-store"
+            assert preview_response.json()["basis_digest"] == pool_package["basis_digest"]
+            assert preview_response.json()["command"] == pool_package["command"]
+            assert preview_response.json()["confirmation_available"] is True
+            assert (await client.get(pool_api + "/posting")).status_code == 404
         if with_output:
             original_confirm_output = production_output_cost_workflow.confirm_output_cost_correction
 
@@ -280,6 +297,23 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         assert Decimal(historical_cost["book_value_byn"]) == expected_remaining
         controls = await closing_snapshot(session, pg_book[0], "2026-10")
         assert "inventory_late_cost_receipt_gap" not in {item["code"] for item in controls["review_items"]}
+        await session.commit()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            rejected_principal = await client.post(pool_api + "/confirm", headers={"X-Expected-Principal": "other"},
+                json={**saved_pool["command"], "request_key": saved_pool["request_key"],
+                      "expected_basis_digest": pool_package["basis_digest"],
+                      "expected_digest": pool_package["posting_digest"]})
+            assert rejected_principal.status_code == 409
+            retry_response = await client.post(pool_api + "/confirm", headers={"X-Expected-Principal": "tester"},
+                json={**saved_pool["command"], "request_key": saved_pool["request_key"],
+                      "expected_basis_digest": pool_package["basis_digest"],
+                      "expected_digest": pool_package["posting_digest"]})
+            assert retry_response.status_code == 201, retry_response.text
+            assert retry_response.json() == saved_pool
+            readback = await client.get(pool_api + "/posting")
+            assert readback.status_code == 200, readback.text
+            assert readback.headers["cache-control"] == "private, no-store"
+            assert readback.json() == saved_pool
         if with_output:
             saved_revision, = saved_pool["output_revisions"]
             assert saved_revision["output_entry_id"] == output_id
@@ -303,6 +337,10 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             result = await original_basis(session, organization_id, receipt_id, expected_version)
             return {**result, "digest": "0" * 64} if receipt_id == receipts[1]["id"] else result
         monkeypatch.setattr(procurement, "posted_receipt_basis", changed_basis)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            readback = await client.get(pool_api + "/posting")
+            assert readback.status_code == 200, readback.text
+            assert readback.json() == saved_pool
         with pytest.raises(service.AccountingError, match="authenticated primary"):
             await load_expense_pools(session, pg_book[0], expense.id, 1, date(2026, 10, 11), policy_id, procurement)
 

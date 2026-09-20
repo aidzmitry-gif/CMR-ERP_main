@@ -64,8 +64,9 @@ from modules.accounting.input_vat_register import (
     InputVatRegisterInput,
 )
 from modules.accounting.late_cost_commands import LateCostConfirmation
-from modules.accounting.late_cost_receipts import LateCostCommand
+from modules.accounting.late_cost_receipts import LateCostCommand, PoolLateCostCommand
 from modules.accounting.late_material_cost import MaterialLateCostConfirmation
+from modules.accounting.late_pool_cost import PoolLateCostConfirmation
 from modules.accounting.models import (
     AccessGrant,
     Account,
@@ -832,6 +833,85 @@ async def additional_expense_material_posting(org_id: int, expense_id: int, resp
     try:
         result = await load_package(ctx[0], org_id, saved.entry_id, gateway)
     except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.post("/organizations/{org_id}/additional-expenses/{expense_id}/pool/posting-preview")
+async def additional_expense_pool_preview(org_id: int, expense_id: int, data: PoolLateCostCommand,
+        response: Response, ctx=Depends(member), core=Depends(get_core)):
+    """Preview the isolated V3 full-pool package without writing a ledger entry."""
+    from sqlalchemy import text
+
+    from modules.accounting.late_pool_cost import prepare_preview
+
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    if not await ctx[0].scalar(text("SELECT to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL")):
+        raise HTTPException(409, "Atomic late pool package requires migration 0155")
+    try:
+        result = await prepare_preview(ctx[0], org_id, expense_id, data, gateway)
+    except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**result, "principal": ctx[1], "digest": result["posting_digest"], "confirmation_available": True}
+
+
+@router.post("/organizations/{org_id}/additional-expenses/{expense_id}/pool/confirm", status_code=201)
+async def additional_expense_pool_confirm(org_id: int, expense_id: int, data: PoolLateCostConfirmation,
+        response: Response, expected_principal: str = Header(alias="X-Expected-Principal"),
+        ctx=Depends(member), core=Depends(get_core)):
+    """Atomically confirm an exact V3 command or read back its idempotent result."""
+    from modules.accounting.late_pool_cost import confirm, load_package
+
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accounting write access required")
+    if expected_principal != ctx[1]:
+        raise HTTPException(409, "Accounting principal changed; review the command again")
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    command = PoolLateCostCommand.model_validate(data.model_dump(exclude={
+        "request_key", "expected_basis_digest", "expected_digest"}))
+    try:
+        saved = await confirm(ctx[0], org_id, expense_id, command, data.request_key,
+            data.expected_basis_digest, ctx[1], gateway, core.services.event_bus,
+            expected_digest=data.expected_digest)
+        result = await load_package(ctx[0], org_id, saved.id)
+    except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/organizations/{org_id}/additional-expenses/{expense_id}/pool/posting")
+async def additional_expense_pool_posting(org_id: int, expense_id: int, response: Response,
+                                          ctx=Depends(member)):
+    """Return the immutable V3 package without recomputing current history."""
+    from sqlalchemy import text
+
+    from modules.accounting.late_pool_cost import load_package
+
+    exists = await ctx[0].scalar(text(
+        "SELECT to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL"
+    ))
+    if exists is not True:
+        raise HTTPException(409, "Atomic late pool package requires migration 0155")
+    entry_ids = (await ctx[0].execute(text("""
+        SELECT late_entry_id
+        FROM accounting.late_pool_package
+        WHERE organization_id=:org AND preview->>'expense_id'=:expense
+        ORDER BY id
+    """), {"org": org_id, "expense": str(expense_id)})).scalars().all()
+    if not entry_ids:
+        raise HTTPException(404, "Additional expense has no V3 pool package")
+    if len(entry_ids) != 1:
+        raise HTTPException(409, "Additional expense V3 package identity is inconsistent")
+    try:
+        result = await load_package(ctx[0], org_id, entry_ids[0])
+    except service.AccountingError as exc:
         raise HTTPException(409, str(exc)) from exc
     response.headers["Cache-Control"] = "private, no-store"
     return result
