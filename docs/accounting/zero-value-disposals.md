@@ -58,3 +58,7 @@ entry, `accounting-inventory-issue.tsx` reads those lines and `entry_id`, and
 entry. The integration stage must introduce an explicit discriminated receipt
 result (`posted_entry` versus `quantity_only_receipt`), preserve existing money
 responses, and never substitute a receipt id for an accounting entry id.
+
+## Accountant issue API (local implementation)
+The existing inventory/issues/posting-preview and confirm routes support a zero-value receipt for a specific-cost lot with one authenticated production-output origin. Source ledger IDs are derived by the server. The UI receives quantity_only_receipt, posting:null and receipt.source_layer; confirmation uses cost.basis_digest and digest. Ordinary expense-account and production-workflow restrictions still apply. Receipt registration invalidates affected period evidence and records an audit event exactly once. Monetary entries keep their existing response contract.
+PostgreSQL replay requires migration0140; public zero commands additionally require the0142 date guard (release all migrations0140–0142 together). Missing schema is an explicit error. Historical issue replay uses the shared registration cutoff. Local HTTP/PostgreSQL evidence covers concurrent duplicate confirmation, dates conflict, organization membership, insufficient quantity, first-lot selection, late costs, exhausted monetary retry and historical verification after subsequent costs. This does not certify weighted/FIFO zero disposal, zero-cost sales, mixed origins, production material zero issues, deployment or a real monthly close.

@@ -130,8 +130,8 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
     Mixed-money commands and sales intentionally remain outside this persistence
     slice.  A receipt id is not an accounting entry id.
     """
-    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
-    from modules.accounting.service import lock_organization
+    from modules.accounting.models import Organization, Period, ZeroValueInventoryDisposalReceipt
+    from modules.accounting.service import audit, lock_organization, period_for
 
     if command.operation != "inventory_issue":
         raise ValueError("Standalone zero-value persistence supports inventory issues only")
@@ -160,6 +160,19 @@ async def register_standalone_zero_value_issue(session, organization_id: int, ac
         command=command.model_dump(mode="json"), basis_digest=command.basis_digest, digest=digest, actor=actor,
     )
     session.add(receipt)
+    await session.flush()
+    period = await period_for(session, organization_id, command.posting_date.strftime("%Y-%m"))
+    affected = (await session.scalars(select(Period).where(
+        Period.organization_id == organization_id, Period.month >= period.month,
+    ).execution_options(populate_existing=True))).all()
+    for item in affected:
+        item.generation += 1
+        item.evidence = {}
+    org = await session.get(Organization, organization_id)
+    org.generation += 1
+    audit(session, organization_id, actor, "zero_value_disposal_registered", {
+        "receipt_id": receipt.id, "digest": digest, "basis_digest": command.basis_digest,
+    })
     await session.flush()
     return receipt
 
@@ -241,3 +254,36 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
         except ValueError as exc:
             raise AccountingError("Zero-value disposal receipt cannot be authenticated for replay") from exc
     return tuple(verified)
+
+
+async def require_public_zero_value_schema(session) -> None:
+    """Refuse the public path until all receipt/date guards are installed."""
+    ready = await session.scalar(text("""
+        SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL
+           AND to_regprocedure('accounting.validate_zero_value_disposal_command(jsonb)') IS NOT NULL
+    """))
+    if ready is not True:
+        from modules.accounting.service import AccountingError
+
+        raise AccountingError("Zero-value issue API requires migrations 0140 through 0142")
+
+
+async def available_authenticated_zero_value_disposals(session, organization_id: int, *, before_registration_token=None):
+    """Return replay events only where the PostgreSQL receipt schema exists.
+
+    SQLite legacy tests never model this PostgreSQL-only durable receipt.  The
+    dedicated public zero route calls ``require_public_zero_value_schema`` and
+    therefore never treats a missing production migration as empty history.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return ()
+    present = await session.scalar(text(
+        "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
+    ))
+    if present is not True:
+        from modules.accounting.service import AccountingError
+
+        raise AccountingError("Zero-value receipt migration 0140 is required for PostgreSQL inventory replay")
+    return await load_authenticated_zero_value_disposals(
+        session, organization_id, before_registration_token=before_registration_token
+    )

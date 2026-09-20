@@ -87,8 +87,13 @@ async def historical_cost(session, organization_id, entry_id, document, *, procu
         session, organization_id, policy, document.account, document.posting_date,
         {"warehouse": document.warehouse, "sku": document.sku, "lot": document.lot}, before_entry_id=entry_id,
     ) if finished_goods else frozenset()
+    from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
+
+    receipts = await available_authenticated_zero_value_disposals(
+        session, organization_id, before_registration_token=entry_id)
     return inventory_cost.issue_result(policy, rows, organization_id, request, verified_value_lines=verified,
-                                       verified_output_lines=output_lines, finished_goods=finished_goods)
+                                       verified_output_lines=output_lines, finished_goods=finished_goods,
+                                       zero_value_disposals=receipts, before_registration_token=entry_id)
 
 
 async def verify_receipt(session, organization_id, entry_id, *, procurement=None,

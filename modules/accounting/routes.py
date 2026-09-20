@@ -46,6 +46,7 @@ from modules.accounting import (
     service,
     settlement_offsets,
     shipment_drafts,
+    specific_zero_value_issue,
 )
 from modules.accounting.documents import BankDocument, preview_bank
 from modules.accounting.fixed_assets import (
@@ -942,6 +943,10 @@ async def confirm_sale_posting(org_id: int, data: sales.SaleConfirm, ctx=Depends
 
 @router.post("/organizations/{org_id}/inventory/issues/posting-preview")
 async def preview_issue_posting(org_id: int, data: InventoryIssueDocument, ctx=Depends(member), core=Depends(get_core)):
+    explicit = await specific_zero_value_issue.implicit_document(
+        ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
+    if explicit is not None:
+        return await specific_zero_value_issue.preview(ctx[0], org_id, explicit, ctx[1])
     cost, posting = await inventory_issues.prepare(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
     return {"cost": cost, "digest": service.digest(posting), "posting": posting.model_dump(mode="json")}
 
@@ -949,6 +954,20 @@ async def preview_issue_posting(org_id: int, data: InventoryIssueDocument, ctx=D
 @router.post("/organizations/{org_id}/inventory/issues/confirm", status_code=201)
 async def confirm_issue_posting(org_id: int, data: InventoryIssueConfirm, ctx=Depends(member), core=Depends(get_core)):
     document = InventoryIssueDocument(**data.model_dump(exclude={"basis_digest", "digest"}))
+    await service.lock_organization(ctx[0], org_id)
+    monetary = await ctx[0].scalar(select(Entry.id).where(
+        Entry.organization_id == org_id, Entry.source == document.source,
+        Entry.source_version == document.source_version, Entry.operation == "inventory_issue",
+    ))
+    if monetary is not None:
+        row = await inventory_issues.confirm(ctx[0], org_id, document, data.basis_digest, data.digest, ctx[1], core.services.event_bus,
+                                            procurement=getattr(core.services, "procurement_source", None))
+        return serialize(row)
+    zero = await specific_zero_value_issue.implicit_confirm(
+        ctx[0], org_id, document, data.basis_digest, data.digest, ctx[1],
+        procurement=getattr(core.services, "procurement_source", None))
+    if zero is not None:
+        return zero
     row = await inventory_issues.confirm(ctx[0], org_id, document, data.basis_digest, data.digest, ctx[1], core.services.event_bus,
                                         procurement=getattr(core.services, "procurement_source", None))
     return serialize(row)

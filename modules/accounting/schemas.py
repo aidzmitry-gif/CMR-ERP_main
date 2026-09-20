@@ -392,3 +392,10 @@ class InventoryIssueDocument(InventoryIssuePreviewInput):
 class InventoryIssueConfirm(InventoryIssueDocument):
     basis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SpecificZeroValueIssueDocument(InventoryIssueDocument):
+    """One entryless disposal of a verified zero-cost production-output layer."""
+
+    source_entry_id: int = Field(gt=0, strict=True)
+    source_line_id: int = Field(gt=0, strict=True)

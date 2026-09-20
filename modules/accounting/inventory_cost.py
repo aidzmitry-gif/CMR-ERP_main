@@ -67,7 +67,7 @@ async def _inventory_rows(session, org_id, data):
 
         verified_output_lines = await verified_output_lines(
             session, org_id, policy, data.account, data.posting_date,
-            {"warehouse": data.warehouse, "sku": data.sku, "lot": data.lot},
+            {"warehouse": data.warehouse, "sku": data.sku, "lot": getattr(data, "lot", "")},
         )
     return policy, rows, verified_output_lines, finished_goods
 
@@ -343,8 +343,12 @@ async def preview_issue(session, org_id, data, *, procurement=None):
 
     policy, rows, output_lines, finished_goods = await _inventory_rows(session, org_id, data)
     verified = await verified_value_lines(session, org_id, rows, procurement)
+    from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
+
+    receipts = await available_authenticated_zero_value_disposals(session, org_id)
     return issue_result(policy, rows, org_id, data, verified_value_lines=verified,
-                        verified_output_lines=output_lines, finished_goods=finished_goods)
+                        verified_output_lines=output_lines, finished_goods=finished_goods,
+                        zero_value_disposals=receipts)
 
 
 async def replay_issue_result(session, policy, rows, org_id, data, *, verified_value_lines=frozenset(),
@@ -447,6 +451,9 @@ async def available_lots(session, org_id, data, *, procurement=None):
 
     policy, rows, output_lines, finished_goods = await _inventory_rows(session, org_id, data)
     verified = await verified_value_lines(session, org_id, rows, procurement)
+    from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
+
+    receipts = await available_authenticated_zero_value_disposals(session, org_id)
     # Match the issue rule: incomplete analytics anywhere on this account block costing.
     if any(any(not (line.dimensions or {}).get(key) for key in ("warehouse", "sku", "lot")) for _, line in rows):
         raise AccountingError("Inventory account contains movements without warehouse, SKU or lot; reconcile first")
@@ -459,16 +466,23 @@ async def available_lots(session, org_id, data, *, procurement=None):
         try:
             if policy.inventory_method == "specific":
                 quantity, amount, _, _ = _lot_balance(rows, target, data.posting_date, verified_value_lines=verified,
-                                                       verified_output_lines=output_lines, finished_goods=finished_goods)
+                                                       verified_output_lines=output_lines, finished_goods=finished_goods,
+                                                       zero_value_disposals=receipts, organization_id=org_id)
             else:
                 layers, _ = _valuation_layers(rows, target, data.posting_date, verified_value_lines=verified,
-                                               verified_output_lines=output_lines, finished_goods=finished_goods)
+                                               verified_output_lines=output_lines, finished_goods=finished_goods,
+                                               zero_value_disposals=receipts, organization_id=org_id)
                 quantity = sum((layer["quantity"] for layer in layers), Decimal("0"))
                 amount = sum((layer["amount"] for layer in layers), Decimal("0"))
+            verified_origins = [(entry.id, line.id) for entry, line in rows
+                                if (entry.id, line.id) in output_lines
+                                and (line.dimensions or {}) == target]
+            zero_supported = policy.inventory_method == "specific" and len(verified_origins) == 1
+            selectable = quantity > 0 and (amount > 0 or zero_supported)
             result.append({"lot": lot, "book_quantity": format(quantity, ".6f"),
                            "book_value_byn": format(amount, ".2f"),
-                           "selectable": quantity > 0 and amount > 0,
-                           "reason": None if quantity > 0 and amount > 0 else "No positive quantity and value remaining"})
+                           "selectable": selectable,
+                           "reason": None if selectable else "No supported positive quantity/value remaining"})
         except AccountingError as exc:
             result.append({"lot": lot, "book_quantity": None, "book_value_byn": None,
                            "selectable": False, "reason": str(exc)})
