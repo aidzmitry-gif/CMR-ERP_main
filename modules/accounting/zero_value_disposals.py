@@ -157,13 +157,75 @@ class ZeroValueSaleCommand(DatedZeroValueDisposalCommand):
         return self
 
 
+class AllocatedZeroValueDisposalCommand(DatedZeroValueDisposalCommand):
+    """V4 immutable all-zero FIFO/weighted selection; persistence is not enabled yet."""
+
+    command_version: Literal[4]
+    valuation_method: Literal["fifo", "weighted_average"]
+    document: dict
+
+    @field_validator("command_version", mode="before")
+    @classmethod
+    def exact_command_version(cls, value):
+        if type(value) is not int or value != 4:
+            raise ValueError("Allocation zero-value command version must be the integer 4")
+        return value
+
+    @model_validator(mode="after")
+    def bind_full_document(self):
+        from modules.accounting.sales import SaleDocument, commercial_lines
+        from modules.accounting.schemas import InventoryIssueDocument
+
+        document_type = SaleDocument if self.operation == "inventory_sale" else InventoryIssueDocument
+        document = document_type.model_validate(self.document)
+        if isinstance(document, SaleDocument):
+            commercial_lines(document)
+        for name in ("source", "source_version", "document_date", "operation_date",
+                     "posting_date", "policy_id", "explanation"):
+            if getattr(document, name) != getattr(self, name):
+                raise ValueError(f"Allocation zero-value {name} differs from its document")
+        if document.expense_account != self.destination_account or document.expense_dimensions != self.destination_dimensions:
+            raise ValueError("Allocation zero-value destination differs from its document")
+        if isinstance(document, SaleDocument) and not (
+            self.destination_account == "90.4" or self.destination_account.startswith("90.4.")
+        ):
+            raise ValueError("Allocation zero-value sale must bind its cost destination to account 90.4")
+        for layer in self.inventory_layers:
+            dimensions = layer.inventory_dimensions
+            if (layer.inventory_account != document.account or dimensions.get("warehouse") != document.warehouse
+                    or dimensions.get("sku") != document.sku
+                    or document.lot and dimensions.get("lot") != document.lot):
+                raise ValueError("Allocation zero-value layer differs from its document inventory identity")
+        self.document = document.model_dump(mode="json")
+        self.allocation
+        return self
+
+    @property
+    def allocation(self) -> InventoryDispositionAllocation:
+        from modules.accounting.sales import SaleDocument
+        from modules.accounting.schemas import InventoryIssueDocument
+
+        document_type = SaleDocument if self.operation == "inventory_sale" else InventoryIssueDocument
+        document = document_type.model_validate(self.document)
+        return InventoryDispositionAllocation(
+            allocation_version=1, valuation_method=self.valuation_method, quantity=document.quantity,
+            amount_byn="0.00", layers=[InventorySourceAllocation(
+                source_entry_id=layer.source_entry_id, source_line_id=layer.source_line_id,
+                inventory_account=layer.inventory_account, inventory_dimensions=layer.inventory_dimensions,
+                quantity=layer.quantity, amount_byn="0.00",
+            ) for layer in self.inventory_layers],
+        )
+
+
 def parse_zero_value_command(snapshot: object) -> ZeroValueDisposalCommand:
     if not isinstance(snapshot, dict):
         raise ValueError("Zero-value disposal command must be an object")
     if "command_version" not in snapshot:
         return ZeroValueDisposalCommand.model_validate(snapshot)
-    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3):
+    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3, 4):
         raise ValueError("Unsupported zero-value disposal command version")
+    if snapshot["command_version"] == 4:
+        return AllocatedZeroValueDisposalCommand.model_validate(snapshot)
     if snapshot["command_version"] == 3:
         return ZeroValueSaleCommand.model_validate(snapshot)
     return DatedZeroValueDisposalCommand.model_validate(snapshot)
@@ -199,12 +261,14 @@ class AuthenticatedZeroValueDisposal:
 
 
 async def register_standalone_zero_value_issue(session, organization_id: int, actor: str,
-                                               command: ZeroValueDisposalCommand):
+                                                command: ZeroValueDisposalCommand):
     """Persist one entryless, zero-total issue; DB guards authenticate every layer.
 
     Mixed-money commands and sales intentionally remain outside this persistence
     slice.  A receipt id is not an accounting entry id.
     """
+    if isinstance(command, AllocatedZeroValueDisposalCommand):
+        raise ValueError("Allocation zero-value command requires migration and replay integration")
     from modules.accounting.models import Organization, Period, ZeroValueInventoryDisposalReceipt
     from modules.accounting.service import audit, lock_organization, period_for
 
@@ -260,6 +324,8 @@ async def preview_standalone_zero_value_issue_basis(session, organization_id: in
     callers preparing a command should keep that same transaction open through
     registration, or retry if the basis becomes stale.
     """
+    if isinstance(command, AllocatedZeroValueDisposalCommand):
+        raise ValueError("Allocation zero-value command requires migration and replay integration")
     from modules.accounting.service import lock_organization
 
     if command.operation != "inventory_issue" or len(command.inventory_layers) != 1:
@@ -306,6 +372,8 @@ async def load_authenticated_zero_value_disposals(session, organization_id: int,
             command = parse_zero_value_command(row.command)
         except (ValidationError, ValueError) as exc:
             raise AccountingError("Zero-value disposal command is not a valid immutable snapshot") from exc
+        if isinstance(command, AllocatedZeroValueDisposalCommand):
+            raise AccountingError("Allocation zero-value command requires migration and replay integration")
         linked_sale = isinstance(command, ZeroValueSaleCommand) and row.operation == "inventory_sale"
         valid_kind = (linked_sale and row.entry_id == row.registration_token) or (
             row.operation == "inventory_issue" and row.entry_id is None)
