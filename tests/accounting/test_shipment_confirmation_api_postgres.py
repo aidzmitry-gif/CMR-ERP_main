@@ -1,8 +1,9 @@
 """Public posting with real WMS acts and committed PostgreSQL receipts."""
 # ruff: noqa: F811
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.domain.models import User
 from modules.accounting.models import AccessGrant, Entry, ShipmentAccountingReceipt, SourceControl
 from modules.wms.models import StockMovement
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
@@ -12,10 +13,25 @@ from tests.integration.test_invoice_physical_shipments_postgres import physical_
 
 async def test_accountant_posts_and_replays_without_warehouse_write(physical_pg):
     api = physical_pg[0]
+    factory = physical_pg[1]
+    from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+
+    async with factory() as session:
+        if not await session.scalar(text(
+            "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
+        )):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        await session.commit()
     factory, org, act, data = await prepare_accounting(physical_pg)
     root = f"/accounting/organizations/{org}/shipments/{act['source_key']}"
     async with factory() as session:
         await session.execute(update(AccessGrant).where(AccessGrant.organization_id == org).values(role="accountant"))
+        session.add(User(
+            username="allocator",
+            full_name="Synthetic finance accountant",
+            role="finance",
+            status="active",
+        ))
         entries = await session.scalar(select(func.count()).select_from(Entry))
         stock = await session.scalar(select(func.count()).select_from(StockMovement))
         await session.commit()
