@@ -1428,11 +1428,20 @@ async def production_material_issue_posting_confirm(org_id: int, month: str,
     from modules.accounting.production_material_cost import confirm_material_issue_posting
 
     try:
+        if data.zero_value:
+            from modules.accounting.production_material_cost import confirm_material_zero_issue
+            return await confirm_material_zero_issue(
+                ctx[0], org_id, month, data, ctx[1],
+                getattr(core.services, 'production_output', None),
+                procurement=getattr(core.services, 'procurement_source', None),
+            )
         entry = await confirm_material_issue_posting(
             ctx[0], org_id, month, data, ctx[1], core.services.event_bus,
             procurement=getattr(core.services, 'procurement_source', None),
         )
     except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {'organization_id': org_id, 'entry': serialize(entry), 'posted': True,
             'final_cost_certified': False}
@@ -1458,6 +1467,14 @@ async def production_material_issue_posting_status(org_id: int, month: str, move
         Entry.source_version == 1, Entry.operation == 'inventory_issue',
     ))
     if entry is None:
+        from modules.accounting.production_material_cost import material_zero_status
+        try:
+            zero = await material_zero_status(ctx[0], org_id, source, month)
+        except (ValueError, service.AccountingError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if zero is not None:
+            response.headers['Cache-Control'] = 'private, no-store'
+            return zero
         raise HTTPException(404, 'Production material posting outcome not found')
     receipt = await ctx[0].scalar(select(InventoryIssueReceipt).where(
         InventoryIssueReceipt.organization_id == org_id, InventoryIssueReceipt.entry_id == entry.id,

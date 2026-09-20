@@ -47,7 +47,7 @@ export function AccountingProductionMaterialConfirmation({ org, month, disabled,
       }
       if (!item) { setNotice("Сохранённого запроса для текущего пользователя, месяца и движения нет."); return; }
       const saved = await resolveMaterialPosting(localStorage, item, action === "confirm");
-      if (saved) { setPending(null); setReceipt(saved); onConfirmed(); onEntry?.(saved.entry_id); }
+      if (saved) { setPending(null); setReceipt(saved); onConfirmed(); if (saved.entry_id !== null) onEntry?.(saved.entry_id); }
       else { setPending(item); setNotice("Квитанция пока не найдена. Запрос сохранён; можно повторить подтверждение."); }
     } catch (e) {
       setError(e instanceof TypeError ? "Связь прервалась. Проверьте сохранённую проводку перед повторной отправкой." : (e as Error).message);
@@ -57,22 +57,22 @@ export function AccountingProductionMaterialConfirmation({ org, month, disabled,
   return <section className="min-w-0 space-y-3 rounded border border-line p-2" aria-label="Проведение материала">
     <h4 className="font-semibold">Проведение списания материала</h4>
     <p>Проводка создаётся только после отдельного подтверждения бухгалтера. После обрыва связи сначала проверьте сохранённый запрос.</p>
-    <Button disabled={disabled || busy} onClick={() => void run("check")}>Проверить сохранённое проведение материала</Button>
+    <Button className="max-w-full h-auto !whitespace-normal" disabled={disabled || busy} onClick={() => void run("check")}>Проверить сохранённое проведение материала</Button>
     {prepared && !pending && !receipt && <div className="space-y-2">
-      <p>Дт {prepared.debit_account} {prepared.amount_byn} BYN → Кт {prepared.credit_account} {prepared.amount_byn} BYN.</p>
+      {prepared.draft.zero_value ? <p>Количество {prepared.draft.quantity} будет списано в НЗП. Стоимость 0.00 BYN; денежная проводка не создаётся.</p> : <p>Дт {prepared.debit_account} {prepared.amount_byn} BYN → Кт {prepared.credit_account} {prepared.amount_byn} BYN.</p>}
       {prepared.credit_lines && <ul aria-label="Строки списания материала">{prepared.credit_lines.map((line, index) => <li key={index}>Кт {line.account} · {line.amount} BYN{line.quantity ? ` · Количество ${line.quantity}` : ""}</li>)}</ul>}
       <p className="text-sm text-muted">Основание стоимости: {prepared.basis_digest.slice(0, 12)}… · пакет: {prepared.digest.slice(0, 12)}…</p>
-      <Button disabled={disabled || busy} onClick={() => void run("confirm")}>Провести проверенный материал</Button>
+      <Button className="max-w-full h-auto !whitespace-normal" disabled={disabled || busy} onClick={() => void run("confirm")}>Провести проверенный материал</Button>
     </div>}
     {pending && <section className="space-y-2" aria-label="Сохранённая проводка материала">
       <p>Движение №{pending.command.wms_movement_id} · пользователь: {pending.principal} · дата: {pending.command.posting_date}.</p>
       <p>Команда сохранена до независимой квитанции сервера.</p>
-      <Button disabled={disabled || busy} onClick={() => void run("check")}>Повторить проверку результата</Button>
+      <Button className="max-w-full h-auto !whitespace-normal" disabled={disabled || busy} onClick={() => void run("check")}>Повторить проверку результата</Button>
     </section>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {receipt && <div role="status"><p>Материал проведён. Проводка №{receipt.entry_id}.</p>
+    {receipt && <div role="status">{receipt.zero_value ? <p>Количество списано в НЗП. Квитанция №{receipt.receipt_id}. Денежная проводка не создавалась.</p> : <p>Материал проведён. Проводка №{receipt.entry_id}.</p>}
       <p>Окончательная себестоимость выпуска ещё не сертифицирована.</p>
-      <Button disabled={disabled || busy || !onEntry} onClick={() => onEntry?.(receipt.entry_id)}>Открыть проводку материала</Button>
+      {receipt.entry_id !== null && <Button className="max-w-full h-auto !whitespace-normal" disabled={disabled || busy || !onEntry} onClick={() => onEntry?.(receipt.entry_id!)}>Открыть проводку материала</Button>}
     </div>}
   </section>;
 }

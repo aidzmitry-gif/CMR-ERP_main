@@ -59,6 +59,26 @@ export function AccountingProductionMaterialCost({ org, month, policyId, disable
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось подготовить проводку материала.");
+      if (data.zero_value === true) {
+        const zero = data.zero_value_receipt;
+        const normalizeQuantity = (value: unknown) => typeof value === "string" && /^\d+(?:\.\d{1,6})?$/.test(value)
+          ? value.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") : null;
+        if (String(data.organization_id) !== org || data.month !== month || String(data.policy_id) !== policyId
+          || data.scope !== "production_material_cost_basis" || data.posting_available !== false
+          || data.quantity_registered !== false || data.entry_id !== null || data.final_cost_certified !== false
+          || typeof data.basis_digest !== "string" || !/^[a-f0-9]{64}$/.test(data.basis_digest)
+          || typeof data.digest !== "string" || !/^[a-f0-9]{64}$/.test(data.digest)
+          || zero?.command_version !== 5 || zero.operation !== "inventory_issue"
+          || zero.basis_digest !== data.basis_digest || zero.material_binding?.movement_id !== Number(movementId)
+          || zero.material_binding?.order_id !== Number(orderId) || zero.document?.account !== account
+          || zero.document?.warehouse !== warehouse || zero.document?.sku !== sku || zero.document?.lot !== lot
+          || normalizeQuantity(zero.document?.quantity) !== normalizeQuantity(quantity)
+          || data.inventory_cost?.issue_cost_byn !== "0.00" || typeof zero.destination_account !== "string")
+          throw new Error("Квитанция количественного списания не соответствует проверенному материалу.");
+        setPrepared({ draft: { ...command(), zero_value: true }, basis_digest: data.basis_digest,
+          digest: data.digest, amount_byn: "0.00", debit_account: zero.destination_account, credit_account: account });
+        return;
+      }
       if (String(data.organization_id) !== org || data.month !== month || String(data.policy_id) !== policyId
         || data.scope !== "production_material_cost_basis" || data.posting_available !== true || data.final_cost_certified !== false
         || typeof data.basis_digest !== "string" || !/^[a-f0-9]{64}$/.test(data.basis_digest)
@@ -99,7 +119,9 @@ export function AccountingProductionMaterialCost({ org, month, policyId, disable
       <p><strong>Статус:</strong> {result.status}</p><p>{result.explanation}</p>
       <p>WMS-движение №{result.wms_movement.id}: {result.wms_movement.sku} · {result.wms_movement.quantity} · партия {result.wms_movement.lot} · {result.wms_movement.reason}</p>
       <p>Стоимость партии: {result.inventory_cost.issue_cost_byn} BYN · основание {result.inventory_cost.basis_digest.slice(0, 12)}…</p>
-      <p>Кандидат: Дт {result.candidate_posting.debit.account} {result.candidate_posting.debit.amount_byn} BYN → Кт {result.candidate_posting.credit.account} {result.candidate_posting.credit.amount_byn} BYN.</p>
+      {result.inventory_cost.issue_cost_byn === "0.00"
+        ? <p>Будет зарегистрировано количество без денежной проводки.</p>
+        : <p>Кандидат: Дт {result.candidate_posting.debit.account} {result.candidate_posting.debit.amount_byn} BYN → Кт {result.candidate_posting.credit.account} {result.candidate_posting.credit.amount_byn} BYN.</p>}
       {!prepared && <><p className="text-sm text-muted">Проводка не создана; требуется отдельная подготовка и подтверждение бухгалтера.</p>
         <Button disabled={disabled || busy} onClick={() => void preparePosting()}>Подготовить подтверждение проводки</Button></>}
       {prepared && <p className="text-sm text-muted">Пакет проводки подготовлен, но ещё не проведён. Полная себестоимость остаётся непроверенной.</p>}

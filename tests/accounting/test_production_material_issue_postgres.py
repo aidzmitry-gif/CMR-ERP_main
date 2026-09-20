@@ -389,3 +389,20 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
         with pytest.raises(DBAPIError, match="Cannot downgrade V5"):
             async with session.begin_nested():
                 await run_migration(session, "0150_zero_material_allocations.py", "downgrade")
+        await session.rollback()
+        from httpx import ASGITransport, AsyncClient
+
+        from tests.accounting.test_inventory_allocation_api_postgres import application
+        app = application(pg_factory)
+        app.state.core.services.production_output = SyntheticProduction()
+        base = f"/accounting/organizations/{pg_book[0]}/periods/2026-10"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(base + "/production-material-issue-confirm",
+                json={**confirmed.model_dump(mode="json"), "zero_value": True})
+            assert response.status_code == 201, response.text
+            assert response.json()["receipt_id"] == first["receipt_id"]
+            response = await client.get(base + f"/production-material-issue-posting-status/{movement_id}")
+            assert response.status_code == 200, response.text
+            assert response.json()["entry_id"] is None and response.json()["quantity_registered"] is True
+            assert response.json()["digest"] == confirmed.digest
+            assert response.json()["posted"] is False

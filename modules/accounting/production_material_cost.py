@@ -49,6 +49,7 @@ class ProductionMaterialIssuePostingInput(ProductionMaterialIssuePreviewInput):
 
 
 class ProductionMaterialIssuePostingConfirmInput(ProductionMaterialIssuePostingInput):
+    zero_value: bool = Field(default=False, strict=True)
     basis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -64,6 +65,8 @@ async def prepare_material_issue_posting(session, org_id: int, month: str,
                                           data: ProductionMaterialIssuePostingInput,
                                           production, procurement=None):
     review = await preview_material_issue(session, org_id, month, data, production, procurement=procurement)
+    if review["inventory_cost"]["issue_cost_byn"] == "0.00":
+        return await prepare_material_zero_issue(session, org_id, month, data, production, procurement=procurement)
     _, _, policy, settings = await _load_policy(session, org_id, month, data, current=True)
     _, _, binding, _ = await _load_source(session, org_id, month, data)
     document = material_issue_document(org_id, data, policy, settings, binding)
@@ -337,7 +340,7 @@ async def prepare_material_zero_issue(session, org_id: int, month: str, data: Pr
         raise AccountingError("Material zero allocation basis is unavailable")
     command = command.model_copy(update={"basis_digest": basis})
     return {**review, "zero_value_receipt": command.model_dump(mode="json"), "basis_digest": basis,
-            "digest": service.digest(command),
+            "digest": service.digest(command), "zero_value": True,
             "posting_available": False, "quantity_registered": False, "entry_id": None}
 
 
@@ -368,5 +371,38 @@ async def confirm_material_zero_issue(session, org_id: int, month: str, data: Pr
     if command.basis_digest != data.basis_digest or data.digest != service.digest(command):
         raise AccountingError("Material zero receipt confirmation differs from its review")
     receipt = await register_standalone_zero_value_issue(session, org_id, actor, command)
-    return {"receipt_id": receipt.id, "entry_id": None, "posted": False, "quantity_registered": True,
-            "basis_digest": receipt.basis_digest, "digest": receipt.digest}
+    return material_zero_outcome(receipt, command)
+
+
+def material_zero_outcome(receipt, command):
+    return {"organization_id": receipt.organization_id, "month": command.posting_date.strftime("%Y-%m"),
+            "actor": receipt.actor, "order_id": command.material_binding["order_id"],
+            "wms_movement_id": command.material_binding["movement_id"], "policy_id": command.policy_id,
+            "receipt_id": receipt.id, "entry_id": None, "entry": None, "posted": False,
+            "quantity_registered": True, "zero_value": True, "final_cost_certified": False,
+            "basis_digest": receipt.basis_digest, "digest": service.digest(command),
+            "receipt_digest": receipt.digest}
+
+
+async def material_zero_status(session, org_id, source, month):
+    from modules.accounting.models import ZeroValueInventoryDisposalReceipt
+    from modules.accounting.zero_value_disposals import (
+        ProductionMaterialZeroValueDisposalCommand,
+        load_authenticated_zero_value_disposals,
+    )
+    if session.get_bind().dialect.name != "postgresql" or not await session.scalar(text(
+        "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
+    )):
+        return None
+    saved = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
+        ZeroValueInventoryDisposalReceipt.organization_id == org_id,
+        ZeroValueInventoryDisposalReceipt.source == source,
+        ZeroValueInventoryDisposalReceipt.source_version == 1,
+        ZeroValueInventoryDisposalReceipt.operation == "inventory_issue",
+    ))
+    if saved is None or saved.posting_date.strftime("%Y-%m") != month:
+        return None
+    command = ProductionMaterialZeroValueDisposalCommand.model_validate(saved.command)
+    await load_authenticated_zero_value_disposals(session, org_id,
+        before_registration_token=saved.registration_token + 1)
+    return material_zero_outcome(saved, command)

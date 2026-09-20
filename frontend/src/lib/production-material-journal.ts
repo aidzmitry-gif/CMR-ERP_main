@@ -1,5 +1,6 @@
 /** Exact material-posting command retained until the matching ledger receipt is read back. */
 export type MaterialPostingCommand = {
+  zero_value?: boolean;
   policy_id: number;
   order_id: number;
   order_analytics: string;
@@ -32,9 +33,13 @@ export type MaterialPostingReceipt = {
   policy_id: number;
   basis_digest: string;
   digest: string;
-  entry_id: number;
-  entry?: { id: number };
-  posted: true;
+  entry_id: number | null;
+  entry?: { id: number } | null;
+  posted: boolean;
+  zero_value?: boolean;
+  quantity_registered?: boolean;
+  receipt_id?: number;
+  receipt_digest?: string;
   final_cost_certified: false;
 };
 
@@ -59,7 +64,8 @@ function validate(item: PendingMaterialPosting) {
     || typeof item.org !== "string" || !/^[1-9]\d*$/.test(item.org)
     || !text(item.principal, 1, 200) || typeof item.month !== "string" || !/^\d{4}-\d{2}$/.test(item.month)
     || !shape(c, ["policy_id", "order_id", "order_analytics", "department", "wms_movement_id", "posting_date",
-      "account", "warehouse", "sku", "lot", "quantity", "basis_digest", "digest"])
+      "account", "warehouse", "sku", "lot", "quantity", "basis_digest", "digest", ...(c && Object.hasOwn(c, "zero_value") ? ["zero_value"] : [])])
+    || (c?.zero_value !== undefined && typeof c.zero_value !== "boolean")
     || !id(c.policy_id) || !id(c.order_id) || !id(c.wms_movement_id)
     || !text(c.order_analytics, 1, 200) || !text(c.department, 1, 200)
     || !dateInMonth(c.posting_date, item.month) || !text(c.account, 1, 32) || !text(c.warehouse, 1, 200)
@@ -103,8 +109,11 @@ function receiptFor(item: PendingMaterialPosting, value: unknown): MaterialPosti
   if (!row || String(row.organization_id) !== item.org || row.month !== item.month || row.actor !== item.principal
     || row.order_id !== item.command.order_id || row.wms_movement_id !== item.command.wms_movement_id
     || row.policy_id !== item.command.policy_id || row.basis_digest !== item.command.basis_digest
-    || row.digest !== item.command.digest || row.posted !== true || row.final_cost_certified !== false
-    || !id(row.entry_id) || (row.entry && row.entry.id !== row.entry_id))
+    || row.digest !== item.command.digest || row.final_cost_certified !== false
+    || (item.command.zero_value === true
+      ? row.zero_value !== true || row.quantity_registered !== true || row.posted !== false
+        || row.entry_id !== null || row.entry != null || !id(row.receipt_id) || !digest(row.receipt_digest)
+      : row.posted !== true || row.zero_value === true || !id(row.entry_id) || (row.entry && row.entry.id !== row.entry_id)))
     throw new Error("Квитанция не подтверждает сохранённую проводку материала.");
   return row as MaterialPostingReceipt;
 }
