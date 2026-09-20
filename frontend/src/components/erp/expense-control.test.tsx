@@ -253,12 +253,16 @@ it("does not start a duplicate B while stale A is finishing", async () => {
   fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "2" } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
   await waitFor(() => expect(actualMonths.slice(-2)).toEqual([2, 2]));
-  await waitFor(() => expect(within(panel).getByRole("button", { name: "Показать неразнесённые строки" })).toBeInTheDocument());
-  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  await waitFor(() => {
+    const currentPanel = screen.getByLabelText("Фактические начисления расходов");
+    expect(within(currentPanel).getByRole("button", { name: "Показать неразнесённые строки" })).toBeInTheDocument();
+  });
+  const monthTwoPanel = screen.getByLabelText("Фактические начисления расходов");
+  fireEvent.click(within(monthTwoPanel).getByRole("button", { name: "Показать неразнесённые строки" }));
   await waitFor(() => expect(api.getUnmatchedActuals).toHaveBeenCalledTimes(2));
 
   await act(async () => { first.resolve(unmatched(1, 1, "accrual", "old-A")); await first.promise; });
-  fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
+  fireEvent.click(within(monthTwoPanel).getByRole("button", { name: "Показать неразнесённые строки" }));
   const callsWhileBIsPending = api.getUnmatchedActuals.mock.calls.length;
   await act(async () => { second.resolve(unmatched(1, 2, "accrual", "new-B")); await second.promise; });
   expect(callsWhileBIsPending).toBe(2);
