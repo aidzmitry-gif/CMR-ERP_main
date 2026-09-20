@@ -38,6 +38,7 @@ it("shows a month plan-fact percentage and warnings for partial and unplanned ac
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
   fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } });
+  fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "1" } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
 
   expect(await screen.findByLabelText("План-факт расходов")).toBeInTheDocument();
@@ -65,9 +66,10 @@ it("uses the approved immutable budget instead of a newer draft for plan-fact", 
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
   fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } });
+  fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "1" } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
 
-  expect(await screen.findByText("План: утверждённая версия 1.")).toBeInTheDocument();
+  expect(await screen.findByText(/План: утверждённая версия 1\./)).toBeInTheDocument();
   expect(screen.getByText("25.00 BYN")).toBeInTheDocument();
   expect(screen.getByText("25.00%")).toBeInTheDocument();
   expect(screen.queryByText("-75.00 BYN")).not.toBeInTheDocument();
