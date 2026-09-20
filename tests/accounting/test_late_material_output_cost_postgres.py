@@ -9,6 +9,7 @@ from modules.accounting.late_cost_preview import calculate
 from modules.accounting.late_cost_receipts import (
     LateCostCommand,
     MaterialLateCostCommand,
+    PoolLateCostCommand,
     parse_command,
 )
 from modules.accounting.service import AccountingError
@@ -61,6 +62,27 @@ def test_version_dispatch_preserves_legacy_snapshot_and_rejects_invalid_selectio
     with pytest.raises(ValueError):
         MaterialLateCostCommand.model_validate({**saved, "material_outputs": [
             {"output_entry_id": 5, "amount_byn": "1.00"}, {"output_entry_id": 5, "amount_byn": "1.00"}]})
+
+
+def test_pool_command_is_versioned_and_preserves_signed_output_amounts():
+    command = LateCostCommand(allocation=_data(), accounts=ExpenseAccounts(settlement_account="60"))
+    saved = command.model_dump(mode="json")
+    for version in (True, 3.0, "3", 2):
+        with pytest.raises(ValueError):
+            PoolLateCostCommand.model_validate({**saved, "command_version": version})
+    with pytest.raises(ValueError):
+        PoolLateCostCommand.model_validate({**saved, "command_version": 3, "material_outputs": [
+            {"output_entry_id": 5, "amount_byn": "0.00"}]})
+    pool = PoolLateCostCommand.model_validate({**saved, "command_version": 3, "material_outputs": [
+        {"output_entry_id": 5, "amount_byn": "-1.00"}]})
+    assert pool.material_outputs[0].amount_byn == -1
+    with pytest.raises(ValueError):
+        PoolLateCostCommand.model_validate({**saved, "command_version": 3, "material_outputs": [
+            {"output_entry_id": 5, "amount_byn": "-1.00"},
+            {"output_entry_id": 5, "amount_byn": "1.00"},
+        ]})
+    with pytest.raises(ValueError):
+        parse_command(pool.model_dump(mode="json"))
 
 
 @pytest.mark.integration

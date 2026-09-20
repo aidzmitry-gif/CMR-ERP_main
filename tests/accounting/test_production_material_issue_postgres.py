@@ -55,9 +55,12 @@ class SyntheticProduction:
 @pytest.mark.parametrize("method,wip_delta,remaining_delta", [
     ("fifo", "2.00", "3.00"), ("weighted_average", "1.25", "3.75"),
 ])
-async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, monkeypatch):
+@pytest.mark.parametrize("with_output", [False, True])
+async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, with_output, monkeypatch):
     from modules.accounting.late_cost_pool import load_expense_pools, preview_expense, project_pool
     from modules.accounting.late_cost_posting import ExpenseAccounts, pool_candidate
+    from modules.accounting.late_cost_receipts import PoolLateCostCommand
+    from modules.accounting.late_pool_cost import prepare as prepare_pool_package
     from modules.accounting.schemas import LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
     from modules.procurement.receipt_documents import (
@@ -107,6 +110,41 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             ProductionMaterialIssuePostingConfirmInput.model_validate({**data.model_dump(mode="json"),
                 "basis_digest": prepared["basis_digest"], "digest": prepared["digest"]}),
             "tester", procurement=procurement)
+        output_id = None
+        if with_output:
+            from modules.accounting.production_output_transfer import (
+                ProductionOutputTransferConfirmInput,
+                confirm_output_transfer,
+                prepare_output_transfer,
+            )
+            from tests.accounting.test_production_output_transfer_postgres import (
+                SyntheticProduction as OutputProduction,
+            )
+            from tests.accounting.test_production_output_transfer_postgres import transfer_input
+
+            for revision in ("0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
+                             "0152_signed_prospective_wip.py"):
+                await run_migration(session, revision, "upgrade")
+            output_data = transfer_input(policy_id).model_copy(update={
+                "order_id": order_id,
+                "posting_date": date(2026, 10, 10),
+            })
+            output_preview = await prepare_output_transfer(
+                session, pg_book[0], "2026-10", output_data, OutputProduction(), object())
+            output = await confirm_output_transfer(session, pg_book[0], "2026-10",
+                ProductionOutputTransferConfirmInput.model_validate({**output_data.model_dump(mode="json"),
+                    "basis_digest": output_preview["basis_digest"], "digest": output_preview["digest"]}),
+                "tester", production=OutputProduction(), warehouse_gateway=object())
+            output_id = output.id
+            from modules.accounting.closing_commands import actual_posting
+            from modules.accounting.models import ProductionOutputTransferReceipt
+
+            saved_output = await session.get(ProductionOutputTransferReceipt, output_id)
+            assert saved_output is not None
+            expected_output = PostingInput.model_validate(saved_output.posting)
+            assert service.digest(expected_output) == saved_output.digest
+            assert (await actual_posting(session, output)).model_dump() == expected_output.model_dump()
+            await session.commit()
         expense, _ = await save_document(session, gateway, user, pg_book[0], AdditionalExpenseCreate.model_validate({
             "key": "pool-freight", "document": {
                 "invoice_reference": "pool-freight", "document_date": "2026-10-11", "operation_date": "2026-10-11",
@@ -140,6 +178,35 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         assert sum(line.amount for line in candidate.lines if line.side == "debit" and line.account == "20") == Decimal(wip_delta)
         assert sum(line.amount for line in candidate.lines if line.side == "debit") == Decimal("5.00")
         assert full["confirmation_available"] is False and full["calculation_version"] == 3
+        signed_value = PostingInput(source="pool-signed-value-validation", source_version=1,
+            operation="inventory_late_cost", document_date="2026-10-11", operation_date="2026-10-11",
+            posting_date="2026-10-11", policy_id=policy_id, rule_version="late-cost-pool-v3",
+            explanation="Synthetic signed pool validation", lines=[
+                LineInput(account="10.1", side="debit", amount="0.01",
+                    dimensions={"warehouse": "Main", "sku": "MAT-1", "lot": "LOT-1"}),
+                LineInput(account="10.1", side="credit", amount="0.01",
+                    dimensions={"warehouse": "Main", "sku": "MAT-1", "lot": "LOT-1"}),
+            ])
+        await service.validate_posting(session, pg_book[0], signed_value, late_cost=True)
+        with pytest.raises(service.AccountingError, match="quantity tracking mismatch"):
+            await service.validate_posting(session, pg_book[0], signed_value.model_copy(update={
+                "source": "pool-legacy-credit-rejection", "rule_version": "late-cost-byn-v1"}), late_cost=True)
+        pool_command = PoolLateCostCommand(command_version=3, allocation=request,
+            accounts=ExpenseAccounts(settlement_account="60"), material_outputs=(
+                [{"output_entry_id": output_id, "amount_byn": wip_delta}] if with_output else []))
+        pool_package = await prepare_pool_package(session, pg_book[0], expense.id, pool_command, procurement)
+        assert pool_package["command"] == pool_command.model_dump(mode="json")
+        if with_output:
+            assert pool_package["wip_origins"] == []
+            assert pool_package["outputs"][0]["output_entry_id"] == output_id
+            assert Decimal(pool_package["outputs"][0]["amount_byn"]) == Decimal(wip_delta)
+            assert {(row["account"], row["side"], Decimal(str(row["amount"])))
+                    for row in pool_package["outputs"][0]["prospective_evidence"]["matrix"]} == {
+                ("20", "credit", Decimal(wip_delta)), ("43", "debit", Decimal(wip_delta))}
+        else:
+            assert pool_package["outputs"] == []
+            assert pool_package["wip_origins"][0]["order_id"] == order_id
+            assert Decimal(pool_package["wip_origins"][0]["amount_byn"]) == Decimal(wip_delta)
         assert await session.scalar(select(func.count()).select_from(Entry)) == before
         # The unlinked second purchase affects weighted cost too: authenticate
         # its primary document, not merely the receipt named by the freight.

@@ -49,9 +49,12 @@ async def load_expense_pools(session, organization_id, expense_id, version, on, 
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
     source = await expense_basis(session, organization_id, expense_id, version, procurement)
-    policy = await session.scalar(select(Policy).where(Policy.organization_id == organization_id,
-        Policy.effective_from <= on).order_by(Policy.effective_from.desc()).limit(1))
-    if policy is None or policy.id != policy_id:
+    # The reviewed request names its policy. Selecting merely "latest" here
+    # makes same-day policy revisions nondeterministic and can silently use a
+    # policy that has no late-cost rule.
+    policy = await session.get(Policy, policy_id)
+    if (policy is None or policy.organization_id != organization_id
+            or policy.effective_from > on):
         raise AccountingError("Late-cost pool requires the applicable reviewed policy")
     query = select(Entry, Line).join(Line, Line.entry_id == Entry.id).where(
         Entry.organization_id == organization_id,

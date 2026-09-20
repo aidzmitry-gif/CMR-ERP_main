@@ -1,5 +1,8 @@
 """Reproduce a saved late-cost receipt from its original authenticated history."""
-from pydantic import Field, model_validator
+from decimal import Decimal
+from typing import Annotated
+
+from pydantic import BeforeValidator, Field, model_validator
 
 from modules.accounting import service
 from modules.accounting.closing_commands import actual_posting
@@ -7,7 +10,7 @@ from modules.accounting.late_cost_posting import ExpenseAccounts, candidate, mat
 from modules.accounting.late_cost_preview import calculate, validate_currency
 from modules.accounting.late_cost_sources import expense_history
 from modules.accounting.models import Entry, LateCostReceipt, Policy
-from modules.accounting.schemas import Input, LateCostPreviewInput, Money, PostingInput
+from modules.accounting.schemas import Input, LateCostPreviewInput, Money, PostingInput, exact
 
 
 class LateCostCommand(Input):
@@ -30,6 +33,36 @@ class MaterialLateCostCommand(LateCostCommand):
         identities = [row.output_entry_id for row in self.material_outputs]
         if len(set(identities)) != len(identities):
             raise ValueError("Material output selections must be unique")
+        return self
+
+
+SignedMoney = Annotated[Decimal, BeforeValidator(exact), Field(max_digits=20, decimal_places=2)]
+
+
+class PoolOutputSelection(Input):
+    """V3 selection is intentionally distinct from persisted V2 material snapshots."""
+
+    output_entry_id: int = Field(gt=0, strict=True)
+    amount_byn: SignedMoney
+
+    @model_validator(mode="after")
+    def nonzero_amount(self):
+        if self.amount_byn == 0:
+            raise ValueError("Pool output selection amount must not be zero")
+        return self
+
+
+class PoolLateCostCommand(LateCostCommand):
+    command_version: int = Field(strict=True)
+    material_outputs: list[PoolOutputSelection] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def strict_pool_version_and_outputs(self):
+        if type(self.command_version) is not int or self.command_version != 3:
+            raise ValueError("Pool late-cost command version must be the integer 3")
+        ids = [row.output_entry_id for row in self.material_outputs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Pool output selections must be unique")
         return self
 
 

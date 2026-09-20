@@ -217,7 +217,11 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
             raise AccountingError(f"Account {line.account}: missing analytics {sorted(missing)}")
         if line.currency != "BYN" and not account.currency_tracking:
             raise AccountingError(f"Account {line.account} does not support foreign currency")
-        cost_only = late_cost and account.quantity_tracking and line.quantity is None and line.side == "debit"
+        # V1/V2 late-cost receipts remain debit-only.  V3 pool projection can
+        # carry a signed cent redistribution between authenticated inventory
+        # origins, so it may need a credit value-only line on owned inventory.
+        cost_only = (late_cost and account.quantity_tracking and line.quantity is None
+                     and (line.side == "debit" or data.rule_version == "late-cost-pool-v3"))
         if cost_only and (account.category != "asset" or account.cash or line.currency != "BYN"
                           or line.account.split(".")[0] not in {"10", "41"}):
             raise AccountingError("Late cost requires owned BYN inventory")
