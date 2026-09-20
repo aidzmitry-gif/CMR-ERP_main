@@ -28,7 +28,7 @@ def _chronological_events(rows, org_id, cutoff, zero_value_disposals, before_reg
             raise AccountingError("Zero-value disposal receipt identity or digest changed during replay")
         receipt_ids.add(receipt.receipt_id)
         tokens.add(receipt.registration_token)
-        if receipt.posting_date > cutoff or (before_registration_token is not None and receipt.registration_token >= before_registration_token):
+        if before_registration_token is not None and receipt.registration_token >= before_registration_token:
             continue
         for layer in receipt.command.inventory_layers:
             source = sources.get((layer.source_entry_id, layer.source_line_id))
@@ -125,6 +125,8 @@ def _valuation_layers(rows, target, posting_date, *, verified_value_lines=frozen
                 continue
             if method != "weighted_average" and target.get("lot") and dimensions.get("lot") != target["lot"]:
                 continue
+            if receipt.posting_date > posting_date:
+                raise AccountingError("Selected SKU has later movements; chronological costing is required")
             matches = [layer for layer in layers if layer["entry_id"] == source_layer.source_entry_id
                        and layer["line_id"] == source_layer.source_line_id and layer["quantity"] >= source_layer.quantity]
             if len(matches) != 1:
@@ -256,6 +258,7 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
     with localcontext() as context:
         context.prec = 64
         quantity, amount = Decimal(0), Decimal(0)
+        checked_zero_receipts = set()
         if organization_id is None and zero_value_disposals:
             raise AccountingError("Zero-value disposal replay needs an organization identity")
         for _, _, _, entry, line, zero_event in _chronological_events(
@@ -266,6 +269,18 @@ def _lot_balance(rows, target, posting_date, *, verified_value_lines=frozenset()
                 dimensions = source_layer.inventory_dimensions
                 if any(dimensions[key] != value for key, value in target.items()):
                     continue
+                if receipt.posting_date > posting_date:
+                    raise AccountingError("Selected lot has later movements; chronological costing is required")
+                if receipt.receipt_id not in checked_zero_receipts:
+                    command_quantity = sum((item.quantity for item in receipt.command.inventory_layers
+                                            if item.inventory_dimensions == dimensions), Decimal(0))
+                    if command_quantity > quantity or quantity <= 0:
+                        raise AccountingError("Zero-value disposal cannot reduce a valued or exhausted specific lot")
+                    command_cost = amount if command_quantity == quantity else (amount * command_quantity / quantity).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    if command_cost != 0:
+                        raise AccountingError("Zero-value disposal cannot reduce a valued or exhausted specific lot: rounded command cost is positive")
+                    checked_zero_receipts.add(receipt.receipt_id)
                 if quantity < source_layer.quantity:
                     raise AccountingError("Zero-value disposal cannot reduce a valued or exhausted specific lot")
                 expected_cost = amount if quantity == source_layer.quantity else (amount * source_layer.quantity / quantity).quantize(

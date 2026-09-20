@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -91,3 +92,28 @@ def test_specific_allows_a_partial_zero_rounding_slice_but_not_the_full_cent():
     assert (result["book_quantity"], result["book_value_byn"]) == ("2.000000", "0.01")
     with pytest.raises(AccountingError, match="valued or exhausted"):
         issue_result(policy, [origin], 1, data(1), zero_value_disposals=(event(quantity="3.000000"),))
+
+
+def test_specific_checks_whole_command_across_same_lot_origins():
+    rows = [row(n, n + 1, date(2026, 10, 1), quantity=5, amount="0.01") for n in (10, 12, 14)]
+    saved = event()
+    payload = saved.command.model_dump(mode="json")
+    template = payload["inventory_layers"][0]
+    payload["inventory_layers"] = [{**template, "source_entry_id": n, "source_line_id": n + 1} for n in (10, 12, 14)]
+    command = ZeroValueDisposalCommand(**payload)
+    saved = replace(saved, command=command, digest=receipt_digest(1, "chief", command))
+    policy = SimpleNamespace(id=7, inventory_method="specific", normative_verified=False)
+    with pytest.raises(AccountingError, match="rounded command cost"):
+        issue_result(policy, rows, 1, data(1), zero_value_disposals=(saved,))
+
+
+@pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
+def test_future_zero_disposal_requires_chronological_costing(method):
+    origin = row(10, 11, date(2026, 10, 1), quantity=5, amount="0.01")
+    request = data(1)
+    request.posting_date = date(2026, 10, 2)
+    policy = SimpleNamespace(id=7, inventory_method=method, normative_verified=False)
+    with pytest.raises(AccountingError, match="later movements"):
+        issue_result(policy, [origin], 1, request, zero_value_disposals=(event(),))
+    result = issue_result(policy, [origin], 1, request, zero_value_disposals=(event(),), before_registration_token=30)
+    assert result["book_quantity"] == "5.000000"
