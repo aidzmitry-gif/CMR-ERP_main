@@ -70,6 +70,7 @@ async def test_closing_controls_report_queues_and_unregistered_vat(client, db, b
         "overhead_receipts": 0,
         "output_transfers": 0,
         "output_transfer_receipts": 0,
+        "stale_output_transfers": [],
         "receipt_gap": 0,
         "final_cost_certified": False,
     }
