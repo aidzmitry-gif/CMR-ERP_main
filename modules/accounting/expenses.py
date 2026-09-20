@@ -319,8 +319,24 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
             if len(items) == limit:
                 break
         exhausted = len(chunk) < 100
+    next_after_line_id = None
+    if items:
+        probe = items[-1]["line_id"]
+        while True:
+            query = select(Line).join(Entry, Line.entry_id == Entry.id).where(*conditions, Line.id > probe)
+            chunk = (await session.scalars(query.order_by(Line.id).limit(100))).all()
+            if not chunk:
+                break
+            for line in chunk:
+                dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
+                if _expense_article_id(dimensions.get("expense_article_id")) not in articles:
+                    next_after_line_id = items[-1]["line_id"]
+                    break
+            if next_after_line_id is not None or len(chunk) < 100:
+                break
+            probe = chunk[-1].id
     return {"year": year, "month": month, "currency": "BYN", "basis": basis, "items": items,
-            "next_after_line_id": cursor if items and not exhausted else None}
+            "next_after_line_id": next_after_line_id}
 
 
 async def execute(session, org_id, actor, kind, data):
