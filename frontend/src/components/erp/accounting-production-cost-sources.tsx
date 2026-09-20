@@ -8,6 +8,7 @@ import { AccountingProductionOverheadHistory } from "./accounting-production-ove
 import { AccountingProductionOverheadCorrectionPreview, type CorrectionTarget } from "./accounting-production-overhead-correction-preview";
 import { AccountingProductionCorrectionConfirmation } from "./accounting-production-correction-confirmation";
 import { AccountingProductionOutputCost } from "./accounting-production-output-cost";
+import { AccountingProductionOutputCostRevision } from "./accounting-production-output-cost-revision";
 import { AccountingProductionMaterialCost } from "./accounting-production-material-cost";
 import { AccountingProductionLaborCost } from "./accounting-production-labor-cost";
 import type { PreparedCorrection } from "@/lib/production-correction-journal";
@@ -79,6 +80,7 @@ function Sources({ org, month, disabled, onEntry, onChanged, onLock }: Props) {
       <AccountingProductionCostReview key={result.digest} source={result} disabled={disabled || busy}
         onPrepared={value => { setPrepared(value); setPreparedCorrection(null); }} correctionOf={correction?.entryId} />
       {!correction && policy && <AccountingProductionOutputCost org={org} month={month} policyId={policy} disabled={disabled || busy} onEntry={onEntry} onLock={onLock} />}
+      {!correction && <AccountingProductionOutputCostRevision org={org} month={month} disabled={disabled || busy} onEntry={onEntry} onLock={onLock} />}
       {!correction && policy && <AccountingProductionMaterialCost org={org} month={month} policyId={policy} disabled={disabled || busy} onEntry={onEntry} onLock={onLock} />}
       {!correction && policy && <AccountingProductionLaborCost org={org} month={month} policyId={policy} disabled={disabled || busy} onEntry={onEntry} onLock={onLock} />}
       {!result.snapshot.balances.length && <p>Проводки по выбранным затратным счетам за доступную историю не найдены. Это не подтверждает отсутствие неучтённых затрат.</p>}

@@ -103,6 +103,7 @@ async def _prepare(session, organization_id, month, data):
             disposals.append(destination)
         delta = Decimal(str(row["delta"]))
         destinations.append({"key": row["key"], "kind": "disposed" if destination else "remaining",
+            "account": row["account"], "dimensions": row["dimensions"],
             "destination": destination, "cents": int(Decimal(str(row["desired"]))*100),
             "delta_cents": int(delta*100), "amount_byn": f"{abs(delta):.2f}", "side": "debit" if delta>=0 else "credit"})
     total = sum((Decimal(str(r["desired"])) for r in allocations), Decimal(0))
