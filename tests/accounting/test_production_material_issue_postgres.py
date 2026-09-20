@@ -581,6 +581,22 @@ async def test_purchased_material_late_expense_authenticates_production_history(
                     await run_migration(session, path.name, "upgrade")
         reviewed = MaterialLateCostCommand.model_validate(package["command"])
         request_key = uuid4()
+        from httpx import ASGITransport, AsyncClient
+
+        from tests.accounting.test_inventory_allocation_api_postgres import application
+
+        await session.commit()
+        app = application(pg_factory)
+        app.state.core.services.procurement_source = procurement
+        api_base = f"/accounting/organizations/{pg_book[0]}/additional-expenses/{expense.id}/material"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(api_base + "/posting-preview", json=command.model_dump(mode="json"))
+            assert response.status_code == 200, response.text
+            assert response.json()["basis_digest"] == package["basis_digest"]
+            assert response.json()["command"] == package["command"]
+            assert response.json()["confirmation_available"] is True
+            assert response.json()["principal"] == "tester"
+            assert (await client.get(api_base + "/posting")).status_code == 404
         import json
         from copy import deepcopy
 
@@ -658,10 +674,13 @@ async def test_purchased_material_late_expense_authenticates_production_history(
                 assert failures == []
             saved_entry_id, request_key = successes[0]
         else:
-            saved = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
-                package["basis_digest"], "tester", procurement)
             await session.commit()
-            saved_entry_id = saved.entry_id
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(api_base + "/confirm", json={**reviewed.model_dump(mode="json"),
+                    "request_key": str(request_key), "expected_basis_digest": package["basis_digest"],
+                    "expected_digest": package["posting_digest"]}, headers={"X-Expected-Principal": "tester"})
+                assert response.status_code == 201, response.text
+                saved_entry_id = response.json()["entry_id"]
         repeated = await confirm_package(session, pg_book[0], expense.id, reviewed, request_key,
             package["basis_digest"], "tester", procurement)
         assert repeated.entry_id == saved_entry_id
@@ -672,6 +691,26 @@ async def test_purchased_material_late_expense_authenticates_production_history(
         assert persisted["command"] == reviewed.model_dump(mode="json")
         assert persisted["posted"] is True
         assert len(persisted["output_revisions"]) == int(with_output)
+        await session.commit()
+        path = f"/accounting/organizations/{pg_book[0]}/additional-expenses/{expense.id}/material/posting"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(path)
+            assert response.status_code == 200, response.text
+            assert response.json() == persisted
+            assert response.headers["cache-control"] == "private, no-store"
+            denied = await client.get(path.replace(f"/organizations/{pg_book[0]}/", f"/organizations/{pg_book[0]+999}/"))
+            assert denied.status_code == 403, denied.text
+            http_command = {**reviewed.model_dump(mode="json"), "request_key": str(request_key),
+                "expected_digest": package["posting_digest"], "expected_basis_digest": package["basis_digest"]}
+            assert (await client.post(api_base + "/confirm", json=http_command)).status_code == 422
+            assert (await client.post(api_base + "/confirm", json=http_command,
+                headers={"X-Expected-Principal": "other"})).status_code == 409
+            assert (await client.post(api_base + "/confirm", json={**http_command, "expected_basis_digest": "0" * 64},
+                headers={"X-Expected-Principal": "tester"})).status_code == 409
+            response = await client.post(api_base + "/confirm", json=http_command,
+                headers={"X-Expected-Principal": "tester"})
+            assert response.status_code == 201, response.text
+            assert response.json() == persisted
         if with_output:
             assert persisted["output_revisions"][0]["output_entry_id"] == output_id
             assert persisted["output_revisions"][0]["amount_byn"] == "2.00"

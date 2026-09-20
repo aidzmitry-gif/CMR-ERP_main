@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from uuid import UUID
 
+from pydantic import Field
 from sqlalchemy import select, text
 
 from modules.accounting import service
@@ -17,6 +19,12 @@ from modules.accounting.production_output_cost_workflow import (
     preview_output_cost_correction,
 )
 from modules.wms.production_material_issues import ProductionMaterialIssue
+
+
+class MaterialLateCostConfirmation(MaterialLateCostCommand):
+    request_key: UUID
+    expected_basis_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 async def prepare(session, organization_id, expense_id, command, procurement):
@@ -131,7 +139,7 @@ async def load_package(session, organization_id, entry_id, procurement):
 
 
 async def confirm(session, organization_id, expense_id, command: MaterialLateCostCommand,
-                  request_key, expected_basis_digest, actor, procurement, event_bus=None):
+                  request_key, expected_basis_digest, actor, procurement, event_bus=None, *, expected_digest=None):
     """Internal atomic package; outer caller owns the final transaction commit."""
     from uuid import uuid5
 
@@ -158,13 +166,16 @@ async def confirm(session, organization_id, expense_id, command: MaterialLateCos
         ), {"entry": saved.entry_id})).mappings().one_or_none()
         if (package is None or saved.expense_id != expense_id or saved.request_key != str(request_key)
             or saved.command != command.model_dump(mode="json") or saved.actor != actor
-            or package["basis_digest"] != expected_basis_digest):
+            or package["basis_digest"] != expected_basis_digest
+            or expected_digest is not None and saved.digest != expected_digest):
             raise service.AccountingError("Late material command conflicts with the saved package")
         await load_package(session, organization_id, saved.entry_id, procurement)
         return saved
     prepared = await prepare(session, organization_id, expense_id, command, procurement)
     if prepared["basis_digest"] != expected_basis_digest:
         raise service.AccountingError("Late material basis changed; preview again")
+    if expected_digest is not None and prepared["posting_digest"] != expected_digest:
+        raise service.AccountingError("Late material posting changed; preview again")
     posting = PostingInput.model_validate(prepared["posting"])
     control = await session.scalar(select(SourceControl).where(
         SourceControl.organization_id == organization_id, SourceControl.source == posting.source))

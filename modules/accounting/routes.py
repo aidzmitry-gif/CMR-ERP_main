@@ -65,6 +65,7 @@ from modules.accounting.input_vat_register import (
 )
 from modules.accounting.late_cost_commands import LateCostConfirmation
 from modules.accounting.late_cost_receipts import LateCostCommand
+from modules.accounting.late_material_cost import MaterialLateCostConfirmation
 from modules.accounting.models import (
     AccessGrant,
     Account,
@@ -768,6 +769,72 @@ async def additional_expense_confirm(org_id: int, expense_id: int, data: LateCos
     return {"organization_id": org_id, "expense_id": expense_id, "source_version": saved.source_version,
             "entry_id": saved.entry_id, "request_key": saved.request_key, "digest": saved.digest,
             "basis_digest": saved.calculation["basis_digest"], "posted": True}
+
+
+@router.post("/organizations/{org_id}/additional-expenses/{expense_id}/material/posting-preview")
+async def additional_expense_material_preview(org_id: int, expense_id: int, data: LateCostCommand,
+        response: Response, ctx=Depends(member), core=Depends(get_core)):
+    from sqlalchemy import text
+
+    from modules.accounting.late_material_cost import prepare
+
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    if not await ctx[0].scalar(text("SELECT to_regclass('accounting.late_material_package') IS NOT NULL")):
+        raise HTTPException(409, "Atomic late material package requires migration 0151")
+    try:
+        result = await prepare(ctx[0], org_id, expense_id, data, gateway)
+    except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**result, "principal": ctx[1], "digest": result["posting_digest"], "confirmation_available": True}
+
+
+@router.post("/organizations/{org_id}/additional-expenses/{expense_id}/material/confirm", status_code=201)
+async def additional_expense_material_confirm(org_id: int, expense_id: int, data: MaterialLateCostConfirmation,
+        response: Response, expected_principal: str = Header(alias="X-Expected-Principal"),
+        ctx=Depends(member), core=Depends(get_core)):
+    from modules.accounting.late_cost_receipts import MaterialLateCostCommand
+    from modules.accounting.late_material_cost import confirm, load_package
+
+    if expected_principal != ctx[1]:
+        raise HTTPException(409, "Accounting principal changed; review the command again")
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    command = MaterialLateCostCommand.model_validate(data.model_dump(exclude={
+        "request_key", "expected_basis_digest", "expected_digest"}))
+    try:
+        saved = await confirm(ctx[0], org_id, expense_id, command, data.request_key,
+            data.expected_basis_digest, ctx[1], gateway, core.services.event_bus,
+            expected_digest=data.expected_digest)
+        result = await load_package(ctx[0], org_id, saved.entry_id, gateway)
+    except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/organizations/{org_id}/additional-expenses/{expense_id}/material/posting")
+async def additional_expense_material_posting(org_id: int, expense_id: int, response: Response,
+                                              ctx=Depends(member), core=Depends(get_core)):
+    from modules.accounting.late_material_cost import load_package
+    from modules.accounting.models import LateCostReceipt
+
+    saved = await ctx[0].scalar(select(LateCostReceipt).where(
+        LateCostReceipt.organization_id == org_id, LateCostReceipt.expense_id == expense_id))
+    if saved is None or saved.command.get("command_version") != 2:
+        raise HTTPException(404, "Additional expense has no material package")
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    try:
+        result = await load_package(ctx[0], org_id, saved.entry_id, gateway)
+    except (ValueError, service.AccountingError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return result
 
 
 @router.get("/organizations/{org_id}/receipts/{receipt_id}/source")
