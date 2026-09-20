@@ -29,6 +29,16 @@ const formatDeviationPercent = (actual: string, plan: string | null): string | n
   const basisPoints = (actualCents - plannedCents) * 10000n / (plannedCents < 0n ? -plannedCents : plannedCents);
   return `${basisPoints < 0n ? "-" : ""}${formatCents(basisPoints < 0n ? -basisPoints : basisPoints)}%`;
 };
+type ActualSlice = { actuals: api.ExpenseActuals | null; error: string | null };
+const unavailableActuals = (error: unknown): ActualSlice => ({ actuals: null, error: errorText(error) });
+
+function ActualsPanel({ title, actuals, error }: { title: string; actuals: api.ExpenseActuals | null; error: string | null }) {
+  if (!actuals && !error) return null;
+  return <div aria-label={title} className="rounded border border-line p-3"><h3 className="font-semibold">{title}</h3>
+    {actuals ? <><p className="text-sm text-muted">Покрытие: {actuals.coverage}. {actuals.reason} Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</>
+      : <p role="alert">Покрытие: неизвестно. {error}</p>}
+  </div>;
+}
 
 export function ExpenseControl({ org }: { org?: string }) {
   const [selected, setSelected] = useState("");
@@ -55,7 +65,8 @@ export function ExpenseControl({ org }: { org?: string }) {
 function Book({ org }: { org: number }) {
   const [ctx, setCtx] = useState<api.Context | null>(null);
   const [view, setView] = useState<api.BudgetView | null>(null);
-  const [actuals, setActuals] = useState<api.ExpenseActuals | null>(null);
+  const [accrualActuals, setAccrualActuals] = useState<ActualSlice | null>(null);
+  const [cashActuals, setCashActuals] = useState<ActualSlice | null>(null);
   const [saved, setSaved] = useState<api.Journal>({ raw: null, attempt: null });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -78,7 +89,7 @@ function Book({ org }: { org: number }) {
 
   function invalidateAccess(e: unknown) {
     if (!(e instanceof api.ExpenseError) || ![401, 403, 503].includes(e.status ?? 0)) return false;
-    contextRef.current = null; setCtx(null); setView(null); setActuals(null); setCells({}); setHistory("");
+    contextRef.current = null; setCtx(null); setView(null); setAccrualActuals(null); setCashActuals(null); setCells({}); setHistory("");
     setSaved({ raw: null, attempt: null }); setNotice(""); setEvidence(""); setCode(""); setTitle(""); setGroup("");
     return true; // Durable journal stays in storage for its original principal.
   }
@@ -86,13 +97,18 @@ function Book({ org }: { org: number }) {
     const current = await api.context(org);
     if (token !== epoch.current) return;
     contextRef.current = current;
-    setCtx(current); setView(null); setActuals(null); setCells({}); setHistory(""); setSaved({ raw: null, attempt: null });
+    setCtx(current); setView(null); setAccrualActuals(null); setCashActuals(null); setCells({}); setHistory(""); setSaved({ raw: null, attempt: null });
     const scope = { org, principal: current.principal };
     const next = await api.journal(scope);
     const data = configured && basis ? await api.getBudgets(scope, Number(year), basis) : null;
-    const actual = configured && basis ? await api.getActuals(scope, Number(year), Number(actualMonth), basis) : null;
+    const slices = configured ? await Promise.allSettled([
+      api.getActuals(scope, Number(year), Number(actualMonth), "accrual"),
+      api.getActuals(scope, Number(year), Number(actualMonth), "cash"),
+    ]) : null;
     if (token !== epoch.current) return;
-    setSaved(next); setView(data); setActuals(actual);
+    setSaved(next); setView(data);
+    setAccrualActuals(slices ? slices[0].status === "fulfilled" ? { actuals: slices[0].value, error: null } : unavailableActuals(slices[0].reason) : null);
+    setCashActuals(slices ? slices[1].status === "fulfilled" ? { actuals: slices[1].value, error: null } : unavailableActuals(slices[1].reason) : null);
     if (data) {
       const latest = data.versions[0];
       const inputs: Record<number, string[]> = {};
@@ -181,7 +197,7 @@ function Book({ org }: { org: number }) {
       if (token === epoch.current) setNotice(`Исходная команда подтверждена: ${result.receipt.request_key}.`);
     });
   }
-  function configure(action: () => void) { action(); setView(null); setActuals(null); setCells({}); setHistory(""); }
+  function configure(action: () => void) { action(); setView(null); setAccrualActuals(null); setCashActuals(null); setCells({}); setHistory(""); }
   const editable = !busy && !pending && !!ctx && ctx.role !== "reader";
   const chief = editable && ctx?.role === "chief";
   const historyBudget = view?.versions.find(v => String(v.revision) === history);
@@ -190,13 +206,14 @@ function Book({ org }: { org: number }) {
   const planBudget = view?.approved_plan?.budget ?? view?.versions[0] ?? null;
   const planLabel = view?.approved_plan ? `утверждённая версия ${view.approved_plan.budget_revision}`
     : planBudget ? `черновик версии ${planBudget.revision}` : null;
+  const planActuals = basis === "cash" ? cashActuals?.actuals ?? null : accrualActuals?.actuals ?? null;
   const planFactRows = (() => {
     const rows = new Map<number, { article_id: number; group: string; article: string; plan: string | null; actual: string | null; lines: number }>();
     for (const line of planBudget?.lines ?? []) rows.set(line.article_id, {
       article_id: line.article_id, group: line.article_snapshot.group.title, article: line.article_snapshot.title,
       plan: line.months[Number(actualMonth) - 1] ?? null, actual: null, lines: 0,
     });
-    for (const actual of actuals?.rows ?? []) {
+    for (const actual of planActuals?.rows ?? []) {
       const current = rows.get(actual.article_id);
       rows.set(actual.article_id, {
         article_id: actual.article_id, group: actual.group_title ?? current?.group ?? "Без группы",
@@ -206,7 +223,7 @@ function Book({ org }: { org: number }) {
     return [...rows.values()].sort((left, right) => left.group.localeCompare(right.group, "ru") || left.article.localeCompare(right.article, "ru"));
   })();
   const unplannedRows = planFactRows.filter(row => row.actual !== null && row.plan === null && parseCents(row.actual) !== 0n);
-  const incompleteCoverage = actuals !== null && actuals.coverage !== "complete";
+  const incompleteCoverage = planActuals !== null && planActuals.coverage !== "complete";
   return <div className="space-y-4">
     {busy && <p role="status">Проверка и сохранение…</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
@@ -250,14 +267,19 @@ function Book({ org }: { org: number }) {
       <button className={button} disabled={!chief || !view?.versions[0] || !evidence.trim()
         || view.approved_plan?.budget_revision === view.versions[0]?.revision} onClick={approve}>Утвердить бюджет</button>
     </>}
-    <div className="grid gap-3 md:grid-cols-4">{["Утверждённый план", "Начислено", "Оплачено", "Непогашенные обязательства"].map(label => {
-      const value = label === "Утверждённый план" && view?.approved_plan ? `Версия ${view.approved_plan.budget_revision}`
-        : label === "Начислено" && actuals?.amount !== null && actuals?.amount !== undefined ? `${actuals.amount} BYN` : "— Неизвестно";
-      return <div key={label} className="rounded border border-line p-3"><strong>{label}</strong><p>{value}</p><p className="text-xs text-muted">{label === "Утверждённый план" ? (view?.approved_plan ? `Утвердил: ${view.approved_plan.approved_by}` : "Утверждение ещё не выполнено") : label === "Начислено" && actuals ? actuals.reason : "Адаптер подтверждённых данных не подключён"}</p></div>;
-    })}</div>
-    {actuals && <div aria-label="Фактические начисления расходов" className="rounded border border-line p-3"><h3 className="font-semibold">Начисленные расходы за {actuals.month} месяц</h3><p className="text-sm text-muted">Покрытие: {actuals.coverage}. Учтено строк: {actuals.matched_lines}; без статьи: {actuals.unmatched_lines ?? "не определено"}.</p>{actuals.rows.length ? <ul>{actuals.rows.map(row => <li key={row.article_id}>{row.group_title ?? "Без группы"} / {row.article_title}: {row.amount} BYN ({row.lines} строк)</li>)}</ul> : <p>{actuals.reason}</p>}</div>}
-    {actuals && (planFactRows.length > 0 || planBudget) && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {actuals.month} месяц</h3><p className="text-sm text-muted">План: {planLabel ?? "не создан"}. Отклонение = факт минус план; проценты не считаются при нулевом плане.</p>
-      {incompleteCoverage && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: покрытие факта {actuals.coverage}; без статьи расходов: {actuals.unmatched_lines ?? "не определено"}. План-факт не является полным до разметки этих проводок.</p>}
+    <div className="grid gap-3 md:grid-cols-4">
+      <div aria-label="Утверждённый план" className="rounded border border-line p-3"><strong>Утверждённый план</strong><p>{view?.approved_plan ? `Версия ${view.approved_plan.budget_revision}` : "— Неизвестно"}</p><p className="text-xs text-muted">{view?.approved_plan ? `Утвердил: ${view.approved_plan.approved_by}` : "Утверждение ещё не выполнено"}</p></div>
+      {([["Начислено", accrualActuals], ["Оплачено", cashActuals]] as Array<[string, ActualSlice | null]>).map(([label, fact]) => {
+        const value = fact?.actuals?.amount !== null && fact?.actuals?.amount !== undefined ? `${fact.actuals.amount} BYN` : "— Неизвестно";
+        const quality = fact?.actuals ? `Покрытие: ${fact.actuals.coverage}. ${fact.actuals.reason}` : fact?.error ? `Покрытие: неизвестно. ${fact.error}` : "Данные ещё не загружены.";
+        return <div key={String(label)} aria-label={String(label)} className="rounded border border-line p-3"><strong>{label}</strong><p>{value}</p><p className="text-xs text-muted">{quality}</p></div>;
+      })}
+      <div aria-label="Непогашенные обязательства" className="rounded border border-line p-3"><strong>Непогашенные обязательства</strong><p>— Неизвестно</p><p className="text-xs text-muted">Адаптер подтверждённых обязательств не подключён; разность начислений и оплат не используется.</p></div>
+    </div>
+    <ActualsPanel title="Фактические начисления расходов" actuals={accrualActuals?.actuals ?? null} error={accrualActuals?.error ?? null} />
+    <ActualsPanel title="Фактические оплаты расходов" actuals={cashActuals?.actuals ?? null} error={cashActuals?.error ?? null} />
+    {planActuals && (planFactRows.length > 0 || planBudget) && <div aria-label="План-факт расходов" className="rounded border border-line p-3"><h3 className="font-semibold">План-факт за {planActuals.month} месяц</h3><p className="text-sm text-muted">План: {planLabel ?? "не создан"}. Основа: {basis === "cash" ? "денежные выплаты" : "начисления"}. Отклонение = факт минус план; проценты не считаются при нулевом плане.</p>
+      {incompleteCoverage && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: покрытие факта {planActuals.coverage}; без статьи расходов: {planActuals.unmatched_lines ?? "не определено"}. План-факт не является полным до разметки этих проводок.</p>}
       {unplannedRows.length > 0 && <p role="alert" className="my-2 rounded border border-amber-400 p-2">Предупреждение: {unplannedRows.length} {unplannedRows.length === 1 ? "статья имеет" : "статей имеют"} факт без плана за выбранный месяц.</p>}
       <div className="overflow-x-auto"><table className="text-sm"><thead><tr><th className="p-2 text-left">Группа / статья</th><th className="p-2 text-right">План</th><th className="p-2 text-right">Факт</th><th className="p-2 text-right">Отклонение</th><th className="p-2 text-right">Отклонение, %</th></tr></thead><tbody>{planFactRows.map(row => {
         const delta = row.plan === null || row.actual === null ? null : (() => { const planned = parseCents(row.plan); const actual = parseCents(row.actual); return planned === null || actual === null ? null : formatCents(actual - planned); })();
