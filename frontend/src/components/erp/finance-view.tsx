@@ -6,6 +6,7 @@ import { SourceTag } from "@/components/source-tag";
 import { formatByn } from "@/lib/format";
 import { FinanceLedgerBalance } from "./finance-ledger-balance";
 import { FinanceLedgerCashflow } from "./finance-ledger-cashflow";
+import { FinanceLedgerGroup } from "./finance-ledger-group";
 import { FinanceLedgerPnl } from "./finance-ledger-pnl";
 
 // ──────────────────────────── Контракты ответов /finance/* ────────────────────────────
@@ -201,6 +202,7 @@ type TabId =
   | "cashflow"
   | "calendar"
   | "margin"
+  | "group"
   | "pnl"
   | "dds"
   | "balance"
@@ -212,6 +214,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "cashflow", label: "Cash-flow" },
   { id: "calendar", label: "Календарь" },
   { id: "margin", label: "Маржа" },
+  { id: "group", label: "Обзор группы" },
   { id: "pnl", label: "P&L" },
   { id: "dds", label: "ДДС" },
   { id: "balance", label: "Баланс" },
@@ -257,6 +260,7 @@ export function FinanceView() {
         {tab === "cashflow" && <CashflowTab />}
         {tab === "calendar" && <CalendarTab />}
         {tab === "margin" && <MarginTab />}
+        {tab === "group" && <FinanceLedgerGroup />}
         {tab === "pnl" && <FinanceLedgerPnl />}
         {tab === "dds" && <FinanceLedgerCashflow />}
         {tab === "balance" && <FinanceLedgerBalance />}
