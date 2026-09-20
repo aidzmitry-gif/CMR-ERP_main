@@ -21,7 +21,9 @@ it("показывает доступные книги, частичную ош�
   render(<FinanceLedgerGroup />);
   expect(await screen.findByText("Первая компания · 111111111")).toBeInTheDocument();
   expect(screen.getByText("12.34 BYN")).toBeInTheDocument();
-  expect(screen.getByText(/Сумма отдельных результатов — не консолидация:.*12\.34 BYN/)).toBeInTheDocument();
+  const total = screen.getByText("Сумма отдельных результатов — не консолидация:").parentElement;
+  expect(total).not.toBeNull();
+  expect(total).toHaveTextContent("12.34 BYN");
   expect(screen.getByText("50.00 BYN")).toBeInTheDocument();
   expect(screen.getByText(/Нет доступа к отчёту второй компании/)).toBeInTheDocument();
   expect(screen.getByText(/Отчёты с ошибкой: 1; они не заменены нулями/)).toBeInTheDocument();
