@@ -16,10 +16,11 @@ from modules.accounting.expense_models import (
     ExpenseBudgetApproval,
     ExpenseBudgetLine,
     ExpenseCatalog,
+    ExpenseArticleAttribution,
     ExpenseCommandReceipt,
     ExpenseGroup,
 )
-from modules.accounting.models import Entry, Line
+from modules.accounting.models import Entry, Line, Period, Policy
 
 APPROVAL_BLOCKER = "Утверждение доступно только главному бухгалтеру после проверки версии бюджета."
 
@@ -199,17 +200,297 @@ def _money(value: Decimal) -> str:
     return format(value, ".2f")
 
 
+def _expense_source_snapshot(entry, line):
+    dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
+    return {
+        "entry_id": entry.id,
+        "source": entry.source,
+        "source_version": entry.source_version,
+        "operation": entry.operation,
+        "posting_date": entry.posting_date.isoformat(),
+        "policy_id": entry.policy_id,
+        "entry_digest": entry.digest,
+        "line_id": line.id,
+        "account_code": line.account_code,
+        "account_title": line.account_title,
+        "category": line.category,
+        "cash": line.cash,
+        "side": line.side,
+        "amount": _money(line.amount),
+        "currency": line.currency,
+        "dimensions": dimensions,
+    }
+
+
+def _article_snapshot(article, group):
+    return {
+        "id": article["id"],
+        "code": article["code"],
+        "title": article["title"],
+        "group_id": article["group_id"],
+        "group": (
+            {
+                "id": group["id"],
+                "code": group["code"],
+                "title": group["title"],
+                "active": group["active"],
+            }
+            if group is not None
+            else None
+        ),
+    }
+
+
+def verified_attribution_receipt(row):
+    """Reject a corrupted attribution before it changes a reporting view."""
+    receipt = row.receipt
+    result = receipt.get("result") if isinstance(receipt, dict) else None
+    unsigned = {key: value for key, value in receipt.items() if key != "receipt_digest"} if isinstance(receipt, dict) else None
+    if (
+        not isinstance(result, dict)
+        or receipt.get("organization_id") != row.organization_id
+        or receipt.get("principal") != row.actor
+        or receipt.get("kind") != "expense_article_attribution"
+        or receipt.get("request_key") != row.request_key
+        or receipt.get("command_hash") != row.command_hash
+        or digest(receipt.get("command")) != row.command_hash
+        or digest(unsigned) != receipt.get("receipt_digest")
+        or digest(result) != receipt.get("result_digest")
+        or result.get("source_entry_id") != row.source_entry_id
+        or result.get("source_line_id") != row.source_line_id
+        or result.get("article_id") != row.article_id
+        or result.get("supersedes_id") != row.supersedes_id
+        or result.get("basis_digest") != row.basis_digest
+        or result.get("effective_date") != row.effective_date.isoformat()
+        or result.get("evidence") != row.evidence
+        or result.get("explanation") != row.explanation
+        or result.get("source_snapshot") != row.source_snapshot
+        or result.get("article_snapshot") != row.article_snapshot
+    ):
+        raise Conflict("Сохранённая квитанция атрибуции не прошла проверку целостности")
+    return receipt
+
+
+async def _latest_attributions(session, org_id, line_ids):
+    if not line_ids:
+        return {}
+    rows = (
+        await session.scalars(
+            select(ExpenseArticleAttribution)
+            .where(
+                ExpenseArticleAttribution.organization_id == org_id,
+                ExpenseArticleAttribution.source_line_id.in_(set(line_ids)),
+            )
+            .order_by(
+                ExpenseArticleAttribution.source_line_id,
+                ExpenseArticleAttribution.id.desc(),
+            )
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    latest = {}
+    for row in rows:
+        latest.setdefault(row.source_line_id, row)
+    return latest
+
+
+async def _attribution_basis(session, org_id, data):
+    row = (
+        await session.execute(
+            select(Entry, Line)
+            .join(Line, Line.entry_id == Entry.id)
+            .where(Entry.organization_id == org_id, Line.id == data.source_line_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise Conflict("Строка расхода не найдена в выбранной организации")
+    entry, line = row
+    if line.category != "expense" or line.currency != "BYN":
+        raise Conflict("Атрибуция доступна только для расходной строки в BYN")
+    if data.effective_date != entry.posting_date:
+        raise Conflict("Дата атрибуции должна совпадать с датой отражения исходной проводки")
+    policy = await session.scalar(
+        select(Policy).where(
+            Policy.id == entry.policy_id,
+            Policy.organization_id == org_id,
+            Policy.effective_from <= entry.posting_date,
+        )
+    )
+    if policy is None:
+        raise Conflict("Для исходной строки не найдена применимая учётная политика")
+    month = entry.posting_date.strftime("%Y-%m")
+    period = await session.scalar(
+        select(Period).where(Period.organization_id == org_id, Period.month == month)
+    )
+    if period is not None and period.closed:
+        raise Conflict("Период исходной строки закрыт")
+    current = await catalog(session, org_id)
+    articles = {item["id"]: item for item in current["articles"]}
+    groups = {item["id"]: item for item in current["groups"]}
+    article = articles.get(data.article_id)
+    group = groups.get(article["group_id"]) if article is not None else None
+    if article is None or group is None or not article["active"] or not group["active"]:
+        raise Conflict("Статья расходов недоступна в выбранной организации")
+    latest = await _latest_attributions(session, org_id, [line.id])
+    prior = latest.get(line.id)
+    dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
+    direct_article_id = _expense_article_id(dimensions.get("expense_article_id"))
+    if direct_article_id in articles and prior is None:
+        raise Conflict("Исходная строка уже имеет явную статью расходов")
+    source_snapshot = _expense_source_snapshot(entry, line)
+    article_snapshot = _article_snapshot(article, group)
+    basis_digest = digest(
+        {
+            "source_snapshot": source_snapshot,
+            "article_snapshot": article_snapshot,
+            "catalog_revision": current["revision"],
+            "supersedes_id": prior.id if prior is not None else None,
+        }
+    )
+    return {
+        "entry": entry,
+        "line": line,
+        "prior": prior,
+        "source_snapshot": source_snapshot,
+        "article_snapshot": article_snapshot,
+        "basis_digest": basis_digest,
+    }
+
+
+async def preview_attribution(session, org_id, data):
+    """Return a no-write snapshot a user must present on confirmation."""
+    await service.lock_organization(session, org_id)
+    basis = await _attribution_basis(session, org_id, data)
+    return {
+        "source_entry_id": basis["entry"].id,
+        "source_line_id": basis["line"].id,
+        "article_id": data.article_id,
+        "supersedes_id": basis["prior"].id if basis["prior"] is not None else None,
+        "effective_date": data.effective_date.isoformat(),
+        "basis_digest": basis["basis_digest"],
+        "source_snapshot": basis["source_snapshot"],
+        "article_snapshot": basis["article_snapshot"],
+    }
+
+
+async def confirm_attribution(session, org_id, actor, data):
+    """Append one attribution receipt without mutating its source posting."""
+    await service.lock_organization(session, org_id)
+    command = data.model_dump(mode="json")
+    checksum = digest(command)
+    prior_request = await session.scalar(
+        select(ExpenseArticleAttribution).where(
+            ExpenseArticleAttribution.organization_id == org_id,
+            ExpenseArticleAttribution.request_key == str(data.request_key),
+        )
+    )
+    if prior_request is not None:
+        if prior_request.actor != actor or prior_request.command_hash != checksum:
+            raise Conflict("UUID уже использован другой командой или пользователем")
+        receipt = verified_attribution_receipt(prior_request)
+        if receipt.get("command") != command:
+            raise Conflict("Сохранённая квитанция атрибуции не прошла проверку целостности")
+        return receipt
+    basis = await _attribution_basis(session, org_id, data)
+    if data.expected_basis_digest != basis["basis_digest"]:
+        raise Conflict("Основание атрибуции изменилось. Обновите предварительный просмотр")
+    result = {
+        "source_entry_id": basis["entry"].id,
+        "source_line_id": basis["line"].id,
+        "article_id": data.article_id,
+        "supersedes_id": basis["prior"].id if basis["prior"] is not None else None,
+        "effective_date": data.effective_date.isoformat(),
+        "basis_digest": basis["basis_digest"],
+        "evidence": data.evidence,
+        "explanation": data.explanation,
+        "source_snapshot": basis["source_snapshot"],
+        "article_snapshot": basis["article_snapshot"],
+    }
+    receipt = {
+        "organization_id": org_id,
+        "principal": actor,
+        "kind": "expense_article_attribution",
+        "request_key": str(data.request_key),
+        "command": command,
+        "command_hash": checksum,
+        "result": result,
+        "result_digest": digest(result),
+    }
+    receipt["receipt_digest"] = digest(receipt)
+    session.add(
+        ExpenseArticleAttribution(
+            organization_id=org_id,
+            source_entry_id=basis["entry"].id,
+            source_line_id=basis["line"].id,
+            article_id=data.article_id,
+            supersedes_id=basis["prior"].id if basis["prior"] is not None else None,
+            request_key=str(data.request_key),
+            actor=actor,
+            command_hash=checksum,
+            basis_digest=basis["basis_digest"],
+            effective_date=data.effective_date,
+            evidence=data.evidence,
+            explanation=data.explanation,
+            source_snapshot=basis["source_snapshot"],
+            article_snapshot=basis["article_snapshot"],
+            receipt=receipt,
+        )
+    )
+    service.audit(
+        session,
+        org_id,
+        actor,
+        "expense_article_attribution",
+        {"request_key": str(data.request_key), "receipt_digest": receipt["receipt_digest"]},
+    )
+    await session.flush()
+    return receipt
+
+
+async def attribution_receipt(session, org_id, actor, request_key):
+    row = await session.scalar(
+        select(ExpenseArticleAttribution).where(
+            ExpenseArticleAttribution.organization_id == org_id,
+            ExpenseArticleAttribution.request_key == str(request_key),
+        )
+    )
+    if row is None or row.actor != actor:
+        return None
+    return verified_attribution_receipt(row)
+
+
+async def _resolved_expense_articles(session, org_id, lines, current):
+    articles = {item["id"]: item for item in current["articles"]}
+    groups = {item["id"]: item for item in current["groups"]}
+    latest = await _latest_attributions(session, org_id, [line.id for line in lines])
+    resolved = {}
+    for line in lines:
+        attribution = latest.get(line.id)
+        if attribution is not None:
+            receipt = verified_attribution_receipt(attribution)
+            snapshot = receipt["result"].get("article_snapshot")
+            if not isinstance(snapshot, dict):
+                raise Conflict("Сохранённая квитанция атрибуции не прошла проверку целостности")
+            resolved[line.id] = snapshot
+            continue
+        dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
+        article = articles.get(_expense_article_id(dimensions.get("expense_article_id")))
+        if article is not None:
+            resolved[line.id] = _article_snapshot(article, groups.get(article["group_id"]))
+    return resolved
+
+
 async def actuals(session, org_id, year, month, basis):
-    """Return only explicitly article-bound accrued expense lines.
+    """Return only expense lines with direct or immutable receipt-bound articles.
 
     A missing ``expense_article_id`` is evidence of incomplete analytical
-    coverage, not a reason to infer an article from the account or counterparty.
+    coverage unless a reviewed attribution receipt exists; neither path infers
+    an article from the account or counterparty.
     Cash actuals use the same rule, additionally requiring the explicit
     ``Line.cash`` flag so a bank movement is never guessed to be an expense.
     """
     first, last = _month_bounds(year, month)
     current = await catalog(session, org_id)
-    articles = {row["id"]: row for row in current["articles"]}
     conditions = [
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
@@ -227,26 +508,28 @@ async def actuals(session, org_id, year, month, basis):
             .order_by(Entry.id, Line.id)
         )
     ).all()
+    resolved = await _resolved_expense_articles(session, org_id, [line for _entry, line in rows], current)
     grouped = {}
     unmatched = 0
     matched = 0
     for _entry, line in rows:
-        dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
-        article_id = _expense_article_id(dimensions.get("expense_article_id"))
-        if article_id is None or article_id not in articles:
+        article = resolved.get(line.id)
+        if article is None:
             unmatched += 1
             continue
-        article = articles[article_id]
+        article_id = article["id"]
         amount = line.amount if line.side == "debit" else -line.amount
-        item = grouped.setdefault(article_id, {"amount": Decimal("0"), "lines": 0})
+        item = grouped.setdefault(
+            article_id, {"amount": Decimal("0"), "lines": 0, "article": article}
+        )
         item["amount"] += amount
         item["lines"] += 1
         matched += 1
     if not matched:
         reason = (
-            "За месяц нет денежных расходов с явной аналитикой статьи расходов"
+            "За месяц нет денежных расходов с явной аналитикой статьи или квитанцией атрибуции"
             if basis == "cash"
-            else "За месяц нет начислений с явной аналитикой статьи расходов"
+            else "За месяц нет начислений с явной аналитикой статьи или квитанцией атрибуции"
         )
         return {
             "year": year, "month": month, "currency": "BYN", "basis": basis,
@@ -256,16 +539,16 @@ async def actuals(session, org_id, year, month, basis):
     result_rows = []
     total = Decimal("0")
     for article_id, item in grouped.items():
-        article = articles[article_id]
+        article = item["article"]
         amount = item["amount"]
         total += amount
-        group = next((row for row in current["groups"] if row["id"] == article["group_id"]), None)
+        group = article.get("group") if isinstance(article, dict) else None
         result_rows.append({
             "article_id": article_id,
             "article_code": article["code"],
             "article_title": article["title"],
             "group_id": article["group_id"],
-            "group_title": group["title"] if group else None,
+            "group_title": group.get("title") if isinstance(group, dict) else None,
             "amount": _money(amount),
             "lines": item["lines"],
         })
@@ -277,12 +560,12 @@ async def actuals(session, org_id, year, month, basis):
         "unmatched_lines": unmatched, "rows": result_rows,
         "reason": (
             (
-                "Все денежные строки расходов имеют явную аналитику expense_article_id и cash=true; сверка с выпиской и первичными документами всё равно обязательна"
+                "Все денежные строки расходов имеют явную аналитику статьи или квитанцию атрибуции и cash=true; сверка с выпиской и первичными документами всё равно обязательна"
                 if basis == "cash"
-                else "Все строки начисленных расходов имеют явную аналитику expense_article_id; сверка с первичными документами всё равно обязательна"
+                else "Все строки начисленных расходов имеют явную аналитику статьи или квитанцию атрибуции; сверка с первичными документами всё равно обязательна"
             )
             if unmatched == 0
-            else "Учтены только проводки с явной аналитикой expense_article_id; покрытие требует сверки с выпиской/первичными документами"
+            else "Учтены только проводки с явной аналитикой статьи или квитанцией атрибуции; покрытие требует сверки с выпиской/первичными документами"
         ),
     }
 
@@ -290,7 +573,8 @@ async def actuals(session, org_id, year, month, basis):
 async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=None, limit=50):
     """Read-only keyset register of the exact lines excluded by ``actuals``."""
     first, last = _month_bounds(year, month)
-    articles = {row["id"] for row in (await catalog(session, org_id))["articles"]}
+    current = await catalog(session, org_id)
+    articles = {row["id"] for row in current["articles"]}
     conditions = [Entry.organization_id == org_id, Entry.posting_date >= first, Entry.posting_date <= last,
                   Line.category == "expense", Line.currency == "BYN"]
     if basis == "cash":
@@ -306,12 +590,13 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
         if not chunk:
             exhausted = True
             break
+        resolved = await _resolved_expense_articles(session, org_id, [line for _entry, line in chunk], current)
         for entry, line in chunk:
             cursor = line.id
+            if line.id in resolved:
+                continue
             dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
             article_id = _expense_article_id(dimensions.get("expense_article_id"))
-            if article_id in articles:
-                continue
             items.append({"entry_id": entry.id, "line_id": line.id, "posting_date": entry.posting_date.isoformat(),
                 "source": entry.source, "operation": entry.operation, "account_code": line.account_code, "side": line.side,
                 "amount": _money(line.amount), "dimensions": dimensions,
@@ -327,9 +612,9 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
             chunk = (await session.scalars(query.order_by(Line.id).limit(100))).all()
             if not chunk:
                 break
+            resolved = await _resolved_expense_articles(session, org_id, chunk, current)
             for line in chunk:
-                dimensions = line.dimensions if isinstance(line.dimensions, dict) else {}
-                if _expense_article_id(dimensions.get("expense_article_id")) not in articles:
+                if line.id not in resolved:
                     next_after_line_id = items[-1]["line_id"]
                     break
             if next_after_line_id is not None or len(chunk) < 100:

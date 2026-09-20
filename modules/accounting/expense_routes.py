@@ -13,7 +13,13 @@ from core.services.auth import (
 )
 from modules.accounting import expenses
 from modules.accounting.expense_models import ExpenseCommandReceipt
-from modules.accounting.expense_schemas import BudgetApprovalCommand, BudgetCommand, CatalogCommand
+from modules.accounting.expense_schemas import (
+    BudgetApprovalCommand,
+    BudgetCommand,
+    CatalogCommand,
+    ExpenseAttributionCommand,
+    ExpenseAttributionPreview,
+)
 from modules.accounting.routes import chief, organization_role, subject, transaction
 
 router = APIRouter(prefix="/organizations/{org_id}", tags=["expense-control"])
@@ -132,6 +138,49 @@ async def get_receipt(org_id: int, request_key: UUID, ctx=Depends(expense_member
         return expenses.verified_receipt(row)
     except expenses.Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/expense-attributions/preview")
+async def preview_attribution(
+    org_id: int,
+    data: ExpenseAttributionPreview,
+    expected: str = Header(alias="X-Expected-Principal"),
+    ctx=Depends(expense_member),
+):
+    if expected != ctx[1]:
+        raise HTTPException(409, "Пользователь изменился. Обновите сведения")
+    try:
+        return expenses.envelope(
+            org_id, ctx[1], {"preview": await expenses.preview_attribution(ctx[0], org_id, data)}
+        )
+    except expenses.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/expense-attributions")
+async def confirm_attribution(
+    org_id: int,
+    data: ExpenseAttributionCommand,
+    expected: str = Header(alias="X-Expected-Principal"),
+    ctx=Depends(expense_member),
+):
+    if expected != ctx[1]:
+        raise HTTPException(409, "Пользователь изменился. Обновите сведения")
+    try:
+        return await expenses.confirm_attribution(ctx[0], org_id, ctx[1], data)
+    except expenses.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/expense-attributions/{request_key}")
+async def get_attribution_receipt(org_id: int, request_key: UUID, ctx=Depends(expense_member)):
+    try:
+        receipt = await expenses.attribution_receipt(ctx[0], org_id, ctx[1], request_key)
+    except expenses.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if receipt is None:
+        raise HTTPException(404, "Квитанция атрибуции не найдена для текущего пользователя")
+    return receipt
 
 
 async def command(org_id, data, kind, expected, ctx):

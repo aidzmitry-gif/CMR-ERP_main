@@ -4,7 +4,7 @@ The schema remains an unallocated proposal. Budget versions are never mutated;
 an approval is an immutable, separately guarded fact tied to one exact version.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
@@ -137,6 +137,50 @@ class ExpenseCommandReceipt(Base):
     receipt: Mapped[dict] = mapped_column(JSON)
 
 
+class ExpenseArticleAttribution(Base):
+    """Immutable analytical correction for one already-posted expense line.
+
+    The source ledger line deliberately remains untouched.  Reclassification is
+    represented by a successor receipt, so reports can use the newest receipt
+    while the full decision chain stays auditable.
+    """
+
+    __tablename__ = "expense_article_attribution"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "article_id"],
+            ["accounting.expense_article.organization_id", "accounting.expense_article.id"],
+        ),
+        UniqueConstraint("organization_id", "request_key", name="uq_expense_article_attribution_request"),
+        UniqueConstraint("supersedes_id", name="uq_expense_article_attribution_successor"),
+        UniqueConstraint("organization_id", "id", name="uq_expense_article_attribution_org_id"),
+        CheckConstraint(
+            "source_entry_id > 0 AND source_line_id > 0 AND article_id > 0",
+            name="expense_article_attribution_positive_refs",
+        ),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    source_entry_id: Mapped[int] = mapped_column(ForeignKey("accounting.entry.id"))
+    source_line_id: Mapped[int] = mapped_column(ForeignKey("accounting.line.id"))
+    article_id: Mapped[int]
+    supersedes_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounting.expense_article_attribution.id")
+    )
+    request_key: Mapped[str] = mapped_column(String(36))
+    actor: Mapped[str] = mapped_column(String(200))
+    command_hash: Mapped[str] = mapped_column(String(64))
+    basis_digest: Mapped[str] = mapped_column(String(64))
+    effective_date: Mapped[date] = mapped_column()
+    evidence: Mapped[str] = mapped_column(String(1000))
+    explanation: Mapped[str] = mapped_column(String(1000))
+    source_snapshot: Mapped[dict] = mapped_column(JSON)
+    article_snapshot: Mapped[dict] = mapped_column(JSON)
+    receipt: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ExpenseBudgetApproval(Base):
     """Immutable approval of one exact budget version.
 
@@ -173,6 +217,12 @@ def prevent_history_mutation(mapper, connection, target):
 
 
 # ORM protection complements expense_guards.sql in the unallocated schema proposal.
-for history_model in (ExpenseBudget, ExpenseBudgetLine, ExpenseCommandReceipt, ExpenseBudgetApproval):
+for history_model in (
+    ExpenseBudget,
+    ExpenseBudgetLine,
+    ExpenseCommandReceipt,
+    ExpenseArticleAttribution,
+    ExpenseBudgetApproval,
+):
     event.listen(history_model, "before_update", prevent_history_mutation)
     event.listen(history_model, "before_delete", prevent_history_mutation)

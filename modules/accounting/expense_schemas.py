@@ -1,6 +1,7 @@
 """Explicit scope, configuration and exact money; never Sheet import bodies."""
 
 import re
+from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -82,3 +83,18 @@ class BudgetApprovalCommand(Input):
     budget_id: Id
     expected_revision: int = Field(gt=0, strict=True)
     evidence: str = Field(min_length=1, max_length=1000)
+
+
+class ExpenseAttributionPreview(Input):
+    """Read the exact source/article basis before confirming a receipt."""
+
+    source_line_id: Id
+    article_id: Id
+    effective_date: date
+
+
+class ExpenseAttributionCommand(ExpenseAttributionPreview):
+    request_key: UUID
+    evidence: str = Field(min_length=1, max_length=1000)
+    explanation: str = Field(min_length=1, max_length=1000)
+    expected_basis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
