@@ -170,7 +170,7 @@ async def get_catalog(user=Depends(get_current_user)):
 @router.get("/catalog/accounts")
 async def catalog_accounts(user=Depends(get_current_user)):
     data = await get_catalog(user)
-    return [{**row, "edition_status": "Через 2022 год; требует проверки на 2026 год"}
+    return [{**row, "edition_status": "Сверка с редакцией 2026 года продолжается; первичный текст № 126 ожидается"}
             for row in data["accounts"]]
 
 

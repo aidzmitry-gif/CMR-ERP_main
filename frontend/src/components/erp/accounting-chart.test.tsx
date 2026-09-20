@@ -8,7 +8,7 @@ const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((url: string) => {
-    if (url.endsWith("/catalog")) return respond({ version: "historical", source: "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf", verified_through: "2022-12-28", current_normative_verified: false, normative_review: { status: "requires_full_text_review", checked_at: "2026-09-13", verified_through: "2022-12-28" }, known_amendments: [{ document: "Постановление Минфина № 126", date: "2025-10-31", effective_from: "2026-01-01", status: "requires_text_review", impact_on_chart: "unknown", full_text_verified: false, checked_at: "2026-09-13", evidence: "Влияние на план счетов не установлено." }], accounts: [{ code: "41", title: "Товары", parent: null }, { code: "41.1", title: "Товары на складах", parent: "41" }] });
+    if (url.endsWith("/catalog")) return respond({ version: "historical", source: "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf", verified_through: "2025-08-25", current_normative_verified: false, normative_review: { status: "requires_primary_edition_review", checked_at: "2026-09-20", verified_through: "2025-10-31" }, known_amendments: [{ document: "Постановление Минфина № 126", date: "2025-10-31", effective_from: "2026-01-01", status: "requires_primary_text_review", impact_on_chart: "instruction_scope_only", full_text_verified: false, checked_at: "2026-09-20", evidence: "Опубликованная область касается инструкции." }], accounts: [{ code: "41", title: "Товары", parent: null }, { code: "41.1", title: "Товары на складах", parent: "41" }] });
     if (url.endsWith("/organizations")) return respond([{ id: 1, name: "Первая книга", unp: "999999999" }, { id: 2, name: "Вторая книга", unp: "888888888" }]);
     if (url.includes("/accounts?")) return respond(url.includes("/2/") ? [] : [{ code: "41.1", title: "Рабочие товары", valid_from: "2026-01-01", required_dimensions: ["warehouse", "sku"], quantity_tracking: true }]);
     return respond([]);
@@ -20,8 +20,8 @@ it("shows a searchable normative chart without implying current certification", 
   render(<AccountingChart />);
   await screen.findByText("Товары на складах");
   expect(screen.getByText(/Актуальность на 2026 год требует проверки/)).toBeInTheDocument();
-  expect(screen.getByText(/Проверка сведений: 2026-09-13/)).toBeInTheDocument();
-  expect(screen.getByText("Влияние на план счетов не установлено.")).toBeInTheDocument();
+  expect(screen.getByText(/Проверка сведений: 2026-09-20/)).toBeInTheDocument();
+  expect(screen.getByText(/доступная область изменения касается инструкции/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Поиск счетов"), { target: { value: "41.1" } });
   expect(screen.queryByText("Товары", { exact: true })).not.toBeInTheDocument();
   expect(screen.getByText("Субсчёт")).toBeInTheDocument();

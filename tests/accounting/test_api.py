@@ -168,49 +168,30 @@ async def test_event_adapter_and_registration(db, book, posting):
 async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(client):
     catalog = (await client.get("/accounting/catalog")).json()
     assert catalog["current_normative_verified"] is False
-    assert catalog["version"] == "BY-MF50-2025-10-31-review-required"
+    assert catalog["version"] == "BY-MF50-2026-01-01-review-required"
     assert catalog["current_revision_reference"] == "2025-10-31"
-    assert catalog["normative_review"] == {
-        "status": "requires_full_text_review",
-        "checked_at": "2026-09-13",
-        "verified_through": "2022-12-28",
-        "source_access": "historical_minfin_pdf_and_official_etalon_excerpt",
-        "note": "Поздние акты зарегистрированы как очередь проверки; доступные материалы не подтверждают их влияние на план счетов.",
-        "blocking_reasons": [
-            "Полный текст редакции № 50 после 28.12.2022 не получен.",
-            "Влияние найденных актов на счета и инструкцию не подтверждено постатейной сверкой.",
-            "Рабочий план и учётная политика каждого юридического лица ещё не утверждены бухгалтером.",
-        ],
-        "evidence": [
-            {
-                "document": "Постановление Минфина № 50",
-                "url": "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf",
-                "source_kind": "official_pdf",
-                "coverage": "Полный доступный PDF; перечень изменений заканчивается 28.12.2022.",
-                "full_text_verified": True,
-            },
-            {
-                "document": "Постановление Минфина № 73",
-                "url": "https://continent-online.com/Document/?doc_id=39812416",
-                "source_kind": "secondary_discovery",
-                "coverage": "Карточка и сокращённый фрагмент; полный текст не получен.",
-                "full_text_verified": False,
-            },
-            {
-                "document": "Постановление Минфина № 126",
-                "url": "https://etalonline.by/document/?regnum=w22544278",
-                "source_kind": "official_record_excerpt",
-                "coverage": "Официальная карточка показывает стандарт по инвентаризации; полный текст закрыт демонстрационным режимом.",
-                "full_text_verified": False,
-            },
-        ],
+    assert catalog["verified_through"] == "2025-08-25 для перечня счетов; 2025-10-31 частично"
+    review = catalog["normative_review"]
+    assert review["status"] == "requires_primary_edition_review"
+    assert review["checked_at"] == "2026-09-20"
+    assert review["verified_through"] == "2025-08-25 (полный текст); 2025-10-31 (опубликованная область)"
+    assert review["source_access"] == "official_2022_pdf_and_2025_legal_database_review"
+    assert review["evidence"][1] == {
+        "document": "Постановление Минфина № 73",
+        "url": "https://base2.spinform.ru/show_doc.fwx?rgn=171243",
+        "source_kind": "legal_database_full_text",
+        "coverage": "Полный опубликованный текст: пункт 1.7 меняет преамбулу и Инструкцию, но не приложение 1 с номерами счетов и субсчетами.",
+        "full_text_verified": True,
     }
-    assert [item["document"] for item in catalog["known_amendments"]] == [
-        "Постановление Минфина № 73", "Постановление Минфина № 126"
+    assert review["evidence"][2]["full_text_verified"] is False
+    assert "Полный первичный текст" in review["blocking_reasons"][1]
+    amendments = catalog["known_amendments"]
+    assert [(item["document"], item["impact_on_chart"], item["full_text_verified"]) for item in amendments] == [
+        ("Постановление Минфина № 73", "no_chart_code_change", True),
+        ("Постановление Минфина № 126", "instruction_scope_only", False),
     ]
-    assert all(item["impact_on_chart"] == "unknown" and item["full_text_verified"] is False for item in catalog["known_amendments"])
-    assert catalog["known_amendments"][0]["source_kind"] == "secondary_discovery"
-    assert catalog["known_amendments"][1]["source_kind"] == "official_record_excerpt"
+    assert amendments[0]["source_kind"] == "legal_database_full_text"
+    assert amendments[1]["source_kind"] == "legal_database_published_scope"
     accounts = (await client.get("/accounting/catalog/accounts")).json()
     assert len(accounts) == len(catalog["accounts"])
     assert len({row["code"] for row in accounts}) == len(accounts)

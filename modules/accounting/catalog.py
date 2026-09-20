@@ -1,23 +1,26 @@
-"""Historical official BY chart, deliberately NOT certified as the 2026 edition.
+"""Belarusian chart with an explicit, evidence-backed 2026 review boundary.
 
-Transcribed from appendix 1 of the public Ministry PDF (amendments through 2022-12-28).
+The public Ministry PDF is a complete historical text through 2022-12-28.  The
+published full text of amendment 73 was reviewed on 2026-09-20: it changes the
+preamble and application instruction, but not Appendix 1 account numbers or
+subaccounts.  The available record for amendment 126 identifies an instruction
+change only, but its primary full text has not been obtained.  Therefore the
+catalogue remains blocked from claiming a fully certified 2026 normative edition.
 Unused numbers are not accounts. Analytics and reporting classifications belong to
-the organization's approved policy, not to guessed defaults in this catalogue. The
-amendment registry below is an explicit review queue: it must not be mistaken for a
-verified transcription of the later editions.
+the organization's approved policy, not to guessed defaults in this catalogue.
 """
 
 SOURCE = "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf"
-VERSION = "BY-MF50-2025-10-31-review-required"
+VERSION = "BY-MF50-2026-01-01-review-required"
 NORMATIVE_REVIEW = {
-    "status": "requires_full_text_review",
-    "checked_at": "2026-09-13",
-    "verified_through": "2022-12-28",
-    "source_access": "historical_minfin_pdf_and_official_etalon_excerpt",
-    "note": "Поздние акты зарегистрированы как очередь проверки; доступные материалы не подтверждают их влияние на план счетов.",
+    "status": "requires_primary_edition_review",
+    "checked_at": "2026-09-20",
+    "verified_through": "2025-08-25 (полный текст); 2025-10-31 (опубликованная область)",
+    "source_access": "official_2022_pdf_and_2025_legal_database_review",
+    "note": "В проверенном тексте № 73 номера счетов и субсчета приложения 1 не изменены; первичный полный текст изменения № 126 ещё не получен.",
     "blocking_reasons": [
-        "Полный текст редакции № 50 после 28.12.2022 не получен.",
-        "Влияние найденных актов на счета и инструкцию не подтверждено постатейной сверкой.",
+        "Официальный PDF Минфина содержит полный доступный текст только до 28.12.2022.",
+        "Полный первичный текст изменения № 126 от 31.10.2025 не получен; доступна только опубликованная область изменения инструкции.",
         "Рабочий план и учётная политика каждого юридического лица ещё не утверждены бухгалтером.",
     ],
     "evidence": [
@@ -30,16 +33,16 @@ NORMATIVE_REVIEW = {
         },
         {
             "document": "Постановление Минфина № 73",
-            "url": "https://continent-online.com/Document/?doc_id=39812416",
-            "source_kind": "secondary_discovery",
-            "coverage": "Карточка и сокращённый фрагмент; полный текст не получен.",
-            "full_text_verified": False,
+            "url": "https://base2.spinform.ru/show_doc.fwx?rgn=171243",
+            "source_kind": "legal_database_full_text",
+            "coverage": "Полный опубликованный текст: пункт 1.7 меняет преамбулу и Инструкцию, но не приложение 1 с номерами счетов и субсчетами.",
+            "full_text_verified": True,
         },
         {
             "document": "Постановление Минфина № 126",
-            "url": "https://etalonline.by/document/?regnum=w22544278",
-            "source_kind": "official_record_excerpt",
-            "coverage": "Официальная карточка показывает стандарт по инвентаризации; полный текст закрыт демонстрационным режимом.",
+            "url": "https://base.spinform.ru/show_doc.fwx?rgn=174918",
+            "source_kind": "legal_database_published_scope",
+            "coverage": "Опубликованная область текущей редакции указывает изменение пункта 73 Инструкции; первичный полный текст не получен.",
             "full_text_verified": False,
         },
     ],
@@ -49,27 +52,27 @@ AMENDMENTS = [
         "document": "Постановление Минфина № 73",
         "date": "2025-08-25",
         "effective_from": "2025-09-20",
-        "status": "requires_text_review",
-        "impact_on_chart": "unknown",
-        "full_text_verified": False,
-        "checked_at": "2026-09-13",
-        "evidence": "Полный официальный текст и влияние на план счетов не установлены в доступном доступе.",
-        "source_url": "https://continent-online.com/Document/?doc_id=39812416",
-        "source_kind": "secondary_discovery",
-        "review_scope": "Полевая проверка первичных документов и иных актов; влияние на план счетов не подтверждено.",
+        "status": "reviewed_instruction_only",
+        "impact_on_chart": "no_chart_code_change",
+        "full_text_verified": True,
+        "checked_at": "2026-09-20",
+        "evidence": "Пункт 1.7 изменяет преамбулу и применение счетов, включая описание забалансовых 006 и 014; приложение 1 не изменялось.",
+        "source_url": "https://base2.spinform.ru/show_doc.fwx?rgn=171243",
+        "source_kind": "legal_database_full_text",
+        "review_scope": "Полный опубликованный текст изменения № 50; номера и субсчета приложения 1 сверены как неизменённые.",
     },
     {
         "document": "Постановление Минфина № 126",
         "date": "2025-10-31",
         "effective_from": "2026-01-01",
-        "status": "requires_text_review",
-        "impact_on_chart": "unknown",
+        "status": "requires_primary_text_review",
+        "impact_on_chart": "instruction_scope_only",
         "full_text_verified": False,
-        "checked_at": "2026-09-13",
-        "evidence": "Официальная карточка подтверждает реквизиты акта, но доступный фрагмент не показывает его влияние на план счетов.",
-        "source_url": "https://etalonline.by/document/?regnum=w22544278",
-        "source_kind": "official_record_excerpt",
-        "review_scope": "Инвентаризация активов и обязательств; влияние полного текста на план счетов не подтверждено.",
+        "checked_at": "2026-09-20",
+        "evidence": "Опубликованная область текущей редакции указывает на пункт 73 Инструкции; итоговая сверка требует первичного полного текста.",
+        "source_url": "https://base.spinform.ru/show_doc.fwx?rgn=174918",
+        "source_kind": "legal_database_published_scope",
+        "review_scope": "Доступная область касается инструкции по учёту запасов; изменения номеров и субсчетов не подтверждены полным первичным текстом.",
     },
 ]
 
@@ -184,10 +187,10 @@ def catalogue():
     return {
         "version": VERSION,
         "source": SOURCE,
-        "verified_through": "2022-12-28",
+        "verified_through": "2025-08-25 для перечня счетов; 2025-10-31 частично",
         "current_revision_reference": "2025-10-31",
         "current_normative_verified": False,
-        "verification_note": "Текст редакции 2026 года ещё не сверен с официальными изменениями; справочник только для сопоставления.",
+        "verification_note": "Перечень счетов сверён с полным опубликованным текстом № 73; выпуск нормативной редакции блокирует отсутствующий первичный полный текст № 126.",
         "normative_review": NORMATIVE_REVIEW,
         "known_amendments": AMENDMENTS,
         "accounts": accounts,
