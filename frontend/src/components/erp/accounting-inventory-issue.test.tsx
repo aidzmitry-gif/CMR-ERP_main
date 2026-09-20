@@ -3,12 +3,30 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AccountingInventoryIssue } from "./accounting-inventory-issue";
 
 afterEach(() => vi.unstubAllGlobals());
-const accounts = [{ code: "41", title: "Goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "90.4", title: "Cost", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] }];
+const accounts = [{ code: "41", title: "Goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "43", title: "Finished goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "90.4", title: "Cost", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] }];
 const props = { org: "1", date: "2026-09-01", policyId: 1, accounts, onDate: vi.fn(), onBusyChange: vi.fn(), onPosted: vi.fn() };
 const calculation = { cost: { basis_digest: "basis", book_quantity: "3.000000", book_value_byn: "10.00", remaining_quantity: "1.500000", remaining_value_byn: "5.00", evidence: [{ entry_id: 2, line_id: 3, source: "receipt", source_version: 1, amount_byn: "10.00", quantity: "3.000000" }] }, digest: "posting", posting: { lines: [{ side: "debit", account: "90.4", amount: "5.00", quantity: null, dimensions: {} }, { side: "credit", account: "41", amount: "5.00", quantity: "1.500000", dimensions: { lot: "LOT" } }] } };
 function fill(sale = false) {
   for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Склад партии", "W"], ["Номенклатура партии", "SKU"], ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
 }
+
+it.each([false, true])("offers finished-goods account 43 for %s", (sale) => {
+  render(<AccountingInventoryIssue {...props} sale={sale} />);
+  const codes = Array.from((screen.getByLabelText("Счёт запасов") as HTMLSelectElement).options).map((option) => option.value);
+  expect(codes).toEqual(expect.arrayContaining(["41", "43"]));
+});
+
+it("shows all allocated inventory layers separately from accounting postings", async () => {
+  const allocation = { ...calculation, cost: { ...calculation.cost, inventory_layers: [{ lot: "ZERO", quantity: "1.000000", amount_byn: "0.00", dimensions: { warehouse: "W", sku: "SKU" } }, { lot: "COST", quantity: "0.500000", amount_byn: "5.00", dimensions: { warehouse: "W", sku: "SKU" } }] } };
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => allocation })));
+  render(<AccountingInventoryIssue {...props} />);
+  fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  expect(await screen.findByText("Слои списания запасов")).toBeInTheDocument();
+  expect(screen.getByText(/Партия ZERO · Количество 1.000000 · Себестоимость 0.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Партия COST · Количество 0.500000 · Себестоимость 5.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Кт 41 · 5.00 BYN · Количество 1.500000/)).toBeInTheDocument();
+});
 
 it("requires preview and retries confirmation with the same prepared body", async () => {
   let fail = true;
