@@ -94,3 +94,29 @@ def test_conversion_currency_and_date_are_bound_to_source_and_posting():
             "currency": "USD", "rate": "3.2", "rate_scale": 1,
             "rate_date": "2026-09-03", "rate_source": "Synthetic official rate evidence",
         }), _policy(), _history())
+
+
+def test_production_allocation_preserves_each_order_and_cent_without_authorizing_posting():
+    history = _history("BYN")
+    lot = history["lots"][0]
+    lot.update(remaining_quantity="4", disposed_quantity="3", production_quantity="3")
+    lot["disposals"] = [{"entry_id": 2, "inventory_line": 2, "quantity": "3",
+                         "expense_account": "90.4", "expense_dimensions": {}}]
+    lot["production_disposals"] = [
+        {"entry_id": 4, "inventory_line": 2, "quantity": "1", "expense_account": "20",
+         "expense_dimensions": {"department": "SHOP", "order": "B"}},
+        {"entry_id": 3, "inventory_line": 2, "quantity": "2", "expense_account": "20",
+         "expense_dimensions": {"department": "SHOP", "order": "A"}},
+    ]
+    data = _data(conversion=None, capitalizable_amount_byn="100.00")
+    result = calculate(42, 9, data, _policy(), history)
+    production = next(share for share in result["shares"] if share["destination"] == "production")
+    assert production["amount_byn"] == "30.00"
+    assert [(row["entry_id"], row["amount_byn"], row["expense_dimensions"]["order"])
+            for row in production["production_origins"]] == [(3, "20.00", "A"), (4, "10.00", "B")]
+    assert result["confirmation_available"] is False
+    with pytest.raises(AccountingError, match="verified cost-layer destination"):
+        candidate(result, ExpenseAccounts(settlement_account="60"))
+    lot.pop("production_disposals")
+    with pytest.raises(AccountingError, match="authenticated material origins"):
+        calculate(42, 9, data, _policy(), history)

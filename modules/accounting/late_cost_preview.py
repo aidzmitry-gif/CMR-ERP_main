@@ -89,6 +89,15 @@ def calculate(organization_id, expense_id, data, policy, history):
         if share["destination"] == "disposed":
             trace = traces[(share["receipt_id"], share["version"], share["line_number"])]
             share["expense_destinations"] = disposal_shares(share["amount_byn"], share["quantity"], trace["disposals"])
+        elif share["destination"] == "production" and Fraction(share["quantity"]) > 0:
+            trace = traces[(share["receipt_id"], share["version"], share["line_number"])]
+            # These are the original reviewed material issues, not the final
+            # destination of value after output or sale. Posting must resolve
+            # that downstream history before treating any share as WIP.
+            origins = trace.get("production_disposals")
+            if origins is None:
+                raise service.AccountingError("Production allocation requires authenticated material origins")
+            share["production_origins"] = disposal_shares(share["amount_byn"], share["quantity"], origins)
     basis = {"organization_id": organization_id, "expense_id": expense_id, "history": history["basis_digest"],
              "request": data.model_dump(mode="json"), "policy_id": policy.id, "rule": rule.model_dump(),
              "inventory_method": inventory_method,
