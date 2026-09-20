@@ -31,7 +31,7 @@ vi.mock("@/components/leads/leads-workspace", () => ({ LeadsWorkspace: () => <di
 vi.mock("@/components/owner-ai-insight", () => ({ OwnerAiInsight: () => <div>owner-ai-insight</div> }));
 vi.mock("@/components/channels", () => ({ ChannelButtons: () => <div>channels</div> }));
 vi.mock("@/components/kanban/lose-deal-modal", () => ({ DealLossControl: () => <div>loss-control</div> }));
-vi.mock("@/components/erp/procurement-request-plan", () => ({ ProcurementRequestPlan: () => <div>procurement-plan</div> }));
+vi.mock("@/components/erp/procurement-request-plan", () => ({ ProcurementRequestPlan: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>procurement-plan:{suggestedOrg ?? ""}</div> }));
 vi.mock("@/components/erp/procurement-nav", () => ({ ProcurementNav: () => <div>procurement-nav</div> }));
 vi.mock("@/components/deal-actions", () => ({ DealActions: () => <div>actions</div> }));
 vi.mock("@/components/deal-ai-assistant", () => ({ DealAiAssistant: () => <div>ai</div> }));
@@ -200,7 +200,10 @@ describe("страницы (src/app)", () => {
     }
   });
 
-  it("Закупки открывают план закупок", () => { render(<ProcurementPage />); expect(screen.getByText("procurement-plan")).toBeInTheDocument(); });
+  it("Закупки передают только строковый org в план закупок", async () => {
+    render(await ProcurementPage({ searchParams: Promise.resolve({ org: "2" }) }));
+    expect(screen.getByText("procurement-plan:2")).toBeInTheDocument();
+  });
 
   it("ERP-таблицы монтируют ModuleBoard", () => {
     // Finance стал bespoke (FinanceView) — вынесен в отдельный тест ниже.

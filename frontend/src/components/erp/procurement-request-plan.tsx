@@ -59,15 +59,23 @@ function persist(org: number, principal: string, expected: string | null, value:
   return raw;
 }
 
-export function ProcurementRequestPlan() {
+const organizationHint = (value: string | undefined) =>
+  value && /^[1-9]\d*$/.test(value) && Number(value) <= 2147483647 ? value : undefined;
+
+export function ProcurementRequestPlan({ suggestedOrg }: { suggestedOrg?: string }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [org, setOrg] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    api<Organization[]>("/api/procurement/receipt-organizations").then(v => { if (live) setOrganizations(v); }).catch(e => { if (live) setError(message(e)); });
+    api<Organization[]>("/api/procurement/receipt-organizations").then(v => {
+      if (!live) return;
+      setOrganizations(v);
+      const hint = organizationHint(suggestedOrg);
+      if (hint && v.some(row => String(row.id) === hint)) setOrg(hint);
+    }).catch(e => { if (live) setError(message(e)); });
     return () => { live = false; };
-  }, []);
+  }, [suggestedOrg]);
   return <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">План закупок</h1>
     <p>Создание и изменение плана доступны главному бухгалтеру выбранного юрлица с доступом к закупкам.</p>
     <p>Свяжите заявку с существующим заказом своего юрлица или создайте заказ из согласованной заявки в разделе заказов поставщикам.</p>
