@@ -4,11 +4,12 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
 from modules.accounting import sales, service, zero_value_disposals
-from modules.accounting.models import Account
+from modules.accounting.models import Account, Entry
 from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
@@ -16,7 +17,7 @@ from tests.accounting.test_finished_goods_inventory_postgres import (
     _output_cost_command,
     sale_document,
 )
-from tests.accounting.test_inventory_allocation_api_postgres import output_sources
+from tests.accounting.test_inventory_allocation_api_postgres import application, output_sources
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 
@@ -65,12 +66,28 @@ async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory,
                         quantity_tracking=False, cash=False, normative_ref="Synthetic"))
             await session.flush()
         document = sale_document(policy_id).model_copy(update={"lot": "", "quantity": Decimal("3.1"), "vat_rate": Decimal(vat_rate)})
-        prepared = await sales.prepare(session, pg_book[0], document, source_allocations=True)
+        await session.commit()
+        base = f"/accounting/organizations/{pg_book[0]}/sales"
+        async with AsyncClient(transport=ASGITransport(app=application(pg_factory)), base_url="http://test") as client:
+            response = await client.post(base + "/posting-preview", json=document.model_dump(mode="json"))
+            assert response.status_code == 200, response.text
+            prepared = response.json()
+            confirmation = {**document.model_dump(mode="json"), "basis_digest": prepared["cost"]["basis_digest"],
+                            "digest": prepared["digest"]}
+            response = await client.post(base + "/confirm", json=confirmation)
+            assert response.status_code == 201, response.text
+            entry_id = response.json()["id"]
+            retry = await client.post(base + "/confirm", json=confirmation)
+            assert retry.status_code == 201 and retry.json()["id"] == entry_id, retry.text
+            changed = await client.post(base + "/confirm", json={**confirmation, "quantity": "3.0"})
+            assert changed.status_code == 422, changed.text
+            foreign = await client.post(f"/accounting/organizations/{pg_book[0] + 1000}/sales/posting-preview",
+                                        json=document.model_dump(mode="json"))
+            assert foreign.status_code in {403, 404}, foreign.text
         assert prepared["zero_value_command"]["command_version"] == 4
         assert len(prepared["zero_value_command"]["inventory_layers"]) == 2
         assert "source_allocation_version" not in prepared["cost"]
-        entry = await sales.confirm(session, pg_book[0], document, prepared["cost"]["basis_digest"],
-            prepared["digest"], "tester", source_allocations=True)
+        entry = await session.get(Entry, entry_id)
         assert (await sales.confirm(session, pg_book[0], document, prepared["cost"]["basis_digest"],
             prepared["digest"], "tester", source_allocations=True)).id == entry.id
         zeros = await load_authenticated_zero_value_disposals(session, pg_book[0])
