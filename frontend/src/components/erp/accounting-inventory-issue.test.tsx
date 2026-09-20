@@ -49,6 +49,22 @@ it("invalidates a calculation when form or posting date changes", async () => {
   expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
 });
 
+it("shows a zero-value receipt honestly without a phantom posting or entry link", async () => {
+  const zero = { kind: "quantity_only_receipt" as const, cost: { ...calculation.cost, issue_cost_byn: "0.00", evidence: [{ entry_id: null, line_id: null, receipt_id: 9, source: "zero", source_version: 1, amount_byn: "0.00", quantity: "0.500000", zero_value_disposal: true }] }, digest: "zero", posting: null, receipt: { source_layer: { entry_id: 2, line_id: 3, quantity: "0.500000" }, zero_byn: true } };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith("confirm") ? { kind: "quantity_only_receipt", receipt_id: 9, registration_token: 10 } : zero })));
+  const onEntry = vi.fn();
+  const onPosted = vi.fn();
+  render(<AccountingInventoryIssue {...props} onEntry={onEntry} onPosted={onPosted} />); fill(); fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText(/Себестоимость 0.00 BYN/);
+  expect(screen.queryByText(/^Дт /)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Операция №/ })).not.toBeInTheDocument();
+  expect(screen.getByText(/Остаток после: 1.500000/)).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Запись списания № 9 зарегистрирована.")).toBeInTheDocument();
+  expect(onEntry).not.toHaveBeenCalled();
+  expect(onPosted).toHaveBeenCalledOnce();
+});
+
 it("allows FIFO to value a SKU across explicit lots", async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ...calculation, cost: { ...calculation.cost, method: "fifo" } }) }));
   vi.stubGlobal("fetch", fetcher);
