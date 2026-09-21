@@ -158,7 +158,7 @@ export function ProcurementKanban({ suggestedOrg }: { suggestedOrg?: string }) {
     return () => { active = false; };
   }, [suggestedOrg]);
   return <section className="space-y-4 p-6">
-    <div className="space-y-1"><h1 className="text-xl font-semibold">Воронка закупок</h1><p>Канбан показывает только документы выбранного юрлица. Этапы поставки и приёмки строятся из фактического статуса заказа и цепочки первичных документов.</p></div>
+    <div className="space-y-1"><h1 className="text-xl font-semibold">Закупки · обзор и воронка</h1><p>Обзор и канбан показывают только документы выбранного юрлица. Этапы поставки и приёмки строятся из фактического статуса заказа и цепочки первичных документов.</p></div>
     {error && <p role="alert">{error}</p>}
     <Select aria-label="Юрлицо канбана закупок" value={organization} onChange={event => setOrganization(event.target.value)}><option value="">Выберите юрлицо</option>{organizations.map(row => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select>
     {organization && <CompanyKanban key={organization} org={Number(organization)} />}
@@ -259,11 +259,20 @@ function CompanyKanban({ org }: { org: number }) {
   }
 
   const { cards, cancelled } = cardsFor(org, requests, orders, chains);
+  const overview = [
+    { label: "Заявки в работе", stages: ["need", "sourcing", "nego", "analysis", "approval"] as StageId[], href: `/erp/procurement/planning?org=${org}` },
+    { label: "Заказы поставщикам", stages: ["po"] as StageId[], href: `/erp/procurement/orders?org=${org}` },
+    { label: "Поставка", stages: ["supply"] as StageId[], href: `/erp/procurement/orders?org=${org}` },
+    { label: "Приёмка", stages: ["qc"] as StageId[], href: `/erp/procurement/receipts?org=${org}` },
+    { label: "Завершено", stages: ["done"] as StageId[], href: `/erp/procurement/orders?org=${org}` },
+  ];
+  const partial = requestNext !== null || orderNext !== null;
   return <div className="space-y-4">
     {!identity && !error && <p role="status">Загрузка документов закупок…</p>}
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {identity && !identity.can_manage && <p>Доступен просмотр. Перевод заявки между этапами доступен главному бухгалтеру этого юрлица с доступом к закупкам.</p>}
+    {identity && <section aria-label="Оперативный обзор закупок" className="space-y-3 rounded-xl border border-line bg-sunken/40 p-3"><div><h2 className="font-semibold">Оперативный обзор</h2><p className="text-sm text-muted">Счётчики построены из документов, уже загруженных для выбранного юрлица; они не подменяют план, фактическую себестоимость или статусы поставщиков.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{overview.map((item) => <Link key={item.label} href={item.href} className="rounded-lg border border-line bg-surface p-3 hover:border-accent"><p className="text-sm text-muted">{item.label}</p><p className="mt-1 text-2xl font-semibold">{cards.filter(card => item.stages.includes(card.stage)).length}</p></Link>)}</div>{partial && <p className="text-sm text-muted">Показана первая страница документов. Загрузите остальные строки ниже, прежде чем использовать счётчики для контроля.</p>}</section>}
     <div className="flex flex-wrap gap-3"><Button disabled={busy || !identity} variant="secondary" onClick={() => run(refresh)}>Обновить канбан</Button><Link className="self-center text-accent underline" href={`/erp/procurement/planning?org=${org}`}>Открыть план закупок</Link><Link className="self-center text-accent underline" href={`/erp/procurement/receipts?org=${org}`}>Открыть накладные на поступление</Link></div>
     <div className="grid auto-cols-[minmax(252px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3" aria-label="Канбан закупок">
       {(Object.keys(stageTitles) as StageId[]).map(stage => <section key={stage} aria-label={`Колонка ${stageTitles[stage]}`} className="min-h-[250px] space-y-3 rounded-xl border border-line bg-sunken/40 p-3"><header className="flex items-center justify-between gap-2"><h2 className="font-semibold">{stageTitles[stage]}</h2><span className="rounded-full bg-surface px-2 py-0.5 text-xs text-muted">{cards.filter(card => card.stage === stage).length}</span></header>

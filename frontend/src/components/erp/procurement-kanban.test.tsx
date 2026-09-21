@@ -52,6 +52,12 @@ it("строит девять живых этапов из scoped заявок, 
   expect(within(screen.getByLabelText("Колонка Поставка")).getByText("PO-011")).toBeInTheDocument();
   expect(within(screen.getByLabelText("Колонка Приёмка")).getByText("PO-012")).toBeInTheDocument();
   expect(screen.queryByText("REQ-006")).toBeNull();
+  const overview = screen.getByLabelText("Оперативный обзор закупок");
+  expect(within(overview).getByText("Заявки в работе").nextElementSibling).toHaveTextContent("5");
+  expect(within(overview).getByText("Заказы поставщикам").nextElementSibling).toHaveTextContent("1");
+  expect(within(overview).getByText("Поставка").nextElementSibling).toHaveTextContent("1");
+  expect(within(overview).getByText("Приёмка").nextElementSibling).toHaveTextContent("1");
+  expect(within(overview).getByText("Завершено").nextElementSibling).toHaveTextContent("1");
   expect(screen.getByText("Отменённых заказов вне канбана: 1. Их можно проверить в разделе заказов поставщикам.")).toBeInTheDocument();
   expect(vi.mocked(fetch).mock.calls.flat().join(" ")).not.toContain("/procurement/board");
 });
