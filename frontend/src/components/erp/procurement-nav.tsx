@@ -2,6 +2,7 @@ import Link from "next/link";
 
 export function ProcurementNav() {
   return <nav aria-label="Разделы закупок" className="flex flex-wrap gap-3 px-6 py-3 text-sm">
+    <Link className="text-accent underline" href="/erp/procurement">Воронка закупок</Link>
     <Link className="text-accent underline" href="/erp/procurement/planning">План закупок</Link>
     <Link className="text-accent underline" href="/erp/procurement/orders">Заказы поставщикам</Link>
     <Link className="text-accent underline" href="/erp/procurement/receipts">Накладные на поступление</Link>

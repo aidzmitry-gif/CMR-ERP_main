@@ -83,6 +83,7 @@ const MODULES: ModuleItem[] = [
     Icon: ShoppingCart,
     href: "/erp/procurement",
     sub: [
+      { label: "Воронка закупок", href: "/erp/procurement" },
       { label: "План закупок", href: "/erp/procurement/planning" },
       { label: "Заказы поставщикам", href: "/erp/procurement/orders" },
       { label: "Накладные на поступление", href: "/erp/procurement/receipts" },
