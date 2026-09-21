@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { SourceTag } from "@/components/source-tag";
@@ -233,7 +234,13 @@ export function FinanceView() {
         <h1 className="text-xl font-bold text-ink">Финансы</h1>
         <p className="mt-1 text-sm text-muted">
           Операционный срез: касса (ДДС-lite), фактическая маржа, AR/AP-aging, прогноз
-          движения денег и сверка с 1С. Учёт/НДС/ЭСЧФ остаются в 1С.
+          движения денег и сверка с 1С.
+        </p>
+        <p className="mt-1 text-sm text-muted">
+          Регламентированный учёт и регистры НДС ведутся в{" "}
+          <Link className="text-accent underline" href="/erp/accounting">Бухгалтерии</Link>.
+          ЭСЧФ и интеграция с 1С сохраняют переходный статус до отдельных проверок;
+          1С остаётся архивом истории и источником сверки до приёмки пилота.
         </p>
       </div>
 

@@ -101,6 +101,8 @@ describe("FinanceView", () => {
   it("рендерит заголовок и все вкладки финансов", () => {
     render(<FinanceView />);
     expect(screen.getByRole("heading", { name: "Финансы" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Бухгалтерии" })).toHaveAttribute("href", "/erp/accounting");
+    expect(screen.getByText(/1С остаётся архивом истории и источником сверки до приёмки пилота/)).toBeInTheDocument();
     for (const label of ["Касса и маржа", "Платежи", "Aging", "Cash-flow", "P&L", "Баланс", "Сверка 1С"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
