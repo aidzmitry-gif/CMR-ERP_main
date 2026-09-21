@@ -10,10 +10,16 @@ INVENTORY_CONFIRM = {"expected_source": "wms_physical", "journal_complete": True
                      "source_evidence": "Synthetic complete physical journal"}
 
 
-async def physical_receipt(api, org, sku, qty, warehouse):
-    response = await api.post("/wms/receipt", json={"organization_id": org, "sku_code": sku,
-                                                  "qty": qty, "warehouse": warehouse})
-    assert response.status_code == 201, response.text
+async def seed_opening_stock(session, org, sku, qty, warehouse, *, location_id=None):
+    """Test fixture: a pre-existing opening balance, never a supplier receipt."""
+    from decimal import Decimal
+
+    from modules.wms.models import StockMovement
+
+    session.add(StockMovement(organization_id=org, sku_code=sku, warehouse=warehouse,
+                              kind="in", qty=Decimal(str(qty)), reason="receipt",
+                              location_id=location_id, note="Synthetic opening balance"))
+    await session.commit()
 
 
 @pytest_asyncio.fixture
@@ -136,7 +142,7 @@ async def test_wms_inventory(api, session, erp_organization):
                           qty_available=Decimal(41), cost=Decimal(230)))
     await session.commit()
 
-    await physical_receipt(api, erp_organization, "AKB-60", 41, "Минск")
+    await seed_opening_stock(session, erp_organization, "AKB-60", 41, "Минск")
     payload = {"organization_id": erp_organization, "warehouse": "Минск", **INVENTORY_CONFIRM}
     doc = (await api.post("/wms/inventory", json=payload)).json()
     assert doc["status"] == "open" and doc["number"].startswith("ИНВ-2026-")
@@ -165,7 +171,7 @@ async def test_wms_inventory(api, session, erp_organization):
 
 
 async def test_wms_operational(api, session, erp_organization):
-    """Операции (приёмка/отгрузка/перемещение/коррекция) → движения + оперативный остаток."""
+    """Операции склада поверх начального остатка → движения и оперативный остаток."""
 
     from modules.wms.events import on_stock_released
 
@@ -174,7 +180,7 @@ async def test_wms_operational(api, session, erp_organization):
     assert loc1["is_active"] is True
 
     base = {"organization_id": erp_organization, "sku_code": "AKB-60", "warehouse": "Минск"}
-    assert (await api.post("/wms/receipt", json={**base, "qty": 10, "location_id": loc1["id"]})).status_code == 201
+    await seed_opening_stock(session, erp_organization, "AKB-60", 10, "Минск", location_id=loc1["id"])
     assert (await api.post("/wms/shipment", json={**base, "qty": 3, "location_id": loc1["id"]})).status_code == 201
     tr = await api.post("/wms/transfer", json={**base, "qty": 2, "from_location_id": loc1["id"], "to_location_id": loc2["id"]})
     assert tr.status_code == 201 and len(tr.json()) == 2 and tr.json()[0]["doc_ref"].startswith("TRF-")
@@ -220,7 +226,7 @@ async def test_wms_operational(api, session, erp_organization):
     assert (await api.get("/wms/balances?sku=AKB-60")).json() == bal
 
     # RBAC: операции (wms.count) только у склада; логистика (wms.read) — 403
-    assert (await api.post("/wms/receipt", json={**base, "qty": 1},
+    assert (await api.post("/wms/adjustment", json={**base, "qty": 1},
             headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
@@ -236,7 +242,7 @@ async def test_wms_inventory_adjustment_movements(api, session, erp_organization
                           qty_available=Decimal(30), cost=Decimal(300)))
     await session.commit()
 
-    await physical_receipt(api, erp_organization, "ZU-15A", 30, "Гомель")
+    await seed_opening_stock(session, erp_organization, "ZU-15A", 30, "Гомель")
     doc = (await api.post("/wms/inventory", json={"organization_id": erp_organization, "warehouse": "Гомель", **INVENTORY_CONFIRM})).json()
     det = (await api.post(f"/wms/inventory/{doc['id']}/populate")).json()
     line = next(line for line in det["lines"] if line["sku_code"] == "ZU-15A")
@@ -417,7 +423,7 @@ async def test_wms_reconciliation(api, session, erp_organization):
     session.add(StockItem(sku_code="LFP-12-100", warehouse="Минск",
                           qty_available=Decimal(14), cost=Decimal(1850)))
     await session.commit()
-    await api.post("/wms/receipt", json={"organization_id": erp_organization, "sku_code": "LFP-12-100", "qty": 10, "warehouse": "Минск"})
+    await seed_opening_stock(session, erp_organization, "LFP-12-100", 10, "Минск")
 
     rec = (await api.get("/wms/reconciliation")).json()
     assert rec["gateway"] is True
@@ -483,7 +489,7 @@ async def test_wms_cycle_count(api, session, erp_organization):
         StockItem(sku_code="ROLL-5", warehouse="Гомель", qty_available=Decimal(30), cost=Decimal(2100)),
     ])
     await session.commit()
-    await physical_receipt(api, erp_organization, "ROLL-5", 30, "Гомель")
+    await seed_opening_stock(session, erp_organization, "ROLL-5", 30, "Гомель")
     plan = (await api.post("/wms/cycle-plans",
             json={"organization_id": erp_organization, "warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01", **INVENTORY_CONFIRM})).json()
     det = (await api.post(f"/wms/cycle-plans/{plan['id']}/run", json=INVENTORY_CONFIRM)).json()
@@ -626,7 +632,7 @@ async def test_wms_reconciliation_does_not_overwrite_1c(api, session, erp_organi
                      qty_available=Decimal(14), cost=Decimal(1850))
     session.add(item)
     await session.commit()
-    await api.post("/wms/receipt", json={"organization_id": erp_organization, "sku_code": "LFP-24-200", "qty": 10, "warehouse": "Минск"})
+    await seed_opening_stock(session, erp_organization, "LFP-24-200", 10, "Минск")
 
     rec = (await api.get("/wms/reconciliation")).json()
     row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-24-200")
@@ -650,7 +656,7 @@ async def test_wms_cycle_count_correcting_movement_unknown_cost(api, session, er
                   qty_available=Decimal(30), cost=Decimal("1850.50")),
     ])
     await session.commit()
-    await physical_receipt(api, erp_organization, "ROLL-8", 30, "Гомель")
+    await seed_opening_stock(session, erp_organization, "ROLL-8", 30, "Гомель")
     plan = (await api.post("/wms/cycle-plans",
             json={"organization_id": erp_organization, "warehouse": "Гомель", "cadence_days": 7, "next_due_date": "2020-01-01", **INVENTORY_CONFIRM})).json()
     doc = (await api.post(f"/wms/cycle-plans/{plan['id']}/run", json=INVENTORY_CONFIRM)).json()

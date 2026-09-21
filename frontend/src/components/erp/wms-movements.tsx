@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { ArrowLeftRight, ArrowUpFromLine, RefreshCw, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -12,7 +12,6 @@ import {
   locationLabel,
   REASON_LABELS,
   reasonLabel,
-  receipt,
   shipment,
   type StockMovement,
   transfer,
@@ -148,10 +147,9 @@ function MovementsLog({ rows }: { rows: StockMovement[] }) {
   );
 }
 
-type OpKind = "receipt" | "shipment" | "transfer" | "adjustment";
+type OpKind = "shipment" | "transfer" | "adjustment";
 
-const OPS: { id: OpKind; label: string; Icon: typeof ArrowDownToLine }[] = [
-  { id: "receipt", label: "Приёмка", Icon: ArrowDownToLine },
+const OPS: { id: OpKind; label: string; Icon: typeof ArrowUpFromLine }[] = [
   { id: "shipment", label: "Отгрузка", Icon: ArrowUpFromLine },
   { id: "transfer", label: "Перемещение", Icon: ArrowLeftRight },
   { id: "adjustment", label: "Коррекция", Icon: SlidersHorizontal },
@@ -170,7 +168,7 @@ export function WmsMovements({
 }) {
   const [organizationId, setOrganizationId] = useState("");
   const [rows, setRows] = useState<StockMovement[]>(initial);
-  const [op, setOp] = useState<OpKind>("receipt");
+  const [op, setOp] = useState<OpKind>("shipment");
   const [f, setF] = useState({ ...EMPTY });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -212,8 +210,7 @@ export function WmsMovements({
     const base = { organization_id: Number(organizationId), sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim() || "Главный", batch_ref: f.batch.trim(), note: f.note.trim() };
     try {
       let ok = false;
-      if (op === "receipt") ok = await receipt({ ...base, location_id: loc });
-      else if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
+      if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
       else if (op === "adjustment") ok = await adjustment({ ...base, location_id: loc });
       else ok = await transfer({ ...base, from_location_id: loc, to_location_id: f.locTo ? Number(f.locTo) : null });
       if (!ok) {
@@ -239,11 +236,15 @@ export function WmsMovements({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">
           Складские операции записываются в <b>журнал движений ERP</b> с указанием юрлица.
-          Физический остаток рассчитывается по этим движениям. Первичные накладные на поступление находятся в закупках.
+          Физический остаток рассчитывается по этим движениям. Первичные накладные на поступление создаются в закупках,
+          затем склад выполняет приёмку и QC по связанной накладной.
         </p>
         <div className="flex items-center gap-2">
           <Link href="/erp/wms/balances" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken">
             Остаток из движений →
+          </Link>
+          <Link href="/erp/procurement/receipts" className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink">
+            Накладные на поступление →
           </Link>
           <button disabled={busy} onClick={refresh} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken">
             <RefreshCw size={15} /> Обновить

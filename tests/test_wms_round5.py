@@ -268,9 +268,9 @@ async def test_reconciliation_shows_diff_not_silent(api, session):
     ])
     await session.commit()
 
-    # WMS: 12 пришло, 1С: 20 доступно → diff = 12 − 20 = −8
+    # WMS: зафиксировано 12, 1С: 20 доступно → diff = 12 − 20 = −8
     organization_id = await book(api)
-    response = await api.post("/wms/receipt",
+    response = await api.post("/wms/adjustment",
                    json={"organization_id": organization_id, "sku_code": "R5-DIFF", "qty": 12, "warehouse": "Минск"})
     assert response.status_code == 201, response.text
 
@@ -300,9 +300,9 @@ async def test_reconciliation_no_cost_diff_value_is_none(api, session):
     ])
     await session.commit()
 
-    # WMS: 5 пришло, 1С: 10 → diff = −5, но cost=None → diff_value должен быть null
+    # WMS: зафиксировано 5, 1С: 10 → diff = −5, но cost=None → diff_value должен быть null
     organization_id = await book(api)
-    response = await api.post("/wms/receipt",
+    response = await api.post("/wms/adjustment",
                    json={"organization_id": organization_id, "sku_code": "R5-NOCOST", "qty": 5, "warehouse": "Минск"})
     assert response.status_code == 201, response.text
 
@@ -334,7 +334,7 @@ async def test_reconciliation_does_not_write_to_1c(api, session):
 
     # WMS: 15 ≠ 1С: 25
     organization_id = await book(api)
-    created = await api.post("/wms/receipt",
+    created = await api.post("/wms/adjustment",
                    json={"organization_id": organization_id, "sku_code": "R5-NOWRITE", "qty": 15, "warehouse": "Минск"})
     assert created.status_code == 201, created.text
     result = await api.get("/wms/reconciliation")
@@ -367,6 +367,7 @@ async def test_cycle_count_physical_variance(api, session, expected, counted, ki
     """Adjust only owned physical stock; never value it using the unverified 1C mirror."""
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
+    from modules.wms.models import StockMovement
 
     organization_id = await book(api)
     sku, warehouse = "R5-CYCLE", "Минск"
@@ -376,11 +377,10 @@ async def test_cycle_count_physical_variance(api, session, expected, counted, ki
                   qty_available=Decimal("999"), cost=Decimal("1850.50")),
     ])
     await session.commit()
-    receipt = await api.post("/wms/receipt", json={
-        "organization_id": organization_id, "warehouse": warehouse,
-        "sku_code": sku, "qty": expected,
-    })
-    assert receipt.status_code == 201, receipt.text
+    session.add(StockMovement(organization_id=organization_id, warehouse=warehouse,
+                              sku_code=sku, kind="in", qty=Decimal(expected),
+                              reason="receipt", note="Synthetic opening balance"))
+    await session.commit()
     plan = await api.post("/wms/cycle-plans", json={
         "organization_id": organization_id, "warehouse": warehouse,
         "cadence_days": 30, **CONFIRM,

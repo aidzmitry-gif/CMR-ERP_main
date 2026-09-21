@@ -997,7 +997,7 @@ async def test_ownership_preview_rechecks_after_other_company_claim(pg_factory, 
             release.set()
         await pending
 
-@pytest.mark.parametrize("competitor", ["complete", "receipt"])
+@pytest.mark.parametrize("competitor", ["complete", "adjustment"])
 async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg_book, competitor):
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
@@ -1039,7 +1039,7 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
         edited = await client.patch(f"/wms/inventory/lines/{line_id}", json={"counted_qty": 27})
         assert edited.status_code == 200, edited.text
         competing = (client.post(f"/wms/inventory/{count_id}/complete") if competitor == "complete"
-                     else client.post("/wms/receipt", json={"organization_id": pg_book[0],
+                     else client.post("/wms/adjustment", json={"organization_id": pg_book[0],
                           "warehouse": "Test", "sku_code": "A", "qty": "5"}))
         posted, other = await asyncio.gather(client.post(f"/wms/inventory/{count_id}/complete"), competing)
         if competitor == "complete":

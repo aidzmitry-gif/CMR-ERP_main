@@ -140,7 +140,6 @@ async function postOp(path: string, body: unknown): Promise<boolean> {
   }
 }
 
-export const receipt = (i: OpInput) => postOp("receipt", i);
 export const shipment = (i: OpInput) => postOp("shipment", i);
 export const adjustment = (i: OpInput) => postOp("adjustment", i);
 export const transfer = (i: {

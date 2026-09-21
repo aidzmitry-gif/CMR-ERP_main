@@ -258,36 +258,44 @@ async def test_task_list_filters_owner_before_kind_status_and_assignee(api, sess
     assert (await api.get("/wms/tasks", headers={"X-User": "no-task-grants"})).json() == []
 
 
-@pytest.mark.parametrize("kind", ["receipts", "tasks"])
-async def test_manual_wms_create_requires_explicit_accessible_owner_and_exact_quantity(api, session, kind):
+@pytest.mark.parametrize("kind", ["tasks"])
+async def test_manual_wms_task_requires_explicit_accessible_owner_and_exact_quantity(api, session, kind):
     org = await book(api)
-    # Manual receipt lookup uses the existing SKU master table from the API fixture.
-    data = {"lines": [{"sku_code": "A", "expected_qty": "1.25"}]} if kind == "receipts" else {"kind": "pick", "sku_code": "A", "qty": "1.25"}
+    data = {"kind": "pick", "sku_code": "A", "qty": "1.25"}
     assert (await api.post(f"/wms/{kind}", json=data)).status_code == 422
     for invalid_owner in [None, True, "1", 0, -1]:
         assert (await api.post(f"/wms/{kind}", json={**data, "organization_id": invalid_owner})).status_code == 422
     owned = {**data, "organization_id": org}
     assert (await api.post(f"/wms/{kind}", json=owned, headers={"X-User": "foreign-manual-user"})).status_code == 403
-    model = Receipt if kind == "receipts" else Task
-    assert await session.scalar(select(model.id)) is None
+    assert await session.scalar(select(Task.id)) is None
     for invalid_qty in ["0", "-1", "0.001", "NaN", "1000000000000"]:
-        invalid = {**owned, "lines": [{"sku_code": "A", "expected_qty": invalid_qty}]} if kind == "receipts" else {**owned, "qty": invalid_qty}
+        invalid = {**owned, "qty": invalid_qty}
         assert (await api.post(f"/wms/{kind}", json=invalid)).status_code == 422
     result = await api.post(f"/wms/{kind}", json=owned)
     assert result.status_code == 201, result.text
     assert result.json()["organization_id"] == org
     listed = await api.get(f"/wms/{kind}")
     assert [row["id"] for row in listed.json()] == [result.json()["id"]]
-    if kind == "receipts":
-        from modules.wms.models import ReceiptLine
-        line = await session.scalar(select(ReceiptLine))
-        assert line.expected_qty == Decimal("1.25")
-    else:
-        row = await session.get(Task, result.json()["id"])
-        assert row.qty == Decimal("1.25")
+    row = await session.get(Task, result.json()["id"])
+    assert row.qty == Decimal("1.25")
 
 
-@pytest.mark.parametrize("operation", ["movements", "receipt", "shipment", "transfer", "adjustment", "pack"])
+async def test_supplier_receipt_shortcuts_are_rejected_before_stock_changes(api, session):
+    org = await book(api)
+    primary_message = "Supplier receipts are created in Procurement"
+    direct = await api.post("/wms/receipt", json={"organization_id": org, "sku_code": "A", "qty": "1", "warehouse": "Shared"})
+    generic = await api.post("/wms/movements", json={"organization_id": org, "sku_code": "A", "qty": "1",
+        "warehouse": "Shared", "kind": "in", "reason": "receipt"})
+    document = await api.post("/wms/receipts", json={"organization_id": org, "warehouse": "Shared",
+        "lines": [{"sku_code": "A", "expected_qty": "1"}]})
+    assert [direct.status_code, generic.status_code, document.status_code] == [409, 409, 409]
+    assert all(primary_message in response.text for response in [direct, generic])
+    assert "Create the supplier primary receipt in Procurement" in document.text
+    assert await session.scalar(select(StockMovement.id)) is None
+    assert await session.scalar(select(Receipt.id)) is None
+
+
+@pytest.mark.parametrize("operation", ["movements", "shipment", "transfer", "adjustment", "pack"])
 async def test_manual_movement_owner_and_list_visibility(api, session, operation):
     org = await book(api)
     payload = {"sku_code": "OWN-SKU", "qty": "1.25", "warehouse": "Shared"}
@@ -303,7 +311,7 @@ async def test_manual_movement_owner_and_list_visibility(api, session, operation
     if operation == "shipment":
         assert (await api.post("/wms/shipment", json=payload)).status_code == 409
         assert await session.scalar(select(StockMovement.id)) is None
-        assert (await api.post("/wms/receipt", json=payload)).status_code == 201
+        assert (await api.post("/wms/adjustment", json=payload)).status_code == 201
     response = await api.post(f"/wms/{operation}", json=payload)
     assert response.status_code == 201, response.text
     created = response.json() if isinstance(response.json(), list) else [response.json()]
@@ -339,7 +347,7 @@ async def test_balance_groups_accessible_books_separately_and_excludes_unknown(a
     assert (await api.get("/wms/balances", headers={"X-User": "no-stock-grants"})).json() == {"rows": [], "sku_count": 0}
 
 
-@pytest.mark.parametrize("operation", ["movements", "receipt", "shipment", "transfer", "adjustment", "pack"])
+@pytest.mark.parametrize("operation", ["movements", "shipment", "transfer", "adjustment", "pack"])
 async def test_manual_movement_rejects_wrong_inactive_and_missing_locations(api, session, operation):
     org = await book(api)
     own = Location(warehouse="Own", code="GOOD", is_active=True)
@@ -360,7 +368,7 @@ async def test_manual_movement_rejects_wrong_inactive_and_missing_locations(api,
     if operation == "shipment":
         assert (await api.post("/wms/shipment", json={**payload, field: own.id})).status_code == 409
         assert await session.scalar(select(StockMovement.id)) is None
-        assert (await api.post("/wms/receipt", json={**payload, field: own.id})).status_code == 201
+        assert (await api.post("/wms/adjustment", json={**payload, field: own.id})).status_code == 201
     response = await api.post(f"/wms/{operation}", json={**payload, field: own.id})
     assert response.status_code == 201, response.text
 

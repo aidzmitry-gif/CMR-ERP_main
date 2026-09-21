@@ -142,7 +142,7 @@ async def test_inventory_and_physical_writer_use_same_organization_lock(api, ses
         return await original(session, organization_id)
 
     monkeypatch.setattr(gateway, "lock_organization", tracked_lock)
-    response = await api.post("/wms/receipt", json={"organization_id": books[0], "warehouse": "Shared", "sku_code": "A", "qty": 30})
+    response = await api.post("/wms/adjustment", json={"organization_id": books[0], "warehouse": "Shared", "sku_code": "A", "qty": 30})
     assert response.status_code == 201 and calls == [books[0]]
     calls.clear()
     doc_id = await count(api, books[0])

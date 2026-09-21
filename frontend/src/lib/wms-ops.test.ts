@@ -12,7 +12,6 @@ import {
   fetchMovementsServer,
   locationLabel,
   reasonLabel,
-  receipt,
   shipment,
   type StockMovement,
   transfer,
@@ -244,27 +243,6 @@ describe("клиентские fetch* через /api", () => {
 
 describe("операции записи (POST /api/wms/*)", () => {
   const input = { sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
-
-  it("receipt: URL, метод, заголовки, тело — true при ok", async () => {
-    const fn = stubFetch({ ok: true });
-    const result = await receipt(input);
-    expect(fn).toHaveBeenCalledWith("/api/wms/receipt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    expect(result).toBe(true);
-  });
-
-  it("receipt: ok:false → false", async () => {
-    stubFetch(null, false);
-    expect(await receipt(input)).toBe(false);
-  });
-
-  it("receipt: сеть упала → false", async () => {
-    stubFetchThrow();
-    expect(await receipt(input)).toBe(false);
-  });
 
   it("shipment: правильный путь /api/wms/shipment", async () => {
     const fn = stubFetch({});

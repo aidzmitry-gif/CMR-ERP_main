@@ -624,7 +624,7 @@ async def test_persisted_basis_cannot_be_replaced_by_current_stock_or_client_fla
     assert response.status_code == 409 and "persisted_physical_basis_changed" in response.text
 
 
-async def test_neutral_pack_transfer_and_receipt_do_not_spend_reserve(api, session):
+async def test_neutral_pack_transfer_and_adjustment_do_not_spend_reserve(api, session):
     org, _ = await prepared(api, session)
     first = await api.post("/wms/locations", json={"warehouse": "W", "code": "L1"})
     second = await api.post("/wms/locations", json={"warehouse": "W", "code": "L2"})
@@ -634,7 +634,7 @@ async def test_neutral_pack_transfer_and_receipt_do_not_spend_reserve(api, sessi
     assert moved.status_code == 201, moved.text
     packed = await api.post("/wms/pack", json=common)
     assert packed.status_code == 201, packed.text
-    received = await api.post("/wms/receipt", json=common)
+    received = await api.post("/wms/adjustment", json=common)
     assert received.status_code == 201, received.text
     assert (await counts(session))[0:3] == [0, 0, 2]
 

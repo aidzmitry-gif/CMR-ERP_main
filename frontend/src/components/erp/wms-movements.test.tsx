@@ -15,7 +15,6 @@ vi.mock("@/lib/wms-ops", async (importActual) => {
   return {
     ...actual,
     fetchMovements: vi.fn().mockResolvedValue([]),
-    receipt: vi.fn().mockResolvedValue(true),
     shipment: vi.fn().mockResolvedValue(true),
     adjustment: vi.fn().mockResolvedValue(true),
     transfer: vi.fn().mockResolvedValue(true),
@@ -57,13 +56,18 @@ const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.clearAllMocks();
   asMock(wms.fetchMovements).mockResolvedValue([]);
-  asMock(wms.receipt).mockResolvedValue(true);
   asMock(wms.shipment).mockResolvedValue(true);
   asMock(wms.adjustment).mockResolvedValue(true);
   asMock(wms.transfer).mockResolvedValue(true);
 });
 
 describe("WmsMovements", () => {
+  it("направляет накладную поставщика в закупки и не даёт вручную создать приёмку", () => {
+    render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+    expect(screen.getByRole("link", { name: /Накладные на поступление/ })).toHaveAttribute("href", "/erp/procurement/receipts");
+    expect(screen.queryByRole("button", { name: "Приёмка" })).not.toBeInTheDocument();
+  });
+
   it("clears the selected location when warehouse changes", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={locations} />);
     fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
@@ -73,11 +77,11 @@ describe("WmsMovements", () => {
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "A" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
-    await waitFor(() => expect(wms.receipt).toHaveBeenCalledWith(expect.objectContaining({ warehouse: "Второй", location_id: null })));
+    await waitFor(() => expect(wms.shipment).toHaveBeenCalledWith(expect.objectContaining({ warehouse: "Второй", location_id: null })));
   });
   it("locks editable fields and operation tabs until posting finishes", async () => {
     let finish!: (value: boolean) => void;
-    asMock(wms.receipt).mockReturnValueOnce(new Promise<boolean>((resolve) => { finish = resolve; }));
+    asMock(wms.shipment).mockReturnValueOnce(new Promise<boolean>((resolve) => { finish = resolve; }));
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
     fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "A" } });
@@ -99,7 +103,7 @@ describe("WmsMovements", () => {
     expect(screen.getByText("6СТ-190")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-    expect(wms.receipt).not.toHaveBeenCalled();
+    expect(wms.shipment).not.toHaveBeenCalled();
   });
 
   it("does not report failed posting when only refresh failed after saved movement", async () => {
@@ -111,7 +115,7 @@ describe("WmsMovements", () => {
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
     expect(await screen.findByText(/Движение записано, но журнал не обновился/)).toBeInTheDocument();
     expect(screen.getByText("6СТ-190")).toBeInTheDocument();
-    expect(wms.receipt).toHaveBeenCalledTimes(1);
+    expect(wms.shipment).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Записать" })).toBeEnabled();
   });
   it("requires explicit organization even when only one is available", () => {
@@ -120,7 +124,7 @@ describe("WmsMovements", () => {
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "1.25" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
     expect(screen.getByText("Выберите юрлицо операции")).toBeInTheDocument();
-    expect(wms.receipt).not.toHaveBeenCalled();
+    expect(wms.shipment).not.toHaveBeenCalled();
   });
   it("рендерит журнал: русская подпись типа, знаковое кол-во и цвет прихода/расхода", () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[inRow, outRow]} locations={[]} />);
@@ -174,12 +178,12 @@ describe("WmsMovements", () => {
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     expect(screen.getByText("Укажите корректное количество, не более двух знаков после запятой")).toBeInTheDocument();
-    expect(wms.receipt).not.toHaveBeenCalled();
+    expect(wms.shipment).not.toHaveBeenCalled();
   });
 
-  it("успешная приёмка: qty с запятой парсится, зовётся receipt, показывается успех и журнал обновляется", async () => {
+  it("успешная отгрузка: qty с запятой парсится, зовётся shipment, показывается успех и журнал обновляется", async () => {
     asMock(wms.fetchMovements).mockResolvedValue([
-      mv({ id: 9, sku_code: "НОВЫЙ-SKU", kind: "in", qty: 3, reason: "receipt" }),
+      mv({ id: 9, sku_code: "НОВЫЙ-SKU", kind: "out", qty: 3, reason: "shipment" }),
     ]);
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
 
@@ -189,7 +193,7 @@ describe("WmsMovements", () => {
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     await waitFor(() =>
-      expect(wms.receipt).toHaveBeenCalledWith(
+      expect(wms.shipment).toHaveBeenCalledWith(
         expect.objectContaining({ organization_id: 7, sku_code: "6СТ-190", qty: 2.5, warehouse: "Главный" }),
       ),
     );
@@ -200,7 +204,7 @@ describe("WmsMovements", () => {
   });
 
   it("сбой записи показывает ошибку и НЕ обновляет журнал", async () => {
-    asMock(wms.receipt).mockResolvedValue(false);
+    asMock(wms.shipment).mockResolvedValue(false);
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
 
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-190" } });
@@ -212,21 +216,21 @@ describe("WmsMovements", () => {
     expect(wms.fetchMovements).not.toHaveBeenCalled();
   });
 
-  it("переключение операции на «Отгрузка» шлёт shipment, а не receipt", async () => {
+  it("переключение операции на «Коррекция» шлёт adjustment, а не shipment", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Отгрузка/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Коррекция/ }));
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-100" } });
-    fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "4" } });
+    fireEvent.change(screen.getByPlaceholderText("Кол-во (±)"), { target: { value: "4" } });
     fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     await waitFor(() =>
-      expect(wms.shipment).toHaveBeenCalledWith(
+      expect(wms.adjustment).toHaveBeenCalledWith(
         expect.objectContaining({ organization_id: 7, sku_code: "6СТ-100", qty: 4 }),
       ),
     );
-    expect(wms.receipt).not.toHaveBeenCalled();
+    expect(wms.shipment).not.toHaveBeenCalled();
   });
 
   it("кнопка «Обновить» перечитывает журнал из бэкенда", async () => {
@@ -264,6 +268,6 @@ describe("WmsMovements", () => {
         expect.objectContaining({ organization_id: 7, sku_code: "6СТ-190", qty: 2, from_location_id: 10, to_location_id: 10 }),
       ),
     );
-    expect(wms.receipt).not.toHaveBeenCalled();
+    expect(wms.shipment).not.toHaveBeenCalled();
   });
 });
