@@ -53,6 +53,16 @@ class SellerProfileInput(Input):
     confirmed: bool = Field(strict=True)
 
 
+class CatalogAdoptionInput(Input):
+    """Only accountant evidence and timing cross the boundary.
+
+    The regulatory catalogue identity is intentionally never client supplied.
+    """
+    request_key: UUID
+    effective_from: date
+    evidence: str = Field(min_length=10, max_length=2000)
+
+
 class SourceBindingInput(Input):
     source_type: Literal["wms_receipt", "logistics_import", "finance_bank_transaction"]
     source_id: int = Field(gt=0, strict=True)

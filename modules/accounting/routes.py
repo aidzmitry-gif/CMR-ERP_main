@@ -71,6 +71,7 @@ from modules.accounting.late_pool_cost import PoolLateCostConfirmation
 from modules.accounting.models import (
     AccessGrant,
     Account,
+    CatalogAdoption,
     Entry,
     Inbox,
     InventoryIssueReceipt,
@@ -127,6 +128,7 @@ from modules.accounting.repair_accounting import (
 )
 from modules.accounting.schemas import (
     AccountInput,
+    CatalogAdoptionInput,
     BankAccountMappingCloseInput,
     BankAccountMappingInput,
     CloseInput,
@@ -307,6 +309,36 @@ async def accounts(org_id: int, on: date, ctx=Depends(member)):
     return [serialize(row) for row in (await service.accounts_on(ctx[0], org_id, on)).values()]
 
 
+@router.get("/organizations/{org_id}/catalog-adoptions")
+async def catalog_adoptions(org_id: int, ctx=Depends(member)):
+    rows = (await ctx[0].scalars(select(CatalogAdoption).where(
+        CatalogAdoption.organization_id == org_id,
+    ).order_by(CatalogAdoption.effective_from.desc(), CatalogAdoption.id.desc()))).all()
+    return [service.catalog_adoption_result(row) for row in rows]
+
+
+@router.post("/organizations/{org_id}/catalog-adoptions", status_code=201)
+async def create_catalog_adoption(org_id: int, data: CatalogAdoptionInput, ctx=Depends(member)):
+    chief(ctx)
+    try:
+        replay = await service.catalog_adoption_replay(ctx[0], org_id, data)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if replay is not None:
+        return replay
+    await ensure_future_version(ctx[0], org_id, data.effective_from)
+    try:
+        row = await service.create_catalog_adoption(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    service.audit(ctx[0], org_id, ctx[1], "catalog_adoption_created", {
+        "catalog_adoption_id": row["catalog_adoption_id"],
+        "effective_from": row["effective_from"],
+        "catalog_version": row["catalog_version"],
+    })
+    return row
+
+
 @router.get("/organizations/{org_id}/seller-profiles")
 async def seller_profile_versions(org_id: int, ctx=Depends(member)):
     from modules.accounting.models import SellerProfile
@@ -341,7 +373,10 @@ async def ensure_future_version(session, org_id, effective):
 async def create_account(org_id: int, data: AccountInput, ctx=Depends(member)):
     chief(ctx)
     await ensure_future_version(ctx[0], org_id, data.valid_from)
-    row = Account(organization_id=org_id, **data.model_dump())
+    adoption = await service.catalog_adoption_on(ctx[0], org_id, data.valid_from)
+    row = Account(organization_id=org_id,
+                  catalog_adoption_id=adoption.id if adoption is not None else None,
+                  **data.model_dump())
     ctx[0].add(row)
     service.audit(ctx[0], org_id, ctx[1], "account_version_created", data.model_dump(mode="json"))
     await ctx[0].flush()

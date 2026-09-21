@@ -13,6 +13,7 @@ from core.domain.reference import Currency
 from modules.accounting.models import (
     Account,
     Audit,
+    CatalogAdoption,
     Entry,
     FinancialCloseReceipt,
     FinancialReopenItem,
@@ -70,6 +71,97 @@ async def accounts_on(session, org_id, on):
 def digest(data):
     return hashlib.sha256(json.dumps(data.model_dump(mode="json"), ensure_ascii=False,
                                      sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _snapshot_digest(snapshot: dict) -> str:
+    return hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def catalog_adoption_result(row: CatalogAdoption) -> dict:
+    snapshot = dict(row.snapshot)
+    if _snapshot_digest(snapshot) != row.digest:
+        raise AccountingError("Catalog adoption integrity requires reconciliation")
+    return {
+        "catalog_adoption_id": row.id,
+        "organization_id": row.organization_id,
+        "effective_from": row.effective_from.isoformat(),
+        "evidence": row.evidence,
+        "catalog_version": row.catalog_version,
+        "catalog_source": row.catalog_source,
+        "catalog_review_state": row.catalog_review_state,
+        "current_normative_verified": row.current_normative_verified,
+        "request_key": row.request_key,
+        "digest": row.digest,
+        "actor": row.actor,
+    }
+
+
+async def create_catalog_adoption(session, org_id, data, actor: str) -> dict:
+    """Append a receipt whose catalogue provenance is captured server-side."""
+    replay = await catalog_adoption_replay(session, org_id, data)
+    if replay is not None:
+        return replay
+    request_digest = digest(data)
+    occupied = await session.scalar(select(CatalogAdoption.id).where(
+        CatalogAdoption.organization_id == org_id,
+        CatalogAdoption.effective_from == data.effective_from,
+    ))
+    if occupied is not None:
+        raise AccountingError("Catalog adoption already exists for this effective date")
+
+    from modules.accounting.catalog import catalogue
+
+    catalog = catalogue()
+    snapshot = {
+        "organization_id": org_id,
+        "effective_from": data.effective_from.isoformat(),
+        "evidence": data.evidence,
+        "catalog_version": catalog["version"],
+        "catalog_source": catalog["source"],
+        "catalog_review_state": catalog["normative_review"],
+        "current_normative_verified": catalog["current_normative_verified"],
+        "chart_codes_verified": catalog["chart_codes_verified"],
+    }
+    row = CatalogAdoption(
+        organization_id=org_id,
+        effective_from=data.effective_from,
+        evidence=data.evidence,
+        catalog_version=catalog["version"],
+        catalog_source=catalog["source"],
+        catalog_review_state=catalog["normative_review"],
+        current_normative_verified=catalog["current_normative_verified"],
+        request_key=str(data.request_key),
+        request_digest=request_digest,
+        digest=_snapshot_digest(snapshot),
+        snapshot=snapshot,
+        actor=actor,
+    )
+    session.add(row)
+    await session.flush()
+    return catalog_adoption_result(row)
+
+
+async def catalog_adoption_replay(session, org_id, data) -> dict | None:
+    """Return a matching immutable receipt before any prospective-date gate."""
+    await lock_organization(session, org_id)
+    request_digest = digest(data)
+    existing = await session.scalar(select(CatalogAdoption).where(
+        CatalogAdoption.organization_id == org_id,
+        CatalogAdoption.request_key == str(data.request_key),
+    ))
+    if existing is None:
+        return None
+    if existing.request_digest != request_digest:
+        raise AccountingError("Catalog adoption request was reused with different content")
+    return catalog_adoption_result(existing)
+
+
+async def catalog_adoption_on(session, org_id, on):
+    return await session.scalar(select(CatalogAdoption).where(
+        CatalogAdoption.organization_id == org_id,
+        CatalogAdoption.effective_from <= on,
+    ).order_by(CatalogAdoption.effective_from.desc(), CatalogAdoption.id.desc()).limit(1))
 
 
 async def validate_posting(session, org_id, data: PostingInput, *, inventory_issue=False, inventory_sale=False,

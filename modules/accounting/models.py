@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     String,
@@ -67,7 +68,13 @@ class SellerProfile(Base):
 class Account(Base):
     __tablename__ = "account"
     __table_args__ = (
-        UniqueConstraint("organization_id", "code", "valid_from"), {"schema": "accounting"},
+        UniqueConstraint("organization_id", "code", "valid_from"),
+        ForeignKeyConstraint(
+            ["organization_id", "catalog_adoption_id"],
+            ["accounting.catalog_adoption.organization_id", "accounting.catalog_adoption.id"],
+            name="fk_account_catalog_adoption_organization",
+        ),
+        {"schema": "accounting"},
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
@@ -80,6 +87,34 @@ class Account(Base):
     quantity_tracking: Mapped[bool] = mapped_column(Boolean)
     cash: Mapped[bool] = mapped_column(Boolean)
     normative_ref: Mapped[str] = mapped_column(String(200))
+    # Legacy accounts deliberately remain unlinked.  New versions receive the
+    # effective immutable catalogue-adoption receipt at creation time.
+    catalog_adoption_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+
+class CatalogAdoption(Base):
+    """Immutable organization acknowledgement of one server-known chart edition."""
+    __tablename__ = "catalog_adoption"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_catalog_adoption_request"),
+        UniqueConstraint("organization_id", "effective_from", name="uq_catalog_adoption_effective"),
+        UniqueConstraint("organization_id", "id", name="uq_catalog_adoption_organization_id"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"), index=True)
+    effective_from: Mapped[date] = mapped_column(Date)
+    evidence: Mapped[str] = mapped_column(String(2000))
+    catalog_version: Mapped[str] = mapped_column(String(200))
+    catalog_source: Mapped[str] = mapped_column(String(2000))
+    catalog_review_state: Mapped[dict] = mapped_column(JSON)
+    current_normative_verified: Mapped[bool] = mapped_column(Boolean)
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Policy(Base):
@@ -1082,7 +1117,7 @@ def immutable(mapper, connection, target):
     raise ValueError("Accounting history is immutable; append a new version or correction")
 
 
-for _model in (Account, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
+for _model in (Account, CatalogAdoption, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,
                ShipmentAccountingReceipt, ShipmentPreparationDraft, InventoryIssueReceipt, InventorySaleReceipt,
                ProductionOutputTransferReceipt, ProductionLaborReceipt, PayrollAccrualReceipt,
