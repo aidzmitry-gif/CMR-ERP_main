@@ -4,6 +4,9 @@ This is a release-control record for the isolated accounting source branch.
 It makes no deployment request and does not certify an installed database,
 statutory reporting, ESCHF delivery, or replacement of 1C.
 
+The requirement-by-requirement source evidence and the remaining acceptance
+conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
+
 ## Observed source state
 
 - Application-source revision at capture (before this control-record commit):
