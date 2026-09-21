@@ -21,8 +21,8 @@ async def test_output_cost_confirm_uses_authorized_organization_and_actor(monkey
 
     calls = []
 
-    async def confirm(session, org, month, data, actor, bus):
-        calls.append((session, org, month, actor, bus))
+    async def confirm(session, org, month, data, actor, bus, *, procurement=None):
+        calls.append((session, org, month, actor, bus, procurement))
         return SimpleNamespace(id=9, entry_id=None, sequence=2)
 
     monkeypatch.setattr(workflow, "confirm_output_cost_correction", confirm)
@@ -33,7 +33,7 @@ async def test_output_cost_confirm_uses_authorized_organization_and_actor(monkey
     result = await routes.production_output_cost_confirm(12, "2026-10", data, response,
         expected_principal="bookkeeper",
         ctx=(session, "bookkeeper", "accountant"), core=SimpleNamespace(services=SimpleNamespace(event_bus=bus)))
-    assert calls == [(session, 12, "2026-10", "bookkeeper", bus)]
+    assert calls == [(session, 12, "2026-10", "bookkeeper", bus, None)]
     assert result["revision_id"] == 9 and result["entry_id"] is None
     assert result["final_cost_certified"] is False
     assert response.headers["Cache-Control"] == "private, no-store"
