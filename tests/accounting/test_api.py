@@ -186,38 +186,31 @@ async def test_event_adapter_and_registration(db, book, posting):
 async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(client):
     catalog = (await client.get("/accounting/catalog")).json()
     assert catalog["current_normative_verified"] is False
-    assert catalog["chart_codes_verified"] is True
-    assert catalog["version"] == "BY-MF50-2026-01-01-chart-verified-instruction-review-required"
-    assert catalog["current_revision_reference"] == "2025-10-31"
-    assert catalog["verified_through"] == "2026-01-01 для перечня счетов и субсчетов; Инструкция частично проверена по 2025-10-31"
+    assert catalog["chart_codes_verified"] is False
+    assert catalog["version"] == "BY-MF50-official-2022-12-28-current-primary-review-required"
+    assert catalog["current_revision_reference"] == "2022-12-28"
+    assert catalog["verified_through"] == "2022-12-28 по доступному официальному PDF; редакция 2026 года требует первичной сверки"
     review = catalog["normative_review"]
-    assert review["status"] == "chart_verified_instruction_requires_primary_review"
-    assert review["checked_at"] == "2026-09-20"
-    assert review["verified_through"] == "2026-01-01 для приложения 1; 2025-10-31 для доступной области Инструкции"
-    assert review["source_access"] == "official_2022_pdf_and_current_consolidated_legal_database"
-    assert review["evidence"][1] == {
-        "document": "Постановление Минфина № 73",
-        "url": "https://base2.spinform.ru/show_doc.fwx?rgn=171243",
-        "source_kind": "legal_database_full_text",
-        "coverage": "Полный опубликованный текст: пункт 1.7 меняет преамбулу и Инструкцию, но не приложение 1 с номерами счетов и субсчетами.",
+    assert review["status"] == "official_source_through_2022_current_primary_review_required"
+    assert review["checked_at"] == "2026-09-21"
+    assert review["verified_through"] == "2022-12-28 по доступному официальному PDF; редакция 2026 года не подтверждена"
+    assert review["source_access"] == "official_minfin_pdf"
+    assert review["evidence"] == [{
+        "document": "Постановление Минфина № 50",
+        "url": "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf",
+        "source_kind": "official_pdf",
+        "coverage": "Полный доступный PDF; перечень изменений заканчивается 28.12.2022. Он подтверждает только историческую транскрипцию справочника.",
         "full_text_verified": True,
-    }
-    assert review["evidence"][2] == {
-        "document": "Постановление Минфина № 126",
-        "url": "https://base.spinform.ru/show_doc.fwx?rgn=48715",
-        "source_kind": "legal_database_current_consolidated_text",
-        "coverage": "Текущая редакция № 50 действует с 01.01.2026, включает № 126 в перечне изменений и у приложения 1 указывает только изменения 2012 и 2013 годов; полный первичный текст Инструкции не получен.",
-        "full_text_verified": False,
-    }
-    assert "Полный первичный текст" in review["blocking_reasons"][1]
+    }]
+    assert "Применимая на дату первичная консолидированная редакция" in review["blocking_reasons"][1]
     amendments = catalog["known_amendments"]
     assert [(item["document"], item["impact_on_chart"], item["full_text_verified"]) for item in amendments] == [
-        ("Постановление Минфина № 73", "no_chart_code_change", True),
-        ("Постановление Минфина № 126", "no_chart_code_change", False),
+        ("Постановление Минфина № 73", "unknown", False),
+        ("Постановление Минфина № 126", "unknown", False),
     ]
-    assert amendments[0]["source_kind"] == "legal_database_full_text"
-    assert amendments[1]["chart_appendix_verified"] is True
-    assert amendments[1]["source_kind"] == "legal_database_current_consolidated_text"
+    assert amendments[0]["source_kind"] == "non_primary_discovery"
+    assert amendments[1]["chart_appendix_verified"] is False
+    assert amendments[1]["source_kind"] == "non_primary_discovery"
     accounts = (await client.get("/accounting/catalog/accounts")).json()
     assert len(accounts) == len(catalog["accounts"])
     assert len({row["code"] for row in accounts}) == len(accounts)

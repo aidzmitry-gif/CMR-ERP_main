@@ -19,7 +19,7 @@ beforeEach(() => {
   vi.stubGlobal("crypto", { randomUUID: () => "00000000-0000-4000-8000-000000000099" });
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-    if (url.endsWith("/catalog")) return respond({ version: "current-chart", source: "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf", verified_through: "2026-01-01", current_normative_verified: false, chart_codes_verified: true, normative_review: { status: "chart_verified_instruction_requires_primary_review", checked_at: "2026-09-20", verified_through: "2026-01-01" }, known_amendments: [{ document: "Постановление Минфина № 126", date: "2025-10-31", effective_from: "2026-01-01", status: "chart_appendix_verified_instruction_primary_review_pending", impact_on_chart: "no_chart_code_change", chart_appendix_verified: true, full_text_verified: false, checked_at: "2026-09-20", evidence: "Текущая редакция включает № 126 и у приложения 1 перечисляет только изменения 2012 и 2013 годов." }], accounts: [{ code: "41", title: "Товары", parent: null }, { code: "41.1", title: "Товары на складах", parent: "41" }] });
+    if (url.endsWith("/catalog")) return respond({ version: "historical-chart", source: "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf", verified_through: "2022-12-28", current_normative_verified: false, chart_codes_verified: false, normative_review: { status: "official_source_through_2022_current_primary_review_required", checked_at: "2026-09-21", verified_through: "2022-12-28" }, known_amendments: [{ document: "Постановление Минфина № 126", date: "2025-10-31", effective_from: "не подтверждено первичным источником", status: "candidate_primary_source_required", impact_on_chart: "unknown", chart_appendix_verified: false, full_text_verified: false, checked_at: "2026-09-21", evidence: "Влияние на план счетов первичным источником не подтверждено." }], accounts: [{ code: "41", title: "Товары", parent: null }, { code: "41.1", title: "Товары на складах", parent: "41" }] });
     if (url.endsWith("/organizations")) return respond([{ id: 1, name: "Первая книга", unp: "999999999" }, { id: 2, name: "Вторая книга", unp: "888888888" }]);
     if (url.includes("/catalog-adoptions")) return init?.method === "POST" && adoptionPost ? adoptionPost(url, init) : respond(adoptionRows[url.includes("/2/") ? "2" : "1"] ?? []);
     if (url.includes("/accounts?")) return respond(url.includes("/2/") ? [] : [{ code: "41.1", title: "Рабочие товары", valid_from: "2026-01-01", required_dimensions: ["warehouse", "sku"], quantity_tracking: true }]);
@@ -28,13 +28,13 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-it("shows a searchable current chart without implying instruction certification", async () => {
+it("shows a searchable historical chart without implying current certification", async () => {
   render(<AccountingChart />);
   await screen.findByText("Товары на складах");
-  expect(screen.getByText(/Номера счетов и субсчета приложения 1 сверены/)).toBeInTheDocument();
-  expect(screen.getByText(/Проверка сведений: 2026-09-20/)).toBeInTheDocument();
-  expect(screen.getByText(/номера счетов и субсчета в проверенном тексте не изменены/)).toBeInTheDocument();
-  expect(screen.getByText(/Приложение 1 сверено в текущей консолидированной редакции/)).toBeInTheDocument();
+  expect(screen.getByText(/Доступный официальный текст подтверждает исторический справочник/)).toBeInTheDocument();
+  expect(screen.getByText(/Проверка сведений: 2026-09-21/)).toBeInTheDocument();
+  expect(screen.getByText(/влияние на план счетов не установлено/)).toBeInTheDocument();
+  expect(screen.queryByText(/Приложение 1 сверено/)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Поиск счетов"), { target: { value: "41.1" } });
   expect(screen.queryByText("Товары", { exact: true })).not.toBeInTheDocument();
   expect(screen.getByText("Субсчёт")).toBeInTheDocument();

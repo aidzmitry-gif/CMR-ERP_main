@@ -43,9 +43,9 @@ class AccountingModule(ModuleContract):
                      ReferenceColumn("off_balance", "Забалансовый", "bool", editable=False),
                      ReferenceColumn("edition_status", "Редакция", editable=False)),
             permissions=("refs.view",), archivable=False, versioned=True, ai_exposed=False,
-            description="Типовой справочник по постановлению № 50: базовая транскрипция через 2022 год "
-                        "с очередью проверки изменений № 73 и № 126. Нормативная редакция 2026 года "
-                        "не подтверждена; рабочие счета ведутся по юрлицам.",
+            description="Типовой справочник по постановлению № 50: базовая транскрипция доступного "
+                        "официального текста через 2022 год. Применимая нормативная редакция требует "
+                        "первичной сверки; рабочие счета ведутся по юрлицам.",
         ))
 
 
