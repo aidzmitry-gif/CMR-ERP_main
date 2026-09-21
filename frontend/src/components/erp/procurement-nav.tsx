@@ -6,7 +6,11 @@ export function ProcurementNav() {
     <Link className="text-accent underline" href="/erp/procurement/planning">План закупок</Link>
     <Link className="text-accent underline" href="/erp/procurement/orders">Заказы поставщикам</Link>
     <Link className="text-accent underline" href="/erp/procurement/receipts">Накладные на поступление</Link>
+    <Link className="text-accent underline" href="/erp/procurement/rfq">Запросы цен (RFQ)</Link>
+    <Link className="text-accent underline" href="/erp/procurement/suppliers">Поставщики</Link>
+    <Link className="text-accent underline" href="/erp/procurement/cost-calc">Калькулятор себестоимости</Link>
     <Link className="text-accent underline" href="/erp/procurement/additional-expenses">Дополнительные расходы</Link>
+    <Link className="text-accent underline" href="/erp/procurement/claims">Претензии поставщикам</Link>
     <Link className="text-accent underline" href="/erp/procurement/ownership">Юрлица и связи</Link>
     <Link className="text-accent underline" href="/erp/procurement/company-documents">Документы юрлица</Link>
   </nav>;
