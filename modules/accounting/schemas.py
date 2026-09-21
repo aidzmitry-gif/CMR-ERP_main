@@ -23,6 +23,7 @@ def exact(value):
 
 
 Money = Annotated[Decimal, BeforeValidator(exact), Field(ge=0, max_digits=20, decimal_places=2)]
+StatutoryRate = Annotated[Decimal, BeforeValidator(exact), Field(ge=0, max_digits=24, decimal_places=12)]
 Quantity = Annotated[Decimal, BeforeValidator(exact), Field(gt=0, max_digits=24, decimal_places=6)]
 Code = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^[0-9]+(?:\.[0-9]+)*$")]
 
@@ -79,6 +80,41 @@ class BankAccountMappingInput(Input):
 class BankAccountMappingCloseInput(Input):
     valid_to: date
     evidence: str = Field(min_length=10, max_length=1000)
+
+
+class StatutoryRequirementInput(Input):
+    request_key: UUID
+    kind: Literal["form", "rate"]
+    code: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=500)
+    effective_from: date
+    source_reference: str = Field(min_length=1, max_length=1000)
+    evidence: str = Field(min_length=10, max_length=2000)
+    form_version: str | None = Field(default=None, min_length=1, max_length=120)
+    electronic_format_version: str | None = Field(default=None, min_length=1, max_length=120)
+    rate_value: StatutoryRate | None = None
+    rate_unit: str | None = Field(default=None, min_length=1, max_length=120)
+    rate_basis: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_kind_fields(self):
+        if self.effective_from.day != 1:
+            raise ValueError("Statutory requirements take effect on the first day of a period")
+        for label, value in (("code", self.code), ("title", self.title),
+                             ("source reference", self.source_reference), ("evidence", self.evidence)):
+            if not value or not value.strip():
+                raise ValueError(f"Statutory requirement {label} must be meaningful")
+        form_fields = (self.form_version, self.electronic_format_version)
+        rate_fields = (self.rate_value, self.rate_unit, self.rate_basis)
+        if self.kind == "form":
+            if (any(value is None or not value.strip() for value in form_fields)
+                    or any(value is not None for value in rate_fields)):
+                raise ValueError("A statutory form requires its versions and cannot carry rate fields")
+        elif (any(value is not None for value in form_fields)
+              or rate_fields[0] is None
+              or any(value is None or not value.strip() for value in rate_fields[1:])):
+            raise ValueError("A statutory rate requires value, unit and basis and cannot carry form fields")
+        return self
 
 
 class GrantInput(Input):

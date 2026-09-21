@@ -44,6 +44,7 @@ from modules.accounting import (
     sales,
     seller_profiles,
     service,
+    statutory_requirements,
     settlement_offsets,
     shipment_drafts,
     specific_zero_value_issue,
@@ -148,6 +149,7 @@ from modules.accounting.schemas import (
     ReopenInput,
     SellerProfileInput,
     SourceBindingInput,
+    StatutoryRequirementInput,
 )
 from modules.accounting.settlement_offsets import (
     SettlementOffsetConfirmInput,
@@ -466,6 +468,29 @@ async def close_bank_account_mapping(org_id: int, mapping_id: int, data: BankAcc
         "after": {**bank_account_mapping.result(row), "close_evidence": data.evidence},
     })
     return bank_account_mapping.result(row)
+
+
+@router.get("/organizations/{org_id}/periods/{month}/statutory-requirements")
+async def statutory_requirements_for_period(org_id: int, month: str, ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    return await statutory_requirements.effective_for(
+        ctx[0], org_id, date.fromisoformat(month + "-01"),
+    )
+
+
+@router.post("/organizations/{org_id}/statutory-requirements", status_code=201)
+async def create_statutory_requirement(org_id: int, data: StatutoryRequirementInput,
+                                        ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    row = await statutory_requirements.create(ctx[0], org_id, data, ctx[1])
+    service.audit(ctx[0], org_id, ctx[1], "statutory_requirement_created", {
+        "requirement_id": row["requirement_id"], "kind": row["kind"],
+        "code": row["code"], "revision": row["revision"],
+    })
+    return row
 
 
 @router.post("/organizations/{org_id}/preview")
