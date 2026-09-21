@@ -10,6 +10,7 @@ from modules.wms.invoice_reservations import InvoiceReservationRelease
 from modules.wms.invoice_shipments import PhysicalShipmentAct
 from modules.wms.models import ReservationVersion
 from tests.accounting.test_invoice_settlements import bank
+from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 from tests.test_invoice_cancellation import cancel_request
 from tests.test_invoice_issuance import erp_money_flow
