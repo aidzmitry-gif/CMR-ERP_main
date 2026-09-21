@@ -52,8 +52,18 @@ function salesOriginal(org: string, reference: string) {
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/accounting${path}`, { method: body === undefined ? "GET" : "POST", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Проверьте заполнение полей и права доступа.");
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(response.ok
+      ? "ERP вернула некорректный ответ. Повторите загрузку."
+      : "Бухгалтерия временно недоступна. Повторите загрузку.");
+  }
+  if (!response.ok) {
+    const detail = data && typeof data === "object" && "detail" in data && typeof data.detail === "string" ? data.detail : undefined;
+    throw new Error(detail ?? "Проверьте заполнение полей и права доступа.");
+  }
   return data as T;
 }
 

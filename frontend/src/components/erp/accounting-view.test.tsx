@@ -190,6 +190,15 @@ describe("AccountingView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("No access");
     expect(screen.queryByText("Оборотно-сальдовая ведомость")).not.toBeInTheDocument();
   });
+  it("shows a safe error when the accounting API returns no JSON", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve({
+      ok: false,
+      json: async () => { throw new SyntaxError("Unexpected end of JSON input"); },
+    }));
+    render(<AccountingView />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Бухгалтерия временно недоступна. Повторите загрузку.");
+    expect(screen.queryByText(/Unexpected end of JSON input/)).not.toBeInTheDocument();
+  });
   it("opens the production accounting workspace from the accountant navigation", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
