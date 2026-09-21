@@ -20,6 +20,35 @@ from modules.accounting.schemas import CloseInput
 pytestmark = pytest.mark.integration
 
 
+# ``migration-proposal.py`` freezes the shared 0130 accounting baseline for
+# disposable PostgreSQL databases.  The ORM has since gained only registered
+# additive accounting revisions, so a fixture must replay the same tail rather
+# than silently creating current tables from metadata.  Keeping this list
+# explicit makes a missing registration fail in the focused PostgreSQL tests.
+ACCOUNTING_TAIL_MIGRATIONS = (
+    "0140_zero_value_disposals.py",
+    "0141_zero_value_output_cost.py",
+    "0142_zero_value_command_dates.py",
+    "0143_zero_value_sales.py",
+    "0144_inventory_explicit_allocation_guards.py",
+    "0145_inventory_allocation_cost_stream.py",
+    "0146_zero_value_allocation_basis.py",
+    "0147_zero_value_allocation_runtime.py",
+    "0148_zero_value_allocated_sales.py",
+    "0149_production_material_allocations.py",
+    "0150_zero_material_allocations.py",
+    "0151_late_material_output_cost.py",
+    "0152_signed_prospective_wip.py",
+    "0153_late_pool_atomic_package.py",
+    "0154_late_pool_actual_output_evidence.py",
+    "0155_late_pool_inventory_value_links.py",
+    "0156_expense_article_attribution.py",
+    "0157_statutory_requirement_catalog.py",
+    "0158_catalog_adoption.py",
+    "0159_shipment_document_policy.py",
+)
+
+
 @pytest.mark.parametrize("direction", ["receipt", "refund"])
 async def test_invoice_allocation_concurrency_caps_bank_and_refund(pg_factory, pg_book, direction):
     from datetime import datetime
@@ -438,7 +467,11 @@ async def pg_factory():
                     remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
                     remainder["upgrade"]()
                     runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()
-                    runpy.run_path("migrations/versions/0139_production_output_cost_revision.py")["upgrade"]()
+                    for migration_name in (
+                        "0139_production_output_cost_revision.py",
+                        *ACCOUNTING_TAIL_MIGRATIONS,
+                    ):
+                        runpy.run_path(f"migrations/versions/{migration_name}")["upgrade"]()
 
             await conn.run_sync(upgrade)
         yield async_sessionmaker(engine, expire_on_commit=False)

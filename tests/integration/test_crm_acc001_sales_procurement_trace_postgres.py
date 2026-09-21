@@ -1,8 +1,9 @@
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import OutboxEvent, User
 from modules.accounting.models import Policy
+from modules.logistics.models import CarrierBid, CarrierRfqInvite
 from modules.sales.invoice_cancellation import InvoiceCancellationReceipt
 from modules.sales.models import DealDocument
 from modules.sales.reservation_source import SalesReservationSource
@@ -15,14 +16,17 @@ from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa
 from tests.test_invoice_cancellation import cancel_request
 from tests.test_invoice_issuance import erp_money_flow
 
-
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_pg_paid_invoice_cancellation_requires_full_refund_then_releases_once(issuance_pg):
+async def test_pg_paid_invoice_cancellation_requires_full_refund_then_releases_once(issuance_pg):  # noqa: F811
     api, factory = issuance_pg
     async with factory() as session:
+        connection = await session.connection()
+        for model in (CarrierBid, CarrierRfqInvite, User):
+            await connection.run_sync(lambda c, model=model: model.__table__.create(c, checkfirst=True))
+        await session.commit()
         await erp_money_flow(api, session)
         policy = await session.scalar(select(Policy))
         document = await session.get(DealDocument, 1)
@@ -34,6 +38,11 @@ async def test_pg_paid_invoice_cancellation_requires_full_refund_then_releases_o
     org = policy.organization_id
     prefix = f"/sales/organizations/{org}/invoices/1"
 
+    # The evidence can be prepared only while every received payment has been
+    # returned.  A later payment must invalidate that already-confirmed packet;
+    # the cancel endpoint must not use it to release the reserve.
+    stale_cancel_path, stale_cancel_body = await cancel_request(api, org, facts)
+
     late_entry = await bank(api, (org, policy.id), 1, "trace-late-payment", amount="20.00")
     late_allocation = await api.post(prefix + "/settlements", json={
         "bank_entry_id": late_entry,
@@ -43,8 +52,7 @@ async def test_pg_paid_invoice_cancellation_requires_full_refund_then_releases_o
     })
     assert late_allocation.status_code == 201, late_allocation.text
 
-    blocked_path, blocked_body = await cancel_request(api, org, facts)
-    blocked = await api.post(blocked_path, json=blocked_body)
+    blocked = await api.post(stale_cancel_path, json=stale_cancel_body)
     assert blocked.status_code == 409, blocked.text
     money = await api.get(prefix + "/money-basis")
     assert money.status_code == 200 and money.json()["money_state"] == "funds_held"
