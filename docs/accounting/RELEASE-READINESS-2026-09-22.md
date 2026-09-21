@@ -39,7 +39,11 @@ linear through `0160`:
 
 The command above validates migration topology only.  It neither connects to a
 database nor substitutes for an upgrade, rollback, restore, or concurrent
-PostgreSQL acceptance of the complete `0133`–`0160` range.
+PostgreSQL acceptance of the complete `0133`–`0160` range.  In particular,
+`alembic upgrade head --sql` is not a release check for this repository: legacy
+revision `0062` performs a data lookup that requires an online PostgreSQL
+connection.  The schema candidate must therefore be exercised on an owned
+PostgreSQL database, not accepted from generated offline SQL.
 
 ## Why the accountant page may be absent on the running site
 
