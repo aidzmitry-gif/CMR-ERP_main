@@ -116,6 +116,42 @@ async def test_confirm_is_atomic_and_replayable(db, book):
         FxRevaluationReceipt.id == receipt.id)) == book[0]
 
 
+async def test_unverified_policy_blocks_new_confirmation_but_not_existing_replay(db, book):
+    policy_id = await _policy(db, book[0])
+    await service.post(db, book[0], _foreign_posting(policy_id), "tester")
+    await db.commit()
+    command = FxRevaluationInput(
+        request_key=uuid4(), policy_id=policy_id, posting_date=date(2026, 9, 30),
+        expected_generation=1, rates=[{
+            "currency": "USD", "rate": "3.20", "rate_scale": 1,
+            "rate_date": "2026-09-30", "rate_source": "Synthetic central-bank evidence",
+        }], evidence="Synthetic reviewed rate evidence",
+    )
+    await db.execute(update(Policy).where(Policy.id == policy_id).values(normative_verified=False))
+    await db.commit()
+    blocked_plan = await fx_revaluation.preview(db, book[0], "2026-09", command)
+    blocked_confirm = FxRevaluationConfirmInput(
+        **command.model_dump(), basis_digest=blocked_plan["basis_digest"], digest=blocked_plan["digest"],
+    )
+    assert blocked_plan["confirmation_available"] is False
+    with pytest.raises(service.AccountingError, match="normatively verified policy"):
+        await fx_revaluation.confirm(db, book[0], "2026-09", blocked_confirm, "tester")
+    assert await db.scalar(select(Entry.id).where(Entry.operation == "fx_revaluation")) is None
+    assert await db.scalar(select(FxRevaluationReceipt.id)) is None
+
+    await db.execute(update(Policy).where(Policy.id == policy_id).values(normative_verified=True))
+    await db.commit()
+    approved_plan = await fx_revaluation.preview(db, book[0], "2026-09", command)
+    approved_confirm = FxRevaluationConfirmInput(
+        **command.model_dump(), basis_digest=approved_plan["basis_digest"], digest=approved_plan["digest"],
+    )
+    receipt = await fx_revaluation.confirm(db, book[0], "2026-09", approved_confirm, "tester")
+    await db.commit()
+    await db.execute(update(Policy).where(Policy.id == policy_id).values(normative_verified=False))
+    await db.commit()
+    assert (await fx_revaluation.confirm(db, book[0], "2026-09", approved_confirm, "tester")).id == receipt.id
+
+
 async def test_revaluation_uses_prior_adjustments_and_noop_keeps_correction_chain(db, book):
     policy_id = await _policy(db, book[0])
     await service.post(db, book[0], _foreign_posting(policy_id), "tester")

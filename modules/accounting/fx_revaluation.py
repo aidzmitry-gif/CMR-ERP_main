@@ -387,6 +387,10 @@ async def confirm(session, org_id: int, month: str, data: FxRevaluationConfirmIn
     plan = await preview(session, org_id, month, data)
     if plan["basis_digest"] != data.basis_digest or plan["digest"] != data.digest:
         raise service.AccountingError("FX revaluation basis changed; review it again")
+    if not plan["confirmation_available"]:
+        raise service.AccountingError(
+            "FX revaluation requires a normatively verified policy before confirmation"
+        )
     period = await service.period_for(session, org_id, month)
     if period.generation != data.expected_generation:
         raise service.AccountingError("FX revaluation data changed after review; calculate it again")
