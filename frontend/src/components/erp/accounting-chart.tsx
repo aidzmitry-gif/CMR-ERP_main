@@ -58,16 +58,16 @@ export function AccountingChart() {
   useEffect(() => {
     if (!org) return;
     let active = true;
-    void read<ChartRow[]>(`/organizations/${org}/accounts?on=${on}`).then((data) => { if (active) { setWorking(data); setError(""); } }).catch((e: Error) => { if (active) setError(e.message); });
+    void read<ChartRow[]>(`/organizations/${org}/accounts?on=${on}`).then((data) => { if (active) setWorking(data); }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [org, on, reload]);
   useEffect(() => {
     const request = ++adoptionLoad.current;
     if (!org || mode !== "working") { setAdoptions(null); return; }
     let active = true;
-    void listCatalogAdoptions(Number(org)).then((rows) => { if (active && request === adoptionLoad.current) { setAdoptions(rows); setError(""); } }).catch((reason: Error) => { if (active && request === adoptionLoad.current) setError(reason.message); });
+    void listCatalogAdoptions(Number(org)).then((rows) => { if (active && request === adoptionLoad.current) setAdoptions(rows); }).catch((reason: Error) => { if (active && request === adoptionLoad.current) setError(reason.message); });
     return () => { active = false; };
-  }, [org, on, mode, reload]);
+  }, [org, mode, reload]);
   const activeAdoption = adoptions?.filter((row) => row.effective_from <= on).sort((a, b) => b.effective_from.localeCompare(a.effective_from) || b.catalog_adoption_id - a.catalog_adoption_id)[0];
   async function adoptCatalog() {
     if (!org || adoptionBusy) return;
@@ -93,6 +93,7 @@ export function AccountingChart() {
   }
   const source = mode === "catalog" ? catalog?.accounts : working;
   const rows = source?.filter((row) => `${row.code} ${row.title}`.toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru"))).sort((a, b) => Number(Boolean(a.off_balance || a.category === "off_balance")) - Number(Boolean(b.off_balance || b.category === "off_balance")) || a.code.localeCompare(b.code, "ru", { numeric: true }));
+  const frozenAdoption = pendingAdoption.current;
   return <div className="min-w-0 w-0 flex-1 space-y-4 p-6 lg:pr-24 text-ink">
     <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold">План счетов</h1><p className="mt-1 text-sm text-muted">Справочник Беларуси и рабочий план каждого юридического лица.</p></div><Link className="text-sm text-accent underline" href="/erp/accounting">Перейти в бухгалтерию</Link></header>
     {error && <p role="alert" className="rounded-xl border border-red-300 p-3 text-red-700">{error}</p>}
@@ -103,7 +104,8 @@ export function AccountingChart() {
       {mode === "working" && org && <section className="space-y-3 rounded-xl border border-line bg-surface p-4" aria-label="Подтверждение нормативного каталога">
         <div><h2 className="font-semibold">Подтверждение нормативного каталога</h2>{adoptions === null ? <p className="text-sm text-muted">Загрузка подтверждений…</p> : activeAdoption ? <div className="mt-2 space-y-1 text-sm"><p>Действует с {activeAdoption.effective_from}. Версия: {activeAdoption.catalog_version}.</p><p>Источник: <a className="text-accent underline" href={activeAdoption.catalog_source} target="_blank" rel="noreferrer">{activeAdoption.catalog_source}</a></p><p>Evidence: {activeAdoption.evidence}</p><p>Review-state: {reviewSummary(activeAdoption.catalog_review_state)}</p><p>{activeAdoption.current_normative_verified ? "Нормативная верификация указана сервером." : "Регламентированная готовность не подтверждена: server current_normative_verified=false."}</p></div> : <p className="mt-2 text-sm text-muted">На выбранную дату подтверждение нормативного каталога не найдено; готовность не предполагается.</p>}</div>
         {adoptions?.length ? <details className="text-sm text-muted"><summary>История подтверждений ({adoptions.length})</summary><ul className="mt-2 list-disc pl-5">{adoptions.map((row) => <li key={row.catalog_adoption_id}>{row.effective_from} · {row.catalog_version} · {row.catalog_source} · evidence: {row.evidence} · review-state: {reviewSummary(row.catalog_review_state)} · {row.current_normative_verified ? "верификация указана сервером" : "верификация не подтверждена"}</li>)}</ul></details> : null}
-        <div className="flex flex-wrap items-end gap-3 border-t border-line pt-3"><label className="text-sm">Дата действия<Input aria-label="Дата подтверждения каталога" type="date" value={adoptionEffective} onChange={(e) => setAdoptionEffective(e.target.value)} /></label><label className="min-w-64 flex-1 text-sm">Evidence подтверждения<Input aria-label="Evidence подтверждения каталога" value={adoptionEvidence} onChange={(e) => setAdoptionEvidence(e.target.value)} /></label><Button disabled={adoptionBusy} onClick={() => void adoptCatalog()}>{pendingAdoption.current ? "Повторить принятие каталога" : "Принять редакцию каталога"}</Button></div>
+        <div className="flex flex-wrap items-end gap-3 border-t border-line pt-3"><label className="text-sm">Дата действия<Input aria-label="Дата подтверждения каталога" type="date" value={adoptionEffective} disabled={adoptionBusy || !!frozenAdoption} onChange={(e) => setAdoptionEffective(e.target.value)} /></label><label className="min-w-64 flex-1 text-sm">Evidence подтверждения<Input aria-label="Evidence подтверждения каталога" value={adoptionEvidence} disabled={adoptionBusy || !!frozenAdoption} onChange={(e) => setAdoptionEvidence(e.target.value)} /></label><Button disabled={adoptionBusy} onClick={() => void adoptCatalog()}>{frozenAdoption ? "Повторить принятие каталога" : "Принять редакцию каталога"}</Button></div>
+        {frozenAdoption && <p role="status" className="text-sm text-amber-700">Повтор будет отправлен с теми же данными: дата {frozenAdoption.body.effective_from}; evidence: {frozenAdoption.body.evidence}</p>}
         {notice && <p className="text-sm text-green-700">{notice}</p>}
       </section>}
       <Input aria-label="Поиск счетов" placeholder="Поиск по номеру или названию счёта" value={query} onChange={(e) => setQuery(e.target.value)} />

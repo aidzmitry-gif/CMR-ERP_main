@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AccountingChart } from "./accounting-chart";
 
 const fetchMock = vi.fn();
-const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+const respond = (data: unknown, ok = true, status = ok ? 200 : 500) => Promise.resolve({ ok, status, json: async () => data });
 let adoptionRows: Record<string, unknown[]>;
 let adoptionPost: ((url: string, init?: RequestInit) => Promise<unknown>) | null;
 const adoption = (organizationId: number, requestKey = "00000000-0000-4000-8000-000000000001") => ({
@@ -107,6 +107,34 @@ it("retries one frozen adoption body after an unknown POST result", async () => 
   fireEvent.change(screen.getByLabelText("Evidence подтверждения каталога"), { target: { value: "Явное evidence для повторного запроса" } });
   fireEvent.click(screen.getByText("Принять редакцию каталога"));
   expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+  expect(screen.getByLabelText("Дата подтверждения каталога")).toBeDisabled();
+  expect(screen.getByLabelText("Evidence подтверждения каталога")).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent(/Явное evidence для повторного запроса/);
+  fireEvent.click(screen.getByText("Повторить принятие каталога"));
+  expect(await screen.findByText("Подтверждение каталога сохранено сервером.")).toBeInTheDocument();
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toBe(posts[0]);
+});
+
+it("treats a 5xx adoption result as unknown and retries its frozen body", async () => {
+  const posts: string[] = [];
+  adoptionPost = async (_url, init) => {
+    posts.push(String(init?.body));
+    if (posts.length === 1) return respond({ detail: "Temporary upstream failure" }, false, 503);
+    const body = JSON.parse(posts[0]) as { request_key: string };
+    return respond({ ...adoption(1, body.request_key), effective_from: "2026-10-01", evidence: "5xx retry evidence" });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/подтверждение нормативного каталога не найдено/i);
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Дата подтверждения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Evidence подтверждения каталога"), { target: { value: "5xx retry evidence" } });
+  fireEvent.click(screen.getByText("Принять редакцию каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+  expect(screen.getByText("Повторить принятие каталога")).toBeInTheDocument();
+  expect(screen.getByLabelText("Дата подтверждения каталога")).toBeDisabled();
   fireEvent.click(screen.getByText("Повторить принятие каталога"));
   expect(await screen.findByText("Подтверждение каталога сохранено сервером.")).toBeInTheDocument();
   expect(posts).toHaveLength(2);

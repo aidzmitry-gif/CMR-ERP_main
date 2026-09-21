@@ -85,7 +85,15 @@ export async function createCatalogAdoption(organizationId: number, command: Cat
     throw new CatalogAdoptionApiError("Статус принятия неизвестен: повторите тот же запрос.", false);
   }
   const result = await body(response);
-  if (!response.ok) throw new CatalogAdoptionApiError(message(result, "Подтверждение каталога отклонено."), response.status >= 400 && response.status < 500);
+  if (!response.ok) {
+    const known = response.status >= 400 && response.status < 500;
+    throw new CatalogAdoptionApiError(
+      known
+        ? message(result, "Подтверждение каталога отклонено.")
+        : "Статус принятия неизвестен: сервер не подтвердил сохранение. Повторите тот же запрос.",
+      known,
+    );
+  }
   return parseCatalogAdoption(result, organizationId, command);
 }
 
