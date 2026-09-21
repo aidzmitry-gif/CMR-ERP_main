@@ -404,6 +404,84 @@ class ReconciliationReceipt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ReconciliationIssue(Base):
+    """Immutable queue record for an OSV comparison that cannot be accepted.
+
+    Resolving an item never makes this historical pair acceptable.  A fresh
+    normalized comparison must still be run and accepted by an accountant.
+    """
+
+    __tablename__ = "reconciliation_issue"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_reconciliation_issue_request"),
+        UniqueConstraint("organization_id", "command_digest", name="uq_reconciliation_issue_command"),
+        UniqueConstraint("organization_id", "left_digest", "right_digest",
+                         name="uq_reconciliation_issue_source_pair"),
+        UniqueConstraint("organization_id", "id", name="uq_reconciliation_issue_organization_id"),
+        CheckConstraint("difference_count >= 0", name="reconciliation_issue_difference_count"),
+        CheckConstraint("left_pending_documents >= 0 AND right_pending_documents >= 0",
+                        name="reconciliation_issue_pending_documents"),
+        CheckConstraint("left_rows >= 0 AND right_rows >= 0", name="reconciliation_issue_row_counts"),
+        {"schema": "accounting"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"), index=True)
+    request_key: Mapped[str] = mapped_column(String(36))
+    period_from: Mapped[date] = mapped_column(Date)
+    period_to: Mapped[date] = mapped_column(Date)
+    left_digest: Mapped[str] = mapped_column(String(64))
+    right_digest: Mapped[str] = mapped_column(String(64))
+    left_status: Mapped[str] = mapped_column(String(20))
+    right_status: Mapped[str] = mapped_column(String(20))
+    left_pending_documents: Mapped[int] = mapped_column(Integer)
+    right_pending_documents: Mapped[int] = mapped_column(Integer)
+    left_rows: Mapped[int] = mapped_column(Integer)
+    right_rows: Mapped[int] = mapped_column(Integer)
+    difference_count: Mapped[int] = mapped_column(Integer)
+    eligibility_blockers: Mapped[list] = mapped_column(JSON)
+    responsible: Mapped[str] = mapped_column(String(200))
+    evidence: Mapped[str] = mapped_column(String(2000))
+    command_digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    digest: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReconciliationIssueItem(Base):
+    """One unmatched normalized OSV row belonging to an immutable queue case."""
+
+    __tablename__ = "reconciliation_issue_item"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "issue_id"],
+            ["accounting.reconciliation_issue.organization_id", "accounting.reconciliation_issue.id"],
+            name="fk_reconciliation_issue_item_organization",
+        ),
+        UniqueConstraint("organization_id", "issue_id", "item_key",
+                         name="uq_reconciliation_issue_item_key"),
+        UniqueConstraint("organization_id", "issue_id", "id",
+                         name="uq_reconciliation_issue_item_organization_id"),
+        CheckConstraint("presence IN ('both', 'left_only', 'right_only')",
+                        name="reconciliation_issue_item_presence"),
+        {"schema": "accounting"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(Integer, index=True)
+    issue_id: Mapped[int] = mapped_column(Integer, index=True)
+    item_key: Mapped[str] = mapped_column(String(64))
+    account: Mapped[str] = mapped_column(String(32))
+    dimensions: Mapped[dict] = mapped_column(JSON)
+    currency: Mapped[str] = mapped_column(String(3))
+    off_balance: Mapped[bool] = mapped_column(Boolean)
+    presence: Mapped[str] = mapped_column(String(12))
+    fields: Mapped[dict] = mapped_column(JSON)
+    digest: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialCloseReceipt(Base):
     """Immutable financial transfer package; HTTP confirmation awaits its SQL guards."""
     __tablename__ = "financial_close_receipt"

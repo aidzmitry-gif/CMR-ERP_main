@@ -148,6 +148,7 @@ from modules.accounting.schemas import (
     PostingInput,
     ReconciliationConfirmInput,
     ReconciliationInput,
+    ReconciliationIssueInput,
     ReopenInput,
     SellerProfileInput,
     SourceBindingInput,
@@ -743,6 +744,38 @@ async def compare_reports(org_id: int, data: ReconciliationInput, ctx=Depends(me
 @router.get("/organizations/{org_id}/reconciliation/receipts")
 async def reconciliation_receipts(org_id: int, ctx=Depends(member)):
     return {"organization_id": org_id, "rows": await reconciliation.list_receipts(ctx[0], org_id)}
+
+
+@router.post("/organizations/{org_id}/reconciliation/issues")
+async def queue_reconciliation_issue(org_id: int, data: ReconciliationIssueInput, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Only an accountant may queue an OSV reconciliation issue")
+    try:
+        prepared = await run_in_threadpool(
+            reconciliation.prepare_queue_uploads, org_id, data.left_base64, data.right_base64,
+        )
+        return await reconciliation.queue_uploads(
+            ctx[0], org_id, data.left_base64, data.right_base64, data.request_key,
+            data.responsible, data.evidence, ctx[1], prepared,
+        )
+    except (ValueError, csv.Error, service.AccountingError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/organizations/{org_id}/reconciliation/issues")
+async def reconciliation_issues(org_id: int, after_id: int | None = Query(default=None, ge=1),
+                                limit: int = Query(default=20, ge=1, le=100), ctx=Depends(member)):
+    return await reconciliation.list_issues(ctx[0], org_id, after_id, limit)
+
+
+@router.get("/organizations/{org_id}/reconciliation/issues/{issue_id}")
+async def reconciliation_issue_detail(org_id: int, issue_id: int,
+                                      after_item_id: int | None = Query(default=None, ge=1),
+                                      limit: int = Query(default=50, ge=1, le=100), ctx=Depends(member)):
+    try:
+        return await reconciliation.issue_detail(ctx[0], org_id, issue_id, after_item_id, limit)
+    except service.AccountingError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.post("/organizations/{org_id}/reconciliation/confirm")

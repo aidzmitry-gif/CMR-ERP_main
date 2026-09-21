@@ -92,6 +92,81 @@ async def test_scoped_api_preserves_bytes_and_does_not_post(client, db, book):
     assert (await client.post(path, json={**data, "left_base64": "!bad!"})).status_code == 422
 
 
+async def test_nonmatching_osv_can_be_saved_as_an_immutable_scoped_work_queue(client, db, book):
+    from sqlalchemy import func, select
+
+    from modules.accounting.models import Entry, ReconciliationIssue, ReconciliationIssueItem
+
+    left = snapshot(org=str(book[0]), amount="9007199254740993.01", status="closed_periods", pending="0")
+    right = snapshot(org=str(book[0]), amount="9007199254740993.02", status="closed_periods", pending="0")
+    payload = {
+        "request_key": "00000000-0000-4000-8000-000000000021",
+        "left_base64": base64.b64encode(left).decode(),
+        "right_base64": base64.b64encode(right).decode(),
+        "responsible": "accountant:inventory-team",
+        "evidence": "Расхождение передано ответственному за складскую аналитику",
+    }
+    entries_before = await db.scalar(select(func.count()).select_from(Entry))
+    response = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/issues", json=payload)
+    assert response.status_code == 200, response.text
+    issue = response.json()
+    assert issue["already_queued"] is False
+    assert issue["difference_count"] == 1
+    assert issue["eligibility_blockers"] == ["numeric_differences"]
+    assert issue["responsible"] == payload["responsible"]
+    assert issue["requires_fresh_comparison"] is True
+    assert issue["accepted_by_accountant"] is False and issue["cutover_ready"] is False
+    assert await db.scalar(select(func.count()).select_from(Entry)) == entries_before
+    assert await db.scalar(select(func.count()).select_from(ReconciliationIssue)) == 1
+    assert await db.scalar(select(func.count()).select_from(ReconciliationIssueItem)) == 1
+
+    listed = await client.get(f"/accounting/organizations/{book[0]}/reconciliation/issues")
+    assert listed.status_code == 200
+    assert listed.json()["rows"][0]["issue_id"] == issue["issue_id"]
+    detail = await client.get(f"/accounting/organizations/{book[0]}/reconciliation/issues/{issue['issue_id']}")
+    assert detail.status_code == 200
+    row, = detail.json()["items"]
+    assert (row["account"], row["presence"], row["fields"]["debit"]["right_minus_left"]) == ("001", "both", "0.01")
+
+    replay = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/issues", json=payload)
+    assert replay.status_code == 200
+    assert replay.json()["already_queued"] is True
+    assert await db.scalar(select(func.count()).select_from(ReconciliationIssue)) == 1
+    assert await db.scalar(select(func.count()).select_from(ReconciliationIssueItem)) == 1
+    changed = {**payload, "responsible": "accountant:another-team"}
+    assert (await client.post(f"/accounting/organizations/{book[0]}/reconciliation/issues", json=changed)).status_code == 422
+
+
+async def test_queue_keeps_non_numeric_blockers_but_never_accepts_or_queues_an_eligible_pair(client, db, book):
+    from sqlalchemy import func, select
+
+    from modules.accounting.models import ReconciliationIssue, ReconciliationReceipt
+
+    raw = snapshot(org=str(book[0]), status="preliminary", pending="2")
+    payload = {
+        "request_key": "00000000-0000-4000-8000-000000000022",
+        "left_base64": base64.b64encode(raw).decode(),
+        "right_base64": base64.b64encode(raw).decode(),
+        "responsible": "accountant:period-close",
+        "evidence": "До закрытия периода назначен контроль непроведённых документов",
+    }
+    response = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/issues", json=payload)
+    assert response.status_code == 200, response.text
+    issue = response.json()
+    assert issue["difference_count"] == 0
+    assert issue["eligibility_blockers"] == ["reports_not_closed", "pending_documents"]
+    detail = await client.get(f"/accounting/organizations/{book[0]}/reconciliation/issues/{issue['issue_id']}")
+    assert detail.json()["items"] == []
+    assert await db.scalar(select(func.count()).select_from(ReconciliationReceipt)) == 0
+
+    closed = snapshot(org=str(book[0]), status="closed_periods", pending="0")
+    ready = {**payload, "request_key": "00000000-0000-4000-8000-000000000023",
+             "left_base64": base64.b64encode(closed).decode(), "right_base64": base64.b64encode(closed).decode()}
+    rejected = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/issues", json=ready)
+    assert rejected.status_code == 422 and "подтвердите протокол" in rejected.text
+    assert await db.scalar(select(func.count()).select_from(ReconciliationIssue)) == 1
+
+
 async def test_accountant_can_accept_only_closed_equal_pair_and_replay_is_idempotent(client, db, book):
     from sqlalchemy import func, select
 

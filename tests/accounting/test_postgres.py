@@ -46,6 +46,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0157_statutory_requirement_catalog.py",
     "0158_catalog_adoption.py",
     "0159_shipment_document_policy.py",
+    "0160_reconciliation_issue_queue.py",
 )
 
 

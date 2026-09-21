@@ -441,6 +441,14 @@ class ReconciliationConfirmInput(ReconciliationInput):
     evidence: str = Field(min_length=10, max_length=2000)
 
 
+class ReconciliationIssueInput(ReconciliationInput):
+    """Persist a non-eligible comparison as a work queue, never as acceptance."""
+
+    request_key: UUID
+    responsible: str = Field(min_length=1, max_length=200)
+    evidence: str = Field(min_length=10, max_length=2000)
+
+
 class InventoryLotQuery(Input):
     policy_id: int = Field(gt=0)
     posting_date: date

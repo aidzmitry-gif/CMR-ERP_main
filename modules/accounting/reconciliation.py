@@ -16,7 +16,11 @@ from uuid import UUID
 from sqlalchemy import select
 
 from modules.accounting import service
-from modules.accounting.models import ReconciliationReceipt
+from modules.accounting.models import (
+    ReconciliationIssue,
+    ReconciliationIssueItem,
+    ReconciliationReceipt,
+)
 
 HEADERS = ["Тип строки", "Юрлицо ID", "С", "По", "Статус", "Не проведено документов", "Счёт", "Название", "Аналитика JSON", "Валюта исходных сумм", "Забалансовый", "Сальдо начальное BYN", "Дебет BYN", "Кредит BYN", "Сальдо конечное BYN", "Сальдо начальное в валюте", "Дебет в валюте", "Кредит в валюте", "Сальдо конечное в валюте", "Количество начальное", "Количество дебет", "Количество кредит", "Количество конечное"]
 FIELDS = ["opening", "debit", "credit", "closing", "original_opening", "original_debit", "original_credit", "original_closing", "quantity_opening", "quantity_debit", "quantity_credit", "quantity_closing"]
@@ -109,17 +113,32 @@ def compare(left_raw: bytes, right_raw: bytes):
             "left_rows": len(left["balances"]), "right_rows": len(right["balances"]), "differences": differences}
 
 
-def compare_uploads(org_id: int, left_base64: str, right_base64: str):
+def _decode_uploads(left_base64: str, right_base64: str) -> tuple[bytes, bytes]:
     decoded = []
     for encoded in (left_base64, right_base64):
         raw = base64.b64decode(encoded, validate=True)
         if len(raw) > 2_000_000:
             raise ValueError("Файл превышает ограничение 2 МБ")
         decoded.append(raw)
-    result = compare(*decoded)
+    return decoded[0], decoded[1]
+
+
+def _compare_uploads(org_id: int, left_base64: str, right_base64: str) -> tuple[bytes, bytes, dict]:
+    left_raw, right_raw = _decode_uploads(left_base64, right_base64)
+    result = compare(left_raw, right_raw)
     if result["left"]["organization_id"] != str(org_id):
         raise ValueError("Юрлицо в файлах не соответствует выбранной книге")
-    return result
+    return left_raw, right_raw, result
+
+
+def compare_uploads(org_id: int, left_base64: str, right_base64: str):
+    """Preview only: compare source bytes without writing an accounting record."""
+    return _compare_uploads(org_id, left_base64, right_base64)[2]
+
+
+def prepare_queue_uploads(org_id: int, left_base64: str, right_base64: str) -> tuple[bytes, bytes, dict]:
+    """Decode and compare a queue candidate before its async database write."""
+    return _compare_uploads(org_id, left_base64, right_base64)
 
 
 def _command_digest(left_raw: bytes, right_raw: bytes, evidence: str) -> str:
@@ -129,6 +148,23 @@ def _command_digest(left_raw: bytes, right_raw: bytes, evidence: str) -> str:
         "evidence": evidence,
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _queue_command_digest(left_raw: bytes, right_raw: bytes, responsible: str, evidence: str) -> str:
+    payload = {
+        "kind": "crm-osv-reconciliation-issue-v1",
+        "left_sha256": hashlib.sha256(left_raw).hexdigest(),
+        "right_sha256": hashlib.sha256(right_raw).hexdigest(),
+        "responsible": responsible,
+        "evidence": evidence,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _json_digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                                      separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -156,14 +192,7 @@ def _receipt_result(receipt: ReconciliationReceipt) -> dict:
 async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: str,
                           request_key: UUID, evidence: str, actor: str) -> dict:
     """Persist an eligible comparison without creating ledger movements."""
-    decoded = []
-    for encoded in (left_base64, right_base64):
-        raw = base64.b64decode(encoded, validate=True)
-        if len(raw) > 2_000_000:
-            raise ValueError("Файл превышает ограничение 2 МБ")
-        decoded.append(raw)
-    left_raw, right_raw = decoded
-    protocol = compare(left_raw, right_raw)
+    left_raw, right_raw, protocol = _compare_uploads(org_id, left_base64, right_base64)
     if not protocol["cutover_ready"]:
         blockers = ", ".join(protocol["eligibility_blockers"])
         raise ValueError(f"Сверка не готова к подтверждению: {blockers}")
@@ -241,6 +270,215 @@ async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: 
         "period_to": receipt.period_to.isoformat(),
     })
     return _receipt_result(receipt)
+
+
+def _issue_snapshot(protocol: dict) -> dict:
+    """Retain compare evidence, never the uploaded file bytes themselves."""
+    return {
+        "format": protocol["format"],
+        "status": protocol["status"],
+        "left": protocol["left"],
+        "right": protocol["right"],
+        "left_rows": protocol["left_rows"],
+        "right_rows": protocol["right_rows"],
+        "difference_count": len(protocol["differences"]),
+        "eligibility_blockers": protocol["eligibility_blockers"],
+    }
+
+
+def _issue_item_snapshot(row: dict) -> dict:
+    return {
+        "account": row["account"],
+        "dimensions": row["dimensions"],
+        "currency": row["currency"],
+        "off_balance": row["off_balance"],
+        "presence": row["presence"],
+        "fields": row["fields"],
+    }
+
+
+def _issue_result(issue: ReconciliationIssue, *, already_queued: bool = False) -> dict:
+    return {
+        "organization_id": issue.organization_id,
+        "issue_id": issue.id,
+        "request_key": issue.request_key,
+        "period_from": issue.period_from.isoformat(),
+        "period_to": issue.period_to.isoformat(),
+        "left_digest": issue.left_digest,
+        "right_digest": issue.right_digest,
+        "left_status": issue.left_status,
+        "right_status": issue.right_status,
+        "left_pending_documents": issue.left_pending_documents,
+        "right_pending_documents": issue.right_pending_documents,
+        "left_rows": issue.left_rows,
+        "right_rows": issue.right_rows,
+        "difference_count": issue.difference_count,
+        "eligibility_blockers": issue.eligibility_blockers,
+        "responsible": issue.responsible,
+        "evidence": issue.evidence,
+        "command_digest": issue.command_digest,
+        "snapshot": issue.snapshot,
+        "digest": issue.digest,
+        "actor": issue.actor,
+        "created_at": issue.created_at,
+        "already_queued": already_queued,
+        # An owner may repair source data, but only a fresh zero-difference,
+        # closed comparison can later become an accountant acceptance.
+        "requires_fresh_comparison": True,
+        "accepted_by_accountant": False,
+        "cutover_ready": False,
+    }
+
+
+def _issue_item_result(item: ReconciliationIssueItem) -> dict:
+    return {
+        "item_id": item.id,
+        "item_key": item.item_key,
+        "account": item.account,
+        "dimensions": item.dimensions,
+        "currency": item.currency,
+        "off_balance": item.off_balance,
+        "presence": item.presence,
+        "fields": item.fields,
+        "digest": item.digest,
+        "created_at": item.created_at,
+    }
+
+
+async def queue_uploads(session, org_id: int, left_base64: str, right_base64: str,
+                        request_key: UUID, responsible: str, evidence: str, actor: str,
+                        prepared: tuple[bytes, bytes, dict] | None = None) -> dict:
+    """Persist every unmatched row and blocker as a non-accepting work queue.
+
+    The queue exists for review and assignment.  It is deliberately distinct
+    from ``ReconciliationReceipt``: a recorded issue cannot be promoted or
+    edited into an accepted reconciliation.
+    """
+    left_raw, right_raw, protocol = prepared or prepare_queue_uploads(org_id, left_base64, right_base64)
+    if protocol["cutover_ready"]:
+        raise ValueError("Совпадающую закрытую ОСВ не помещают в очередь; подтвердите протокол бухгалтером")
+    command_digest = _queue_command_digest(left_raw, right_raw, responsible, evidence)
+    await service.lock_organization(session, org_id)
+    existing = await session.scalar(select(ReconciliationIssue).where(
+        ReconciliationIssue.organization_id == org_id,
+        ReconciliationIssue.request_key == str(request_key),
+    ))
+    if existing is not None:
+        if existing.command_digest != command_digest:
+            raise service.AccountingError("Ключ очереди сверки уже использован с другими файлами или ответственным")
+        return _issue_result(existing, already_queued=True)
+    duplicate = await session.scalar(select(ReconciliationIssue).where(
+        ReconciliationIssue.organization_id == org_id,
+        ReconciliationIssue.command_digest == command_digest,
+    ))
+    if duplicate is not None:
+        raise service.AccountingError("Эта команда очереди сверки уже сохранена другим ключом")
+    duplicate_source = await session.scalar(select(ReconciliationIssue).where(
+        ReconciliationIssue.organization_id == org_id,
+        ReconciliationIssue.left_digest == protocol["left"]["sha256"],
+        ReconciliationIssue.right_digest == protocol["right"]["sha256"],
+    ))
+    if duplicate_source is not None:
+        raise service.AccountingError("Эта пара ОСВ уже находится в очереди сверки")
+    snapshot = _issue_snapshot(protocol)
+    payload = {
+        "organization_id": org_id,
+        "request_key": str(request_key),
+        "command_digest": command_digest,
+        "responsible": responsible,
+        "evidence": evidence,
+        "snapshot": snapshot,
+        "actor": actor,
+    }
+    issue = ReconciliationIssue(
+        organization_id=org_id,
+        request_key=str(request_key),
+        period_from=date.fromisoformat(protocol["left"]["from"]),
+        period_to=date.fromisoformat(protocol["left"]["to"]),
+        left_digest=protocol["left"]["sha256"],
+        right_digest=protocol["right"]["sha256"],
+        left_status=protocol["left"]["status"],
+        right_status=protocol["right"]["status"],
+        left_pending_documents=protocol["left"]["pending_documents"],
+        right_pending_documents=protocol["right"]["pending_documents"],
+        left_rows=protocol["left_rows"],
+        right_rows=protocol["right_rows"],
+        difference_count=len(protocol["differences"]),
+        eligibility_blockers=protocol["eligibility_blockers"],
+        responsible=responsible,
+        evidence=evidence,
+        command_digest=command_digest,
+        snapshot=snapshot,
+        digest=_json_digest(payload),
+        actor=actor,
+    )
+    session.add(issue)
+    await session.flush()
+    items = []
+    for row in protocol["differences"]:
+        item_snapshot = _issue_item_snapshot(row)
+        item_key = _json_digest(item_snapshot)
+        items.append(ReconciliationIssueItem(
+            organization_id=org_id,
+            issue_id=issue.id,
+            item_key=item_key,
+            account=row["account"],
+            dimensions=row["dimensions"],
+            currency=row["currency"],
+            off_balance=row["off_balance"],
+            presence=row["presence"],
+            fields=row["fields"],
+            digest=_json_digest({"issue_id": issue.id, "item_key": item_key, "snapshot": item_snapshot}),
+        ))
+    session.add_all(items)
+    await session.flush()
+    service.audit(session, org_id, actor, "reconciliation_issue_queued", {
+        "issue_id": issue.id,
+        "request_key": issue.request_key,
+        "command_digest": command_digest,
+        "difference_count": issue.difference_count,
+        "eligibility_blockers": issue.eligibility_blockers,
+        "responsible": responsible,
+    })
+    return _issue_result(issue)
+
+
+async def list_issues(session, org_id: int, after_id: int | None = None, limit: int = 20) -> dict:
+    await service.lock_organization(session, org_id)
+    query = select(ReconciliationIssue).where(ReconciliationIssue.organization_id == org_id)
+    if after_id is not None:
+        query = query.where(ReconciliationIssue.id < after_id)
+    rows = (await session.scalars(query.order_by(ReconciliationIssue.id.desc()).limit(limit + 1))).all()
+    page, extra = rows[:limit], rows[limit:]
+    return {
+        "organization_id": org_id,
+        "rows": [_issue_result(row) for row in page],
+        "next_after_id": page[-1].id if extra and page else None,
+    }
+
+
+async def issue_detail(session, org_id: int, issue_id: int, after_item_id: int | None = None,
+                       limit: int = 50) -> dict:
+    await service.lock_organization(session, org_id)
+    issue = await session.scalar(select(ReconciliationIssue).where(
+        ReconciliationIssue.organization_id == org_id, ReconciliationIssue.id == issue_id,
+    ))
+    if issue is None:
+        raise service.AccountingError("Очередь сверки не найдена")
+    query = select(ReconciliationIssueItem).where(
+        ReconciliationIssueItem.organization_id == org_id,
+        ReconciliationIssueItem.issue_id == issue_id,
+    )
+    if after_item_id is not None:
+        query = query.where(ReconciliationIssueItem.id > after_item_id)
+    rows = (await session.scalars(query.order_by(ReconciliationIssueItem.id).limit(limit + 1))).all()
+    page, extra = rows[:limit], rows[limit:]
+    return {
+        "organization_id": org_id,
+        "issue": _issue_result(issue),
+        "items": [_issue_item_result(row) for row in page],
+        "next_after_item_id": page[-1].id if extra and page else None,
+    }
 
 
 async def list_receipts(session, org_id: int) -> list[dict]:
