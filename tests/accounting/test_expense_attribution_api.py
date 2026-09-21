@@ -5,7 +5,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from modules.accounting.expense_models import (
     ExpenseArticle,
@@ -239,8 +239,13 @@ async def test_attribution_api_receipt_guard_rejects_without_writing(attribution
         )
     )
     assert row is not None
-    row.receipt = {**row.receipt, "receipt_digest": "0" * 64}
+    await db.execute(
+        update(ExpenseArticleAttribution)
+        .where(ExpenseArticleAttribution.id == row.id)
+        .values(receipt={**row.receipt, "receipt_digest": "0" * 64})
+    )
     await db.commit()
+    await db.refresh(row)
     before = await attribution_count(db, book[0])
 
     rejected = await attribution_client.post(prefix + "/expense-attributions", json=command, headers=headers)
