@@ -16,8 +16,9 @@ class OneCGateway(Protocol):
 
     ⚠ ``fetch_payments``/``fetch_bank_balance``/``fetch_balance_sheet`` — read-фасады для
     финотчётов (FIN-C4/Р6/Р7): СТРОГО ЧТЕНИЕ (OData GET), никакого write в 1С (мастер-данные
-    заморожены, см. onec-write-frozen). Реализатор может вернуть ``[]``/``None`` — fail-soft
-    на стороне finance. Контракт dict-полей согласован с finance (круг 4, полоса reference).
+    заморожены, см. onec-write-frozen). Реализатор без проверенного маппинга обязан вернуть
+    ``[]``/``None`` и, если возможно, объявить ``financial_source_available=False``; finance
+    не может подменять такой источник демонстрационными суммами.
     """
 
     async def fetch_counterparties(self) -> list[dict]: ...
@@ -26,7 +27,7 @@ class OneCGateway(Protocol):
 
     async def fetch_payments(self) -> list[dict]: ...
 
-    async def fetch_bank_balance(self, account_code: str) -> dict | None: ...
+    async def fetch_bank_balance(self, account_code: str | None = None) -> dict | None: ...
 
     async def fetch_balance_sheet(self, on_date: date) -> dict | None: ...
 

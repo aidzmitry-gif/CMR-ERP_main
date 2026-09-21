@@ -128,6 +128,7 @@ interface ReconResp {
   as_of: string;
   source: string;
   source_available: boolean;
+  source_reason?: string | null;
   matched: { ref: string; amount: string; counterparty_ref: string | null }[];
   only_in_erp: { ref: string; amount: string; counterparty_ref: string | null }[];
   only_in_1c: { ref: string | null; amount: string; counterparty_ref: string | null }[];
@@ -1401,8 +1402,8 @@ function ReconcileTab() {
           <span>Сверка с 1С не настроена</span>
         </div>
         <p className="mt-2 text-xs">
-          Шлюз 1С недоступен или метод чтения платежей не реализован. ERP не пишет в 1С —
-          сверка появится, как только в `core/services/onec.py` будет включён `fetch_payments`.
+          {data.source_reason?.trim() || "Шлюз 1С недоступен или метод чтения платежей не реализован."} ERP не пишет в 1С —
+          сверка появится после подключения проверенного read-only источника платежей.
         </p>
       </div>
     );

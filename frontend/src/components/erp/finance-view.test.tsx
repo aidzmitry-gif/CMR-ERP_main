@@ -447,6 +447,20 @@ describe("FinanceView", () => {
     expect(screen.getByText(/Только в 1С · 1/)).toBeInTheDocument();
   });
 
+  it("вкладка «Сверка 1С» показывает причину отсутствия проверенного источника", async () => {
+    responders["finance/reconcile-1c"] = {
+      as_of: "2026-07-19",
+      source: "1c",
+      source_available: false,
+      source_reason: "Платёжный OData-адаптер ещё не проверен",
+      matched: [], only_in_erp: [], only_in_1c: [],
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Сверка 1С" }));
+    expect(await screen.findByText(/Платёжный OData-адаптер ещё не проверен/)).toBeInTheDocument();
+  });
+
   it("вкладка «Календарь» позволяет завести счёт и показывает пустой горизонт без платежей", async () => {
     responders["finance/bank-accounts"] = [
       { id: 1, code: "main", title: "Расчётный", currency: "BYN", opening_balance: "0.00", opening_at: null, is_active: true },

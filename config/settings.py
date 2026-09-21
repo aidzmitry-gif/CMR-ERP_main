@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     # инфраструктура (наполняется в части 1+)
     database_url: str = "postgresql+psycopg://aios:aios@localhost:5432/aios"
     redis_url: str = "redis://localhost:6379/0"
-    # базовый URL 1С (OData/REST); пусто — используется mock-источник
+    # базовый URL 1С (OData/REST); пусто — mock только для dev-витрины справочников/товаров.
+    # Финансовые read-фасады при любом непроверенном маппинге возвращают honest-empty.
     onec_base_url: str = ""
     # HTTP Basic для OData (только чтение). Секреты — в env/сервере, не в git.
     onec_user: str = ""
