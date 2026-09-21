@@ -148,6 +148,28 @@ def test_preflight_rejects_missing_required_artifact(tmp_path):
         preflight(path)
 
 
+def test_cli_reports_unverified_missing_kind_inventory_without_relaxing_preflight(tmp_path, capsys):
+    path, manifest = valid_manifest(tmp_path)
+    manifest["artifacts"] = [row for row in manifest["artifacts"] if row["kind"] != "vat"]
+    opening = next(row for row in manifest["artifacts"] if row["kind"] == "opening_balances")
+    opening["source_class"] = "operational_workbook"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert main(["--manifest", str(path)]) == 2
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is False
+    assert "source_class cannot satisfy required opening_balances" in result["errors"][0]
+    assert result["intake"] == {
+        "status": "unverified_artifact_kind_inventory",
+        "required_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND),
+        "declared_candidate_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND.keys() - {"vat"}),
+        "missing_required_artifact_kinds": ["vat"],
+    }
+    with pytest.raises(PreflightError, match="source_class cannot satisfy required opening_balances"):
+        preflight(path)
+
+
 def test_preflight_rejects_tampered_artifact_and_cli_returns_failure(tmp_path, capsys):
     path, _ = valid_manifest(tmp_path)
     (tmp_path / "inventory.txt").write_text("changed after manifest", encoding="utf-8")

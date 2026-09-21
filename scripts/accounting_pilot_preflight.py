@@ -307,6 +307,36 @@ def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str, cutov
     return result
 
 
+def _unverified_intake(manifest_path: Path) -> dict[str, Any] | None:
+    """Return only an untrusted inventory of declared artifact kinds.
+
+    This intentionally does not validate an artifact or read any referenced
+    file.  It lets a preparer see which required folders of evidence are absent
+    after the strict preflight has rejected the package, without turning an
+    incomplete manifest into evidence of a valid source.
+    """
+    try:
+        manifest = _read_json(manifest_path.resolve(), limit=MAX_MANIFEST_BYTES)
+    except (OSError, PreflightError):
+        return None
+    artifacts = manifest.get("artifacts")
+    declared: set[str] = set()
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            kind = artifact.get("kind")
+            if isinstance(kind, str) and kind.strip() in ALLOWED_ARTIFACT_KINDS:
+                declared.add(kind.strip())
+    required = sorted(REQUIRED_ARTIFACT_KINDS)
+    return {
+        "status": "unverified_artifact_kind_inventory",
+        "required_artifact_kinds": required,
+        "declared_candidate_artifact_kinds": sorted(declared),
+        "missing_required_artifact_kinds": sorted(REQUIRED_ARTIFACT_KINDS - declared),
+    }
+
+
 def preflight(manifest_path: Path) -> dict[str, Any]:
     """Validate one explicit manifest and return evidence metadata only."""
     manifest_path = manifest_path.resolve()
@@ -358,7 +388,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = preflight(args.manifest)
     except (OSError, PreflightError) as exc:
-        print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, sort_keys=True))
+        result: dict[str, Any] = {"ok": False, "errors": [str(exc)]}
+        intake = _unverified_intake(args.manifest)
+        if intake is not None:
+            result["intake"] = intake
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
