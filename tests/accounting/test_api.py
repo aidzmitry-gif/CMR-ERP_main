@@ -7,7 +7,7 @@ from sqlalchemy import select
 from core.domain.models import User
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import service
-from modules.accounting.models import Account, Inbox
+from modules.accounting.models import AccessGrant, Account, Inbox
 from modules.accounting.module import AccountingModule, get_module, on_posting_requested
 from modules.accounting.schemas import CloseInput, PostingInput
 
@@ -42,6 +42,24 @@ async def test_organization_setup_accounts_policy_and_permissions(client, db, bo
     assert (await client.get("/accounting/organizations")).status_code == 403
     client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("tester", ["Гость"])
     assert (await client.get("/accounting/organizations")).status_code == 403
+
+
+async def test_platform_accountant_requires_separate_book_access_grant(client, db, book):
+    org_id = book[0]
+    prefix = f"/accounting/organizations/{org_id}"
+    db.add(User(username="accountant", full_name="Synthetic accountant", role="accountant", status="active"))
+    await db.commit()
+    client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("accountant", ["accountant"])
+
+    assert (await client.get(prefix + "/accounts?on=2026-09-01")).status_code == 403
+
+    db.add(AccessGrant(organization_id=org_id, subject="accountant", role="reader"))
+    await db.commit()
+    assert (await client.get(prefix + "/accounts?on=2026-09-01")).status_code == 200
+    assert (await client.post(prefix + "/accounts", json={
+        "code": "76", "title": "Расчеты", "category": "asset", "valid_from": "2026-01-01",
+        "cash": False, "normative_ref": "test",
+    })).status_code == 403
 
 
 async def test_preview_import_inbox_closing_and_reopening(client, db, book, posting, opening_package):

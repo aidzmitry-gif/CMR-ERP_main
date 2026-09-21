@@ -596,6 +596,33 @@ async def test_invite_preflight_normalizes_identity_without_calling_keycloak(ses
 
 
 @pytest.mark.asyncio
+async def test_accountant_preflight_is_available_for_finance_without_keycloak_call(session, identity_api):
+    api, gateway = identity_api
+    employee = Employee(full_name="Бухгалтер Тест", department="Финансы / офис")
+    session.add(employee)
+    await session.commit()
+    await session.refresh(employee)
+
+    catalog = await api.get("/system/users/departments")
+    assert catalog.status_code == 200
+    assert catalog.json()["departments"]["Финансы / офис"] == ["finance", "accountant"]
+
+    response = await api.post(
+        "/system/users/preflight",
+        json={
+            "employee_id": employee.id,
+            "email": "accountant@example.by",
+            "department": "Финансы / офис",
+            "role": "accountant",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["role"] == "accountant"
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
 async def test_invite_requires_idempotency_key(session, identity_api):
     api, gateway = identity_api
     employee = Employee(full_name="Сотрудник", department="Продажи")

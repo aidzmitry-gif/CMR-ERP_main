@@ -50,6 +50,7 @@ ACCESS_MATRIX: dict[str, list[str]] = {
     "logistics": ["home", "wms", "logistics", "knowledge"],
     "production": ["home", "production", "wms", "knowledge"],
     "finance": ["home", "logistics", "office", "knowledge", "accounting"],
+    "accountant": ["home", "finance", "accounting"],
     "hr": [
         "home", "crm", "procurement", "production", "wms", "logistics", "finance",
         "marketing", "service", "hr", "office", "legal", "knowledge", "spravochniki",
@@ -71,13 +72,14 @@ ROLE_TITLES: dict[str, str] = {
     "logistics": "Логистика",
     "production": "Производство",
     "finance": "Финансы / офис",
+    "accountant": "Бухгалтер",
     "hr": "Кадры (HR)",
 }
 
 # Порядок ролей в переключателе (как в матрице, сверху вниз).
 ROLE_ORDER: list[str] = [
     "onboarding", "director", "commercial", "assistant", "sales_head", "sales", "sales_manager", "sales_cli",
-    "procurement", "warehouse", "logistics", "production", "finance", "hr",
+    "procurement", "warehouse", "logistics", "production", "finance", "accountant", "hr",
 ]
 
 # Допустимые роли по отделам для управляемого приглашения сотрудника. Это гейт от
@@ -89,7 +91,7 @@ DEPARTMENT_ROLES: dict[str, tuple[str, ...]] = {
     "Склад": ("warehouse",),
     "Логистика": ("logistics",),
     "Производство": ("production",),
-    "Финансы / офис": ("finance",),
+    "Финансы / офис": ("finance", "accountant"),
     "Кадры (HR)": ("hr",),
 }
 
