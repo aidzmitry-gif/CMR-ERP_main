@@ -6,8 +6,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, text, update
 
-from modules.accounting.models import AccessGrant, Period
+from modules.accounting.models import AccessGrant, Period, Policy
 from modules.sales import deal_loss  # noqa: F401 -- register guard tables before fixture create_all
+from modules.wms import (
+    invoice_remainder,  # noqa: F401 -- register release tables used by shipment preview
+)
 from modules.wms.invoice_reservations import invoice_availability, release_preview, reserve
 from modules.wms.invoice_shipments import PhysicalShipmentAct, PhysicalShipmentLine
 from modules.wms.models import ReservationVersion, StockMovement, Task
@@ -95,11 +98,55 @@ async def test_accounting_tn_ttn_draft_is_source_bound_and_never_certified(api, 
     assert value["document_kind"] == "ttn"
     assert value["document_label"] == "ТТН"
     assert value["statutory_certified"] is False and value["can_issue"] is False
+    assert value["shipment_document_policy"]["status"] == "missing_accounting_policy"
     assert "vehicle_registration" in value["required_fields"]
     assert value["source"]["source_key"] == body["source_key"]
     assert len(value["draft_digest"]) == 64
     assert draft.headers["cache-control"] == "private, no-store"
     assert (await api.get(url + "?kind=bad")).status_code == 422
+
+
+async def test_accounting_tn_ttn_draft_uses_only_matching_explicit_policy(api, session):
+    org, facts = await prepared(api, session)
+    body = await request(api, org, facts)
+    created = await api.post(endpoint(org), json=body)
+    assert created.status_code == 201, created.text
+    policy = Policy(
+        organization_id=org,
+        effective_from=date.today(),
+        reference="Synthetic shipment document policy",
+        inventory_method="specific",
+        allocation_basis="direct_cost",
+        depreciation_method="straight_line",
+        normative_reference="Synthetic policy review",
+        normative_verified=True,
+        shipment_documents={"scenarios": [{
+            "kind": "ttn", "exchange_mode": "electronic", "form_version": "Synthetic TTN form v1",
+            "numbering_rule": "Synthetic reviewed sequence", "signing_rule": "Synthetic authorized signer",
+            "exchange_rule": "Synthetic external exchange route", "evidence": "Synthetic reviewed policy evidence",
+        }]},
+        approved_by="allocator",
+    )
+    session.add(policy)
+    await session.commit()
+    url = f"/accounting/organizations/{org}/shipments/{body['source_key']}/tn-ttn-draft"
+    reviewed = await api.get(url + "?kind=ttn")
+    assert reviewed.status_code == 200, reviewed.text
+    value = reviewed.json()
+    assert value["shipment_document_policy"] == {
+        "status": "review_ready", "policy_id": policy.id,
+        "effective_from": date.today().isoformat(), "normative_verified": True,
+        "operation_date": date.today().isoformat(),
+        "scenario": {
+            "kind": "ttn", "exchange_mode": "electronic", "form_version": "Synthetic TTN form v1",
+            "numbering_rule": "Synthetic reviewed sequence", "signing_rule": "Synthetic authorized signer",
+            "exchange_rule": "Synthetic external exchange route", "evidence": "Synthetic reviewed policy evidence",
+        },
+    }
+    assert value["can_issue"] is False and value["statutory_certified"] is False
+    mismatch = await api.get(url + "?kind=tn")
+    assert mismatch.status_code == 200, mismatch.text
+    assert mismatch.json()["shipment_document_policy"]["status"] == "document_kind_not_configured"
 
 
 async def test_accountant_source_snapshot_is_verified_scoped_and_read_only(api, session):

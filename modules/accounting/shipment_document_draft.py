@@ -32,6 +32,13 @@ _TTN_REQUIRED = (
     "loading_point",
     "unloading_point",
 )
+_SCENARIO_TEXT_FIELDS = (
+    "form_version",
+    "numbering_rule",
+    "signing_rule",
+    "exchange_rule",
+    "evidence",
+)
 
 
 def _digest(value: object) -> str:
@@ -50,7 +57,66 @@ def _quantity(lines: list[dict]) -> str:
     return format(total, ".6f").rstrip("0").rstrip(".") or "0"
 
 
-def build(receipt: dict, kind: DocumentKind | None = None) -> dict:
+def _shipment_policy(policy: object | None, kind: DocumentKind | None, operation_date: object) -> dict:
+    """Expose only an explicit, date-selected policy scenario for review.
+
+    A configured scenario is intentionally *not* a statutory issue approval:
+    electronic signing and external exchange remain outside this local module.
+    """
+    result = {
+        "status": "missing_accounting_policy",
+        "policy_id": None,
+        "effective_from": None,
+        "normative_verified": None,
+        "operation_date": str(operation_date),
+        "scenario": None,
+    }
+    if policy is None:
+        return result
+
+    result.update({
+        "policy_id": getattr(policy, "id", None),
+        "effective_from": str(getattr(policy, "effective_from", "")) or None,
+        "normative_verified": bool(getattr(policy, "normative_verified", False)),
+    })
+    if kind is None:
+        result["status"] = "document_kind_not_selected"
+        return result
+    configured = getattr(policy, "shipment_documents", None)
+    if not isinstance(configured, dict):
+        result["status"] = "missing_shipment_document_policy"
+        return result
+    scenarios = configured.get("scenarios")
+    if not isinstance(scenarios, list):
+        result["status"] = "invalid_shipment_document_policy"
+        return result
+    scenario = next((item for item in scenarios if isinstance(item, dict) and item.get("kind") == kind), None)
+    if scenario is None:
+        result["status"] = "document_kind_not_configured"
+        return result
+    if (scenario.get("exchange_mode") not in {"paper", "electronic"}
+            or any(not isinstance(scenario.get(field), str) or not scenario[field].strip()
+                   or "\x00" in scenario[field] for field in _SCENARIO_TEXT_FIELDS)):
+        result["status"] = "invalid_shipment_document_policy"
+        return result
+    result["scenario"] = {field: scenario[field] for field in ("kind", "exchange_mode", *_SCENARIO_TEXT_FIELDS)}
+    result["status"] = "review_ready" if result["normative_verified"] else "normative_basis_unverified"
+    return result
+
+
+def _policy_blocker(status: str) -> str | None:
+    messages = {
+        "missing_accounting_policy": "На дату операции нет применимой версии учётной политики.",
+        "document_kind_not_selected": "Выберите вид ТН или ТТН; вид документа не определяется по акту WMS.",
+        "missing_shipment_document_policy": "В версии учётной политики нет настроенного сценария ТН/ТТН.",
+        "document_kind_not_configured": "Для выбранного вида документа в учётной политике нет отдельного сценария.",
+        "invalid_shipment_document_policy": "Настройка ТН/ТТН в учётной политике неполная или повреждена.",
+        "normative_basis_unverified": "Нормативная база выбранной версии учётной политики не подтверждена бухгалтером.",
+    }
+    return messages.get(status)
+
+
+def build(receipt: dict, kind: DocumentKind | None = None, policy: object | None = None) -> dict:
     """Return a stable, source-bound TN/TTN preparation package."""
     if not isinstance(receipt, dict) or not isinstance(receipt.get("snapshot"), dict):
         raise service.AccountingError("Verified physical shipment source is required")
@@ -81,6 +147,16 @@ def build(receipt: dict, kind: DocumentKind | None = None) -> dict:
         ],
         "total_quantity": _quantity(lines),
     }
+    shipment_policy = _shipment_policy(policy, selected, snapshot.get("operation_date"))
+    blockers = [
+        "Внутренний акт WMS не является ТН или ТТН.",
+        "Черновик не содержит подписи, ЭЦП или подтверждения внешнего оператора.",
+        "Заполните обязательные реквизиты и подтвердите форму бухгалтером.",
+        "Выпуск ТН/ТТН из этого черновика недоступен до отдельного подключённого контура.",
+    ]
+    policy_blocker = _policy_blocker(shipment_policy["status"])
+    if policy_blocker is not None:
+        blockers.insert(1, policy_blocker)
     package = {
         "status": "draft_required",
         "document_kind": selected,
@@ -95,13 +171,10 @@ def build(receipt: dict, kind: DocumentKind | None = None) -> dict:
             "digest": receipt.get("digest"),
             "act_id": receipt.get("act_id"),
         },
+        "shipment_document_policy": shipment_policy,
         "prefilled": prefilled,
         "required_fields": required,
-        "blockers": [
-            "Внутренний акт WMS не является ТН или ТТН.",
-            "Черновик не содержит подписи, ЭЦП или подтверждения внешнего оператора.",
-            "Заполните обязательные реквизиты и подтвердите форму бухгалтером.",
-        ],
+        "blockers": blockers,
         "can_issue": False,
         "statutory_certified": False,
     }

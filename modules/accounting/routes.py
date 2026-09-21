@@ -44,10 +44,10 @@ from modules.accounting import (
     sales,
     seller_profiles,
     service,
-    statutory_requirements,
     settlement_offsets,
     shipment_drafts,
     specific_zero_value_issue,
+    statutory_requirements,
 )
 from modules.accounting.documents import BankDocument, preview_bank
 from modules.accounting.fixed_assets import (
@@ -128,9 +128,9 @@ from modules.accounting.repair_accounting import (
 )
 from modules.accounting.schemas import (
     AccountInput,
-    CatalogAdoptionInput,
     BankAccountMappingCloseInput,
     BankAccountMappingInput,
+    CatalogAdoptionInput,
     CloseInput,
     FinancialCloseInput,
     FinancialReopenConfirmInput,
@@ -1075,8 +1075,13 @@ async def accounting_shipment_tn_ttn_draft(
         raise HTTPException(422, "kind must be tn or ttn")
     result = await verified_shipment_source(ctx[0], org_id, key, core)
     try:
-        draft = build_shipment_document_draft(result["receipt"], kind)
-    except service.AccountingError as exc:
+        operation_date = date.fromisoformat(str(result["receipt"]["snapshot"]["operation_date"]))
+        policy = await ctx[0].scalar(select(Policy).where(
+            Policy.organization_id == org_id,
+            Policy.effective_from <= operation_date,
+        ).order_by(Policy.effective_from.desc()).limit(1))
+        draft = build_shipment_document_draft(result["receipt"], kind, policy)
+    except (KeyError, TypeError, ValueError, service.AccountingError) as exc:
         raise HTTPException(409, str(exc)) from exc
     response.headers["Cache-Control"] = "private, no-store"
     return draft

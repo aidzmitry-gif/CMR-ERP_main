@@ -138,6 +138,9 @@ class Policy(Base):
     currency_revaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     late_cost_allocation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     production_costing: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Optional by design.  An absent TN/TTN scenario blocks that workflow;
+    # no document kind, form, number or external operator is inferred.
+    shipment_documents: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     approved_by: Mapped[str] = mapped_column(String(200))
 
 

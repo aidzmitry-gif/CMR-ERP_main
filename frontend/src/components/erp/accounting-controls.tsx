@@ -13,6 +13,7 @@ import { FinancialClosingPolicyFields, type ClosingSelection } from "./financial
 import { ProductionCostPolicyFields, type ProductionCostSelection } from "./production-cost-policy-fields";
 import { AccountingProductionCostSources } from "./accounting-production-cost-sources";
 import { FxPolicyFields, type FxPolicySelection } from "./fx-policy-fields";
+import { ShipmentDocumentPolicyFields, type ShipmentDocumentPolicySelection } from "./shipment-document-policy-fields";
 
 type Period = { month: string; generation: number; closed: boolean };
 type SourceControl = { id: number; source: string; version: number; month: string };
@@ -59,11 +60,13 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
   const [closing, setClosing] = useState<ClosingSelection | null>(null);
   const [production, setProduction] = useState<ProductionCostSelection | null>(null);
   const [fx, setFx] = useState<FxPolicySelection | null>(null);
+  const [shipmentDocuments, setShipmentDocuments] = useState<ShipmentDocumentPolicySelection | null>(null);
   const [closingIntent, setClosingIntent] = useState({ org, enabled: false });
   const closingEnabled = closingIntent.org === org && closingIntent.enabled;
   const closingScope = `${org}:${policy.effective_from}`;
   const fxReady = fx?.scope === closingScope && (!fx.enabled || fx.value !== null);
   const productionReady = production?.scope === closingScope && (!production.enabled || production.value !== null);
+  const shipmentDocumentsReady = shipmentDocuments?.scope === closingScope && (!shipmentDocuments.enabled || shipmentDocuments.value !== null);
   const [lateCost, setLateCost] = useState({ scope: "", enabled: false, basis: "", rounding: "" });
   const late = lateCost.scope === closingScope ? lateCost : { scope: closingScope, enabled: false, basis: "", rounding: "" };
   const lateReady = !late.enabled || Boolean(late.basis && late.rounding);
@@ -106,12 +109,14 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
   function savePolicy() {
     if (!fxReady) { setError("Проверьте настройки валютного учёта для выбранной организации и даты."); return; }
     if (production?.scope !== closingScope || (production.enabled && !production.value)) { setError("Проверьте настройки производственных затрат."); return; }
+    if (!shipmentDocumentsReady) { setError("Заполните применимые сценарии ТН/ТТН или отключите их настройку."); return; }
     if (!lateReady) { setError("Выберите базу и правило округления поздних расходов."); return; }
     if (!closingReady || closing?.scope !== `${org}:${policy.effective_from}`) { setError("Проверьте настройки переноса для выбранной организации и даты политики."); return; }
     void save(`${prefix}/policies`, { ...policy, ...(closing.enabled ? { financial_closing: closing.value } : {}),
       ...(fx?.enabled ? { currency_revaluation: fx.value } : {}),
       ...(late.enabled ? { late_cost_allocation: { basis: late.basis, rounding: late.rounding } } : {}),
-      ...(production.enabled ? { production_costing: production.value } : {}) }, "Версия политики сохранена.");
+      ...(production.enabled ? { production_costing: production.value } : {}),
+      ...(shipmentDocuments?.enabled ? { shipment_documents: shipmentDocuments.value } : {}) }, "Версия политики сохранена.");
   }
   async function readImport(file: File | undefined) {
     setImportData(null); setImportPreview(null); setError("");
@@ -154,6 +159,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
             <FinancialClosingPolicyFields org={org} effectiveDate={policy.effective_from} enabled={closingEnabled} onEnabledChange={enabled => setClosingIntent({ org, enabled })} onChange={setClosing} />
             <ProductionCostPolicyFields org={org} effectiveDate={policy.effective_from} onChange={setProduction} />
             <FxPolicyFields key={closingScope} org={org} effectiveDate={policy.effective_from} onChange={setFx} />
+            <ShipmentDocumentPolicyFields org={org} effectiveDate={policy.effective_from} onChange={setShipmentDocuments} />
             <fieldset className="min-w-0 space-y-2 rounded-lg border border-line p-3">
               <legend>Поздние дополнительные расходы</legend>
               <label className="block text-sm"><input type="checkbox" checked={late.enabled} onChange={event => setLateCost({ ...late, enabled: event.target.checked })} /> Настроить распределение поздних расходов</label>
@@ -167,7 +173,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
                 <p className="text-sm text-muted">Укажите метод действующей учётной политики. Предварительный расчёт пока поддерживает идентификацию отдельной партии. Эти настройки сохраняются только в новой версии политики.</p>
               </>}
             </fieldset>
-            <label className="block text-sm"><input type="checkbox" checked={policy.normative_verified} onChange={(e) => setPolicy({ ...policy, normative_verified: e.target.checked })} /> Бухгалтер проверил применимую нормативную редакцию</label><Button disabled={!fxReady || !productionReady || !lateReady || !closingReady || !policy.reference || !policy.inventory_method || !policy.allocation_basis || !policy.depreciation_method || !policy.normative_reference} onClick={savePolicy}>Утвердить версию политики</Button>
+            <label className="block text-sm"><input type="checkbox" checked={policy.normative_verified} onChange={(e) => setPolicy({ ...policy, normative_verified: e.target.checked })} /> Бухгалтер проверил применимую нормативную редакцию</label><Button disabled={!fxReady || !productionReady || !shipmentDocumentsReady || !lateReady || !closingReady || !policy.reference || !policy.inventory_method || !policy.allocation_basis || !policy.depreciation_method || !policy.normative_reference} onClick={savePolicy}>Утвердить версию политики</Button>
           </div>
           <div className="space-y-2 border-t border-line pt-4"><h2 className="font-semibold">Доступ к книге</h2><Input aria-label="Идентификатор сотрудника" placeholder="Идентификатор сотрудника в системе входа" value={member.subject} onChange={(e) => setMember({ ...member, subject: e.target.value })} /><Select aria-label="Права сотрудника" value={member.role} onChange={(e) => setMember({ ...member, role: e.target.value })}><option value="reader">Просмотр</option><option value="accountant">Бухгалтер</option><option value="chief">Главный бухгалтер</option></Select><Button disabled={!member.subject} onClick={() => void save(`${prefix}/members`, member, "Доступ сохранён.", "PUT")}>Назначить доступ</Button></div>
         </>}

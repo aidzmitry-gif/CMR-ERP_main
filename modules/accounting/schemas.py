@@ -238,6 +238,42 @@ class ProductionCostPolicyInput(Input):
         return self
 
 
+class ShipmentDocumentScenarioInput(Input):
+    """One explicit TN/TTN scenario from the organisation's policy.
+
+    The platform records the accountant's selected scenario only.  It does
+    not infer applicability, a statutory form, numbering, signing, or an
+    external exchange operator from the WMS act or a sales document.
+    """
+
+    kind: Literal["tn", "ttn"]
+    exchange_mode: Literal["paper", "electronic"]
+    form_version: str = Field(min_length=1, max_length=200)
+    numbering_rule: str = Field(min_length=1, max_length=500)
+    signing_rule: str = Field(min_length=1, max_length=500)
+    exchange_rule: str = Field(min_length=1, max_length=1000)
+    evidence: str = Field(min_length=10, max_length=2000)
+
+    @model_validator(mode="after")
+    def explicit_nonempty_evidence(self):
+        values = (self.form_version, self.numbering_rule, self.signing_rule,
+                  self.exchange_rule, self.evidence)
+        if any("\x00" in value for value in values):
+            raise ValueError("Shipment document policy text cannot contain null characters")
+        return self
+
+
+class ShipmentDocumentsPolicyInput(Input):
+    scenarios: list[ShipmentDocumentScenarioInput] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def one_explicit_scenario_per_kind(self):
+        kinds = [scenario.kind for scenario in self.scenarios]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("Shipment document policy cannot contain duplicate document kinds")
+        return self
+
+
 class LateCostPreviewInput(Input):
     expected_version: int = Field(gt=0, strict=True)
     policy_id: int = Field(gt=0, strict=True)
@@ -260,6 +296,7 @@ class PolicyInput(Input):
     currency_revaluation: CurrencyRevaluationPolicyInput | None = None
     late_cost_allocation: LateCostPolicyInput | None = None
     production_costing: ProductionCostPolicyInput | None = None
+    shipment_documents: ShipmentDocumentsPolicyInput | None = None
 
 
 class LineInput(Input):
