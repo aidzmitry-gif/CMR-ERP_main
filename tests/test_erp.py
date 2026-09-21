@@ -773,6 +773,7 @@ async def test_erp_modules_loaded(api):
         "wms",
         "logistics",
         "finance",
+        "accounting",
         "marketing",
         "service",
         "hr",
