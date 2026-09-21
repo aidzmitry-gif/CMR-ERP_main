@@ -42,6 +42,8 @@ async def test_catalog_adoption_is_server_snapshotted_idempotent_and_links_only_
     ))
     historic_line = await db.scalar(select(Line).where(Line.entry_id == entry.id))
     assert legacy.catalog_adoption_id is None
+    legacy_id = legacy.id
+    historic_line_id = historic_line.id
 
     forged = await client.post(prefix + "/catalog-adoptions", json=adoption_payload(
         catalog_version="forged-by-client",
@@ -68,6 +70,8 @@ async def test_catalog_adoption_is_server_snapshotted_idempotent_and_links_only_
     linked = await client.post(prefix + "/accounts", json=account_payload("42", "2026-10-01"))
     assert linked.status_code == 201, linked.text
     assert linked.json()["catalog_adoption_id"] == created["catalog_adoption_id"]
+    legacy = await db.get(Account, legacy_id)
+    historic_line = await db.get(Line, historic_line_id)
     assert legacy.catalog_adoption_id is None
     assert historic_line.account_id == legacy.id
     assert historic_line.account_code == "41"
