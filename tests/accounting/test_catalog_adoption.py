@@ -63,7 +63,8 @@ async def test_catalog_adoption_is_server_snapshotted_idempotent_and_links_only_
     assert collision.status_code == 409
 
     pre_adoption = await client.post(prefix + "/accounts", json=account_payload("42", "2026-09-15"))
-    assert pre_adoption.status_code == 422  # Posted history makes retroactive configuration invalid.
+    assert pre_adoption.status_code == 201, pre_adoption.text
+    assert pre_adoption.json()["catalog_adoption_id"] is None
     linked = await client.post(prefix + "/accounts", json=account_payload("42", "2026-10-01"))
     assert linked.status_code == 201, linked.text
     assert linked.json()["catalog_adoption_id"] == created["catalog_adoption_id"]
@@ -92,6 +93,8 @@ async def test_catalog_adoption_reader_readonly_and_cross_organization_isolation
     assert (await client.post(prefix + "/catalog-adoptions", json=adoption_payload())).status_code == 201
     other = Organization(name="Synthetic isolated catalogue organization", unp="888888888")
     db.add(other)
+    await db.flush()
+    other_id = other.id
     db.add(AccessGrant(organization_id=book[0], subject="catalog-reader", role="reader"))
     await db.commit()
 
@@ -100,8 +103,8 @@ async def test_catalog_adoption_reader_readonly_and_cross_organization_isolation
     assert (await client.post(prefix + "/catalog-adoptions", json=adoption_payload(
         request_key="00000000-0000-0000-0000-000000000582",
     ))).status_code == 403
-    assert (await client.get(f"/accounting/organizations/{other.id}/catalog-adoptions")).status_code == 403
-    assert (await client.post(f"/accounting/organizations/{other.id}/catalog-adoptions", json=adoption_payload(
+    assert (await client.get(f"/accounting/organizations/{other_id}/catalog-adoptions")).status_code == 403
+    assert (await client.post(f"/accounting/organizations/{other_id}/catalog-adoptions", json=adoption_payload(
         request_key="00000000-0000-0000-0000-000000000583",
     ))).status_code == 403
 
