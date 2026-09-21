@@ -1,0 +1,69 @@
+# Accounting release readiness — source snapshot 2026-09-22
+
+This is a release-control record for the isolated accounting source branch.
+It makes no deployment request and does not certify an installed database,
+statutory reporting, ESCHF delivery, or replacement of 1C.
+
+## Observed source state
+
+- Application-source revision at capture (before this control-record commit):
+  `1d963d8fbcfa3d8f8b646318ee0748b24b9c6b1f`
+  (`agent/crm-acc-prod009`).
+- `py -3 -m alembic heads` reports one **source** head: `0160`.
+- The accounting module is enabled in
+  [`config/modules.py`](../../config/modules.py), and the source UI contains
+  the `Бухгалтерия` sidebar entry and `/erp/accounting` page.  This proves the
+  feature is present in the source candidate only; it does not prove that the
+  running site has this revision.
+- This branch still has no evidence of merge to the production baseline, target
+  database revision, release receipt, backup/recovery drill on the target, or
+  accountant acceptance of a real close.
+
+## Current migration graph
+
+The prior historical checkpoint through `0132` remains documented in
+[migration-integration-plan.md](migration-integration-plan.md).  The live
+source graph has since been joined by `0133` (parents `0129` and `0132`) and is
+linear through `0160`:
+
+| Revisions | Subject | Evidence boundary |
+| --- | --- | --- |
+| `0134`–`0137` | Bank source completeness, provenance, duplicate identity and account mapping | Source graph only in this record; see the bank pilot documents for their scoped local PostgreSQL evidence. |
+| `0138`–`0139` | Finished-goods transfer and immutable output-cost revision | Local synthetic acceptance is described in [production-output-cost-revisions.md](production-output-cost-revisions.md). |
+| `0140`–`0150` | Entryless zero-value inventory, sales and WMS material allocations | The narrow supported cases and exclusions are documented in [zero-value-disposals.md](zero-value-disposals.md). |
+| `0151`–`0155` | Late material costs and immutable full-pool / inventory-value evidence | Source graph only here; V1/V2 history remains additive and unchanged. |
+| `0156` | Expense-article attribution of posted lines | The analytical-receipt contract is in [EXPENSE-ARTICLE-ATTRIBUTION-CONTRACT.md](EXPENSE-ARTICLE-ATTRIBUTION-CONTRACT.md). |
+| `0157`–`0158` | Statutory requirement catalog and per-organization chart-catalog adoption | A source model only until current official rules and accountant adoption are verified. |
+| `0159` | TN/TTN scenarios in versioned accounting policy | Requires organization policy and primary-document acceptance. |
+| `0160` | Immutable OSV reconciliation issue queue and unmatched rows | Source graph only in this record; it must be exercised against a real reconciliation package before use for cutover. |
+
+The command above validates migration topology only.  It neither connects to a
+database nor substitutes for an upgrade, rollback, restore, or concurrent
+PostgreSQL acceptance of the complete `0133`–`0160` range.
+
+## Why the accountant page may be absent on the running site
+
+The source candidate has the route, but a release of this range includes
+frontend code, enabled-module configuration and schema migrations.  It cannot
+be treated as an unchanged-backend package.  No release receipt ties the
+currently running `belakb.by` build or its database to this source revision.
+Consequently, source navigation is not evidence that a user can open
+`/erp/accounting` on the server.
+
+## Required gates before a release decision
+
+1. Reconcile this isolated branch with the current integration/production
+   baseline and inspect the target database's actual Alembic history.  Do not
+   rewrite applied migration history.
+2. Use a release path that explicitly supports frontend, configuration and
+   schema changes; record the candidate SHA, check result and final receipt.
+3. Verify a target-specific backup and restoration procedure before any schema
+   change.  Local synthetic restores are insufficient.
+4. Upgrade an owned copy of the target schema through the candidate range and
+   run the required PostgreSQL concurrency, replay and period-close checks.
+5. Supply the real policy, opening balances, primary documents and matching
+   OSV package; then have the accountant accept a pilot close.  These are the
+   gates for 1C replacement, not merely for code delivery.
+
+Until these gates are evidenced, the source remains a locally verified
+candidate and 1C remains the archive/reconciliation source for historical data.

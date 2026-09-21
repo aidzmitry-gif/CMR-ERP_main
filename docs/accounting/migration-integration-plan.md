@@ -1,5 +1,11 @@
 # Accounting migration integration
 
+> **Current source snapshot:** the historical evidence below records the
+> `2026-09-13` checkpoint through `0132`.  It is not evidence that the current
+> branch head is installed anywhere.  For the current `0160` source graph,
+> integration and release boundary see
+> [RELEASE-READINESS-2026-09-22.md](RELEASE-READINESS-2026-09-22.md).
+
 Status (2026-09-13): registered and locally verified through **0132** in the accounting agent branch. Not merged or deployed. Real accounting and statutory cutover acceptance remain open.
 
 ## Registered chain
