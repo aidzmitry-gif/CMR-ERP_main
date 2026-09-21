@@ -21,7 +21,21 @@ type PendingLine = { account: string; side: string; amount: string; dimensions?:
 type Pending = { id: number; event_key: string; month: string; error: string | null; payload: { source?: string; source_version?: number; operation?: string; document_date?: string; operation_date?: string; posting_date?: string; policy_id?: number; rule_version?: string; explanation?: string; lines?: PendingLine[] } };
 type Catalog = { version: string; accounts: { code: string; title: string }[] };
 type ImportControlTotals = { entry_count: number; line_count: number; debit_byn: string; credit_byn: string };
-type ImportPreview = { batch: string; request_key: string; cutover_date: string; source_system: string; source_digest: string; command_digest: string; control_totals: ImportControlTotals; confirmed: boolean; already_confirmed?: boolean };
+type ImportCommand = Record<string, unknown> & {
+  batch: string;
+  request_key: string;
+  protocol_version: "opening-balance-v1";
+  source_system: string;
+  source_digest: string;
+  cutover_date: string;
+  evidence: string;
+  expected_entry_count: number;
+  expected_line_count: number;
+  expected_debit_byn: string | number;
+  expected_credit_byn: string | number;
+  entries: unknown[];
+};
+type ImportPreview = { organization_id: number; batch: string; request_key: string; cutover_date: string; source_system: string; source_digest: string; command_digest: string; control_totals: ImportControlTotals; confirmed: boolean; already_confirmed?: boolean };
 type ImportReceipt = ImportPreview & { receipt_id: number; entry_ids: number[]; evidence: string; digest: string; created_at: string };
 const steps: Record<string, string> = { documents: "Полнота документов", bank: "Сверка банка", settlements: "Сверка расчётов", stock: "Сверка склада", costing: "Себестоимость и затраты", depreciation: "Амортизация", fx: "Валютные операции", tax: "Налоги", financial_result: "Финансовый результат", trial_balance: "Контрольная ОСВ" };
 const dimensions: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", employee: "Сотрудник", asset: "Основное средство", department: "Подразделение", owner: "Владелец", serial: "Серийный номер" };
@@ -33,9 +47,87 @@ async function api<T>(path: string, body?: unknown, method = "POST"): Promise<T>
   return data as T;
 }
 
-async function sha256Hex(value: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", value);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+type ImportRequestError = Error & { status?: number };
+const sha256 = /^[a-f0-9]{64}$/;
+const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const plainObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const money = (value: unknown) => (typeof value === "string" && value.trim().length > 0) || (typeof value === "number" && Number.isFinite(value));
+
+function importCommand(value: unknown): ImportCommand {
+  if (!plainObject(value)) throw new Error("Файл должен содержать JSON-пакет начальных остатков.");
+  if ("organization_id" in value) throw new Error("Юрлицо не берётся из файла: выберите книгу в ERP перед импортом.");
+  const command = value as Partial<ImportCommand>;
+  const entryCount = command.expected_entry_count;
+  const lineCount = command.expected_line_count;
+  if (typeof entryCount !== "number" || typeof lineCount !== "number") {
+    throw new Error("Пакет обязан явно содержать batch, request_key, источник, SHA-256 источника, дату среза, контрольные количества, строки и основание. ERP не подставляет эти данные.");
+  }
+  if (!command.batch?.trim() || !command.source_system?.trim() || !command.evidence?.trim()
+    || command.evidence.trim().length < 10 || command.protocol_version !== "opening-balance-v1"
+    || !uuid.test(command.request_key ?? "") || !sha256.test(command.source_digest ?? "")
+    || !/^\d{4}-\d{2}-\d{2}$/.test(command.cutover_date ?? "")
+    || !Number.isInteger(entryCount) || entryCount < 1
+    || !Number.isInteger(lineCount) || lineCount < 1
+    || !money(command.expected_debit_byn) || !money(command.expected_credit_byn)
+    || !Array.isArray(command.entries) || command.entries.length !== entryCount) {
+    throw new Error("Пакет обязан явно содержать batch, request_key, источник, SHA-256 источника, дату среза, контрольные количества, строки и основание. ERP не подставляет эти данные.");
+  }
+  return value as ImportCommand;
+}
+
+function assertImportIdentity(value: unknown, org: string, command: ImportCommand) {
+  if (!plainObject(value) || String(value.organization_id) !== org || value.batch !== command.batch
+    || typeof value.request_key !== "string" || value.request_key.toLowerCase() !== command.request_key.toLowerCase()
+    || value.source_system !== command.source_system || value.source_digest !== command.source_digest
+    || value.cutover_date !== command.cutover_date || typeof value.command_digest !== "string" || !sha256.test(value.command_digest)) {
+    throw new Error("Сервер вернул пакет, не подтверждающий выбранное юрлицо или исходный файл.");
+  }
+  const totals = value.control_totals;
+  if (!plainObject(totals) || totals.entry_count !== command.expected_entry_count || totals.line_count !== command.expected_line_count) {
+    throw new Error("Сервер вернул контрольные количества, не совпадающие с загруженным пакетом.");
+  }
+}
+
+function assertImportPreview(value: unknown, org: string, command: ImportCommand): asserts value is ImportPreview {
+  assertImportIdentity(value, org, command);
+  if (!plainObject(value) || typeof value.confirmed !== "boolean"
+    || (value.confirmed && value.already_confirmed !== true)) {
+    throw new Error("Сервер не подтвердил корректный предварительный расчёт импорта.");
+  }
+}
+
+function assertImportReceipt(value: unknown, org: string, command: ImportCommand): asserts value is ImportReceipt {
+  assertImportIdentity(value, org, command);
+  const receiptId = plainObject(value) ? value.receipt_id : undefined;
+  if (!plainObject(value) || value.confirmed !== true || typeof receiptId !== "number" || !Number.isInteger(receiptId)
+    || receiptId < 1 || !Array.isArray(value.entry_ids)
+    || value.entry_ids.length !== command.expected_entry_count || !sha256.test(String(value.digest ?? ""))) {
+    throw new Error("Сервер не подтвердил неизменяемую квитанцию переноса остатков.");
+  }
+}
+
+async function importApi<T>(path: string, body: ImportCommand): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/accounting${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store",
+    });
+  } catch {
+    throw new Error("Не удалось получить ответ ERP; результат подтверждения пока неизвестен.");
+  }
+  let data: unknown;
+  try { data = await response.json(); }
+  catch {
+    const error = new Error("ERP вернула неполный ответ; результат подтверждения пока неизвестен.") as ImportRequestError;
+    error.status = response.status;
+    throw error;
+  }
+  if (!response.ok) {
+    const error = new Error(plainObject(data) && typeof data.detail === "string" ? data.detail : "Проверьте обязательные поля и права доступа.") as ImportRequestError;
+    error.status = response.status;
+    throw error;
+  }
+  return data as T;
 }
 
 export function AccountingControls({ org, onChanged, initialSection = "setup", onBusyChange, onShipment, onEntry }: { org: string; onChanged: () => void; initialSection?: string; onBusyChange?: (busy: boolean) => void; onShipment?: (source: string) => void; onEntry?: (id: number) => void }) {
@@ -73,9 +165,10 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
   const closingReady = closing?.scope === closingScope && closing.enabled === closingEnabled && (!closing.enabled || closing.value !== null);
   const saveLock = useRef(false);
   const [member, setMember] = useState({ subject: "", role: "reader" });
-  const [importData, setImportData] = useState<unknown>(null);
+  const [importData, setImportData] = useState<ImportCommand | null>(null);
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importReceipts, setImportReceipts] = useState<ImportReceipt[]>([]);
+  const [importRetry, setImportRetry] = useState(false);
   const prefix = `/organizations/${org}`;
   const mounted = useRef(true);
   const onChangedRef = useRef(onChanged);
@@ -119,23 +212,40 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
       ...(shipmentDocuments?.enabled ? { shipment_documents: shipmentDocuments.value } : {}) }, "Версия политики сохранена.");
   }
   async function readImport(file: File | undefined) {
-    setImportData(null); setImportPreview(null); setError("");
+    if (importRetry) return;
+    setImportData(null); setImportPreview(null); setImportRetry(false); setError(""); setNotice("");
     if (!file) return;
     if (file.size > 5_000_000) { setError("Файл превышает 5 МБ. Разделите остатки на пакеты."); return; }
     setBusy(true);
     try {
       const raw = await file.arrayBuffer();
-      const parsed: unknown = JSON.parse(new TextDecoder().decode(raw));
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("Файл должен содержать JSON-пакет остатков.");
-      const sourceDigest = typeof (parsed as Record<string, unknown>).source_digest === "string"
-        ? (parsed as Record<string, unknown>).source_digest
-        : await sha256Hex(raw);
-      const body = { ...(parsed as Record<string, unknown>), source_digest: sourceDigest };
-      const checked = await api<ImportPreview>(`${prefix}/imports/preview`, body);
+      const body = importCommand(JSON.parse(new TextDecoder().decode(raw)) as unknown);
+      const checked = await importApi<unknown>(`${prefix}/imports/preview`, body);
+      assertImportPreview(checked, org, body);
       setImportData(body); setImportPreview(checked);
     }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
+  }
+  async function confirmImport() {
+    if (!importData || !importPreview || busy || closingBusy) return;
+    const command = importData;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const confirmed = await importApi<unknown>(`${prefix}/imports/confirm`, command);
+      assertImportReceipt(confirmed, org, command);
+      if (!mounted.current) return;
+      setImportRetry(false); setImportData(null); setImportPreview(null); setRefresh((value) => value + 1);
+      setNotice(`Остатки перенесены. Квитанция №${confirmed.receipt_id}; сверяйте ОСВ по протоколу.`);
+      onChangedRef.current();
+    } catch (error) {
+      if (!mounted.current) return;
+      const status = (error as ImportRequestError).status;
+      if (status === undefined || ![400, 401, 403, 404, 409, 413, 415, 422].includes(status)) {
+        setImportRetry(true);
+        setError("Результат подтверждения неизвестен. ERP сохранит и повторит только тот же неизменённый пакет.");
+      } else setError((error as Error).message);
+    } finally { setBusy(false); }
   }
   const current = periods.find((p) => p.month === month);
 
@@ -183,7 +293,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
         onLock={value => { setClosingBusy(value); onBusyChange?.(value); }}
         onChanged={() => { setEvidence({}); setRefresh(value => value + 1); onChangedRef.current(); }} />}
       {section === "inbox" && org && <div className="space-y-3"><h2 className="font-semibold">Документы, ожидающие проведения</h2>{inbox.map((row) => <div key={row.id} className="border-b border-line pb-3"><Button variant="secondary" onClick={() => setSelected(row)}>{row.event_key} · {row.month}</Button><p className="mt-2 text-sm text-red-700">{row.error || "Ожидает проверки бухгалтером"}</p></div>)}{sources.map((row) => <div key={`source:${row.id}`}>{row.source} · версия {row.version} · {row.month} · <AccountingSourceLink org={org} source={row.source} onPosted={() => { setNotice("Поступление проведено. Очередь и отчёты обновляются."); setRefresh(v => v + 1); onChangedRef.current(); }} />{onShipment && row.source.startsWith(`wms:physical-shipment:${org}:`) && <Button variant="secondary" onClick={() => onShipment(row.source)}>Подготовить проводки отгрузки</Button>}</div>)}{!inbox.length && !sources.length && <p>Нет ожидающих документов.</p>}{selected && <div className="rounded-xl border border-accent p-3"><h3>{selected.payload.explanation || selected.event_key}</h3><dl className="grid gap-1 text-sm text-muted sm:grid-cols-2"><div><dt className="inline font-semibold">Источник: </dt><dd className="inline">{selected.payload.source || selected.event_key} · версия {selected.payload.source_version ?? "—"}</dd></div><div><dt className="inline font-semibold">Операция: </dt><dd className="inline">{selected.payload.operation || "—"} · правило {selected.payload.rule_version || "—"}</dd></div><div><dt className="inline font-semibold">Даты: </dt><dd className="inline">документ {selected.payload.document_date || "—"} · операция {selected.payload.operation_date || "—"} · отражение {selected.payload.posting_date || "—"}</dd></div><div><dt className="inline font-semibold">Политика: </dt><dd className="inline">{selected.payload.policy_id ?? "—"}</dd></div></dl>{selected.payload.lines?.map((line, i) => <article key={i} className="mt-3 rounded border border-line p-2"><p>{line.side === "debit" ? "Дт" : "Кт"} {line.account} — {line.amount} {line.currency || "BYN"}{line.quantity ? ` · количество ${line.quantity}` : ""}</p>{line.dimensions && Object.keys(line.dimensions).length > 0 && <p className="text-sm text-muted">Аналитика: {Object.entries(line.dimensions).map(([key, value]) => `${key}=${value}`).join(" · ")}</p>}{line.currency && line.currency !== "BYN" && <p className="text-sm text-muted">Исходная сумма: {line.original_amount || "—"} {line.currency}; курс {line.rate || "—"}, масштаб {line.rate_scale ?? "—"}, дата {line.rate_date || "—"}, источник {line.rate_source || "—"}</p>}</article>)}<Button onClick={() => void save(`${prefix}/inbox/${selected.id}/confirm`, {}, "Документ проверен и проведён.")}>Подтвердить пакет и повторить проведение</Button></div>}</div>}
-      {section === "import" && org && <div className="space-y-3"><h2 className="font-semibold">Ввод начальных остатков</h2><p className="text-sm text-muted">Загрузите JSON-пакет opening-balance-v1 с request_key, датой среза, источником, хэшем файла, контрольными суммами и протоколом сверки. Сначала выполняется preview; подтверждение создаёт одну неизменяемую квитанцию и связанные проводки атомарно.</p><Input aria-label="Файл остатков" type="file" accept=".json,application/json" onChange={(e) => void readImport(e.target.files?.[0])} />{importPreview && <div className="space-y-2 rounded-lg border border-line p-3"><p>Пакет: {importPreview.batch} · срез {importPreview.cutover_date} · источник {importPreview.source_system}.</p><p>Операций: {importPreview.control_totals.entry_count}, строк: {importPreview.control_totals.line_count}; Дт {importPreview.control_totals.debit_byn} BYN = Кт {importPreview.control_totals.credit_byn} BYN.</p><p className="break-all text-sm text-muted">Хэш источника: {importPreview.source_digest}<br />Хэш пакета: {importPreview.command_digest}</p>{importPreview.already_confirmed ? <p role="status">Этот пакет уже подтверждён; повторная отправка не создаст новые проводки.</p> : <Button onClick={() => void save(`${prefix}/imports/confirm`, importData, "Остатки перенесены. Сверьте ОСВ с протоколом квитанции.")}>Подтвердить перенос остатков</Button>}</div>}{importReceipts.length > 0 && <div className="space-y-2 border-t border-line pt-3"><h3 className="font-semibold">Протоколы переноса</h3>{importReceipts.map((receipt) => <div key={receipt.receipt_id} className="rounded-lg border border-line p-2 text-sm"><p>{receipt.batch} · {receipt.cutover_date} · {receipt.source_system}</p><p>Дт {receipt.control_totals.debit_byn} BYN = Кт {receipt.control_totals.credit_byn} BYN · проводок: {receipt.entry_ids.length}</p><p className="break-all text-muted">Квитанция {receipt.receipt_id} · {receipt.digest}</p></div>)}</div>}</div>}
+      {section === "import" && org && <div className="space-y-3"><h2 className="font-semibold">Ввод начальных остатков</h2><p className="text-sm text-muted">Загрузите JSON-пакет opening-balance-v1 с request_key, датой среза, источником, явным SHA-256 источника, контрольными суммами и протоколом сверки. Юрлицо всегда выбирается в ERP, а не в файле. Сначала выполняется preview; подтверждение создаёт одну неизменяемую квитанцию и связанные проводки атомарно.</p><Input aria-label="Файл остатков" disabled={importRetry} type="file" accept=".json,application/json" onChange={(e) => void readImport(e.target.files?.[0])} />{importRetry && <p role="status" className="text-sm text-amber-700">Выбранный файл заблокирован: результат предыдущего подтверждения неизвестен. Повторите ту же команду или сначала проверьте журнал квитанций.</p>}{importPreview && <div className="space-y-2 rounded-lg border border-line p-3"><p>Пакет: {importPreview.batch} · срез {importPreview.cutover_date} · источник {importPreview.source_system}.</p><p>Операций: {importPreview.control_totals.entry_count}, строк: {importPreview.control_totals.line_count}; Дт {importPreview.control_totals.debit_byn} BYN = Кт {importPreview.control_totals.credit_byn} BYN.</p><p className="break-all text-sm text-muted">Хэш источника: {importPreview.source_digest}<br />Хэш пакета: {importPreview.command_digest}</p>{importPreview.already_confirmed ? <p role="status">Этот пакет уже подтверждён; повторная отправка не создаст новые проводки.</p> : <Button disabled={busy || closingBusy || !importData} onClick={() => void confirmImport()}>{importRetry ? "Повторить подтверждение того же пакета" : "Подтвердить перенос остатков"}</Button>}</div>}<Button variant="secondary" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Обновить журнал переносов</Button>{importReceipts.length > 0 && <div className="space-y-2 border-t border-line pt-3"><h3 className="font-semibold">Протоколы переноса</h3>{importReceipts.map((receipt) => <div key={receipt.receipt_id} className="rounded-lg border border-line p-2 text-sm"><p>{receipt.batch} · {receipt.cutover_date} · {receipt.source_system}</p><p>Дт {receipt.control_totals.debit_byn} BYN = Кт {receipt.control_totals.credit_byn} BYN · проводок: {receipt.entry_ids.length}</p><p className="break-all text-muted">Квитанция {receipt.receipt_id} · {receipt.digest}</p></div>)}</div>}</div>}
     </fieldset>
   </section>;
 }

@@ -26,6 +26,44 @@ async function filled(treatment="include") {
   fireEvent.change(screen.getByRole("textbox",{name:"Основание настроек переноса",exact:true}),{target:{value:"Explicit policy"}});
 }
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+const openingCommand = () => ({
+  batch: "opening-2026-09",
+  request_key: "00000000-0000-4000-8000-000000000001",
+  protocol_version: "opening-balance-v1",
+  source_system: "1c-export",
+  source_digest: "a".repeat(64),
+  cutover_date: "2026-09-01",
+  evidence: "Approved opening reconciliation protocol",
+  expected_entry_count: 1,
+  expected_line_count: 2,
+  expected_debit_byn: "100.00",
+  expected_credit_byn: "100.00",
+  entries: [{ source: "1c:opening:1", source_version: 1 }],
+});
+const jsonFile = (value: unknown) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return { name: "opening.json", size: bytes.byteLength, arrayBuffer: async () => bytes.buffer } as unknown as File;
+};
+const openingPreview = (command: ReturnType<typeof openingCommand>, organization_id = 1) => ({
+  organization_id,
+  batch: command.batch,
+  request_key: command.request_key,
+  cutover_date: command.cutover_date,
+  source_system: command.source_system,
+  source_digest: command.source_digest,
+  command_digest: "b".repeat(64),
+  control_totals: { entry_count: command.expected_entry_count, line_count: command.expected_line_count, debit_byn: "100.00", credit_byn: "100.00" },
+  confirmed: false,
+});
+const openingReceipt = (command: ReturnType<typeof openingCommand>) => ({
+  ...openingPreview(command),
+  confirmed: true,
+  receipt_id: 8,
+  entry_ids: [18],
+  evidence: command.evidence,
+  digest: "c".repeat(64),
+  created_at: "2026-09-21T00:00:00Z",
+});
 
 it("submits production configuration through the existing policy form", async () => {
   setupClosing([
@@ -201,4 +239,81 @@ it("shows durable opening-balance protocol receipts", async () => {
   expect(screen.getByText(/opening-1 · 2026-09-01 · 1c-export/)).toBeInTheDocument();
   expect(screen.getByText(/Дт 100.00 BYN = Кт 100.00 BYN/)).toBeInTheDocument();
   expect(screen.getByText(/Квитанция 4/)).toBeInTheDocument();
+});
+
+it("requires an explicit source digest instead of deriving one from the uploaded JSON", async () => {
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  const command = openingCommand();
+  const withoutDigest = { ...command };
+  delete withoutDigest.source_digest;
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(withoutDigest)] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("ERP не подставляет эти данные");
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
+});
+
+it("rejects an organization embedded in an opening package instead of silently routing it", async () => {
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile({ ...openingCommand(), organization_id: 2 })] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Юрлицо не берётся из файла");
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
+});
+
+it("previews and confirms only the exact package for the selected organization", async () => {
+  const command = openingCommand();
+  const changed = vi.fn();
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command));
+    if (url.endsWith("/imports/confirm")) return respond(openingReceipt(command));
+    if (url.endsWith("catalog")) return respond({ version: "test", accounts: [] });
+    return respond([]);
+  });
+  render(<AccountingControls org="1" initialSection="import" onChanged={changed} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  await screen.findByText(/Пакет: opening-2026-09/);
+  const previewCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/imports/preview"));
+  expect(JSON.parse(previewCall?.[1].body)).toEqual(command);
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить перенос остатков" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Квитанция №8");
+  const confirmCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/imports/confirm"));
+  expect(JSON.parse(confirmCall?.[1].body)).toEqual(command);
+  expect(changed).toHaveBeenCalledTimes(1);
+});
+
+it("rejects a preview returned for another organization before it can be confirmed", async () => {
+  const command = openingCommand();
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command, 2));
+    if (url.endsWith("catalog")) return respond({ version: "test", accounts: [] });
+    return respond([]);
+  });
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("не подтверждающий выбранное юрлицо");
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
+it("retries an unknown confirmation with the frozen exact opening package", async () => {
+  const command = openingCommand();
+  let confirms = 0;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command));
+    if (url.endsWith("/imports/confirm")) {
+      confirms += 1;
+      return confirms === 1 ? Promise.reject(new Error("network unavailable")) : respond(openingReceipt(command));
+    }
+    if (url.endsWith("catalog")) return respond({ version: "test", accounts: [] });
+    return respond([]);
+  });
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  await screen.findByText(/Пакет: opening-2026-09/);
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить перенос остатков" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Результат подтверждения неизвестен");
+  expect(screen.getByLabelText("Файл остатков")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение того же пакета" }));
+  expect(await screen.findByText(/Квитанция №8/)).toBeInTheDocument();
+  const calls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/imports/confirm"));
+  expect(calls).toHaveLength(2);
+  expect(JSON.parse(calls[0][1].body)).toEqual(JSON.parse(calls[1][1].body));
+  expect(JSON.parse(calls[1][1].body)).toEqual(command);
 });
