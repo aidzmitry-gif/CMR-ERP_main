@@ -1,6 +1,6 @@
 # Полная банковская выписка: следующий участок реализации
 
-Исходный осмотр кандидата 341ecb6, 19 сентября 2026 года. Ниже сохранён исходный контракт; выполненные этапы описаны далее. Текущий интеграционный кандидат 3959ff5 включает BYN-поступления/списания, CSV и защиту0136; валютная оценка и API полной выписки остаются незавершёнными.
+Исходный осмотр кандидата 341ecb6, 19 сентября 2026 года. Ниже сохранён исходный контракт; выполненные этапы описаны далее. Текущий локальный source-checkpoint `99bbaaf` включает BYN-поступления/списания, normalized CSV, защиту0136 и строгую UI-проверку preview/confirm; валютная оценка и API полной выписки остаются незавершёнными.
 
 ## Исходная граница до реализации
 
@@ -44,7 +44,7 @@
 - Обновление заполненной0134 до0135 сохраняет прежние поля237таблиц, две строки проводок и старую банковскую строку. Старые квитанции банковского импорта в этом наборе отдельно не представлены.
 - Реальный браузер: ручной ввод списания → повторное сохранение без дубля → расчёт → подтверждение → карточка Кт51/Дт60 на125.50BYN. Два теста с авторизацией прошли за50.7с. Проверки TypeScript, ESLint и Ruff прошли.
 
-Локальные протоколы находятся в `reports/bank-statement/` рабочего каталога; они не заменяют CI или приёмку бухгалтером. Автоматическое чтение файла/ответа банка, массовая очередь ошибок, валютная выписка и реальная сверка ещё не реализованы. В интерфейсе сейчас ручной ввод одной строки; это не завершённый импорт полной выписки и не готовность заменить1С. Изменения не развёрнуты на сервере.
+Локальные протоколы находятся в `reports/bank-statement/` рабочего каталога; они не заменяют CI или приёмку бухгалтером. Нормализованный CSV уже загружается вручную и показывает ошибки до сохранения, но автоматическое преобразование банковских форматов/ответов, специальная очередь повторной обработки, валютная выписка и реальная сверка ещё не реализованы. Это не завершённый импорт полной выписки и не готовность заменить1С. Изменения не развёрнуты на сервере.
 
 ## CSV adapter (normalized-csv-v1)
 
@@ -58,7 +58,9 @@ BANK-002,payment,2026-09-01,20.50,BYN,Example supplier,,Supplier payment
 
 The chief accountant supplies the bank/provider identifier, owned bank account and ownership evidence for the selected organization. Up to1000 operations, BYN only; no automatic bank-specific format detection. The content SHA256 is retained as source provenance. Preview identifies bad records and valid-row totals without storing sources. Any validation error blocks the entire file. Confirmation binds the organization, exact content and import settings to the preview digest, reuses source identity checks and atomically saves all source rows. A conflict rolls back earlier rows in the same package. Replays return existing sources; ledger posting remains a separate reviewed action.
 
-Six targeted parser/API tests passed, including atomic rollback, idempotence, explicit invalid rows and changed preview settings. TypeScript and focused ESLint passed. Real bank samples, bank-specific adapters, API ingestion and foreign-currency valuation remain outstanding.
+Since `99bbaaf`, the client also checks that preview proves the selected numeric organization, SHA-256 digest/reference, count, totals and explicit errors. Confirm must return the same organization/reference, matching count and unique source ids. A network, incomplete, 5xx or malformed confirmation freezes the exact command and fields, then allows only that replay; a known validation rejection remains editable. This UI guard does not create ledger entries and does not replace the server-side atomicity checks.
+
+Six targeted parser/API tests passed, including atomic rollback, idempotence, explicit invalid rows and changed preview settings. The current UI guard has 7 focused Vitest cases together with its parent bank-import component; TypeScript, focused ESLint and diff-check passed. Real bank samples, bank-specific adapters, API ingestion and foreign-currency valuation remain outstanding.
 
 Browser CSV scenario plus auth setup: 2 passed in30.8s on synthetic SQLite with real Next/FastAPI. Screenshot inspected: reports/bank-statement/bank-csv-import.png. PostgreSQL concurrency verification of draft0136 remains a separate pending packet.
 
