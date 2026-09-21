@@ -1,10 +1,11 @@
 """Belarusian chart with an explicit, evidence-backed normative boundary.
 
 The accessible official Ministry PDF is a complete source text only through
-2022-12-28. A later act numbered 126 was discovered in a non-primary registry,
-but that does not prove it changes decree 50 or its appendix 1. The application
-therefore does not certify a 2026 edition, chart codes, or the instruction until
-the applicable primary consolidated source is reviewed.
+2022-12-28. The official registry card for later act 126 was located, but its
+body is unavailable from this environment. That does not prove whether it
+changes decree 50 or its appendix 1. The application therefore does not certify
+a 2026 edition, chart codes, or the instruction until the applicable primary
+consolidated source is reviewed.
 Unused numbers are not accounts. Analytics and reporting classifications belong to
 the organization's approved policy, not to guessed defaults in this catalogue.
 """
@@ -15,11 +16,11 @@ NORMATIVE_REVIEW = {
     "status": "official_source_through_2022_current_primary_review_required",
     "checked_at": "2026-09-21",
     "verified_through": "2022-12-28 по доступному официальному PDF; редакция 2026 года не подтверждена",
-    "source_access": "official_minfin_pdf",
-    "note": "Доступный официальный PDF № 50 содержит перечень изменений только по 28.12.2022. Сведения о более поздних актах из неофициального реестра не являются подтверждением редакции плана счетов.",
+    "source_access": "official_minfin_pdf_and_registry_record_access_limited",
+    "note": "Доступный официальный PDF № 50 содержит перечень изменений только по 28.12.2022. Официальная карточка № 126 найдена, но её текст недоступен из текущей среды; неофициальные сведения не подтверждают редакцию плана счетов.",
     "blocking_reasons": [
         "Официальный PDF Минфина содержит полный доступный текст только до 28.12.2022.",
-        "Применимая на дату первичная консолидированная редакция постановления № 50 и тексты последующих изменений не получены.",
+        "Применимая на дату первичная консолидированная редакция постановления № 50 и полный текст последующего изменения № 126 не получены.",
         "Рабочий план и учётная политика каждого юридического лица ещё не утверждены бухгалтером.",
     ],
     "evidence": [
@@ -55,10 +56,10 @@ AMENDMENTS = [
         "chart_appendix_verified": False,
         "full_text_verified": False,
         "checked_at": "2026-09-21",
-        "evidence": "Акт найден как «О вопросах бухгалтерского учета» в неофициальном реестре. Связь с постановлением № 50 и влияние на план счетов первичным источником не подтверждены.",
-        "source_url": "https://base.spinform.ru/show_doc.fwx?rgn=174918",
-        "source_kind": "non_primary_discovery",
-        "review_scope": "Только поиск кандидата; не доказательство редакции постановления № 50.",
+        "evidence": "Карточка официального реестра W22544278 найдена, но из текущей среды возвращает 403. Полный текст не прочитан; связь с постановлением № 50 и влияние на план счетов не подтверждены.",
+        "source_url": "https://etalonline.by/document/?regnum=W22544278",
+        "source_kind": "official_registry_access_limited",
+        "review_scope": "Идентификатор официального реестра найден, но тело документа не получено; не доказательство редакции постановления № 50.",
     },
 ]
 

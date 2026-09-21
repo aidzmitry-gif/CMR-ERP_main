@@ -194,7 +194,7 @@ async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(cli
     assert review["status"] == "official_source_through_2022_current_primary_review_required"
     assert review["checked_at"] == "2026-09-21"
     assert review["verified_through"] == "2022-12-28 по доступному официальному PDF; редакция 2026 года не подтверждена"
-    assert review["source_access"] == "official_minfin_pdf"
+    assert review["source_access"] == "official_minfin_pdf_and_registry_record_access_limited"
     assert review["evidence"] == [{
         "document": "Постановление Минфина № 50",
         "url": "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf",
@@ -202,7 +202,7 @@ async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(cli
         "coverage": "Полный доступный PDF; перечень изменений заканчивается 28.12.2022. Он подтверждает только историческую транскрипцию справочника.",
         "full_text_verified": True,
     }]
-    assert "Применимая на дату первичная консолидированная редакция" in review["blocking_reasons"][1]
+    assert "полный текст последующего изменения № 126" in review["blocking_reasons"][1]
     amendments = catalog["known_amendments"]
     assert [(item["document"], item["impact_on_chart"], item["full_text_verified"]) for item in amendments] == [
         ("Постановление Минфина № 73", "unknown", False),
@@ -210,7 +210,8 @@ async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(cli
     ]
     assert amendments[0]["source_kind"] == "non_primary_discovery"
     assert amendments[1]["chart_appendix_verified"] is False
-    assert amendments[1]["source_kind"] == "non_primary_discovery"
+    assert amendments[1]["source_kind"] == "official_registry_access_limited"
+    assert amendments[1]["source_url"] == "https://etalonline.by/document/?regnum=W22544278"
     accounts = (await client.get("/accounting/catalog/accounts")).json()
     assert len(accounts) == len(catalog["accounts"])
     assert len({row["code"] for row in accounts}) == len(accounts)
