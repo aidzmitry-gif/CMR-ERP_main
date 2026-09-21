@@ -71,6 +71,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
   const today = new Date().toISOString().slice(0, 10);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [organizationRefresh, setOrganizationRefresh] = useState(0);
+  const [organizationError, setOrganizationError] = useState("");
   const [org, setOrg] = useState("");
   const [start, setStart] = useState(`${today.slice(0, 7)}-01`);
   const [end, setEnd] = useState(today);
@@ -104,14 +105,14 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
 
   useEffect(() => {
     let active = true;
-    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizations(rows); setOrg((current) => {
+    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizationError(""); setOrganizations(rows); setOrg((current) => {
       if (appliedSuggestedOrg.current !== suggestedOrg) {
         appliedSuggestedOrg.current = suggestedOrg;
         const hint = organizationHint(suggestedOrg);
         if (hint && rows.some((row) => String(row.id) === hint)) return hint;
       }
       return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : "";
-    }); } }).catch((e: Error) => { if (active) setError(e.message); });
+    }); } }).catch((e: Error) => { if (active) setOrganizationError(e.message); });
     return () => { active = false; };
   }, [organizationRefresh, suggestedOrg]);
 
@@ -182,6 +183,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
 
   return <div className="min-w-0 w-full space-y-5 p-6 lg:pr-24 text-ink">
     <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры по каждому юридическому лицу. Суммы в BYN.</p></header>
+    {organizationError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-surface p-3 text-red-700"><span>{organizationError}</span><Button variant="secondary" onClick={() => { setOrganizationError(""); setOrganizationRefresh((value) => value + 1); }}>Повторить список организаций</Button></div>}
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-surface p-4">
@@ -190,7 +192,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
       <label className="text-sm">По<Input aria-label="Конец периода" type="date" value={end} disabled={locked} onChange={(e) => changeDate("end", e.target.value)} /></label>
       <Button variant="secondary" disabled={locked || !org} onClick={() => void refresh()}>Обновить</Button>
     </div>
-    {!organizations.length && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
+    {!organizations.length && !organizationError && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
     <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{[["home", "Рабочее место"], ["expenses", "Контроль расходов"], ["reports", "ОСВ и отчёты"], ["accounts", "План счетов"], ["entry", "Ручная операция"], ["bank", "Банк"], ["bank-import", "Импорт выписки"], ["payroll-accruals", "Начисления зарплаты"], ["payroll-statutory", "Удержания и взносы"], ["statutory-requirements", "Формы и ставки"], ["invoice-settlements", "Оплаты счетов"], ["seller-profiles", "Реквизиты продавца"], ["input-vat", "Входной НДС"], ["output-vat", "Исходящий НДС"], ["foreign-trade", "ВЭД"], ["fx-revaluation", "Валюты"], ["fixed-assets", "ОС и амортизация"], ["repairs", "Ремонты"], ["production", "Производство"], ["reconciliation", "Сверка ОСВ"], ["inventory-issue", "Списание запасов"], ["sale", "Продажа товаров"], ["controls", "Управление книгой"]].map(([id, label]) => <Button key={id} disabled={locked} variant={tab === id ? "primary" : "secondary"} onClick={() => setTab(id)}>{label}</Button>)}</nav>
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}

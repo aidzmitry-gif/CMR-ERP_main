@@ -198,6 +198,8 @@ describe("AccountingView", () => {
     render(<AccountingView />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Бухгалтерия временно недоступна. Повторите загрузку.");
     expect(screen.queryByText(/Unexpected end of JSON input/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить список организаций" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/organizations"))).toHaveLength(2));
   });
   it("opens the production accounting workspace from the accountant navigation", async () => {
     render(<AccountingView />);
