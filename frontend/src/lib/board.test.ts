@@ -769,7 +769,7 @@ describe("daysUntilDate (слайс 6)", () => {
 describe("invoiceBadge (слайс 6, C)", () => {
   const NOW = new Date(2026, 5, 11, 12, 0, 0).getTime(); // 11.06.2026 12:00 локальное
 
-  it("«✓ оплачен» — ТОЛЬКО paid; posted = записан в 1С, деньги не дошли (ревью f4f825d)", () => {
+  it("«✓ оплачен» — ТОЛЬКО paid; posted = выпущен в ERP, деньги не дошли (ревью f4f825d)", () => {
     expect(invoiceBadge({ status: "paid", validUntil: null }, NOW)).toEqual({
       label: "✓ оплачен",
       tone: "green",
@@ -781,7 +781,7 @@ describe("invoiceBadge (слайс 6, C)", () => {
     });
   });
 
-  it("posted без valid_until — нейтральный «не оплачен» (записан в 1С, ждём денег)", () => {
+  it("posted без valid_until — нейтральный «не оплачен» (выпущен в ERP, ждём денег)", () => {
     expect(invoiceBadge({ status: "posted", validUntil: null }, NOW)).toEqual({
       label: "💳 не оплачен",
       tone: "neutral",

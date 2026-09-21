@@ -188,8 +188,16 @@ describe("DealDocuments", () => {
     mock(api.decideDocument).mockResolvedValue(true);
     render(<DealDocuments dealId="1" />);
     expect(await screen.findByText(/ДГ-1/)).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Согласовать и провести в 1С"));
+    fireEvent.click(screen.getByTitle("Согласовать и выпустить в ERP"));
     await waitFor(() => expect(api.decideDocument).toHaveBeenCalledWith(3, true, "Юрист"));
+  });
+
+  it("не называет локально выпущенный документ записью в 1С", async () => {
+    mock(api.fetchDocuments).mockResolvedValue([issuedInvoice]);
+    render(<DealDocuments dealId="1" />);
+    expect(await screen.findByText("Выпущен в ERP")).toBeInTheDocument();
+    expect(screen.getByText("Связь с 1С не подтверждена")).toBeInTheDocument();
+    expect(screen.queryByText("Записан в 1С")).toBeNull();
   });
 
   it("смена типа документа и отклонение", async () => {

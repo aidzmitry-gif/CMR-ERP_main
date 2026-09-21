@@ -509,7 +509,7 @@ async def test_contract_goes_through_approval(session, api):
         )
     ).json()
 
-    # договор НЕ пишется в 1С сразу — сначала уходит на согласование юристу (ч.4)
+    # договор НЕ выпускается сразу — сначала уходит на согласование юристу (ч.4)
     r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
     assert r.status_code == 201
     doc = r.json()

@@ -1165,7 +1165,7 @@ export async function issueDocument(dealId: string, kind: "invoice" | "contract"
   return { ok: true, message: `✅ Договор ${doc.number} отправлен на согласование` };
 }
 
-/** Решение по документу на согласовании (договор): провести в 1С или отклонить. */
+/** Решение по документу на согласовании (договор): выпустить в ERP или отклонить. */
 export async function decideDocument(docId: number, approved: boolean, by: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/documents/${docId}/decide`, {

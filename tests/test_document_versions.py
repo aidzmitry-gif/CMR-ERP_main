@@ -106,6 +106,9 @@ async def test_contract_approval_issues_the_reviewed_copy(api, session):
     assert (await api.get(url)).content == candidate.content
     events = (await session.execute(select(OutboxEvent).where(OutboxEvent.event_type == 'sales.document.posted'))).scalars().all()
     assert events[-1].payload['amount'] == '200.00'
+    assert events[-1].payload['onec_ref'] is None
+    assert events[-1].payload['onec_sync_state'] == 'unavailable'
+    assert events[-1].payload['onec_sync_reason']
 
 
 async def test_paid_invoice_replacement_does_not_release_reservation(api, session):

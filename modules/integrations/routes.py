@@ -236,9 +236,9 @@ async def sync_out(
 ) -> dict:
     """Выгрузить очередь pending-записей ERP → 1С (исходящий синк, M3).
 
-    Каркас на шлюзе ``core.services.onec.post_document``: успех → external_ref + synced,
-    ошибка → error с текстом (виден в журнале, ручной повтор). Реальный OData-POST подключается
-    в OneCClient без правки этого роута.
+    Каркас на шлюзе ``core.services.onec.post_document``: успех проверенного адаптера →
+    external_ref + synced; ошибка или непроверенный адаптер → error с текстом в журнале.
+    Базовый OneCClient не имитирует исходящий успех.
     """
     summary = await sync_outbound.flush_pending(session, core.services.onec)
     await session.commit()

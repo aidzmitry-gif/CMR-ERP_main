@@ -276,6 +276,8 @@ describe("DealDrawerPreview — слайс 6 (B): блок «Документы�
     // который рендерится только после того, как fetchDocuments реально резолвнулся.
     expect(await screen.findByText("Статус документов")).toBeInTheDocument();
     expect(screen.getByText(/Счёт СЧ-1/)).toBeInTheDocument();
+    expect(screen.getByText("Выпущен в ERP")).toBeInTheDocument();
+    expect(screen.getByText("Связь с 1С не подтверждена")).toBeInTheDocument();
     expect(screen.getByText(/просрочен \d+ дн/)).toBeInTheDocument();
     expect(screen.getByText("резерв")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "открыть" })).toHaveAttribute(

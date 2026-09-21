@@ -94,7 +94,7 @@ const MESSAGE_CHANNELS: { key: string; label: string }[] = [
 const DOC_STATUS_LABEL: Record<string, string> = {
   draft: "Черновик",
   pending_approval: "На согласовании",
-  posted: "Записан в 1С",
+  posted: "Выпущен в ERP",
   paid: "Оплачен",
   rejected: "Отклонён",
   cancelled: "Аннулирован",
@@ -990,6 +990,12 @@ export function DealDrawerPreview({
                             <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
                               {DOC_STATUS_LABEL[latestInvoice.status] ?? latestInvoice.status}
                             </span>
+                            {latestInvoice.status === "posted" && !latestInvoice.onec_ref && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                              Связь с 1С не подтверждена
+                            </span>}
+                            {latestInvoice.status === "posted" && latestInvoice.onec_ref && <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                              Указана ссылка 1С: {latestInvoice.onec_ref}
+                            </span>}
                             {invoiceExpiry && (
                               <span
                                 className={clsx(
@@ -1030,6 +1036,12 @@ export function DealDrawerPreview({
                             <span className="rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-medium text-muted">
                               {DOC_STATUS_LABEL[latestContract.status] ?? latestContract.status}
                             </span>
+                            {latestContract.status === "posted" && !latestContract.onec_ref && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                              Связь с 1С не подтверждена
+                            </span>}
+                            {latestContract.status === "posted" && latestContract.onec_ref && <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                              Указана ссылка 1С: {latestContract.onec_ref}
+                            </span>}
                           </div>
                           <a
                             href={`/api/sales/documents/${latestContract.id}/render`}

@@ -3,8 +3,9 @@
 При пустом ``base_url`` — mock только для справочников и витрины товаров в dev/тестах.
 При заданном URL — OData GET (только чтение) для контрагентов и остатков/цен.
 Финансовые read-фасады не используют демонстрационные суммы: пока для них нет
-проверенного OData-маппинга, они отдают честное пустое значение. ``post_document``
-не пишет в 1С (мастер-данные заморожены).
+проверенного OData-маппинга, они отдают честное пустое значение. Исходящая запись
+документов тоже закрыта до отдельного проверенного адаптера: ``post_document``
+не возвращает поддельную ссылку и не пишет в 1С.
 """
 from __future__ import annotations
 
@@ -34,6 +35,10 @@ _MOCK_STOCK = [
      "warehouse": "Склад-2", "qty_available": 40, "qty_reserved": 5, "qty_forecast": 60,
      "price": 1500.0, "cost": 1230.0},
 ]
+
+
+class OutboundDocumentUnavailable(RuntimeError):
+    """Исходящая запись не имеет проверенного адаптера и не может считаться успешной."""
 
 class OneCClient:
     def __init__(
@@ -65,6 +70,15 @@ class OneCClient:
     @property
     def financial_source_reason(self) -> str:
         return "Для платежей, банковских остатков и баланса 1С не настроен проверенный read-only OData-адаптер"
+
+    @property
+    def outbound_document_source_available(self) -> bool:
+        """Default client never claims a document was written to 1C."""
+        return False
+
+    @property
+    def outbound_document_source_reason(self) -> str:
+        return "Для исходящих CRM-документов не настроен проверенный адаптер 1С"
 
     def _client(self) -> httpx.Client:
         # httpx (уже в requirements) вместо requests: тот НЕ в прод-зависимостях, а этот модуль
@@ -234,5 +248,5 @@ class OneCClient:
         return None
 
     async def post_document(self, doc_type: str, payload: dict) -> dict:
-        """Исходящая ERP→1С (часть 9). Не OData POST в живую 1С — mock-ссылка."""
-        return {"ref": f"1С-{payload.get('number', '')}", "posted": True}
+        """Fail closed until a verified outbound adapter is installed."""
+        raise OutboundDocumentUnavailable(self.outbound_document_source_reason)

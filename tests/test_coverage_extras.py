@@ -108,28 +108,29 @@ async def test_ai_endpoints_404_when_enabled(ai_api):
     ).status_code == 404
 
 
-# --- Защитные ветки: интеграции не подключены (503) ---
+# --- Локальный lifecycle без исходящей 1С ---
 
 
-async def test_document_503_without_onec(api_no_gateways):
+async def test_document_issues_locally_without_onec(api_no_gateways):
     deal = (
         await api_no_gateways.post("/sales/deals", json={"number": "NO-1", "title": "t", "counterparty": "c"})
     ).json()
-    r = await api_no_gateways.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    assert r.status_code == 503
+    r = await api_no_gateways.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "posted" and r.json()["onec_ref"] is None
 
 
-async def test_decide_503_without_onec(session, api_no_gateways):
-    from modules.sales.models import Deal, DealDocument
-
-    deal = Deal(number="DEC-NO", title="t", counterparty="c")
-    session.add(deal)
-    await session.flush()
-    doc = DealDocument(deal_id=deal.id, kind="contract", number="ДГ-DEC", status="pending_approval")
-    session.add(doc)
-    await session.commit()
-    r = await api_no_gateways.post(f"/sales/documents/{doc.id}/decide", json={"approved": True})
-    assert r.status_code == 503
+async def test_approved_contract_issues_locally_without_onec(api_no_gateways):
+    deal = (await api_no_gateways.post(
+        "/sales/deals", json={"number": "DEC-NO", "title": "t", "counterparty": "c"}
+    )).json()
+    pending = await api_no_gateways.post(
+        f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"}
+    )
+    assert pending.status_code == 201, pending.text
+    r = await api_no_gateways.post(f"/sales/documents/{pending.json()['id']}/decide", json={"approved": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "posted" and r.json()["onec_ref"] is None
 
 
 async def test_egr_503_without_registry(api_no_gateways):

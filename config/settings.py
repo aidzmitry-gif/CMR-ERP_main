@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://aios:aios@localhost:5432/aios"
     redis_url: str = "redis://localhost:6379/0"
     # базовый URL 1С (OData/REST); пусто — mock только для dev-витрины справочников/товаров.
-    # Финансовые read-фасады при любом непроверенном маппинге возвращают honest-empty.
+    # Финансовые read-фасады честно пусты, а исходящие CRM-документы fail closed,
+    # пока для них нет отдельного проверенного маппинга.
     onec_base_url: str = ""
     # HTTP Basic для OData (только чтение). Секреты — в env/сервере, не в git.
     onec_user: str = ""

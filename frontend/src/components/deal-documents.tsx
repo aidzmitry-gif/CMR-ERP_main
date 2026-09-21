@@ -24,7 +24,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   issued: { label: "Выпущен", cls: "bg-emerald-50 text-emerald-600" },
   draft: { label: "Черновик", cls: "bg-sunken text-muted" },
   pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
-  posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
+  posted: { label: "Выпущен в ERP", cls: "bg-emerald-50 text-emerald-600" },
   paid: { label: "Оплачен", cls: "bg-emerald-50 text-emerald-600" },
   rejected: { label: "Отклонён", cls: "bg-red-50 text-red-600" },
   cancelled: { label: "Аннулирован", cls: "bg-red-50 text-red-600" },
@@ -245,8 +245,13 @@ function DealDocumentsForDeal({ dealId }: { dealId: string }) {
                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
                   <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
                     {s.label}
-                    {d.onec_ref ? ` · ${d.onec_ref}` : ""}
                   </span>
+                  {d.status === "posted" && !d.onec_ref && <span className="inline-block rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                    Связь с 1С не подтверждена
+                  </span>}
+                  {d.status === "posted" && d.onec_ref && <span className="inline-block rounded-md bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
+                    Указана ссылка 1С: {d.onec_ref}
+                  </span>}
                   {rb && (
                     <span
                       className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${rb.cls}`}
@@ -261,7 +266,7 @@ function DealDocumentsForDeal({ dealId }: { dealId: string }) {
                   <button
                     onClick={() => onDecide(d.id, true)}
                     disabled={busy}
-                    title="Согласовать и провести в 1С"
+                    title="Согласовать и выпустить в ERP"
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
                   >
                     <Check size={16} />

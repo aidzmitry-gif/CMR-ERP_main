@@ -8,7 +8,7 @@ import { fetchEvents, type SystemEvent } from "@/lib/api";
 
 const EVENT_LABEL: Record<string, string> = {
   "sales.deal.created": "Создана сделка",
-  "sales.document.posted": "Документ записан в 1С",
+  "sales.document.posted": "Документ выпущен в ERP",
   "sales.document.created": "Сформирован документ",
   "sales.document.rejected": "Документ отклонён",
   "sales.message.sent": "Сообщение по сделке",

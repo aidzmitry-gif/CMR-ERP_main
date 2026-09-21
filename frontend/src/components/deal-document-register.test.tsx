@@ -23,6 +23,13 @@ it("requires explicit book selection and shows honest coverage and reserve seman
   expect(screen.queryByRole("button", { name: /отмен|подтвердить|выпустить/i })).not.toBeInTheDocument();
 });
 
+it("shows an unavailable 1C link without inventing an external reference", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok({ ...page, items: [{ ...row, status: "posted", onec_ref: null }] })));
+  render(<DealDocumentRegister dealId="501" org="7" />);
+  expect(await screen.findByText("Связь с 1С не подтверждена.")).toBeInTheDocument();
+  expect(screen.queryByText(/Ссылка 1С:/)).toBeNull();
+});
+
 it("uses scoped lookup for linked versions outside the current filter/page and opens saved HTML in a sandbox", async () => {
   const next = { ...row, id: 101, number: "TEST-101", supersedes_id: 100, superseded_by_id: null };
   const fetchMock = vi.fn().mockResolvedValueOnce(ok(page)).mockResolvedValueOnce(ok(next)).mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers({ "Content-Type": "text/html" }), text: async () => "<p>Saved original 101</p>" }); vi.stubGlobal("fetch", fetchMock);

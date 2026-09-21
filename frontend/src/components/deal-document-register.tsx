@@ -119,7 +119,8 @@ function DocumentRow({ row, onSelect, detail = false }: { row: DocumentRegisterI
         Перед аннулированием проверьте оплаты, возвраты и отгрузки. Резерв сохранён.
       </p>}
     {row.replacement_reason && <p>Причина замены: {row.replacement_reason}</p>}
-    {row.onec_ref && <p>Ссылка 1С: {row.onec_ref}</p>}
+    {row.status === "posted" && !row.onec_ref && <p className="text-muted">Связь с 1С не подтверждена.</p>}
+    {row.status === "posted" && row.onec_ref && <p>Указана ссылка 1С: {row.onec_ref}; проверка исходящего сопоставления не завершена.</p>}
     {row.original_state === "legacy_unavailable" && <p className="text-muted">Оригинал не сохранён. Историческое содержание неизвестно.</p>}
     {row.original_state === "draft" && <p className="text-muted">Черновик — не исторический оригинал.</p>}
     {row.original_state === "approval_copy" && <p className="text-muted">Сохранённая копия на согласовании — ещё не выпущена.</p>}
