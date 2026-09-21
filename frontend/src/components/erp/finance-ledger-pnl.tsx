@@ -8,7 +8,7 @@ import { Input, Select } from "@/components/ui/input";
 type Organization = { id: number; name: string; unp: string };
 type PnlMovement = {
   entry_id: number; source: string; date: string; account: string; title: string;
-  line_id: number; currency: string; side: "debit" | "credit"; amount: string;
+  line_id: number; currency: string; ledger_currency?: string; valuation_only?: boolean; side: "debit" | "credit"; amount: string;
   dimensions: Record<string, string>; category: "income" | "expense";
 };
 type ReviewItem = { code: string; count: number; message: string };
@@ -29,17 +29,22 @@ function csvCell(value: unknown) {
 }
 
 export function pnlCsv(report: Report, applied: Applied) {
-  const header = ["Организация", "С", "По", "Статус", "Доходы", "Расходы", "Финансовый результат", "Источник", "Дата", "Проводка", "Счёт", "Наименование", "Категория", "Сторона", "Сумма BYN", "Валюта исходной операции", "Аналитика"];
-  const summary = [applied.org, applied.start, applied.end, report.status, report.pnl.income, report.pnl.expenses, report.pnl.profit, "", "", "", "", "", "", "", "", "", ""];
+  const header = ["Организация", "С", "По", "Статус", "Доходы", "Расходы", "Финансовый результат", "Источник", "Дата", "Проводка", "Счёт", "Наименование", "Категория", "Сторона", "Сумма BYN", "Валюта позиции или строки", "Валюта строки при переоценке", "Оценка", "Аналитика"];
+  const summary = [applied.org, applied.start, applied.end, report.status, report.pnl.income, report.pnl.expenses, report.pnl.profit, "", "", "", "", "", "", "", "", "", "", "", ""];
   const rows = report.pnl_movements.map((row) => [
     applied.org, applied.start, applied.end, report.status, report.pnl.income, report.pnl.expenses, report.pnl.profit,
     row.source, row.date, row.entry_id, row.account, row.title, row.category, row.side, row.amount, row.currency,
+    row.ledger_currency ?? "", row.valuation_only ? "Переоценка" : "",
     JSON.stringify(row.dimensions),
   ]);
   return [header, summary, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
 }
 
 function money(value: string) { return `${value} BYN`; }
+function movementAmount(row: PnlMovement) {
+  if (row.valuation_only) return `${row.amount} BYN · валюта позиции: ${row.currency}${row.ledger_currency ? ` (переоценка; валюта строки: ${row.ledger_currency})` : " (переоценка)"}`;
+  return `${row.amount} BYN${row.currency !== "BYN" ? ` · валюта строки: ${row.currency}` : ""}`;
+}
 function message(data: unknown, fallback: string) {
   return typeof (data as { detail?: unknown })?.detail === "string" ? (data as { detail: string }).detail : fallback;
 }
@@ -48,7 +53,7 @@ function checkedReport(value: unknown, applied: Applied): Report {
   const report = value as Partial<Report>;
   if (!report || Number(report.organization_id) !== Number(applied.org) || report.from !== applied.start || report.to !== applied.end
     || !report.pnl || typeof report.pnl.income !== "string" || typeof report.pnl.expenses !== "string" || typeof report.pnl.profit !== "string"
-    || !Array.isArray(report.pnl_movements) || !report.pnl_movements.every((row) => row && typeof row.entry_id === "number" && typeof row.source === "string" && typeof row.date === "string" && typeof row.account === "string" && typeof row.title === "string" && typeof row.line_id === "number" && typeof row.currency === "string" && (row.side === "debit" || row.side === "credit") && typeof row.amount === "string" && row.dimensions && typeof row.dimensions === "object" && (row.category === "income" || row.category === "expense")))
+    || !Array.isArray(report.pnl_movements) || !report.pnl_movements.every((row) => row && typeof row.entry_id === "number" && typeof row.source === "string" && typeof row.date === "string" && typeof row.account === "string" && typeof row.title === "string" && typeof row.line_id === "number" && typeof row.currency === "string" && (row.ledger_currency === undefined || typeof row.ledger_currency === "string") && (row.valuation_only === undefined || typeof row.valuation_only === "boolean") && (!row.valuation_only || typeof row.ledger_currency === "string") && (row.side === "debit" || row.side === "credit") && typeof row.amount === "string" && row.dimensions && typeof row.dimensions === "object" && (row.category === "income" || row.category === "expense")))
     throw new Error("Ответ P&L не соответствует применённой организации или периоду.");
   return report as Report;
 }
@@ -136,7 +141,7 @@ export function FinanceLedgerPnl() {
   }
 
   return <section aria-label="Бухгалтерский P&L" className="space-y-4 rounded-xl border border-line bg-surface p-4">
-    <div><h2 className="text-lg font-bold text-ink">Финансовый результат бухгалтерской книги</h2><p className="text-sm text-muted">Доходы и расходы по проведённым строкам учёта. Не является операционной маржой или регламентированной отчётностью.</p></div>
+    <div><h2 className="text-lg font-bold text-ink">Финансовый результат бухгалтерской книги</h2><p className="text-sm text-muted">Доходы и расходы по проведённым строкам учёта. Все суммы — BYN; валюта строки или позиции не является суммой операции. Не является операционной маржой или регламентированной отчётностью.</p></div>
     <div className="flex flex-wrap gap-3">
       <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация P&L" value={org} onChange={(event) => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
       <label className="text-sm">С<Input aria-label="Начало периода P&L" type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
@@ -150,10 +155,10 @@ export function FinanceLedgerPnl() {
       <p className={`rounded-lg p-3 text-sm ${report.status === "closed_periods" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{report.status === "closed_periods" ? "Периоды закрыты; регламентированная отчётность не подтверждена." : "Предварительный отчёт; закрытие периодов и регламентированная отчётность не подтверждены."}</p>
       <div className="grid gap-3 sm:grid-cols-3"><Metric label="Доходы" value={report.pnl.income} tone="text-emerald-700" /><Metric label="Расходы" value={report.pnl.expenses} tone="text-rose-700" /><Metric label="Финансовый результат" value={report.pnl.profit} tone="text-ink" /></div>
       <div className="rounded-lg border border-line p-3 text-sm"><p>Необработанные документы: <strong>{report.pending_documents}</strong></p>{report.review_items?.length ? <ul className="mt-2 list-disc pl-5">{report.review_items.map((item) => <li key={item.code}>{item.message} ({item.count})</li>)}</ul> : <p className="mt-2 text-muted">Замечаний проверки нет.</p>}</div>
-      <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><caption className="mb-2 text-left font-semibold text-ink">Строки, вошедшие в P&L</caption><thead className="border-b border-line text-muted"><tr><th>Дата</th><th>Категория</th><th>Источник</th><th>Счёт</th><th>Сторона</th><th>Сумма</th><th>Аналитика</th><th>Операция</th></tr></thead><tbody>{report.pnl_movements.map((row) => <tr key={row.line_id} className="border-b border-line"><td>{row.date}</td><td>{row.category === "income" ? "Доход" : "Расход"}</td><td>{row.source} · №{row.entry_id}</td><td>{row.account} · {row.title}</td><td>{row.side === "debit" ? "Дебет" : "Кредит"}</td><td>{row.amount} BYN (валюта операции: {row.currency})</td><td>{Object.entries(row.dimensions).map(([key, value]) => `${key}: ${value}`).join(", ") || "—"}</td><td><Button size="sm" variant="ghost" onClick={() => void openEntry(row)}>Открыть</Button></td></tr>)}</tbody></table>{!report.pnl_movements.length && <p className="py-3 text-sm text-muted">В применённом периоде нет строк доходов и расходов.</p>}</div>
+      <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><caption className="mb-2 text-left font-semibold text-ink">Строки, вошедшие в P&L</caption><thead className="border-b border-line text-muted"><tr><th>Дата</th><th>Категория</th><th>Источник</th><th>Счёт</th><th>Сторона</th><th>Сумма</th><th>Аналитика</th><th>Операция</th></tr></thead><tbody>{report.pnl_movements.map((row) => <tr key={row.line_id} className="border-b border-line"><td>{row.date}</td><td>{row.category === "income" ? "Доход" : "Расход"}</td><td>{row.source} · №{row.entry_id}</td><td>{row.account} · {row.title}</td><td>{row.side === "debit" ? "Дебет" : "Кредит"}</td><td>{movementAmount(row)}</td><td>{Object.entries(row.dimensions).map(([key, value]) => `${key}: ${value}`).join(", ") || "—"}</td><td><Button size="sm" variant="ghost" onClick={() => void openEntry(row)}>Открыть</Button></td></tr>)}</tbody></table>{!report.pnl_movements.length && <p className="py-3 text-sm text-muted">В применённом периоде нет строк доходов и расходов.</p>}</div>
       {detailLoading && <p role="status" className="text-sm text-muted">Загрузка операции…</p>}
       {detailError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{detailError}</p>}
-      {detail && <div className="rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold text-ink">Операция № {detail.id}</h3><p className="text-muted">{detail.posting_date} · {detail.source} · {detail.operation}</p><p className="mt-1">{detail.explanation}</p><ul className="mt-2 list-disc pl-5">{detail.lines.map((line) => <li key={line.id}>{line.account_code} · {line.account_title}: {line.side === "debit" ? "Дебет" : "Кредит"} {line.amount} BYN{line.currency ? ` (валюта операции: ${line.currency})` : ""}</li>)}</ul></div>}
+      {detail && <div className="rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold text-ink">Операция № {detail.id}</h3><p className="text-muted">{detail.posting_date} · {detail.source} · {detail.operation}</p><p className="mt-1">{detail.explanation}</p><ul className="mt-2 list-disc pl-5">{detail.lines.map((line) => <li key={line.id}>{line.account_code} · {line.account_title}: {line.side === "debit" ? "Дебет" : "Кредит"} {line.amount} BYN{line.currency !== "BYN" ? ` · валюта строки: ${line.currency}` : ""}</li>)}</ul></div>}
     </div>}
   </section>;
 }

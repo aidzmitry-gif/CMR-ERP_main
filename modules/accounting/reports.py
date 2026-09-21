@@ -85,12 +85,7 @@ async def report(session, org_id, start, end):
                 "period_bucket": "opening" if before else "movement",
             })
         if is_pnl_movement:
-            pnl_movements.append({
-                "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
-                "account": line.account_code, "title": line.account_title, "line_id": line.id,
-                "currency": position_currency, "side": line.side, "amount": money(line.amount),
-                "dimensions": line.dimensions, "category": line.category,
-            })
+            pnl_movements.append({**movement, "category": line.category})
         if line.cash:
             cash["opening" if before else "movement"] += signed
             if not before:
@@ -100,12 +95,7 @@ async def report(session, org_id, start, end):
                     cash_ledger["opening_adjustment_net"] += signed
                     cash_ledger["opening_adjustment_count"] += 1
                 else:
-                    cash_movements.append({
-                        "entry_id": entry.id, "source": entry.source, "date": str(entry.posting_date),
-                        "account": line.account_code, "title": line.account_title, "line_id": line.id,
-                        "currency": position_currency, "side": line.side, "amount": money(line.amount),
-                        "dimensions": line.dimensions, "cash_activity": line.cash_activity,
-                    })
+                    cash_movements.append({**movement, "cash_activity": line.cash_activity})
                     activity = line.cash_activity
                     if activity in cash_activities:
                         bucket = cash_activities[activity]

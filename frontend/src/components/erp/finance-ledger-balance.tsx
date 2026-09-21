@@ -46,7 +46,7 @@ export function balanceCsv(report: Report, applied: Applied) {
     ["Необработанные документы", report.pending_documents], ["Активы", report.balance.assets],
     ["Обязательства", report.balance.liabilities], ["Капитал", report.balance.equity],
     ["Текущий финансовый результат", report.balance.current_result], ["Расхождение", report.balance.difference],
-    [], ["Период", "Категория", "Источник", "Дата", "Проводка", "Счёт", "Наименование", "Сторона", "Сумма в BYN", "Валюта строки", "Валюта книги", "Оценка", "Аналитика"],
+    [], ["Период", "Категория", "Источник", "Дата", "Проводка", "Счёт", "Наименование", "Сторона", "Сумма в BYN", "Валюта позиции или строки", "Валюта строки при переоценке", "Оценка", "Аналитика"],
   ];
   for (const row of report.balance_movements) rows.push([
     row.period_bucket === "opening" ? "Остаток на начало" : "Движение периода", categoryLabels[row.category],
@@ -55,6 +55,11 @@ export function balanceCsv(report: Report, applied: Applied) {
   ]);
   for (const item of report.review_items ?? []) rows.push(["Проверка", item.message, item.count]);
   return rows.map(row => row.map(csvCell).join(";")).join("\r\n");
+}
+
+function movementAmount(row: Movement) {
+  if (row.valuation_only) return `${row.amount} BYN · валюта позиции: ${row.currency}${row.ledger_currency ? ` (переоценка; валюта строки: ${row.ledger_currency})` : " (переоценка)"}`;
+  return `${row.amount} BYN${row.currency !== "BYN" ? ` · валюта строки: ${row.currency}` : ""}`;
 }
 
 function checkedReport(value: unknown, applied: Applied): Report {
@@ -69,7 +74,7 @@ function checkedReport(value: unknown, applied: Applied): Report {
       && Number.isSafeInteger(row.entry_id) && Number.isSafeInteger(row.line_id) && typeof row.source === "string"
       && typeof row.date === "string" && typeof row.account === "string" && typeof row.title === "string"
       && typeof row.currency === "string" && (row.ledger_currency === undefined || typeof row.ledger_currency === "string")
-      && (row.valuation_only === undefined || typeof row.valuation_only === "boolean") && (row.side === "debit" || row.side === "credit")
+      && (row.valuation_only === undefined || typeof row.valuation_only === "boolean") && (!row.valuation_only || typeof row.ledger_currency === "string") && (row.side === "debit" || row.side === "credit")
       && isAmount(row.amount) && isDimensions(row.dimensions) && ["asset", "liability", "equity", "income", "expense"].includes(row.category)
       && (row.period_bucket === "opening" || row.period_bucket === "movement"));
   if (invalid) throw new Error("Ответ баланса имеет неверный формат или не соответствует выбранной организации и периоду.");
@@ -157,7 +162,7 @@ export function FinanceLedgerBalance() {
   const balance = report?.balance;
   const balanced = balance?.difference === "0.00";
   return <section aria-label="Баланс бухгалтерской книги" className="space-y-4 rounded-xl border border-line bg-surface p-4">
-    <div><h2 className="text-lg font-bold text-ink">Баланс бухгалтерской книги</h2><p className="text-sm text-muted">Накопительные остатки по проведённым строкам до конца выбранного периода.</p></div>
+    <div><h2 className="text-lg font-bold text-ink">Баланс бухгалтерской книги</h2><p className="text-sm text-muted">Накопительные остатки по проведённым строкам до конца выбранного периода. Все суммы — BYN; валюта позиции показывается отдельно только для переоценки.</p></div>
     <div className="flex flex-wrap gap-3">
       <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация баланса" value={org} onChange={event => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map(item => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
       <label className="text-sm">С<Input aria-label="Начало периода баланса" type="date" value={start} onChange={event => setStart(event.target.value)} /></label>
@@ -172,7 +177,7 @@ export function FinanceLedgerBalance() {
       <div className="rounded-lg border border-line p-3 text-sm"><p>Необработанные документы: <strong>{report.pending_documents}</strong></p>{report.review_items?.length ? <ul className="mt-2 list-disc pl-5">{report.review_items.map(item => <li key={item.code}>{item.message} ({item.count})</li>)}</ul> : <p className="mt-2 text-muted">Замечаний проверки нет.</p>}</div>
       <div className="grid gap-3 sm:grid-cols-3"><Metric label="Активы" value={balance.assets} /><Metric label="Обязательства" value={balance.liabilities} /><Metric label="Капитал" value={balance.equity} /><Metric label="Текущий финансовый результат" value={balance.current_result} /><Metric label="Расхождение" value={balance.difference} tone={balanced ? "text-emerald-700" : "text-red-700"} /></div>
       <div className={`rounded-lg border p-3 text-sm ${balanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50 text-red-700"}`}><p>Уравнение: {balance.assets} = {balance.liabilities} + {balance.equity} + {balance.current_result} + {balance.difference} BYN</p><p role={balanced ? "status" : "alert"}>{balanced ? "Расхождений баланса нет." : `Расхождение баланса: ${balance.difference} BYN. Требуется проверка.`}</p></div>
-      <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><caption className="mb-2 text-left font-semibold text-ink">Строки, вошедшие в баланс</caption><thead className="border-b border-line text-muted"><tr><th>Период</th><th>Категория</th><th>Дата</th><th>Источник</th><th>Счёт</th><th>Сторона</th><th>Сумма</th><th>Аналитика</th><th>Операция</th></tr></thead><tbody>{report.balance_movements.map(row => <tr key={row.line_id} className="border-b border-line"><td>{row.period_bucket === "opening" ? "Остаток на начало" : "Движение периода"}</td><td>{categoryLabels[row.category]}</td><td>{row.date}</td><td>{row.source} · №{row.entry_id}</td><td>{row.account} · {row.title}</td><td>{row.side === "debit" ? "Дебет" : "Кредит"}</td><td>{row.amount} BYN{row.currency !== "BYN" ? ` · валюта строки: ${row.currency}` : ""}{row.valuation_only && row.ledger_currency ? ` (переоценка; книга: ${row.ledger_currency})` : ""}</td><td>{Object.entries(row.dimensions).map(([key, value]) => `${key}: ${value}`).join(", ") || "—"}</td><td><Button size="sm" variant="ghost" onClick={() => void openEntry(row)}>Открыть</Button></td></tr>)}</tbody></table>{!report.balance_movements.length && <p className="py-3 text-sm text-muted">До конца выбранного периода нет балансовых строк.</p>}</div>
+      <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><caption className="mb-2 text-left font-semibold text-ink">Строки, вошедшие в баланс</caption><thead className="border-b border-line text-muted"><tr><th>Период</th><th>Категория</th><th>Дата</th><th>Источник</th><th>Счёт</th><th>Сторона</th><th>Сумма</th><th>Аналитика</th><th>Операция</th></tr></thead><tbody>{report.balance_movements.map(row => <tr key={row.line_id} className="border-b border-line"><td>{row.period_bucket === "opening" ? "Остаток на начало" : "Движение периода"}</td><td>{categoryLabels[row.category]}</td><td>{row.date}</td><td>{row.source} · №{row.entry_id}</td><td>{row.account} · {row.title}</td><td>{row.side === "debit" ? "Дебет" : "Кредит"}</td><td>{movementAmount(row)}</td><td>{Object.entries(row.dimensions).map(([key, value]) => `${key}: ${value}`).join(", ") || "—"}</td><td><Button size="sm" variant="ghost" onClick={() => void openEntry(row)}>Открыть</Button></td></tr>)}</tbody></table>{!report.balance_movements.length && <p className="py-3 text-sm text-muted">До конца выбранного периода нет балансовых строк.</p>}</div>
       {detailError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{detailError}</p>}
       {detail && <div className="rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold text-ink">Операция № {detail.id}</h3><p className="text-muted">{detail.posting_date} · {detail.source} · {detail.operation}</p><p className="mt-1">{detail.explanation}</p><ul className="mt-2 list-disc pl-5">{detail.lines.map(line => <li key={line.id}>{line.account_code} · {line.account_title}: {line.side === "debit" ? "Дебет" : "Кредит"} {line.amount} BYN{line.currency !== "BYN" ? ` · валюта строки: ${line.currency}` : ""}</li>)}</ul></div>}
     </div>}

@@ -30,7 +30,7 @@ it("requires explicit organization and displays only the applied accounting repo
   expect(screen.getByText("sale; one · №11")).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Открыть" })[0]);
   expect(await screen.findByText("Синтетическая операция")).toBeInTheDocument();
-  expect(screen.getByText("20.00 BYN (валюта операции: USD)")).toBeInTheDocument();
+  expect(screen.getByText("20.00 BYN · валюта строки: USD")).toBeInTheDocument();
   expect(screen.queryByText("20.00 USD")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith("/api/accounting/organizations/7/entries/11", { cache: "no-store" });
 });
@@ -59,6 +59,7 @@ it("keeps the latest organization and date response when requests resolve out of
 it("reports member access failures and exports exactly the displayed response", async () => {
   const csv = pnlCsv(report, { org: "7", start: "2026-09-01", end: "2026-09-30" });
   expect(csv).toMatch(/^Организация;С;По;Статус;Доходы;Расходы;Финансовый результат;/);
+  expect(csv).toContain("Валюта позиции или строки;Валюта строки при переоценке;Оценка");
   expect(csv).toContain("20.00;3.33;16.67");
   expect(csv).toContain('"sale; one"');
   expect(csv).toContain('"{""note"":""a\\""b\\nc""}"');

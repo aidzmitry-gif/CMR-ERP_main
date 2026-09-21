@@ -8,7 +8,7 @@ const report = {
   review_items: [{ code: "check", count: 1, message: "Нужна проверка" }],
   balance: { assets: "31.67", liabilities: "14.00", equity: "0.00", current_result: "16.67", difference: "1.00" },
   balance_movements: [
-    { entry_id: 9, source: "opening; line", date: "2026-09-01", account: "51", title: "Банк", line_id: 10, currency: "BYN", ledger_currency: "USD", valuation_only: true, side: "debit" as const, amount: "15.00", dimensions: { account: "main" }, category: "asset" as const, period_bucket: "opening" as const },
+    { entry_id: 9, source: "opening; line", date: "2026-09-01", account: "51", title: "Банк", line_id: 10, currency: "USD", ledger_currency: "BYN", valuation_only: true, side: "debit" as const, amount: "15.00", dimensions: { account: "main" }, category: "asset" as const, period_bucket: "opening" as const },
     { entry_id: 11, source: "sale", date: "2026-09-04", account: "90.1", title: "Доход", line_id: 21, currency: "BYN", side: "credit" as const, amount: "20.00", dimensions: { note: "a\"b\nc" }, category: "income" as const, period_bucket: "movement" as const },
   ],
 };
@@ -40,7 +40,7 @@ it("requires an applied organization, exposes the exact balance equation, and dr
   expect(screen.getByText("Уравнение: 31.67 = 14.00 + 0.00 + 16.67 + 1.00 BYN")).toBeInTheDocument();
   expect(screen.getByRole("alert")).toHaveTextContent("Расхождение баланса: 1.00 BYN. Требуется проверка.");
   expect(screen.getByText(/Остаток на начало/)).toBeInTheDocument();
-  expect(screen.getByText(/15.00 BYN \(переоценка; книга: USD\)/)).toBeInTheDocument();
+  expect(screen.getByText("15.00 BYN · валюта позиции: USD (переоценка; валюта строки: BYN)")).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Открыть" })[0]);
   expect(await screen.findByText("Синтетический ввод остатков")).toBeInTheDocument();
   expect(screen.getByText(/15.00 BYN · валюта строки: USD/)).toBeInTheDocument();
@@ -50,6 +50,7 @@ it("requires an applied organization, exposes the exact balance equation, and dr
 it("exports the displayed response and rejects malformed balance totals", async () => {
   const csv = balanceCsv(report, { org: "7", start: "2026-09-01", end: "2026-09-30" });
   expect(csv).toContain("Активы;31.67");
+  expect(csv).toContain("Валюта позиции или строки;Валюта строки при переоценке;Оценка");
   expect(csv).toContain('"opening; line"');
   expect(csv).toContain('a\\""b');
   vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => url === "/api/accounting/organizations"
