@@ -22,6 +22,22 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 
 Обязательные виды: `opening_balances`, `bank_statement`, `inventory`,
 `receivables`, `vat`, `fx`, `primary_documents`, `osv_left`, `osv_right`.
+Дополнительно можно приложить `supporting_calculation`: он сохраняет контекст
+расчёта, но не закрывает ни один обязательный вид доказательства.
+
+Каждый файл получает два явных признака происхождения:
+
+- `evidence_role=required_evidence` — доказательство, которое закрывает один
+  обязательный вид;
+- `evidence_role=supporting_calculation` — вспомогательный расчёт, например
+  таблица распределения доставки. Такой файл допускается только с
+  `kind=supporting_calculation`.
+
+Поле `source_class` не позволяет выдать оперативную таблицу за первичный
+документ. Для выписки банка нужна `bank_statement`, для курсов —
+`official_rate`, для первички — `primary_document`; реестры и ОСВ принимают
+только соответствующий экспорт или регистр. Оперативный файл можно указать
+только как `operational_workbook` во вспомогательном расчёте.
 
 `opening_balances` — JSON пакета `opening-balance-v1`, который уже проходит
 модель ERP. Его `source_system` и `cutover_date` должны совпасть с манифестом.
@@ -29,7 +45,7 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 один период, статус `closed_periods`, ноль непроведённых документов и ноль
 расхождений. Программа сверяет их хэши и данные, но не сохраняет файлы.
 
-## Строгая схема `belarus-pilot-input-v1`
+## Строгая схема `belarus-pilot-input-v2`
 
 Замените все значения в угловых скобках подтверждёнными данными. Пустые поля,
 `unknown`, `n/a`, `todo` и другие заполнители отклоняются. Политика должна
@@ -37,7 +53,7 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 
 ```json
 {
-  "protocol_version": "belarus-pilot-input-v1",
+  "protocol_version": "belarus-pilot-input-v2",
   "pilot": {
     "month": "<YYYY-MM>",
     "cutover_date": "<YYYY-MM-01>",
@@ -64,6 +80,8 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
   "artifacts": [
     {
       "kind": "<один из обязательных видов>",
+      "evidence_role": "<required_evidence или supporting_calculation>",
+      "source_class": "<класс происхождения файла>",
       "source_system": "<система-источник>",
       "source_id": "<устойчивый ID выгрузки или документа>",
       "path": "<относительный путь к файлу>",

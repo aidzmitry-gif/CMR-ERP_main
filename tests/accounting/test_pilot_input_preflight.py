@@ -46,9 +46,32 @@ def opening_package() -> dict:
     }
 
 
-def artifact(kind: str, source_id: str, path: Path, *, source_system: str = "control-export") -> dict:
+SOURCE_CLASS_BY_KIND = {
+    "opening_balances": "external_system_export",
+    "bank_statement": "bank_statement",
+    "inventory": "source_register",
+    "receivables": "source_register",
+    "vat": "source_register",
+    "fx": "official_rate",
+    "primary_documents": "primary_document",
+    "osv_left": "external_system_export",
+    "osv_right": "erp_control_export",
+}
+
+
+def artifact(
+    kind: str,
+    source_id: str,
+    path: Path,
+    *,
+    source_system: str = "control-export",
+    evidence_role: str = "required_evidence",
+    source_class: str | None = None,
+) -> dict:
     return {
         "kind": kind,
+        "evidence_role": evidence_role,
+        "source_class": source_class or SOURCE_CLASS_BY_KIND[kind],
         "source_system": source_system,
         "source_id": source_id,
         "path": path.name,
@@ -75,7 +98,7 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
         path.write_text(f"synthetic {kind} evidence", encoding="utf-8")
         artifacts.append(artifact(kind, f"{kind}-2026-09", path))
     manifest = {
-        "protocol_version": "belarus-pilot-input-v1",
+        "protocol_version": "belarus-pilot-input-v2",
         "pilot": {
             "month": "2026-09",
             "cutover_date": "2026-09-01",
@@ -109,6 +132,8 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
 
     assert result["ok"] is True
     assert result["artifact_count"] == 9
+    assert result["required_artifact_count"] == 9
+    assert result["supporting_artifact_count"] == 0
     assert result["opening_import"]["entry_count"] == 1
     assert result["osv"]["period_from"] == "2026-09-01"
     assert "synthetic bank_statement evidence" not in json.dumps(result)
@@ -151,3 +176,34 @@ def test_preflight_rejects_duplicate_source_identity_and_ineligible_osv(tmp_path
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(PreflightError, match="OSV pair is not eligible"):
         preflight(path)
+
+
+def test_preflight_rejects_operational_workbook_as_required_primary_evidence(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    row = next(row for row in manifest["artifacts"] if row["kind"] == "primary_documents")
+    row["source_class"] = "operational_workbook"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(PreflightError, match="source_class cannot satisfy required primary_documents"):
+        preflight(path)
+
+
+def test_preflight_keeps_supporting_calculation_outside_required_evidence(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    calculation = tmp_path / "delivery-calculation.txt"
+    calculation.write_text("synthetic delivery calculation", encoding="utf-8")
+    manifest["artifacts"].append(artifact(
+        "supporting_calculation",
+        "delivery-calc-2026-09",
+        calculation,
+        source_system="operations-sheet",
+        evidence_role="supporting_calculation",
+        source_class="operational_workbook",
+    ))
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = preflight(path)
+
+    assert result["artifact_count"] == 10
+    assert result["required_artifact_count"] == 9
+    assert result["supporting_artifact_count"] == 1

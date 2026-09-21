@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 from modules.accounting.reconciliation import compare  # noqa: E402
 from modules.accounting.schemas import ImportInput  # noqa: E402
 
-PROTOCOL_VERSION = "belarus-pilot-input-v1"
+PROTOCOL_VERSION = "belarus-pilot-input-v2"
 REQUIRED_ARTIFACT_KINDS = frozenset({
     "opening_balances",
     "bank_statement",
@@ -34,7 +34,30 @@ REQUIRED_ARTIFACT_KINDS = frozenset({
     "osv_left",
     "osv_right",
 })
+SUPPORTING_ARTIFACT_KINDS = frozenset({"supporting_calculation"})
+ALLOWED_ARTIFACT_KINDS = REQUIRED_ARTIFACT_KINDS | SUPPORTING_ARTIFACT_KINDS
 SINGLE_ARTIFACT_KINDS = frozenset({"opening_balances", "osv_left", "osv_right"})
+EVIDENCE_ROLES = frozenset({"required_evidence", "supporting_calculation"})
+SOURCE_CLASSES = frozenset({
+    "bank_statement",
+    "erp_control_export",
+    "external_system_export",
+    "official_rate",
+    "operational_workbook",
+    "primary_document",
+    "source_register",
+})
+REQUIRED_SOURCE_CLASSES: dict[str, frozenset[str]] = {
+    "opening_balances": frozenset({"erp_control_export", "external_system_export"}),
+    "bank_statement": frozenset({"bank_statement"}),
+    "inventory": frozenset({"external_system_export", "source_register"}),
+    "receivables": frozenset({"external_system_export", "source_register"}),
+    "vat": frozenset({"external_system_export", "source_register"}),
+    "fx": frozenset({"official_rate"}),
+    "primary_documents": frozenset({"primary_document"}),
+    "osv_left": frozenset({"erp_control_export", "external_system_export"}),
+    "osv_right": frozenset({"erp_control_export", "external_system_export"}),
+}
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MONTH = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")
 PLACEHOLDERS = frozenset({"", "-", "n/a", "na", "none", "null", "tbd", "todo", "unknown", "неизвестно"})
@@ -197,12 +220,25 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path) -> dict[str, list[
         artifact = _require_object(
             artifact_value,
             field,
-            required={"kind", "source_system", "source_id", "path", "sha256", "evidence"},
-            allowed={"kind", "source_system", "source_id", "path", "sha256", "evidence"},
+            required={"kind", "evidence_role", "source_class", "source_system", "source_id", "path", "sha256", "evidence"},
+            allowed={"kind", "evidence_role", "source_class", "source_system", "source_id", "path", "sha256", "evidence"},
         )
         kind = _text(artifact["kind"], f"{field}.kind")
-        if kind not in REQUIRED_ARTIFACT_KINDS:
-            raise PreflightError(f"{field}.kind is not required for this pilot")
+        if kind not in ALLOWED_ARTIFACT_KINDS:
+            raise PreflightError(f"{field}.kind is not supported for this pilot")
+        evidence_role = _text(artifact["evidence_role"], f"{field}.evidence_role")
+        if evidence_role not in EVIDENCE_ROLES:
+            raise PreflightError(f"{field}.evidence_role is invalid")
+        source_class = _text(artifact["source_class"], f"{field}.source_class")
+        if source_class not in SOURCE_CLASSES:
+            raise PreflightError(f"{field}.source_class is invalid")
+        if kind in REQUIRED_ARTIFACT_KINDS:
+            if evidence_role != "required_evidence":
+                raise PreflightError(f"{field} cannot satisfy required {kind} as supporting_calculation")
+            if source_class not in REQUIRED_SOURCE_CLASSES[kind]:
+                raise PreflightError(f"{field}.source_class cannot satisfy required {kind}")
+        elif evidence_role != "supporting_calculation":
+            raise PreflightError(f"{field} must use supporting_calculation evidence_role")
         source_system = _text(artifact["source_system"], f"{field}.source_system")
         source_id = _text(artifact["source_id"], f"{field}.source_id")
         source_key = (source_system, source_id)
@@ -294,6 +330,8 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         "pilot": {"month": month, "cutover_date": cutover.isoformat()},
         "organization_external_id": external_id,
         "artifact_count": sum(len(rows) for rows in artifacts.values()),
+        "required_artifact_count": sum(len(artifacts[kind]) for kind in REQUIRED_ARTIFACT_KINDS),
+        "supporting_artifact_count": len(artifacts.get("supporting_calculation", [])),
         "opening_import": {
             "entry_count": opening.expected_entry_count,
             "line_count": opening.expected_line_count,
@@ -315,7 +353,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v1 JSON manifest")
+    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v2 JSON manifest")
     args = parser.parse_args(argv)
     try:
         result = preflight(args.manifest)
