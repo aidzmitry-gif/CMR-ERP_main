@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.domain.reference import Currency
@@ -557,8 +557,13 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
         await session.commit()
 
     async with pg_factory() as session:
-        session.add(Period(organization_id=pg_book[0], month="2026-10",
-                           closed=True, generation=0))
+        period = Period(organization_id=pg_book[0], month="2026-10",
+                        closed=False, generation=0)
+        session.add(period)
+        await session.flush()
+        period.closed = True
+        period.closed_generation = period.generation
+        period.evidence = {step: "Synthetic control reviewed" for step in service.CLOSE_STEPS}
         with pytest.raises(DBAPIError, match="monthly payroll source"):
             await session.flush()
         await session.rollback()
@@ -591,11 +596,17 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
         )
         session.add(roster_file)
         await session.flush()
+        period = Period(organization_id=pg_book[0], month="2026-10",
+                        closed=False, generation=0)
+        session.add(period)
+        await session.flush()
         with pytest.raises(DBAPIError, match="population review required"):
             async with session.begin_nested():
-                session.add(Period(organization_id=pg_book[0], month="2026-10",
-                                   closed=True, generation=0))
+                period.closed = True
+                period.closed_generation = period.generation
+                period.evidence = {step: "Synthetic control reviewed" for step in service.CLOSE_STEPS}
                 await session.flush()
+        await session.refresh(period)
         from modules.accounting.payroll_population import _digest
 
         review_key = str(uuid4())
@@ -618,8 +629,9 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
             digest=_digest(review_snapshot), snapshot=review_snapshot, actor="tester",
         ))
         await session.flush()
-        session.add(Period(organization_id=pg_book[0], month="2026-10",
-                           closed=True, generation=0))
+        period.closed = True
+        period.closed_generation = period.generation
+        period.evidence = {step: "Synthetic control reviewed" for step in service.CLOSE_STEPS}
         await session.commit()
 
     async with pg_factory() as session:
@@ -651,8 +663,14 @@ async def test_payroll_partial_binding_coverage_is_blocked_in_postgres(pg_factor
 
     from sqlalchemy.exc import DBAPIError
 
-    from modules.accounting.models import Entry, PayrollAccrualReceipt, PayrollEvidenceFile, Period
+    from modules.accounting.models import Account, PayrollEvidenceFile, Period
     from modules.accounting.payroll_employment import PayrollEmploymentInput, create
+    from modules.accounting.payroll_import import (
+        PayrollAccrualConfirmInput,
+        PayrollAccrualInput,
+        confirm_payroll_accrual,
+        prepare_payroll_accrual,
+    )
     from modules.hr.models import Employee
 
     async with pg_factory() as session:
@@ -669,31 +687,51 @@ async def test_payroll_partial_binding_coverage_is_blocked_in_postgres(pg_factor
                 "evidence": "Synthetic employer source for coverage guard",
             }), "tester")
             binding_ids.append(binding["binding_id"])
-        entry = Entry(
-            organization_id=pg_book[0], source="payroll:accrual:partial-coverage",
-            source_version=1, operation="payroll_accrual_import",
-            document_date=date(2026, 10, 31), operation_date=date(2026, 10, 31),
-            posting_date=date(2026, 10, 31), policy_id=pg_book[1],
-            rule_version="verified-payroll-accrual-import-v1",
-            explanation="Synthetic partial month payroll", opening=False,
-            correction_of=None, digest="a" * 64, actor="tester",
-        )
-        session.add(entry)
-        await session.flush()
-        lines = [{"employment_binding_id": binding_ids[0], "source_line_id": "one"}]
-        session.add(PayrollAccrualReceipt(
-            entry_id=entry.id, organization_id=pg_book[0], month="2026-10",
-            request_key=str(uuid4()), source_document="partial-coverage",
-            source_version=1, source_digest="b" * 64,
-            command={"lines": lines}, source={"lines": lines}, posting={},
-            digest="c" * 64, actor="tester",
+        await session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('accounting.account','id'), "
+            "(SELECT max(id) FROM accounting.account))"
         ))
+        session.add_all([
+            Account(organization_id=pg_book[0], code="26", title="Synthetic payroll expense",
+                    category="expense", valid_from=date(2026, 1, 1),
+                    required_dimensions=["employee", "department"],
+                    currency_tracking=False, quantity_tracking=False, cash=False,
+                    normative_ref="Synthetic"),
+            Account(organization_id=pg_book[0], code="70", title="Synthetic payroll payable",
+                    category="liability", valid_from=date(2026, 1, 1),
+                    required_dimensions=["employee"],
+                    currency_tracking=False, quantity_tracking=False, cash=False,
+                    normative_ref="Synthetic"),
+        ])
+        await session.flush()
+        command = PayrollAccrualInput.model_validate({
+            "request_key": str(uuid4()), "source_document": "partial-coverage",
+            "source_version": 1, "source_digest": "b" * 64,
+            "verified_by": "Synthetic chief", "source_evidence": "Reviewed synthetic payroll source",
+            "policy_id": pg_book[1], "posting_date": "2026-10-31",
+            "payroll_account": "70", "lines": [{
+                "source_line_id": "one", "employment_binding_id": binding_ids[0],
+                "employee": people[0].full_name, "department": people[0].department,
+                "debit_account": "26", "amount_byn": "100.00",
+                "evidence": "Synthetic checked workpaper for worker one",
+            }],
+        })
+        preview = await prepare_payroll_accrual(session, pg_book[0], "2026-10", command)
+        await confirm_payroll_accrual(session, pg_book[0], "2026-10",
+            PayrollAccrualConfirmInput.model_validate({
+                **command.model_dump(mode="json"), "digest": preview["digest"],
+            }), "tester")
+        period = await session.scalar(select(Period).where(
+            Period.organization_id == pg_book[0], Period.month == "2026-10"))
+        assert period is not None
         await session.flush()
         with pytest.raises(DBAPIError, match="binding coverage is incomplete"):
             async with session.begin_nested():
-                session.add(Period(organization_id=pg_book[0], month="2026-10",
-                                   closed=True, generation=0))
+                period.closed = True
+                period.closed_generation = period.generation
+                period.evidence = {step: "Synthetic control reviewed" for step in service.CLOSE_STEPS}
                 await session.flush()
+        await session.refresh(period)
         key = str(uuid4())
         session.add(PayrollEvidenceFile(
             organization_id=pg_book[0], employment_binding_id=binding_ids[1],
@@ -709,8 +747,9 @@ async def test_payroll_partial_binding_coverage_is_blocked_in_postgres(pg_factor
         # Coverage now passes; the distinct roster-review guard is next.
         with pytest.raises(DBAPIError, match="population review required"):
             async with session.begin_nested():
-                session.add(Period(organization_id=pg_book[0], month="2026-10",
-                                   closed=True, generation=0))
+                period.closed = True
+                period.closed_generation = period.generation
+                period.evidence = {step: "Synthetic control reviewed" for step in service.CLOSE_STEPS}
                 await session.flush()
 
 

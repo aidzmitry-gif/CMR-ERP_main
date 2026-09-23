@@ -1,5 +1,12 @@
 # Accounting release readiness — source snapshot 2026-09-22
 
+Current local synthetic PostgreSQL upgrade/restore and payroll-guard evidence
+for source head `0172` is recorded in
+[POSTGRES-ACCEPTANCE-2026-09-23.md](POSTGRES-ACCEPTANCE-2026-09-23.md).
+The revision table below is the 2026-09-22 source snapshot; its earlier
+"PostgreSQL unverified" statements do not describe the newer local test run.
+Neither checkpoint verifies the target database or authorizes deployment.
+
 This is a release-control record for the isolated accounting source branch.
 It makes no deployment request and does not certify an installed database,
 statutory reporting, ESCHF delivery, or replacement of 1C.

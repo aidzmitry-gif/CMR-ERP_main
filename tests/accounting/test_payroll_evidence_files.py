@@ -55,10 +55,16 @@ async def test_payroll_file_upload_replay_download_and_tamper_block(
 
     storage_file = root / str(book[0]) / (command["request_key"].replace("-", "") + ".pdf")
     assert storage_file.is_file()
+    backup_file = tmp_path / "payroll-source-backup.pdf"
+    backup_file.write_bytes(storage_file.read_bytes())
     storage_file.write_bytes(b"%PDF-1.7\ntampered")
     corrupted = await client.get(f"{url}/{body['file_id']}/download")
     assert corrupted.status_code == 409
     assert (await client.post(url, json=command)).status_code == 409
+    storage_file.write_bytes(backup_file.read_bytes())
+    restored = await client.get(f"{url}/{body['file_id']}/download")
+    assert restored.status_code == 200
+    assert restored.content == PDF
 
 
 async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
