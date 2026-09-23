@@ -94,7 +94,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  window.history.replaceState({}, "", "/");
 });
 
 // ru-RU разделитель разрядов — неразрывный пробел; \s покрывает его в regexp.
@@ -102,10 +101,11 @@ const byn = (whole: string) => new RegExp(`${whole.replace(/\B(?=(\d{3})+(?!\d))
 
 describe("FinanceView", () => {
   it("opens the ledger P&L requested by the accountant workspace link", async () => {
-    window.history.replaceState({}, "", "/erp/finance?tab=pnl");
-    render(<FinanceView />);
+    ledgerResponses();
+    render(<FinanceView initialTab="pnl" />);
     expect(await screen.findByRole("region", { name: "Бухгалтерский P&L" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Касса (ДДС-lite)" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/summary"))).toBe(false);
   });
 
   it("рендерит заголовок и все вкладки финансов", () => {

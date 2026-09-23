@@ -225,13 +225,10 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ──────────────────────────── Главный экран ────────────────────────────
 
-export function FinanceView() {
-  const [tab, setTab] = useState<TabId>("summary");
-
-  useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (TABS.some((item) => item.id === requested)) setTab(requested as TabId);
-  }, []);
+export function FinanceView({ initialTab }: { initialTab?: string } = {}) {
+  const [tab, setTab] = useState<TabId>(() =>
+    TABS.some((item) => item.id === initialTab) ? (initialTab as TabId) : "summary",
+  );
 
   return (
     <main className="flex-1 overflow-auto p-6">
