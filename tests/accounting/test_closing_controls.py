@@ -200,6 +200,8 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
         "source_missing": False, "source_conflict": False,
         "gross_accruals": 1, "receipts": 0, "receipt_gap": 1,
         "statutory_imports": 0, "statutory_receipts": 0, "statutory_receipt_gap": 0,
+        "statutory_zero_file_ids": [], "statutory_source_missing": False,
+        "statutory_source_conflict": False,
         "statutory_payroll_certified": False,
         "deductions_and_contributions_available": False,
     }
@@ -335,6 +337,63 @@ async def test_close_rejects_payroll_accrual_receipt_gap(db, book):
             expected_generation=0,
             evidence={step: "Synthetic checked" for step in service.CLOSE_STEPS},
         ))
+
+
+async def test_gross_payroll_close_requires_statutory_source_or_reviewed_zero(
+        client, db, book, tmp_path, monkeypatch):
+    gross = models.Entry(
+        organization_id=book[0], source="payroll:accrual:statutory-source-check", source_version=1,
+        operation="payroll_accrual_import", document_date=date(2026, 10, 1),
+        operation_date=date(2026, 10, 1), posting_date=date(2026, 10, 1),
+        policy_id=book[1], rule_version="verified-payroll-accrual-import-v1",
+        explanation="Synthetic reviewed gross payroll source", opening=False,
+        correction_of=None, digest="a" * 64, actor="tester",
+    )
+    db.add(gross)
+    await db.flush()
+    db.add(models.PayrollAccrualReceipt(
+        entry_id=gross.id, organization_id=book[0], month="2026-10",
+        request_key=str(uuid4()), source_document="synthetic-gross-register", source_version=1,
+        source_digest="b" * 64, command={}, source={}, posting={}, digest="c" * 64,
+        actor="tester",
+    ))
+    await db.commit()
+
+    prefix = f"/accounting/organizations/{book[0]}"
+    controls = (await client.get(prefix + "/periods/2026-10/closing-controls")).json()
+    assert controls["payroll"]["statutory_source_missing"] is True
+    assert "payroll_statutory_source_missing" in {row["code"] for row in controls["blockers"]}
+    close = CloseInput(expected_generation=0, evidence={
+        step: "Synthetic checked" for step in service.CLOSE_STEPS
+    })
+    with pytest.raises(service.AccountingError, match="deductions and contributions source is missing"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    raw = b"%PDF-1.7\nsynthetic reviewed statement: no deductions or contributions\n"
+    request_key = str(uuid4())
+    saved = await client.post(prefix + "/payroll-evidence-files", json={
+        "request_key": request_key, "kind": "payroll_statutory_zero",
+        "month": "2026-10", "reference": "synthetic-statutory-zero-2026-10",
+        "filename": "statutory-zero.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(raw).decode(),
+        "evidence": "Synthetic chief-reviewed zero statutory source for the month",
+    })
+    assert saved.status_code == 200, saved.text
+    controls = (await client.get(prefix + "/periods/2026-10/closing-controls")).json()
+    assert controls["payroll"]["statutory_zero_file_ids"] == [saved.json()["file_id"]]
+    assert controls["payroll"]["statutory_source_missing"] is False
+    assert controls["payroll"]["deductions_and_contributions_available"] is True
+    await service.validate_close_period(db, book[0], "2026-10", close)
+
+    file_path = root / str(book[0]) / (request_key.replace("-", "") + ".pdf")
+    file_path.write_bytes(b"%PDF-1.7\ntampered\n")
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException, match="missing or differs"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
 
 
 async def test_closing_controls_surfaces_payroll_statutory_receipt_gap(client, db, book):

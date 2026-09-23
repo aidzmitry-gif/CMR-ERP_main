@@ -245,6 +245,14 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         Entry.source.like("payroll:statutory:%"),
     )) or 0
     payroll_statutory_receipt_gap = max(0, int(payroll_statutory_postings) - int(payroll_statutory_receipts))
+    statutory_zero_files = (await session.scalars(select(PayrollEvidenceFile.id).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_statutory_zero",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    payroll_statutory_source_missing = bool(
+        payroll_receipts and not payroll_statutory_receipts and not statutory_zero_files)
+    payroll_statutory_source_conflict = bool(statutory_zero_files and payroll_statutory_postings)
     from modules.accounting.payroll_population import state as population_state
 
     population = await population_state(session, org_id, month)
@@ -411,6 +419,12 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         blockers.append({"code": "payroll_binding_coverage_incomplete",
                          "count": len(missing_binding_ids) + unmapped_accrual_lines,
                          "message": "Не все известные договоры покрыты начислением или индивидуальным документом об отсутствии начисления; строки без ID договора требуют сопоставления."})
+    if payroll_statutory_source_missing:
+        blockers.append({"code": "payroll_statutory_source_missing", "count": int(payroll_receipts),
+                         "message": "Для начисленной зарплаты нет проверенного источника удержаний и взносов либо подтверждения их отсутствия."})
+    if payroll_statutory_source_conflict:
+        blockers.append({"code": "payroll_statutory_source_conflict", "count": len(statutory_zero_files),
+                         "message": "Документ об отсутствии удержаний и взносов противоречит проведённому импорту."})
     review = []
     if policy is not None and not policy.normative_verified:
         review.append({"code": "policy_normative_basis", "count": 1,
@@ -546,9 +560,13 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
             "statutory_imports": int(payroll_statutory_postings),
             "statutory_receipts": int(payroll_statutory_receipts),
             "statutory_receipt_gap": int(payroll_statutory_receipt_gap),
+            "statutory_zero_file_ids": list(statutory_zero_files),
+            "statutory_source_missing": payroll_statutory_source_missing,
+            "statutory_source_conflict": payroll_statutory_source_conflict,
             "statutory_payroll_certified": False,
-            "deductions_and_contributions_available": bool(payroll_statutory_postings)
-            and not payroll_statutory_receipt_gap,
+            "deductions_and_contributions_available": bool(
+                payroll_statutory_receipts or statutory_zero_files)
+            and not payroll_statutory_receipt_gap and not payroll_statutory_source_conflict,
         },
         "repairs": {"posted": int(repairs), "final_cost_certified": False},
         "inventory": {"late_cost_postings": int(late_cost_postings),

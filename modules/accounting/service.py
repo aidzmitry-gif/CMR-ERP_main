@@ -462,6 +462,10 @@ async def validate_close_period(session, org_id, month, data):
         raise AccountingError("Known payroll source is missing")
     if payroll["coverage_incomplete"]:
         raise AccountingError("Known payroll binding coverage is incomplete")
+    if payroll["statutory_source_missing"]:
+        raise AccountingError("Payroll deductions and contributions source is missing")
+    if payroll["statutory_source_conflict"]:
+        raise AccountingError("Payroll statutory zero statement conflicts with imported amounts")
     if payroll["population_review_required"]:
         from modules.accounting.payroll_population import verify_for_close
 
@@ -476,6 +480,11 @@ async def validate_close_period(session, org_id, month, data):
 
         for file_id in payroll["individual_zero_file_ids"]:
             await file_for(session, org_id, file_id, kind="payroll_zero_individual", month=month)
+    if payroll["statutory_zero_file_ids"]:
+        from modules.accounting.payroll_evidence_files import file_for
+
+        for file_id in payroll["statutory_zero_file_ids"]:
+            await file_for(session, org_id, file_id, kind="payroll_statutory_zero", month=month)
     earlier_open = await session.scalar(select(Period.id).where(
         Period.organization_id == org_id, Period.month < month, Period.closed.is_(False)
     ).limit(1))

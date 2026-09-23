@@ -57,6 +57,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0168_payroll_binding_month_coverage.py",
     "0169_opening_import_single_cutover.py",
     "0170_freeze_accepted_opening_balances.py",
+    "0171_payroll_statutory_close_source.py",
 )
 
 

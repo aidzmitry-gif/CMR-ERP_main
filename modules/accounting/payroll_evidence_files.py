@@ -25,7 +25,8 @@ from modules.accounting.service import AccountingError, lock_organization
 class PayrollEvidenceFileInput(Input):
     request_key: UUID
     kind: Literal["employment_contract", "timesheet", "payroll_policy", "base_adjustment",
-                  "payroll_zero_activity", "payroll_population", "payroll_zero_individual"]
+                  "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
+                  "payroll_statutory_zero"]
     employment_binding_id: int | None = Field(default=None, gt=0, strict=True)
     month: str | None = Field(default=None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
     reference: str = Field(min_length=1, max_length=160)
@@ -38,7 +39,7 @@ class PayrollEvidenceFileInput(Input):
         if self.kind == "payroll_policy":
             if self.employment_binding_id is not None or self.month is not None:
                 raise ValueError("Policy file is organization-scoped, not employee-scoped")
-        elif self.kind in {"payroll_zero_activity", "payroll_population"}:
+        elif self.kind in {"payroll_zero_activity", "payroll_population", "payroll_statutory_zero"}:
             if self.employment_binding_id is not None or self.month is None:
                 raise ValueError("Monthly payroll source file needs a month and no employee binding")
         elif self.kind == "employment_contract":
@@ -185,7 +186,8 @@ async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: st
         await run_in_threadpool(verify_bytes, existing)
         return result(existing)
 
-    if data.kind in {"payroll_zero_activity", "payroll_population", "payroll_zero_individual"}:
+    if data.kind in {"payroll_zero_activity", "payroll_population", "payroll_zero_individual",
+                     "payroll_statutory_zero"}:
         from modules.accounting.models import Period
 
         closed = await session.scalar(select(Period.id).where(

@@ -165,3 +165,14 @@ chief accountants as a review item. Readers of the general closing controls
 do not receive the private reconciliation status or difference count.
 This is a visible accountant decision, not automatic acceptance of the
 provisional workpaper or a substitute for a documented pilot variance.
+
+Migration `0171` adds a separate closing source for deductions and employer
+contributions. A month with a reviewed gross-payroll import cannot close until
+it has a reviewed statutory-import receipt or a chief-uploaded, month-scoped
+`payroll_statutory_zero` document stating that no such amounts apply. The zero
+document is byte-checked again at application close; a conflicting statutory
+posting blocks close. PostgreSQL checks the source presence and conflict even
+for a direct period update. The software does not decide whether zero amounts
+are legally justified or whether imported lines cover every applicable tax
+and contribution. The chief accountant must verify those facts against the
+current rules and the source register before accepting the pilot month.
