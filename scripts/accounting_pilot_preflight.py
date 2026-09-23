@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 from modules.accounting.reconciliation import compare  # noqa: E402
 from modules.accounting.schemas import ImportInput  # noqa: E402
 
-PROTOCOL_VERSION = "belarus-pilot-input-v3"
+PROTOCOL_VERSION = "belarus-pilot-input-v4"
 REQUIRED_ARTIFACT_KINDS = frozenset({
     "opening_balances",
     "bank_statement",
@@ -186,14 +186,17 @@ def _validate_pilot(manifest: dict[str, Any]) -> tuple[str, date]:
     return month, cutover
 
 
-def _validate_identity(manifest: dict[str, Any], cutover: date) -> str:
+def _validate_identity(manifest: dict[str, Any], cutover: date) -> tuple[str, str]:
     organization = _require_object(
         manifest["organization"],
         "organization",
-        required={"external_id", "name", "unp"},
-        allowed={"external_id", "name", "unp"},
+        required={"external_id", "erp_book_id", "name", "unp"},
+        allowed={"external_id", "erp_book_id", "name", "unp"},
     )
     external_id = _text(organization["external_id"], "organization.external_id")
+    erp_book_id = _text(organization["erp_book_id"], "organization.erp_book_id")
+    if not re.fullmatch(r"[1-9][0-9]*", erp_book_id):
+        raise PreflightError("organization.erp_book_id must be a positive ERP book ID")
     _text(organization["name"], "organization.name")
     unp = _text(organization["unp"], "organization.unp")
     if not re.fullmatch(r"[0-9]{9}", unp):
@@ -221,7 +224,7 @@ def _validate_identity(manifest: dict[str, Any], cutover: date) -> str:
     for key in ("revision", "order_reference", "responsible_id"):
         _text(policy[key], f"policy.{key}")
     _text(policy["evidence"], "policy.evidence", minimum=10)
-    return external_id
+    return external_id, erp_book_id
 
 
 def _validate_payroll(manifest: dict[str, Any]) -> tuple[str, str, str]:
@@ -374,7 +377,8 @@ def _read_structured_artifact(path: Path) -> bytes:
     return raw
 
 
-def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str, cutover: date) -> dict[str, Any]:
+def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str,
+                  cutover: date, erp_book_id: str) -> dict[str, Any]:
     try:
         result = compare(_read_structured_artifact(left["path"]), _read_structured_artifact(right["path"]))
     except (UnicodeDecodeError, ValueError) as exc:
@@ -382,6 +386,8 @@ def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str, cutov
     if not result["cutover_ready"]:
         blockers = ", ".join(result["eligibility_blockers"])
         raise PreflightError(f"OSV pair is not eligible for cutover: {blockers}")
+    if result["left"]["organization_id"] != erp_book_id:
+        raise PreflightError("OSV organization_id must match organization.erp_book_id")
     if result["left"]["from"] != cutover.isoformat() or result["left"]["to"][:7] != month:
         raise PreflightError("OSV pair must cover pilot.month from pilot.cutover_date")
     return result
@@ -436,7 +442,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
     if _text(manifest["protocol_version"], "protocol_version") != PROTOCOL_VERSION:
         raise PreflightError(f"protocol_version must be {PROTOCOL_VERSION}")
     month, cutover = _validate_pilot(manifest)
-    external_id = _validate_identity(manifest, cutover)
+    external_id, erp_book_id = _validate_identity(manifest, cutover)
     payroll_mode, payroll_source_system, payroll_kind = _validate_payroll(manifest)
     responsibility = _validate_responsibility(manifest, payroll_mode, payroll_source_system)
     artifacts = _validate_artifacts(
@@ -444,13 +450,15 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         payroll_kind=payroll_kind, payroll_source_system=payroll_source_system,
     )
     opening = _validate_opening(artifacts["opening_balances"][0], cutover)
-    osv = _validate_osv(artifacts["osv_left"][0], artifacts["osv_right"][0], month, cutover)
+    osv = _validate_osv(artifacts["osv_left"][0], artifacts["osv_right"][0],
+                        month, cutover, erp_book_id)
     return {
         "ok": True,
         "protocol_version": PROTOCOL_VERSION,
         "manifest_sha256": manifest_sha256,
         "pilot": {"month": month, "cutover_date": cutover.isoformat()},
         "organization_external_id": external_id,
+        "organization_erp_book_id": erp_book_id,
         "artifact_count": sum(len(rows) for rows in artifacts.values()),
         "required_artifact_count": sum(len(artifacts[kind]) for kind in REQUIRED_ARTIFACT_KINDS | {payroll_kind}),
         "supporting_artifact_count": len(artifacts.get("supporting_calculation", [])),
@@ -488,7 +496,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v3 JSON manifest")
+    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v4 JSON manifest")
     args = parser.parse_args(argv)
     try:
         result = preflight(args.manifest)

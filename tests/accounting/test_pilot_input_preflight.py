@@ -106,13 +106,13 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
         source_system="external-payroll",
     ))
     manifest = {
-        "protocol_version": "belarus-pilot-input-v3",
+        "protocol_version": "belarus-pilot-input-v4",
         "pilot": {
             "month": "2026-09",
             "cutover_date": "2026-09-01",
             "authorization_evidence": "Synthetic approved pilot protocol reference",
         },
-        "organization": {"external_id": "source-org-42", "name": "Synthetic LLC", "unp": "123456789"},
+        "organization": {"external_id": "source-org-42", "erp_book_id": "1", "name": "Synthetic LLC", "unp": "123456789"},
         "owners": {
             "chief_accountant": "accountant:chief-1",
             "accountant": "accountant:operator-1",
@@ -158,6 +158,7 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
 
     assert result["ok"] is True
     assert result["manifest_sha256"] == digest(path)
+    assert result["organization_erp_book_id"] == "1"
     assert result["artifact_count"] == 10
     assert result["required_artifact_count"] == 10
     assert result["supporting_artifact_count"] == 0
@@ -303,9 +304,27 @@ def test_preflight_requires_payroll_scope_and_its_matching_source(tmp_path):
         preflight(path)
 
     path, manifest = valid_manifest(tmp_path)
-    manifest["protocol_version"] = "belarus-pilot-input-v2"
+    manifest["protocol_version"] = "belarus-pilot-input-v3"
     path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(PreflightError, match="belarus-pilot-input-v3"):
+    with pytest.raises(PreflightError, match="belarus-pilot-input-v4"):
+        preflight(path)
+
+
+def test_preflight_binds_osv_pair_to_declared_erp_book(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    manifest["organization"]["erp_book_id"] = "2"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="OSV organization_id must match"):
+        preflight(path)
+
+    manifest["organization"]["erp_book_id"] = "01"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="positive ERP book ID"):
+        preflight(path)
+
+    del manifest["organization"]["erp_book_id"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="organization is missing: erp_book_id"):
         preflight(path)
 
 
