@@ -54,6 +54,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0165_payroll_employment_closed_period.py",
     "0166_payroll_zero_activity_evidence.py",
     "0167_payroll_population_review.py",
+    "0168_payroll_binding_month_coverage.py",
 )
 
 
@@ -639,6 +640,74 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
                 FROM accounting.payroll_employment_binding WHERE id = :binding_id
             """), {"request_key": str(uuid4()), "binding_id": receipt["binding_id"]})
         await session.rollback()
+
+
+async def test_payroll_partial_binding_coverage_is_blocked_in_postgres(pg_factory, pg_book):
+    from datetime import date
+
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting.models import Entry, PayrollAccrualReceipt, PayrollEvidenceFile, Period
+    from modules.accounting.payroll_employment import PayrollEmploymentInput, create
+    from modules.hr.models import Employee
+
+    async with pg_factory() as session:
+        people = [Employee(full_name=f"Coverage worker {index}", department="repair")
+                  for index in (1, 2)]
+        session.add_all(people)
+        await session.flush()
+        binding_ids = []
+        for person in people:
+            binding = await create(session, pg_book[0], PayrollEmploymentInput.model_validate({
+                "request_key": str(uuid4()), "employee_id": person.id,
+                "contract_ref": f"contract-{person.id}", "effective_from": "2026-10-01",
+                "state": "active", "source_document": f"contract-{person.id}",
+                "evidence": "Synthetic employer source for coverage guard",
+            }), "tester")
+            binding_ids.append(binding["binding_id"])
+        entry = Entry(
+            organization_id=pg_book[0], source="payroll:accrual:partial-coverage",
+            source_version=1, operation="payroll_accrual_import",
+            document_date=date(2026, 10, 31), operation_date=date(2026, 10, 31),
+            posting_date=date(2026, 10, 31), policy_id=pg_book[1],
+            rule_version="verified-payroll-accrual-import-v1",
+            explanation="Synthetic partial month payroll", opening=False,
+            correction_of=None, digest="a" * 64, actor="tester",
+        )
+        session.add(entry)
+        await session.flush()
+        lines = [{"employment_binding_id": binding_ids[0], "source_line_id": "one"}]
+        session.add(PayrollAccrualReceipt(
+            entry_id=entry.id, organization_id=pg_book[0], month="2026-10",
+            request_key=str(uuid4()), source_document="partial-coverage",
+            source_version=1, source_digest="b" * 64,
+            command={"lines": lines}, source={"lines": lines}, posting={},
+            digest="c" * 64, actor="tester",
+        ))
+        await session.flush()
+        with pytest.raises(DBAPIError, match="binding coverage is incomplete"):
+            async with session.begin_nested():
+                session.add(Period(organization_id=pg_book[0], month="2026-10",
+                                   closed=True, generation=0))
+                await session.flush()
+        key = str(uuid4())
+        session.add(PayrollEvidenceFile(
+            organization_id=pg_book[0], employment_binding_id=binding_ids[1],
+            kind="payroll_zero_individual", month="2026-10",
+            reference="second-worker-zero", filename="zero.pdf",
+            content_type="application/pdf", size_bytes=25,
+            sha256="a" * 64, storage_filename=key.replace("-", "") + ".pdf",
+            evidence="Synthetic chief zero-accrual source for second worker",
+            request_key=key, request_digest="b" * 64, digest="c" * 64,
+            snapshot={"synthetic": True}, actor="tester",
+        ))
+        await session.flush()
+        # Coverage now passes; the distinct roster-review guard is next.
+        with pytest.raises(DBAPIError, match="population review required"):
+            async with session.begin_nested():
+                session.add(Period(organization_id=pg_book[0], month="2026-10",
+                                   closed=True, generation=0))
+                await session.flush()
 
 
 async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_factory, pg_book, posting):

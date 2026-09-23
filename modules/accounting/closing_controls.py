@@ -254,6 +254,43 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         PayrollEvidenceFile.month == month,
         PayrollEvidenceFile.kind == "payroll_zero_activity",
     ).order_by(PayrollEvidenceFile.id))).all()
+    individual_zero_rows = (await session.scalars(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_zero_individual",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    individual_zero_by_binding = {row.employment_binding_id: row.id for row in individual_zero_rows}
+    accrual_rows = (await session.scalars(select(PayrollAccrualReceipt).join(
+        Entry, Entry.id == PayrollAccrualReceipt.entry_id,
+    ).where(
+        PayrollAccrualReceipt.organization_id == org_id,
+        PayrollAccrualReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_accrual_import",
+        Entry.source.like("payroll:accrual:%"),
+    ).order_by(PayrollAccrualReceipt.entry_id))).all()
+    accrual_binding_ids = set()
+    unmapped_accrual_lines = 0
+    for receipt in accrual_rows:
+        source_lines = receipt.source.get("lines") if isinstance(receipt.source, dict) else None
+        command_lines = receipt.command.get("lines") if isinstance(receipt.command, dict) else None
+        if not isinstance(source_lines, list) or not source_lines or source_lines != command_lines:
+            unmapped_accrual_lines += max(len(source_lines), 1) if isinstance(source_lines, list) else 1
+            continue
+        for line in source_lines:
+            binding_id = line.get("employment_binding_id") if isinstance(line, dict) else None
+            if type(binding_id) is int and binding_id > 0:
+                accrual_binding_ids.add(binding_id)
+            else:
+                unmapped_accrual_lines += 1
+    missing_binding_ids = sorted(set(population["known_binding_ids"])
+                                 - accrual_binding_ids - set(individual_zero_by_binding))
+    individual_zero_used = ([individual_zero_by_binding[binding_id] for binding_id in
+                             sorted(set(population["known_binding_ids"]) - accrual_binding_ids)
+                             if binding_id in individual_zero_by_binding]
+                            if payroll_receipts else [])
     payroll_source_missing = bool(
         (known_payroll_bindings or payroll_statutory_postings)
         and not payroll_receipts
@@ -261,6 +298,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     )
     payroll_source_conflict = bool(zero_activity_files and (
         payroll_postings or payroll_statutory_postings))
+    payroll_coverage_incomplete = bool(
+        known_payroll_bindings and payroll_receipts
+        and (missing_binding_ids or unmapped_accrual_lines))
     late_cost_postings = await session.scalar(select(func.count(Entry.id)).where(
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
@@ -352,6 +392,10 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if population_review_missing:
         blockers.append({"code": "payroll_population_review_missing", "count": known_payroll_bindings,
                          "message": "Для известных трудовых договоров нет актуального подтверждения полного состава сотрудников из исходного реестра."})
+    if payroll_coverage_incomplete:
+        blockers.append({"code": "payroll_binding_coverage_incomplete",
+                         "count": len(missing_binding_ids) + unmapped_accrual_lines,
+                         "message": "Не все известные договоры покрыты начислением или индивидуальным документом об отсутствии начисления; строки без ID договора требуют сопоставления."})
     review = []
     if policy is not None and not policy.normative_verified:
         review.append({"code": "policy_normative_basis", "count": 1,
@@ -460,6 +504,11 @@ async def snapshot(session, org_id: int, month: str) -> dict:
             "population_review_id": population["review"]["review_id"] if population["review"] else None,
             "population_matches_known_bindings": population["matches_current_bindings"],
             "zero_activity_file_ids": list(zero_activity_files),
+            "individual_zero_file_ids": individual_zero_used,
+            "accrual_binding_ids": sorted(accrual_binding_ids),
+            "missing_binding_ids": missing_binding_ids if payroll_receipts else [],
+            "unmapped_accrual_lines": unmapped_accrual_lines,
+            "coverage_incomplete": payroll_coverage_incomplete,
             "source_missing": payroll_source_missing,
             "source_conflict": payroll_source_conflict,
             "gross_accruals": int(payroll_postings),

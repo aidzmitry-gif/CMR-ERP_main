@@ -191,6 +191,9 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
     result = (await client.get(f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
     assert result["payroll"] == {
         "known_active_bindings": 0, "zero_activity_file_ids": [],
+        "individual_zero_file_ids": [], "accrual_binding_ids": [],
+        "missing_binding_ids": [], "unmapped_accrual_lines": 0,
+        "coverage_incomplete": False,
         "population_review_required": False, "population_review_id": None,
         "population_matches_known_bindings": False,
         "source_missing": False, "source_conflict": False,

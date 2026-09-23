@@ -454,6 +454,8 @@ async def validate_close_period(session, org_id, month, data):
                               + "; ".join(item["message"] for item in receipt_gaps))
     if payroll["source_missing"]:
         raise AccountingError("Known payroll source is missing")
+    if payroll["coverage_incomplete"]:
+        raise AccountingError("Known payroll binding coverage is incomplete")
     if payroll["population_review_required"]:
         from modules.accounting.payroll_population import verify_for_close
 
@@ -463,6 +465,11 @@ async def validate_close_period(session, org_id, month, data):
 
         for file_id in payroll["zero_activity_file_ids"]:
             await file_for(session, org_id, file_id, kind="payroll_zero_activity", month=month)
+    if payroll["individual_zero_file_ids"]:
+        from modules.accounting.payroll_evidence_files import file_for
+
+        for file_id in payroll["individual_zero_file_ids"]:
+            await file_for(session, org_id, file_id, kind="payroll_zero_individual", month=month)
     earlier_open = await session.scalar(select(Period.id).where(
         Period.organization_id == org_id, Period.month < month, Period.closed.is_(False)
     ).limit(1))

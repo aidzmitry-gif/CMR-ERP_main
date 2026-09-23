@@ -94,8 +94,9 @@ unknown. Therefore `organization_payroll_population_verified`,
 external form is created.
 
 For a month with at least one **known** active employer/contract binding,
-closing controls now require a matching reviewed gross-payroll import receipt
-or an organization-scoped `payroll_zero_activity` file for that month. The
+closing controls require reviewed gross-payroll import receipts covering each
+known active binding or an organization-scoped `payroll_zero_activity` file
+when there are no payroll postings. The
 latter is uploaded only by the chief accountant through the existing private
 payroll file endpoint, with explicit evidence, and its bytes are rechecked
 before application-level close. A later payroll posting supersedes the zero
@@ -131,3 +132,17 @@ field keep their original command shape and replay identity. An omitted ID is
 explicitly reported as an incomplete stable mapping in the preview; this
 change alone does not prove that every employee in the reviewed roster received
 an accrual or a documented zero amount.
+
+Migration `0168` uses those stable IDs to close that gap for **known** active
+bindings. When gross-payroll receipts exist, every imported gross line must
+carry a binding ID, and every known active binding needs at least one such
+line or a chief-uploaded `payroll_zero_individual` source file for that binding
+and month. The individual file is byte-checked before application-level close;
+a later mapped accrual supersedes it as the closing basis without deleting it.
+The closing-controls response lists missing binding IDs, unmapped line count,
+and the individual files currently used. PostgreSQL also refuses a direct
+period close when this coverage is incomplete. A whole-month zero file remains
+the route for a month without payroll postings; individual zero files do not
+replace it. Source documents are stored, not interpreted by the software:
+truth of the zero-accrual statement, completeness of the real workforce and
+statutory payroll remain subject to accountant review.
