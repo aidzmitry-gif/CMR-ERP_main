@@ -377,7 +377,7 @@ class PayrollEvidenceFile(Base):
     __tablename__ = "payroll_evidence_file"
     __table_args__ = (
         UniqueConstraint("organization_id", "request_key", name="uq_payroll_evidence_request"),
-        CheckConstraint("kind IN ('employment_contract', 'timesheet', 'payroll_policy', 'base_adjustment', 'payroll_zero_activity', 'payroll_population', 'payroll_zero_individual', 'payroll_statutory_zero', 'payroll_stat_zero_person')",
+        CheckConstraint("kind IN ('employment_contract', 'timesheet', 'work_schedule', 'payroll_policy', 'base_adjustment', 'payroll_zero_activity', 'payroll_population', 'payroll_zero_individual', 'payroll_statutory_zero', 'payroll_stat_zero_person')",
                         name="payroll_evidence_kind"),
         CheckConstraint("size_bytes > 0 AND size_bytes <= 10485760", name="payroll_evidence_size"),
         {"schema": "accounting"},

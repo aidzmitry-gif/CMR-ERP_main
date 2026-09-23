@@ -1,5 +1,12 @@
 # Accounting release readiness — source snapshot 2026-09-22
 
+Current isolated source head is `0173`. A local synthetic PostgreSQL 18.4
+rehearsal upgraded to `0173`, downgraded to `0172`, reapplied `0173` and
+checked that both payroll-file constraints include the new `work_schedule`
+kind only at `0173`. The same run completed paired database/private-file
+recovery and verified cleanup of its generated resources. This is local
+schema evidence, not a target-database or deployment receipt.
+
 Current local synthetic PostgreSQL upgrade/restore and payroll-guard evidence
 for source head `0172` is recorded in
 [POSTGRES-ACCEPTANCE-2026-09-23.md](POSTGRES-ACCEPTANCE-2026-09-23.md).

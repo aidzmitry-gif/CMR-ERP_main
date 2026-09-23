@@ -98,6 +98,22 @@ def _psql(container: str, user: str, database: str, sql: str, *, secret: str,
     )
 
 
+def _assert_work_schedule_constraints(container: str, user: str, database: str,
+                                      password: str, *, present: bool) -> None:
+    result = _psql(container, user, database, """
+    SELECT conname || '=' ||
+           CASE WHEN pg_get_constraintdef(oid) LIKE '%work_schedule%' THEN 'yes' ELSE 'no' END
+    FROM pg_constraint
+    WHERE conrelid = 'accounting.payroll_evidence_file'::regclass
+      AND conname IN ('payroll_evidence_kind', 'payroll_evidence_subject')
+    ORDER BY conname
+    """, secret=password)
+    expected = 'yes' if present else 'no'
+    for name in ('payroll_evidence_kind', 'payroll_evidence_subject'):
+        if not re.search(rf"(?m)^\s*{name}={expected}\s*$", result.stdout):
+            raise RehearsalError(f"{name} did not match the expected work-schedule migration state")
+
+
 def _cleanup_database(container: str, user: str, database: str, password: str) -> None:
     _assert_generated(database, DATABASE_PREFIX)
     _run(
@@ -198,6 +214,8 @@ async def _check_restored_policy(url: str, root: Path, organization_id: int, fil
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a local-only accounting PostgreSQL recovery rehearsal")
     parser.add_argument("--image", required=True, help="already-present local PostgreSQL Docker image")
+    parser.add_argument("--check-work-schedule-migration", action="store_true",
+                        help="rehearse 0173 downgrade/upgrade and verify both file constraints")
     args = parser.parse_args(argv)
 
     token = uuid.uuid4().hex
@@ -269,6 +287,18 @@ def main(argv: list[str] | None = None) -> int:
         source_created = True
         expected_head = _alembic_head(python, migration_env, password)
         _run("upgrade generated source database", [*python, "-m", "alembic", "upgrade", "head"], timeout=180, env=migration_env, secret=password)
+        if args.check_work_schedule_migration:
+            if expected_head != "0173":
+                raise RehearsalError("work-schedule migration check requires source head 0173")
+            _assert_work_schedule_constraints(container, user, source_db, password, present=True)
+            _run("downgrade generated source database to 0172",
+                 [*python, "-m", "alembic", "downgrade", "0172"],
+                 timeout=180, env=migration_env, secret=password)
+            _assert_work_schedule_constraints(container, user, source_db, password, present=False)
+            _run("reapply generated work-schedule migration",
+                 [*python, "-m", "alembic", "upgrade", "head"],
+                 timeout=180, env=migration_env, secret=password)
+            _assert_work_schedule_constraints(container, user, source_db, password, present=True)
 
         receipt_key = str(uuid.uuid4())
         digest_a, digest_b, command_digest, receipt_digest = ("a" * 64, "b" * 64, "c" * 64, "d" * 64)
@@ -334,7 +364,8 @@ FROM organization;
         if "Reconciliation receipts are immutable" not in (immutable_rejection.stdout + immutable_rejection.stderr):
             raise RehearsalError("receipt update was rejected without the immutable reconciliation guard signal")
         print(f"recovery rehearsal passed: alembic_head={expected_head}; reconciliation_receipts=1; "
-              "payroll_files=1; database_only_rejected=true; tamper_rejected=true; paired_restore_verified=true")
+              "payroll_files=1; database_only_rejected=true; tamper_rejected=true; paired_restore_verified=true; "
+              f"work_schedule_migration_checked={str(args.check_work_schedule_migration).lower()}")
         return 0
     except RehearsalError as exc:
         print(f"recovery rehearsal failed: {exc}", file=sys.stderr)

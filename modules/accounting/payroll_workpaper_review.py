@@ -162,8 +162,9 @@ async def create(session, org_id: int, month: str,
     if preview["basis_digest"] != data.basis_digest:
         raise AccountingError("Payroll workpaper changed; review the current preview")
     if (not preview["contract_and_timesheet_hashes_verified"]
-            or not preview["rule_source_file_bytes_verified"]):
-        raise AccountingError("Payroll review requires stored contract, timesheet and policy files")
+            or not preview["rule_source_file_bytes_verified"]
+            or not preview["schedule_file_bytes_verified"]):
+        raise AccountingError("Payroll review requires stored contract, timesheet, schedule and policy files")
     timesheet_file = await payroll_evidence_files.file_for(
         session, org_id, data.timesheet_file_id, kind="timesheet",
         employment_binding_id=data.employment_binding_id, month=month,

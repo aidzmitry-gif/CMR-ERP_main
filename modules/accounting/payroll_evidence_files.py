@@ -23,7 +23,7 @@ from modules.accounting.service import AccountingError, lock_organization
 from modules.accounting.timesheet_preflight import UnsupportedWorkbook, scan_bytes
 
 PayrollEvidenceKind = Literal[
-    "employment_contract", "timesheet", "payroll_policy", "base_adjustment",
+    "employment_contract", "timesheet", "work_schedule", "payroll_policy", "base_adjustment",
     "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
     "payroll_statutory_zero", "payroll_stat_zero_person",
 ]
@@ -51,7 +51,7 @@ class PayrollEvidenceFileInput(Input):
             if self.employment_binding_id is None or self.month is not None:
                 raise ValueError("Contract file needs an employee binding and no month")
         elif self.employment_binding_id is None or self.month is None:
-            raise ValueError("Timesheet or adjustment needs an employee binding and month")
+            raise ValueError("Monthly employee source needs an employment binding and month")
         if self.month is not None:
             try:
                 parsed = date.fromisoformat(self.month + "-01")

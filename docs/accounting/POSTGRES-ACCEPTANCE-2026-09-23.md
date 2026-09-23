@@ -67,3 +67,18 @@ resources. A live backup still needs an application-consistent snapshot of the
 entire database and private file store, actual target data, access and restore
 procedures, and a separate accountant acceptance; this run does not establish
 production recovery or payroll correctness.
+
+## Work-schedule file migration — 2026-09-24
+
+`python scripts/accounting_recovery_rehearsal.py --image 9a8afca54e78
+--check-work-schedule-migration` passed on a newly generated local PostgreSQL
+18.4 container and databases. The runner upgraded to source head `0173`,
+verified that both `payroll_evidence_kind` and `payroll_evidence_subject`
+contain `work_schedule`, downgraded to `0172` and verified its absence, then
+reapplied `0173` and verified its presence again. Its paired database/private
+file recovery checks also passed at `0173`; the runner reported removal of
+both generated databases, the generated container and its scratch file tree.
+The local API test separately stores a synthetic schedule receipt scoped to
+one employer binding and month, rejects a missing binding, wrong month, wrong
+file kind and changed bytes. The local run does not cover the target schema,
+real schedules or accountant approval of the stated norm.

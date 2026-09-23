@@ -71,4 +71,21 @@ describe("AccountingPayrollEvidenceUpload", () => {
     });
     expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({ employment_binding_id: null, month: null }));
   });
+
+  it("uploads a monthly work schedule for the selected employer binding", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => Promise.resolve(response(receipt(JSON.parse(init.body as string)))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollEvidenceUpload org="7" month="2026-10" bindingId={12} contractReference="signed-contract" disabled={false} onUploaded={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Вид документа"), { target: { value: "work_schedule" } });
+    fireEvent.change(screen.getByLabelText("Номер документа"), { target: { value: "approved-schedule-10" } });
+    fireEvent.change(screen.getByLabelText("Файл источника зарплаты"), { target: { files: [new File(["%PDF-1.7\nfictional"], "schedule.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(screen.getByLabelText("Пояснение документа"), { target: { value: "График и норма за октябрь" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить документ" }));
+    expect(await screen.findByText(/Файл № 87 сохранён/)).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      kind: "work_schedule", employment_binding_id: 12, month: "2026-10",
+      reference: "approved-schedule-10", filename: "schedule.pdf",
+    });
+  });
 });

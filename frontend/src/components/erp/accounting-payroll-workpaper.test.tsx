@@ -20,6 +20,7 @@ const sourceFiles = [
   { file_id: 71, organization_id: 7, employment_binding_id: 12, kind: "employment_contract", month: null, reference: "signed-contract", filename: "contract.pdf", content_type: "application/pdf", sha256: "c".repeat(64), size_bytes: 100 },
   { file_id: 72, organization_id: 7, employment_binding_id: 12, kind: "timesheet", month: "2026-10", reference: "timesheet-10", filename: "sheet.pdf", content_type: "application/pdf", sha256: "d".repeat(64), size_bytes: 100 },
   { file_id: 73, organization_id: 7, employment_binding_id: 12, kind: "base_adjustment", month: "2026-10", reference: "adjustment-10", filename: "adjust.pdf", content_type: "application/pdf", sha256: "e".repeat(64), size_bytes: 100 },
+  { file_id: 74, organization_id: 7, employment_binding_id: 12, kind: "work_schedule", month: "2026-10", reference: "schedule-10", filename: "schedule.pdf", content_type: "application/pdf", sha256: "f".repeat(64), size_bytes: 100 },
 ];
 const matchingFiles = (input: string) => sourceFiles.filter((row) => row.kind === new URL(input, "http://localhost").searchParams.get("kind"));
 const access = { organization_id: 7, can_preview: true, can_upload: true, can_review: true };
@@ -28,7 +29,7 @@ const result = {
   status: "arithmetic_workpaper_only", basis_digest: "f".repeat(64),
   gross_byn: "750.00", listed_employee_deductions_byn: "75.00", after_listed_deductions_byn: "675.00",
   listed_employer_contributions_byn: "130.00", cost_including_listed_contributions_byn: "880.00",
-  contract_and_timesheet_hashes_verified: true, rule_source_file_bytes_verified: true,
+  contract_and_timesheet_hashes_verified: true, schedule_file_bytes_verified: true, rule_source_file_bytes_verified: true,
   posting_available: false, statutory_payroll_certified: false,
   basis: { organization_id: 7, month: "2026-10", employee_name: "Тестовый работник", work_from: "2026-10-01", work_to: "2026-10-31", components: [
     { rate_code: "SYNTHETIC-EMPLOYEE", role: "employee_deduction", base_byn: "750.00", rate_value: "10.00", amount_byn: "75.00" },
@@ -61,11 +62,13 @@ describe("AccountingPayrollWorkpaper", () => {
     await screen.findByRole("option", { name: /timesheet-10/ });
     fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
     fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    fireEvent.change(screen.getByLabelText("Файл графика работы"), { target: { value: "74" } });
     fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
     fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
     fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "80.00" } });
     fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
     fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Часы в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Основание нормы часов"), { target: { value: "Утверждённая норма в графике" } });
     fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "100.00" } });
     fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
     fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Пункт документа о корректировке" } });
@@ -79,6 +82,7 @@ describe("AccountingPayrollWorkpaper", () => {
       policy_id: 3, rule_set_id: 41, employment_binding_id: 12,
       monthly_salary_byn: "1500.00", month_norm_hours: "160.00", worked_hours: "80.00",
       contract_file_id: 71, contract_digest: "c".repeat(64), timesheet_file_id: 72, timesheet_digest: "d".repeat(64),
+      work_schedule_file_id: 74, work_schedule_digest: "f".repeat(64), norm_hours_evidence: "Утверждённая норма в графике",
       components: [{ requirement_id: 61, adjustment_byn: "0.00" }, { requirement_id: 62, adjustment_byn: "100.00", adjustment_file_id: 73 }],
     });
     expect(screen.getByText(/не сумма зарплаты к выплате/)).toBeInTheDocument();
@@ -108,7 +112,7 @@ describe("AccountingPayrollWorkpaper", () => {
     render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
     await screen.findByText(/Набор правил № 41/);
     fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
     expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("payroll-workpaper-preview"))).toBe(true);
   });
@@ -139,12 +143,14 @@ describe("AccountingPayrollWorkpaper", () => {
     await screen.findByRole("option", { name: /timesheet-10/ });
     fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
     fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    fireEvent.change(screen.getByLabelText("Файл графика работы"), { target: { value: "74" } });
     expect(await screen.findByText(/формула часов охватывает не все дни/)).toHaveTextContent("11");
     fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
     fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
     fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "80.00" } });
     fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
     fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Часы в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Основание нормы часов"), { target: { value: "Утверждённая норма в графике" } });
     fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "100.00" } });
     fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
     fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Пункт документа о корректировке" } });
@@ -188,6 +194,7 @@ describe("AccountingPayrollWorkpaper", () => {
     await screen.findByRole("option", { name: /timesheet-10/ });
     fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
     fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    fireEvent.change(screen.getByLabelText("Файл графика работы"), { target: { value: "74" } });
     await screen.findByLabelText("Строка работника в XLSX");
     expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Строка работника в XLSX"), { target: { value: "11" } });
@@ -196,6 +203,7 @@ describe("AccountingPayrollWorkpaper", () => {
     fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "8.00" } });
     fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
     fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Первая строка в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Основание нормы часов"), { target: { value: "Утверждённая норма в графике" } });
     fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "0.00" } });
     fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
     fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Проверена корректировка базы" } });

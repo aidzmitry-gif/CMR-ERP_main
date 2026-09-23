@@ -367,6 +367,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
 
     contract, _ = await upload("employment_contract", "signed-contract-2026-7")
     timesheet, _ = await upload("timesheet", "reviewed-timesheet-2026-10-7", "2026-10")
+    schedule, schedule_raw = await upload("work_schedule", "approved-work-schedule-2026-10", "2026-10")
     adjustment, _ = await upload("base_adjustment", "synthetic-adjustment-source", "2026-10")
     policy_file, _ = await upload("payroll_policy", "synthetic-reviewed-payroll-policy")
     bad_rule = await client.post(
@@ -400,14 +401,42 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     fields = {
         "contract_file_id": contract["file_id"], "contract_digest": contract["sha256"],
         "timesheet_file_id": timesheet["file_id"], "timesheet_digest": timesheet["sha256"],
+        "work_schedule_document": schedule["reference"],
+        "work_schedule_digest": schedule["sha256"],
+        "work_schedule_file_id": schedule["file_id"],
+        "norm_hours_evidence": "Approved monthly norm in the work schedule",
     }
     reviewed_command = command(*args, **fields)
     reviewed_command["components"][1]["adjustment_file_id"] = adjustment["file_id"]
+    missing_schedule = command(*args, **{key: value for key, value in fields.items()
+                                       if not key.startswith("work_schedule")
+                                       and key != "norm_hours_evidence"})
+    missing_schedule["components"][1]["adjustment_file_id"] = adjustment["file_id"]
+    preliminary = await client.post(preview_url, json=missing_schedule)
+    assert preliminary.status_code == 200, preliminary.text
+    assert preliminary.json()["schedule_file_bytes_verified"] is False
     accepted = await client.post(preview_url, json=reviewed_command)
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["contract_and_timesheet_hashes_verified"] is True
+    assert accepted.json()["schedule_file_bytes_verified"] is True
+    assert accepted.json()["basis"]["work_schedule_file_id"] == schedule["file_id"]
+    assert accepted.json()["basis"]["norm_hours_evidence"] == fields["norm_hours_evidence"]
     assert accepted.json()["rule_source_file_bytes_verified"] is True
     assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
+
+    schedule_path = root / str(book[0]) / (schedule["request_key"].replace("-", "") + ".pdf")
+    schedule_path.write_bytes(b"%PDF-1.7\ntampered schedule\n")
+    assert (await client.post(preview_url, json=reviewed_command)).status_code == 409
+    schedule_path.write_bytes(schedule_raw)
+    assert (await client.post(preview_url, json={
+        **reviewed_command, "work_schedule_file_id": adjustment["file_id"],
+    })).status_code == 422
+    september_schedule, _ = await upload("work_schedule", "approved-work-schedule-2026-09", "2026-09")
+    assert (await client.post(preview_url, json={
+        **reviewed_command, "work_schedule_file_id": september_schedule["file_id"],
+        "work_schedule_document": september_schedule["reference"],
+        "work_schedule_digest": september_schedule["sha256"],
+    })).status_code == 422
 
     xlsx_path = tmp_path / "october.xlsx"
     make_timesheet(xlsx_path, month="2026-10", coded_day=True)
@@ -447,6 +476,12 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert checked_xlsx.json()["basis"]["timesheet_uninterpreted_code_days"] == 1
 
     review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"
+    missing_schedule_review = await client.post(review_url, json={
+        **missing_schedule, "request_key": str(uuid4()),
+        "basis_digest": preliminary.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic preview lacks the monthly norm source",
+    })
+    assert missing_schedule_review.status_code == 422
     broken_path = tmp_path / "broken-october.xlsx"
     make_timesheet(broken_path, month="2026-10", truncated=True)
     broken_upload = await client.post(url, json={

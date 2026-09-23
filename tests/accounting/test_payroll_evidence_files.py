@@ -3,9 +3,12 @@ import base64
 import hashlib
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import select
 
+from modules.accounting import payroll_evidence_files
 from modules.accounting.models import AccessGrant, Organization, Period
+from modules.accounting.service import AccountingError
 from modules.hr.models import Employee
 
 PDF = b"%PDF-1.7\nsynthetic payroll source, not a real employee document\n"
@@ -86,6 +89,7 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     assert not list(root.iterdir())
     missing_subject = await client.post(url, json=payload(kind="timesheet", month="2026-10"))
     assert missing_subject.status_code == 422
+    assert (await client.post(url, json=payload(kind="work_schedule", month="2026-10"))).status_code == 422
 
     employee = Employee(full_name="Synthetic Payroll Employee", department="repair")
     db.add(employee)
@@ -109,8 +113,14 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
         month="2026-10", reference="synthetic-timesheet-october",
     ))
     assert timesheet.status_code == 200, timesheet.text
+    schedule = await client.post(url, json=payload(
+        kind="work_schedule", employment_binding_id=binding.json()["binding_id"],
+        month="2026-10", reference="synthetic-approved-schedule-october",
+    ))
+    assert schedule.status_code == 200, schedule.text
     selected = await client.get(f"{url}?employment_binding_id={binding.json()['binding_id']}&month=2026-10")
-    assert [row["file_id"] for row in selected.json()] == [timesheet.json()["file_id"]]
+    assert {row["file_id"] for row in selected.json()} == {
+        timesheet.json()["file_id"], schedule.json()["file_id"]}
     contract_only = await client.get(
         f"{url}?employment_binding_id={binding.json()['binding_id']}&kind=employment_contract",
     )
@@ -119,7 +129,17 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
         f"{url}?employment_binding_id={binding.json()['binding_id']}&month=2026-10&kind=timesheet",
     )
     assert [row["file_id"] for row in timesheet_only.json()] == [timesheet.json()["file_id"]]
+    schedule_only = await client.get(
+        f"{url}?employment_binding_id={binding.json()['binding_id']}&month=2026-10&kind=work_schedule",
+    )
+    assert [row["file_id"] for row in schedule_only.json()] == [schedule.json()["file_id"]]
     assert (await client.get(f"{url}?kind=unknown")).status_code == 422
+    with pytest.raises(AccountingError, match="calculation scope"):
+        await payroll_evidence_files.file_for(
+            db, book[0], schedule.json()["file_id"], kind="work_schedule",
+            employment_binding_id=binding.json()["binding_id"] + 1,
+            month="2026-10",
+        )
 
     other = Organization(name="Other payroll company", unp="123123123")
     db.add(other)
@@ -132,11 +152,15 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     crossed = await client.get(
         f"/accounting/organizations/{other_id}/payroll-evidence-files/{contract.json()['file_id']}/download",
     )
+    crossed_schedule = await client.get(
+        f"/accounting/organizations/{other_id}/payroll-evidence-files/{schedule.json()['file_id']}/download",
+    )
     crossed_request = await client.get(
         f"/accounting/organizations/{other_id}/payroll-evidence-files/by-request/{contract.json()['request_key']}",
     )
     assert crossed_request.status_code == 404
     assert crossed.status_code == 404
+    assert crossed_schedule.status_code == 404
 
     grant = await db.scalar(select(AccessGrant).where(
         AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",

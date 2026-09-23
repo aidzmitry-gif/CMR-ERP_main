@@ -57,6 +57,10 @@ class PayrollWorkpaperInput(Input):
     timesheet_file_id: int | None = Field(default=None, gt=0, strict=True)
     timesheet_row: int | None = Field(default=None, ge=11, strict=True)
     timesheet_evidence: str = Field(min_length=10, max_length=2000)
+    work_schedule_document: str | None = Field(default=None, min_length=1, max_length=160)
+    work_schedule_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    work_schedule_file_id: int | None = Field(default=None, gt=0, strict=True)
+    norm_hours_evidence: str | None = Field(default=None, min_length=10, max_length=2000)
     month_norm_hours: Hours = Field(gt=0, le=744)
     worked_hours: Hours = Field(le=744)
     components: list[PayrollWorkpaperComponent] = Field(min_length=1, max_length=20)
@@ -67,6 +71,11 @@ class PayrollWorkpaperInput(Input):
             raise ValueError("Work period is reversed")
         if self.worked_hours > self.month_norm_hours:
             raise ValueError("Worked hours exceed monthly norm; overtime needs its own rule")
+        schedule = (self.work_schedule_document, self.work_schedule_digest,
+                    self.work_schedule_file_id, self.norm_hours_evidence)
+        if any(value is not None for value in schedule) and not all(
+                value is not None for value in schedule):
+            raise ValueError("Work schedule file, digest, reference and norm evidence must be supplied together")
         identities = [component.requirement_id for component in self.components]
         if len(identities) != len(set(identities)):
             raise ValueError("Rate requirement cannot appear twice in one workpaper")
@@ -117,6 +126,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         raise AccountingError("Contract and timesheet source files must be selected together")
     source_files_verified = data.contract_file_id is not None
     timesheet_row_check = None
+    schedule_bytes_verified = False
     if source_files_verified:
         contract_file = await evidence_file_for(
             session, org_id, data.contract_file_id, kind="employment_contract",
@@ -153,6 +163,16 @@ async def preview_workpaper(session, org_id: int, month: str,
             raise AccountingError("Timesheet row applies only to an XLSX source")
     elif data.timesheet_row is not None:
         raise AccountingError("Timesheet row requires a stored XLSX source")
+
+    if data.work_schedule_file_id is not None:
+        schedule_file = await evidence_file_for(
+            session, org_id, data.work_schedule_file_id, kind="work_schedule",
+            employment_binding_id=binding.id, month=month,
+        )
+        if (schedule_file.reference != data.work_schedule_document
+                or schedule_file.sha256 != data.work_schedule_digest):
+            raise AccountingError("Monthly work schedule differs from stored source file")
+        schedule_bytes_verified = True
 
     with localcontext() as context:
         context.prec = 64
@@ -260,6 +280,11 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_uninterpreted_code_days": (
             timesheet_row_check["uninterpreted_code_days"] if timesheet_row_check else None),
         "timesheet_evidence": data.timesheet_evidence,
+        "work_schedule_document": data.work_schedule_document,
+        "work_schedule_digest": data.work_schedule_digest,
+        "work_schedule_file_id": data.work_schedule_file_id,
+        "schedule_file_bytes_verified": schedule_bytes_verified,
+        "norm_hours_evidence": data.norm_hours_evidence,
         "month_norm_hours": format(data.month_norm_hours, ".2f"),
         "worked_hours": format(data.worked_hours, ".2f"),
         "method": ruleset.gross_method,
@@ -282,6 +307,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "statutory_payroll_certified": False,
         "contract_and_timesheet_hashes_verified": source_files_verified,
         "timesheet_numeric_hours_verified": timesheet_row_check is not None,
+        "schedule_file_bytes_verified": schedule_bytes_verified,
         "rule_set_configured": True,
         "rule_source_file_bytes_verified": rule_source_bytes_verified,
         "method_and_rate_classification_verified": False,

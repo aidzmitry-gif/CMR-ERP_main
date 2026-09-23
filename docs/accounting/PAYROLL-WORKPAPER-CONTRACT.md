@@ -47,6 +47,11 @@ day cells of that row over `work_from`–`work_to` and requires equality with
 are kept in the calculation basis. The accountant must still confirm that the
 row belongs to the employee and interpret all codes; the salary amount and
 monthly norm remain documented inputs rather than parsed contract facts.
+For a monthly norm, the accountant can attach a private `work_schedule` file
+scoped to the same legal entity, employment binding and month, with the exact
+location of the norm in that document. The workpaper rechecks its bytes and
+records the file reference, SHA-256 and ID in the immutable calculation basis.
+It does not parse the schedule or certify that the entered norm is correct.
 The chief can also select `source_file_id` when recording the rule-set revision.
 The configuration compares the stored file reference and SHA-256 with the
 declared policy source; every subsequent workpaper preview rechecks its bytes.
@@ -63,6 +68,8 @@ immutable metadata receipt and up to 10 MiB of private PDF, image or Office
 bytes. List and download require accountant/chief access to the same legal
 entity; download rechecks the hash. The server requires an existing private
 absolute `AIOS_PAYROLL_DATA_DIR` and does not accept client filesystem paths.
+`work_schedule` is a monthly employee-bound source, subject to the same private
+storage, receipt and backup rules as the timesheet.
 The file store must be included in backup/restore with the database; no target
 storage or recovery has been verified. The receipt is append-only, while the
 document's contents and authenticity still require human review.
@@ -84,7 +91,9 @@ used as evidence that a complete payroll run was calculated.
 `POST /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-workpaper-reviews`
 records a chief accountant's immutable **arithmetic-only** review. It requires
 the exact preview basis digest, stored and byte-verified contract, timesheet,
-policy and any adjusted-rate source files. A repeat of the same request key
+work schedule, policy and any adjusted-rate source files. The preliminary
+preview may omit a schedule for investigation, but it cannot receive a new
+chief-review receipt until the schedule is attached. A repeat of the same request key
 returns its original receipt. An amended calculation creates a new revision
 linked to the latest receipt; the old one remains readable through
 `GET /accounting/organizations/{org_id}/payroll-workpaper-reviews/{request_key}`.
