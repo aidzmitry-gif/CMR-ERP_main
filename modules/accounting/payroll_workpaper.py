@@ -88,6 +88,18 @@ async def preview_workpaper(session, org_id: int, month: str,
                 or rule_source_file.sha256 != ruleset.source_digest):
             raise AccountingError("Payroll rule source differs from stored source file")
     by_code = {rule["code"]: rule for rule in configured_rules["rate_rules"]}
+    configured_versions = ruleset.snapshot.get("rates_at_configuration")
+    if (not isinstance(configured_versions, list)
+            or len(configured_versions) != len(by_code)
+            or any(not isinstance(version, dict)
+                   or version.get("code") not in by_code
+                   or type(version.get("requirement_id")) is not int
+                   or not isinstance(version.get("requirement_digest"), str)
+                   for version in configured_versions)):
+        raise AccountingError("Payroll rule set rate versions require reconciliation")
+    versions_by_code = {version["code"]: version for version in configured_versions}
+    if len(versions_by_code) != len(by_code):
+        raise AccountingError("Payroll rule set rate versions require reconciliation")
     if len(data.components) != len(by_code):
         raise AccountingError("Workpaper must include every configured payroll rate once")
     binding, employment = await active_employment(
@@ -131,6 +143,11 @@ async def preview_workpaper(session, org_id: int, month: str,
             if rule is None or rate.code in used_codes:
                 raise AccountingError("Workpaper rate differs from the current payroll rule set")
             used_codes.add(rate.code)
+            configured_version = versions_by_code[rate.code]
+            if (rate.id != configured_version["requirement_id"]
+                    or rate_info["digest"] != configured_version["requirement_digest"]):
+                raise AccountingError(
+                    "Payroll rate version changed since payroll rule set configuration")
             if rule["base_mode"] == "gross":
                 if (component.adjustment_byn != 0 or component.adjustment_document
                         or component.adjustment_evidence or component.adjustment_file_id):

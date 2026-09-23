@@ -11,8 +11,12 @@ for the entire dated work segment, a verified accounting policy applicable for
 the whole month, and the latest immutable payroll rule set configured by the
 chief accountant. The rule set records its source document hash, gross method,
 rounding and every rate code's role and base mode. The workpaper requires every
-configured rate exactly once at its current organization-specific version; the
-caller cannot reclassify a deduction as an employer contribution. It also
+configured rate exactly once at its current organization-specific version and
+checks that its ID and digest match the version captured when the chief recorded
+the rule set. If a rate changes for a later month, the new workpaper is blocked
+until the chief records a new rule-set revision for that month; earlier months
+retain their applicable rate version. The caller cannot reclassify a deduction
+as an employer contribution. It also
 requires an identified contract amount and timesheet with document references
 and SHA-256 strings, exact monthly norm and worked hours, and documented
 adjustment to gross where the configured base mode needs it. Missing or

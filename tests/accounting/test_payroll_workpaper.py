@@ -150,6 +150,58 @@ async def test_workpaper_calculates_listed_components_without_posting(
     assert second.json()["basis_digest"] != body["basis_digest"]
 
 
+async def test_workpaper_requires_rule_set_review_after_rate_revision(
+        client, db, book, workpaper_sources):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    updated_rate = await statutory_requirements.create(db, book[0], rate_input(
+        request_key=str(uuid4()), code="SYNTHETIC-EMPLOYEE-DEDUCTION",
+        value="12", effective_from="2026-10-01",
+    ), "tester")
+    await db.commit()
+
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    stale_rules = await client.post(url, json=command(
+        book[1], binding["binding_id"], updated_rate["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
+    ))
+    assert stale_rules.status_code == 422
+    assert "payroll rule set" in stale_rules.text
+
+    september = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-09/payroll-workpaper-preview",
+        json=command(
+            book[1], binding["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"],
+            work_from="2026-09-01", work_to="2026-09-30",
+            timesheet_document="reviewed-timesheet-2026-09-7",
+        ),
+    )
+    assert september.status_code == 200, september.text
+    assert september.json()["listed_employee_deductions_byn"] == "75.00"
+
+    renewed = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()),
+            "policy_id": book[1],
+            "effective_from": "2026-10-01",
+            "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent",
+            "rate_rules": ruleset["rate_rules"],
+            "source_reference": "synthetic-reviewed-october-payroll-policy",
+            "source_digest": "d" * 64,
+            "evidence": "Synthetic chief review of the changed October rate version",
+        },
+    )
+    assert renewed.status_code == 200, renewed.text
+    current = await client.post(url, json=command(
+        book[1], binding["binding_id"], updated_rate["requirement_id"],
+        contribution["requirement_id"], renewed.json()["rule_set_id"],
+    ))
+    assert current.status_code == 200, current.text
+    assert current.json()["listed_employee_deductions_byn"] == "90.00"
+    assert current.json()["basis"]["rule_set_digest"] == renewed.json()["digest"]
+
+
 async def test_workpaper_rejects_unproven_shape_and_partial_period_binding(
         client, db, book, workpaper_sources):
     binding, deduction, contribution, ruleset = workpaper_sources
