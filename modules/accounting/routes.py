@@ -39,6 +39,7 @@ from modules.accounting import (
     opening_import,
     output_vat_register,
     payroll_employment,
+    payroll_rule_set,
     payroll_workpaper,
     reconciliation,
     repair_accounting,
@@ -94,6 +95,7 @@ from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
 )
+from modules.accounting.payroll_rule_set import PayrollRuleSetInput
 from modules.accounting.payroll_statutory import (
     PayrollStatutoryConfirmInput,
     PayrollStatutoryInput,
@@ -1533,6 +1535,27 @@ async def payroll_workpaper_preview(org_id: int, month: str, data: PayrollWorkpa
         return await payroll_workpaper.preview_workpaper(ctx[0], org_id, month, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/payroll-rule-sets')
+async def create_payroll_rule_set(org_id: int, data: PayrollRuleSetInput,
+                                  response: Response, ctx=Depends(member)):
+    chief(ctx)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_rule_set.create(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/payroll-rule-sets/current')
+async def current_payroll_rule_set(org_id: int, as_of: date, response: Response,
+                                   ctx=Depends(member)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    row = await payroll_rule_set.current(ctx[0], org_id, as_of)
+    if row is None:
+        raise HTTPException(404, 'No payroll rule set for this organization and date')
+    return payroll_rule_set.result(row)
 
 
 @router.post('/organizations/{org_id}/payroll-employments')

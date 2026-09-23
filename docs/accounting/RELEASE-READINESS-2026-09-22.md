@@ -10,7 +10,7 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
 ## Local candidate update — 2026-09-23
 
 - The isolated source branch is `agent/crm-acc-prod009`. The source migration graph
-  now reports a single `0161` head. This is a newer local snapshot than the
+  now reports a single `0162` head. This is a newer local snapshot than the
   historical capture below; no target database was inspected.
 - This source commit records `modules/hr` at
   `f8a6e0142f1920b07ec56818f42d156a602ff9c3`. It combines the isolated
@@ -33,6 +33,11 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
   complete payroll run or certify statutory amounts. Its PostgreSQL migration
   has not been executed in this record because the local Docker engine is
   unavailable.
+- Accounting revision `0162` adds an immutable organization payroll arithmetic
+  rule set. A chief accountant must explicitly configure the gross method,
+  rounding and every rate code's role/base mode before the workpaper can run.
+  Its declared source hash is not a verification of the policy document. The
+  PostgreSQL migration remains unexecuted in this record.
 - The source also pins `modules/production` at `be7d7e198bf09cc41c642d22125db401da5adc48`.
   This commit was created in the isolated production-module worktree; its
   configured remote is a local repository while `.gitmodules` declares
@@ -45,7 +50,7 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
 - Application-source revision at capture (before this control-record commit):
   `1d963d8fbcfa3d8f8b646318ee0748b24b9c6b1f`
   (`agent/crm-acc-prod009`).
-- `py -3 -m alembic heads` reports one **source** head: `0161`.
+- `py -3 -m alembic heads` reports one **source** head: `0162`.
 - The accounting module is enabled in
   [`config/modules.py`](../../config/modules.py), and the source UI contains
   the `Бухгалтерия` sidebar entry and `/erp/accounting` page.  This proves the
@@ -60,7 +65,7 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
 The prior historical checkpoint through `0132` remains documented in
 [migration-integration-plan.md](migration-integration-plan.md).  The live
 source graph has since been joined by `0133` (parents `0129` and `0132`) and is
-linear through `0161`:
+linear through `0162`:
 
 | Revisions | Subject | Evidence boundary |
 | --- | --- | --- |
@@ -73,10 +78,11 @@ linear through `0161`:
 | `0159` | TN/TTN scenarios in versioned accounting policy | Requires organization policy and primary-document acceptance. |
 | `0160` | Immutable OSV reconciliation issue queue and unmatched rows | Source graph only in this record; it must be exercised against a real reconciliation package before use for cutover. |
 | `0161` | Explicit, immutable HR employee/contract to legal-entity binding for payroll previews | Local API and SQLite tests only; PostgreSQL migration and real employer documents remain unverified. |
+| `0162` | Immutable organization payroll arithmetic rule set | Local API and SQLite tests only; official rule applicability and PostgreSQL migration remain unverified. |
 
 The command above validates migration topology only.  It neither connects to a
 database nor substitutes for an upgrade, rollback, restore, or concurrent
-PostgreSQL acceptance of the complete `0133`–`0161` range.  In particular,
+PostgreSQL acceptance of the complete `0133`–`0162` range.  In particular,
 `alembic upgrade head --sql` is not a release check for this repository: legacy
 revision `0062` performs a data lookup that requires an online PostgreSQL
 connection.  The schema candidate must therefore be exercised on an owned

@@ -35,12 +35,31 @@ async def workpaper_sources(client, db, book):
         request_key=str(uuid4()), code="SYNTHETIC-EMPLOYER-CONTRIBUTION", value="20",
     ), "tester")
     await db.commit()
-    return binding.json(), deduction, contribution
+    ruleset = await client.post(f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+        "request_key": str(uuid4()),
+        "policy_id": book[1],
+        "effective_from": "2026-01-01",
+        "gross_method": "monthly_salary_by_hours",
+        "rounding": "half_up_cent",
+        "rate_rules": [
+            {"code": "SYNTHETIC-EMPLOYEE-DEDUCTION", "role": "employee_deduction",
+             "base_mode": "gross", "classification_evidence": "Synthetic documented deduction classification"},
+            {"code": "SYNTHETIC-EMPLOYER-CONTRIBUTION", "role": "employer_contribution",
+             "base_mode": "gross_less_adjustment",
+             "classification_evidence": "Synthetic documented contribution classification"},
+        ],
+        "source_reference": "synthetic-reviewed-payroll-policy",
+        "source_digest": "c" * 64,
+        "evidence": "Synthetic accountant supplied gross method and rounding policy evidence",
+    })
+    assert ruleset.status_code == 200, ruleset.text
+    return binding.json(), deduction, contribution, ruleset.json()
 
 
-def command(policy_id, binding_id, deduction_id, contribution_id, **changes):
+def command(policy_id, binding_id, deduction_id, contribution_id, ruleset_id, **changes):
     payload = {
         "policy_id": policy_id,
+        "rule_set_id": ruleset_id,
         "employment_binding_id": binding_id,
         "work_from": "2026-10-01",
         "work_to": "2026-10-31",
@@ -53,25 +72,13 @@ def command(policy_id, binding_id, deduction_id, contribution_id, **changes):
         "timesheet_evidence": "Synthetic reviewed October hours evidence",
         "month_norm_hours": "160.00",
         "worked_hours": "80.00",
-        "method": "monthly_salary_by_hours",
-        "method_evidence": "Synthetic policy explicitly approves hours proportion for this scenario",
-        "rounding": "half_up_cent",
-        "rounding_evidence": "Synthetic policy explicitly approves cent half-up rounding",
         "components": [
             {
                 "requirement_id": deduction_id,
-                "role": "employee_deduction",
-                "classification_document": "synthetic-deduction-rule",
-                "classification_evidence": "Synthetic accountant classification, not statutory proof",
-                "base_mode": "gross",
                 "adjustment_byn": "0.00",
             },
             {
                 "requirement_id": contribution_id,
-                "role": "employer_contribution",
-                "classification_document": "synthetic-contribution-rule",
-                "classification_evidence": "Synthetic accountant classification, not statutory proof",
-                "base_mode": "gross_less_adjustment",
                 "adjustment_byn": "100.00",
                 "adjustment_document": "synthetic-adjustment-source",
                 "adjustment_evidence": "Synthetic explicit rate base adjustment evidence",
@@ -84,11 +91,12 @@ def command(policy_id, binding_id, deduction_id, contribution_id, **changes):
 
 async def test_workpaper_calculates_listed_components_without_posting(
         client, db, book, workpaper_sources):
-    binding, deduction, contribution = workpaper_sources
+    binding, deduction, contribution, ruleset = workpaper_sources
     before = await db.scalar(select(func.count(Entry.id)))
     url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
     payload = command(book[1], binding["binding_id"],
-                      deduction["requirement_id"], contribution["requirement_id"])
+                      deduction["requirement_id"], contribution["requirement_id"],
+                      ruleset["rule_set_id"])
     response = await client.post(url, json=payload)
     assert response.status_code == 200, response.text
     body = response.json()
@@ -98,18 +106,21 @@ async def test_workpaper_calculates_listed_components_without_posting(
     assert body["listed_employer_contributions_byn"] == "130.00"
     assert body["cost_including_listed_contributions_byn"] == "880.00"
     assert body["basis"]["employment_binding_digest"] == binding["digest"]
+    assert body["basis"]["rule_set_digest"] == ruleset["digest"]
     assert body["basis"]["components"][1]["base_byn"] == "650.00"
     assert len(body["basis_digest"]) == 64
     assert body["status"] == "arithmetic_workpaper_only"
     assert body["posting_available"] is False
     assert body["statutory_payroll_certified"] is False
     assert body["contract_and_timesheet_hashes_verified"] is False
+    assert body["rule_set_configured"] is True
     assert "unlisted_components" in body["not_calculated"]
     assert response.headers["cache-control"] == "private, no-store"
     assert await db.scalar(select(func.count(Entry.id))) == before
 
     rounded = command(book[1], binding["binding_id"],
                       deduction["requirement_id"], contribution["requirement_id"],
+                      ruleset["rule_set_id"],
                       monthly_salary_byn="1000.00", month_norm_hours="3.00",
                       worked_hours="1.00")
     second = await client.post(url, json=rounded)
@@ -121,10 +132,10 @@ async def test_workpaper_calculates_listed_components_without_posting(
 
 async def test_workpaper_rejects_unproven_shape_and_partial_period_binding(
         client, db, book, workpaper_sources):
-    binding, deduction, contribution = workpaper_sources
+    binding, deduction, contribution, ruleset = workpaper_sources
     url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
     args = (book[1], binding["binding_id"], deduction["requirement_id"],
-            contribution["requirement_id"])
+            contribution["requirement_id"], ruleset["rule_set_id"])
     for changes in (
         {"monthly_salary_byn": 1500.00},
         {"worked_hours": "161.00"},
@@ -141,6 +152,32 @@ async def test_workpaper_rejects_unproven_shape_and_partial_period_binding(
     missing_evidence = command(*args)
     del missing_evidence["components"][1]["adjustment_evidence"]
     assert (await client.post(url, json=missing_evidence)).status_code == 422
+
+    incomplete = command(*args)
+    incomplete["components"].pop()
+    missing_rate = await client.post(url, json=incomplete)
+    assert missing_rate.status_code == 422
+    assert "every configured payroll rate" in missing_rate.text
+
+    newer_rule_set = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets",
+        json={
+            "request_key": str(uuid4()),
+            "policy_id": book[1],
+            "effective_from": "2026-01-01",
+            "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent",
+            "rate_rules": ruleset["rate_rules"],
+            "source_reference": "synthetic-corrected-policy",
+            "source_digest": "d" * 64,
+            "evidence": "Synthetic reviewed replacement policy evidence",
+        },
+    )
+    assert newer_rule_set.status_code == 200, newer_rule_set.text
+    stale = await client.post(url, json=command(*args))
+    assert stale.status_code == 422
+    assert "current payroll rule set" in stale.text
+    args = (*args[:-1], newer_rule_set.json()["rule_set_id"])
 
     ended = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
         "request_key": str(uuid4()),
@@ -159,7 +196,7 @@ async def test_workpaper_rejects_unproven_shape_and_partial_period_binding(
 
 async def test_workpaper_rejects_foreign_rate_and_reader(
         client, db, book, workpaper_sources):
-    binding, deduction, contribution = workpaper_sources
+    binding, deduction, contribution, ruleset = workpaper_sources
     other = Organization(name="Other synthetic employer", unp="777777777")
     db.add(other)
     await db.flush()
@@ -170,7 +207,7 @@ async def test_workpaper_rejects_foreign_rate_and_reader(
     url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
     response = await client.post(url, json=command(
         book[1], binding["binding_id"], foreign_rate["requirement_id"],
-        contribution["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
     ))
     assert response.status_code == 422
     assert "not effective for this organization" in response.text
@@ -182,6 +219,6 @@ async def test_workpaper_rejects_foreign_rate_and_reader(
     await db.commit()
     denied = await client.post(url, json=command(
         book[1], binding["binding_id"], deduction["requirement_id"],
-        contribution["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
     ))
     assert denied.status_code == 403

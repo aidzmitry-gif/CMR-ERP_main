@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, localcontext
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BeforeValidator, Field, model_validator
 
@@ -19,6 +19,8 @@ from modules.accounting.payroll_calculation import (
     month_bounds,
     verified_policy,
 )
+from modules.accounting.payroll_rule_set import current as current_rule_set
+from modules.accounting.payroll_rule_set import result as rule_set_result
 from modules.accounting.schemas import Input, Money, exact
 from modules.accounting.service import AccountingError
 
@@ -29,26 +31,13 @@ MAX_MONEY = Decimal("999999999999999999.99")
 
 class PayrollWorkpaperComponent(Input):
     requirement_id: int = Field(gt=0, strict=True)
-    role: Literal["employee_deduction", "employer_contribution"]
-    classification_document: str = Field(min_length=1, max_length=160)
-    classification_evidence: str = Field(min_length=10, max_length=2000)
-    base_mode: Literal["gross", "gross_less_adjustment"]
     adjustment_byn: Money
     adjustment_document: str | None = Field(default=None, min_length=1, max_length=160)
     adjustment_evidence: str | None = Field(default=None, min_length=10, max_length=2000)
 
-    @model_validator(mode="after")
-    def check_adjustment(self):
-        if self.base_mode == "gross":
-            if self.adjustment_byn != 0 or self.adjustment_document or self.adjustment_evidence:
-                raise ValueError("Gross rate base cannot contain an adjustment")
-        elif not self.adjustment_document or not self.adjustment_evidence:
-            raise ValueError("Adjusted rate base requires document and evidence")
-        return self
-
-
 class PayrollWorkpaperInput(Input):
     policy_id: int = Field(gt=0, strict=True)
+    rule_set_id: int = Field(gt=0, strict=True)
     employment_binding_id: int = Field(gt=0, strict=True)
     work_from: date
     work_to: date
@@ -61,10 +50,6 @@ class PayrollWorkpaperInput(Input):
     timesheet_evidence: str = Field(min_length=10, max_length=2000)
     month_norm_hours: Hours = Field(gt=0, le=744)
     worked_hours: Hours = Field(le=744)
-    method: Literal["monthly_salary_by_hours"]
-    method_evidence: str = Field(min_length=10, max_length=2000)
-    rounding: Literal["half_up_cent"]
-    rounding_evidence: str = Field(min_length=10, max_length=2000)
     components: list[PayrollWorkpaperComponent] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
@@ -85,6 +70,13 @@ async def preview_workpaper(session, org_id: int, month: str,
     if not first <= data.work_from <= data.work_to <= last:
         raise AccountingError("Work period must belong to the selected month")
     policy = await verified_policy(session, org_id, first, last, data.policy_id)
+    ruleset = await current_rule_set(session, org_id, first)
+    if ruleset is None or ruleset.id != data.rule_set_id or ruleset.policy_id != policy.id:
+        raise AccountingError("Select the current payroll rule set for this organization and month")
+    configured_rules = rule_set_result(ruleset)
+    by_code = {rule["code"]: rule for rule in configured_rules["rate_rules"]}
+    if len(data.components) != len(by_code):
+        raise AccountingError("Workpaper must include every configured payroll rate once")
     binding, employment = await active_employment(
         session, org_id, data.employment_binding_id, data.work_from,
     )
@@ -100,10 +92,21 @@ async def preview_workpaper(session, org_id: int, month: str,
         component_rows = []
         deductions = Decimal("0")
         employer_contributions = Decimal("0")
+        used_codes = set()
         for component in data.components:
             rate, rate_info = await effective_percentage_rate(
                 session, org_id, component.requirement_id, data.work_to,
             )
+            rule = by_code.get(rate.code)
+            if rule is None or rate.code in used_codes:
+                raise AccountingError("Workpaper rate differs from the current payroll rule set")
+            used_codes.add(rate.code)
+            if rule["base_mode"] == "gross":
+                if (component.adjustment_byn != 0 or component.adjustment_document
+                        or component.adjustment_evidence):
+                    raise AccountingError("Gross rate base cannot contain an adjustment")
+            elif not component.adjustment_document or not component.adjustment_evidence:
+                raise AccountingError("Adjusted rate base requires document and evidence")
             if component.adjustment_byn > gross:
                 raise AccountingError("Rate-base adjustment exceeds calculated gross pay")
             base = gross - component.adjustment_byn
@@ -112,7 +115,7 @@ async def preview_workpaper(session, org_id: int, month: str,
             )
             if amount > MAX_MONEY:
                 raise AccountingError("Payroll component exceeds the accounting money range")
-            if component.role == "employee_deduction":
+            if rule["role"] == "employee_deduction":
                 deductions += amount
             else:
                 employer_contributions += amount
@@ -122,16 +125,17 @@ async def preview_workpaper(session, org_id: int, month: str,
                 "rate_code": rate.code,
                 "rate_value": rate_info["rate_value"],
                 "rate_basis": rate.rate_basis,
-                "role": component.role,
-                "classification_document": component.classification_document,
-                "classification_evidence": component.classification_evidence,
-                "base_mode": component.base_mode,
+                "role": rule["role"],
+                "classification_evidence": rule["classification_evidence"],
+                "base_mode": rule["base_mode"],
                 "adjustment_byn": format(component.adjustment_byn, ".2f"),
                 "adjustment_document": component.adjustment_document,
                 "adjustment_evidence": component.adjustment_evidence,
                 "base_byn": format(base, ".2f"),
                 "amount_byn": format(amount, ".2f"),
             })
+        if used_codes != set(by_code):
+            raise AccountingError("Workpaper omits a configured payroll rate")
         if deductions > gross:
             raise AccountingError("Employee deductions exceed calculated gross pay")
         net = gross - deductions
@@ -144,6 +148,10 @@ async def preview_workpaper(session, org_id: int, month: str,
         "month": month,
         "policy_id": policy.id,
         "policy_reference": policy.reference,
+        "rule_set_id": ruleset.id,
+        "rule_set_digest": ruleset.digest,
+        "rule_set_source_reference": ruleset.source_reference,
+        "rule_set_source_digest": ruleset.source_digest,
         "employee_id": binding.employee_id,
         "employee_name": employment["employee_name"],
         "department": employment["department"],
@@ -161,11 +169,10 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_evidence": data.timesheet_evidence,
         "month_norm_hours": format(data.month_norm_hours, ".2f"),
         "worked_hours": format(data.worked_hours, ".2f"),
-        "method": data.method,
+        "method": ruleset.gross_method,
         "gross_formula": "round_half_up(monthly_salary_byn * worked_hours / month_norm_hours, 2)",
-        "method_evidence": data.method_evidence,
-        "rounding": data.rounding,
-        "rounding_evidence": data.rounding_evidence,
+        "method_evidence": ruleset.evidence,
+        "rounding": ruleset.rounding,
         "gross_byn": format(gross, ".2f"),
         "components": component_rows,
     }
@@ -181,10 +188,12 @@ async def preview_workpaper(session, org_id: int, month: str,
         "posting_available": False,
         "statutory_payroll_certified": False,
         "contract_and_timesheet_hashes_verified": False,
+        "rule_set_configured": True,
         "method_and_rate_classification_verified": False,
         "needs_accountant_review": True,
         "not_calculated": [
-            "document_authenticity", "method_applicability", "rate_eligibility",
+            "document_authenticity", "rule_source_authenticity", "method_applicability",
+            "rate_eligibility",
             "exemptions", "caps", "benefits", "unlisted_components",
             "period_aggregation", "statutory_forms",
         ],

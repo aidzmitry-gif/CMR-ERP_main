@@ -338,6 +338,39 @@ class PayrollEmploymentBinding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PayrollRuleSet(Base):
+    """Append-only employer configuration for payroll workpaper arithmetic."""
+
+    __tablename__ = "payroll_rule_set"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_payroll_rule_set_request"),
+        UniqueConstraint("organization_id", "effective_from", "revision",
+                         name="uq_payroll_rule_set_revision"),
+        CheckConstraint("revision > 0", name="payroll_rule_set_positive_revision"),
+        CheckConstraint("gross_method = 'monthly_salary_by_hours'",
+                        name="payroll_rule_set_gross_method"),
+        CheckConstraint("rounding = 'half_up_cent'", name="payroll_rule_set_rounding"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    policy_id: Mapped[int] = mapped_column(ForeignKey("accounting.policy.id"))
+    effective_from: Mapped[date] = mapped_column(Date)
+    revision: Mapped[int] = mapped_column(Integer)
+    gross_method: Mapped[str] = mapped_column(String(40))
+    rounding: Mapped[str] = mapped_column(String(20))
+    rate_rules: Mapped[list] = mapped_column(JSON)
+    source_reference: Mapped[str] = mapped_column(String(200))
+    source_digest: Mapped[str] = mapped_column(String(64))
+    evidence: Mapped[str] = mapped_column(String(2000))
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SourceControl(Base):
     """Current completeness state; source revisions and audit preserve its history."""
     __tablename__ = "source_control"
@@ -1228,7 +1261,7 @@ def immutable(mapper, connection, target):
 
 
 for _model in (Account, CatalogAdoption, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
-               PayrollEmploymentBinding,
+               PayrollEmploymentBinding, PayrollRuleSet,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,
                ShipmentAccountingReceipt, ShipmentPreparationDraft, InventoryIssueReceipt, InventorySaleReceipt,
                ProductionOutputTransferReceipt, ProductionLaborReceipt, PayrollAccrualReceipt,
