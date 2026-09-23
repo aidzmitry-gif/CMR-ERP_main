@@ -176,3 +176,13 @@ for a direct period update. The software does not decide whether zero amounts
 are legally justified or whether imported lines cover every applicable tax
 and contribution. The chief accountant must verify those facts against the
 current rules and the source register before accepting the pilot month.
+
+Migration `0172` closes the partial-import case. When external statutory lines
+exist, each line must carry a stable employment binding, and each binding with
+gross accrual needs a statutory line or a chief-uploaded
+`payroll_stat_zero_person` file for that binding and month. A zero file for a
+binding that also has an imported amount is contradictory. Closing controls
+show missing binding IDs and unmapped lines; application close rechecks the
+individual files, while PostgreSQL rejects a direct close with incomplete
+binding coverage. This proves source assignment to known ERP contracts, not
+the completeness of the real workforce or each legally applicable component.

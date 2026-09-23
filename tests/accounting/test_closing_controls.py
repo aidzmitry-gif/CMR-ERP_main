@@ -202,6 +202,9 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
         "statutory_imports": 0, "statutory_receipts": 0, "statutory_receipt_gap": 0,
         "statutory_zero_file_ids": [], "statutory_source_missing": False,
         "statutory_source_conflict": False,
+        "statutory_person_zero_file_ids": [], "statutory_binding_ids": [],
+        "missing_statutory_binding_ids": [], "unmapped_statutory_lines": 0,
+        "statutory_coverage_incomplete": False,
         "statutory_payroll_certified": False,
         "deductions_and_contributions_available": False,
     }
@@ -394,6 +397,101 @@ async def test_gross_payroll_close_requires_statutory_source_or_reviewed_zero(
 
     with pytest.raises(HTTPException, match="missing or differs"):
         await service.validate_close_period(db, book[0], "2026-10", close)
+
+
+async def test_statutory_import_covers_each_gross_binding_or_individual_zero(
+        client, db, book, tmp_path, monkeypatch):
+    prefix = f"/accounting/organizations/{book[0]}"
+    employees = [Employee(full_name=f"Synthetic payroll {n}", department="repair") for n in (1, 2)]
+    db.add_all(employees)
+    await db.commit()
+    binding_ids = []
+    for number, employee in enumerate(employees, start=1):
+        response = await client.post(prefix + "/payroll-employments", json={
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": f"statutory-coverage-{number}", "effective_from": "2026-10-01",
+            "state": "active", "source_document": f"statutory-coverage-{number}",
+            "evidence": "Synthetic reviewed employment source for coverage",
+        })
+        assert response.status_code == 200, response.text
+        binding_ids.append(response.json()["binding_id"])
+
+    gross = models.Entry(
+        organization_id=book[0], source="payroll:accrual:coverage", source_version=1,
+        operation="payroll_accrual_import", document_date=date(2026, 10, 1),
+        operation_date=date(2026, 10, 1), posting_date=date(2026, 10, 1),
+        policy_id=book[1], rule_version="verified-payroll-accrual-import-v1",
+        explanation="Synthetic gross coverage", opening=False, correction_of=None,
+        digest="a" * 64, actor="tester",
+    )
+    statutory = models.Entry(
+        organization_id=book[0], source="payroll:statutory:coverage", source_version=1,
+        operation="payroll_statutory_import", document_date=date(2026, 10, 1),
+        operation_date=date(2026, 10, 1), posting_date=date(2026, 10, 1),
+        policy_id=book[1], rule_version="verified-payroll-statutory-import-v1",
+        explanation="Synthetic partial statutory coverage", opening=False, correction_of=None,
+        digest="b" * 64, actor="tester",
+    )
+    db.add_all([gross, statutory])
+    await db.flush()
+    gross_source = {"lines": [{"employment_binding_id": value} for value in binding_ids]}
+    statutory_source = {"lines": [{"employment_binding_id": binding_ids[0]}]}
+    db.add_all([
+        models.PayrollAccrualReceipt(
+            entry_id=gross.id, organization_id=book[0], month="2026-10",
+            request_key=str(uuid4()), source_document="synthetic-gross-coverage", source_version=1,
+            source_digest="c" * 64, command=gross_source, source=gross_source, posting={},
+            digest="d" * 64, actor="tester",
+        ),
+        models.PayrollStatutoryReceipt(
+            entry_id=statutory.id, organization_id=book[0], month="2026-10",
+            request_key=str(uuid4()), source_document="synthetic-statutory-coverage", source_version=1,
+            source_digest="e" * 64, command=statutory_source, source=statutory_source,
+            posting={}, digest="f" * 64, actor="tester",
+        ),
+    ])
+    await db.commit()
+    url = prefix + "/periods/2026-10/closing-controls"
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["statutory_source_missing"] is False
+    assert controls["payroll"]["missing_statutory_binding_ids"] == [binding_ids[1]]
+    assert controls["payroll"]["statutory_coverage_incomplete"] is True
+    assert "payroll_statutory_coverage_incomplete" in {row["code"] for row in controls["blockers"]}
+    close = CloseInput(expected_generation=0, evidence={
+        step: "Synthetic checked" for step in service.CLOSE_STEPS
+    })
+    with pytest.raises(service.AccountingError, match="does not cover all mapped gross accruals"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    saved = await client.post(prefix + "/payroll-evidence-files", json={
+        "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",
+        "employment_binding_id": binding_ids[1], "month": "2026-10",
+        "reference": "synthetic-person-zero", "filename": "person-zero.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic reviewed individual zero statement\n").decode(),
+        "evidence": "Synthetic chief-reviewed individual statutory zero evidence",
+    })
+    assert saved.status_code == 200, saved.text
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["statutory_person_zero_file_ids"] == [saved.json()["file_id"]]
+    assert controls["payroll"]["statutory_coverage_incomplete"] is False
+    assert controls["payroll"]["deductions_and_contributions_available"] is True
+
+    contradiction = await client.post(prefix + "/payroll-evidence-files", json={
+        "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",
+        "employment_binding_id": binding_ids[0], "month": "2026-10",
+        "reference": "synthetic-conflicting-person-zero", "filename": "conflict.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic contradictory individual zero statement\n").decode(),
+        "evidence": "Synthetic chief statement contradicts imported statutory amount",
+    })
+    assert contradiction.status_code == 200, contradiction.text
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["statutory_source_conflict"] is True
+    assert "payroll_statutory_source_conflict" in {row["code"] for row in controls["blockers"]}
 
 
 async def test_closing_controls_surfaces_payroll_statutory_receipt_gap(client, db, book):

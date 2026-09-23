@@ -49,6 +49,24 @@ def _bounds(month: str) -> tuple[date, date]:
     return first, first.replace(day=monthrange(first.year, first.month)[1])
 
 
+def _receipt_binding_ids(receipts) -> tuple[set[int], int]:
+    binding_ids: set[int] = set()
+    unmapped = 0
+    for receipt in receipts:
+        source_lines = receipt.source.get("lines") if isinstance(receipt.source, dict) else None
+        command_lines = receipt.command.get("lines") if isinstance(receipt.command, dict) else None
+        if not isinstance(source_lines, list) or not source_lines or source_lines != command_lines:
+            unmapped += max(len(source_lines), 1) if isinstance(source_lines, list) else 1
+            continue
+        for line in source_lines:
+            binding_id = line.get("employment_binding_id") if isinstance(line, dict) else None
+            if type(binding_id) is int and binding_id > 0:
+                binding_ids.add(binding_id)
+            else:
+                unmapped += 1
+    return binding_ids, unmapped
+
+
 async def _line_ids(session, org_id: int, first: date, last: date, prefix: str) -> list[int]:
     rows = (await session.execute(select(Line.id).join(Entry, Entry.id == Line.entry_id).where(
         Entry.organization_id == org_id,
@@ -281,20 +299,41 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         Entry.operation == "payroll_accrual_import",
         Entry.source.like("payroll:accrual:%"),
     ).order_by(PayrollAccrualReceipt.entry_id))).all()
-    accrual_binding_ids = set()
-    unmapped_accrual_lines = 0
-    for receipt in accrual_rows:
-        source_lines = receipt.source.get("lines") if isinstance(receipt.source, dict) else None
-        command_lines = receipt.command.get("lines") if isinstance(receipt.command, dict) else None
-        if not isinstance(source_lines, list) or not source_lines or source_lines != command_lines:
-            unmapped_accrual_lines += max(len(source_lines), 1) if isinstance(source_lines, list) else 1
-            continue
-        for line in source_lines:
-            binding_id = line.get("employment_binding_id") if isinstance(line, dict) else None
-            if type(binding_id) is int and binding_id > 0:
-                accrual_binding_ids.add(binding_id)
-            else:
-                unmapped_accrual_lines += 1
+    accrual_binding_ids, unmapped_accrual_lines = _receipt_binding_ids(accrual_rows)
+    statutory_rows = (await session.scalars(select(PayrollStatutoryReceipt).join(
+        Entry, Entry.id == PayrollStatutoryReceipt.entry_id,
+    ).where(
+        PayrollStatutoryReceipt.organization_id == org_id,
+        PayrollStatutoryReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_statutory_import",
+        Entry.source.like("payroll:statutory:%"),
+    ).order_by(PayrollStatutoryReceipt.entry_id))).all()
+    statutory_binding_ids, unmapped_statutory_lines = _receipt_binding_ids(statutory_rows)
+    statutory_person_zero_rows = (await session.scalars(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_stat_zero_person",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    statutory_person_zero_by_binding = {
+        row.employment_binding_id: row.id for row in statutory_person_zero_rows
+    }
+    missing_statutory_binding_ids = sorted(
+        accrual_binding_ids - statutory_binding_ids - set(statutory_person_zero_by_binding))
+    statutory_person_zero_used = [
+        statutory_person_zero_by_binding[binding_id]
+        for binding_id in sorted(accrual_binding_ids - statutory_binding_ids)
+        if binding_id in statutory_person_zero_by_binding
+    ] if payroll_statutory_receipts else []
+    statutory_person_zero_conflict = bool(
+        statutory_binding_ids & set(statutory_person_zero_by_binding))
+    payroll_statutory_source_conflict = bool(
+        payroll_statutory_source_conflict or statutory_person_zero_conflict)
+    payroll_statutory_coverage_incomplete = bool(
+        payroll_receipts and payroll_statutory_receipts
+        and (missing_statutory_binding_ids or unmapped_statutory_lines or unmapped_accrual_lines))
     missing_binding_ids = sorted(set(population["known_binding_ids"])
                                  - accrual_binding_ids - set(individual_zero_by_binding))
     individual_zero_used = ([individual_zero_by_binding[binding_id] for binding_id in
@@ -423,8 +462,14 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         blockers.append({"code": "payroll_statutory_source_missing", "count": int(payroll_receipts),
                          "message": "Для начисленной зарплаты нет проверенного источника удержаний и взносов либо подтверждения их отсутствия."})
     if payroll_statutory_source_conflict:
-        blockers.append({"code": "payroll_statutory_source_conflict", "count": len(statutory_zero_files),
+        blockers.append({"code": "payroll_statutory_source_conflict",
+                         "count": len(statutory_zero_files) + int(statutory_person_zero_conflict),
                          "message": "Документ об отсутствии удержаний и взносов противоречит проведённому импорту."})
+    if payroll_statutory_coverage_incomplete:
+        blockers.append({"code": "payroll_statutory_coverage_incomplete",
+                         "count": len(missing_statutory_binding_ids)
+                         + unmapped_statutory_lines + unmapped_accrual_lines,
+                         "message": "Импорт удержаний и взносов не сопоставлен со всеми начислениями по договорам."})
     review = []
     if policy is not None and not policy.normative_verified:
         review.append({"code": "policy_normative_basis", "count": 1,
@@ -561,12 +606,18 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
             "statutory_receipts": int(payroll_statutory_receipts),
             "statutory_receipt_gap": int(payroll_statutory_receipt_gap),
             "statutory_zero_file_ids": list(statutory_zero_files),
+            "statutory_person_zero_file_ids": statutory_person_zero_used,
+            "statutory_binding_ids": sorted(statutory_binding_ids),
+            "missing_statutory_binding_ids": missing_statutory_binding_ids if payroll_statutory_receipts else [],
+            "unmapped_statutory_lines": unmapped_statutory_lines,
+            "statutory_coverage_incomplete": payroll_statutory_coverage_incomplete,
             "statutory_source_missing": payroll_statutory_source_missing,
             "statutory_source_conflict": payroll_statutory_source_conflict,
             "statutory_payroll_certified": False,
             "deductions_and_contributions_available": bool(
                 payroll_statutory_receipts or statutory_zero_files)
-            and not payroll_statutory_receipt_gap and not payroll_statutory_source_conflict,
+            and not payroll_statutory_receipt_gap and not payroll_statutory_source_conflict
+            and not payroll_statutory_coverage_incomplete,
         },
         "repairs": {"posted": int(repairs), "final_cost_certified": False},
         "inventory": {"late_cost_postings": int(late_cost_postings),
