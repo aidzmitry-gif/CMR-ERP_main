@@ -18,7 +18,8 @@ it("opens invoice settlements from the accountant home and resets the invoice on
   vi.stubGlobal("fetch", fetchMock);
   render(<AccountingView />);
   await screen.findByText(/включительно: 0\./);
-  fireEvent.click(screen.getByRole("button", { name: "Открыть: Оплаты и возвраты счетов" }));
+  fireEvent.click(screen.getByRole("button", { name: "Банк и платежи" }));
+  fireEvent.click(screen.getByRole("button", { name: "Оплаты счетов" }));
   fireEvent.change(screen.getByLabelText("ID счёта"), { target: { value: "77" } });
   fireEvent.click(screen.getByRole("button", { name: "Открыть расчёты счёта" }));
   await screen.findByLabelText("Итоги расчётов");
@@ -42,7 +43,8 @@ it("locks organization and workspace navigation throughout an uncertain allocati
   }));
   render(<AccountingView />);
   await screen.findByText(/включительно: 0\./);
-  fireEvent.click(screen.getByRole("button", { name: "Открыть: Оплаты и возвраты счетов" }));
+  fireEvent.click(screen.getByRole("button", { name: "Банк и платежи" }));
+  fireEvent.click(screen.getByRole("button", { name: "Оплаты счетов" }));
   fireEvent.change(screen.getByLabelText("ID счёта"), { target: { value: "77" } });
   fireEvent.click(screen.getByRole("button", { name: "Открыть расчёты счёта" }));
   await screen.findByLabelText("Сумма распределения");

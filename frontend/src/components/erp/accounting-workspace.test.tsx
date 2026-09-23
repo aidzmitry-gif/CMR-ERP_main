@@ -17,7 +17,7 @@ it("keeps the book mounted while confirmation is pending and refreshes the works
   }));
   render(<AccountingView />);
   await screen.findByText(/включительно: 1\./);
-  fireEvent.click(screen.getByRole("button", { name: "Открыть: Документы к проведению" }));
+  fireEvent.click(screen.getByRole("button", { name: "Открыть: Документы и ошибки проведения" }));
   fireEvent.click(await screen.findByText("Pending source · 2026-09"));
   fireEvent.click(screen.getByText("Подтвердить пакет и повторить проведение"));
   expect(screen.getByRole("button", { name: "Рабочее место", exact: true })).toBeDisabled();

@@ -13,14 +13,14 @@ function api(post: () => Promise<unknown>) { return vi.fn((url: string, init?: R
   return Promise.resolve(ok([]));
 }); }
 async function open() {
-  render(<AccountingView />); await screen.findByText(/включительно: 0\./); fireEvent.click(screen.getByRole("button", { name: "Открыть: Реквизиты продавца" }));
+  render(<AccountingView />); await screen.findByText(/включительно: 0\./); fireEvent.click(screen.getByRole("button", { name: "Закрытие месяца" })); fireEvent.click(screen.getByRole("button", { name: "Реквизиты продавца" }));
   await screen.findByText("Подтверждённых версий реквизитов пока нет."); fireEvent.click(screen.getByRole("button", { name: "Подготовить новую версию реквизитов" }));
   for (const [label, value] of [["Начало действия реквизитов", "2026-09-10"], ["Валюта новой версии", "BYN"], ["Адрес продавца", "ADDR"], ["Расчётный счёт", "ACC"], ["Банк продавца", "BANK"], ["БИК", "BIK"], ["Руководитель", "DIRECTOR"], ["Основание реквизитов", "EVIDENCE"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
   fireEvent.click(screen.getByLabelText("Реквизиты проверены главным бухгалтером"));
 }
 it("home integration freezes organization, dates and tabs through unknown response then unlocks after receipt", async () => {
   let resolve!: (v: unknown) => void; const pending = new Promise((r) => { resolve = r; }); let count = 0; const f = api(() => ++count === 1 ? pending : Promise.resolve(ok(receipt))); vi.stubGlobal("fetch", f); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить версию реквизитов" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByRole("button", { name: "Оплаты счетов" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
+  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByRole("button", { name: "Банк и платежи" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
   await act(async () => resolve({ ok: false, status: 503 })); await screen.findByRole("button", { name: "Повторить сохранённый запрос" }); expect(screen.getByLabelText("Организация")).toBeDisabled(); fireEvent.click(screen.getByRole("button", { name: "Повторить сохранённый запрос" })); await screen.findByLabelText("Фактически сохранена версия 1"); expect(screen.getByLabelText("Организация")).toBeEnabled();
   const posts = f.mock.calls.filter(([, init]) => init?.method === "POST"); expect(posts).toHaveLength(2); expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
   fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "8" } }); expect(screen.queryByLabelText("Фактически сохранена версия 1")).not.toBeInTheDocument(); expect(screen.getByLabelText("Дата действующих реквизитов")).toHaveValue("");

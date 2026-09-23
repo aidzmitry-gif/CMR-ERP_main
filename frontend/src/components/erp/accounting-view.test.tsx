@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./expense-control", () => ({ ExpenseControl: ({org}: {org?: string}) => <section aria-label="Общий экран расходов">Расходы книги {org}</section> }));
-vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged }: { onChanged: () => void }) => <button onClick={onChanged}>Обновить список организаций</button> }));
+vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged, initialSection }: { onChanged: () => void; initialSection: string }) => <><span>Раздел контроля: {initialSection}</span><button onClick={onChanged}>Обновить список организаций</button></> }));
 
 import { AccountingView } from "./accounting-view";
 
@@ -12,6 +12,10 @@ const report = { organization_id: 1, status: "preliminary", pending_documents: 0
   balance: { equity: "1000.00", difference: "0.00" }, pnl: { income: "180.00", expenses: "100.00", profit: "80.00" }, cashflow: { closing: "1080.00" } };
 const fetchMock = vi.fn();
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+function openPage(section: string, page: string) {
+  fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
+  if (section !== page) fireEvent.click(screen.getByRole("button", { name: page, exact: true }));
+}
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
@@ -29,10 +33,25 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingView", () => {
+  it("uses seven sections and keeps home shortcuts in the selected section", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    const sections = screen.getByRole("navigation", { name: "Разделы бухгалтерии" });
+    expect(sections.querySelectorAll("button")).toHaveLength(7);
+    openPage("Зарплата", "Контроль зарплаты");
+    expect(screen.getByRole("navigation", { name: "Страницы раздела Зарплата" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочее место", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть: План счетов" }));
+    expect(screen.getByRole("button", { name: "Закрытие месяца", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("navigation", { name: "Страницы раздела Закрытие месяца" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Закрытие месяца", exact: true }));
+    expect(screen.getByText("Раздел контроля: periods")).toBeInTheDocument();
+  });
+
   it("links the accountant report catalog to existing ledger financial reports", async () => {
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     const catalog = screen.getByRole("navigation", { name: "Отчёты бухгалтерской книги" });
     expect(catalog.querySelector('a[href="/erp/finance?tab=pnl"]')).not.toBeNull();
     expect(catalog.querySelector('a[href="/erp/finance?tab=dds"]')).not.toBeNull();
@@ -52,7 +71,7 @@ describe("AccountingView", () => {
     await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
     fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "1" } });
     await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("1"));
-    fireEvent.click(screen.getByRole("button", { name: "Управление книгой", exact: true }));
+    openPage("Закрытие месяца", "Управление книгой");
     fireEvent.click(await screen.findByRole("button", { name: "Обновить список организаций" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/organizations"))).toHaveLength(2));
     expect(screen.getByLabelText("Организация")).toHaveValue("1");
@@ -72,7 +91,7 @@ describe("AccountingView", () => {
       : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     fireEvent.click(await screen.findByText("№ 5 · Поступление 1"));
     expect(await screen.findByRole("button", { name: "Открыть поступление" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Открыть первичную накладную" })).not.toBeInTheDocument();
@@ -89,7 +108,7 @@ describe("AccountingView", () => {
     }) : url.endsWith("/entries/4") ? respond({ id: 4, source: "Original", explanation: "Original posting", lines: [] }) : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     fireEvent.click(await screen.findByText("№ 5 · Поступление 1"));
     await screen.findByText("Historical snapshot");
     for (const value of ["2026-08-28", "2026-08-29", "2026-09-01", "2026-09-02T10:11:12+03:00", "manual-v1", "Поставщик A", "Договор 7", "Партия 9", "Количество: 2.000000", "Сумма в валюте: 100.00 USD", "Курс: 3.210000 BYN за 1 USD"]) expect(screen.getByText(value, { exact: true })).toBeInTheDocument();
@@ -108,7 +127,7 @@ describe("AccountingView", () => {
       ? new Promise((resolve) => pending.push(resolve)) : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     const link = await screen.findByText("№ 5 · Поступление 1");
     fireEvent.click(link);
     fireEvent.click(link);
@@ -126,7 +145,7 @@ describe("AccountingView", () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     expect(await screen.findByText("Оборотно-сальдовая ведомость")).toBeInTheDocument();
     expect(screen.getByText(/Предварительные данные/)).toBeInTheDocument();
     expect(screen.getByText("80.00 BYN")).toBeInTheDocument();
@@ -137,9 +156,9 @@ describe("AccountingView", () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     await screen.findByText("Оборотно-сальдовая ведомость");
-    fireEvent.click(screen.getByText("Ручная операция"));
+    openPage("Документы", "Ручная операция");
     fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "Справка 1" } });
     fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов" } });
     fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
@@ -157,7 +176,7 @@ describe("AccountingView", () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
     await screen.findByText(/включительно: 0\./);
-    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    openPage("Отчёты", "ОСВ и отчёты");
     await screen.findByText("Оборотно-сальдовая ведомость");
     fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
     await waitFor(() => expect(screen.queryByText("№ 5 · Поступление 1")).not.toBeInTheDocument());
@@ -188,7 +207,7 @@ describe("AccountingView", () => {
       { id: 60, code: "60", title: "Расчёты с поставщиками", cash: false, category: "liability", required_dimensions: [] },
     ])));
 
-    fireEvent.click(screen.getByRole("button", { name: "Импорт выписки", exact: true }));
+    openPage("Банк и платежи", "Импорт выписки");
     await screen.findByText("BANK-9");
     fireEvent.click(screen.getByRole("button", { name: "Выбрать", exact: true }));
 
@@ -215,21 +234,21 @@ describe("AccountingView", () => {
   it("opens the production accounting workspace from the accountant navigation", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
-    fireEvent.click(screen.getByRole("button", { name: "Производство", exact: true }));
+    openPage("Документы", "Производство");
     expect(await screen.findByRole("region", { name: "Источники затрат производства" })).toBeInTheDocument();
     expect(screen.getByText(/Затраты производства/)).toBeInTheDocument();
   });
   it("opens the separate verified payroll accrual workspace", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
-    fireEvent.click(screen.getByRole("button", { name: "Начисления зарплаты", exact: true }));
+    openPage("Зарплата", "Начисления зарплаты");
     expect(await screen.findByRole("region", { name: "Проверенные начисления зарплаты" })).toBeInTheDocument();
     expect(screen.getByText(/Это не расчёт зарплаты, удержаний, взносов или обязательной отчётности/)).toBeInTheDocument();
   });
   it("opens the separate reviewed payroll statutory workspace", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
-    fireEvent.click(screen.getByRole("button", { name: "Удержания и взносы", exact: true }));
+    openPage("Зарплата", "Удержания и взносы");
     expect(await screen.findByRole("region", { name: "Проверенные удержания и взносы" })).toBeInTheDocument();
     expect(screen.getByText(/Ставки и расчёт от оклада не угадываются/)).toBeInTheDocument();
   });

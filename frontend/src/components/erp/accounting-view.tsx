@@ -48,6 +48,37 @@ const organizationHint = (value: string | undefined) => value && /^[1-9]\d*$/.te
 
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", employee: "Сотрудник", asset: "Основное средство", department: "Подразделение", owner: "Владелец", serial: "Серийный номер" };
 
+type AccountingSection = { id: string; label: string; pages: { id: string; label: string }[]; hiddenTabs?: string[] };
+const accountingSections: AccountingSection[] = [
+  { id: "workspace", label: "Рабочее место", pages: [{ id: "home", label: "Обзор" }] },
+  { id: "documents", label: "Документы", pages: [
+    { id: "sale", label: "Продажа товаров" }, { id: "inventory-issue", label: "Списание запасов" },
+    { id: "entry", label: "Ручная операция" }, { id: "production", label: "Производство" },
+    { id: "repairs", label: "Ремонты" }, { id: "fixed-assets", label: "ОС и амортизация" },
+  ], hiddenTabs: ["shipment-preview"] },
+  { id: "banking", label: "Банк и платежи", pages: [
+    { id: "bank", label: "Банк" }, { id: "bank-import", label: "Импорт выписки" },
+    { id: "invoice-settlements", label: "Оплаты счетов" },
+  ] },
+  { id: "payroll", label: "Зарплата", pages: [
+    { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-workpaper", label: "Расчётный лист" },
+    { id: "payroll-accruals", label: "Начисления зарплаты" }, { id: "payroll-statutory", label: "Удержания и взносы" },
+  ] },
+  { id: "tax", label: "Налоги и обязательные платежи", pages: [
+    { id: "input-vat", label: "Входной НДС" }, { id: "output-vat", label: "Исходящий НДС" },
+    { id: "foreign-trade", label: "ВЭД" }, { id: "statutory-requirements", label: "Формы и ставки" },
+  ] },
+  { id: "reports", label: "Отчёты", pages: [
+    { id: "reports", label: "ОСВ и отчёты" }, { id: "reconciliation", label: "Сверка ОСВ" },
+    { id: "expenses", label: "Контроль расходов" },
+  ] },
+  { id: "closing", label: "Закрытие месяца", pages: [
+    { id: "controls", label: "Управление книгой" }, { id: "accounts", label: "План счетов" },
+    { id: "fx-revaluation", label: "Валюты" },
+    { id: "seller-profiles", label: "Реквизиты продавца" },
+  ] },
+];
+
 function salesOriginal(org: string, reference: string) {
   const match = /^sales:document:([1-9][0-9]*)$/.exec(reference);
   return match && org ? <a className="text-accent underline" href={`/api/sales/organizations/${encodeURIComponent(org)}/documents/${match[1]}/original`} target="_blank" rel="noreferrer">Оригинал документа № {match[1]}</a> : null;
@@ -184,6 +215,9 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
     else setTab(destination);
   }
 
+  const currentSection = accountingSections.find((section) =>
+    section.pages.some((page) => page.id === tab) || section.hiddenTabs?.includes(tab)) ?? accountingSections[0];
+
   return <div className="min-w-0 w-full space-y-5 p-6 lg:pr-24 text-ink">
     <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры по каждому юридическому лицу. Суммы в BYN.</p></header>
     {organizationError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-surface p-3 text-red-700"><span>{organizationError}</span><Button variant="secondary" onClick={() => { setOrganizationError(""); setOrganizationRefresh((value) => value + 1); }}>Повторить список организаций</Button></div>}
@@ -196,7 +230,12 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
       <Button variant="secondary" disabled={locked || !org} onClick={() => void refresh()}>Обновить</Button>
     </div>
     {!organizations.length && !organizationError && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
-    <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{[["home", "Рабочее место"], ["expenses", "Контроль расходов"], ["reports", "ОСВ и отчёты"], ["accounts", "План счетов"], ["entry", "Ручная операция"], ["bank", "Банк"], ["bank-import", "Импорт выписки"], ["payroll-control", "Контроль зарплаты"], ["payroll-workpaper", "Расчётный лист"], ["payroll-accruals", "Начисления зарплаты"], ["payroll-statutory", "Удержания и взносы"], ["statutory-requirements", "Формы и ставки"], ["invoice-settlements", "Оплаты счетов"], ["seller-profiles", "Реквизиты продавца"], ["input-vat", "Входной НДС"], ["output-vat", "Исходящий НДС"], ["foreign-trade", "ВЭД"], ["fx-revaluation", "Валюты"], ["fixed-assets", "ОС и амортизация"], ["repairs", "Ремонты"], ["production", "Производство"], ["reconciliation", "Сверка ОСВ"], ["inventory-issue", "Списание запасов"], ["sale", "Продажа товаров"], ["controls", "Управление книгой"]].map(([id, label]) => <Button key={id} disabled={locked} variant={tab === id ? "primary" : "secondary"} onClick={() => setTab(id)}>{label}</Button>)}</nav>
+    <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{accountingSections.map((section) =>
+      <Button key={section.id} disabled={locked} aria-pressed={currentSection.id === section.id} variant={currentSection.id === section.id ? "primary" : "secondary"} onClick={() => { if (section.id === "closing") setControlSection("periods"); setTab(section.pages[0].id); }}>{section.label}</Button>
+    )}</nav>
+    {currentSection.pages.length > 1 && <nav aria-label={`Страницы раздела ${currentSection.label}`} className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-3">{currentSection.pages.map((page) =>
+      <Button key={page.id} disabled={locked} aria-pressed={tab === page.id} variant={tab === page.id ? "primary" : "secondary"} onClick={() => setTab(page.id)}>{page.label}</Button>
+    )}</nav>}
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}
     {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organizations.find((row) => String(row.id) === org)} onBusyChange={setControlsBusy} />}
