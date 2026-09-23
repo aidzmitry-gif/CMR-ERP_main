@@ -39,6 +39,9 @@ reports the single source head `0167`.
   whose declared employee and binding IDs match the ERP book. The file is
   byte-checked at close, but its contents and complete real-world population
   still require accountant verification.
+- External payroll import lines may carry a stable employer-binding ID; the
+  preview rejects cross-entity, unknown, future and name-mismatched mappings.
+  Legacy free-text lines remain accepted and are marked as incompletely mapped.
 - For the later own-payroll stage, the tax authority's [2026 income-tax rate
   notice](https://nalog.gov.by/news/34207/) and [standard-deduction
   guidance](https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/)

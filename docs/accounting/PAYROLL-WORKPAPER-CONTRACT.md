@@ -121,3 +121,13 @@ GET payroll-population endpoint exposes the latest review and whether its IDs
 still match. This makes responsibility for roster completeness explicit; it
 does **not** parse the roster's contents, prove that every real employee was
 entered into ERP, validate payroll amounts, or certify a statutory form.
+
+External gross-accrual and deductions/contributions import lines can now carry
+an `employment_binding_id`. When supplied, the preview checks that the binding
+belongs to the selected legal entity, existed by the payroll month, and retains
+the same employee name in its immutable employer snapshot. The stable ID is
+preserved in the source-bound receipt. Existing imports without this optional
+field keep their original command shape and replay identity. An omitted ID is
+explicitly reported as an incomplete stable mapping in the preview; this
+change alone does not prove that every employee in the reviewed roster received
+an accrual or a documented zero amount.

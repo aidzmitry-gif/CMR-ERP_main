@@ -19,6 +19,11 @@ from sqlalchemy import select
 
 from modules.accounting import service
 from modules.accounting.models import Entry, PayrollAccrualReceipt, Policy
+from modules.accounting.payroll_source_binding import (
+    canonical_command,
+    canonical_line,
+    verify_lines,
+)
 from modules.accounting.schemas import Code, Input, Money, PostingInput
 from modules.accounting.service import AccountingError, lock_organization
 
@@ -32,6 +37,7 @@ class PayrollAccrualLine(Input):
     """One externally verified gross accrual and its accounting target."""
 
     source_line_id: str = Field(min_length=1, max_length=128)
+    employment_binding_id: int | None = Field(default=None, gt=0, strict=True)
     employee: str = Field(min_length=1, max_length=200)
     department: str = Field(min_length=1, max_length=200)
     debit_account: Code
@@ -120,6 +126,7 @@ async def _load_policy(session, org_id: int, month: str, data: PayrollAccrualInp
             raise AccountingError(f"Payroll debit account {line.debit_account} is not effective for this organization")
         if debit.category not in {"asset", "expense"} or debit.cash or debit.currency_tracking or debit.quantity_tracking:
             raise AccountingError("Payroll debit accounts must be noncash BYN cost or WIP accounts")
+    await verify_lines(session, org_id, last, data.lines)
     return first, last, policy, accounts
 
 
@@ -132,7 +139,7 @@ def _source_snapshot(org_id: int, month: str, data: PayrollAccrualInput) -> dict
         "source_digest": data.source_digest,
         "verified_by": data.verified_by,
         "source_evidence": data.source_evidence,
-        "lines": [line.model_dump(mode="json") for line in data.lines],
+        "lines": [canonical_line(line) for line in data.lines],
         "scope": "verified_payroll_accrual_import",
         "status": "verified_source_review",
         "statutory_payroll_certified": False,
@@ -188,6 +195,8 @@ async def prepare_payroll_accrual(session, org_id: int, month: str, data: Payrol
         "posted": False,
         "statutory_payroll_certified": False,
         "deductions_and_contributions_available": False,
+        "stable_employment_mapping_complete": all(
+            line.employment_binding_id is not None for line in data.lines),
     }
     result["basis_digest"] = hashlib.sha256(
         json.dumps(source, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
@@ -198,7 +207,7 @@ async def prepare_payroll_accrual(session, org_id: int, month: str, data: Payrol
 async def confirm_payroll_accrual(session, org_id: int, month: str,
                                   data: PayrollAccrualConfirmInput, actor, event_bus=None):
     await lock_organization(session, org_id)
-    incoming = data.model_dump(mode="json")
+    incoming = canonical_command(data)
 
     async def replay(receipt: PayrollAccrualReceipt | None, *, ignore_request_key: bool = False):
         if receipt is None:
@@ -254,7 +263,7 @@ async def confirm_payroll_accrual(session, org_id: int, month: str,
         source_document=data.source_document,
         source_version=data.source_version,
         source_digest=data.source_digest,
-        command=data.model_dump(mode="json"),
+        command=canonical_command(data),
         source=prepared["source"],
         posting=prepared["posting_document"],
         digest=prepared["digest"],

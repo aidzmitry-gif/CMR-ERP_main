@@ -20,6 +20,11 @@ from sqlalchemy import select
 
 from modules.accounting import service
 from modules.accounting.models import Entry, PayrollStatutoryReceipt, Policy
+from modules.accounting.payroll_source_binding import (
+    canonical_command,
+    canonical_line,
+    verify_lines,
+)
 from modules.accounting.schemas import Code, Input, Money, PostingInput
 from modules.accounting.service import AccountingError, lock_organization
 
@@ -33,6 +38,7 @@ class PayrollStatutoryLine(Input):
     """One reviewed deduction or employer contribution."""
 
     source_line_id: str = Field(min_length=1, max_length=128)
+    employment_binding_id: int | None = Field(default=None, gt=0, strict=True)
     employee: str = Field(min_length=1, max_length=200)
     department: str = Field(min_length=1, max_length=200)
     kind: Literal["employee_deduction", "employer_contribution"]
@@ -136,6 +142,7 @@ async def _load_policy(session, org_id: int, month: str, data: PayrollStatutoryI
         else:
             cost = accounts.get(line.cost_account)
             _is_noncash_byn(cost, category={"asset", "expense"}, label="Contribution cost account")
+    await verify_lines(session, org_id, last, data.lines)
     return first, last, policy, accounts
 
 
@@ -148,7 +155,7 @@ def _source_snapshot(org_id: int, month: str, data: PayrollStatutoryInput) -> di
         "source_digest": data.source_digest,
         "verified_by": data.verified_by,
         "source_evidence": data.source_evidence,
-        "lines": [line.model_dump(mode="json") for line in data.lines],
+        "lines": [canonical_line(line) for line in data.lines],
         "scope": "verified_payroll_statutory_import",
         "status": "verified_source_review",
         "calculation_mode": "external_verified_import",
@@ -214,6 +221,8 @@ async def prepare_payroll_statutory(session, org_id: int, month: str,
         "posted": False,
         "statutory_payroll_certified": False,
         "deductions_and_contributions_available": True,
+        "stable_employment_mapping_complete": all(
+            line.employment_binding_id is not None for line in data.lines),
         "employee_deductions_byn": format(deductions, "f"),
         "employer_contributions_byn": format(contributions, "f"),
     }
@@ -226,7 +235,7 @@ async def prepare_payroll_statutory(session, org_id: int, month: str,
 async def confirm_payroll_statutory(session, org_id: int, month: str,
                                     data: PayrollStatutoryConfirmInput, actor, event_bus=None):
     await lock_organization(session, org_id)
-    incoming = data.model_dump(mode="json")
+    incoming = canonical_command(data)
 
     async def replay(receipt: PayrollStatutoryReceipt | None, *, ignore_request_key: bool = False):
         if receipt is None:
@@ -282,7 +291,7 @@ async def confirm_payroll_statutory(session, org_id: int, month: str,
         source_document=data.source_document,
         source_version=data.source_version,
         source_digest=data.source_digest,
-        command=data.model_dump(mode="json"),
+        command=canonical_command(data),
         source=prepared["source"],
         posting=prepared["posting_document"],
         digest=prepared["digest"],
