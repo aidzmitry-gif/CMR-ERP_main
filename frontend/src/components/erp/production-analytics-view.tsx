@@ -89,11 +89,14 @@ export function ProductionAnalyticsView({ initial }: Props) {
           color={kpiTone("low", data.scrap_pct)}
         />
         <KpiCard
-          label="Премия ФОТ"
+          label="Плановая премия"
           value={fmtByn(data.premium_fot_byn)}
           color="text-ink"
         />
       </div>
+      <p className="mt-2 text-xs text-amber-700" role="note">
+        Плановая премия рассчитана по допущению производства; это не бухгалтерское начисление зарплаты или подтверждённый ФОТ.
+      </p>
 
       {/* Plan / Fact chart */}
       <div>

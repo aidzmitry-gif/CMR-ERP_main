@@ -22,6 +22,7 @@ const SAMPLE: AnalyticsData = {
   pass_rate_pct: 98,
   scrap_pct: 2,
   premium_fot_byn: 500,
+  financial_scope: "production_planning_estimate",
   plan_fact_by_month: [{ month: 1, plan_nh: 10, fact_nh: 8 }],
   scrap_reasons: [{ reason: "брак литья", count: 3 }],
   team_contribution: [{ name: "Иванов", nh_output: 10, share_pct: 10 }],

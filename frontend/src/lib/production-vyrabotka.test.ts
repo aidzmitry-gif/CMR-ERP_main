@@ -24,6 +24,9 @@ const EMPTY_PAYROLL: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 afterEach(() => {
@@ -93,6 +96,9 @@ describe("fetchPayrollServer", () => {
       total_base: 500,
       total_premium: 62.5,
       total_payroll: 562.5,
+      calculation_scope: "management_estimate",
+      accounting_posting_available: false,
+      statutory_payroll_certified: false,
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
     vi.stubGlobal("fetch", fetchMock);

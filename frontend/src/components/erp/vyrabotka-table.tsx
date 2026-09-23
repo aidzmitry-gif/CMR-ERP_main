@@ -76,10 +76,13 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
         <Kpi label="Выработка цеха" value={`${formatNh(payroll.total_nh)} н.ч`} />
         <Kpi label="Оклад (база)" value={formatByn(payroll.total_base)} />
         <Kpi label="Премия от н.ч" value={formatByn(payroll.total_premium)} />
-        <Kpi label="ФОТ итого" value={formatByn(payroll.total_payroll)} />
+        <Kpi label="Плановый ФОТ" value={formatByn(payroll.total_payroll)} />
       </div>
 
-      <div className="mt-5 text-sm font-semibold text-ink">Табель и расчёт ЗП</div>
+      <div className="mt-5 text-sm font-semibold text-ink">Табель и плановая оценка оплаты</div>
+      <p className="mt-1 text-xs text-amber-700" role="note">
+        Это управленческая оценка по фиксированным допущениям. Она не является начислением зарплаты, проводкой или расчётом налогов и взносов.
+      </p>
       <div className="mt-2 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
@@ -88,7 +91,7 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
               <th className="px-4 py-2 text-right font-medium">Выработка</th>
               <th className="px-4 py-2 text-right font-medium">Оклад</th>
               <th className="px-4 py-2 text-right font-medium">Премия</th>
-              <th className="px-4 py-2 text-right font-medium">Итого ЗП</th>
+              <th className="px-4 py-2 text-right font-medium">Плановая сумма</th>
               <th className="px-4 py-2 text-right font-medium">Вклад</th>
             </tr>
           </thead>
@@ -168,7 +171,7 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
         </div>
       </div>
       <p className="mt-2 text-xs text-muted">
-        ЗП = оклад × отработанные дни / 22 + выработка (н.ч) × 6,25 BYN. Записей в табеле: {workers.length}.
+        Оценка = оклад × отработанные дни / 22 + выработка (н.ч) × 6,25 BYN. Это допущения производственного планирования. Записей в табеле: {workers.length}.
       </p>
     </div>
   );

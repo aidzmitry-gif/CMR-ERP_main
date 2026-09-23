@@ -1,5 +1,6 @@
 // Домен «Выработка и оценка» поверх backend-API `/production/workers` и `/production/payroll`.
-// Расчёт ЗП делает бэкенд (оклад × дни/22 + выработка н.ч × 6,25 BYN); фронт отображает.
+// Бэкенд возвращает управленческую оценку по фиксированным допущениям;
+// она не служит бухгалтерским начислением или основанием для отчётности.
 
 import { formatNh } from "@/lib/production-norms";
 
@@ -38,6 +39,9 @@ export interface Payroll {
   total_base: number;
   total_premium: number;
   total_payroll: number;
+  calculation_scope: "management_estimate";
+  accounting_posting_available: boolean;
+  statutory_payroll_certified: boolean;
 }
 
 const EMPTY_PAYROLL: Payroll = {
@@ -46,6 +50,9 @@ const EMPTY_PAYROLL: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 /** Сумма в BYN, русский формат: 910 → «910 BYN», 910.5 → «910,5 BYN». */

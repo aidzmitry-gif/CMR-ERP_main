@@ -30,6 +30,9 @@ const payroll: Payroll = {
   total_base: 800,
   total_premium: 400,
   total_payroll: 1200,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 const emptyPayroll: Payroll = {
@@ -38,6 +41,9 @@ const emptyPayroll: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 const workers: Worker[] = [
@@ -67,6 +73,7 @@ describe("VyrabotkaTable", () => {
     // Доли вклада: 250/400 и 150/400 → сломай contributionShare и эти числа поедут.
     expect(screen.getByText("62.5%")).toBeInTheDocument();
     expect(screen.getByText("37.5%")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("не является начислением зарплаты");
   });
 
   it("показывает пустое состояние, когда табель пуст", async () => {
