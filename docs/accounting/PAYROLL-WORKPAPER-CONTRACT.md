@@ -150,11 +150,14 @@ statutory payroll remain subject to accountant review.
 `GET /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-source-reconciliation`
 compares the latest reviewed workpaper arithmetic with posted external gross,
 deduction and contribution imports by `employment_binding_id`. It lists the
-entry IDs, differences for each binding, missing gross mappings and unmapped
-source lines. Before using an import, it checks the receipt identity and hash,
+entry IDs, differences for each binding, missing gross and statutory mappings,
+conflicting individual statutory-zero documents and unmapped source lines.
+An individual statutory-zero document is counted only after its stored bytes
+are checked against its receipt. Before using an import, it checks the receipt identity and hash,
 its stored posting and the actual ledger lines. `matched_arithmetic_only`
 requires a current known-roster review, complete known workpaper date coverage,
-both import types, no unmapped lines or receipt gaps, and zero differences.
+both import types, no missing statutory source per gross binding, no conflicting
+zero document, no unmapped lines or receipt gaps, and zero differences.
 The response remains private, read-only and explicitly uncertified. A matched
 arithmetic result does not establish document authenticity, complete real
 employee population, legal rate applicability, payroll payment or readiness

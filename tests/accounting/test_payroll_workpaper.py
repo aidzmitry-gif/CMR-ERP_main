@@ -461,6 +461,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "debit_account": "26", "amount_byn": "800.00",
         "evidence": "Synthetic gross line from external payroll",
     }])
+    without_statutory = (await client.get(reconcile_url)).json()
+    assert without_statutory["comparison_ready"] is False
+    assert without_statutory["missing_statutory_binding_ids"] == [binding["binding_id"]]
     await imported("statutory", "statutory-reviewed", [
         {"source_line_id": "deduction-1", "employment_binding_id": binding["binding_id"],
          "employee": "Synthetic Employee", "department": "repair",
@@ -499,6 +502,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     matched = (await client.get(reconcile_url)).json()
     assert matched["status"] == "matched_arithmetic_only"
     assert matched["comparison_ready"] is True
+    assert matched["missing_statutory_binding_ids"] == []
     assert matched["statutory_payroll_certified"] is False
     assert matched["posting_available"] is False
     first_gross_entry = matched["receipt_entry_ids"]["gross"][0]
@@ -540,6 +544,21 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": receipt["review_id"],
     })).status_code == 422
+
+    contradictory_zero = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "contradictory-statutory-zero", "filename": "stat-zero.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic contradictory statutory zero\n").decode(),
+        "evidence": "Synthetic contradictory zero statement for mapped employee",
+    })
+    assert contradictory_zero.status_code == 200, contradictory_zero.text
+    conflicted = (await client.get(reconcile_url)).json()
+    assert conflicted["comparison_ready"] is False
+    assert conflicted["conflicting_statutory_zero_binding_ids"] == [binding["binding_id"]]
+    assert conflicted["statutory_person_zero_file_ids"] == [
+        contradictory_zero.json()["file_id"]]
 
     wrong_claim = await client.post(preview_url, json=command(*args, **{
         **fields, "timesheet_digest": hashlib.sha256(b"different").hexdigest(),

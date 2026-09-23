@@ -16,6 +16,7 @@ from modules.accounting.models import (
     Line,
     PayrollAccrualReceipt,
     PayrollEmploymentBinding,
+    PayrollEvidenceFile,
     PayrollStatutoryReceipt,
     PayrollWorkpaperReview,
     Period,
@@ -400,6 +401,7 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
               "listed_employer_contributions_byn")
     imports: dict[int, dict[str, Decimal]] = {}
     receipts: dict[str, list[int]] = {"gross": [], "statutory": []}
+    source_binding_ids: dict[str, set[int]] = {"gross": set(), "statutory": set()}
     unmapped_lines = {"gross": 0, "statutory": 0}
     posting_gaps = {}
     for label, model, operation, source_prefix in (
@@ -467,6 +469,7 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
                 if type(binding_id) is not int or binding_id <= 0:
                     unmapped_lines[label] += 1
                     continue
+                source_binding_ids[label].add(binding_id)
                 if label == "gross":
                     field = "gross_byn"
                 elif line.get("kind") == "employee_deduction":
@@ -482,6 +485,24 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
                     sum((line.amount for line in posted_lines if line.side == "credit"), Decimal("0"))
                     != source_total):
                 raise HTTPException(409, "Payroll import amount differs from its ledger package")
+
+    from modules.accounting.payroll_evidence_files import file_for
+
+    statutory_zero_rows = (await session.scalars(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_stat_zero_person",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    statutory_zero_ids = {row.employment_binding_id for row in statutory_zero_rows}
+    missing_statutory_ids = sorted(
+        source_binding_ids["gross"] - source_binding_ids["statutory"] - statutory_zero_ids)
+    conflicting_statutory_ids = sorted(source_binding_ids["statutory"] & statutory_zero_ids)
+    used_statutory_zero_file_ids = []
+    for row in statutory_zero_rows:
+        if row.employment_binding_id in source_binding_ids["gross"]:
+            await file_for(session, org_id, row.id, kind="payroll_stat_zero_person", month=month,
+                           employment_binding_id=row.employment_binding_id)
+            used_statutory_zero_file_ids.append(row.id)
 
     rows = []
     differences = 0
@@ -509,6 +530,7 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
         and summary["known_binding_coverage"]["known_binding_coverage_complete"]
         and receipts["gross"] and receipts["statutory"]
         and not missing_gross_ids and not unmatched_import_ids
+        and not missing_statutory_ids and not conflicting_statutory_ids
         and not any(unmapped_lines.values())
         and not any(posting_gaps.values())
     )
@@ -523,6 +545,9 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
         "receipt_entry_ids": receipts, "receipt_gaps": posting_gaps,
         "unmapped_source_lines": unmapped_lines,
         "missing_gross_binding_ids": missing_gross_ids,
+        "missing_statutory_binding_ids": missing_statutory_ids,
+        "conflicting_statutory_zero_binding_ids": conflicting_statutory_ids,
+        "statutory_person_zero_file_ids": used_statutory_zero_file_ids,
         "unmatched_import_binding_ids": unmatched_import_ids,
         "comparison_ready": ready,
         "differing_binding_count": differences,
