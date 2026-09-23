@@ -411,6 +411,9 @@ class ImportInput(Input):
     def validate_control_totals(self):
         if self.expected_entry_count != len(self.entries):
             raise ValueError("Opening import entry count does not match the package")
+        keys = {(entry.source, entry.source_version, entry.operation) for entry in self.entries}
+        if len(keys) != len(self.entries):
+            raise ValueError("Opening import entries must have distinct posting identities")
         line_count = sum(len(entry.lines) for entry in self.entries)
         if self.expected_line_count != line_count:
             raise ValueError("Opening import line count does not match the package")

@@ -1,4 +1,6 @@
 """PostgreSQL evidence that opening receipts cannot bind another organization."""
+# Imported fixtures intentionally share the names of test parameters.
+# ruff: noqa: F811
 
 from __future__ import annotations
 
@@ -12,7 +14,6 @@ from sqlalchemy.exc import DBAPIError
 from modules.accounting import service
 from modules.accounting.models import Account, OpeningImportReceipt, Organization, Policy
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
-
 
 pytestmark = pytest.mark.integration
 
@@ -82,7 +83,7 @@ async def test_opening_import_guard_rejects_foreign_entry_and_keeps_valid_receip
         own_entry = await service.post(session, pg_book[0], own_data, "tester")
         foreign_data = posting("foreign-opening", "51", "80", "100.00", opening=True)
         foreign_data.policy_id = policy.id
-        foreign_entry = await service.post(session, organization.id, foreign_data, "tester")
+        await service.post(session, organization.id, foreign_data, "tester")
 
         valid_receipt = OpeningImportReceipt(
             organization_id=pg_book[0],
@@ -106,12 +107,27 @@ async def test_opening_import_guard_rejects_foreign_entry_and_keeps_valid_receip
         session.add(valid_receipt)
         await session.flush()
         valid_receipt_id = valid_receipt.id
-        foreign_entry_id = foreign_entry.id
+        own_entry_id = own_entry.id
         await session.commit()
 
     async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="frozen after the accepted import"):
+            await session.execute(text("""
+                INSERT INTO accounting.entry (
+                    organization_id, source, source_version, operation,
+                    document_date, operation_date, posting_date, policy_id,
+                    rule_version, explanation, opening, correction_of, digest, actor
+                )
+                SELECT organization_id, source || '-unlisted', source_version, operation,
+                       document_date, operation_date, posting_date, policy_id,
+                       rule_version, explanation, opening, correction_of, digest, actor
+                FROM accounting.entry WHERE id = :entry_id
+            """), {"entry_id": own_entry_id})
+        await session.rollback()
+
+    async with pg_factory() as session:
         forged_receipt = OpeningImportReceipt(
-            organization_id=pg_book[0],
+            organization_id=organization.id,
             request_key="00000000-0000-0000-0000-000000000702",
             batch="pg-opening-forged",
             protocol_version="opening-balance-v1",
@@ -124,8 +140,8 @@ async def test_opening_import_guard_rejects_foreign_entry_and_keeps_valid_receip
             credit_total=Decimal("100.00"),
             command_digest="e" * 64,
             evidence="Synthetic forged opening import evidence",
-            entry_ids=[foreign_entry_id],
-            snapshot={"entries": [{"entry_id": foreign_entry_id}]},
+            entry_ids=[own_entry_id],
+            snapshot={"entries": [{"entry_id": own_entry_id}]},
             digest="f" * 64,
             actor="tester",
         )
@@ -142,4 +158,36 @@ async def test_opening_import_guard_rejects_foreign_entry_and_keeps_valid_receip
                 text("UPDATE accounting.opening_import_receipt SET actor = 'forged' WHERE id = :id"),
                 {"id": valid_receipt_id},
             )
+        await session.rollback()
+
+
+async def test_opening_import_receipt_rejects_unlisted_opening_entries(pg_factory, pg_book, posting):
+    async with pg_factory() as session:
+        first = await service.post(session, pg_book[0],
+                                   posting("opening-listed", "51", "80", opening=True), "tester")
+        await service.post(session, pg_book[0],
+                           posting("opening-unlisted", "51", "80", opening=True), "tester")
+        receipt = OpeningImportReceipt(
+            organization_id=pg_book[0],
+            request_key="00000000-0000-0000-0000-000000000703",
+            batch="pg-opening-incomplete",
+            protocol_version="opening-balance-v1",
+            source_system="1c-export",
+            source_digest="a" * 64,
+            cutover_date=date(2026, 9, 1),
+            entry_count=1,
+            line_count=2,
+            debit_total=Decimal("100.00"),
+            credit_total=Decimal("100.00"),
+            command_digest="b" * 64,
+            evidence="Synthetic incomplete opening import evidence",
+            entry_ids=[first.id],
+            snapshot={"entries": [{"entry_id": first.id}]},
+            digest="c" * 64,
+            actor="tester",
+        )
+        session.add(receipt)
+        await session.flush()
+        with pytest.raises(DBAPIError, match="omits or repeats opening entries"):
+            await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         await session.rollback()

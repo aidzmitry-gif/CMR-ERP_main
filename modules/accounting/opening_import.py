@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from modules.accounting import service
-from modules.accounting.models import OpeningImportReceipt
+from modules.accounting.models import Entry, OpeningImportReceipt
 from modules.accounting.schemas import ImportInput
 
 
@@ -126,12 +126,22 @@ async def _existing(session, org_id: int, request_key: UUID, command_digest: str
     return None
 
 
+async def _ensure_complete_opening_set(session, org_id: int, data: ImportInput) -> None:
+    package_keys = {(entry.source, entry.source_version, entry.operation) for entry in data.entries}
+    existing_keys = (await session.execute(select(
+        Entry.source, Entry.source_version, Entry.operation,
+    ).where(Entry.organization_id == org_id, Entry.opening.is_(True)))).all()
+    if any(tuple(row) not in package_keys for row in existing_keys):
+        raise service.AccountingError("Opening import omits existing opening entries for this organization")
+
+
 async def preview(session, org_id: int, data: ImportInput) -> dict:
     await service.lock_organization(session, org_id)
     command_digest = package_command_digest(data)
     existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return {**_result(existing), "command_digest": command_digest, "already_confirmed": True}
+    await _ensure_complete_opening_set(session, org_id, data)
     for entry in data.entries:
         await service.preview_posting(session, org_id, entry)
     return {
@@ -157,6 +167,7 @@ async def confirm(session, org_id: int, data: ImportInput, actor: str, event_bus
     existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return _result(existing)
+    await _ensure_complete_opening_set(session, org_id, data)
     for entry in data.entries:
         await service.preview_posting(session, org_id, entry)
     entry_ids = [

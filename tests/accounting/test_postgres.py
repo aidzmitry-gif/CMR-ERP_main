@@ -55,6 +55,8 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0166_payroll_zero_activity_evidence.py",
     "0167_payroll_population_review.py",
     "0168_payroll_binding_month_coverage.py",
+    "0169_opening_import_single_cutover.py",
+    "0170_freeze_accepted_opening_balances.py",
 )
 
 

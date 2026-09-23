@@ -19,6 +19,7 @@ from modules.accounting.models import (
     FinancialReopenItem,
     Inbox,
     Line,
+    OpeningImportReceipt,
     Organization,
     Period,
     Policy,
@@ -266,6 +267,11 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
     elif reversing:
         raise AccountingError("Financial reopening requires its original entry")
     if data.opening:
+        accepted_import = await session.scalar(select(OpeningImportReceipt.id).where(
+            OpeningImportReceipt.organization_id == org_id,
+        ).limit(1))
+        if accepted_import is not None:
+            raise AccountingError("Opening balances are frozen after the accepted import")
         existing = await session.scalar(select(Entry.id).where(
             Entry.organization_id == org_id, Entry.opening.is_(False)
         ).limit(1))

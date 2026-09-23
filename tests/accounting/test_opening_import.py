@@ -78,3 +78,54 @@ async def test_opening_import_rejects_second_package_for_same_cutover(client, db
     receipts = (await db.scalars(select(OpeningImportReceipt))).all()
     assert len(receipts) == 1
     assert receipts[0].id == accepted.json()["receipt_id"]
+
+
+async def test_accepted_opening_import_freezes_manual_opening_entries(client, book, posting, opening_package):
+    prefix = f"/accounting/organizations/{book[0]}"
+    package = opening_package([posting("package-opening", "51", "80", opening=True)])
+    accepted = await client.post(prefix + "/imports/confirm", json=package)
+    assert accepted.status_code == 200, accepted.text
+
+    extra = posting("manual-extra-opening", "51", "80", opening=True)
+    response = await client.post(prefix + "/entries", json=extra.model_dump(mode="json"))
+    assert response.status_code == 422
+    assert "frozen after the accepted import" in response.text
+
+    replay = await client.post(prefix + "/imports/confirm", json=package)
+    assert replay.status_code == 200
+    assert replay.json()["receipt_id"] == accepted.json()["receipt_id"]
+
+
+async def test_opening_import_rejects_unlisted_existing_opening_entries(client, book, posting, opening_package):
+    prefix = f"/accounting/organizations/{book[0]}"
+    extra = posting("manual-opening-outside-package", "51", "80", opening=True)
+    manual = await client.post(prefix + "/entries", json=extra.model_dump(mode="json"))
+    assert manual.status_code == 201, manual.text
+
+    package = opening_package([posting("package-opening", "51", "80", opening=True)])
+    preview = await client.post(prefix + "/imports/preview", json=package)
+    confirm = await client.post(prefix + "/imports/confirm", json=package)
+    assert preview.status_code == 422
+    assert confirm.status_code == 422
+    assert "omits existing opening entries" in confirm.text
+
+
+async def test_opening_import_can_include_identical_existing_opening_entry(client, book, posting, opening_package):
+    prefix = f"/accounting/organizations/{book[0]}"
+    entry = posting("manual-opening-in-package", "51", "80", opening=True)
+    manual = await client.post(prefix + "/entries", json=entry.model_dump(mode="json"))
+    assert manual.status_code == 201, manual.text
+
+    package = opening_package([entry])
+    accepted = await client.post(prefix + "/imports/confirm", json=package)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["entry_ids"] == [manual.json()["id"]]
+
+
+async def test_opening_import_rejects_duplicate_entry_identity(client, book, posting, opening_package):
+    prefix = f"/accounting/organizations/{book[0]}"
+    entry = posting("same-opening", "51", "80", opening=True)
+    package = opening_package([entry, entry])
+    response = await client.post(prefix + "/imports/preview", json=package)
+    assert response.status_code == 422
+    assert "distinct posting identities" in response.text
