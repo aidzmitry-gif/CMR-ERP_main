@@ -62,7 +62,8 @@ const accountingSections: AccountingSection[] = [
     { id: "invoice-settlements", label: "Оплаты счетов" },
   ] },
   { id: "payroll", label: "Зарплата", pages: [
-    { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-workpaper", label: "Расчётный лист" },
+    { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-hr-draft", label: "Черновая ведомость HR" },
+    { id: "payroll-workpaper", label: "Расчётный лист" },
     { id: "payroll-rules", label: "Правила расчёта" },
     { id: "payroll-accruals", label: "Начисления зарплаты" }, { id: "payroll-statutory", label: "Удержания и взносы" },
   ] },
@@ -251,6 +252,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
     {tab === "repairs" && <AccountingRepairs org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
     {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => { setOrganizationRefresh((value) => value + 1); void refresh(); }} />}
     {tab === "payroll-control" && <AccountingPayrollControl key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} onEntry={(id) => void openEntry(id)} />}
+    {tab === "payroll-hr-draft" && <section aria-label="Черновая ведомость HR" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="text-lg font-semibold">Черновая ведомость HR</h2><p className="text-sm text-muted">В HR можно подготовить расчёт и распечатать листки сотрудников. Черновик пока не связан с выбранным здесь юрлицом и не создаёт бухгалтерские проводки. Для учёта начислений используйте проверенный импорт с основаниями.</p><Link className="text-accent underline" href="/erp/hr/payroll">Открыть черновую ведомость HR</Link></section>}
     {tab === "payroll-workpaper" && <AccountingPayrollWorkpaper key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} onOpenRules={() => setTab("payroll-rules")} />}
     {tab === "payroll-rules" && <AccountingPayrollRuleSet key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} policies={policies} disabled={locked} onBusyChange={setControlsBusy} onOpenRates={() => setTab("statutory-requirements")} />}
     {tab === "payroll-accruals" && <AccountingPayrollAccrualImport org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} />}

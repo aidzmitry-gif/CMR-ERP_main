@@ -245,6 +245,13 @@ describe("AccountingView", () => {
     expect(await screen.findByRole("region", { name: "Проверенные начисления зарплаты" })).toBeInTheDocument();
     expect(screen.getByText(/Это не расчёт зарплаты, удержаний, взносов или обязательной отчётности/)).toBeInTheDocument();
   });
+  it("links the existing HR draft from payroll without presenting it as a posting", async () => {
+    render(<AccountingView />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    openPage("Зарплата", "Черновая ведомость HR");
+    expect(screen.getByRole("link", { name: "Открыть черновую ведомость HR" })).toHaveAttribute("href", "/erp/hr/payroll");
+    expect(screen.getByText(/не создаёт бухгалтерские проводки/)).toBeInTheDocument();
+  });
   it("opens the separate reviewed payroll statutory workspace", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });

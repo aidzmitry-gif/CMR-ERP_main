@@ -3,6 +3,11 @@
 `POST /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-workpaper-preview`
 calculates a read-only, organization-scoped gross salary and the explicitly
 listed percentage components. It does not create a payroll run or ledger entry.
+
+The accountant salary section links to the existing `/erp/hr/payroll` draft
+workbook and printable employee slips. That HR preview is not scoped to an
+accounting organization and does not become an accounting source or posting
+until its inputs are independently checked and imported with evidence.
 Only an accountant or chief accountant with membership in that organization can
 call it. The response is private and uncached.
 
