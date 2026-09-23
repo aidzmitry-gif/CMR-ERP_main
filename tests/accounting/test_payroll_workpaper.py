@@ -104,6 +104,13 @@ def command(policy_id, binding_id, deduction_id, contribution_id, ruleset_id, **
 async def test_workpaper_calculates_listed_components_without_posting(
         client, db, book, workpaper_sources):
     binding, deduction, contribution, ruleset = workpaper_sources
+    access = await client.get(f"/accounting/organizations/{book[0]}/payroll-workpaper-access")
+    assert access.status_code == 200
+    assert access.json() == {
+        "organization_id": book[0], "can_preview": True,
+        "can_upload": True, "can_review": True,
+    }
+    assert access.headers["cache-control"] == "private, no-store"
     before = await db.scalar(select(func.count(Entry.id)))
     url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
     payload = command(book[1], binding["binding_id"],
@@ -289,6 +296,11 @@ async def test_workpaper_rejects_foreign_rate_and_reader(
     ))
     grant.role = "reader"
     await db.commit()
+    reader_access = (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-access",
+    )).json()
+    assert reader_access == {"organization_id": book[0], "can_preview": False,
+                             "can_upload": False, "can_review": False}
     denied = await client.post(url, json=command(
         book[1], binding["binding_id"], deduction["requirement_id"],
         contribution["requirement_id"], ruleset["rule_set_id"],
@@ -662,6 +674,11 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     ))
     grant.role = "accountant"
     await db.commit()
+    accountant_access = (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-access",
+    )).json()
+    assert accountant_access == {"organization_id": book[0], "can_preview": True,
+                                 "can_upload": True, "can_review": False}
     assert (await client.post(review_url, json=review_command)).status_code == 403
     assert (await client.get(
         f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"

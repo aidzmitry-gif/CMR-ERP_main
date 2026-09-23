@@ -42,6 +42,10 @@ async def test_payroll_file_upload_replay_download_and_tamper_block(
     assert "data_url" not in str(body)
     assert created.headers["cache-control"] == "private, no-store"
     assert (await client.post(url, json=command)).json() == body
+    recovered = await client.get(f"{url}/by-request/{command['request_key']}")
+    assert recovered.status_code == 200
+    assert recovered.json() == body
+    assert recovered.headers["cache-control"] == "private, no-store"
     changed = await client.post(url, json={**command, "reference": "another-policy"})
     assert changed.status_code == 409
 
@@ -128,6 +132,10 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     crossed = await client.get(
         f"/accounting/organizations/{other_id}/payroll-evidence-files/{contract.json()['file_id']}/download",
     )
+    crossed_request = await client.get(
+        f"/accounting/organizations/{other_id}/payroll-evidence-files/by-request/{contract.json()['request_key']}",
+    )
+    assert crossed_request.status_code == 404
     assert crossed.status_code == 404
 
     grant = await db.scalar(select(AccessGrant).where(

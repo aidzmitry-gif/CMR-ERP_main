@@ -103,11 +103,23 @@ accountant workspace's **Расчётный лист** tab uses those IDs, an ex
 selected employer binding and stored contract/timesheet/adjustment-file receipts
 to call the read-only workpaper preview. Salary, norm hours, worked hours and
 the locations of the facts in the documents are entered explicitly. The tab
-shows the full arithmetic trace and source-byte flags but cannot create a
-review, payroll run or ledger entry. It does not upload source files; they must
-already exist in the private payroll store, and the rule set must already have
-been configured by the chief accountant. A missing source or configuration
-blocks the UI preview rather than supplying a default.
+shows the full arithmetic trace and source-byte flags. An accountant or chief
+can upload a contract, monthly timesheet or rate-base adjustment for the
+selected binding. The upload receipt is scoped to that organization, binding,
+kind and month, and a lost POST response is recovered by its idempotency key
+before any retry. The private file store must be configured and backed up with
+the database. A missing source or configuration blocks the preview rather than
+supplying a default.
+
+For a byte-backed preview, the chief alone may enter an explanation and record
+an immutable arithmetic-only review. The UI reads the monthly summary to find
+the latest review of that exact binding and date segment; a changed calculation
+supersedes that receipt instead of overwriting it. A lost review response is
+resolved by request key, and an uncertain request is retried with the same
+body. This does not post a payroll run or ledger entry, verify that the facts
+inside source files are true, or certify legal rates. The chief must still
+configure the rule set with a stored policy file; that configuration is not
+performed by the workpaper tab.
 
 The accountant workspace's **Контроль зарплаты** tab reads this monthly
 summary and the private `payroll-source-reconciliation` result for the selected

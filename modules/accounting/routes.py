@@ -1644,6 +1644,22 @@ async def list_payroll_evidence_files(org_id: int, response: Response,
     return [payroll_evidence_files.result(row) for row in rows]
 
 
+@router.get('/organizations/{org_id}/payroll-evidence-files/by-request/{request_key}')
+async def payroll_evidence_file_by_request(org_id: int, request_key: UUID,
+                                           response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    row = await ctx[0].scalar(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.request_key == str(request_key),
+    ))
+    if row is None:
+        raise HTTPException(404, "Payroll source file request was not found")
+    await payroll_evidence_files.file_for(ctx[0], org_id, row.id)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return payroll_evidence_files.result(row)
+
+
 @router.get('/organizations/{org_id}/payroll-evidence-files/{file_id}/download')
 async def download_payroll_evidence_file(org_id: int, file_id: int, ctx=Depends(member)):
     if ctx[2] not in {"accountant", "chief"}:
@@ -1679,6 +1695,17 @@ async def current_payroll_rule_set(org_id: int, as_of: date, response: Response,
     if row is None:
         raise HTTPException(404, 'No payroll rule set for this organization and date')
     return payroll_rule_set.result(row)
+
+
+@router.get('/organizations/{org_id}/payroll-workpaper-access')
+async def payroll_workpaper_access(org_id: int, response: Response, ctx=Depends(member)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    return {
+        'organization_id': org_id,
+        'can_preview': ctx[2] in {'accountant', 'chief'},
+        'can_upload': ctx[2] in {'accountant', 'chief'},
+        'can_review': ctx[2] == 'chief',
+    }
 
 
 @router.post('/organizations/{org_id}/payroll-employments')
