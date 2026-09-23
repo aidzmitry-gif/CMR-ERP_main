@@ -1,11 +1,14 @@
 """One source-bound arithmetic component is not an accepted payroll run."""
 from datetime import date
+from uuid import uuid4
 
+import pytest_asyncio
 from sqlalchemy import func, select
 
 from modules.accounting import statutory_requirements
 from modules.accounting.models import AccessGrant, Entry, Organization, Policy
 from modules.accounting.schemas import StatutoryRequirementInput
+from modules.hr.models import Employee
 
 
 def rate_input(*, request_key="00000000-0000-0000-0000-000000000601", value="10",
@@ -24,12 +27,30 @@ def rate_input(*, request_key="00000000-0000-0000-0000-000000000601", value="10"
     })
 
 
-def command(policy_id, requirement_id, **changes):
+@pytest_asyncio.fixture
+async def employment(client, db, book):
+    employee = Employee(full_name="Synthetic Employee Seven", department="repair",
+                        position="technician", status="active")
+    db.add(employee)
+    await db.flush()
+    response = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()),
+        "employee_id": employee.id,
+        "contract_ref": "synthetic-contract-7",
+        "effective_from": "2026-01-01",
+        "state": "active",
+        "source_document": "synthetic-signed-contract-7",
+        "evidence": "Synthetic accountant supplied employer and contract evidence",
+    })
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def command(policy_id, requirement_id, binding_id, **changes):
     result = {
         "policy_id": policy_id,
         "calculation_date": "2026-10-15",
-        "employee": "employee-7",
-        "department": "repair",
+        "employment_binding_id": binding_id,
         "requirement_id": requirement_id,
         "base_byn": "101.05",
         "base_document": "reviewed-timesheet-7",
@@ -41,12 +62,12 @@ def command(policy_id, requirement_id, **changes):
     return result
 
 
-async def test_payroll_component_uses_org_rate_and_never_posts(client, db, book):
+async def test_payroll_component_uses_org_rate_and_never_posts(client, db, book, employment):
     rate = await statutory_requirements.create(db, book[0], rate_input(), "tester")
     before = await db.scalar(select(func.count(Entry.id)))
     response = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], rate["requirement_id"]),
+        json=command(book[1], rate["requirement_id"], employment["binding_id"]),
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -54,6 +75,8 @@ async def test_payroll_component_uses_org_rate_and_never_posts(client, db, book)
     assert body["basis"]["requirement_id"] == rate["requirement_id"]
     assert body["basis"]["requirement_digest"] == rate["digest"]
     assert body["basis"]["base_document"] == "reviewed-timesheet-7"
+    assert body["basis"]["employee_id"] == employment["employee_id"]
+    assert body["basis"]["employment_binding_digest"] == employment["digest"]
     assert body["basis"]["rounding_evidence"] == "Synthetic reviewed rounding method for arithmetic test"
     assert len(body["basis_digest"]) == 64
     assert body["status"] == "arithmetic_preview_only"
@@ -63,7 +86,7 @@ async def test_payroll_component_uses_org_rate_and_never_posts(client, db, book)
     assert await db.scalar(select(func.count(Entry.id))) == before
 
 
-async def test_payroll_component_rejects_superseded_and_cross_org_rates(client, db, book):
+async def test_payroll_component_rejects_superseded_and_cross_org_rates(client, db, book, employment):
     original = await statutory_requirements.create(db, book[0], rate_input(), "tester")
     await statutory_requirements.create(
         db, book[0], rate_input(request_key="00000000-0000-0000-0000-000000000602", value="20"),
@@ -71,7 +94,7 @@ async def test_payroll_component_rejects_superseded_and_cross_org_rates(client, 
     )
     stale = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], original["requirement_id"]),
+        json=command(book[1], original["requirement_id"], employment["binding_id"]),
     )
     assert stale.status_code == 422
     assert "superseded" in stale.text
@@ -84,13 +107,13 @@ async def test_payroll_component_rejects_superseded_and_cross_org_rates(client, 
     )
     crossed = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], foreign_rate["requirement_id"]),
+        json=command(book[1], foreign_rate["requirement_id"], employment["binding_id"]),
     )
     assert crossed.status_code == 422
     assert "not effective for this organization" in crossed.text
 
 
-async def test_payroll_component_requires_verified_policy(client, db, book):
+async def test_payroll_component_requires_verified_policy(client, db, book, employment):
     rate = await statutory_requirements.create(db, book[0], rate_input(), "tester")
     policy = Policy(organization_id=book[0], effective_from=date(2026, 10, 1),
                     reference="Synthetic unverified policy", inventory_method="specific",
@@ -101,12 +124,12 @@ async def test_payroll_component_requires_verified_policy(client, db, book):
     await db.flush()
     blocked = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(policy.id, rate["requirement_id"]),
+        json=command(policy.id, rate["requirement_id"], employment["binding_id"]),
     )
     assert blocked.status_code == 422
 
 
-async def test_payroll_component_requires_whole_month_policy_and_accountant(client, db, book):
+async def test_payroll_component_requires_whole_month_policy_and_accountant(client, db, book, employment):
     rate = await statutory_requirements.create(db, book[0], rate_input(), "tester")
     db.add(Policy(organization_id=book[0], effective_from=date(2026, 10, 15),
                   reference="Synthetic changed mid-month", inventory_method="specific",
@@ -116,7 +139,7 @@ async def test_payroll_component_requires_whole_month_policy_and_accountant(clie
     await db.flush()
     mid_month = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], rate["requirement_id"]),
+        json=command(book[1], rate["requirement_id"], employment["binding_id"]),
     )
     assert mid_month.status_code == 422
     grant = await db.scalar(select(AccessGrant).where(
@@ -125,21 +148,21 @@ async def test_payroll_component_requires_whole_month_policy_and_accountant(clie
     grant.role = "reader"
     denied = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], rate["requirement_id"]),
+        json=command(book[1], rate["requirement_id"], employment["binding_id"]),
     )
     assert denied.status_code == 403
 
 
-async def test_payroll_component_rejects_unverified_base_shape_and_nonpercent_rate(client, db, book):
+async def test_payroll_component_rejects_unverified_base_shape_and_nonpercent_rate(client, db, book, employment):
     rate = await statutory_requirements.create(
         db, book[0], rate_input(value="10"), "tester",
     )
     floating = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], rate["requirement_id"], base_byn=101.05),
+        json=command(book[1], rate["requirement_id"], employment["binding_id"], base_byn=101.05),
     )
     assert floating.status_code == 422
-    no_rounding = command(book[1], rate["requirement_id"])
+    no_rounding = command(book[1], rate["requirement_id"], employment["binding_id"])
     del no_rounding["rounding"]
     missing_method = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
@@ -154,7 +177,7 @@ async def test_payroll_component_rejects_unverified_base_shape_and_nonpercent_ra
     fixed = await statutory_requirements.create(db, book[0], other_unit, "tester")
     response = await client.post(
         f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-component-preview",
-        json=command(book[1], fixed["requirement_id"]),
+        json=command(book[1], fixed["requirement_id"], employment["binding_id"]),
     )
     assert response.status_code == 422
     assert "incomplete provenance" in response.text

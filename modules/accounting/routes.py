@@ -38,6 +38,7 @@ from modules.accounting import (
     inventory_issues,
     opening_import,
     output_vat_register,
+    payroll_employment,
     reconciliation,
     repair_accounting,
     reports,
@@ -87,6 +88,7 @@ from modules.accounting.output_vat_register import (
     OutputVatRegisterInput,
 )
 from modules.accounting.payroll_calculation import PayrollComponentPreviewInput
+from modules.accounting.payroll_employment import PayrollEmploymentInput
 from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
@@ -1516,6 +1518,24 @@ async def payroll_component_preview(org_id: int, month: str, data: PayrollCompon
         return await preview_component(ctx[0], org_id, month, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/payroll-employments')
+async def create_payroll_employment(org_id: int, data: PayrollEmploymentInput,
+                                    response: Response, ctx=Depends(member)):
+    chief(ctx)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_employment.create(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/payroll-employments')
+async def list_payroll_employments(org_id: int, as_of: date, response: Response,
+                                   ctx=Depends(member)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_employment.effective(ctx[0], org_id, as_of)
 
 
 @router.get('/organizations/{org_id}/payroll-accrual-access')

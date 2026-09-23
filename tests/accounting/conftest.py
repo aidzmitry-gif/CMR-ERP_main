@@ -20,6 +20,7 @@ from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import models, routes
 from modules.accounting.gateway import AccountingService
 from modules.finance.models import BankAccount, BankTransaction, Payment, PaymentAllocation
+from modules.hr.models import Employee
 from modules.logistics import models as logistics_models
 from modules.procurement import deal_demands, expected_reservations, ownership, receipt_documents
 from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest
@@ -39,9 +40,10 @@ if sys.platform == "win32":
 @pytest_asyncio.fixture
 async def db():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", execution_options={
-        "schema_translate_map": {"accounting": None, "procurement": None, "sales": None, "logistics": None, "finance": None},
+        "schema_translate_map": {"accounting": None, "procurement": None, "sales": None, "logistics": None, "finance": None, "hr": None},
     })
-    tables = [Currency.__table__, *[t for t in Base.metadata.sorted_tables if t.schema == "accounting"]]
+    tables = [Currency.__table__, Employee.__table__,
+              *[t for t in Base.metadata.sorted_tables if t.schema == "accounting"]]
     tables += [receipt_documents.ReceiptDocument.__table__, receipt_documents.ReceiptRevision.__table__]
     tables += [receipt_documents.ReceiptPosting.__table__]
     tables += [PurchaseOrder.__table__, PurchaseRequest.__table__, ownership.PurchaseOwnership.__table__, ownership.OrderRequestLink.__table__]

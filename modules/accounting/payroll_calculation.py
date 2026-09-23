@@ -16,7 +16,9 @@ from typing import Literal
 from pydantic import Field
 from sqlalchemy import select
 
-from modules.accounting.models import Policy, StatutoryRequirement
+from modules.accounting.models import PayrollEmploymentBinding, Policy, StatutoryRequirement
+from modules.accounting.payroll_employment import current
+from modules.accounting.payroll_employment import result as employment_result
 from modules.accounting.schemas import Input, Money
 from modules.accounting.service import AccountingError
 from modules.accounting.statutory_requirements import result as requirement_result
@@ -28,8 +30,7 @@ _MAX_MONEY = Decimal("999999999999999999.99")
 class PayrollComponentPreviewInput(Input):
     policy_id: int = Field(gt=0, strict=True)
     calculation_date: date
-    employee: str = Field(min_length=1, max_length=200)
-    department: str = Field(min_length=1, max_length=200)
+    employment_binding_id: int = Field(gt=0, strict=True)
     requirement_id: int = Field(gt=0, strict=True)
     base_byn: Money
     base_document: str = Field(min_length=1, max_length=160)
@@ -63,6 +64,20 @@ async def preview_component(session, org_id: int, month: str,
     if (policy is None or policy.id != data.policy_id or policy.effective_from > first
             or not policy.normative_verified):
         raise AccountingError("Select a verified accounting policy applicable for the whole month")
+
+    binding = await session.scalar(select(PayrollEmploymentBinding).where(
+        PayrollEmploymentBinding.id == data.employment_binding_id,
+        PayrollEmploymentBinding.organization_id == org_id,
+        PayrollEmploymentBinding.effective_from <= data.calculation_date,
+    ))
+    if binding is None:
+        raise AccountingError("Explicit payroll employment binding is required for this organization")
+    latest_binding = await current(
+        session, org_id, binding.employee_id, binding.contract_ref, data.calculation_date,
+    )
+    if latest_binding is None or latest_binding.id != binding.id or binding.state != "active":
+        raise AccountingError("The payroll employment binding is ended or superseded for this date")
+    employment = employment_result(binding)
 
     rate = await session.scalar(select(StatutoryRequirement).where(
         StatutoryRequirement.id == data.requirement_id,
@@ -99,8 +114,12 @@ async def preview_component(session, org_id: int, month: str,
         "organization_id": org_id,
         "month": month,
         "policy_id": policy.id,
-        "employee": data.employee,
-        "department": data.department,
+        "employee_id": binding.employee_id,
+        "employee": employment["employee_name"],
+        "department": employment["department"],
+        "employment_binding_id": binding.id,
+        "employment_binding_digest": binding.digest,
+        "contract_ref": binding.contract_ref,
         "calculation_date": data.calculation_date.isoformat(),
         "base_byn": format(data.base_byn, ".2f"),
         "base_document": data.base_document,

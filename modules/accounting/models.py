@@ -309,6 +309,35 @@ class StatutoryRequirement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PayrollEmploymentBinding(Base):
+    """Explicit, append-only employer and contract link for a global HR employee."""
+
+    __tablename__ = "payroll_employment_binding"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_payroll_employment_request"),
+        UniqueConstraint("organization_id", "employee_id", "contract_ref", "effective_from", "revision",
+                         name="uq_payroll_employment_revision"),
+        CheckConstraint("revision > 0", name="payroll_employment_positive_revision"),
+        CheckConstraint("state IN ('active', 'ended')", name="payroll_employment_state"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr.employee.id"))
+    contract_ref: Mapped[str] = mapped_column(String(160))
+    effective_from: Mapped[date] = mapped_column(Date)
+    revision: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(8))
+    source_document: Mapped[str] = mapped_column(String(160))
+    evidence: Mapped[str] = mapped_column(String(2000))
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SourceControl(Base):
     """Current completeness state; source revisions and audit preserve its history."""
     __tablename__ = "source_control"
@@ -1199,6 +1228,7 @@ def immutable(mapper, connection, target):
 
 
 for _model in (Account, CatalogAdoption, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
+               PayrollEmploymentBinding,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,
                ShipmentAccountingReceipt, ShipmentPreparationDraft, InventoryIssueReceipt, InventorySaleReceipt,
                ProductionOutputTransferReceipt, ProductionLaborReceipt, PayrollAccrualReceipt,

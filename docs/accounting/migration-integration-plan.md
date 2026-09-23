@@ -2,7 +2,7 @@
 
 > **Current source snapshot:** the historical evidence below records the
 > `2026-09-13` checkpoint through `0132`.  It is not evidence that the current
-> branch head is installed anywhere.  For the current `0160` source graph,
+> branch head is installed anywhere.  For the current `0161` source graph,
 > integration and release boundary see
 > [RELEASE-READINESS-2026-09-22.md](RELEASE-READINESS-2026-09-22.md).
 
