@@ -1,16 +1,19 @@
 """A multi-component workpaper must keep every source explicit and stay read-only."""
 import base64
 import hashlib
+from datetime import date
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from modules.accounting import statutory_requirements
 from modules.accounting.models import (
     AccessGrant,
+    Account,
     Entry,
+    Line,
     Organization,
     PayrollWorkpaperReview,
     Period,
@@ -416,6 +419,106 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert summary["known_binding_coverage"]["organization_payroll_population_verified"] is False
     assert summary["posting_available"] is False
     assert summary["statutory_payroll_certified"] is False
+    reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                     "payroll-source-reconciliation")
+    empty_reconcile = await client.get(reconcile_url)
+    assert empty_reconcile.status_code == 200, empty_reconcile.text
+    assert empty_reconcile.headers["cache-control"] == "private, no-store"
+    assert empty_reconcile.json()["status"] == "not_ready"
+    assert empty_reconcile.json()["missing_gross_binding_ids"] == [binding["binding_id"]]
+
+    for code, category in (("26", "expense"), ("70", "liability"),
+                           ("68.1", "liability"), ("69", "liability")):
+        db.add(Account(
+            organization_id=book[0], code=code, title=f"Synthetic payroll {code}",
+            category=category, valid_from=date(2026, 1, 1),
+            required_dimensions=[], currency_tracking=False,
+            quantity_tracking=False, cash=False, normative_ref="Synthetic payroll source",
+        ))
+    await db.commit()
+
+    async def imported(kind, source_document, lines):
+        body = {
+            "request_key": str(uuid4()), "source_document": source_document,
+            "source_version": 1, "source_digest": "b" * 64,
+            "verified_by": "tester", "source_evidence": "Synthetic reviewed external payroll file",
+            "policy_id": book[1], "posting_date": "2026-10-31",
+            "payroll_account": "70", "lines": lines,
+        }
+        path = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                f"payroll-{kind}-import-")
+        preview = await client.post(path + "preview", json=body)
+        assert preview.status_code == 200, preview.text
+        confirmed = await client.post(path + "confirm", json={
+            **body, "digest": preview.json()["digest"],
+        }, headers={"X-Expected-Principal": "tester"})
+        assert confirmed.status_code == 201, confirmed.text
+        await db.commit()
+
+    await imported("accrual", "gross-reviewed", [{
+        "source_line_id": "gross-1", "employment_binding_id": binding["binding_id"],
+        "employee": "Synthetic Employee", "department": "repair",
+        "debit_account": "26", "amount_byn": "800.00",
+        "evidence": "Synthetic gross line from external payroll",
+    }])
+    await imported("statutory", "statutory-reviewed", [
+        {"source_line_id": "deduction-1", "employment_binding_id": binding["binding_id"],
+         "employee": "Synthetic Employee", "department": "repair",
+         "kind": "employee_deduction", "liability_account": "68.1",
+         "amount_byn": "80.00", "evidence": "Synthetic external deduction line"},
+        {"source_line_id": "contribution-1", "employment_binding_id": binding["binding_id"],
+         "employee": "Synthetic Employee", "department": "repair",
+         "kind": "employer_contribution", "liability_account": "69",
+         "cost_account": "26", "amount_byn": "140.00",
+         "evidence": "Synthetic external contribution line"},
+    ])
+    no_roster = (await client.get(reconcile_url)).json()
+    assert no_roster["status"] == "not_ready"
+    assert no_roster["bindings"][0]["difference_import_less_review"] == {
+        "gross_byn": "0.00", "listed_employee_deductions_byn": "0.00",
+        "listed_employer_contributions_byn": "0.00",
+    }
+    roster_file = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_population", "month": "2026-10",
+        "reference": "one-worker-roster", "filename": "roster.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic roster source\n").decode(),
+        "evidence": "Synthetic chief reviewed the monthly employee roster",
+    })
+    assert roster_file.status_code == 200, roster_file.text
+    roster_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-population-reviews",
+        json={
+            "request_key": str(uuid4()), "source_file_id": roster_file.json()["file_id"],
+            "source_system": "synthetic-hr", "source_document": "one-worker-roster",
+            "source_employee_count": 1, "binding_ids": [binding["binding_id"]],
+            "employee_ids": [binding["employee_id"]],
+            "evidence": "Synthetic chief matched the employee to ERP binding",
+        })
+    assert roster_review.status_code == 200, roster_review.text
+    matched = (await client.get(reconcile_url)).json()
+    assert matched["status"] == "matched_arithmetic_only"
+    assert matched["comparison_ready"] is True
+    assert matched["statutory_payroll_certified"] is False
+    assert matched["posting_available"] is False
+    first_gross_entry = matched["receipt_entry_ids"]["gross"][0]
+    first_line = await db.scalar(select(Line).where(Line.entry_id == first_gross_entry)
+                                 .order_by(Line.id))
+    first_line_id = first_line.id
+    await db.execute(update(Line).where(Line.id == first_line_id).values(amount="801.00"))
+    await db.commit()
+    assert (await client.get(reconcile_url)).status_code == 409
+    await db.execute(update(Line).where(Line.id == first_line_id).values(amount="800.00"))
+    await db.commit()
+    await imported("accrual", "extra-gross-reviewed", [{
+        "source_line_id": "extra-gross-1", "employment_binding_id": binding["binding_id"],
+        "employee": "Synthetic Employee", "department": "repair",
+        "debit_account": "26", "amount_byn": "10.00",
+        "evidence": "Synthetic additional external gross line",
+    }])
+    changed = (await client.get(reconcile_url)).json()
+    assert changed["status"] == "differences"
+    assert changed["bindings"][0]["difference_import_less_review"]["gross_byn"] == "10.00"
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": receipt["review_id"],
@@ -457,7 +560,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert stale_summary["coverage_digest"] != summary["coverage_digest"]
     assert stale_summary["summary_digest"] != summary["summary_digest"]
 
-    db.add(Period(organization_id=book[0], month="2026-10", closed=True, generation=0))
+    period = await db.scalar(select(Period).where(
+        Period.organization_id == book[0], Period.month == "2026-10"))
+    period.closed = True
     await db.commit()
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),

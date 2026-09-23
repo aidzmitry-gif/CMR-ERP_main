@@ -9,9 +9,17 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from modules.accounting.models import PayrollEmploymentBinding, PayrollWorkpaperReview, Period
+from modules.accounting.models import (
+    Entry,
+    Line,
+    PayrollAccrualReceipt,
+    PayrollEmploymentBinding,
+    PayrollStatutoryReceipt,
+    PayrollWorkpaperReview,
+    Period,
+)
 from modules.accounting.payroll_calculation import month_bounds
 from modules.accounting.payroll_employment import result as employment_result
 from modules.accounting.payroll_workpaper import PayrollWorkpaperInput, preview_workpaper
@@ -351,6 +359,174 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
         "totals": formatted_totals,
         "known_binding_coverage": coverage,
         "coverage_verified": False,
+        "source_facts_verified": False,
+        "statutory_payroll_certified": False,
+        "posting_available": False,
+    }
+
+
+def _import_amount(value: object) -> Decimal:
+    if not isinstance(value, str):
+        raise HTTPException(409, "Payroll import amount requires reconciliation")
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as exc:
+        raise HTTPException(409, "Payroll import amount requires reconciliation") from exc
+    if (not amount.is_finite() or amount <= 0 or amount >= Decimal("1e18")
+            or amount * 100 != (amount * 100).to_integral_value()):
+        raise HTTPException(409, "Payroll import amount requires reconciliation")
+    return amount
+
+
+async def external_source_reconciliation(session, org_id: int, month: str) -> dict:
+    """Compare reviewed arithmetic with posted imports; never certify payroll."""
+    from modules.accounting.payroll_population import (
+        state as population_state,
+    )
+    from modules.accounting.payroll_population import (
+        verify_for_close as verify_population_for_close,
+    )
+
+    await lock_organization(session, org_id)
+    summary = await monthly_arithmetic_summary(session, org_id, month)
+    population = await population_state(session, org_id, month)
+    if population["matches_current_bindings"]:
+        await verify_population_for_close(session, org_id, month)
+    first, last = month_bounds(month)
+    known_ids = set(population["known_binding_ids"])
+    workpaper = {item["employment_binding_id"]: item["totals"]
+                 for item in summary["bindings"]}
+    fields = ("gross_byn", "listed_employee_deductions_byn",
+              "listed_employer_contributions_byn")
+    imports: dict[int, dict[str, Decimal]] = {}
+    receipts: dict[str, list[int]] = {"gross": [], "statutory": []}
+    unmapped_lines = {"gross": 0, "statutory": 0}
+    posting_gaps = {}
+    for label, model, operation, source_prefix in (
+        ("gross", PayrollAccrualReceipt, "payroll_accrual_import", "payroll:accrual:"),
+        ("statutory", PayrollStatutoryReceipt, "payroll_statutory_import", "payroll:statutory:"),
+    ):
+        rows = (await session.execute(select(model, Entry).join(
+            Entry, Entry.id == model.entry_id,
+        ).where(
+            model.organization_id == org_id, model.month == month,
+            Entry.organization_id == org_id, Entry.posting_date >= first,
+            Entry.posting_date <= last, Entry.operation == operation,
+            Entry.source.like(source_prefix + "%"),
+        ).order_by(model.entry_id))).all()
+        posting_count = await session.scalar(select(func.count(Entry.id)).where(
+            Entry.organization_id == org_id, Entry.posting_date >= first,
+            Entry.posting_date <= last, Entry.operation == operation,
+            Entry.source.like(source_prefix + "%"),
+        )) or 0
+        posting_gaps[label] = max(0, int(posting_count) - len(rows))
+        for receipt, entry in rows:
+            source = receipt.source
+            command = receipt.command
+            lines = source.get("lines") if isinstance(source, dict) else None
+            posting = receipt.posting
+            if (entry.digest != receipt.digest or not isinstance(command, dict)
+                    or not isinstance(lines, list) or not lines
+                    or not isinstance(posting, dict)
+                    or lines != command.get("lines")
+                    or source.get("organization_id") != org_id
+                    or source.get("month") != month
+                    or source.get("source_document") != receipt.source_document
+                    or source.get("source_version") != receipt.source_version
+                    or source.get("source_digest") != receipt.source_digest
+                    or command.get("source_document") != receipt.source_document
+                    or command.get("source_version") != receipt.source_version
+                    or command.get("source_digest") != receipt.source_digest
+                    or command.get("policy_id") != entry.policy_id
+                    or entry.source != f"{source_prefix}{org_id}:{receipt.source_document}"
+                    or entry.source_version != receipt.source_version
+                    or _digest(posting) != receipt.digest):
+                raise HTTPException(409, "Payroll import receipt requires reconciliation")
+            posted_lines = (await session.scalars(select(Line).where(
+                Line.entry_id == entry.id,
+            ).order_by(Line.id))).all()
+            posting_lines = posting.get("lines")
+            if (not isinstance(posting_lines, list)
+                    or len(posted_lines) != len(posting_lines)
+                    or len(posted_lines) != 2 * len(lines)):
+                raise HTTPException(409, "Payroll import ledger lines require reconciliation")
+            for posted, planned in zip(posted_lines, posting_lines, strict=True):
+                if (not isinstance(planned, dict) or posted.account_code != planned.get("account")
+                        or posted.side != planned.get("side")
+                        or posted.amount != _import_amount(planned.get("amount"))
+                        or posted.dimensions != planned.get("dimensions")):
+                    raise HTTPException(409, "Payroll import ledger lines require reconciliation")
+            receipts[label].append(receipt.entry_id)
+            source_total = Decimal("0")
+            for line in lines:
+                if not isinstance(line, dict):
+                    raise HTTPException(409, "Payroll import line requires reconciliation")
+                amount = _import_amount(line.get("amount_byn"))
+                source_total += amount
+                binding_id = line.get("employment_binding_id")
+                if type(binding_id) is not int or binding_id <= 0:
+                    unmapped_lines[label] += 1
+                    continue
+                if label == "gross":
+                    field = "gross_byn"
+                elif line.get("kind") == "employee_deduction":
+                    field = "listed_employee_deductions_byn"
+                elif line.get("kind") == "employer_contribution":
+                    field = "listed_employer_contributions_byn"
+                else:
+                    raise HTTPException(409, "Payroll statutory line kind requires reconciliation")
+                totals = imports.setdefault(binding_id, {key: Decimal("0") for key in fields})
+                totals[field] += amount
+            if (sum((line.amount for line in posted_lines if line.side == "debit"), Decimal("0"))
+                    != source_total or
+                    sum((line.amount for line in posted_lines if line.side == "credit"), Decimal("0"))
+                    != source_total):
+                raise HTTPException(409, "Payroll import amount differs from its ledger package")
+
+    rows = []
+    differences = 0
+    for binding_id in sorted(known_ids | set(workpaper) | set(imports)):
+        reviewed = workpaper.get(binding_id)
+        imported = imports.get(binding_id, {key: Decimal("0") for key in fields})
+        deltas = {key: format(imported[key] - Decimal(reviewed[key]), ".2f")
+                  for key in fields} if reviewed else None
+        if deltas and any(Decimal(value) != 0 for value in deltas.values()):
+            differences += 1
+        rows.append({
+            "employment_binding_id": binding_id,
+            "known_active": binding_id in known_ids,
+            "reviewed": {key: reviewed[key] for key in fields} if reviewed else None,
+            "imported": {key: format(imported[key], ".2f") for key in fields},
+            "difference_import_less_review": deltas,
+        })
+    missing_gross_ids = sorted(known_ids - {
+        binding_id for binding_id, amounts in imports.items()
+        if amounts["gross_byn"] > 0
+    })
+    unmatched_import_ids = sorted(set(imports) - set(workpaper))
+    ready = bool(
+        known_ids and population["matches_current_bindings"]
+        and summary["known_binding_coverage"]["known_binding_coverage_complete"]
+        and receipts["gross"] and receipts["statutory"]
+        and not missing_gross_ids and not unmatched_import_ids
+        and not any(unmapped_lines.values())
+        and not any(posting_gaps.values())
+    )
+    return {
+        "organization_id": org_id, "month": month,
+        "status": ("not_ready" if not ready else
+                   "differences" if differences else "matched_arithmetic_only"),
+        "population_review_current": population["matches_current_bindings"],
+        "workpaper_summary_digest": summary["summary_digest"],
+        "known_workpaper_coverage_complete": summary["known_binding_coverage"][
+            "known_binding_coverage_complete"],
+        "receipt_entry_ids": receipts, "receipt_gaps": posting_gaps,
+        "unmapped_source_lines": unmapped_lines,
+        "missing_gross_binding_ids": missing_gross_ids,
+        "unmatched_import_binding_ids": unmatched_import_ids,
+        "comparison_ready": ready,
+        "differing_binding_count": differences,
+        "bindings": rows,
         "source_facts_verified": False,
         "statutory_payroll_certified": False,
         "posting_available": False,

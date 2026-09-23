@@ -1576,6 +1576,16 @@ async def payroll_arithmetic_summary(org_id: int, month: str, response: Response
     return await payroll_workpaper_review.monthly_arithmetic_summary(ctx[0], org_id, month)
 
 
+@router.get('/organizations/{org_id}/periods/{month}/payroll-source-reconciliation')
+async def payroll_source_reconciliation(org_id: int, month: str, response: Response,
+                                        ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_workpaper_review.external_source_reconciliation(ctx[0], org_id, month)
+
+
 @router.get('/organizations/{org_id}/periods/{month}/payroll-population')
 async def payroll_population_state(org_id: int, month: str, response: Response,
                                    ctx=Depends(member)):
