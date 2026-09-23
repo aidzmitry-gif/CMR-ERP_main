@@ -215,6 +215,10 @@ async def test_chart_catalogue_is_read_only_and_does_not_certify_current_law(cli
     accounts = (await client.get("/accounting/catalog/accounts")).json()
     assert len(accounts) == len(catalog["accounts"])
     assert len({row["code"] for row in accounts}) == len(accounts)
-    assert next(row for row in accounts if row["code"] == "90.4")["parent"] == "90"
+    cost_subaccount = next(row for row in accounts if row["code"] == "90.4")
+    assert cost_subaccount["parent"] == "90"
+    assert cost_subaccount["normative_code"] == "90-4"
+    assert next(row for row in accounts if row["code"] == "10.10")["normative_code"] == "10-10"
+    assert next(row for row in accounts if row["code"] == "003")["normative_code"] == "003"
     assert next(row for row in accounts if row["code"] == "003")["off_balance"] is True
     assert (await client.post("/accounting/catalog/accounts", json={})).status_code == 405

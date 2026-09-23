@@ -168,9 +168,12 @@ def catalogue():
     accounts = []
     for row in _MAIN.splitlines():
         code, title = row.split("|", 1)
-        accounts.append({"code": code, "title": title, "parent": None, "off_balance": len(code) == 3})
+        accounts.append({"code": code, "normative_code": code, "title": title,
+                         "parent": None, "off_balance": len(code) == 3})
         for number, name in enumerate(_SUB.get(code, []), 1):
-            accounts.append({"code": f"{code}.{number}", "title": name, "parent": code, "off_balance": False})
+            accounts.append({"code": f"{code}.{number}",
+                             "normative_code": f"{code}-{number}", "title": name,
+                             "parent": code, "off_balance": False})
     return {
         "version": VERSION,
         "source": SOURCE,
@@ -178,7 +181,7 @@ def catalogue():
         "current_revision_reference": "2022-12-28",
         "current_normative_verified": False,
         "chart_codes_verified": False,
-        "verification_note": "Справочник воспроизводит доступный официальный PDF, но не помечается действующей редакцией на 2026 год. До регламентированного применения нужны первичная сверка редакции № 50 и утверждённая политика каждого юрлица.",
+        "verification_note": "Справочник содержит историческую транскрипцию доступного официального PDF: normative_code показывает обозначение субсчёта с дефисом, code — внутренний рабочий код ERP с точкой. Редакция 2026 года не подтверждена; до регламентированного применения нужны первичная сверка редакции № 50 и утверждённая политика каждого юрлица.",
         "normative_review": NORMATIVE_REVIEW,
         "known_amendments": AMENDMENTS,
         "accounts": accounts,
