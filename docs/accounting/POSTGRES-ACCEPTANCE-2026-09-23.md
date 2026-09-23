@@ -43,3 +43,27 @@ they prove these local paths, but they do not prove an upgrade from the
 server's actual schema and data, a target backup/restore, private-file-store
 recovery alongside the database, legal payroll correctness, or accountant
 acceptance. G06C, G07 and the real pilot remain open.
+
+## Paired database and private-file recovery — 2026-09-24
+
+The local `scripts/accounting_recovery_rehearsal.py` now creates one synthetic
+`payroll_policy` file through the real accounting evidence service in its own
+generated organization and PostgreSQL database. It copies the private file tree
+and dumps that database, then restores the database into a second generated
+database and the file tree into a separate temporary directory. No existing
+ERP database, document or file-store path is used.
+
+Fresh execution with an already-local `postgres:18.4-alpine` image identified
+by SHA-256 image ID passed at source head `0172`: one reconciliation receipt and
+one payroll-file receipt survived. Against the restored receipt, database-only
+recovery rejected the missing file, paired recovery verified the original
+bytes and SHA-256, tampering was rejected, and copying the backed-up file back
+restored access. Ruff, Python compile, CLI help and diff check passed. An
+independent `docker ps -a` check found no generated recovery container; the
+temporary scratch directory was absent after cleanup.
+
+This proves one synthetic, quiescent paired restore on disposable local
+resources. A live backup still needs an application-consistent snapshot of the
+entire database and private file store, actual target data, access and restore
+procedures, and a separate accountant acceptance; this run does not establish
+production recovery or payroll correctness.
