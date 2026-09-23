@@ -95,7 +95,7 @@ from modules.accounting.output_vat_register import (
 )
 from modules.accounting.payroll_calculation import PayrollComponentPreviewInput
 from modules.accounting.payroll_employment import PayrollEmploymentInput
-from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput
+from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput, PayrollEvidenceKind
 from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
@@ -1626,7 +1626,9 @@ async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInp
 @router.get('/organizations/{org_id}/payroll-evidence-files')
 async def list_payroll_evidence_files(org_id: int, response: Response,
                                       employment_binding_id: int | None = None,
-                                      month: str | None = None, ctx=Depends(member)):
+                                      month: str | None = None,
+                                      kind: PayrollEvidenceKind | None = None,
+                                      ctx=Depends(member)):
     if ctx[2] not in {"accountant", "chief"}:
         raise HTTPException(403, "Accountant or chief access required")
     query = select(PayrollEvidenceFile).where(PayrollEvidenceFile.organization_id == org_id)
@@ -1635,6 +1637,8 @@ async def list_payroll_evidence_files(org_id: int, response: Response,
     if month is not None:
         valid_month(month)
         query = query.where(PayrollEvidenceFile.month == month)
+    if kind is not None:
+        query = query.where(PayrollEvidenceFile.kind == kind)
     rows = (await ctx[0].scalars(query.order_by(PayrollEvidenceFile.id.desc()).limit(100))).all()
     response.headers['Cache-Control'] = 'private, no-store'
     return [payroll_evidence_files.result(row) for row in rows]

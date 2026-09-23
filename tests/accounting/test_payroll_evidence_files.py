@@ -107,6 +107,15 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     assert timesheet.status_code == 200, timesheet.text
     selected = await client.get(f"{url}?employment_binding_id={binding.json()['binding_id']}&month=2026-10")
     assert [row["file_id"] for row in selected.json()] == [timesheet.json()["file_id"]]
+    contract_only = await client.get(
+        f"{url}?employment_binding_id={binding.json()['binding_id']}&kind=employment_contract",
+    )
+    assert [row["file_id"] for row in contract_only.json()] == [contract.json()["file_id"]]
+    timesheet_only = await client.get(
+        f"{url}?employment_binding_id={binding.json()['binding_id']}&month=2026-10&kind=timesheet",
+    )
+    assert [row["file_id"] for row in timesheet_only.json()] == [timesheet.json()["file_id"]]
+    assert (await client.get(f"{url}?kind=unknown")).status_code == 422
 
     other = Organization(name="Other payroll company", unp="123123123")
     db.add(other)

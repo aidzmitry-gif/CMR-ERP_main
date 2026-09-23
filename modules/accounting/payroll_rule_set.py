@@ -69,6 +69,7 @@ def result(row: PayrollRuleSet) -> dict:
         "gross_method": row.gross_method,
         "rounding": row.rounding,
         "rate_rules": row.rate_rules,
+        "rate_versions": row.snapshot.get("rates_at_configuration", []),
         "source_reference": row.source_reference,
         "source_digest": row.source_digest,
         "source_file_id": row.snapshot.get("source_file_id"),

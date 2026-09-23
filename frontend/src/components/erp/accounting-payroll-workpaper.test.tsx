@@ -1,0 +1,100 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { AccountingPayrollWorkpaper } from "@/components/erp/accounting-payroll-workpaper";
+
+const rules = {
+  rule_set_id: 41, organization_id: 7, policy_id: 3, effective_from: "2026-10-01", revision: 2,
+  source_reference: "policy-2026", source_file_id: 90,
+  rate_rules: [
+    { code: "SYNTHETIC-EMPLOYEE", role: "employee_deduction", base_mode: "gross", classification_evidence: "Synthetic classification" },
+    { code: "SYNTHETIC-EMPLOYER", role: "employer_contribution", base_mode: "gross_less_adjustment", classification_evidence: "Synthetic classification" },
+  ],
+  rate_versions: [
+    { code: "SYNTHETIC-EMPLOYEE", requirement_id: 61, requirement_digest: "a".repeat(64) },
+    { code: "SYNTHETIC-EMPLOYER", requirement_id: 62, requirement_digest: "b".repeat(64) },
+  ],
+};
+const employment = [{ binding_id: 12, organization_id: 7, employee_name: "Тестовый работник", contract_ref: "contract-1", source_document: "signed-contract", state: "active", effective_from: "2026-01-01" }];
+const sourceFiles = [
+  { file_id: 71, organization_id: 7, employment_binding_id: 12, kind: "employment_contract", month: null, reference: "signed-contract", filename: "contract.pdf", sha256: "c".repeat(64), size_bytes: 100 },
+  { file_id: 72, organization_id: 7, employment_binding_id: 12, kind: "timesheet", month: "2026-10", reference: "timesheet-10", filename: "sheet.pdf", sha256: "d".repeat(64), size_bytes: 100 },
+  { file_id: 73, organization_id: 7, employment_binding_id: 12, kind: "base_adjustment", month: "2026-10", reference: "adjustment-10", filename: "adjust.pdf", sha256: "e".repeat(64), size_bytes: 100 },
+];
+const matchingFiles = (input: string) => sourceFiles.filter((row) => row.kind === new URL(input, "http://localhost").searchParams.get("kind"));
+const result = {
+  status: "arithmetic_workpaper_only", basis_digest: "f".repeat(64),
+  gross_byn: "750.00", listed_employee_deductions_byn: "75.00", after_listed_deductions_byn: "675.00",
+  listed_employer_contributions_byn: "130.00", cost_including_listed_contributions_byn: "880.00",
+  contract_and_timesheet_hashes_verified: true, rule_source_file_bytes_verified: true,
+  posting_available: false, statutory_payroll_certified: false,
+  basis: { organization_id: 7, month: "2026-10", employee_name: "Тестовый работник", work_from: "2026-10-01", work_to: "2026-10-31", components: [
+    { rate_code: "SYNTHETIC-EMPLOYEE", role: "employee_deduction", base_byn: "750.00", rate_value: "10.00", amount_byn: "75.00" },
+    { rate_code: "SYNTHETIC-EMPLOYER", role: "employer_contribution", base_byn: "650.00", rate_value: "20.00", amount_byn: "130.00" },
+  ] },
+};
+
+const response = (value: unknown) => ({ ok: true, status: 200, json: async () => value });
+afterEach(() => vi.unstubAllGlobals());
+
+describe("AccountingPayrollWorkpaper", () => {
+  it("previews only source-backed arithmetic with the configured rate identities", async () => {
+    const fetchMock = vi.fn((input: string, init: RequestInit) => {
+      if (input.includes("payroll-rule-sets/current")) return Promise.resolve(response(rules));
+      if (input.includes("payroll-employments")) return Promise.resolve(response(employment));
+      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(matchingFiles(input)));
+      if (input.includes("payroll-workpaper-preview")) return Promise.resolve(response(result));
+      throw new Error(`Unexpected request: ${input} ${init.method}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    await screen.findByText(/Набор правил № 41/);
+    fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
+    await screen.findByRole("option", { name: /timesheet-10/ });
+    fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
+    fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
+    fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
+    fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "80.00" } });
+    fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
+    fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Часы в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "100.00" } });
+    fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
+    fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Пункт документа о корректировке" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить арифметику" }));
+    await screen.findByText("Предварительный результат");
+    const posts = fetchMock.mock.calls.filter(([, init]) => init.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(String(posts[0][0])).toContain("/organizations/7/periods/2026-10/payroll-workpaper-preview");
+    const body = JSON.parse(posts[0][1].body as string);
+    expect(body).toMatchObject({
+      policy_id: 3, rule_set_id: 41, employment_binding_id: 12,
+      monthly_salary_byn: "1500.00", month_norm_hours: "160.00", worked_hours: "80.00",
+      contract_file_id: 71, contract_digest: "c".repeat(64), timesheet_file_id: 72, timesheet_digest: "d".repeat(64),
+      components: [{ requirement_id: 61, adjustment_byn: "0.00" }, { requirement_id: 62, adjustment_byn: "100.00", adjustment_file_id: 73 }],
+    });
+    expect(screen.getByText(/не сумма зарплаты к выплате/)).toBeInTheDocument();
+  });
+
+  it("rejects foreign-organization sources before rendering a preview", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
+      input.includes("payroll-rule-sets/current") ? { ...rules, organization_id: 8 } : employment,
+    ))));
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("другому юридическому лицу");
+    expect(screen.queryByRole("button", { name: "Проверить арифметику" })).not.toBeInTheDocument();
+  });
+
+  it("does not preview with missing salary, hours or source documents", async () => {
+    const fetchMock = vi.fn((input: string) => Promise.resolve(response(
+      input.includes("payroll-rule-sets/current") ? rules : input.includes("payroll-employments") ? employment : matchingFiles(input),
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    await screen.findByText(/Набор правил № 41/);
+    fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("payroll-workpaper-preview"))).toBe(true);
+  });
+});

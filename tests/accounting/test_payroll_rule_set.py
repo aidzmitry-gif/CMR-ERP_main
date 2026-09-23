@@ -36,13 +36,18 @@ async def test_rule_set_requires_effective_rate_and_is_idempotent(client, db, bo
     assert missing.status_code == 422
     assert "No effective organization rate" in missing.text
 
-    await statutory_requirements.create(db, book[0], rate_input(
+    rate = await statutory_requirements.create(db, book[0], rate_input(
         request_key=str(uuid4()), code="SYNTHETIC-EMPLOYEE-DEDUCTION",
     ), "tester")
     await db.commit()
     created = await client.post(url, json=payload)
     assert created.status_code == 200, created.text
     assert created.json()["revision"] == 1
+    assert created.json()["rate_versions"] == [{
+        "code": "SYNTHETIC-EMPLOYEE-DEDUCTION",
+        "requirement_id": rate["requirement_id"],
+        "requirement_digest": rate["digest"],
+    }]
     assert created.json()["source_document_verified"] is False
     repeated = await client.post(url, json=payload)
     assert repeated.json() == created.json()

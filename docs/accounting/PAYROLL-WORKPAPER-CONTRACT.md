@@ -97,6 +97,18 @@ unknown. Therefore `organization_payroll_population_verified`,
 `statutory_payroll_certified` remain false. No ledger entry, payroll run or
 external form is created.
 
+The current rule-set API exposes `rate_versions` (the immutable configured
+requirement IDs and digests) together with the rate roles and base modes. The
+accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly
+selected employer binding and stored contract/timesheet/adjustment-file receipts
+to call the read-only workpaper preview. Salary, norm hours, worked hours and
+the locations of the facts in the documents are entered explicitly. The tab
+shows the full arithmetic trace and source-byte flags but cannot create a
+review, payroll run or ledger entry. It does not upload source files; they must
+already exist in the private payroll store, and the rule set must already have
+been configured by the chief accountant. A missing source or configuration
+blocks the UI preview rather than supplying a default.
+
 The accountant workspace's **Контроль зарплаты** tab reads this monthly
 summary and the private `payroll-source-reconciliation` result for the selected
 legal entity and month. It shows missing intervals, the latest reviewed totals,

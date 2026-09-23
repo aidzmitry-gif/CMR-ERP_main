@@ -21,12 +21,16 @@ from modules.accounting.models import PayrollEmploymentBinding, PayrollEvidenceF
 from modules.accounting.schemas import Input
 from modules.accounting.service import AccountingError, lock_organization
 
+PayrollEvidenceKind = Literal[
+    "employment_contract", "timesheet", "payroll_policy", "base_adjustment",
+    "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
+    "payroll_statutory_zero", "payroll_stat_zero_person",
+]
+
 
 class PayrollEvidenceFileInput(Input):
     request_key: UUID
-    kind: Literal["employment_contract", "timesheet", "payroll_policy", "base_adjustment",
-                  "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
-                  "payroll_statutory_zero", "payroll_stat_zero_person"]
+    kind: PayrollEvidenceKind
     employment_binding_id: int | None = Field(default=None, gt=0, strict=True)
     month: str | None = Field(default=None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
     reference: str = Field(min_length=1, max_length=160)
