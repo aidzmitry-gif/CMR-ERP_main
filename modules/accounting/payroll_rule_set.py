@@ -17,6 +17,7 @@ from modules.accounting.payroll_calculation import (
     month_bounds,
     verified_policy,
 )
+from modules.accounting.payroll_evidence_files import file_for as evidence_file_for
 from modules.accounting.schemas import Input
 from modules.accounting.service import AccountingError, lock_organization
 
@@ -37,6 +38,7 @@ class PayrollRuleSetInput(Input):
     rate_rules: list[PayrollRateRuleInput] = Field(min_length=1, max_length=20)
     source_reference: str = Field(min_length=1, max_length=200)
     source_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_file_id: int | None = Field(default=None, gt=0, strict=True)
     evidence: str = Field(min_length=10, max_length=2000)
 
     @model_validator(mode="after")
@@ -69,11 +71,13 @@ def result(row: PayrollRuleSet) -> dict:
         "rate_rules": row.rate_rules,
         "source_reference": row.source_reference,
         "source_digest": row.source_digest,
+        "source_file_id": row.snapshot.get("source_file_id"),
         "evidence": row.evidence,
         "request_key": row.request_key,
         "digest": row.digest,
         "actor": row.actor,
         "source_document_verified": False,
+        "source_file_verified_at_configuration": row.snapshot.get("source_file_id") is not None,
         "statutory_completeness_verified": False,
     }
 
@@ -96,7 +100,17 @@ async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) ->
     if existing is not None:
         if existing.request_digest != request_digest:
             raise HTTPException(409, "Payroll rule set request key was reused with different content")
+        if data.source_file_id is not None:
+            await evidence_file_for(session, org_id, data.source_file_id, kind="payroll_policy")
         return result(existing)
+
+    if data.source_file_id is not None:
+        source_file = await evidence_file_for(
+            session, org_id, data.source_file_id, kind="payroll_policy",
+        )
+        if (source_file.reference != data.source_reference
+                or source_file.sha256 != data.source_digest):
+            raise AccountingError("Payroll rule source claims differ from stored source file")
 
     first, last = month_bounds(data.effective_from.strftime("%Y-%m"))
     await verified_policy(session, org_id, first, last, data.policy_id)

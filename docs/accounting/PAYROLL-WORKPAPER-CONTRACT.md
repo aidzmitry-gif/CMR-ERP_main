@@ -31,8 +31,11 @@ the legal entity, employee binding, document references and timesheet month.
 An optional `adjustment_file_id` similarly checks a documented adjusted rate
 base. Missing, changed or cross-entity files block the preview. This proves
 file identity and integrity, not the salary or hours stated inside the file.
-The rule-set source document remains an unverified claim, and statutory
-applicability is not verified by the API.
+The chief can also select `source_file_id` when recording the rule-set revision.
+The configuration compares the stored file reference and SHA-256 with the
+declared policy source; every subsequent workpaper preview rechecks its bytes.
+Without this ID, the rule-set source remains a claim. Byte identity never
+verifies what a policy document says or whether its rules are legally applicable.
 `posting_available=false` and
 `statutory_payroll_certified=false` are fixed. A subsequent accepted payroll
 workflow must verify source documents and accountant-approved rules, persist

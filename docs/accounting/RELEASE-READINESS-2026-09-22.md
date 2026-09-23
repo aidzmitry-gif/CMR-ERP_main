@@ -40,7 +40,8 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
   PostgreSQL migration remains unexecuted in this record.
 - Accounting revision `0163` adds organization-scoped, append-only receipts for
   private payroll source files. The preview can verify the selected contract
-  and timesheet bytes, scope and declared hashes. This does not verify their
+  and timesheet bytes, scope and declared hashes; a rule-set revision may also
+  select a policy source file and recheck it before each preview. This does not verify their
   contents, rule applicability or statutory salary. `AIOS_PAYROLL_DATA_DIR`
   must be privately provisioned and backed up together with the database;
   target storage, restore and PostgreSQL migration remain unverified.

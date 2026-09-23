@@ -78,6 +78,15 @@ async def preview_workpaper(session, org_id: int, month: str,
     if ruleset is None or ruleset.id != data.rule_set_id or ruleset.policy_id != policy.id:
         raise AccountingError("Select the current payroll rule set for this organization and month")
     configured_rules = rule_set_result(ruleset)
+    rule_source_file_id = configured_rules["source_file_id"]
+    rule_source_bytes_verified = rule_source_file_id is not None
+    if rule_source_bytes_verified:
+        rule_source_file = await evidence_file_for(
+            session, org_id, rule_source_file_id, kind="payroll_policy",
+        )
+        if (rule_source_file.reference != ruleset.source_reference
+                or rule_source_file.sha256 != ruleset.source_digest):
+            raise AccountingError("Payroll rule source differs from stored source file")
     by_code = {rule["code"]: rule for rule in configured_rules["rate_rules"]}
     if len(data.components) != len(by_code):
         raise AccountingError("Workpaper must include every configured payroll rate once")
@@ -184,6 +193,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "rule_set_digest": ruleset.digest,
         "rule_set_source_reference": ruleset.source_reference,
         "rule_set_source_digest": ruleset.source_digest,
+        "rule_set_source_file_id": rule_source_file_id,
         "employee_id": binding.employee_id,
         "employee_name": employment["employee_name"],
         "department": employment["department"],
@@ -223,6 +233,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "statutory_payroll_certified": False,
         "contract_and_timesheet_hashes_verified": source_files_verified,
         "rule_set_configured": True,
+        "rule_source_file_bytes_verified": rule_source_bytes_verified,
         "method_and_rate_classification_verified": False,
         "needs_accountant_review": True,
         "not_calculated": [

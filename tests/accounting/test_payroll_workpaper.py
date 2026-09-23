@@ -238,7 +238,8 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         raw = (f"%PDF-1.7\nsynthetic {kind} evidence\n").encode()
         response = await client.post(url, json={
             "request_key": str(uuid4()), "kind": kind,
-            "employment_binding_id": binding["binding_id"], "month": month,
+            "employment_binding_id": None if kind == "payroll_policy" else binding["binding_id"],
+            "month": month,
             "reference": reference, "filename": f"{kind}.pdf",
             "data_url": "data:application/pdf;base64," + base64.b64encode(raw).decode(),
             "evidence": "Synthetic source for byte verification test",
@@ -248,9 +249,35 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
 
     contract, _ = await upload("employment_contract", "signed-contract-2026-7")
     timesheet, _ = await upload("timesheet", "reviewed-timesheet-2026-10-7", "2026-10")
+    policy_file, _ = await upload("payroll_policy", "synthetic-reviewed-payroll-policy")
+    bad_rule = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()), "policy_id": book[1],
+            "effective_from": "2026-01-01", "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent", "rate_rules": ruleset["rate_rules"],
+            "source_reference": policy_file["reference"],
+            "source_digest": "0" * 64,
+            "source_file_id": policy_file["file_id"],
+            "evidence": "Synthetic accountant supplied file-backed payroll policy",
+        },
+    )
+    assert bad_rule.status_code == 422
+    new_rule = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()), "policy_id": book[1],
+            "effective_from": "2026-01-01", "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent", "rate_rules": ruleset["rate_rules"],
+            "source_reference": policy_file["reference"],
+            "source_digest": policy_file["sha256"],
+            "source_file_id": policy_file["file_id"],
+            "evidence": "Synthetic accountant supplied file-backed payroll policy",
+        },
+    )
+    assert new_rule.status_code == 200, new_rule.text
+    assert new_rule.json()["source_file_verified_at_configuration"] is True
     preview_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
     args = (book[1], binding["binding_id"], deduction["requirement_id"],
-            contribution["requirement_id"], ruleset["rule_set_id"])
+            contribution["requirement_id"], new_rule.json()["rule_set_id"])
     fields = {
         "contract_file_id": contract["file_id"], "contract_digest": contract["sha256"],
         "timesheet_file_id": timesheet["file_id"], "timesheet_digest": timesheet["sha256"],
@@ -258,6 +285,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     accepted = await client.post(preview_url, json=command(*args, **fields))
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["contract_and_timesheet_hashes_verified"] is True
+    assert accepted.json()["rule_source_file_bytes_verified"] is True
     assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
 
     wrong_claim = await client.post(preview_url, json=command(*args, **{
