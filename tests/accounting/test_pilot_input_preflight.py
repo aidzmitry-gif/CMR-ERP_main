@@ -13,7 +13,7 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def opening_package() -> dict:
+def opening_package(source_digest: str) -> dict:
     entry = {
         "source": "opening-export-2026-09",
         "source_version": 1,
@@ -35,7 +35,7 @@ def opening_package() -> dict:
         "request_key": str(uuid4()),
         "protocol_version": "opening-balance-v1",
         "source_system": "1c-export",
-        "source_digest": "a" * 64,
+        "source_digest": source_digest,
         "cutover_date": "2026-09-01",
         "evidence": "Synthetic opening-balance reconciliation",
         "expected_entry_count": 1,
@@ -47,6 +47,7 @@ def opening_package() -> dict:
 
 
 SOURCE_CLASS_BY_KIND = {
+    "opening_source": "external_system_export",
     "opening_balances": "external_system_export",
     "bank_statement": "bank_statement",
     "inventory": "source_register",
@@ -83,8 +84,10 @@ def artifact(
 
 
 def valid_manifest(root: Path) -> tuple[Path, dict]:
+    source = root / "opening-source.txt"
+    source.write_text("synthetic original 1C opening balances export", encoding="utf-8")
     opening = root / "opening.json"
-    opening.write_text(json.dumps(opening_package()), encoding="utf-8")
+    opening.write_text(json.dumps(opening_package(digest(source))), encoding="utf-8")
     osv_left = root / "osv-left.csv"
     osv_right = root / "osv-right.csv"
     raw_osv = snapshot(status="closed_periods", pending="0")
@@ -92,6 +95,7 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
     osv_right.write_bytes(raw_osv)
     artifacts = [
         artifact("opening_balances", "opening-2026-09", opening, source_system="1c-export"),
+        artifact("opening_source", "opening-source-2026-09", source, source_system="1c-export"),
         artifact("osv_left", "osv-source-2026-09", osv_left, source_system="1c-export"),
         artifact("osv_right", "osv-erp-2026-09", osv_right, source_system="crm-erp"),
     ]
@@ -106,7 +110,7 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
         source_system="external-payroll",
     ))
     manifest = {
-        "protocol_version": "belarus-pilot-input-v5",
+        "protocol_version": "belarus-pilot-input-v6",
         "pilot": {
             "month": "2026-09",
             "cutover_date": "2026-09-01",
@@ -159,10 +163,12 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     assert result["ok"] is True
     assert result["manifest_sha256"] == digest(path)
     assert result["organization_erp_book_id"] == "1"
-    assert result["artifact_count"] == 10
-    assert result["required_artifact_count"] == 10
+    assert result["artifact_count"] == 11
+    assert result["required_artifact_count"] == 11
     assert result["supporting_artifact_count"] == 0
     assert result["opening_import"]["entry_count"] == 1
+    assert len(result["opening_import"]["command_digest"]) == 64
+    assert result["opening_import"]["source_file_sha256"] == digest(tmp_path / "opening-source.txt")
     assert result["osv"]["period_from"] == "2026-09-01"
     assert result["osv"]["left_source_class"] == "external_system_export"
     assert result["osv"]["left_source_system"] == "1c-export"
@@ -225,6 +231,35 @@ def test_preflight_rejects_tampered_artifact_and_cli_returns_failure(tmp_path, c
         preflight(path)
 
 
+def test_preflight_binds_opening_package_to_attached_source_bytes(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    missing_source = {**manifest, "artifacts": [
+        row for row in manifest["artifacts"] if row["kind"] != "opening_source"
+    ]}
+    path.write_text(json.dumps(missing_source), encoding="utf-8")
+    with pytest.raises(PreflightError, match="Missing required artifact kinds: opening_source"):
+        preflight(path)
+
+    package_path = tmp_path / "opening.json"
+    package = json.loads(package_path.read_text(encoding="utf-8"))
+    package["source_digest"] = "a" * 64
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    opening = next(row for row in manifest["artifacts"] if row["kind"] == "opening_balances")
+    opening["sha256"] = digest(package_path)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="source_digest must match opening source file"):
+        preflight(path)
+
+    package["source_digest"] = digest(tmp_path / "opening-source.txt")
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    opening["sha256"] = digest(package_path)
+    source = next(row for row in manifest["artifacts"] if row["kind"] == "opening_source")
+    source["source_system"] = "unrelated-1c-export"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="source file must match opening package source_system"):
+        preflight(path)
+
+
 def test_preflight_rejects_duplicate_source_identity_and_ineligible_osv(tmp_path):
     path, manifest = valid_manifest(tmp_path)
     manifest["artifacts"][1]["source_system"] = manifest["artifacts"][0]["source_system"]
@@ -271,8 +306,8 @@ def test_preflight_keeps_supporting_calculation_outside_required_evidence(tmp_pa
 
     result = preflight(path)
 
-    assert result["artifact_count"] == 11
-    assert result["required_artifact_count"] == 10
+    assert result["artifact_count"] == 12
+    assert result["required_artifact_count"] == 11
     assert result["supporting_artifact_count"] == 1
 
 
@@ -308,9 +343,9 @@ def test_preflight_requires_payroll_scope_and_its_matching_source(tmp_path):
         preflight(path)
 
     path, manifest = valid_manifest(tmp_path)
-    manifest["protocol_version"] = "belarus-pilot-input-v4"
+    manifest["protocol_version"] = "belarus-pilot-input-v5"
     path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(PreflightError, match="belarus-pilot-input-v5"):
+    with pytest.raises(PreflightError, match="belarus-pilot-input-v6"):
         preflight(path)
 
 

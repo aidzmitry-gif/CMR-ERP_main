@@ -53,12 +53,13 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
   changing a closed month or later closed history. Replays of an earlier accepted
   request remain readable. Local API checks pass; its PostgreSQL migration and
   direct-SQL trigger scenario still await an owned PostgreSQL instance.
-- The local pilot preflight now requires `belarus-pilot-input-v5`: a declared
+- The local pilot preflight now requires `belarus-pilot-input-v6`: a declared
   source owner for every section, either an external payroll register or a
   separate zero-accrual control file, and an ERP book ID matching both OSV files.
   The left OSV must declare an external export; the right must declare an ERP
-  control export from a different named system. Earlier v2–v4 manifests cannot
-  be treated as complete pilot input. The
+  control export from a different named system. The opening package's source
+  digest must match an attached original-export file byte for byte. Earlier
+  v2–v5 manifests cannot be treated as complete pilot input. The
   preflight checks file identity and declarations, not the external-ID-to-book
   mapping, authentic provenance, payroll figures, actual operational ownership
   or accountant acceptance.

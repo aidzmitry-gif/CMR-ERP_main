@@ -20,11 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from modules.accounting.opening_import import package_command_digest  # noqa: E402
 from modules.accounting.reconciliation import compare  # noqa: E402
 from modules.accounting.schemas import ImportInput  # noqa: E402
 
-PROTOCOL_VERSION = "belarus-pilot-input-v5"
+PROTOCOL_VERSION = "belarus-pilot-input-v6"
 REQUIRED_ARTIFACT_KINDS = frozenset({
+    "opening_source",
     "opening_balances",
     "bank_statement",
     "inventory",
@@ -46,7 +48,7 @@ RESPONSIBILITY_AREAS = frozenset({
 })
 SUPPORTING_ARTIFACT_KINDS = frozenset({"supporting_calculation"})
 ALLOWED_ARTIFACT_KINDS = REQUIRED_ARTIFACT_KINDS | PAYROLL_ARTIFACT_KINDS | SUPPORTING_ARTIFACT_KINDS
-SINGLE_ARTIFACT_KINDS = frozenset({"opening_balances", "osv_left", "osv_right"}) | PAYROLL_ARTIFACT_KINDS
+SINGLE_ARTIFACT_KINDS = frozenset({"opening_source", "opening_balances", "osv_left", "osv_right"}) | PAYROLL_ARTIFACT_KINDS
 EVIDENCE_ROLES = frozenset({"required_evidence", "supporting_calculation"})
 SOURCE_CLASSES = frozenset({
     "bank_statement",
@@ -58,6 +60,7 @@ SOURCE_CLASSES = frozenset({
     "source_register",
 })
 REQUIRED_SOURCE_CLASSES: dict[str, frozenset[str]] = {
+    "opening_source": frozenset({"external_system_export"}),
     "opening_balances": frozenset({"erp_control_export", "external_system_export"}),
     "bank_statement": frozenset({"bank_statement"}),
     "inventory": frozenset({"external_system_export", "source_register"}),
@@ -453,6 +456,11 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         payroll_kind=payroll_kind, payroll_source_system=payroll_source_system,
     )
     opening = _validate_opening(artifacts["opening_balances"][0], cutover)
+    opening_source = artifacts["opening_source"][0]
+    if opening.source_system != opening_source["source_system"]:
+        raise PreflightError("Opening source file must match opening package source_system")
+    if opening.source_digest != opening_source["sha256"]:
+        raise PreflightError("Opening package source_digest must match opening source file SHA-256")
     osv = _validate_osv(artifacts["osv_left"][0], artifacts["osv_right"][0],
                         month, cutover, erp_book_id)
     return {
@@ -481,8 +489,10 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         "opening_import": {
             "entry_count": opening.expected_entry_count,
             "line_count": opening.expected_line_count,
+            "command_digest": package_command_digest(opening),
             "source_system": opening.source_system,
             "source_digest": opening.source_digest,
+            "source_file_sha256": opening_source["sha256"],
             "file_sha256": artifacts["opening_balances"][0]["sha256"],
         },
         "osv": {
@@ -505,7 +515,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v5 JSON manifest")
+    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v6 JSON manifest")
     args = parser.parse_args(argv)
     try:
         result = preflight(args.manifest)

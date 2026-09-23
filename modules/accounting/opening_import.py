@@ -20,7 +20,7 @@ def _digest(value: object) -> str:
     ).hexdigest()
 
 
-def _command_digest(data: ImportInput) -> str:
+def package_command_digest(data: ImportInput) -> str:
     command = data.model_dump(mode="json")
     # The request key is transport idempotency, not package content.  A second
     # key for the same source package must be rejected as a duplicate package.
@@ -128,7 +128,7 @@ async def _existing(session, org_id: int, request_key: UUID, command_digest: str
 
 async def preview(session, org_id: int, data: ImportInput) -> dict:
     await service.lock_organization(session, org_id)
-    command_digest = _command_digest(data)
+    command_digest = package_command_digest(data)
     existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return {**_result(existing), "command_digest": command_digest, "already_confirmed": True}
@@ -153,7 +153,7 @@ async def preview(session, org_id: int, data: ImportInput) -> dict:
 
 async def confirm(session, org_id: int, data: ImportInput, actor: str, event_bus=None) -> dict:
     await service.lock_organization(session, org_id)
-    command_digest = _command_digest(data)
+    command_digest = package_command_digest(data)
     existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return _result(existing)
