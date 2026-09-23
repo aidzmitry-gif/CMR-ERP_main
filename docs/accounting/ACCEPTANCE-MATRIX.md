@@ -7,7 +7,7 @@ the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads`
-reports the single source head `0165`.
+reports the single source head `0167`.
 
 | Requirement | Source evidence | Still required for acceptance |
 | --- | --- | --- |
@@ -35,6 +35,10 @@ reports the single source head `0165`.
   error handling.
 - The close control explicitly checks document completeness, bank, settlements,
   stock, costing, depreciation, FX, tax, financial result and trial balance.
+- Known active employment now requires a chief-attested monthly source roster
+  whose declared employee and binding IDs match the ERP book. The file is
+  byte-checked at close, but its contents and complete real-world population
+  still require accountant verification.
 - For the later own-payroll stage, the tax authority's [2026 income-tax rate
   notice](https://nalog.gov.by/news/34207/) and [standard-deduction
   guidance](https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/)

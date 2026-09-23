@@ -107,3 +107,17 @@ to closed months. These checks cover only contracts registered in this book;
 they neither verify the document's statements nor establish the complete
 employee population or statutory payroll. The pilot manifest remains the
 separate source-of-truth declaration for the real pilot month.
+
+The chief can additionally upload a monthly `payroll_population` source file
+and record `POST /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-population-reviews`.
+The review stores the claimed source employee count and sorted employee and
+employer-binding IDs. It accepts only the exact IDs currently known for that
+book/month, links the byte-checked source file and preserves corrections as
+append-only revisions. The latest review becomes stale when another known
+binding is added or corrected. For a month with known active bindings, close
+requires a current review and rechecks the source file bytes; PostgreSQL
+revision `0167` also blocks a direct close without the matching review. The
+GET payroll-population endpoint exposes the latest review and whether its IDs
+still match. This makes responsibility for roster completeness explicit; it
+does **not** parse the roster's contents, prove that every real employee was
+entered into ERP, validate payroll amounts, or certify a statutory form.

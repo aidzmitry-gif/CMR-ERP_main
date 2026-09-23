@@ -191,6 +191,8 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
     result = (await client.get(f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
     assert result["payroll"] == {
         "known_active_bindings": 0, "zero_activity_file_ids": [],
+        "population_review_required": False, "population_review_id": None,
+        "population_matches_known_bindings": False,
         "source_missing": False, "source_conflict": False,
         "gross_accruals": 1, "receipts": 0, "receipt_gap": 1,
         "statutory_imports": 0, "statutory_receipts": 0, "statutory_receipt_gap": 0,
@@ -245,6 +247,32 @@ async def test_known_employment_needs_month_payroll_source_before_close(
     assert controls["payroll"]["zero_activity_file_ids"] == [saved.json()["file_id"]]
     assert controls["payroll"]["source_missing"] is False
     assert "payroll_source_missing" not in {item["code"] for item in controls["blockers"]}
+    assert "payroll_population_review_missing" in {item["code"] for item in controls["blockers"]}
+    with pytest.raises(service.AccountingError, match="population review is required"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+
+    roster_key = str(uuid4())
+    roster_file = await client.post(prefix + "/payroll-evidence-files", json={
+        "request_key": roster_key, "kind": "payroll_population",
+        "month": "2026-10", "reference": "test-roster-2026-10",
+        "filename": "roster.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic source roster\n").decode(),
+        "evidence": "Synthetic signed staff roster for this book and month",
+    })
+    assert roster_file.status_code == 200, roster_file.text
+    review = await client.post(prefix + "/periods/2026-10/payroll-population-reviews", json={
+        "request_key": str(uuid4()), "source_file_id": roster_file.json()["file_id"],
+        "source_system": "synthetic-hr", "source_document": "test-roster-2026-10",
+        "source_employee_count": 1, "binding_ids": [binding.json()["binding_id"]],
+        "employee_ids": [employee.id],
+        "evidence": "Synthetic chief compared the source roster with known contracts",
+    })
+    assert review.status_code == 200, review.text
+    assert review.json()["complete_employee_population_proven"] is False
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["population_review_id"] == review.json()["review_id"]
+    assert controls["payroll"]["population_matches_known_bindings"] is True
     await service.validate_close_period(db, book[0], "2026-10", close)
 
     storage_file = root / str(book[0]) / (command["request_key"].replace("-", "") + ".pdf")

@@ -243,10 +243,12 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry.source.like("payroll:statutory:%"),
     )) or 0
     payroll_statutory_receipt_gap = max(0, int(payroll_statutory_postings) - int(payroll_statutory_receipts))
-    from modules.accounting.payroll_workpaper_review import _known_binding_coverage
+    from modules.accounting.payroll_population import state as population_state
 
-    known_payroll_bindings = (await _known_binding_coverage(session, org_id, month, {}))[
-        "active_binding_count"]
+    population = await population_state(session, org_id, month)
+    known_payroll_bindings = len(population["known_binding_ids"])
+    population_review_required = bool(known_payroll_bindings)
+    population_review_missing = population_review_required and not population["matches_current_bindings"]
     zero_activity_files = (await session.scalars(select(PayrollEvidenceFile.id).where(
         PayrollEvidenceFile.organization_id == org_id,
         PayrollEvidenceFile.month == month,
@@ -347,6 +349,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if payroll_source_missing:
         blockers.append({"code": "payroll_source_missing", "count": max(known_payroll_bindings, int(payroll_statutory_postings)),
                          "message": "Для известной занятости или удержаний нет проверенного начисления либо непротиворечивого документа об отсутствии начислений."})
+    if population_review_missing:
+        blockers.append({"code": "payroll_population_review_missing", "count": known_payroll_bindings,
+                         "message": "Для известных трудовых договоров нет актуального подтверждения полного состава сотрудников из исходного реестра."})
     review = []
     if policy is not None and not policy.normative_verified:
         review.append({"code": "policy_normative_basis", "count": 1,
@@ -451,6 +456,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         },
         "payroll": {
             "known_active_bindings": known_payroll_bindings,
+            "population_review_required": population_review_required,
+            "population_review_id": population["review"]["review_id"] if population["review"] else None,
+            "population_matches_known_bindings": population["matches_current_bindings"],
             "zero_activity_file_ids": list(zero_activity_files),
             "source_missing": payroll_source_missing,
             "source_conflict": payroll_source_conflict,

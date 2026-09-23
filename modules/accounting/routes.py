@@ -40,6 +40,7 @@ from modules.accounting import (
     output_vat_register,
     payroll_employment,
     payroll_evidence_files,
+    payroll_population,
     payroll_rule_set,
     payroll_workpaper,
     payroll_workpaper_review,
@@ -99,6 +100,7 @@ from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
 )
+from modules.accounting.payroll_population import PayrollPopulationInput
 from modules.accounting.payroll_rule_set import PayrollRuleSetInput
 from modules.accounting.payroll_statutory import (
     PayrollStatutoryConfirmInput,
@@ -1574,12 +1576,34 @@ async def payroll_arithmetic_summary(org_id: int, month: str, response: Response
     return await payroll_workpaper_review.monthly_arithmetic_summary(ctx[0], org_id, month)
 
 
+@router.get('/organizations/{org_id}/periods/{month}/payroll-population')
+async def payroll_population_state(org_id: int, month: str, response: Response,
+                                   ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_population.state(ctx[0], org_id, month)
+
+
+@router.post('/organizations/{org_id}/periods/{month}/payroll-population-reviews')
+async def create_payroll_population_review(org_id: int, month: str,
+        data: PayrollPopulationInput, response: Response, ctx=Depends(member)):
+    valid_month(month)
+    chief(ctx)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_population.create(ctx[0], org_id, month, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.post('/organizations/{org_id}/payroll-evidence-files')
 async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInput,
                                        response: Response, ctx=Depends(member)):
     if ctx[2] not in {"accountant", "chief"}:
         raise HTTPException(403, "Accountant or chief access required")
-    if data.kind == "payroll_zero_activity":
+    if data.kind in {"payroll_zero_activity", "payroll_population"}:
         chief(ctx)
     response.headers['Cache-Control'] = 'private, no-store'
     try:

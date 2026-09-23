@@ -53,6 +53,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0164_payroll_workpaper_review.py",
     "0165_payroll_employment_closed_period.py",
     "0166_payroll_zero_activity_evidence.py",
+    "0167_payroll_population_review.py",
 )
 
 
@@ -532,7 +533,7 @@ async def pg_book(pg_factory, db, book):
 async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg_book):
     from sqlalchemy.exc import DBAPIError
 
-    from modules.accounting.models import PayrollEvidenceFile, Period
+    from modules.accounting.models import PayrollEvidenceFile, PayrollPopulationReview, Period
     from modules.accounting.payroll_employment import PayrollEmploymentInput, create
     from modules.hr.models import Employee
 
@@ -570,6 +571,46 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
             evidence="Synthetic chief statement of zero accruals",
             request_key=key, request_digest="b" * 64, digest="c" * 64,
             snapshot={"synthetic": True}, actor="tester",
+        ))
+        await session.flush()
+        roster_key = str(uuid4())
+        roster_file = PayrollEvidenceFile(
+            organization_id=pg_book[0], employment_binding_id=None,
+            kind="payroll_population", month="2026-10",
+            reference="synthetic-roster", filename="roster.pdf",
+            content_type="application/pdf", size_bytes=25,
+            sha256="a" * 64, storage_filename=roster_key.replace("-", "") + ".pdf",
+            evidence="Synthetic chief statement of payroll population",
+            request_key=roster_key, request_digest="b" * 64, digest="c" * 64,
+            snapshot={"synthetic": True}, actor="tester",
+        )
+        session.add(roster_file)
+        await session.flush()
+        with pytest.raises(DBAPIError, match="population review required"):
+            async with session.begin_nested():
+                session.add(Period(organization_id=pg_book[0], month="2026-10",
+                                   closed=True, generation=0))
+                await session.flush()
+        from modules.accounting.payroll_population import _digest
+
+        review_key = str(uuid4())
+        review_snapshot = {
+            "organization_id": pg_book[0], "month": "2026-10", "revision": 1,
+            "supersedes_id": None, "source_file_id": roster_file.id,
+            "source_file_sha256": roster_file.sha256,
+            "source_system": "synthetic-hr", "source_document": "synthetic-roster",
+            "source_employee_count": 1, "binding_ids": [receipt["binding_id"]],
+            "employee_ids": [employee.id],
+            "evidence": "Synthetic chief compared source and known roster",
+            "request_key": review_key,
+        }
+        review_command = {field: review_snapshot[field] for field in (
+            "request_key", "source_file_id", "source_system", "source_document",
+            "source_employee_count", "binding_ids", "employee_ids", "evidence", "supersedes_id",
+        )}
+        session.add(PayrollPopulationReview(
+            **review_snapshot, request_digest=_digest(review_command),
+            digest=_digest(review_snapshot), snapshot=review_snapshot, actor="tester",
         ))
         await session.flush()
         session.add(Period(organization_id=pg_book[0], month="2026-10",

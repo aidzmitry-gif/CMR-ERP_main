@@ -24,7 +24,8 @@ from modules.accounting.service import AccountingError, lock_organization
 
 class PayrollEvidenceFileInput(Input):
     request_key: UUID
-    kind: Literal["employment_contract", "timesheet", "payroll_policy", "base_adjustment", "payroll_zero_activity"]
+    kind: Literal["employment_contract", "timesheet", "payroll_policy", "base_adjustment",
+                  "payroll_zero_activity", "payroll_population"]
     employment_binding_id: int | None = Field(default=None, gt=0, strict=True)
     month: str | None = Field(default=None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
     reference: str = Field(min_length=1, max_length=160)
@@ -37,9 +38,9 @@ class PayrollEvidenceFileInput(Input):
         if self.kind == "payroll_policy":
             if self.employment_binding_id is not None or self.month is not None:
                 raise ValueError("Policy file is organization-scoped, not employee-scoped")
-        elif self.kind == "payroll_zero_activity":
+        elif self.kind in {"payroll_zero_activity", "payroll_population"}:
             if self.employment_binding_id is not None or self.month is None:
-                raise ValueError("Zero-activity payroll file needs a month and no employee binding")
+                raise ValueError("Monthly payroll source file needs a month and no employee binding")
         elif self.kind == "employment_contract":
             if self.employment_binding_id is None or self.month is not None:
                 raise ValueError("Contract file needs an employee binding and no month")
@@ -184,11 +185,11 @@ async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: st
         await run_in_threadpool(verify_bytes, existing)
         return result(existing)
 
-    if data.kind == "payroll_zero_activity":
+    if data.kind in {"payroll_zero_activity", "payroll_population"}:
         from modules.accounting.models import Period
 
         closed = await session.scalar(select(Period.id).where(
-            Period.organization_id == org_id, Period.month == data.month,
+            Period.organization_id == org_id, Period.month >= data.month,
             Period.closed.is_(True),
         ))
         if closed is not None:

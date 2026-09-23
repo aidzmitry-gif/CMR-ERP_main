@@ -454,6 +454,10 @@ async def validate_close_period(session, org_id, month, data):
                               + "; ".join(item["message"] for item in receipt_gaps))
     if payroll["source_missing"]:
         raise AccountingError("Known payroll source is missing")
+    if payroll["population_review_required"]:
+        from modules.accounting.payroll_population import verify_for_close
+
+        await verify_for_close(session, org_id, month)
     if payroll["zero_activity_file_ids"] and not payroll["source_conflict"]:
         from modules.accounting.payroll_evidence_files import file_for
 
