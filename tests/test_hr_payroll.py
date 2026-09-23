@@ -92,6 +92,38 @@ async def test_pay_twice_idempotent(api):
     assert r2.status_code == 404
 
 
+async def test_pay_requires_exact_entry_when_employee_has_two_accruals(api, session):
+    emp_id = await _make_employee(api)
+    first = await api.post(
+        "/hr/payroll/accrue",
+        json={"employee_id": emp_id, "period": "2026-04", "amount_byn": "100.00"},
+    )
+    second = await api.post(
+        "/hr/payroll/accrue",
+        json={"employee_id": emp_id, "period": "2026-04", "amount_byn": "200.00"},
+    )
+    assert first.status_code == second.status_code == 201
+
+    ambiguous = await api.post(
+        "/hr/payroll/pay", json={"employee_id": emp_id, "period": "2026-04"},
+    )
+    assert ambiguous.status_code == 409
+    assert {row["status"] for row in (await api.get("/hr/payroll")).json()} == {"pending"}
+
+    selected_id = second.json()["id"]
+    paid = await api.post(
+        "/hr/payroll/pay",
+        json={"employee_id": emp_id, "period": "2026-04", "entry_id": selected_id},
+    )
+    assert paid.status_code == 200
+    assert paid.json()["id"] == selected_id
+    assert (await api.get(f"/hr/payroll/{first.json()['id']}")).json()["status"] == "pending"
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    paid_events = [event for event in events if event.event_type == "hr.payroll.paid"]
+    assert len(paid_events) == 1
+    assert paid_events[0].payload["entity_ref"] == f"payroll:{selected_id}"
+
+
 async def test_amount_byn_is_str_not_float(api, session):
     """amount_byn в payload события — всегда str, никогда float."""
     emp_id = await _make_employee(api)

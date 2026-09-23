@@ -180,7 +180,7 @@ export function HrPayrollView() {
         const r = await fetch("/api/hr/payroll/pay", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ employee_id: entry.employee_id, period: entry.period }),
+          body: JSON.stringify({ employee_id: entry.employee_id, period: entry.period, entry_id: entry.id }),
         });
         if (!r.ok) throw new Error(String(r.status));
         await loadEntries();

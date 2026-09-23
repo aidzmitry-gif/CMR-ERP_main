@@ -236,6 +236,6 @@ describe("HrPayrollView", () => {
     );
     const payCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/payroll/pay"));
     const body = JSON.parse((payCall?.[1] as RequestInit).body as string);
-    expect(body).toMatchObject({ employee_id: 1, period: "2026-06" });
+    expect(body).toMatchObject({ employee_id: 1, period: "2026-06", entry_id: 10 });
   });
 });
