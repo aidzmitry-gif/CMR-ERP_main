@@ -86,6 +86,7 @@ from modules.accounting.output_vat_register import (
     OutputVatRegisterConfirmInput,
     OutputVatRegisterInput,
 )
+from modules.accounting.payroll_calculation import PayrollComponentPreviewInput
 from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
@@ -1500,6 +1501,21 @@ async def payroll_accrual_import_preview(org_id: int, month: str, data: PayrollA
         raise HTTPException(422, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/periods/{month}/payroll-component-preview')
+async def payroll_component_preview(org_id: int, month: str, data: PayrollComponentPreviewInput,
+                                    response: Response, ctx=Depends(member)):
+    from modules.accounting.payroll_calculation import preview_component
+
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await preview_component(ctx[0], org_id, month, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get('/organizations/{org_id}/payroll-accrual-access')

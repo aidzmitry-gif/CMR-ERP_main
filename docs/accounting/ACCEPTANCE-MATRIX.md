@@ -6,7 +6,7 @@ real source documents, organization policy, PostgreSQL recovery evidence and
 the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
-Current source snapshot: `dce60b5` on `agent/crm-acc-prod009`; `alembic heads`
+Current source branch: `agent/crm-acc-prod009`; `alembic heads`
 reports the single source head `0160`.
 
 | Requirement | Source evidence | Still required for acceptance |
@@ -20,7 +20,7 @@ reports the single source head `0160`.
 | Bank, settlements, advances, returns and FX | [bank pilot status](BANK-PILOT-STATUS.md), bank import/settlement source and tests | Map actual bank formats/accounts, obtain currency source evidence and complete real bank reconciliation. Full bank API and foreign-currency statement ingestion are not accepted. |
 | VAT, ESCHF and foreign trade registers | [input/output VAT components](../../frontend/src/components/erp/accounting-input-vat-register.tsx), [foreign-trade module](../../modules/accounting/foreign_trade_register.py), [ESCHF source/version record](../eschf/sources.json) | Apply the ESCHF form and instruction effective from 13 May 2026, then confirm the matching technical format, provider, signature and portal result against real documents. The [tax authority announcement](https://nalog.gov.by/news/35429/) identifies Regulation No. 14 of 31 March 2026 as replacing the earlier form; the local unsigned candidate and VAT register do not certify external submission. |
 | Production, late costs, repairs, customer property, fixed assets and depreciation | [production cost revision contract](production-output-cost-revisions.md), [repairs module](../../modules/accounting/repair_accounting.py), fixed-asset and production workspaces | Reconcile WIP, production, customer property and depreciation using real policy and source documents. |
-| Payroll and statutory amounts | [payroll imports](../../modules/accounting/payroll_import.py), [statutory registry](../../modules/accounting/payroll_statutory.py), [legacy HR register](../../modules/hr/routes.py) | For the pilot, import a verified external calculation with its receipt. The manual HR register has no legal-entity ownership or bank-payment proof and its rows alone do not qualify as a statutory source. The approved plan also includes later ERP payroll calculation and period-versioned compulsory forms; neither is implemented or accepted yet. A verified external payroll system may remain the source during the staged 1C transition. |
+| Payroll and statutory amounts | [payroll imports](../../modules/accounting/payroll_import.py), [statutory registry](../../modules/accounting/payroll_statutory.py), [legacy HR register](../../modules/hr/routes.py), [one-component arithmetic preview](../../modules/accounting/payroll_calculation.py) | For the pilot, import a verified external calculation with its receipt. The manual HR register has no legal-entity ownership or bank-payment proof and its rows alone do not qualify as a statutory source. The new preview selects the current rate for one legal entity and calculates one explicit supplied base; it cannot decide eligibility, exemptions, caps, period aggregation, postings or payroll forms. Full ERP payroll calculation and period-versioned compulsory forms remain unimplemented. A verified external payroll system may remain the source during staged 1C transition. |
 | Opening balances, source ownership and 1C reconciliation without duplicate imports | [pilot input packet](PILOT-INPUT-PACKET.md), [strict manifest](PILOT-INPUT-MANIFEST.md), opening-import controls and tests | Receive signed real policy, balances, source hashes and one closed matched OSV pair. No default organization assignment is permitted. |
 | Recovery and release | [release readiness](RELEASE-READINESS-2026-09-22.md) | Owned PostgreSQL upgrade/restore, target DB revision inspection, integration to the release baseline, target backup/restore and release receipt. |
 | Replacement of 1C | All rows above are necessary local groundwork | Two successive accepted monthly closes, quarterly cycle, trial annual reporting, documented reconciliation of every variance, and an authorized production release. |
@@ -35,6 +35,12 @@ reports the single source head `0160`.
   error handling.
 - The close control explicitly checks document completeness, bank, settlements,
   stock, costing, depreciation, FX, tax, financial result and trial balance.
+- For the later own-payroll stage, the tax authority's [2026 income-tax rate
+  notice](https://nalog.gov.by/news/34207/) and [standard-deduction
+  guidance](https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/)
+  show why one percentage multiplication cannot be treated as a complete
+  withholding calculation. Their applicability, versions and examples still
+  require accountant review before an ERP rule is enabled.
 
 These are local source checks.  They do not replace the real acceptance
 conditions in the table and must not be used to mark the pilot, release or 1C
