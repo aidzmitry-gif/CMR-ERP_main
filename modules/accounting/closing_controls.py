@@ -24,6 +24,7 @@ from modules.accounting.models import (
     Line,
     OutputVatRegisterEntry,
     PayrollAccrualReceipt,
+    PayrollEvidenceFile,
     PayrollStatutoryReceipt,
     Period,
     Policy,
@@ -215,6 +216,7 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry, Entry.id == PayrollAccrualReceipt.entry_id,
     ).where(
         PayrollAccrualReceipt.organization_id == org_id,
+        PayrollAccrualReceipt.month == month,
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
         Entry.posting_date <= last,
@@ -233,6 +235,7 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry, Entry.id == PayrollStatutoryReceipt.entry_id,
     ).where(
         PayrollStatutoryReceipt.organization_id == org_id,
+        PayrollStatutoryReceipt.month == month,
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
         Entry.posting_date <= last,
@@ -240,6 +243,22 @@ async def snapshot(session, org_id: int, month: str) -> dict:
         Entry.source.like("payroll:statutory:%"),
     )) or 0
     payroll_statutory_receipt_gap = max(0, int(payroll_statutory_postings) - int(payroll_statutory_receipts))
+    from modules.accounting.payroll_workpaper_review import _known_binding_coverage
+
+    known_payroll_bindings = (await _known_binding_coverage(session, org_id, month, {}))[
+        "active_binding_count"]
+    zero_activity_files = (await session.scalars(select(PayrollEvidenceFile.id).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_zero_activity",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    payroll_source_missing = bool(
+        (known_payroll_bindings or payroll_statutory_postings)
+        and not payroll_receipts
+        and (not zero_activity_files or payroll_statutory_postings)
+    )
+    payroll_source_conflict = bool(zero_activity_files and (
+        payroll_postings or payroll_statutory_postings))
     late_cost_postings = await session.scalar(select(func.count(Entry.id)).where(
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
@@ -325,6 +344,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if policy is None:
         blockers.append({"code": "missing_policy", "count": 1,
                          "message": "На дату месяца нет применимой версии учётной политики."})
+    if payroll_source_missing:
+        blockers.append({"code": "payroll_source_missing", "count": max(known_payroll_bindings, int(payroll_statutory_postings)),
+                         "message": "Для известной занятости или удержаний нет проверенного начисления либо непротиворечивого документа об отсутствии начислений."})
     review = []
     if policy is not None and not policy.normative_verified:
         review.append({"code": "policy_normative_basis", "count": 1,
@@ -360,6 +382,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if payroll_receipt_gap:
         review.append({"code": "payroll_accrual_receipt_gap", "count": int(payroll_receipt_gap),
                        "message": "Для части импортированных начислений зарплаты нет связанной квитанции источника."})
+    if payroll_source_conflict:
+        review.append({"code": "payroll_zero_activity_superseded", "count": len(zero_activity_files),
+                       "message": "Документ об отсутствии начислений больше не используется: появились зарплатные проводки. Проверьте их квитанции."})
     if payroll_statutory_postings:
         review.append({"code": "payroll_statutory_provisional", "count": int(payroll_statutory_postings),
                        "message": "Удержания и взносы импортированы из проверенного источника; нормативная сертификация ещё не выполнена."})
@@ -425,6 +450,10 @@ async def snapshot(session, org_id: int, month: str) -> dict:
             "final_cost_certified": False,
         },
         "payroll": {
+            "known_active_bindings": known_payroll_bindings,
+            "zero_activity_file_ids": list(zero_activity_files),
+            "source_missing": payroll_source_missing,
+            "source_conflict": payroll_source_conflict,
             "gross_accruals": int(payroll_postings),
             "receipts": int(payroll_receipts),
             "receipt_gap": int(payroll_receipt_gap),

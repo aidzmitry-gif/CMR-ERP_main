@@ -92,3 +92,18 @@ unknown. Therefore `organization_payroll_population_verified`,
 `coverage_verified`, `source_facts_verified`, `posting_available` and
 `statutory_payroll_certified` remain false. No ledger entry, payroll run or
 external form is created.
+
+For a month with at least one **known** active employer/contract binding,
+closing controls now require a matching reviewed gross-payroll import receipt
+or an organization-scoped `payroll_zero_activity` file for that month. The
+latter is uploaded only by the chief accountant through the existing private
+payroll file endpoint, with explicit evidence, and its bytes are rechecked
+before application-level close. A later payroll posting supersedes the zero
+file for closing purposes; the file remains immutable and the conflict is
+shown for review. A posting without its matching month receipt still blocks
+closing. Migration `0166` also refuses direct PostgreSQL period close when a
+known active binding has neither source. Zero files cannot be newly attached
+to closed months. These checks cover only contracts registered in this book;
+they neither verify the document's statements nor establish the complete
+employee population or statutory payroll. The pilot manifest remains the
+separate source-of-truth declaration for the real pilot month.

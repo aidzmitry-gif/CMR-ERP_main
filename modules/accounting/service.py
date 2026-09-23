@@ -444,6 +444,7 @@ async def validate_close_period(session, org_id, month, data):
     controls = await closing_snapshot(session, org_id, month)
     if any(item["code"] == "unposted_bank_imports" for item in controls["blockers"]):
         raise AccountingError("Unposted imported bank transactions prevent closing")
+    payroll = controls["payroll"]
     receipt_gaps = [item for item in controls["review_items"] if item["code"] in {
         "production_cost_receipt_gap", "inventory_late_cost_receipt_gap",
         "payroll_accrual_receipt_gap", "payroll_statutory_receipt_gap",
@@ -451,6 +452,13 @@ async def validate_close_period(session, org_id, month, data):
     if receipt_gaps:
         raise AccountingError("Unverified accounting receipts prevent closing: "
                               + "; ".join(item["message"] for item in receipt_gaps))
+    if payroll["source_missing"]:
+        raise AccountingError("Known payroll source is missing")
+    if payroll["zero_activity_file_ids"] and not payroll["source_conflict"]:
+        from modules.accounting.payroll_evidence_files import file_for
+
+        for file_id in payroll["zero_activity_file_ids"]:
+            await file_for(session, org_id, file_id, kind="payroll_zero_activity", month=month)
     earlier_open = await session.scalar(select(Period.id).where(
         Period.organization_id == org_id, Period.month < month, Period.closed.is_(False)
     ).limit(1))

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from modules.accounting.models import AccessGrant, Organization
+from modules.accounting.models import AccessGrant, Organization, Period
 from modules.hr.models import Employee
 
 PDF = b"%PDF-1.7\nsynthetic payroll source, not a real employee document\n"
@@ -122,3 +122,26 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     await db.commit()
     assert (await client.get(url)).status_code == 403
     assert (await client.post(url, json=payload())).status_code == 403
+
+
+async def test_zero_activity_file_requires_chief_and_open_month(
+        client, db, book, tmp_path, monkeypatch):
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+    command = payload(kind="payroll_zero_activity", month="2026-10")
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",
+    ))
+    grant.role = "accountant"
+    await db.commit()
+    assert (await client.post(url, json=command)).status_code == 403
+    grant.role = "chief"
+    db.add(Period(organization_id=book[0], month="2026-10", closed=True,
+                  generation=0, evidence={}))
+    await db.commit()
+    closed = await client.post(url, json=command)
+    assert closed.status_code == 422
+    assert "closed month" in closed.text.lower()
+    assert not list(root.iterdir())

@@ -1,3 +1,4 @@
+import base64
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -17,6 +18,7 @@ from modules.accounting.models import (
     SourceControl,
 )
 from modules.accounting.schemas import CloseInput
+from modules.hr.models import Employee
 
 
 async def _account(client, prefix, code, category):
@@ -188,6 +190,8 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
 
     result = (await client.get(f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
     assert result["payroll"] == {
+        "known_active_bindings": 0, "zero_activity_file_ids": [],
+        "source_missing": False, "source_conflict": False,
         "gross_accruals": 1, "receipts": 0, "receipt_gap": 1,
         "statutory_imports": 0, "statutory_receipts": 0, "statutory_receipt_gap": 0,
         "statutory_payroll_certified": False,
@@ -196,6 +200,92 @@ async def test_closing_controls_surfaces_payroll_accrual_receipt_gap(client, db,
     assert {item["code"] for item in result["review_items"]} >= {
         "payroll_accrual_provisional", "payroll_accrual_receipt_gap",
     }
+
+
+async def test_known_employment_needs_month_payroll_source_before_close(
+        client, db, book, tmp_path, monkeypatch):
+    employee = Employee(full_name="Synthetic close employee", department="repair")
+    db.add(employee)
+    await db.commit()
+    prefix = f"/accounting/organizations/{book[0]}"
+    binding = await client.post(prefix + "/payroll-employments", json={
+        "request_key": str(uuid4()), "employee_id": employee.id,
+        "contract_ref": "test-close-contract", "effective_from": "2026-10-01",
+        "state": "active", "source_document": "test-close-contract",
+        "evidence": "Synthetic signed contract for close control",
+    })
+    assert binding.status_code == 200, binding.text
+    url = prefix + "/periods/2026-10/closing-controls"
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["known_active_bindings"] == 1
+    assert controls["payroll"]["source_missing"] is True
+    assert "payroll_source_missing" in {item["code"] for item in controls["blockers"]}
+    close = CloseInput(expected_generation=0, evidence={
+        step: "Synthetic checked" for step in service.CLOSE_STEPS
+    })
+    with pytest.raises(service.AccountingError, match="Known payroll source is missing"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    raw = b"%PDF-1.7\nsynthetic chief zero-accrual statement\n"
+    command = {
+        "request_key": str(uuid4()), "kind": "payroll_zero_activity",
+        "month": "2026-10", "reference": "test-zero-payroll-2026-10",
+        "filename": "zero-payroll.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(raw).decode(),
+        "evidence": "Synthetic chief confirms zero accruals for this month",
+    }
+    saved = await client.post(prefix + "/payroll-evidence-files", json=command)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["document_facts_verified"] is False
+    assert (await client.post(prefix + "/payroll-evidence-files", json=command)).json() == saved.json()
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["zero_activity_file_ids"] == [saved.json()["file_id"]]
+    assert controls["payroll"]["source_missing"] is False
+    assert "payroll_source_missing" not in {item["code"] for item in controls["blockers"]}
+    await service.validate_close_period(db, book[0], "2026-10", close)
+
+    storage_file = root / str(book[0]) / (command["request_key"].replace("-", "") + ".pdf")
+    storage_file.write_bytes(b"%PDF-1.7\ntampered\n")
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException, match="missing or differs"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+    storage_file.write_bytes(raw)
+
+    db.add(models.Entry(
+        organization_id=book[0], source="payroll:statutory:without-gross",
+        source_version=1, operation="payroll_statutory_import",
+        document_date=date(2026, 10, 1), operation_date=date(2026, 10, 1),
+        posting_date=date(2026, 10, 1), policy_id=book[1],
+        rule_version="verified-payroll-statutory-import-v1",
+        explanation="Synthetic deductions cannot rely on zero-accrual source",
+        opening=False, correction_of=None, digest="e" * 64, actor="tester",
+    ))
+    await db.commit()
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["source_missing"] is True
+    assert controls["payroll"]["source_conflict"] is True
+
+    db.add(models.Entry(
+        organization_id=book[0], source="payroll:accrual:later-import",
+        source_version=1, operation="payroll_accrual_import",
+        document_date=date(2026, 10, 1), operation_date=date(2026, 10, 1),
+        posting_date=date(2026, 10, 1), policy_id=book[1],
+        rule_version="verified-payroll-accrual-import-v1",
+        explanation="Synthetic late source supersedes zero statement",
+        opening=False, correction_of=None, digest="f" * 64, actor="tester",
+    ))
+    await db.commit()
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["source_conflict"] is True
+    assert "payroll_zero_activity_superseded" in {
+        item["code"] for item in controls["review_items"]
+    }
+    with pytest.raises(service.AccountingError, match="receipts prevent closing"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
 
 
 async def test_close_rejects_payroll_accrual_receipt_gap(db, book):

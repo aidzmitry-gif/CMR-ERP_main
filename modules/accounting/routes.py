@@ -1579,6 +1579,8 @@ async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInp
                                        response: Response, ctx=Depends(member)):
     if ctx[2] not in {"accountant", "chief"}:
         raise HTTPException(403, "Accountant or chief access required")
+    if data.kind == "payroll_zero_activity":
+        chief(ctx)
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         return await payroll_evidence_files.create(ctx[0], org_id, data, ctx[1])

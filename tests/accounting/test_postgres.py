@@ -52,6 +52,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0163_payroll_evidence_file.py",
     "0164_payroll_workpaper_review.py",
     "0165_payroll_employment_closed_period.py",
+    "0166_payroll_zero_activity_evidence.py",
 )
 
 
@@ -531,7 +532,7 @@ async def pg_book(pg_factory, db, book):
 async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg_book):
     from sqlalchemy.exc import DBAPIError
 
-    from modules.accounting.models import Period
+    from modules.accounting.models import PayrollEvidenceFile, Period
     from modules.accounting.payroll_employment import PayrollEmploymentInput, create
     from modules.hr.models import Employee
 
@@ -547,6 +548,30 @@ async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg
             "evidence": "Synthetic chief-reviewed employment evidence",
         })
         receipt = await create(session, pg_book[0], original, "tester")
+        await session.commit()
+
+    async with pg_factory() as session:
+        session.add(Period(organization_id=pg_book[0], month="2026-10",
+                           closed=True, generation=0))
+        with pytest.raises(DBAPIError, match="monthly payroll source"):
+            await session.flush()
+        await session.rollback()
+
+    async with pg_factory() as session:
+        # Database-level acceptance verifies the source metadata; byte-level
+        # attestation is performed by the application close path.
+        key = str(uuid4())
+        session.add(PayrollEvidenceFile(
+            organization_id=pg_book[0], employment_binding_id=None,
+            kind="payroll_zero_activity", month="2026-10",
+            reference="synthetic-zero-payroll", filename="zero.pdf",
+            content_type="application/pdf", size_bytes=25,
+            sha256="a" * 64, storage_filename=key.replace("-", "") + ".pdf",
+            evidence="Synthetic chief statement of zero accruals",
+            request_key=key, request_digest="b" * 64, digest="c" * 64,
+            snapshot={"synthetic": True}, actor="tester",
+        ))
+        await session.flush()
         session.add(Period(organization_id=pg_book[0], month="2026-10",
                            closed=True, generation=0))
         await session.commit()
