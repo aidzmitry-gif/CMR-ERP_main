@@ -11,6 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from modules.accounting.payroll_calculation import (
     _digest,
@@ -20,10 +21,13 @@ from modules.accounting.payroll_calculation import (
     verified_policy,
 )
 from modules.accounting.payroll_evidence_files import file_for as evidence_file_for
+from modules.accounting.payroll_evidence_files import timesheet_preflight
+from modules.accounting.payroll_evidence_files import verify_bytes as verify_evidence_bytes
 from modules.accounting.payroll_rule_set import current as current_rule_set
 from modules.accounting.payroll_rule_set import result as rule_set_result
 from modules.accounting.schemas import Input, Money, exact
 from modules.accounting.service import AccountingError
+from modules.accounting.timesheet_preflight import UnsupportedWorkbook, row_numeric_hours
 
 Hours = Annotated[Decimal, BeforeValidator(exact), Field(ge=0, max_digits=5, decimal_places=2)]
 CENT = Decimal("0.01")
@@ -51,6 +55,7 @@ class PayrollWorkpaperInput(Input):
     timesheet_document: str = Field(min_length=1, max_length=160)
     timesheet_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     timesheet_file_id: int | None = Field(default=None, gt=0, strict=True)
+    timesheet_row: int | None = Field(default=None, ge=11, strict=True)
     timesheet_evidence: str = Field(min_length=10, max_length=2000)
     month_norm_hours: Hours = Field(gt=0, le=744)
     worked_hours: Hours = Field(le=744)
@@ -111,6 +116,7 @@ async def preview_workpaper(session, org_id: int, month: str,
     if (data.contract_file_id is None) != (data.timesheet_file_id is None):
         raise AccountingError("Contract and timesheet source files must be selected together")
     source_files_verified = data.contract_file_id is not None
+    timesheet_row_check = None
     if source_files_verified:
         contract_file = await evidence_file_for(
             session, org_id, data.contract_file_id, kind="employment_contract",
@@ -125,6 +131,28 @@ async def preview_workpaper(session, org_id: int, month: str,
                 or timesheet_file.reference != data.timesheet_document
                 or timesheet_file.sha256 != data.timesheet_digest):
             raise AccountingError("Workpaper source claims differ from stored source files")
+        if timesheet_file.content_type == (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+            preflight = await run_in_threadpool(timesheet_preflight, timesheet_file)
+            if preflight["status"] == "structure_checked":
+                if data.timesheet_row is None:
+                    raise AccountingError("Select the employee row of the XLSX timesheet")
+                raw = await run_in_threadpool(verify_evidence_bytes, timesheet_file)
+                try:
+                    timesheet_row_check = await run_in_threadpool(
+                        row_numeric_hours, raw, month, data.timesheet_row,
+                        data.work_from, data.work_to)
+                except UnsupportedWorkbook as exc:
+                    raise AccountingError("XLSX row or work interval failed source verification") from exc
+                if (timesheet_row_check["source_sha256"] != timesheet_file.sha256
+                        or Decimal(timesheet_row_check["numeric_hours"]) != data.worked_hours):
+                    raise AccountingError("Worked hours differ from the selected XLSX row and interval")
+            elif data.timesheet_row is not None:
+                raise AccountingError("Employee row requires a structurally valid XLSX source")
+        elif data.timesheet_row is not None:
+            raise AccountingError("Timesheet row applies only to an XLSX source")
+    elif data.timesheet_row is not None:
+        raise AccountingError("Timesheet row requires a stored XLSX source")
 
     with localcontext() as context:
         context.prec = 64
@@ -227,6 +255,10 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_document": data.timesheet_document,
         "timesheet_digest": data.timesheet_digest,
         "timesheet_file_id": data.timesheet_file_id,
+        "timesheet_row": data.timesheet_row,
+        "timesheet_numeric_hours_verified": timesheet_row_check is not None,
+        "timesheet_uninterpreted_code_days": (
+            timesheet_row_check["uninterpreted_code_days"] if timesheet_row_check else None),
         "timesheet_evidence": data.timesheet_evidence,
         "month_norm_hours": format(data.month_norm_hours, ".2f"),
         "worked_hours": format(data.worked_hours, ".2f"),
@@ -249,6 +281,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "posting_available": False,
         "statutory_payroll_certified": False,
         "contract_and_timesheet_hashes_verified": source_files_verified,
+        "timesheet_numeric_hours_verified": timesheet_row_check is not None,
         "rule_set_configured": True,
         "rule_source_file_bytes_verified": rule_source_bytes_verified,
         "method_and_rate_classification_verified": False,
@@ -257,6 +290,7 @@ async def preview_workpaper(session, org_id: int, month: str,
             "document_authenticity", "rule_source_authenticity", "method_applicability",
             "rate_eligibility",
             "exemptions", "caps", "benefits", "unlisted_components",
-            "period_aggregation", "statutory_forms",
+            "period_aggregation", "statutory_forms", "timesheet_row_identity",
+            "timesheet_code_meanings",
         ],
     }

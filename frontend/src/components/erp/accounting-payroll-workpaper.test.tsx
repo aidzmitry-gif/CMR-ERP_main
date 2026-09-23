@@ -150,8 +150,61 @@ describe("AccountingPayrollWorkpaper", () => {
     fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Пункт документа о корректировке" } });
     fireEvent.click(screen.getByRole("button", { name: "Проверить арифметику" }));
     await screen.findByText("Предварительный результат");
+    const defectPreview = fetchMock.mock.calls.find(([url]) => String(url).includes("payroll-workpaper-preview"));
+    expect(defectPreview).toBeDefined();
+    expect(JSON.parse(defectPreview![1].body as string)).not.toHaveProperty("timesheet_row");
     fireEvent.change(screen.getByLabelText("Основание проверки главбуха"), { target: { value: "Проверены договор и табель" } });
     expect(screen.getByRole("button", { name: "Подтвердить исправление" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-reviews"))).toBe(false);
+  });
+
+  it("requires an explicit XLSX row and sends it with the arithmetic preview", async () => {
+    const xlsxFiles = sourceFiles.map((file) => file.kind === "timesheet"
+      ? { ...file, filename: "sheet.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+      : file);
+    const checkedResult = {
+      ...result, timesheet_numeric_hours_verified: true,
+      basis: { ...result.basis, timesheet_row: 11, timesheet_uninterpreted_code_days: 1 },
+    };
+    const fetchMock = vi.fn((input: string) => {
+      if (input.includes("timesheet-preflight")) return Promise.resolve(response({
+        file_id: 72, organization_id: 7, employment_binding_id: 12, period: "2026-10",
+        source_sha256: "d".repeat(64), status: "structure_checked", structure_ok: true,
+        employee_row_numbers: [11, 12], document_facts_verified: false, issues: [],
+      }));
+      if (input.includes("payroll-rule-sets/current")) return Promise.resolve(response(rules));
+      if (input.includes("payroll-workpaper-access")) return Promise.resolve(response(access));
+      if (input.includes("payroll-employments")) return Promise.resolve(response(employment));
+      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(xlsxFiles.filter(
+        (file) => file.kind === new URL(input, "http://localhost").searchParams.get("kind"))));
+      if (input.includes("payroll-workpaper-preview")) return Promise.resolve(response(checkedResult));
+      if (input.includes("payroll-arithmetic-summary")) return Promise.resolve(response(summary));
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    await screen.findByText(/Набор правил № 41/);
+    fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
+    await screen.findByRole("option", { name: /timesheet-10/ });
+    fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
+    fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    await screen.findByLabelText("Строка работника в XLSX");
+    expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Строка работника в XLSX"), { target: { value: "11" } });
+    fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
+    fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
+    fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "8.00" } });
+    fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
+    fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Первая строка в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "0.00" } });
+    fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
+    fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Проверена корректировка базы" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить арифметику" }));
+    await screen.findByText("Предварительный результат");
+    const previewPost = fetchMock.mock.calls.find(([url]) => String(url).includes("payroll-workpaper-preview"));
+    expect(previewPost).toBeDefined();
+    expect(JSON.parse(previewPost![1].body as string)).toMatchObject({ timesheet_row: 11, worked_hours: "8.00" });
+    expect(screen.getByText(/Числовые часы проверены по строке 11/)).toHaveTextContent("не интерпретированы");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-reviews"))).toBe(false);
   });
 });

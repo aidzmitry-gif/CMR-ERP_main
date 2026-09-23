@@ -20,6 +20,7 @@ from modules.accounting.models import (
 )
 from modules.hr.models import Employee
 from tests.accounting.test_payroll_calculation import rate_input
+from tests.accounting.test_timesheet_preflight import make_timesheet
 
 
 @pytest_asyncio.fixture
@@ -408,7 +409,72 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert accepted.json()["rule_source_file_bytes_verified"] is True
     assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
 
+    xlsx_path = tmp_path / "october.xlsx"
+    make_timesheet(xlsx_path, month="2026-10", coded_day=True)
+    xlsx_upload = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "timesheet",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-october-xlsx", "filename": xlsx_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(xlsx_path.read_bytes()).decode(),
+        "evidence": "Fictional row-level XLSX comparison",
+    })
+    assert xlsx_upload.status_code == 200, xlsx_upload.text
+    xlsx_source = xlsx_upload.json()
+    xlsx_command = {
+        **reviewed_command,
+        "work_to": "2026-10-02",
+        "timesheet_document": xlsx_source["reference"],
+        "timesheet_file_id": xlsx_source["file_id"],
+        "timesheet_digest": xlsx_source["sha256"],
+        "worked_hours": "8.00",
+    }
+    xlsx_command["components"] = [
+        reviewed_command["components"][0],
+        {**reviewed_command["components"][1], "adjustment_byn": "50.00"},
+    ]
+    assert (await client.post(preview_url, json=xlsx_command)).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 13,
+    })).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 11, "worked_hours": "7.00",
+    })).status_code == 422
+    checked_xlsx = await client.post(preview_url, json={**xlsx_command, "timesheet_row": 11})
+    assert checked_xlsx.status_code == 200, checked_xlsx.text
+    assert checked_xlsx.json()["timesheet_numeric_hours_verified"] is True
+    assert checked_xlsx.json()["basis"]["timesheet_row"] == 11
+    assert checked_xlsx.json()["basis"]["timesheet_uninterpreted_code_days"] == 1
+
     review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"
+    broken_path = tmp_path / "broken-october.xlsx"
+    make_timesheet(broken_path, month="2026-10", truncated=True)
+    broken_upload = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "timesheet",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-broken-october", "filename": broken_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(broken_path.read_bytes()).decode(),
+        "evidence": "Fictional defective workbook for investigation",
+    })
+    assert broken_upload.status_code == 200, broken_upload.text
+    broken_source = broken_upload.json()
+    broken_command = {
+        **xlsx_command,
+        "timesheet_document": broken_source["reference"],
+        "timesheet_file_id": broken_source["file_id"],
+        "timesheet_digest": broken_source["sha256"],
+    }
+    investigation = await client.post(preview_url, json=broken_command)
+    assert investigation.status_code == 200, investigation.text
+    blocked_xlsx_review = await client.post(review_url, json={
+        **broken_command, "request_key": str(uuid4()),
+        "basis_digest": investigation.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic investigation of defective XLSX",
+    })
+    assert blocked_xlsx_review.status_code == 422
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 0
+
     review_command = {
         **reviewed_command,
         "request_key": str(uuid4()),

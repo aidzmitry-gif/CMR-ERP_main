@@ -1,46 +1,62 @@
 """Structural XLSX intake checks, using fictional timesheets only."""
 
 import base64
+import calendar
 import json
+from datetime import date
 from uuid import uuid4
 from zipfile import ZipFile
 
+import pytest
 from sqlalchemy import select
 
 from modules.accounting.models import AccessGrant, Organization
-from modules.accounting.timesheet_preflight import scan
+from modules.accounting.timesheet_preflight import (
+    UnsupportedWorkbook,
+    _column,
+    row_numeric_hours,
+    scan,
+)
 from modules.hr.models import Employee
 
 
-def make_timesheet(path, *, truncated=False, duplicate=False, wrong_days=False,
-                   row_after_gap=False):
-    last_column = "AE" if truncated else "AH"
+def make_timesheet(path, *, month="2026-06", truncated=False, duplicate=False,
+                   wrong_days=False, row_after_gap=False, coded_day=False):
+    year, month_number = map(int, month.split("-"))
+    days = calendar.monthrange(year, month_number)[1]
+    day_columns = [_column(index) for index in range(5, 5 + days)]
+    days_col = _column(5 + days)
+    hours_col = _column(6 + days)
+    last_column = day_columns[-4] if truncated else day_columns[-1]
     identifier_2 = "worker-a" if duplicate else "worker-b"
     header = "".join(
         f'<c r="{column}8"><v>{day}</v></c>'
-        for day, column in enumerate(
-            ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P",
-             "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB",
-             "AC", "AD", "AE", "AF", "AG", "AH"], 1
-        )
+        for day, column in enumerate(day_columns, 1)
     )
-    extra_1 = '<c r="AF11"><v>2</v></c>' if truncated else ""
-    extra_2 = '<c r="AG12"><v>3</v></c>' if truncated else ""
-    hours_1 = "8" if truncated else "10" if extra_1 else "8"
-    hours_2 = "4" if truncated else "7" if extra_2 else "4"
+    extra_1 = f'<c r="{day_columns[-3]}11"><v>2</v></c>' if truncated else ""
+    extra_2 = f'<c r="{day_columns[-2]}12"><v>3</v></c>' if truncated else ""
+    code = '<c r="F11" t="inlineStr"><is><t>В</t></is></c>' if coded_day else ""
+    hours_1 = "8"
+    hours_2 = "4"
     days_1 = "1" if wrong_days or not truncated else "2"
     days_2 = "2" if truncated else "1"
-    extra_row = '''<row r="14"><c r="B14" t="inlineStr"><is><t>worker-c</t></is></c><c r="C14" t="inlineStr"><is><t>Employee C</t></is></c><c r="E14"><v>1</v></c><c r="AI14"><v>1</v></c><c r="AJ14"><f>SUM(E14:AH14)</f><v>1</v></c></row>''' if row_after_gap else ""
+    extra_row = (f'<row r="14"><c r="B14" t="inlineStr"><is><t>worker-c</t></is></c>'
+                 f'<c r="C14" t="inlineStr"><is><t>Employee C</t></is></c>'
+                 f'<c r="E14"><v>1</v></c><c r="{days_col}14"><v>1</v></c>'
+                 f'<c r="{hours_col}14"><f>SUM(E14:{day_columns[-1]}14)</f><v>1</v></c>'
+                 f'</row>') if row_after_gap else ""
+    month_name = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+                  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")[month_number - 1]
     sheet = f'''<?xml version="1.0" encoding="utf-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <sheetData>
- <row r="8">{header}<c r="AI8" t="inlineStr"><is><t>Рабочее время</t></is></c><c r="AJ8" t="inlineStr"><is><t>Часы</t></is></c></row>
- <row r="11"><c r="B11" t="inlineStr"><is><t>worker-a</t></is></c><c r="C11" t="inlineStr"><is><t>Employee A</t></is></c><c r="E11"><v>8</v></c>{extra_1}<c r="AI11"><v>{days_1}</v></c><c r="AJ11"><f t="shared" si="0" ref="AJ11:AJ12">SUM(E11:{last_column}11)</f><v>{hours_1}</v></c></row>
- <row r="12"><c r="B12" t="inlineStr"><is><t>{identifier_2}</t></is></c><c r="C12" t="inlineStr"><is><t>Employee B</t></is></c><c r="E12"><v>4</v></c>{extra_2}<c r="AI12"><v>{days_2}</v></c><c r="AJ12"><f t="shared" si="0"/><v>{hours_2}</v></c></row>
+ <row r="8">{header}<c r="{days_col}8" t="inlineStr"><is><t>Рабочее время</t></is></c><c r="{hours_col}8" t="inlineStr"><is><t>Часы</t></is></c></row>
+ <row r="11"><c r="B11" t="inlineStr"><is><t>worker-a</t></is></c><c r="C11" t="inlineStr"><is><t>Employee A</t></is></c><c r="E11"><v>8</v></c>{code}{extra_1}<c r="{days_col}11"><v>{days_1}</v></c><c r="{hours_col}11"><f t="shared" si="0" ref="{hours_col}11:{hours_col}12">SUM(E11:{last_column}11)</f><v>{hours_1}</v></c></row>
+ <row r="12"><c r="B12" t="inlineStr"><is><t>{identifier_2}</t></is></c><c r="C12" t="inlineStr"><is><t>Employee B</t></is></c><c r="E12"><v>4</v></c>{extra_2}<c r="{days_col}12"><v>{days_2}</v></c><c r="{hours_col}12"><f t="shared" si="0"/><v>{hours_2}</v></c></row>
  <row r="13"><c r="D13" t="inlineStr"><is><t>Total</t></is></c></row>
  {extra_row}
 </sheetData></worksheet>'''
-    workbook = '''<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Июнь 2026" sheetId="1" r:id="rId1"/></sheets></workbook>'''
+    workbook = f'''<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="{month_name} {year}" sheetId="1" r:id="rId1"/></sheets></workbook>'''
     rels = '''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/></Relationships>'''
     with ZipFile(path, "w") as archive:
         archive.writestr("xl/workbook.xml", workbook)
@@ -54,8 +70,24 @@ def test_valid_shared_formula_and_uninterpreted_codes(tmp_path):
     result = scan(path, "2026-06")
     assert result["structure_ok"] is True
     assert result["employee_rows"] == 2
+    assert result["employee_row_numbers"] == [11, 12]
     assert result["issues"] == []
     assert result["payroll_approved"] is False
+
+
+def test_selected_row_hours_are_limited_to_interval_and_codes_remain_uninterpreted(tmp_path):
+    path = tmp_path / "october.xlsx"
+    make_timesheet(path, month="2026-10", coded_day=True)
+    raw = path.read_bytes()
+    selected = row_numeric_hours(raw, "2026-10", 11, date(2026, 10, 1), date(2026, 10, 2))
+    assert selected["numeric_hours"] == "8.00"
+    assert selected["uninterpreted_code_days"] == 1
+    assert selected["employee_identity_verified"] is False
+    assert selected["code_meanings_verified"] is False
+    with pytest.raises(UnsupportedWorkbook):
+        row_numeric_hours(raw, "2026-10", 13, date(2026, 10, 1), date(2026, 10, 2))
+    with pytest.raises(UnsupportedWorkbook):
+        row_numeric_hours(raw, "2026-10", 11, date(2026, 10, 1), date(2026, 11, 1))
 
 
 def test_truncated_shared_formula_mismatch_and_duplicate_are_private(tmp_path):
@@ -151,6 +183,7 @@ async def test_stored_timesheet_preflight_keeps_scope_and_source_bytes(
     assert good.status_code == 200
     assert good.json()["status"] == "structure_checked"
     assert good.json()["structure_ok"] is True
+    assert good.json()["employee_row_numbers"] == [11, 12]
     assert good.json()["payroll_approved"] is False
 
     manual = await client.post(

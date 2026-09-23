@@ -40,7 +40,13 @@ the workpaper verifies the private file bytes against server-calculated hashes,
 the legal entity, employee binding, document references and timesheet month.
 An optional `adjustment_file_id` similarly checks a documented adjusted rate
 base. Missing, changed or cross-entity files block the preview. This proves
-file identity and integrity, not the salary or hours stated inside the file.
+file identity and integrity. For a structurally valid stored XLSX timesheet,
+the caller must also select an exact employee row. The server sums only numeric
+day cells of that row over `work_from`–`work_to` and requires equality with
+`worked_hours`. The selected row and count of uninterpreted text-coded days
+are kept in the calculation basis. The accountant must still confirm that the
+row belongs to the employee and interpret all codes; the salary amount and
+monthly norm remain documented inputs rather than parsed contract facts.
 The chief can also select `source_file_id` when recording the rule-set revision.
 The configuration compares the stored file reference and SHA-256 with the
 declared policy source; every subsequent workpaper preview rechecks its bytes.
@@ -67,7 +73,8 @@ XLSX with an unreadable or inconsistent month, day headers, formula, cached
 hours, day count or personnel identifier blocks a **new arithmetic review**;
 upload and read-only preview remain available for investigation. A PDF or
 other supported source is marked `manual_source` and remains a human-review
-case. A passing XLSX structure does not identify the employee row, interpret
+case. A passing XLSX structure exposes redacted row numbers for explicit
+selection; it does not identify which row belongs to the employee, interpret
 time codes, validate the contract or authorize statutory payroll.
 
 The existing single-rate arithmetic preview remains available for review of

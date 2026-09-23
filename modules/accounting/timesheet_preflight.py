@@ -146,6 +146,16 @@ def _resolved_formula(cell: ET.Element | None, row: int,
     return f"SUM({match[1]}{row}:{match[3]}{row})"
 
 
+def _workbook(raw: bytes) -> tuple[str, dict[int, dict[str, ET.Element]], list[str]]:
+    try:
+        with ZipFile(BytesIO(raw)) as archive:
+            title, sheet = _sheet(archive)
+            strings = _shared_strings(archive)
+    except (BadZipFile, ET.ParseError) as exc:
+        raise UnsupportedWorkbook("invalid XLSX package") from exc
+    return title, _cells(sheet), strings
+
+
 def scan_bytes(raw: bytes, month: str) -> dict:
     try:
         year, month_number = map(int, month.split("-"))
@@ -158,14 +168,7 @@ def scan_bytes(raw: bytes, month: str) -> dict:
         raise UnsupportedWorkbook("XLSX file exceeds size limit")
 
     digest = hashlib.sha256(raw).hexdigest()
-    try:
-        with ZipFile(BytesIO(raw)) as archive:
-            title, sheet = _sheet(archive)
-            strings = _shared_strings(archive)
-    except (BadZipFile, ET.ParseError) as exc:
-        raise UnsupportedWorkbook("invalid XLSX package") from exc
-
-    rows = _cells(sheet)
+    title, rows, strings = _workbook(raw)
     issues: list[dict] = []
     warnings: list[dict] = []
 
@@ -193,6 +196,7 @@ def scan_bytes(raw: bytes, month: str) -> dict:
     identifiers: dict[str, list[int]] = defaultdict(list)
     shared_formulas: dict[str, tuple[int, str]] = {}
     employee_rows = 0
+    employee_row_numbers: list[int] = []
     code_cells = 0
     started = False
     gap_seen = False
@@ -208,6 +212,7 @@ def scan_bytes(raw: bytes, month: str) -> dict:
             issue("employee_rows_after_gap", [row_number])
         started = True
         employee_rows += 1
+        employee_row_numbers.append(row_number)
         identifier = _value(cells.get(f"B{row_number}"), strings).strip().casefold()
         if identifier:
             identifiers[identifier].append(row_number)
@@ -263,10 +268,44 @@ def scan_bytes(raw: bytes, month: str) -> dict:
         "period": month,
         "sheet_count": 1,
         "employee_rows": employee_rows,
+        "employee_row_numbers": employee_row_numbers,
         "structure_ok": not issues,
         "payroll_approved": False,
         "issues": issues,
         "warnings": warnings,
+    }
+
+
+def row_numeric_hours(raw: bytes, month: str, row_number: int,
+                      work_from: date, work_to: date) -> dict:
+    """Match an explicitly selected row/interval to numeric cells, not employee identity."""
+    report = scan_bytes(raw, month)
+    if not report["structure_ok"]:
+        raise UnsupportedWorkbook("timesheet structure is not accepted")
+    if (type(row_number) is not int or row_number not in report["employee_row_numbers"]
+            or work_from > work_to or work_from.strftime("%Y-%m") != month
+            or work_to.strftime("%Y-%m") != month):
+        raise UnsupportedWorkbook("timesheet row or work interval is outside this source")
+    _, rows, strings = _workbook(raw)
+    cells = rows[row_number]
+    hours = Decimal(0)
+    coded_days = 0
+    for day in range(work_from.day, work_to.day + 1):
+        cell = cells.get(f"{_column(4 + day)}{row_number}")
+        value = _number(cell, strings)
+        if value is not None:
+            hours += value
+        elif _value(cell, strings).strip():
+            coded_days += 1
+    return {
+        "row_number": row_number,
+        "work_from": work_from.isoformat(),
+        "work_to": work_to.isoformat(),
+        "numeric_hours": format(hours, ".2f"),
+        "uninterpreted_code_days": coded_days,
+        "source_sha256": report["source_sha256"],
+        "employee_identity_verified": False,
+        "code_meanings_verified": False,
     }
 
 
