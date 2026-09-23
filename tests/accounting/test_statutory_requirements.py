@@ -62,6 +62,33 @@ async def test_statutory_requirements_are_explicit_versioned_and_period_scoped(c
     assert rows[("rate", "SOCIAL-RATE")]["rate_value"] == "0"
 
 
+async def test_statutory_rate_serialization_preserves_integer_zeros(client, book):
+    values = (("10", "10"), ("20.00", "20"), ("0.10", "0.1"))
+    for index, (value, expected) in enumerate(values, start=1):
+        response = await client.post(
+            f"/accounting/organizations/{book[0]}/statutory-requirements",
+            json=requirement_payload(
+                "rate",
+                request_key=f"00000000-0000-0000-0000-0000000005{index:02d}",
+                code=f"SYNTHETIC-RATE-{index}",
+                rate_value=value,
+            ),
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["rate_value"] == expected
+
+    current = await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/statutory-requirements"
+    )
+    assert current.status_code == 200
+    rates = {row["code"]: row["rate_value"] for row in current.json()}
+    assert rates == {
+        "SYNTHETIC-RATE-1": "10",
+        "SYNTHETIC-RATE-2": "20",
+        "SYNTHETIC-RATE-3": "0.1",
+    }
+
+
 def test_statutory_requirement_input_requires_explicit_kind_specific_fields():
     with pytest.raises(ValueError, match="at least 1 character"):
         StatutoryRequirementInput.model_validate(requirement_payload(form_version=" "))

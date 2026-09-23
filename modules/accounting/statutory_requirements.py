@@ -21,7 +21,9 @@ def _snapshot(org_id: int, data) -> dict:
 
 
 def _decimal_text(value) -> str:
-    rendered = format(value, "f").rstrip("0").rstrip(".")
+    rendered = format(value, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
     return rendered or "0"
 
 
