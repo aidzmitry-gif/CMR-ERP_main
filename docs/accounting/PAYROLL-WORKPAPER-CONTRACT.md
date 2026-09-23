@@ -54,3 +54,16 @@ document's contents and authenticity still require human review.
 The existing single-rate arithmetic preview remains available for review of
 one supplied base. It has no automatic link to this workpaper and cannot be
 used as evidence that a complete payroll run was calculated.
+
+`POST /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-workpaper-reviews`
+records a chief accountant's immutable **arithmetic-only** review. It requires
+the exact preview basis digest, stored and byte-verified contract, timesheet,
+policy and any adjusted-rate source files. A repeat of the same request key
+returns its original receipt. An amended calculation creates a new revision
+linked to the latest receipt; the old one remains readable through
+`GET /accounting/organizations/{org_id}/payroll-workpaper-reviews/{request_key}`.
+Overlapping work segments for the same binding and month are rejected.
+New reviews are blocked when this or a later period is closed. The receipt
+records the bytes verified at review time but does not claim that files remain
+unchanged later, that their figures are true, or that statutory payroll is
+complete. It does not post to the ledger.

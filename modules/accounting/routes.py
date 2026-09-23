@@ -42,6 +42,7 @@ from modules.accounting import (
     payroll_evidence_files,
     payroll_rule_set,
     payroll_workpaper,
+    payroll_workpaper_review,
     reconciliation,
     repair_accounting,
     reports,
@@ -104,6 +105,7 @@ from modules.accounting.payroll_statutory import (
     PayrollStatutoryInput,
 )
 from modules.accounting.payroll_workpaper import PayrollWorkpaperInput
+from modules.accounting.payroll_workpaper_review import PayrollWorkpaperReviewInput
 from modules.accounting.production_cost_correction import (
     ProductionOverheadCorrectionConfirm,
     ProductionOverheadCorrectionPreview,
@@ -1538,6 +1540,28 @@ async def payroll_workpaper_preview(org_id: int, month: str, data: PayrollWorkpa
         return await payroll_workpaper.preview_workpaper(ctx[0], org_id, month, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/periods/{month}/payroll-workpaper-reviews')
+async def create_payroll_workpaper_review(
+        org_id: int, month: str, data: PayrollWorkpaperReviewInput,
+        response: Response, ctx=Depends(member)):
+    valid_month(month)
+    chief(ctx)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_workpaper_review.create(ctx[0], org_id, month, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/payroll-workpaper-reviews/{request_key}')
+async def payroll_workpaper_review_by_request(
+        org_id: int, request_key: UUID, response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_workpaper_review.by_request(ctx[0], org_id, request_key)
 
 
 @router.post('/organizations/{org_id}/payroll-evidence-files')

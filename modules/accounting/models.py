@@ -404,6 +404,39 @@ class PayrollEvidenceFile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PayrollWorkpaperReview(Base):
+    """Append-only chief review of source-backed arithmetic, never a payroll posting."""
+
+    __tablename__ = "payroll_workpaper_review"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_payroll_workpaper_review_request"),
+        UniqueConstraint("organization_id", "employment_binding_id", "month", "work_from",
+                         "work_to", "revision", name="uq_payroll_workpaper_review_revision"),
+        CheckConstraint("revision > 0", name="payroll_workpaper_review_positive_revision"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    employment_binding_id: Mapped[int] = mapped_column(
+        ForeignKey("accounting.payroll_employment_binding.id"),
+    )
+    month: Mapped[str] = mapped_column(String(7))
+    work_from: Mapped[date] = mapped_column(Date)
+    work_to: Mapped[date] = mapped_column(Date)
+    revision: Mapped[int] = mapped_column(Integer)
+    supersedes_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounting.payroll_workpaper_review.id"), nullable=True,
+    )
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    basis_digest: Mapped[str] = mapped_column(String(64))
+    snapshot_digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    reviewer_evidence: Mapped[str] = mapped_column(String(2000))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SourceControl(Base):
     """Current completeness state; source revisions and audit preserve its history."""
     __tablename__ = "source_control"
@@ -1295,6 +1328,7 @@ def immutable(mapper, connection, target):
 
 for _model in (Account, CatalogAdoption, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
                PayrollEmploymentBinding, PayrollRuleSet, PayrollEvidenceFile,
+               PayrollWorkpaperReview,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,
                ShipmentAccountingReceipt, ShipmentPreparationDraft, InventoryIssueReceipt, InventorySaleReceipt,
                ProductionOutputTransferReceipt, ProductionLaborReceipt, PayrollAccrualReceipt,

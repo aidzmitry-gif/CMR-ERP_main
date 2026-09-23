@@ -3,11 +3,18 @@ import base64
 import hashlib
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
 from modules.accounting import statutory_requirements
-from modules.accounting.models import AccessGrant, Entry, Organization
+from modules.accounting.models import (
+    AccessGrant,
+    Entry,
+    Organization,
+    PayrollWorkpaperReview,
+    Period,
+)
 from modules.hr.models import Employee
 from tests.accounting.test_payroll_calculation import rate_input
 
@@ -119,6 +126,14 @@ async def test_workpaper_calculates_listed_components_without_posting(
     assert "unlisted_components" in body["not_calculated"]
     assert response.headers["cache-control"] == "private, no-store"
     assert await db.scalar(select(func.count(Entry.id))) == before
+    unbacked_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews",
+        json={**payload, "request_key": str(uuid4()),
+              "basis_digest": body["basis_digest"],
+              "reviewer_evidence": "Synthetic review without stored source files"},
+    )
+    assert unbacked_review.status_code == 422
+    assert "requires stored contract" in unbacked_review.text
 
     rounded = command(book[1], binding["binding_id"],
                       deduction["requirement_id"], contribution["requirement_id"],
@@ -249,6 +264,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
 
     contract, _ = await upload("employment_contract", "signed-contract-2026-7")
     timesheet, _ = await upload("timesheet", "reviewed-timesheet-2026-10-7", "2026-10")
+    adjustment, _ = await upload("base_adjustment", "synthetic-adjustment-source", "2026-10")
     policy_file, _ = await upload("payroll_policy", "synthetic-reviewed-payroll-policy")
     bad_rule = await client.post(
         f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
@@ -282,11 +298,80 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "contract_file_id": contract["file_id"], "contract_digest": contract["sha256"],
         "timesheet_file_id": timesheet["file_id"], "timesheet_digest": timesheet["sha256"],
     }
-    accepted = await client.post(preview_url, json=command(*args, **fields))
+    reviewed_command = command(*args, **fields)
+    reviewed_command["components"][1]["adjustment_file_id"] = adjustment["file_id"]
+    accepted = await client.post(preview_url, json=reviewed_command)
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["contract_and_timesheet_hashes_verified"] is True
     assert accepted.json()["rule_source_file_bytes_verified"] is True
     assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
+
+    review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"
+    review_command = {
+        **reviewed_command,
+        "request_key": str(uuid4()),
+        "basis_digest": accepted.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic chief reviewed source-backed arithmetic only",
+    }
+    reviewed = await client.post(review_url, json=review_command)
+    assert reviewed.status_code == 200, reviewed.text
+    receipt = reviewed.json()
+    assert receipt["revision"] == 1
+    assert receipt["bytes_verified_at_review"] is True
+    assert receipt["current_file_bytes_verified"] is False
+    assert receipt["posting_available"] is False
+    assert receipt["statutory_payroll_certified"] is False
+    assert receipt["snapshot"]["basis_digest"] == accepted.json()["basis_digest"]
+    assert (await client.post(review_url, json=review_command)).json() == receipt
+    assert (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
+    )).json() == receipt
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 1
+    assert (await client.post(review_url, json={
+        **review_command, "reviewer_evidence": "Changed evidence on same key",
+    })).status_code == 409
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "reviewer_evidence": "           ",
+    })).status_code == 422
+
+    overlapping_command = {**reviewed_command, "work_from": "2026-10-02"}
+    overlapping_preview = await client.post(preview_url, json=overlapping_command)
+    assert overlapping_preview.status_code == 200
+    overlap = await client.post(review_url, json={
+        **overlapping_command, "request_key": str(uuid4()),
+        "basis_digest": overlapping_preview.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic review of an overlapping work segment",
+    })
+    assert overlap.status_code == 422
+    assert "overlaps" in overlap.text
+
+    corrected_command = {**reviewed_command, "monthly_salary_byn": "1600.00"}
+    corrected_preview = await client.post(preview_url, json=corrected_command)
+    assert corrected_preview.status_code == 200
+    correction = {
+        **corrected_command, "request_key": str(uuid4()),
+        "basis_digest": corrected_preview.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic correction of the salary input source",
+    }
+    assert (await client.post(review_url, json=correction)).status_code == 422
+    correction["supersedes_review_id"] = receipt["review_id"]
+    corrected = await client.post(review_url, json=correction)
+    assert corrected.status_code == 200, corrected.text
+    assert corrected.json()["revision"] == 2
+    assert corrected.json()["supersedes_review_id"] == receipt["review_id"]
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "supersedes_review_id": receipt["review_id"],
+    })).status_code == 422
+
+    db.add(Period(organization_id=book[0], month="2026-10", closed=True, generation=0))
+    await db.commit()
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "supersedes_review_id": corrected.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(review_url, json=review_command)).json() == receipt
 
     wrong_claim = await client.post(preview_url, json=command(*args, **{
         **fields, "timesheet_digest": hashlib.sha256(b"different").hexdigest(),
@@ -303,3 +388,17 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         path.write_bytes(b"%PDF-1.7\ncorrupted")
     tampered = await client.post(preview_url, json=command(*args, **fields))
     assert tampered.status_code == 409
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",
+    ))
+    grant.role = "accountant"
+    await db.commit()
+    assert (await client.post(review_url, json=review_command)).status_code == 403
+    assert (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
+    )).status_code == 200
+    immutable_receipt = await db.get(PayrollWorkpaperReview, receipt["review_id"])
+    immutable_receipt.reviewer_evidence = "Attempted edit of reviewed history"
+    with pytest.raises(ValueError, match="immutable"):
+        await db.flush()
+    await db.rollback()

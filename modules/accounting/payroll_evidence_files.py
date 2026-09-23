@@ -141,12 +141,10 @@ def verify_bytes(row: PayrollEvidenceFile) -> bytes:
     result(row)
     try:
         org_root = _org_root(row.organization_id, create=False)
-        intake_storage.verify_file(org_root, {
-            "storage_path": row.storage_filename,
-            "size_bytes": row.size_bytes,
-            "sha256": row.sha256,
-        })
-        return intake_storage.resolve_path(org_root, row.storage_filename).read_bytes()
+        raw = intake_storage.resolve_path(org_root, row.storage_filename).read_bytes()
+        if len(raw) != row.size_bytes or hashlib.sha256(raw).hexdigest() != row.sha256:
+            raise AttachmentRejected("Stored payroll bytes differ from their receipt")
+        return raw
     except (AttachmentRejected, FileNotFoundError, OSError) as exc:
         raise HTTPException(409, "Payroll source file is missing or differs from its receipt") from exc
 
