@@ -92,8 +92,8 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
     osv_right.write_bytes(raw_osv)
     artifacts = [
         artifact("opening_balances", "opening-2026-09", opening, source_system="1c-export"),
-        artifact("osv_left", "osv-source-2026-09", osv_left),
-        artifact("osv_right", "osv-erp-2026-09", osv_right),
+        artifact("osv_left", "osv-source-2026-09", osv_left, source_system="1c-export"),
+        artifact("osv_right", "osv-erp-2026-09", osv_right, source_system="crm-erp"),
     ]
     for kind in ("bank_statement", "inventory", "receivables", "vat", "fx", "primary_documents"):
         path = root / f"{kind}.txt"
@@ -106,7 +106,7 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
         source_system="external-payroll",
     ))
     manifest = {
-        "protocol_version": "belarus-pilot-input-v4",
+        "protocol_version": "belarus-pilot-input-v5",
         "pilot": {
             "month": "2026-09",
             "cutover_date": "2026-09-01",
@@ -164,6 +164,10 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     assert result["supporting_artifact_count"] == 0
     assert result["opening_import"]["entry_count"] == 1
     assert result["osv"]["period_from"] == "2026-09-01"
+    assert result["osv"]["left_source_class"] == "external_system_export"
+    assert result["osv"]["left_source_system"] == "1c-export"
+    assert result["osv"]["right_source_class"] == "erp_control_export"
+    assert result["osv"]["right_source_system"] == "crm-erp"
     assert result["payroll"]["source_contents_verified"] is False
     assert result["payroll"]["statutory_payroll_certified"] is False
     assert result["responsibility"]["operational_ownership_verified"] is False
@@ -304,9 +308,32 @@ def test_preflight_requires_payroll_scope_and_its_matching_source(tmp_path):
         preflight(path)
 
     path, manifest = valid_manifest(tmp_path)
-    manifest["protocol_version"] = "belarus-pilot-input-v3"
+    manifest["protocol_version"] = "belarus-pilot-input-v4"
     path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(PreflightError, match="belarus-pilot-input-v4"):
+    with pytest.raises(PreflightError, match="belarus-pilot-input-v5"):
+        preflight(path)
+
+
+def test_preflight_requires_distinct_external_and_erp_osv_sources(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    left = next(row for row in manifest["artifacts"] if row["kind"] == "osv_left")
+    right = next(row for row in manifest["artifacts"] if row["kind"] == "osv_right")
+
+    left["source_class"] = "erp_control_export"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="source_class cannot satisfy required osv_left"):
+        preflight(path)
+
+    left["source_class"] = "external_system_export"
+    right["source_class"] = "external_system_export"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="source_class cannot satisfy required osv_right"):
+        preflight(path)
+
+    right["source_class"] = "erp_control_export"
+    right["source_system"] = left["source_system"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="OSV sides must declare different source systems"):
         preflight(path)
 
 

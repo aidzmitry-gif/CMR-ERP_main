@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 from modules.accounting.reconciliation import compare  # noqa: E402
 from modules.accounting.schemas import ImportInput  # noqa: E402
 
-PROTOCOL_VERSION = "belarus-pilot-input-v4"
+PROTOCOL_VERSION = "belarus-pilot-input-v5"
 REQUIRED_ARTIFACT_KINDS = frozenset({
     "opening_balances",
     "bank_statement",
@@ -67,8 +67,8 @@ REQUIRED_SOURCE_CLASSES: dict[str, frozenset[str]] = {
     "primary_documents": frozenset({"primary_document"}),
     "payroll_register": frozenset({"external_system_export", "source_register"}),
     "payroll_zero_activity": frozenset({"primary_document", "source_register"}),
-    "osv_left": frozenset({"erp_control_export", "external_system_export"}),
-    "osv_right": frozenset({"erp_control_export", "external_system_export"}),
+    "osv_left": frozenset({"external_system_export"}),
+    "osv_right": frozenset({"erp_control_export"}),
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MONTH = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")
@@ -340,6 +340,7 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path, *,
             raise PreflightError(f"Artifact SHA-256 does not match: {path.name}")
         by_kind.setdefault(kind, []).append({
             "path": path,
+            "source_class": source_class,
             "source_system": source_system,
             "source_id": source_id,
             "sha256": actual_hash,
@@ -351,6 +352,8 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path, *,
     for kind in SINGLE_ARTIFACT_KINDS & required_kinds:
         if len(by_kind[kind]) != 1:
             raise PreflightError(f"Exactly one {kind} artifact is required")
+    if by_kind["osv_left"][0]["source_system"] == by_kind["osv_right"][0]["source_system"]:
+        raise PreflightError("OSV sides must declare different source systems")
     return by_kind
 
 
@@ -486,6 +489,12 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
             "organization_id": osv["left"]["organization_id"],
             "period_from": osv["left"]["from"],
             "period_to": osv["left"]["to"],
+            "left_source_class": artifacts["osv_left"][0]["source_class"],
+            "left_source_system": artifacts["osv_left"][0]["source_system"],
+            "left_source_id": artifacts["osv_left"][0]["source_id"],
+            "right_source_class": artifacts["osv_right"][0]["source_class"],
+            "right_source_system": artifacts["osv_right"][0]["source_system"],
+            "right_source_id": artifacts["osv_right"][0]["source_id"],
             "left_sha256": osv["left"]["sha256"],
             "right_sha256": osv["right"]["sha256"],
             "row_count": osv["left_rows"],
@@ -496,7 +505,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v4 JSON manifest")
+    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v5 JSON manifest")
     args = parser.parse_args(argv)
     try:
         result = preflight(args.manifest)

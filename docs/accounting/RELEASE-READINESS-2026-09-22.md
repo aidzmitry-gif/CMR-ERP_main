@@ -49,12 +49,15 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
   payroll arithmetic. Corrections append a linked revision and closed periods
   reject new reviews. Receipts do not post or certify statutory payroll;
   PostgreSQL trigger and migration acceptance remain unverified.
-- The local pilot preflight now requires `belarus-pilot-input-v4`: a declared
+- The local pilot preflight now requires `belarus-pilot-input-v5`: a declared
   source owner for every section, either an external payroll register or a
   separate zero-accrual control file, and an ERP book ID matching both OSV files.
-  Earlier v2/v3 manifests cannot be treated as complete pilot input. The
+  The left OSV must declare an external export; the right must declare an ERP
+  control export from a different named system. Earlier v2–v4 manifests cannot
+  be treated as complete pilot input. The
   preflight checks file identity and declarations, not the external-ID-to-book
-  mapping, payroll figures, actual operational ownership or accountant acceptance.
+  mapping, authentic provenance, payroll figures, actual operational ownership
+  or accountant acceptance.
 - The source also pins `modules/production` at `be7d7e198bf09cc41c642d22125db401da5adc48`.
   This commit was created in the isolated production-module worktree; its
   configured remote is a local repository while `.gitmodules` declares
