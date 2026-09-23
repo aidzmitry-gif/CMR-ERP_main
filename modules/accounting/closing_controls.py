@@ -10,6 +10,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select, text
 
 from modules.accounting.models import (
@@ -26,6 +27,7 @@ from modules.accounting.models import (
     PayrollAccrualReceipt,
     PayrollEvidenceFile,
     PayrollStatutoryReceipt,
+    PayrollWorkpaperReview,
     Period,
     Policy,
     ProductionLaborReceipt,
@@ -57,7 +59,7 @@ async def _line_ids(session, org_id: int, first: date, last: date, prefix: str) 
     return [row[0] for row in rows]
 
 
-async def snapshot(session, org_id: int, month: str) -> dict:
+async def snapshot(session, org_id: int, month: str, *, include_private_payroll: bool = False) -> dict:
     first, last = _bounds(month)
     await lock_organization(session, org_id)
     period = await session.scalar(select(Period).where(
@@ -301,6 +303,19 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     payroll_coverage_incomplete = bool(
         known_payroll_bindings and payroll_receipts
         and (missing_binding_ids or unmapped_accrual_lines))
+    payroll_reconciliation = None
+    payroll_reconciliation_error = None
+    if include_private_payroll and payroll_receipts and await session.scalar(select(func.count(
+        PayrollWorkpaperReview.id)).where(
+            PayrollWorkpaperReview.organization_id == org_id,
+            PayrollWorkpaperReview.month == month,
+        )):
+        from modules.accounting.payroll_workpaper_review import external_source_reconciliation
+
+        try:
+            payroll_reconciliation = await external_source_reconciliation(session, org_id, month)
+        except (HTTPException, AccountingError) as exc:
+            payroll_reconciliation_error = str(exc.detail if isinstance(exc, HTTPException) else exc)
     late_cost_postings = await session.scalar(select(func.count(Entry.id)).where(
         Entry.organization_id == org_id,
         Entry.posting_date >= first,
@@ -440,6 +455,17 @@ async def snapshot(session, org_id: int, month: str) -> dict:
     if payroll_statutory_receipt_gap:
         review.append({"code": "payroll_statutory_receipt_gap", "count": int(payroll_statutory_receipt_gap),
                        "message": "Для части импортированных удержаний и взносов нет связанной квитанции источника."})
+    if payroll_reconciliation_error:
+        review.append({"code": "payroll_arithmetic_reconciliation_unavailable", "count": 1,
+                       "message": "Сверка расчётной ведомости с зарплатными проводками недоступна: "
+                                  + payroll_reconciliation_error})
+    if payroll_reconciliation and payroll_reconciliation["differing_binding_count"]:
+        review.append({"code": "payroll_arithmetic_difference",
+                       "count": payroll_reconciliation["differing_binding_count"],
+                       "message": "Начисления, удержания или взносы в расчётной ведомости отличаются от проведённого внешнего источника; требуется объяснение бухгалтера."})
+    if payroll_reconciliation and payroll_reconciliation["status"] == "not_ready":
+        review.append({"code": "payroll_arithmetic_reconciliation_incomplete", "count": 1,
+                       "message": "Сверка расчётной ведомости с проведённым внешним источником ещё не завершена."})
     if repairs:
         review.append({"code": "repair_cost_provisional", "count": int(repairs),
                        "message": "Ремонтные результаты не сертифицированы как финальная себестоимость."})
@@ -509,6 +535,9 @@ async def snapshot(session, org_id: int, month: str) -> dict:
             "missing_binding_ids": missing_binding_ids if payroll_receipts else [],
             "unmapped_accrual_lines": unmapped_accrual_lines,
             "coverage_incomplete": payroll_coverage_incomplete,
+            "arithmetic_reconciliation_status": (
+                "unavailable" if payroll_reconciliation_error else
+                payroll_reconciliation["status"] if payroll_reconciliation else "not_requested"),
             "source_missing": payroll_source_missing,
             "source_conflict": payroll_source_conflict,
             "gross_accruals": int(payroll_postings),

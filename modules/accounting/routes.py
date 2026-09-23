@@ -2131,7 +2131,10 @@ async def financial_closing_history(org_id: int, month: str, response: Response,
 async def closing_controls_snapshot(org_id: int, month: str, response: Response, ctx=Depends(member)):
     valid_month(month)
     try:
-        result = await closing_controls.snapshot(ctx[0], org_id, month)
+        result = await closing_controls.snapshot(
+            ctx[0], org_id, month,
+            include_private_payroll=ctx[2] in {"accountant", "chief"},
+        )
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
     response.headers["Cache-Control"] = "private, no-store"

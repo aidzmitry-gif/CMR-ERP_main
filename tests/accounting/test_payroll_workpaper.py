@@ -519,6 +519,23 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     changed = (await client.get(reconcile_url)).json()
     assert changed["status"] == "differences"
     assert changed["bindings"][0]["difference_import_less_review"]["gross_byn"] == "10.00"
+    closing_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert closing_controls["payroll"]["arithmetic_reconciliation_status"] == "differences"
+    assert "payroll_arithmetic_difference" in {
+        item["code"] for item in closing_controls["review_items"]}
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester"))
+    grant.role = "reader"
+    await db.commit()
+    reader_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert reader_controls["payroll"]["arithmetic_reconciliation_status"] == "not_requested"
+    assert "payroll_arithmetic_difference" not in {
+        item["code"] for item in reader_controls["review_items"]}
+    assert (await client.get(reconcile_url)).status_code == 403
+    grant.role = "chief"
+    await db.commit()
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": receipt["review_id"],

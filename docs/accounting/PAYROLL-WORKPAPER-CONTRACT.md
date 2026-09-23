@@ -159,3 +159,9 @@ The response remains private, read-only and explicitly uncertified. A matched
 arithmetic result does not establish document authenticity, complete real
 employee population, legal rate applicability, payroll payment or readiness
 of an external statutory form.
+When reviewed workpapers and gross-import receipts coexist, month-closing
+controls show an incomplete or differing reconciliation to accountants and
+chief accountants as a review item. Readers of the general closing controls
+do not receive the private reconciliation status or difference count.
+This is a visible accountant decision, not automatic acceptance of the
+provisional workpaper or a substitute for a documented pilot variance.
