@@ -19,6 +19,7 @@ from modules.accounting.payroll_calculation import (
     month_bounds,
     verified_policy,
 )
+from modules.accounting.payroll_evidence_files import file_for as evidence_file_for
 from modules.accounting.payroll_rule_set import current as current_rule_set
 from modules.accounting.payroll_rule_set import result as rule_set_result
 from modules.accounting.schemas import Input, Money, exact
@@ -34,6 +35,7 @@ class PayrollWorkpaperComponent(Input):
     adjustment_byn: Money
     adjustment_document: str | None = Field(default=None, min_length=1, max_length=160)
     adjustment_evidence: str | None = Field(default=None, min_length=10, max_length=2000)
+    adjustment_file_id: int | None = Field(default=None, gt=0, strict=True)
 
 class PayrollWorkpaperInput(Input):
     policy_id: int = Field(gt=0, strict=True)
@@ -44,9 +46,11 @@ class PayrollWorkpaperInput(Input):
     monthly_salary_byn: Money = Field(gt=0)
     contract_document: str = Field(min_length=1, max_length=160)
     contract_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    contract_file_id: int | None = Field(default=None, gt=0, strict=True)
     contract_amount_evidence: str = Field(min_length=10, max_length=2000)
     timesheet_document: str = Field(min_length=1, max_length=160)
     timesheet_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    timesheet_file_id: int | None = Field(default=None, gt=0, strict=True)
     timesheet_evidence: str = Field(min_length=10, max_length=2000)
     month_norm_hours: Hours = Field(gt=0, le=744)
     worked_hours: Hours = Field(le=744)
@@ -83,6 +87,23 @@ async def preview_workpaper(session, org_id: int, month: str,
     await active_employment(session, org_id, binding.id, data.work_to)
     if data.contract_document != binding.source_document:
         raise AccountingError("Salary document must match the current employment binding")
+    if (data.contract_file_id is None) != (data.timesheet_file_id is None):
+        raise AccountingError("Contract and timesheet source files must be selected together")
+    source_files_verified = data.contract_file_id is not None
+    if source_files_verified:
+        contract_file = await evidence_file_for(
+            session, org_id, data.contract_file_id, kind="employment_contract",
+            employment_binding_id=binding.id,
+        )
+        timesheet_file = await evidence_file_for(
+            session, org_id, data.timesheet_file_id, kind="timesheet",
+            employment_binding_id=binding.id, month=month,
+        )
+        if (contract_file.reference != data.contract_document
+                or contract_file.sha256 != data.contract_digest
+                or timesheet_file.reference != data.timesheet_document
+                or timesheet_file.sha256 != data.timesheet_digest):
+            raise AccountingError("Workpaper source claims differ from stored source files")
 
     with localcontext() as context:
         context.prec = 64
@@ -103,10 +124,19 @@ async def preview_workpaper(session, org_id: int, month: str,
             used_codes.add(rate.code)
             if rule["base_mode"] == "gross":
                 if (component.adjustment_byn != 0 or component.adjustment_document
-                        or component.adjustment_evidence):
+                        or component.adjustment_evidence or component.adjustment_file_id):
                     raise AccountingError("Gross rate base cannot contain an adjustment")
             elif not component.adjustment_document or not component.adjustment_evidence:
                 raise AccountingError("Adjusted rate base requires document and evidence")
+            adjustment_file_digest = None
+            if component.adjustment_file_id is not None:
+                adjustment_file = await evidence_file_for(
+                    session, org_id, component.adjustment_file_id, kind="base_adjustment",
+                    employment_binding_id=binding.id, month=month,
+                )
+                if adjustment_file.reference != component.adjustment_document:
+                    raise AccountingError("Rate-base adjustment differs from stored source file")
+                adjustment_file_digest = adjustment_file.sha256
             if component.adjustment_byn > gross:
                 raise AccountingError("Rate-base adjustment exceeds calculated gross pay")
             base = gross - component.adjustment_byn
@@ -131,6 +161,8 @@ async def preview_workpaper(session, org_id: int, month: str,
                 "adjustment_byn": format(component.adjustment_byn, ".2f"),
                 "adjustment_document": component.adjustment_document,
                 "adjustment_evidence": component.adjustment_evidence,
+                "adjustment_file_id": component.adjustment_file_id,
+                "adjustment_file_digest": adjustment_file_digest,
                 "base_byn": format(base, ".2f"),
                 "amount_byn": format(amount, ".2f"),
             })
@@ -163,9 +195,11 @@ async def preview_workpaper(session, org_id: int, month: str,
         "monthly_salary_byn": format(data.monthly_salary_byn, ".2f"),
         "contract_document": data.contract_document,
         "contract_digest": data.contract_digest,
+        "contract_file_id": data.contract_file_id,
         "contract_amount_evidence": data.contract_amount_evidence,
         "timesheet_document": data.timesheet_document,
         "timesheet_digest": data.timesheet_digest,
+        "timesheet_file_id": data.timesheet_file_id,
         "timesheet_evidence": data.timesheet_evidence,
         "month_norm_hours": format(data.month_norm_hours, ".2f"),
         "worked_hours": format(data.worked_hours, ".2f"),
@@ -187,7 +221,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "cost_including_listed_contributions_byn": format(employer_cost, ".2f"),
         "posting_available": False,
         "statutory_payroll_certified": False,
-        "contract_and_timesheet_hashes_verified": False,
+        "contract_and_timesheet_hashes_verified": source_files_verified,
         "rule_set_configured": True,
         "method_and_rate_classification_verified": False,
         "needs_accountant_review": True,

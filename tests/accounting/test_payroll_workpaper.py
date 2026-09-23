@@ -1,4 +1,6 @@
 """A multi-component workpaper must keep every source explicit and stay read-only."""
+import base64
+import hashlib
 from uuid import uuid4
 
 import pytest_asyncio
@@ -222,3 +224,54 @@ async def test_workpaper_rejects_foreign_rate_and_reader(
         contribution["requirement_id"], ruleset["rule_set_id"],
     ))
     assert denied.status_code == 403
+
+
+async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
+        client, db, book, workpaper_sources, tmp_path, monkeypatch):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+
+    async def upload(kind, reference, month=None):
+        raw = (f"%PDF-1.7\nsynthetic {kind} evidence\n").encode()
+        response = await client.post(url, json={
+            "request_key": str(uuid4()), "kind": kind,
+            "employment_binding_id": binding["binding_id"], "month": month,
+            "reference": reference, "filename": f"{kind}.pdf",
+            "data_url": "data:application/pdf;base64," + base64.b64encode(raw).decode(),
+            "evidence": "Synthetic source for byte verification test",
+        })
+        assert response.status_code == 200, response.text
+        return response.json(), raw
+
+    contract, _ = await upload("employment_contract", "signed-contract-2026-7")
+    timesheet, _ = await upload("timesheet", "reviewed-timesheet-2026-10-7", "2026-10")
+    preview_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    args = (book[1], binding["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"])
+    fields = {
+        "contract_file_id": contract["file_id"], "contract_digest": contract["sha256"],
+        "timesheet_file_id": timesheet["file_id"], "timesheet_digest": timesheet["sha256"],
+    }
+    accepted = await client.post(preview_url, json=command(*args, **fields))
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["contract_and_timesheet_hashes_verified"] is True
+    assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
+
+    wrong_claim = await client.post(preview_url, json=command(*args, **{
+        **fields, "timesheet_digest": hashlib.sha256(b"different").hexdigest(),
+    }))
+    assert wrong_claim.status_code == 422
+    assert "differ from stored" in wrong_claim.text
+    partial = await client.post(preview_url, json=command(*args, **{
+        **fields, "timesheet_file_id": None,
+    }))
+    assert partial.status_code == 422
+
+    # Corrupt both possible files: whichever is selected must fail byte verification.
+    for path in (root / str(book[0])).glob("*.pdf"):
+        path.write_bytes(b"%PDF-1.7\ncorrupted")
+    tampered = await client.post(preview_url, json=command(*args, **fields))
+    assert tampered.status_code == 409

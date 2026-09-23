@@ -49,6 +49,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0160_reconciliation_issue_queue.py",
     "0161_payroll_employment_binding.py",
     "0162_payroll_rule_set.py",
+    "0163_payroll_evidence_file.py",
 )
 
 

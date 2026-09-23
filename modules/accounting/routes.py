@@ -39,6 +39,7 @@ from modules.accounting import (
     opening_import,
     output_vat_register,
     payroll_employment,
+    payroll_evidence_files,
     payroll_rule_set,
     payroll_workpaper,
     reconciliation,
@@ -80,6 +81,7 @@ from modules.accounting.models import (
     InventoryIssueReceipt,
     Line,
     Organization,
+    PayrollEvidenceFile,
     Period,
     Policy,
     SourceBinding,
@@ -91,6 +93,7 @@ from modules.accounting.output_vat_register import (
 )
 from modules.accounting.payroll_calculation import PayrollComponentPreviewInput
 from modules.accounting.payroll_employment import PayrollEmploymentInput
+from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput
 from modules.accounting.payroll_import import (
     PayrollAccrualConfirmInput,
     PayrollAccrualInput,
@@ -1535,6 +1538,51 @@ async def payroll_workpaper_preview(org_id: int, month: str, data: PayrollWorkpa
         return await payroll_workpaper.preview_workpaper(ctx[0], org_id, month, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/payroll-evidence-files')
+async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInput,
+                                       response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_evidence_files.create(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/payroll-evidence-files')
+async def list_payroll_evidence_files(org_id: int, response: Response,
+                                      employment_binding_id: int | None = None,
+                                      month: str | None = None, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    query = select(PayrollEvidenceFile).where(PayrollEvidenceFile.organization_id == org_id)
+    if employment_binding_id is not None:
+        query = query.where(PayrollEvidenceFile.employment_binding_id == employment_binding_id)
+    if month is not None:
+        valid_month(month)
+        query = query.where(PayrollEvidenceFile.month == month)
+    rows = (await ctx[0].scalars(query.order_by(PayrollEvidenceFile.id.desc()).limit(100))).all()
+    response.headers['Cache-Control'] = 'private, no-store'
+    return [payroll_evidence_files.result(row) for row in rows]
+
+
+@router.get('/organizations/{org_id}/payroll-evidence-files/{file_id}/download')
+async def download_payroll_evidence_file(org_id: int, file_id: int, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        row = await payroll_evidence_files.file_for(ctx[0], org_id, file_id)
+    except service.AccountingError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    raw = await run_in_threadpool(payroll_evidence_files.verify_bytes, row)
+    return Response(raw, media_type=row.content_type, headers={
+        'Content-Disposition': 'attachment; filename="payroll-source"',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
+    })
 
 
 @router.post('/organizations/{org_id}/payroll-rule-sets')

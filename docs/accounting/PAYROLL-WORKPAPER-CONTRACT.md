@@ -24,13 +24,29 @@ The workpaper reports `gross_byn`, amounts for **listed** components,
 digest of the full calculation basis. These totals are not a statutory net
 salary or complete employer cost: unlisted components, eligibility, caps,
 exemptions, benefits and period aggregation are not calculated. Document
-digests and the rule-set source document are recorded as claims; their
-authenticity and statutory applicability are not verified by the API.
+digests and the rule-set source document are recorded as claims unless the
+caller selects both `contract_file_id` and `timesheet_file_id`. With those IDs,
+the workpaper verifies the private file bytes against server-calculated hashes,
+the legal entity, employee binding, document references and timesheet month.
+An optional `adjustment_file_id` similarly checks a documented adjusted rate
+base. Missing, changed or cross-entity files block the preview. This proves
+file identity and integrity, not the salary or hours stated inside the file.
+The rule-set source document remains an unverified claim, and statutory
+applicability is not verified by the API.
 `posting_available=false` and
 `statutory_payroll_certified=false` are fixed. A subsequent accepted payroll
 workflow must verify source documents and accountant-approved rules, persist
 immutable results and corrections, reconcile payment and post only after
 separate confirmation.
+
+`POST /accounting/organizations/{org_id}/payroll-evidence-files` stores an
+immutable metadata receipt and up to 10 MiB of private PDF, image or Office
+bytes. List and download require accountant/chief access to the same legal
+entity; download rechecks the hash. The server requires an existing private
+absolute `AIOS_PAYROLL_DATA_DIR` and does not accept client filesystem paths.
+The file store must be included in backup/restore with the database; no target
+storage or recovery has been verified. The receipt is append-only, while the
+document's contents and authenticity still require human review.
 
 The existing single-rate arithmetic preview remains available for review of
 one supplied base. It has no automatic link to this workpaper and cannot be
