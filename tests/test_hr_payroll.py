@@ -1,4 +1,5 @@
 """Тесты payroll-эндпоинтов HR: начисление + выплата + события outbox."""
+import pytest
 from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
@@ -118,6 +119,38 @@ async def test_accrue_unknown_employee_404(api):
         json={"employee_id": 999999, "period": "2026-06", "amount_byn": "100.00"},
     )
     assert r.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("period", "amount"),
+    [
+        ("2026-13", "100.00"),
+        ("2026-06", "NaN"),
+        ("2026-06", "-1.00"),
+        ("2026-06", "0"),
+        ("2026-06", "1.001"),
+    ],
+)
+async def test_invalid_accrual_does_not_create_entry_or_event(api, session, period, amount):
+    emp_id = await _make_employee(api)
+    response = await api.post(
+        "/hr/payroll/accrue",
+        json={"employee_id": emp_id, "period": period, "amount_byn": amount},
+    )
+    assert response.status_code == 422
+    assert (await api.get("/hr/payroll")).json() == []
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert not any(event.event_type == "hr.payroll.accrued" for event in events)
+
+
+async def test_accrual_amount_is_canonical_decimal_string(api):
+    emp_id = await _make_employee(api)
+    response = await api.post(
+        "/hr/payroll/accrue",
+        json={"employee_id": emp_id, "period": "2026-06", "amount_byn": "12.3"},
+    )
+    assert response.status_code == 201
+    assert response.json()["amount_byn"] == "12.30"
 
 
 async def test_payroll_summary_empty(api):

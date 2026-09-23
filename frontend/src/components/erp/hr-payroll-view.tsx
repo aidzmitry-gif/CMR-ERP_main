@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 // ──────────────────────────── Типы ────────────────────────────
@@ -207,7 +208,7 @@ export function HrPayrollView() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-ink">Начисления зарплаты</h1>
-          <p className="mt-1 text-sm text-muted">Учёт начислений и выплат сотрудникам (BYN).</p>
+          <p className="mt-1 text-sm text-muted">Ручной HR-реестр начислений (BYN). Банковский платёж, налоги и проводки подтверждайте отдельно в <Link href="/erp/accounting" className="text-blue-600 underline">Бухгалтерии</Link>.</p>
         </div>
         <button
           type="button"
