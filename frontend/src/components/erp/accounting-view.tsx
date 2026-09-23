@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -216,6 +217,13 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
     {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => { setOrganizationRefresh((v) => v + 1); void refresh(); }} />}
     {busy && <p role="status">Загрузка…</p>}
     {report && tab === "reports" && <>
+      <nav aria-label="Отчёты бухгалтерской книги" className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4 text-sm">
+        <span className="font-semibold">ОСВ и журнал — открыты здесь</span>
+        <Link className="text-accent underline" href="/erp/finance?tab=pnl">Прибыль и убытки</Link>
+        <Link className="text-accent underline" href="/erp/finance?tab=dds">Движение денег</Link>
+        <Link className="text-accent underline" href="/erp/finance?tab=balance">Баланс</Link>
+        <p className="w-full text-muted">Финансовые отчёты строятся по этой же бухгалтерской книге. На открывшейся странице выберите юрлицо и период заново.</p>
+      </nav>
       <Button variant="secondary" onClick={() => { try { downloadTrialBalance(report); } catch (e) { setError((e as Error).message); } }}>Скачать ОСВ CSV</Button>
       <p className="text-xs text-muted">CSV содержит показанный отчёт, валютные суммы и количества. При импорте в Excel задайте счетам текстовый формат, суммам — десятичную точку. Сальдо со знаком: плюс — дебет, минус — кредит. Строка report содержит параметры выгрузки; balance — остатки и обороты.</p>
       <p className="text-sm text-muted">{report.status === "closed_periods" ? "Периоды закрыты" : "Предварительные данные"} · Не проведено документов: {report.pending_documents}. Регламентированная отчётность требует отдельной проверки.</p>

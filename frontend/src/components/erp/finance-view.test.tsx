@@ -92,12 +92,22 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/");
+});
 
 // ru-RU разделитель разрядов — неразрывный пробел; \s покрывает его в regexp.
 const byn = (whole: string) => new RegExp(`${whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\\s")}\\sBYN`);
 
 describe("FinanceView", () => {
+  it("opens the ledger P&L requested by the accountant workspace link", async () => {
+    window.history.replaceState({}, "", "/erp/finance?tab=pnl");
+    render(<FinanceView />);
+    expect(await screen.findByRole("region", { name: "Бухгалтерский P&L" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Касса (ДДС-lite)" })).not.toBeInTheDocument();
+  });
+
   it("рендерит заголовок и все вкладки финансов", () => {
     render(<FinanceView />);
     expect(screen.getByRole("heading", { name: "Финансы" })).toBeInTheDocument();

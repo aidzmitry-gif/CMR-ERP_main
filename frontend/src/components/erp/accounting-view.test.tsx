@@ -29,6 +29,17 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingView", () => {
+  it("links the accountant report catalog to existing ledger financial reports", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    fireEvent.click(screen.getByRole("button", { name: "ОСВ и отчёты", exact: true }));
+    const catalog = screen.getByRole("navigation", { name: "Отчёты бухгалтерской книги" });
+    expect(catalog.querySelector('a[href="/erp/finance?tab=pnl"]')).not.toBeNull();
+    expect(catalog.querySelector('a[href="/erp/finance?tab=dds"]')).not.toBeNull();
+    expect(catalog.querySelector('a[href="/erp/finance?tab=balance"]')).not.toBeNull();
+    expect(screen.getByText(/выберите юрлицо и период заново/)).toBeInTheDocument();
+  });
+
   it("предвыбирает доступную книгу из org query-hint после загрузки", async () => {
     render(<AccountingView suggestedOrg="2" />);
     await screen.findByRole("option", { name: "Вторая компания · 888888888" });

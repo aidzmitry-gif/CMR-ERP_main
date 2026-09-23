@@ -228,6 +228,11 @@ const TABS: { id: TabId; label: string }[] = [
 export function FinanceView() {
   const [tab, setTab] = useState<TabId>("summary");
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (TABS.some((item) => item.id === requested)) setTab(requested as TabId);
+  }, []);
+
   return (
     <main className="flex-1 overflow-auto p-6">
       <div>
