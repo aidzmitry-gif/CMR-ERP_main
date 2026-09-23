@@ -97,6 +97,14 @@ unknown. Therefore `organization_payroll_population_verified`,
 `statutory_payroll_certified` remain false. No ledger entry, payroll run or
 external form is created.
 
+The accountant workspace's **Контроль зарплаты** tab reads this monthly
+summary and the private `payroll-source-reconciliation` result for the selected
+legal entity and month. It shows missing intervals, the latest reviewed totals,
+differences from posted external imports and links to their ledger entries.
+Changing the organization or month discards the previous view; a response with
+a different scope is rejected. This is a read-only control, not an interface
+for creating a workpaper, confirming a payroll result or submitting a form.
+
 For a month with at least one **known** active employer/contract binding,
 closing controls require reviewed gross-payroll import receipts covering each
 known active binding or an organization-scoped `payroll_zero_activity` file
