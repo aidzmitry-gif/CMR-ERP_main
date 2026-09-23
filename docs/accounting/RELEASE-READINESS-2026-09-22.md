@@ -10,7 +10,7 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
 ## Local candidate update — 2026-09-23
 
 - The isolated source branch is now `agent/crm-acc-prod009` at
-  `a666bfa29a4557fd5de9451176aecf1d1cb6e843`. The source migration graph
+  `b0880d2f` (local short SHA). The source migration graph
   still reports a single `0160` head. This is a newer local snapshot than the
   historical capture below; no target database was inspected.
 - This source commit records `modules/hr` at
@@ -26,6 +26,12 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
   calculation, legal-entity ownership for legacy HR rows or bank-payment
   evidence. The parallel accountant reports/navigation task is outside this
   frozen source snapshot until its commit and integration are reviewed.
+- The source also pins `modules/production` at `be7d7e198bf09cc41c642d22125db401da5adc48`.
+  This commit was created in the isolated production-module worktree; its
+  configured remote is a local repository while `.gitmodules` declares
+  `https://github.com/aidzmitry-gif/PRO-4.git`. Fetchability from that declared
+  release remote is unverified. Its payroll and premium outputs are now
+  identified as production planning estimates, not accounting payroll.
 
 ## Observed source state
 
