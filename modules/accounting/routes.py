@@ -39,6 +39,7 @@ from modules.accounting import (
     opening_import,
     output_vat_register,
     payroll_employment,
+    payroll_workpaper,
     reconciliation,
     repair_accounting,
     reports,
@@ -97,6 +98,7 @@ from modules.accounting.payroll_statutory import (
     PayrollStatutoryConfirmInput,
     PayrollStatutoryInput,
 )
+from modules.accounting.payroll_workpaper import PayrollWorkpaperInput
 from modules.accounting.production_cost_correction import (
     ProductionOverheadCorrectionConfirm,
     ProductionOverheadCorrectionPreview,
@@ -1516,6 +1518,19 @@ async def payroll_component_preview(org_id: int, month: str, data: PayrollCompon
     response.headers['Cache-Control'] = 'private, no-store'
     try:
         return await preview_component(ctx[0], org_id, month, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/periods/{month}/payroll-workpaper-preview')
+async def payroll_workpaper_preview(org_id: int, month: str, data: PayrollWorkpaperInput,
+                                    response: Response, ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_workpaper.preview_workpaper(ctx[0], org_id, month, data)
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
 

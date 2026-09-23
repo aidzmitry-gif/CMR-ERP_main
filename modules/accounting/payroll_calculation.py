@@ -45,45 +45,49 @@ def _digest(value: dict) -> str:
     ).encode()).hexdigest()
 
 
-async def preview_component(session, org_id: int, month: str,
-                            data: PayrollComponentPreviewInput) -> dict:
+def month_bounds(month: str) -> tuple[date, date]:
     try:
         first = date.fromisoformat(month + "-01")
     except ValueError as exc:
         raise AccountingError("Month must be YYYY-MM") from exc
-    if (first.strftime("%Y-%m") != month
-            or data.calculation_date < first
-            or data.calculation_date > first.replace(day=monthrange(first.year, first.month)[1])):
-        raise AccountingError("Calculation date must belong to the selected period")
-    last = first.replace(day=monthrange(first.year, first.month)[1])
+    if first.strftime("%Y-%m") != month:
+        raise AccountingError("Month must be YYYY-MM")
+    return first, first.replace(day=monthrange(first.year, first.month)[1])
 
+
+async def verified_policy(session, org_id: int, first: date, last: date, policy_id: int):
     policy = await session.scalar(select(Policy).where(
         Policy.organization_id == org_id,
         Policy.effective_from <= last,
     ).order_by(Policy.effective_from.desc()))
-    if (policy is None or policy.id != data.policy_id or policy.effective_from > first
+    if (policy is None or policy.id != policy_id or policy.effective_from > first
             or not policy.normative_verified):
         raise AccountingError("Select a verified accounting policy applicable for the whole month")
+    return policy
 
+
+async def active_employment(session, org_id: int, binding_id: int, on: date):
     binding = await session.scalar(select(PayrollEmploymentBinding).where(
-        PayrollEmploymentBinding.id == data.employment_binding_id,
+        PayrollEmploymentBinding.id == binding_id,
         PayrollEmploymentBinding.organization_id == org_id,
-        PayrollEmploymentBinding.effective_from <= data.calculation_date,
+        PayrollEmploymentBinding.effective_from <= on,
     ))
     if binding is None:
         raise AccountingError("Explicit payroll employment binding is required for this organization")
     latest_binding = await current(
-        session, org_id, binding.employee_id, binding.contract_ref, data.calculation_date,
+        session, org_id, binding.employee_id, binding.contract_ref, on,
     )
     if latest_binding is None or latest_binding.id != binding.id or binding.state != "active":
         raise AccountingError("The payroll employment binding is ended or superseded for this date")
-    employment = employment_result(binding)
+    return binding, employment_result(binding)
 
+
+async def effective_percentage_rate(session, org_id: int, requirement_id: int, on: date):
     rate = await session.scalar(select(StatutoryRequirement).where(
-        StatutoryRequirement.id == data.requirement_id,
+        StatutoryRequirement.id == requirement_id,
         StatutoryRequirement.organization_id == org_id,
         StatutoryRequirement.kind == "rate",
-        StatutoryRequirement.effective_from <= data.calculation_date,
+        StatutoryRequirement.effective_from <= on,
     ))
     if rate is None:
         raise AccountingError("The selected rate is not effective for this organization and period")
@@ -91,7 +95,7 @@ async def preview_component(session, org_id: int, month: str,
         StatutoryRequirement.organization_id == org_id,
         StatutoryRequirement.kind == "rate",
         StatutoryRequirement.code == rate.code,
-        StatutoryRequirement.effective_from <= data.calculation_date,
+        StatutoryRequirement.effective_from <= on,
     ).order_by(
         StatutoryRequirement.effective_from.desc(),
         StatutoryRequirement.revision.desc(),
@@ -102,6 +106,21 @@ async def preview_component(session, org_id: int, month: str,
     if (rate.rate_unit != "percent" or rate.rate_value is None
             or not rate.rate_basis or not rate.source_reference or not rate.evidence):
         raise AccountingError("The selected percentage rate has incomplete provenance")
+    return rate, verified_rate
+
+
+async def preview_component(session, org_id: int, month: str,
+                            data: PayrollComponentPreviewInput) -> dict:
+    first, last = month_bounds(month)
+    if not first <= data.calculation_date <= last:
+        raise AccountingError("Calculation date must belong to the selected period")
+    policy = await verified_policy(session, org_id, first, last, data.policy_id)
+    binding, employment = await active_employment(
+        session, org_id, data.employment_binding_id, data.calculation_date,
+    )
+    rate, verified_rate = await effective_percentage_rate(
+        session, org_id, data.requirement_id, data.calculation_date,
+    )
 
     with localcontext() as context:
         context.prec = 64

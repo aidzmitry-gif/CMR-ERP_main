@@ -377,6 +377,7 @@ async def pg_factory():
                     OutboxEvent,
                     User,
                 )
+                from modules.hr.models import Employee
                 from modules.logistics.models import CarrierRfq, ImportShipment, Shipment
                 from modules.office.models import OfficeDoc
                 from modules.procurement.models import (
@@ -447,6 +448,10 @@ async def pg_factory():
                 ImportShipment.__table__.create(connection)
                 connection.execute(text("CREATE SCHEMA office"))
                 OfficeDoc.__table__.create(connection)
+                # The global HR identity is a legacy FK target of the new
+                # accounting-owned employment evidence in revision 0161.
+                connection.execute(text("CREATE SCHEMA hr"))
+                Employee.__table__.create(connection)
                 # Existing request table is an FK target of the additive
                 # request-creation receipt; never create that receipt via ORM.
                 connection.execute(text("CREATE SCHEMA procurement"))
