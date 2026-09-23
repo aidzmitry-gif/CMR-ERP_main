@@ -10,22 +10,24 @@ conditions are maintained in [ACCEPTANCE-MATRIX.md](ACCEPTANCE-MATRIX.md).
 ## Local candidate update — 2026-09-23
 
 - The isolated source branch is now `agent/crm-acc-prod009` at
-  `b0880d2f` (local short SHA). The source migration graph
+  `864f19d2` (local short SHA). The source migration graph
   still reports a single `0160` head. This is a newer local snapshot than the
   historical capture below; no target database was inspected.
 - This source commit records `modules/hr` at
-  `f0eeabbe4b9c6e7e253d275e9afaad830d8de36f`. That commit was created in
-  the isolated `agent/crm-acc-hr-safety-001` worktree. Its configured Git
+  `f8a6e0142f1920b07ec56818f42d156a602ff9c3`. It combines the isolated
+  HR safety worktree with the separately committed CRM-PAY-NET-001 draft.
+  Its configured Git
   remote is a local repository, while `.gitmodules` names the GitHub HR
   repository. No publication of this HR commit or the parent source commit was
   performed in this task. Before packaging a reproducible release, verify that
   every recorded submodule commit is fetchable from its declared release
   remote, then pin and build the exact parent/submodule pair.
 - The HR change bounds manual amount/period input and selects the exact
-  accrual for a payment marker. It does not provide statutory payroll
-  calculation, legal-entity ownership for legacy HR rows or bank-payment
-  evidence. The parallel accountant reports/navigation task is outside this
-  frozen source snapshot until its commit and integration are reviewed.
+  accrual for a payment marker. It also adds read-only, source-described
+  scenario previews and employee handouts. It does not provide accepted
+  statutory payroll calculation, legal-entity ownership for legacy HR rows or
+  bank-payment evidence. Other changes from the parallel accountant
+  reports/navigation task remain outside this snapshot until reviewed.
 - The source also pins `modules/production` at `be7d7e198bf09cc41c642d22125db401da5adc48`.
   This commit was created in the isolated production-module worktree; its
   configured remote is a local repository while `.gitmodules` declares
