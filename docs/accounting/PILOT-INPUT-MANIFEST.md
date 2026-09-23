@@ -48,6 +48,8 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 
 `opening_balances` — JSON пакета `opening-balance-v1`, который уже проходит
 модель ERP. Его `source_system` и `cutover_date` должны совпасть с манифестом.
+На одну дату перехода для каждого юрлица принимается один подтверждённый пакет;
+исправления после импорта оформляются отдельными корректирующими операциями.
 `osv_left` — нормализованная CSV ОСВ внешней учётной системы с классом
 `external_system_export`; `osv_right` — нормализованная CSV ОСВ ERP с классом
 `erp_control_export`. Их заявленные `source_system` должны различаться. Оба

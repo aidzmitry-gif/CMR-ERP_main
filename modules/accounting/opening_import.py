@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -100,7 +101,8 @@ def _result(receipt: OpeningImportReceipt) -> dict:
     }
 
 
-async def _existing(session, org_id: int, request_key: UUID, command_digest: str) -> OpeningImportReceipt | None:
+async def _existing(session, org_id: int, request_key: UUID, command_digest: str,
+                    cutover_date: date) -> OpeningImportReceipt | None:
     receipt = await session.scalar(select(OpeningImportReceipt).where(
         OpeningImportReceipt.organization_id == org_id,
         OpeningImportReceipt.request_key == str(request_key),
@@ -115,13 +117,19 @@ async def _existing(session, org_id: int, request_key: UUID, command_digest: str
     ))
     if duplicate is not None:
         raise service.AccountingError("Opening import package was already accepted with another request key")
+    same_cutover = await session.scalar(select(OpeningImportReceipt).where(
+        OpeningImportReceipt.organization_id == org_id,
+        OpeningImportReceipt.cutover_date == cutover_date,
+    ))
+    if same_cutover is not None:
+        raise service.AccountingError("Opening import already exists for this organization and cutover date")
     return None
 
 
 async def preview(session, org_id: int, data: ImportInput) -> dict:
     await service.lock_organization(session, org_id)
     command_digest = _command_digest(data)
-    existing = await _existing(session, org_id, data.request_key, command_digest)
+    existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return {**_result(existing), "command_digest": command_digest, "already_confirmed": True}
     for entry in data.entries:
@@ -146,7 +154,7 @@ async def preview(session, org_id: int, data: ImportInput) -> dict:
 async def confirm(session, org_id: int, data: ImportInput, actor: str, event_bus=None) -> dict:
     await service.lock_organization(session, org_id)
     command_digest = _command_digest(data)
-    existing = await _existing(session, org_id, data.request_key, command_digest)
+    existing = await _existing(session, org_id, data.request_key, command_digest, data.cutover_date)
     if existing is not None:
         return _result(existing)
     for entry in data.entries:

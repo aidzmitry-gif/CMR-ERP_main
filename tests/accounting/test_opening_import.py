@@ -61,3 +61,20 @@ async def test_opening_import_same_package_cannot_use_another_request_key(client
     other_key["request_key"] = str(uuid4())
     response = await client.post(prefix + "/imports/confirm", json=other_key)
     assert response.status_code == 422
+
+
+async def test_opening_import_rejects_second_package_for_same_cutover(client, db, book, posting, opening_package):
+    prefix = f"/accounting/organizations/{book[0]}"
+    first = opening_package([posting("opening-first", "51", "80", opening=True)], batch="first")
+    second = opening_package([posting("opening-second", "51", "80", opening=True)], batch="second")
+    accepted = await client.post(prefix + "/imports/confirm", json=first)
+    assert accepted.status_code == 200, accepted.text
+
+    preview = await client.post(prefix + "/imports/preview", json=second)
+    confirm = await client.post(prefix + "/imports/confirm", json=second)
+    assert preview.status_code == 422
+    assert confirm.status_code == 422
+    assert "cutover date" in confirm.text
+    receipts = (await db.scalars(select(OpeningImportReceipt))).all()
+    assert len(receipts) == 1
+    assert receipts[0].id == accepted.json()["receipt_id"]

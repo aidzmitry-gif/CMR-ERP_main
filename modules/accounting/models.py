@@ -500,6 +500,7 @@ class OpeningImportReceipt(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "request_key", name="uq_opening_import_request"),
         UniqueConstraint("organization_id", "command_digest", name="uq_opening_import_command"),
+        UniqueConstraint("organization_id", "cutover_date", name="uq_opening_import_cutover"),
         CheckConstraint("entry_count > 0", name="opening_import_entry_count_positive"),
         CheckConstraint("line_count >= entry_count", name="opening_import_line_count_valid"),
         CheckConstraint("debit_total >= 0 AND credit_total >= 0", name="opening_import_totals_nonnegative"),
