@@ -51,13 +51,13 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown): Pr
   return data as T;
 }
 
-type Props = { org: string; month: string; disabled: boolean; onBusyChange?: (busy: boolean) => void };
+type Props = { org: string; month: string; disabled: boolean; onBusyChange?: (busy: boolean) => void; onOpenRules?: () => void };
 
 export function AccountingPayrollWorkpaper(props: Props) {
   return <ScopedPayrollWorkpaper key={`${props.org}:${props.month}`} {...props} />;
 }
 
-function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange }: Props) {
+function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRules }: Props) {
   const [rules, setRules] = useState<RuleSet | null>(null);
   const [access, setAccess] = useState<Access | null>(null);
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -259,6 +259,7 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange }: Props) {
     <div><h2 className="text-lg font-semibold">Расчётный лист по документам</h2><p className="text-sm text-muted">{month} · арифметический черновик по выбранному юрлицу. Он не начисляет зарплату, не создаёт проводки и не подтверждает законность ставок.</p></div>
     {loading && <p role="status">Загрузка правил и договоров…</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
+    {!rules && !loading && onOpenRules && <Button variant="secondary" disabled={disabled} onClick={onOpenRules}>Открыть правила расчёта</Button>}
     {access && !access.can_preview && <p role="alert">Для расчёта нужна роль бухгалтера или главбуха в выбранном юрлице.</p>}
     {rules && <div className="rounded-lg border border-line p-3 text-sm"><p>Набор правил № {rules.rule_set_id}, редакция {rules.revision}, действует с {rules.effective_from}.</p><p>Источник: {rules.source_reference} · {rules.source_file_id ? `файл № ${rules.source_file_id}` : "файл источника не привязан; подтверждение главбуха недоступно"}.</p></div>}
     {rules && <label className="block text-sm">Договор работника

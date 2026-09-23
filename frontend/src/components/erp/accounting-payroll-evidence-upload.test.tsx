@@ -6,7 +6,7 @@ import { AccountingPayrollEvidenceUpload } from "@/components/erp/accounting-pay
 const key = "123e4567-e89b-42d3-a456-426614174000";
 const response = (value: unknown) => ({ ok: true, status: 200, json: async () => value });
 const receipt = (body: Record<string, unknown>) => ({
-  file_id: 87, organization_id: 7, employment_binding_id: 12,
+  file_id: 87, organization_id: 7, employment_binding_id: body.employment_binding_id,
   kind: body.kind, month: body.month, reference: body.reference,
   filename: body.filename, request_key: body.request_key,
   sha256: "a".repeat(64), size_bytes: 42,
@@ -53,5 +53,22 @@ describe("AccountingPayrollEvidenceUpload", () => {
     expect(await screen.findByText(/Файл № 87 сохранён/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(onUploaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores a policy source at organization scope without an employee or month", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    const onUploaded = vi.fn();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => Promise.resolve(response(receipt(JSON.parse(init.body as string)))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollEvidenceUpload key="policy-7" org="7" policyOnly disabled={false} onUploaded={onUploaded} />);
+    fireEvent.change(screen.getByLabelText("Номер документа"), { target: { value: "policy-2026" } });
+    fireEvent.change(screen.getByLabelText("Файл правил зарплаты"), { target: { files: [new File(["%PDF-1.7\nsynthetic"], "policy.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(screen.getByLabelText("Пояснение документа"), { target: { value: "Утверждённые правила для юрлица" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить документ" }));
+    expect(await screen.findByText(/Файл № 87 сохранён/)).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      kind: "payroll_policy", employment_binding_id: null, month: null, reference: "policy-2026",
+    });
+    expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({ employment_binding_id: null, month: null }));
   });
 });

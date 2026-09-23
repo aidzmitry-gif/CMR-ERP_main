@@ -18,11 +18,11 @@ export type PayrollEvidenceReceipt = {
   request_key: string;
 };
 
-type UploadKind = "employment_contract" | "timesheet" | "base_adjustment";
+type UploadKind = "employment_contract" | "timesheet" | "base_adjustment" | "payroll_policy";
 type UploadCommand = {
   request_key: string;
   kind: UploadKind;
-  employment_binding_id: number;
+  employment_binding_id: number | null;
   month: string | null;
   reference: string;
   filename: string;
@@ -31,9 +31,10 @@ type UploadCommand = {
 };
 type Props = {
   org: string;
-  month: string;
-  bindingId: number;
-  contractReference: string;
+  month?: string;
+  bindingId?: number;
+  contractReference?: string;
+  policyOnly?: boolean;
   disabled: boolean;
   onUploaded: (receipt: PayrollEvidenceReceipt) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -90,8 +91,8 @@ function validReceipt(receipt: PayrollEvidenceReceipt, command: UploadCommand, o
     && /^[a-f0-9]{64}$/.test(receipt.sha256);
 }
 
-export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contractReference, disabled, onUploaded, onBusyChange }: Props) {
-  const [kind, setKind] = useState<UploadKind>("employment_contract");
+export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contractReference, policyOnly = false, disabled, onUploaded, onBusyChange }: Props) {
+  const [kind, setKind] = useState<UploadKind>(policyOnly ? "payroll_policy" : "employment_contract");
   const [reference, setReference] = useState("");
   const [evidence, setEvidence] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -101,11 +102,12 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const submitting = useRef(false);
-  const currentReference = kind === "employment_contract" ? contractReference : reference.trim();
+  const currentReference = kind === "employment_contract" ? (contractReference ?? "") : reference.trim();
 
   useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
 
   async function prepare(): Promise<UploadCommand> {
+    if (!policyOnly && (!bindingId || !month)) throw new Error("Выберите договор и месяц источника.");
     if (!file || !file.size || file.size > maxBytes) throw new Error("Выберите файл до 10 МБ.");
     if (!currentReference || currentReference.length > 160 || evidence.trim().length < 10 || file.name.length > 160) throw new Error("Укажите документ и пояснение не короче 10 символов.");
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -115,15 +117,15 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
     const encoded = rawUrl.split(",", 2)[1];
     if (!encoded) throw new Error("Файл не удалось прочитать.");
     return {
-      request_key: crypto.randomUUID(), kind, employment_binding_id: bindingId,
-      month: kind === "employment_contract" ? null : month,
+      request_key: crypto.randomUUID(), kind, employment_binding_id: policyOnly ? null : bindingId!,
+      month: kind === "employment_contract" || kind === "payroll_policy" ? null : month!,
       reference: currentReference, filename: file.name,
       data_url: `data:${contentType};base64,${encoded}`, evidence: evidence.trim(),
     };
   }
 
   function accept(receipt: PayrollEvidenceReceipt, command: UploadCommand) {
-    if (!validReceipt(receipt, command, org)) throw new Error("Квитанция относится к другому юрлицу, договору или файлу.");
+    if (!validReceipt(receipt, command, org)) throw new Error("Квитанция относится к другому юрлицу, области или файлу.");
     setPending(null); setError(""); setNotice(`Файл № ${receipt.file_id} сохранён; байты сверены сервером.`);
     setReference(""); setEvidence(""); setFile(null); setFileInputKey((value) => value + 1);
     onUploaded(receipt);
@@ -133,6 +135,7 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
     if (submitting.current || busy || disabled) return;
     submitting.current = true; setBusy(true); setError(""); setNotice("");
     let command = pending;
+    let rejectedPost = false;
     try {
       if (!command) { command = await prepare(); setPending(command); }
       const base = `/organizations/${encodeURIComponent(org)}/payroll-evidence-files`;
@@ -140,7 +143,7 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
         const receipt = await api<PayrollEvidenceReceipt>(base, command);
         accept(receipt, command);
       } catch (cause) {
-        if (cause instanceof UploadError && cause.status !== undefined && cause.status < 500) throw cause;
+        if (cause instanceof UploadError && cause.status !== undefined && cause.status < 500 && cause.status !== 408 && cause.status !== 429) { rejectedPost = true; throw cause; }
         try {
           const receipt = await api<PayrollEvidenceReceipt>(`${base}/by-request/${command.request_key}`);
           accept(receipt, command);
@@ -150,20 +153,20 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
         }
       }
     } catch (cause) {
-      if (cause instanceof UploadError && cause.status !== undefined && cause.status < 500 && cause.status !== 408 && cause.status !== 429) setPending(null);
+      if (rejectedPost) setPending(null);
       setError(cause instanceof Error ? cause.message : "Файл не сохранён.");
     } finally { submitting.current = false; setBusy(false); }
   }
 
   const locked = disabled || busy || pending !== null;
-  return <div className="space-y-3 rounded-lg border border-line p-3" aria-label="Загрузка источника зарплаты">
+  return <div className="space-y-3 rounded-lg border border-line p-3" aria-label={policyOnly ? "Загрузка правил зарплаты" : "Загрузка источника зарплаты"}>
     <h3 className="font-semibold">Добавить подтверждающий документ</h3>
-    <p className="text-sm text-muted">Файл хранится отдельно для выбранного юрлица и договора. Квитанция подтверждает байты, но содержание проверяет бухгалтер.</p>
+    <p className="text-sm text-muted">{policyOnly ? "Файл правил хранится для выбранного юрлица." : "Файл хранится отдельно для выбранного юрлица и договора."} Квитанция подтверждает байты, но содержание проверяет бухгалтер.</p>
     <div className="grid gap-3 md:grid-cols-2">
-      <label className="text-sm">Вид документа<Select aria-label="Вид документа" value={kind} disabled={locked} onChange={(event) => { setKind(event.target.value as UploadKind); setError(""); }}><option value="employment_contract">Договор</option><option value="timesheet">Табель за {month}</option><option value="base_adjustment">Основание корректировки за {month}</option></Select></label>
+      {policyOnly ? <p className="text-sm">Вид документа: правила расчёта зарплаты</p> : <label className="text-sm">Вид документа<Select aria-label="Вид документа" value={kind} disabled={locked} onChange={(event) => { setKind(event.target.value as UploadKind); setError(""); }}><option value="employment_contract">Договор</option><option value="timesheet">Табель за {month}</option><option value="base_adjustment">Основание корректировки за {month}</option></Select></label>}
       <label className="text-sm">Номер или ссылка на документ<Input aria-label="Номер документа" value={currentReference} disabled={locked || kind === "employment_contract"} onChange={(event) => setReference(event.target.value)} /></label>
     </div>
-    <label className="block text-sm">Файл PDF, изображение или Office до 10 МБ<Input key={fileInputKey} aria-label="Файл источника зарплаты" type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx" disabled={locked} onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
+    <label className="block text-sm">Файл PDF, изображение или Office до 10 МБ<Input key={fileInputKey} aria-label={policyOnly ? "Файл правил зарплаты" : "Файл источника зарплаты"} type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx" disabled={locked} onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
     <label className="block text-sm">Что подтверждает документ<Textarea aria-label="Пояснение документа" value={evidence} disabled={locked} onChange={(event) => setEvidence(event.target.value)} /></label>
     <Button disabled={disabled || busy || (!pending && !file)} onClick={() => void submit()}>{pending ? "Проверить или повторить сохранение" : "Сохранить документ"}</Button>
     {pending && <p className="break-all text-xs text-muted">Ключ запроса: {pending.request_key}. Поля заблокированы до подтверждения результата.</p>}

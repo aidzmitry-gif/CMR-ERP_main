@@ -29,6 +29,12 @@ class PayrollRateRuleInput(Input):
     classification_evidence: str = Field(min_length=10, max_length=2000)
 
 
+class PayrollRateVersionInput(Input):
+    code: str = Field(min_length=1, max_length=120)
+    requirement_id: int = Field(gt=0, strict=True)
+    requirement_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class PayrollRuleSetInput(Input):
     request_key: UUID
     policy_id: int = Field(gt=0, strict=True)
@@ -36,6 +42,7 @@ class PayrollRuleSetInput(Input):
     gross_method: Literal["monthly_salary_by_hours"]
     rounding: Literal["half_up_cent"]
     rate_rules: list[PayrollRateRuleInput] = Field(min_length=1, max_length=20)
+    expected_rate_versions: list[PayrollRateVersionInput] | None = None
     source_reference: str = Field(min_length=1, max_length=200)
     source_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     source_file_id: int | None = Field(default=None, gt=0, strict=True)
@@ -48,6 +55,8 @@ class PayrollRuleSetInput(Input):
         codes = [rule.code for rule in self.rate_rules]
         if len(codes) != len(set(codes)):
             raise ValueError("Payroll rule set rate codes must be unique")
+        if self.expected_rate_versions is not None and [rate.code for rate in self.expected_rate_versions] != codes:
+            raise ValueError("Expected payroll rate versions must match the ordered rate rules")
         return self
 
 
@@ -93,6 +102,8 @@ async def current(session, org_id: int, on: date) -> PayrollRuleSet | None:
 async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) -> dict:
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
+    if command["expected_rate_versions"] is None:
+        del command["expected_rate_versions"]  # Preserve request digests for earlier clients.
     request_digest = _digest(command)
     existing = await session.scalar(select(PayrollRuleSet).where(
         PayrollRuleSet.organization_id == org_id,
@@ -131,6 +142,10 @@ async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) ->
         _, verified = await effective_percentage_rate(session, org_id, rate_id, data.effective_from)
         rate_versions.append({"code": rule.code, "requirement_id": rate_id,
                               "requirement_digest": verified["digest"]})
+
+    if (data.expected_rate_versions is not None
+            and [version.model_dump(mode="json") for version in data.expected_rate_versions] != rate_versions):
+        raise AccountingError("Payroll rate version changed; reload the rate catalog before configuring rules")
 
     revision = (await session.scalar(select(func.max(PayrollRuleSet.revision)).where(
         PayrollRuleSet.organization_id == org_id,

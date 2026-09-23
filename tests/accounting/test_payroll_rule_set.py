@@ -40,6 +40,11 @@ async def test_rule_set_requires_effective_rate_and_is_idempotent(client, db, bo
         request_key=str(uuid4()), code="SYNTHETIC-EMPLOYEE-DEDUCTION",
     ), "tester")
     await db.commit()
+    payload["expected_rate_versions"] = [{
+        "code": "SYNTHETIC-EMPLOYEE-DEDUCTION",
+        "requirement_id": rate["requirement_id"],
+        "requirement_digest": rate["digest"],
+    }]
     created = await client.post(url, json=payload)
     assert created.status_code == 200, created.text
     assert created.json()["revision"] == 1
@@ -52,17 +57,32 @@ async def test_rule_set_requires_effective_rate_and_is_idempotent(client, db, bo
     repeated = await client.post(url, json=payload)
     assert repeated.json() == created.json()
     assert await db.scalar(select(func.count(PayrollRuleSet.id))) == 1
+    recovered = await client.get(f"{url}/by-request/{payload['request_key']}")
+    assert recovered.status_code == 200
+    assert recovered.json() == created.json()
+    assert recovered.headers["cache-control"] == "private, no-store"
+    assert (await client.get(f"{url}/by-request/{uuid4()}")).status_code == 404
     changed = await client.post(url, json={**payload, "rounding": "different"})
     assert changed.status_code == 422
     changed = await client.post(url, json={**payload, "source_reference": "different-policy"})
     assert changed.status_code == 409
+    changed_version = await client.post(url, json={
+        **payload, "request_key": str(uuid4()),
+        "expected_rate_versions": [{**payload["expected_rate_versions"][0],
+                                    "requirement_digest": "a" * 64}],
+    })
+    assert changed_version.status_code == 422
+    assert "Payroll rate version changed" in changed_version.text
+    assert await db.scalar(select(func.count(PayrollRuleSet.id))) == 1
 
-    replacement = await client.post(url, json=command(
+    replacement_payload = command(
         book[1], rate_rules=[{**payload["rate_rules"][0],
                               "classification_evidence": "Corrected synthetic classification evidence"}],
-    ))
+    )
+    replacement = await client.post(url, json=replacement_payload)
     assert replacement.status_code == 200, replacement.text
     assert replacement.json()["revision"] == 2
+    assert (await client.post(url, json=replacement_payload)).json() == replacement.json()
     current = await client.get(f"{url}/current?as_of=2026-10-15")
     assert current.status_code == 200
     assert current.json()["rule_set_id"] == replacement.json()["rule_set_id"]

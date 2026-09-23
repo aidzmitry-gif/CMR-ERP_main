@@ -19,6 +19,7 @@ import { AccountingPayrollAccrualImport } from "./accounting-payroll-accrual-imp
 import { AccountingPayrollStatutoryImport } from "./accounting-payroll-statutory-import";
 import { AccountingPayrollControl } from "./accounting-payroll-control";
 import { AccountingPayrollWorkpaper } from "./accounting-payroll-workpaper";
+import { AccountingPayrollRuleSet } from "./accounting-payroll-rule-set";
 import { AccountingStatutoryRequirements } from "./accounting-statutory-requirements";
 import { AccountingBank } from "./accounting-bank";
 import { AccountingBankImport } from "./accounting-bank-import";
@@ -62,6 +63,7 @@ const accountingSections: AccountingSection[] = [
   ] },
   { id: "payroll", label: "Зарплата", pages: [
     { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-workpaper", label: "Расчётный лист" },
+    { id: "payroll-rules", label: "Правила расчёта" },
     { id: "payroll-accruals", label: "Начисления зарплаты" }, { id: "payroll-statutory", label: "Удержания и взносы" },
   ] },
   { id: "tax", label: "Налоги и обязательные платежи", pages: [
@@ -249,7 +251,8 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
     {tab === "repairs" && <AccountingRepairs org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
     {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => { setOrganizationRefresh((value) => value + 1); void refresh(); }} />}
     {tab === "payroll-control" && <AccountingPayrollControl key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} onEntry={(id) => void openEntry(id)} />}
-    {tab === "payroll-workpaper" && <AccountingPayrollWorkpaper key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} />}
+    {tab === "payroll-workpaper" && <AccountingPayrollWorkpaper key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} onOpenRules={() => setTab("payroll-rules")} />}
+    {tab === "payroll-rules" && <AccountingPayrollRuleSet key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} policies={policies} disabled={locked} onBusyChange={setControlsBusy} onOpenRates={() => setTab("statutory-requirements")} />}
     {tab === "payroll-accruals" && <AccountingPayrollAccrualImport org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} />}
     {tab === "payroll-statutory" && <AccountingPayrollStatutoryImport org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} />}
     {tab === "statutory-requirements" && <AccountingStatutoryRequirements org={org} month={operationDate.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} />}

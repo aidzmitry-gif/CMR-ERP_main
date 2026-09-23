@@ -111,6 +111,20 @@ before any retry. The private file store must be configured and backed up with
 the database. A missing source or configuration blocks the preview rather than
 supplying a default.
 
+The **Правила расчёта** tab now lets the chief configure that immutable
+organization/month rule set in the accountant workspace. It requires an
+explicitly selected verified accounting policy, stored organization-scoped
+`payroll_policy` file, supported gross method and rounding, each effective
+percentage rate's role/base mode and classification evidence. The UI submits
+the displayed requirement IDs and digests as `expected_rate_versions`; the
+server rejects a changed version instead of silently binding a newer rate.
+The POST is idempotent by request key. If its response is lost, the UI reads
+`GET /payroll-rule-sets/by-request/{request_key}` in the same organization and
+keeps the frozen command for replay until the outcome is known. Accountants
+can read the current configuration; only a chief can create a revision. This
+is a configuration of arithmetic, not proof that all statutory rates or source
+facts are correct.
+
 For a byte-backed preview, the chief alone may enter an explanation and record
 an immutable arithmetic-only review. The UI reads the monthly summary to find
 the latest review of that exact binding and date segment; a changed calculation
@@ -118,8 +132,8 @@ supersedes that receipt instead of overwriting it. A lost review response is
 resolved by request key, and an uncertain request is retried with the same
 body. This does not post a payroll run or ledger entry, verify that the facts
 inside source files are true, or certify legal rates. The chief must still
-configure the rule set with a stored policy file; that configuration is not
-performed by the workpaper tab.
+configure the rule set with a stored policy file in **Правила расчёта**;
+the workpaper tab links to it when no current rule set exists.
 
 The accountant workspace's **Контроль зарплаты** tab reads this monthly
 summary and the private `payroll-source-reconciliation` result for the selected

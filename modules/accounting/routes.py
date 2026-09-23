@@ -84,6 +84,7 @@ from modules.accounting.models import (
     Line,
     Organization,
     PayrollEvidenceFile,
+    PayrollRuleSet,
     Period,
     Policy,
     SourceBinding,
@@ -1685,6 +1686,19 @@ async def create_payroll_rule_set(org_id: int, data: PayrollRuleSetInput,
         return await payroll_rule_set.create(ctx[0], org_id, data, ctx[1])
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/payroll-rule-sets/by-request/{request_key}')
+async def payroll_rule_set_by_request(org_id: int, request_key: UUID,
+                                      response: Response, ctx=Depends(member)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    row = await ctx[0].scalar(select(PayrollRuleSet).where(
+        PayrollRuleSet.organization_id == org_id,
+        PayrollRuleSet.request_key == str(request_key),
+    ))
+    if row is None:
+        raise HTTPException(404, 'Payroll rule set request was not found')
+    return payroll_rule_set.result(row)
 
 
 @router.get('/organizations/{org_id}/payroll-rule-sets/current')
