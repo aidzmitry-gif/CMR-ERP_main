@@ -8,7 +8,7 @@ const response = (value: unknown) => ({ ok: true, status: 200, json: async () =>
 const receipt = (body: Record<string, unknown>) => ({
   file_id: 87, organization_id: 7, employment_binding_id: body.employment_binding_id,
   kind: body.kind, month: body.month, reference: body.reference,
-  filename: body.filename, request_key: body.request_key,
+  filename: body.filename, request_key: body.request_key, content_type: "application/pdf",
   sha256: "a".repeat(64), size_bytes: 42,
 });
 

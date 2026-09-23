@@ -1677,6 +1677,21 @@ async def download_payroll_evidence_file(org_id: int, file_id: int, ctx=Depends(
     })
 
 
+@router.get('/organizations/{org_id}/payroll-evidence-files/{file_id}/timesheet-preflight')
+async def payroll_timesheet_preflight(org_id: int, file_id: int, response: Response,
+                                      ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        row = await payroll_evidence_files.file_for(
+            ctx[0], org_id, file_id, kind="timesheet")
+        report = await run_in_threadpool(payroll_evidence_files.timesheet_preflight, row)
+    except service.AccountingError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    response.headers['Cache-Control'] = 'private, no-store'
+    return report
+
+
 @router.post('/organizations/{org_id}/payroll-rule-sets')
 async def create_payroll_rule_set(org_id: int, data: PayrollRuleSetInput,
                                   response: Response, ctx=Depends(member)):

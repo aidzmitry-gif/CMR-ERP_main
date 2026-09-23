@@ -10,7 +10,9 @@ from uuid import UUID
 from fastapi import HTTPException
 from pydantic import Field, field_validator
 from sqlalchemy import func, select
+from starlette.concurrency import run_in_threadpool
 
+from modules.accounting import payroll_evidence_files
 from modules.accounting.models import (
     Entry,
     Line,
@@ -162,6 +164,14 @@ async def create(session, org_id: int, month: str,
     if (not preview["contract_and_timesheet_hashes_verified"]
             or not preview["rule_source_file_bytes_verified"]):
         raise AccountingError("Payroll review requires stored contract, timesheet and policy files")
+    timesheet_file = await payroll_evidence_files.file_for(
+        session, org_id, data.timesheet_file_id, kind="timesheet",
+        employment_binding_id=data.employment_binding_id, month=month,
+    )
+    timesheet_check = await run_in_threadpool(
+        payroll_evidence_files.timesheet_preflight, timesheet_file)
+    if timesheet_check["status"] in {"structure_failed", "uncheckable"}:
+        raise AccountingError("XLSX timesheet structure must pass preflight before arithmetic review")
     if any(component["base_mode"] == "gross_less_adjustment"
            and component["adjustment_file_id"] is None
            for component in preview["basis"]["components"]):

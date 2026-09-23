@@ -13,6 +13,7 @@ export type PayrollEvidenceReceipt = {
   month: string | null;
   reference: string;
   filename: string;
+  content_type: string;
   sha256: string;
   size_bytes: number;
   request_key: string;
@@ -86,6 +87,7 @@ function validReceipt(receipt: PayrollEvidenceReceipt, command: UploadCommand, o
     && receipt.month === command.month
     && receipt.reference === command.reference
     && receipt.filename === command.filename
+    && receipt.content_type === command.data_url.slice(5, command.data_url.indexOf(";base64,"))
     && receipt.request_key === command.request_key
     && receipt.file_id > 0
     && /^[a-f0-9]{64}$/.test(receipt.sha256);

@@ -1,9 +1,15 @@
 """Structural XLSX intake checks, using fictional timesheets only."""
 
+import base64
 import json
+from uuid import uuid4
 from zipfile import ZipFile
 
-from scripts.accounting_timesheet_preflight import scan
+from sqlalchemy import select
+
+from modules.accounting.models import AccessGrant, Organization
+from modules.accounting.timesheet_preflight import scan
+from modules.hr.models import Employee
 
 
 def make_timesheet(path, *, truncated=False, duplicate=False, wrong_days=False,
@@ -81,3 +87,122 @@ def test_employee_after_blank_row_is_not_silently_ignored(tmp_path):
     result = scan(path, "2026-06")
     assert result["employee_rows"] == 3
     assert "employee_rows_after_gap" in [item["code"] for item in result["issues"]]
+
+
+async def test_stored_timesheet_preflight_keeps_scope_and_source_bytes(
+        client, db, book, tmp_path, monkeypatch):
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    employee = Employee(full_name="Synthetic Workbook Employee", department="repair")
+    db.add(employee)
+    await db.flush()
+    await db.commit()
+    binding = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-employments", json={
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": "synthetic-timesheet-contract", "effective_from": "2026-01-01",
+            "state": "active", "source_document": "synthetic-signed-contract",
+            "evidence": "Synthetic binding for a workbook source test",
+        })
+    assert binding.status_code == 200, binding.text
+    binding_id = binding.json()["binding_id"]
+
+    async def upload(path):
+        request_key = str(uuid4())
+        response = await client.post(
+            f"/accounting/organizations/{book[0]}/payroll-evidence-files", json={
+                "request_key": request_key, "kind": "timesheet",
+                "employment_binding_id": binding_id, "month": "2026-06",
+                "reference": f"synthetic-{path.stem}", "filename": path.name,
+                "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                            + base64.b64encode(path.read_bytes()).decode(),
+                "evidence": "Synthetic XLSX source for preflight API test",
+            })
+        assert response.status_code == 200, response.text
+        return response.json(), request_key
+
+    broken = tmp_path / "broken.xlsx"
+    make_timesheet(broken, truncated=True, duplicate=True, wrong_days=True)
+    bad_receipt, bad_key = await upload(broken)
+    endpoint = (f"/accounting/organizations/{book[0]}/payroll-evidence-files/"
+                f"{bad_receipt['file_id']}/timesheet-preflight")
+    failed = await client.get(endpoint)
+    assert failed.status_code == 200, failed.text
+    body = failed.json()
+    assert body["status"] == "structure_failed"
+    assert body["organization_id"] == book[0]
+    assert body["employment_binding_id"] == binding_id
+    assert body["source_sha256"] == bad_receipt["sha256"]
+    assert body["document_facts_verified"] is False
+    assert failed.headers["cache-control"] == "private, no-store"
+    assert {item["code"] for item in body["issues"]} >= {
+        "hours_formula_range", "hours_total_mismatch", "personnel_identifier_repeated"}
+    assert "Synthetic Workbook Employee" not in failed.text
+    assert "worker-a" not in failed.text
+    assert "worker-b" not in failed.text
+
+    corrected = tmp_path / "corrected.xlsx"
+    make_timesheet(corrected)
+    good_receipt, _ = await upload(corrected)
+    good = await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-evidence-files/"
+        f"{good_receipt['file_id']}/timesheet-preflight")
+    assert good.status_code == 200
+    assert good.json()["status"] == "structure_checked"
+    assert good.json()["structure_ok"] is True
+    assert good.json()["payroll_approved"] is False
+
+    manual = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-evidence-files", json={
+            "request_key": str(uuid4()), "kind": "timesheet",
+            "employment_binding_id": binding_id, "month": "2026-06",
+            "reference": "synthetic-signed-timesheet", "filename": "sheet.pdf",
+            "data_url": "data:application/pdf;base64," + base64.b64encode(
+                b"%PDF-1.7\nsynthetic signed timesheet\n").decode(),
+            "evidence": "Synthetic PDF source requiring human review",
+        })
+    assert manual.status_code == 200
+    manual_check = await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-evidence-files/"
+        f"{manual.json()['file_id']}/timesheet-preflight")
+    assert manual_check.status_code == 200
+    assert manual_check.json()["status"] == "manual_source"
+    assert manual_check.json()["structure_ok"] is None
+    assert manual_check.json()["document_facts_verified"] is False
+
+    unreadable = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-evidence-files", json={
+            "request_key": str(uuid4()), "kind": "timesheet",
+            "employment_binding_id": binding_id, "month": "2026-06",
+            "reference": "synthetic-unreadable-xlsx", "filename": "unreadable.xlsx",
+            "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                        + base64.b64encode(b"PK\x03\x04invalid-zip").decode(),
+            "evidence": "Synthetic unreadable workbook for fail-closed check",
+        })
+    assert unreadable.status_code == 200
+    unreadable_check = await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-evidence-files/"
+        f"{unreadable.json()['file_id']}/timesheet-preflight")
+    assert unreadable_check.status_code == 200
+    assert unreadable_check.json()["status"] == "uncheckable"
+    assert unreadable_check.json()["structure_ok"] is False
+
+    storage = root / str(book[0]) / (bad_key.replace("-", "") + ".xlsx")
+    storage.write_bytes(b"PK\x03\x04tampered")
+    assert (await client.get(endpoint)).status_code == 409
+
+    other = Organization(name="Other Timesheet Company", unp="456456456")
+    db.add(other)
+    await db.flush()
+    db.add(AccessGrant(organization_id=other.id, subject="tester", role="accountant"))
+    await db.commit()
+    crossed = await client.get(
+        f"/accounting/organizations/{other.id}/payroll-evidence-files/"
+        f"{good_receipt['file_id']}/timesheet-preflight")
+    assert crossed.status_code == 404
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester"))
+    grant.role = "reader"
+    await db.commit()
+    assert (await client.get(endpoint)).status_code == 403

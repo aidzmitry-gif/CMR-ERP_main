@@ -10,7 +10,8 @@ type RateRule = { code: string; role: "employee_deduction" | "employer_contribut
 type RateVersion = { code: string; requirement_id: number; requirement_digest: string };
 type RuleSet = { rule_set_id: number; organization_id: number; policy_id: number; effective_from: string; revision: number; rate_rules: RateRule[]; rate_versions: RateVersion[]; source_reference: string; source_file_id: number | null };
 type Binding = { binding_id: number; organization_id: number; employee_name: string; contract_ref: string; source_document: string; state: "active" | "ended"; effective_from: string };
-type SourceFile = { file_id: number; organization_id: number; employment_binding_id: number | null; kind: string; month: string | null; reference: string; filename: string; sha256: string; size_bytes: number };
+type SourceFile = { file_id: number; organization_id: number; employment_binding_id: number | null; kind: string; month: string | null; reference: string; filename: string; content_type: string; sha256: string; size_bytes: number };
+type TimesheetCheck = { file_id: number; organization_id: number; employment_binding_id: number | null; period: string; source_sha256: string; status: "structure_checked" | "structure_failed" | "uncheckable" | "manual_source"; structure_ok: boolean | null; issues: { code: string; rows: number[] }[]; document_facts_verified: false };
 type Component = { requirement_id: number; adjustment_byn: string; adjustment_document?: string; adjustment_evidence?: string; adjustment_file_id?: number };
 type WorkpaperCommand = { policy_id: number; rule_set_id: number; employment_binding_id: number; work_from: string; work_to: string; monthly_salary_byn: string; contract_document: string; contract_digest: string; contract_file_id: number; contract_amount_evidence: string; timesheet_document: string; timesheet_digest: string; timesheet_file_id: number; timesheet_evidence: string; month_norm_hours: string; worked_hours: string; components: Component[] };
 type Preview = { status: string; basis_digest: string; gross_byn: string; listed_employee_deductions_byn: string; after_listed_deductions_byn: string; listed_employer_contributions_byn: string; cost_including_listed_contributions_byn: string; contract_and_timesheet_hashes_verified: boolean; rule_source_file_bytes_verified: boolean; posting_available: boolean; statutory_payroll_certified: boolean; basis: { organization_id: number; month: string; employee_name: string; work_from: string; work_to: string; components: { rate_code: string; role: string; base_byn: string; rate_value: string; amount_byn: string }[] } };
@@ -23,7 +24,26 @@ type ReviewReceipt = { review_id: number; organization_id: number; employment_bi
 
 const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 const moneyPattern = /^(0|[1-9]\d*)\.\d{2}$/;
+const spreadsheetType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Запрос не выполнен.";
+const timesheetIssue: Record<string, string> = {
+  sheet_period_unconfirmed: "месяц листа",
+  day_header_mismatch: "даты",
+  summary_header_mismatch: "столбцы итогов",
+  employee_rows_missing: "строки сотрудников",
+  employee_rows_after_gap: "строки после пустого промежутка",
+  personnel_identifier_missing: "табельный номер отсутствует",
+  personnel_identifier_repeated: "табельный номер повторяется",
+  employee_name_missing: "ФИО отсутствует",
+  formula_in_day_cell: "формула в дневной ячейке",
+  invalid_daily_hours: "дневные часы",
+  worked_days_invalid: "итог рабочих дней",
+  worked_days_requires_review: "итог дней требует сверки",
+  hours_formula_range: "формула часов охватывает не все дни",
+  hours_cache_missing: "итог часов отсутствует",
+  hours_total_mismatch: "итог часов расходится с днями",
+  unsupported_workbook: "формат книги не распознан",
+};
 
 class WorkpaperError extends Error {
   constructor(message: string, readonly status?: number) { super(message); }
@@ -65,6 +85,7 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   const [bindingId, setBindingId] = useState("");
   const [contractId, setContractId] = useState("");
   const [timesheetId, setTimesheetId] = useState("");
+  const [timesheetCheckState, setTimesheetCheckState] = useState<{ key: string; report?: TimesheetCheck; error?: string } | null>(null);
   const [workFrom, setWorkFrom] = useState(`${month}-01`);
   const [workTo, setWorkTo] = useState(monthPattern.test(month) ? monthLast(month) : "");
   const [salary, setSalary] = useState("");
@@ -97,6 +118,12 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   const adjustmentFiles = files.filter((row) => row.kind === "base_adjustment" && row.month === month);
   const selectedContract = contractFiles.find((row) => String(row.file_id) === contractId);
   const selectedTimesheet = timesheetFiles.find((row) => String(row.file_id) === timesheetId);
+  const needsXlsxCheck = selectedTimesheet?.content_type === spreadsheetType;
+  const selectedTimesheetFileId = selectedTimesheet?.file_id;
+  const selectedTimesheetSha = selectedTimesheet?.sha256;
+  const timesheetCheckKey = `${org}:${month}:${bindingId}:${selectedTimesheetFileId ?? ""}:${selectedTimesheetSha ?? ""}`;
+  const timesheetCheck = timesheetCheckState?.key === timesheetCheckKey ? timesheetCheckState.report : null;
+  const timesheetCheckError = timesheetCheckState?.key === timesheetCheckKey ? timesheetCheckState.error : "";
   const formLocked = disabled || busy || uploadBusy || pendingReview !== null || reviewBusy;
 
   useEffect(() => { onBusyChange?.(busy || uploadBusy || reviewBusy); return () => onBusyChange?.(false); }, [busy, uploadBusy, reviewBusy, onBusyChange]);
@@ -148,6 +175,25 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
     }
     return () => controller.abort();
   }, [org, month, ready, bindingId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (needsXlsxCheck && selectedTimesheetFileId && selectedTimesheetSha) {
+      void request<TimesheetCheck>(`/organizations/${encodeURIComponent(org)}/payroll-evidence-files/${selectedTimesheetFileId}/timesheet-preflight`, controller.signal)
+        .then((check) => {
+          if (controller.signal.aborted) return;
+          if (check.file_id !== selectedTimesheetFileId || check.organization_id !== Number(org)
+              || check.employment_binding_id !== Number(bindingId) || check.period !== month
+              || check.source_sha256 !== selectedTimesheetSha || check.document_facts_verified !== false
+              || !["structure_checked", "structure_failed", "uncheckable"].includes(check.status)
+              || (check.status === "structure_checked") !== (check.structure_ok === true)) {
+            throw new Error("Проверка табеля относится к другому файлу или договору.");
+          }
+          setTimesheetCheckState({ key: timesheetCheckKey, report: check });
+        }).catch((cause) => { if (!controller.signal.aborted) setTimesheetCheckState({ key: timesheetCheckKey, error: errorText(cause) }); });
+    }
+    return () => controller.abort();
+  }, [org, month, bindingId, needsXlsxCheck, selectedTimesheetFileId, selectedTimesheetSha, timesheetCheckKey]);
 
   function buildCommand(): WorkpaperCommand {
     if (!rules || !selectedBinding || !selectedContract || !selectedTimesheet) throw new Error("Выберите договор и сохранённые файлы договора и табеля.");
@@ -276,6 +322,11 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
       </div>
       {selectedContract && <a className="text-sm text-accent underline" href={`/api/accounting/organizations/${encodeURIComponent(org)}/payroll-evidence-files/${selectedContract.file_id}/download`} target="_blank" rel="noreferrer">Скачать выбранный договор</a>}
       {selectedTimesheet && <a className="ml-3 text-sm text-accent underline" href={`/api/accounting/organizations/${encodeURIComponent(org)}/payroll-evidence-files/${selectedTimesheet.file_id}/download`} target="_blank" rel="noreferrer">Скачать выбранный табель</a>}
+      {selectedTimesheet && !needsXlsxCheck && <p className="text-sm text-muted">Содержание этого табеля проверяется бухгалтером вручную; структура XLSX не проверялась.</p>}
+      {needsXlsxCheck && !timesheetCheck && !timesheetCheckError && <p className="text-sm">Проверяем структуру XLSX…</p>}
+      {timesheetCheckError && <p role="alert" className="text-sm text-red-700">Проверка XLSX недоступна: {timesheetCheckError}. Подтверждение арифметики заблокировано.</p>}
+      {timesheetCheck?.status === "structure_checked" && <p role="status" className="text-sm">Структура XLSX согласована. Содержание кодов и привязка строки к договору остаются на проверке бухгалтера.</p>}
+      {timesheetCheck && timesheetCheck.status !== "structure_checked" && <div role="alert" className="text-sm text-red-700"><p>Структура XLSX не прошла проверку; подтверждение арифметики заблокировано.</p><ul className="list-disc pl-5">{timesheetCheck.issues.map((issue, index) => <li key={`${issue.code}-${index}`}>{timesheetIssue[issue.code] ?? issue.code}{issue.rows.length ? ` · строки ${issue.rows.join(", ")}` : ""}</li>)}</ul></div>}
       <div className="grid gap-3 md:grid-cols-2"><label className="text-sm">Работа с<Input aria-label="Работа с" type="date" value={workFrom} disabled={formLocked} onChange={(event) => { invalidate(); setWorkFrom(event.target.value); }} /></label><label className="text-sm">Работа по<Input aria-label="Работа по" type="date" value={workTo} disabled={formLocked} onChange={(event) => { invalidate(); setWorkTo(event.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-3"><label className="text-sm">Оклад по договору, BYN<Input aria-label="Оклад по договору" inputMode="decimal" value={salary} disabled={formLocked} onChange={(event) => { invalidate(); setSalary(event.target.value); }} placeholder="Из договора, 0.00" /></label><label className="text-sm">Норма часов<Input aria-label="Норма часов" inputMode="decimal" value={normHours} disabled={formLocked} onChange={(event) => { invalidate(); setNormHours(event.target.value); }} placeholder="Из утверждённого графика" /></label><label className="text-sm">Отработано часов<Input aria-label="Отработано часов" inputMode="decimal" value={workedHours} disabled={formLocked} onChange={(event) => { invalidate(); setWorkedHours(event.target.value); }} placeholder="Из табеля" /></label></div>
       <div className="grid gap-3 md:grid-cols-2"><label className="text-sm">Где в договоре указан оклад<Textarea aria-label="Основание оклада" value={contractEvidence} disabled={formLocked} onChange={(event) => { invalidate(); setContractEvidence(event.target.value); }} /></label><label className="text-sm">Где в табеле указаны часы<Textarea aria-label="Основание часов" value={timesheetEvidence} disabled={formLocked} onChange={(event) => { invalidate(); setTimesheetEvidence(event.target.value); }} /></label></div>
@@ -293,7 +344,7 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
       {latestReview && latestReview.basis_digest !== preview.basis_digest && <p className="text-sm">Исправление квитанции № {latestReview.review_id}; прежняя редакция сохранится в истории.</p>}
       {latestReview?.basis_digest !== preview.basis_digest && <>
         <label className="block text-sm">Что именно проверено в документах<Textarea aria-label="Основание проверки главбуха" value={reviewEvidence} disabled={formLocked} onChange={(event) => setReviewEvidence(event.target.value)} /></label>
-        <Button disabled={disabled || reviewBusy || reviewLoading || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
+        <Button disabled={disabled || reviewBusy || reviewLoading || (needsXlsxCheck && timesheetCheck?.status !== "structure_checked") || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
       </>}
       {pendingReview && <p className="break-all text-xs text-muted">Ключ подтверждения: {pendingReview.request_key}. Ввод заблокирован до получения квитанции.</p>}
       {reviewReceipt && <p role="status">Квитанция № {reviewReceipt.review_id}, редакция {reviewReceipt.revision}, сохранена без проводок.</p>}

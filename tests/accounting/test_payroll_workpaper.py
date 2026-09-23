@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, update
 
-from modules.accounting import statutory_requirements
+from modules.accounting import payroll_evidence_files, statutory_requirements
 from modules.accounting.models import (
     AccessGrant,
     Account,
@@ -415,6 +415,14 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "basis_digest": accepted.json()["basis_digest"],
         "reviewer_evidence": "Synthetic chief reviewed source-backed arithmetic only",
     }
+    original_preflight = payroll_evidence_files.timesheet_preflight
+    monkeypatch.setattr(payroll_evidence_files, "timesheet_preflight",
+                        lambda _row: {"status": "structure_failed"})
+    blocked = await client.post(review_url, json={**review_command, "request_key": str(uuid4())})
+    assert blocked.status_code == 422
+    assert "preflight" in blocked.text.lower()
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 0
+    monkeypatch.setattr(payroll_evidence_files, "timesheet_preflight", original_preflight)
     reviewed = await client.post(review_url, json=review_command)
     assert reviewed.status_code == 200, reviewed.text
     receipt = reviewed.json()

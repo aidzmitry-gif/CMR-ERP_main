@@ -17,9 +17,9 @@ const rules = {
 };
 const employment = [{ binding_id: 12, organization_id: 7, employee_name: "Тестовый работник", contract_ref: "contract-1", source_document: "signed-contract", state: "active", effective_from: "2026-01-01" }];
 const sourceFiles = [
-  { file_id: 71, organization_id: 7, employment_binding_id: 12, kind: "employment_contract", month: null, reference: "signed-contract", filename: "contract.pdf", sha256: "c".repeat(64), size_bytes: 100 },
-  { file_id: 72, organization_id: 7, employment_binding_id: 12, kind: "timesheet", month: "2026-10", reference: "timesheet-10", filename: "sheet.pdf", sha256: "d".repeat(64), size_bytes: 100 },
-  { file_id: 73, organization_id: 7, employment_binding_id: 12, kind: "base_adjustment", month: "2026-10", reference: "adjustment-10", filename: "adjust.pdf", sha256: "e".repeat(64), size_bytes: 100 },
+  { file_id: 71, organization_id: 7, employment_binding_id: 12, kind: "employment_contract", month: null, reference: "signed-contract", filename: "contract.pdf", content_type: "application/pdf", sha256: "c".repeat(64), size_bytes: 100 },
+  { file_id: 72, organization_id: 7, employment_binding_id: 12, kind: "timesheet", month: "2026-10", reference: "timesheet-10", filename: "sheet.pdf", content_type: "application/pdf", sha256: "d".repeat(64), size_bytes: 100 },
+  { file_id: 73, organization_id: 7, employment_binding_id: 12, kind: "base_adjustment", month: "2026-10", reference: "adjustment-10", filename: "adjust.pdf", content_type: "application/pdf", sha256: "e".repeat(64), size_bytes: 100 },
 ];
 const matchingFiles = (input: string) => sourceFiles.filter((row) => row.kind === new URL(input, "http://localhost").searchParams.get("kind"));
 const access = { organization_id: 7, can_preview: true, can_upload: true, can_review: true };
@@ -111,5 +111,47 @@ describe("AccountingPayrollWorkpaper", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
     expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("payroll-workpaper-preview"))).toBe(true);
+  });
+
+  it("shows XLSX row defects and blocks chief arithmetic confirmation", async () => {
+    const xlsxFiles = sourceFiles.map((file) => file.kind === "timesheet"
+      ? { ...file, filename: "sheet.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+      : file);
+    const fetchMock = vi.fn((input: string) => {
+      if (input.includes("timesheet-preflight")) return Promise.resolve(response({
+        file_id: 72, organization_id: 7, employment_binding_id: 12, period: "2026-10",
+        source_sha256: "d".repeat(64), status: "structure_failed", structure_ok: false,
+        document_facts_verified: false, issues: [{ code: "hours_formula_range", rows: [11] }],
+      }));
+      if (input.includes("payroll-rule-sets/current")) return Promise.resolve(response(rules));
+      if (input.includes("payroll-workpaper-access")) return Promise.resolve(response(access));
+      if (input.includes("payroll-employments")) return Promise.resolve(response(employment));
+      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(xlsxFiles.filter(
+        (file) => file.kind === new URL(input, "http://localhost").searchParams.get("kind"))));
+      if (input.includes("payroll-workpaper-preview")) return Promise.resolve(response(result));
+      if (input.includes("payroll-arithmetic-summary")) return Promise.resolve(response(summary));
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    await screen.findByText(/Набор правил № 41/);
+    fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
+    await screen.findByRole("option", { name: /timesheet-10/ });
+    fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
+    fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    expect(await screen.findByText(/формула часов охватывает не все дни/)).toHaveTextContent("11");
+    fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
+    fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
+    fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "80.00" } });
+    fireEvent.change(screen.getByLabelText("Основание оклада"), { target: { value: "Строка оклада в договоре" } });
+    fireEvent.change(screen.getByLabelText("Основание часов"), { target: { value: "Часы в подписанном табеле" } });
+    fireEvent.change(screen.getByLabelText("Корректировка SYNTHETIC-EMPLOYER"), { target: { value: "100.00" } });
+    fireEvent.change(screen.getByLabelText("Файл корректировки SYNTHETIC-EMPLOYER"), { target: { value: "73" } });
+    fireEvent.change(screen.getByLabelText("Основание корректировки SYNTHETIC-EMPLOYER"), { target: { value: "Пункт документа о корректировке" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить арифметику" }));
+    await screen.findByText("Предварительный результат");
+    fireEvent.change(screen.getByLabelText("Основание проверки главбуха"), { target: { value: "Проверены договор и табель" } });
+    expect(screen.getByRole("button", { name: "Подтвердить исправление" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-reviews"))).toBe(false);
   });
 });

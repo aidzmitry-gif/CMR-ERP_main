@@ -61,6 +61,15 @@ The file store must be included in backup/restore with the database; no target
 storage or recovery has been verified. The receipt is append-only, while the
 document's contents and authenticity still require human review.
 
+For a stored timesheet, `GET /accounting/organizations/{org_id}/payroll-evidence-files/{file_id}/timesheet-preflight`
+rechecks the private bytes and returns a redacted structural report. A selected
+XLSX with an unreadable or inconsistent month, day headers, formula, cached
+hours, day count or personnel identifier blocks a **new arithmetic review**;
+upload and read-only preview remain available for investigation. A PDF or
+other supported source is marked `manual_source` and remains a human-review
+case. A passing XLSX structure does not identify the employee row, interpret
+time codes, validate the contract or authorize statutory payroll.
+
 The existing single-rate arithmetic preview remains available for review of
 one supplied base. It has no automatic link to this workpaper and cannot be
 used as evidence that a complete payroll run was calculated.

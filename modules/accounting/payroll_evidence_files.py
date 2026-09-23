@@ -20,6 +20,7 @@ from core.services.intake_storage import AttachmentRejected
 from modules.accounting.models import PayrollEmploymentBinding, PayrollEvidenceFile
 from modules.accounting.schemas import Input
 from modules.accounting.service import AccountingError, lock_organization
+from modules.accounting.timesheet_preflight import UnsupportedWorkbook, scan_bytes
 
 PayrollEvidenceKind = Literal[
     "employment_contract", "timesheet", "payroll_policy", "base_adjustment",
@@ -156,6 +157,33 @@ def verify_bytes(row: PayrollEvidenceFile) -> bytes:
         return raw
     except (AttachmentRejected, FileNotFoundError, OSError) as exc:
         raise HTTPException(409, "Payroll source file is missing or differs from its receipt") from exc
+
+
+def timesheet_preflight(row: PayrollEvidenceFile) -> dict:
+    if row.kind != "timesheet" or row.month is None:
+        raise AccountingError("Only a monthly timesheet can be checked")
+    raw = verify_bytes(row)
+    scope = {
+        "file_id": row.id,
+        "organization_id": row.organization_id,
+        "employment_binding_id": row.employment_binding_id,
+        "period": row.month,
+        "source_sha256": row.sha256,
+        "document_facts_verified": False,
+        "payroll_approved": False,
+    }
+    if row.content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return {**scope, "status": "manual_source", "structure_ok": None,
+                "issues": [], "warnings": []}
+    try:
+        report = scan_bytes(raw, row.month)
+    except (UnsupportedWorkbook, ValueError, TypeError, OverflowError, RuntimeError):
+        return {**scope, "status": "uncheckable", "structure_ok": False,
+                "issues": [{"code": "unsupported_workbook", "rows": []}], "warnings": []}
+    if report["source_sha256"] != row.sha256:
+        raise HTTPException(409, "Timesheet source differs from its stored receipt")
+    return {**report, **scope,
+            "status": "structure_checked" if report["structure_ok"] else "structure_failed"}
 
 
 async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: str) -> dict:
