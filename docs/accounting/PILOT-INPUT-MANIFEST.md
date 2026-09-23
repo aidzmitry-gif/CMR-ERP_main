@@ -17,11 +17,18 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 Пути в манифесте относительны к его папке. Нельзя указывать абсолютные пути,
 `..`, повторять путь или пару `source_system`/`source_id`. Для каждого файла
 укажите SHA-256 в нижнем регистре и основание его происхождения. Для `opening_balances`,
-`osv_left` и `osv_right` допустим ровно один файл; остальные виды могут состоять
+`osv_left`, `osv_right` и выбранного зарплатного вида допустим ровно один файл; остальные виды могут состоять
 из нескольких файлов.
 
 Обязательные виды: `opening_balances`, `bank_statement`, `inventory`,
 `receivables`, `vat`, `fx`, `primary_documents`, `osv_left`, `osv_right`.
+Дополнительно обязателен **один** зарплатный вид: `payroll_register` при
+`payroll.mode=external_verified_import` или `payroll_zero_activity` при
+`payroll.mode=no_accruals`. Режим собственного расчёта ERP пока не принимается
+для перехода: G06C не завершён. Для внешнего реестра нужны класс
+`external_system_export` либо `source_register`; для подтверждения отсутствия
+начислений — `primary_document` либо `source_register`. Имя системы-источника
+файла должно совпадать с `payroll.source_system`.
 Дополнительно можно приложить `supporting_calculation`: он сохраняет контекст
 расчёта, но не закрывает ни один обязательный вид доказательства.
 
@@ -45,7 +52,7 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 один период, статус `closed_periods`, ноль непроведённых документов и ноль
 расхождений. Программа сверяет их хэши и данные, но не сохраняет файлы.
 
-## Строгая схема `belarus-pilot-input-v2`
+## Строгая схема `belarus-pilot-input-v3`
 
 Замените все значения в угловых скобках подтверждёнными данными. Пустые поля,
 `unknown`, `n/a`, `todo` и другие заполнители отклоняются. Политика должна
@@ -53,7 +60,7 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 
 ```json
 {
-  "protocol_version": "belarus-pilot-input-v2",
+  "protocol_version": "belarus-pilot-input-v3",
   "pilot": {
     "month": "<YYYY-MM>",
     "cutover_date": "<YYYY-MM-01>",
@@ -77,6 +84,25 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
     "responsible_id": "<устойчивый ID ответственного>",
     "evidence": "<ссылка или идентификатор подтверждённой политики>"
   },
+  "payroll": {
+    "mode": "<external_verified_import или no_accruals>",
+    "source_system": "<система внешнего расчёта или реестр отсутствия начислений>",
+    "verified_by": "<ID бухгалтера или главбуха из owners>",
+    "evidence": "<основание проверки начислений или отсутствия начислений>"
+  },
+  "responsibility": {
+    "sales": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "procurement": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "bank": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "inventory": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "settlements": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "vat": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "fx": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "production": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "repairs": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "fixed_assets": {"owner": "<erp|external|not_applicable>", "source_system": "<ID системы или null>", "evidence": "<основание>"},
+    "payroll": {"owner": "<external|not_applicable>", "source_system": "<ID источника или null>", "evidence": "<основание>"}
+  },
   "artifacts": [
     {
       "kind": "<один из обязательных видов>",
@@ -92,6 +118,18 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 }
 ```
 
+`responsibility` задаёт ответственную систему по каждому участку **только для
+месяца пилота**. При `owner=not_applicable` поле `source_system` должно быть
+JSON `null`; в остальных случаях требуется ID системы. Для зарплаты
+`external_verified_import` означает `owner=external` с тем же `source_system`,
+а `no_accruals` — `owner=not_applicable`. Все одиннадцать участков должны быть
+перечислены. Preflight проверяет заполнение и непротиворечивость этих заявлений,
+но не доказывает фактическое владение процессом и не читает смысл зарплатного
+реестра. Подтверждение бухгалтера и сверка остаются обязательными.
+
+Манифест v2 намеренно не считается полным пакетом перехода: в нём не было
+обязательного источника по зарплате и распределения ответственности.
+
 Сначала заполняется манифест, затем для каждого файла рассчитывается его хэш.
 После любого изменения файла нужно сформировать новый SHA-256 и повторить
 проверку. Успешный preflight не назначает данные основной компании, не снимает
@@ -103,9 +141,12 @@ py -3 scripts/accounting_pilot_preflight.py --manifest <путь-к-manifest.jso
 Если сам `manifest.json` читается как JSON-объект, в ответ также добавляется
 `intake`. Это только инвентаризация названий видов файлов:
 
-- `required_artifact_kinds` — полный обязательный набор;
+- `required_artifact_kinds` — базовый набор плюс зарплатный вид по **заявленному**
+  поддерживаемому режиму; при нераспознанном режиме зарплатный вид ещё не выбран;
 - `declared_candidate_artifact_kinds` — виды, которые лишь заявлены в манифесте;
 - `missing_required_artifact_kinds` — виды, которые ещё не заявлены.
+- `payroll_mode_candidate` и `payroll_kind_candidates` — только непроверенная
+  подсказка о выбранном режиме и допустимых видах зарплатного источника.
 
 `intake.status=unverified_artifact_kind_inventory` не подтверждает ни файл,
 ни его SHA-256, происхождение, содержимое или применимость. Строгий preflight

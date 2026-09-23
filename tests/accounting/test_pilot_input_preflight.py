@@ -54,6 +54,8 @@ SOURCE_CLASS_BY_KIND = {
     "vat": "source_register",
     "fx": "official_rate",
     "primary_documents": "primary_document",
+    "payroll_register": "external_system_export",
+    "payroll_zero_activity": "source_register",
     "osv_left": "external_system_export",
     "osv_right": "erp_control_export",
 }
@@ -97,8 +99,14 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
         path = root / f"{kind}.txt"
         path.write_text(f"synthetic {kind} evidence", encoding="utf-8")
         artifacts.append(artifact(kind, f"{kind}-2026-09", path))
+    payroll = root / "payroll-register.txt"
+    payroll.write_text("synthetic reviewed external payroll export", encoding="utf-8")
+    artifacts.append(artifact(
+        "payroll_register", "payroll-2026-09", payroll,
+        source_system="external-payroll",
+    ))
     manifest = {
-        "protocol_version": "belarus-pilot-input-v2",
+        "protocol_version": "belarus-pilot-input-v3",
         "pilot": {
             "month": "2026-09",
             "cutover_date": "2026-09-01",
@@ -118,6 +126,24 @@ def valid_manifest(root: Path) -> tuple[Path, dict]:
             "responsible_id": "accountant:chief-1",
             "evidence": "Synthetic approved accounting policy reference",
         },
+        "payroll": {
+            "mode": "external_verified_import",
+            "source_system": "external-payroll",
+            "verified_by": "accountant:chief-1",
+            "evidence": "Synthetic chief confirmation of external payroll export",
+        },
+        "responsibility": {
+            area: {
+                "owner": "erp" if area in {"sales", "procurement", "inventory"} else "external",
+                "source_system": "crm-erp" if area in {"sales", "procurement", "inventory"}
+                else "external-payroll" if area == "payroll" else "1c-legacy",
+                "evidence": f"Synthetic source-of-truth assignment for {area}",
+            }
+            for area in (
+                "sales", "procurement", "bank", "inventory", "settlements", "vat", "fx",
+                "production", "repairs", "fixed_assets", "payroll",
+            )
+        },
         "artifacts": artifacts,
     }
     path = root / "manifest.json"
@@ -131,11 +157,15 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     result = preflight(path)
 
     assert result["ok"] is True
-    assert result["artifact_count"] == 9
-    assert result["required_artifact_count"] == 9
+    assert result["artifact_count"] == 10
+    assert result["required_artifact_count"] == 10
     assert result["supporting_artifact_count"] == 0
     assert result["opening_import"]["entry_count"] == 1
     assert result["osv"]["period_from"] == "2026-09-01"
+    assert result["payroll"]["source_contents_verified"] is False
+    assert result["payroll"]["statutory_payroll_certified"] is False
+    assert result["responsibility"]["operational_ownership_verified"] is False
+    assert len(result["responsibility"]["declared_areas"]) == 11
     assert "synthetic bank_statement evidence" not in json.dumps(result)
 
 
@@ -162,9 +192,11 @@ def test_cli_reports_unverified_missing_kind_inventory_without_relaxing_prefligh
     assert "source_class cannot satisfy required opening_balances" in result["errors"][0]
     assert result["intake"] == {
         "status": "unverified_artifact_kind_inventory",
-        "required_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND),
-        "declared_candidate_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND.keys() - {"vat"}),
+        "required_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND.keys() - {"payroll_zero_activity"}),
+        "declared_candidate_artifact_kinds": sorted(SOURCE_CLASS_BY_KIND.keys() - {"vat", "payroll_zero_activity"}),
         "missing_required_artifact_kinds": ["vat"],
+        "payroll_mode_candidate": "external_verified_import",
+        "payroll_kind_candidates": ["payroll_register", "payroll_zero_activity"],
     }
     with pytest.raises(PreflightError, match="source_class cannot satisfy required opening_balances"):
         preflight(path)
@@ -226,6 +258,85 @@ def test_preflight_keeps_supporting_calculation_outside_required_evidence(tmp_pa
 
     result = preflight(path)
 
-    assert result["artifact_count"] == 10
-    assert result["required_artifact_count"] == 9
+    assert result["artifact_count"] == 11
+    assert result["required_artifact_count"] == 10
     assert result["supporting_artifact_count"] == 1
+
+
+def test_preflight_requires_payroll_scope_and_its_matching_source(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    manifest["artifacts"] = [
+        row for row in manifest["artifacts"] if row["kind"] != "payroll_register"
+    ]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="Missing required artifact kinds: payroll_register"):
+        preflight(path)
+
+    path, manifest = valid_manifest(tmp_path)
+    payroll = next(row for row in manifest["artifacts"] if row["kind"] == "payroll_register")
+    payroll["source_system"] = "unrelated-export"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="source_system must match payroll.source_system"):
+        preflight(path)
+
+    path, manifest = valid_manifest(tmp_path)
+    manifest["payroll"]["verified_by"] = "unknown-accountant"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="must identify this pilot's accountant"):
+        preflight(path)
+
+    path, manifest = valid_manifest(tmp_path)
+    payroll_file = tmp_path / "payroll-register.txt"
+    payroll_file.write_bytes(b"")
+    payroll = next(row for row in manifest["artifacts"] if row["kind"] == "payroll_register")
+    payroll["sha256"] = digest(payroll_file)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="Required artifact file is empty"):
+        preflight(path)
+
+    path, manifest = valid_manifest(tmp_path)
+    manifest["protocol_version"] = "belarus-pilot-input-v2"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="belarus-pilot-input-v3"):
+        preflight(path)
+
+
+def test_preflight_requires_documented_zero_payroll_activity(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    manifest["payroll"]["mode"] = "no_accruals"
+    manifest["payroll"]["source_system"] = "hr-control-register"
+    manifest["responsibility"]["payroll"]["owner"] = "not_applicable"
+    manifest["responsibility"]["payroll"]["source_system"] = None
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="contradicts payroll.mode"):
+        preflight(path)
+
+    statement = tmp_path / "payroll-zero-activity.txt"
+    statement.write_text("synthetic signed zero-accrual control statement", encoding="utf-8")
+    manifest["artifacts"] = [
+        row for row in manifest["artifacts"] if row["kind"] != "payroll_register"
+    ]
+    manifest["artifacts"].append(artifact(
+        "payroll_zero_activity", "zero-payroll-2026-09", statement,
+        source_system="hr-control-register",
+    ))
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    accepted = preflight(path)
+    assert accepted["payroll"]["mode"] == "no_accruals"
+    assert accepted["payroll"]["artifact_kind"] == "payroll_zero_activity"
+    assert accepted["payroll"]["source_contents_verified"] is False
+
+
+def test_preflight_requires_every_area_owner_and_payroll_consistency(tmp_path):
+    path, manifest = valid_manifest(tmp_path)
+    del manifest["responsibility"]["fixed_assets"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="responsibility is missing: fixed_assets"):
+        preflight(path)
+
+    path, manifest = valid_manifest(tmp_path)
+    manifest["responsibility"]["payroll"]["owner"] = "erp"
+    manifest["responsibility"]["payroll"]["source_system"] = "crm-erp"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PreflightError, match="responsibility.payroll must match"):
+        preflight(path)

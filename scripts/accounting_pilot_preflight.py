@@ -1,8 +1,9 @@
 """Validate a pilot accounting package locally, before any ERP import.
 
 The command deliberately has no database, network, queue, or 1C dependency.  It
-only validates the accountable manifest, the exact referenced files, the opening
-balance package, and a closed matching OSV pair.
+validates the accountable manifest, declared section ownership, the payroll
+source mode, exact referenced files, the opening balance package, and a closed
+matching OSV pair. It does not validate the meaning of unstructured files.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ if str(ROOT) not in sys.path:
 from modules.accounting.reconciliation import compare  # noqa: E402
 from modules.accounting.schemas import ImportInput  # noqa: E402
 
-PROTOCOL_VERSION = "belarus-pilot-input-v2"
+PROTOCOL_VERSION = "belarus-pilot-input-v3"
 REQUIRED_ARTIFACT_KINDS = frozenset({
     "opening_balances",
     "bank_statement",
@@ -34,9 +35,18 @@ REQUIRED_ARTIFACT_KINDS = frozenset({
     "osv_left",
     "osv_right",
 })
+PAYROLL_ARTIFACT_BY_MODE = {
+    "external_verified_import": "payroll_register",
+    "no_accruals": "payroll_zero_activity",
+}
+PAYROLL_ARTIFACT_KINDS = frozenset(PAYROLL_ARTIFACT_BY_MODE.values())
+RESPONSIBILITY_AREAS = frozenset({
+    "sales", "procurement", "bank", "inventory", "settlements", "vat", "fx",
+    "production", "repairs", "fixed_assets", "payroll",
+})
 SUPPORTING_ARTIFACT_KINDS = frozenset({"supporting_calculation"})
-ALLOWED_ARTIFACT_KINDS = REQUIRED_ARTIFACT_KINDS | SUPPORTING_ARTIFACT_KINDS
-SINGLE_ARTIFACT_KINDS = frozenset({"opening_balances", "osv_left", "osv_right"})
+ALLOWED_ARTIFACT_KINDS = REQUIRED_ARTIFACT_KINDS | PAYROLL_ARTIFACT_KINDS | SUPPORTING_ARTIFACT_KINDS
+SINGLE_ARTIFACT_KINDS = frozenset({"opening_balances", "osv_left", "osv_right"}) | PAYROLL_ARTIFACT_KINDS
 EVIDENCE_ROLES = frozenset({"required_evidence", "supporting_calculation"})
 SOURCE_CLASSES = frozenset({
     "bank_statement",
@@ -55,6 +65,8 @@ REQUIRED_SOURCE_CLASSES: dict[str, frozenset[str]] = {
     "vat": frozenset({"external_system_export", "source_register"}),
     "fx": frozenset({"official_rate"}),
     "primary_documents": frozenset({"primary_document"}),
+    "payroll_register": frozenset({"external_system_export", "source_register"}),
+    "payroll_zero_activity": frozenset({"primary_document", "source_register"}),
     "osv_left": frozenset({"erp_control_export", "external_system_export"}),
     "osv_right": frozenset({"erp_control_export", "external_system_export"}),
 }
@@ -208,7 +220,60 @@ def _validate_identity(manifest: dict[str, Any], cutover: date) -> str:
     return external_id
 
 
-def _validate_artifacts(manifest: dict[str, Any], root: Path) -> dict[str, list[dict[str, Any]]]:
+def _validate_payroll(manifest: dict[str, Any]) -> tuple[str, str, str]:
+    payroll = _require_object(
+        manifest["payroll"], "payroll",
+        required={"mode", "source_system", "verified_by", "evidence"},
+        allowed={"mode", "source_system", "verified_by", "evidence"},
+    )
+    mode = _text(payroll["mode"], "payroll.mode")
+    if mode not in PAYROLL_ARTIFACT_BY_MODE:
+        raise PreflightError("payroll.mode requires external_verified_import or no_accruals")
+    source_system = _text(payroll["source_system"], "payroll.source_system")
+    verified_by = _text(payroll["verified_by"], "payroll.verified_by")
+    if verified_by not in {
+        manifest["owners"]["chief_accountant"], manifest["owners"]["accountant"],
+    }:
+        raise PreflightError("payroll.verified_by must identify this pilot's accountant or chief")
+    _text(payroll["evidence"], "payroll.evidence", minimum=10)
+    return mode, source_system, PAYROLL_ARTIFACT_BY_MODE[mode]
+
+
+def _validate_responsibility(manifest: dict[str, Any], payroll_mode: str,
+                             payroll_source_system: str) -> dict[str, dict[str, str | None]]:
+    declared = _require_object(
+        manifest["responsibility"], "responsibility",
+        required=set(RESPONSIBILITY_AREAS), allowed=set(RESPONSIBILITY_AREAS),
+    )
+    result: dict[str, dict[str, str | None]] = {}
+    for area in sorted(RESPONSIBILITY_AREAS):
+        item = _require_object(
+            declared[area], f"responsibility.{area}",
+            required={"owner", "source_system", "evidence"},
+            allowed={"owner", "source_system", "evidence"},
+        )
+        owner = _text(item["owner"], f"responsibility.{area}.owner")
+        if owner not in {"erp", "external", "not_applicable"}:
+            raise PreflightError(f"responsibility.{area}.owner is invalid")
+        source_system = item["source_system"]
+        if owner == "not_applicable":
+            if source_system is not None:
+                raise PreflightError(f"responsibility.{area}.source_system must be null")
+        else:
+            source_system = _text(source_system, f"responsibility.{area}.source_system")
+        _text(item["evidence"], f"responsibility.{area}.evidence", minimum=10)
+        result[area] = {"owner": owner, "source_system": source_system}
+    payroll = result["payroll"]
+    expected_owner = "external" if payroll_mode == "external_verified_import" else "not_applicable"
+    if (payroll["owner"] != expected_owner
+            or (expected_owner == "external"
+                and payroll["source_system"] != payroll_source_system)):
+        raise PreflightError("responsibility.payroll must match the declared payroll mode and source")
+    return result
+
+
+def _validate_artifacts(manifest: dict[str, Any], root: Path, *,
+                        payroll_kind: str, payroll_source_system: str) -> dict[str, list[dict[str, Any]]]:
     artifacts = manifest["artifacts"]
     if not isinstance(artifacts, list) or not artifacts:
         raise PreflightError("artifacts must contain the required evidence files")
@@ -232,14 +297,18 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path) -> dict[str, list[
         source_class = _text(artifact["source_class"], f"{field}.source_class")
         if source_class not in SOURCE_CLASSES:
             raise PreflightError(f"{field}.source_class is invalid")
-        if kind in REQUIRED_ARTIFACT_KINDS:
+        if kind in REQUIRED_ARTIFACT_KINDS or kind == payroll_kind:
             if evidence_role != "required_evidence":
                 raise PreflightError(f"{field} cannot satisfy required {kind} as supporting_calculation")
             if source_class not in REQUIRED_SOURCE_CLASSES[kind]:
                 raise PreflightError(f"{field}.source_class cannot satisfy required {kind}")
+        elif kind in PAYROLL_ARTIFACT_KINDS:
+            raise PreflightError(f"{field}.kind contradicts payroll.mode")
         elif evidence_role != "supporting_calculation":
             raise PreflightError(f"{field} must use supporting_calculation evidence_role")
         source_system = _text(artifact["source_system"], f"{field}.source_system")
+        if kind == payroll_kind and source_system != payroll_source_system:
+            raise PreflightError("Payroll artifact source_system must match payroll.source_system")
         source_id = _text(artifact["source_id"], f"{field}.source_id")
         source_key = (source_system, source_id)
         if source_key in source_keys:
@@ -250,6 +319,12 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path) -> dict[str, list[
             raise PreflightError(f"{field}.sha256 must be a lowercase SHA-256")
         _text(artifact["evidence"], f"{field}.evidence", minimum=10)
         path = _relative_file(root, artifact["path"], f"{field}.path")
+        if kind in REQUIRED_ARTIFACT_KINDS or kind == payroll_kind:
+            try:
+                if path.stat().st_size == 0:
+                    raise PreflightError(f"Required artifact file is empty: {path.name}")
+            except OSError as exc:
+                raise PreflightError(f"Cannot read {path.name}") from exc
         if path in paths:
             raise PreflightError("Each artifact path must be used once")
         paths.add(path)
@@ -262,10 +337,11 @@ def _validate_artifacts(manifest: dict[str, Any], root: Path) -> dict[str, list[
             "source_id": source_id,
             "sha256": actual_hash,
         })
-    missing = sorted(REQUIRED_ARTIFACT_KINDS - by_kind.keys())
+    required_kinds = REQUIRED_ARTIFACT_KINDS | {payroll_kind}
+    missing = sorted(required_kinds - by_kind.keys())
     if missing:
         raise PreflightError(f"Missing required artifact kinds: {', '.join(missing)}")
-    for kind in SINGLE_ARTIFACT_KINDS:
+    for kind in SINGLE_ARTIFACT_KINDS & required_kinds:
         if len(by_kind[kind]) != 1:
             raise PreflightError(f"Exactly one {kind} artifact is required")
     return by_kind
@@ -328,12 +404,18 @@ def _unverified_intake(manifest_path: Path) -> dict[str, Any] | None:
             kind = artifact.get("kind")
             if isinstance(kind, str) and kind.strip() in ALLOWED_ARTIFACT_KINDS:
                 declared.add(kind.strip())
-    required = sorted(REQUIRED_ARTIFACT_KINDS)
+    payroll = manifest.get("payroll")
+    payroll_mode = payroll.get("mode") if isinstance(payroll, dict) else None
+    payroll_kind = PAYROLL_ARTIFACT_BY_MODE.get(payroll_mode) if isinstance(payroll_mode, str) else None
+    required_kinds = REQUIRED_ARTIFACT_KINDS | ({payroll_kind} if payroll_kind else set())
+    required = sorted(required_kinds)
     return {
         "status": "unverified_artifact_kind_inventory",
         "required_artifact_kinds": required,
         "declared_candidate_artifact_kinds": sorted(declared),
-        "missing_required_artifact_kinds": sorted(REQUIRED_ARTIFACT_KINDS - declared),
+        "missing_required_artifact_kinds": sorted(required_kinds - declared),
+        "payroll_mode_candidate": payroll_mode if payroll_kind else None,
+        "payroll_kind_candidates": sorted(PAYROLL_ARTIFACT_KINDS),
     }
 
 
@@ -344,14 +426,19 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
     manifest = _require_object(
         manifest,
         "manifest",
-        required={"protocol_version", "pilot", "organization", "owners", "policy", "artifacts"},
-        allowed={"protocol_version", "pilot", "organization", "owners", "policy", "artifacts"},
+        required={"protocol_version", "pilot", "organization", "owners", "policy", "payroll", "responsibility", "artifacts"},
+        allowed={"protocol_version", "pilot", "organization", "owners", "policy", "payroll", "responsibility", "artifacts"},
     )
     if _text(manifest["protocol_version"], "protocol_version") != PROTOCOL_VERSION:
         raise PreflightError(f"protocol_version must be {PROTOCOL_VERSION}")
     month, cutover = _validate_pilot(manifest)
     external_id = _validate_identity(manifest, cutover)
-    artifacts = _validate_artifacts(manifest, manifest_path.parent)
+    payroll_mode, payroll_source_system, payroll_kind = _validate_payroll(manifest)
+    responsibility = _validate_responsibility(manifest, payroll_mode, payroll_source_system)
+    artifacts = _validate_artifacts(
+        manifest, manifest_path.parent,
+        payroll_kind=payroll_kind, payroll_source_system=payroll_source_system,
+    )
     opening = _validate_opening(artifacts["opening_balances"][0], cutover)
     osv = _validate_osv(artifacts["osv_left"][0], artifacts["osv_right"][0], month, cutover)
     return {
@@ -360,8 +447,21 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         "pilot": {"month": month, "cutover_date": cutover.isoformat()},
         "organization_external_id": external_id,
         "artifact_count": sum(len(rows) for rows in artifacts.values()),
-        "required_artifact_count": sum(len(artifacts[kind]) for kind in REQUIRED_ARTIFACT_KINDS),
+        "required_artifact_count": sum(len(artifacts[kind]) for kind in REQUIRED_ARTIFACT_KINDS | {payroll_kind}),
         "supporting_artifact_count": len(artifacts.get("supporting_calculation", [])),
+        "payroll": {
+            "mode": payroll_mode,
+            "source_system": payroll_source_system,
+            "artifact_kind": payroll_kind,
+            "file_sha256": artifacts[payroll_kind][0]["sha256"],
+            "source_contents_verified": False,
+            "statutory_payroll_certified": False,
+        },
+        "responsibility": {
+            "pilot_month_only": month,
+            "declared_areas": responsibility,
+            "operational_ownership_verified": False,
+        },
         "opening_import": {
             "entry_count": opening.expected_entry_count,
             "line_count": opening.expected_line_count,
@@ -383,7 +483,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v2 JSON manifest")
+    parser.add_argument("--manifest", type=Path, required=True, help="Path to belarus-pilot-input-v3 JSON manifest")
     args = parser.parse_args(argv)
     try:
         result = preflight(args.manifest)
