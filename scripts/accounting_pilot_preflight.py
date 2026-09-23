@@ -90,7 +90,7 @@ def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _read_json(path: Path, *, limit: int) -> dict[str, Any]:
+def _read_json_with_digest(path: Path, *, limit: int) -> tuple[dict[str, Any], str]:
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -103,7 +103,11 @@ def _read_json(path: Path, *, limit: int) -> dict[str, Any]:
         raise PreflightError(f"{path.name} must be valid JSON without duplicate fields") from exc
     if not isinstance(value, dict):
         raise PreflightError(f"{path.name} must contain a JSON object")
-    return value
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def _read_json(path: Path, *, limit: int) -> dict[str, Any]:
+    return _read_json_with_digest(path, limit=limit)[0]
 
 
 def _require_object(value: object, field: str, *, required: set[str], allowed: set[str]) -> dict[str, Any]:
@@ -422,7 +426,7 @@ def _unverified_intake(manifest_path: Path) -> dict[str, Any] | None:
 def preflight(manifest_path: Path) -> dict[str, Any]:
     """Validate one explicit manifest and return evidence metadata only."""
     manifest_path = manifest_path.resolve()
-    manifest = _read_json(manifest_path, limit=MAX_MANIFEST_BYTES)
+    manifest, manifest_sha256 = _read_json_with_digest(manifest_path, limit=MAX_MANIFEST_BYTES)
     manifest = _require_object(
         manifest,
         "manifest",
@@ -444,6 +448,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
     return {
         "ok": True,
         "protocol_version": PROTOCOL_VERSION,
+        "manifest_sha256": manifest_sha256,
         "pilot": {"month": month, "cutover_date": cutover.isoformat()},
         "organization_external_id": external_id,
         "artifact_count": sum(len(rows) for rows in artifacts.values()),

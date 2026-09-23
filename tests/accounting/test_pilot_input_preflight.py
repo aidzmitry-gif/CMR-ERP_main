@@ -157,6 +157,7 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     result = preflight(path)
 
     assert result["ok"] is True
+    assert result["manifest_sha256"] == digest(path)
     assert result["artifact_count"] == 10
     assert result["required_artifact_count"] == 10
     assert result["supporting_artifact_count"] == 0
@@ -167,6 +168,13 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     assert result["responsibility"]["operational_ownership_verified"] is False
     assert len(result["responsibility"]["declared_areas"]) == 11
     assert "synthetic bank_statement evidence" not in json.dumps(result)
+
+    rewritten = json.loads(path.read_text(encoding="utf-8"))
+    rewritten["responsibility"]["repairs"]["evidence"] = "Different declared responsibility evidence"
+    path.write_text(json.dumps(rewritten), encoding="utf-8")
+    changed = preflight(path)
+    assert changed["manifest_sha256"] == digest(path)
+    assert changed["manifest_sha256"] != result["manifest_sha256"]
 
 
 def test_preflight_rejects_missing_required_artifact(tmp_path):
