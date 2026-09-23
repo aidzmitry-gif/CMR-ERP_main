@@ -1564,6 +1564,16 @@ async def payroll_workpaper_review_by_request(
     return await payroll_workpaper_review.by_request(ctx[0], org_id, request_key)
 
 
+@router.get('/organizations/{org_id}/periods/{month}/payroll-arithmetic-summary')
+async def payroll_arithmetic_summary(org_id: int, month: str, response: Response,
+                                     ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_workpaper_review.monthly_arithmetic_summary(ctx[0], org_id, month)
+
+
 @router.post('/organizations/{org_id}/payroll-evidence-files')
 async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInput,
                                        response: Response, ctx=Depends(member)):

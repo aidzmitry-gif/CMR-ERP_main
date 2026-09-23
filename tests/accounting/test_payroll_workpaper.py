@@ -360,6 +360,25 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert corrected.status_code == 200, corrected.text
     assert corrected.json()["revision"] == 2
     assert corrected.json()["supersedes_review_id"] == receipt["review_id"]
+    summary_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-arithmetic-summary"
+    summary_response = await client.get(summary_url)
+    assert summary_response.status_code == 200, summary_response.text
+    summary = summary_response.json()
+    assert summary_response.headers["cache-control"] == "private, no-store"
+    assert summary["review_count"] == 2
+    assert summary["selected_segment_count"] == 1
+    assert summary["bindings"][0]["segments"][0]["review_id"] == corrected.json()["review_id"]
+    assert summary["totals"] == {
+        "gross_byn": "800.00",
+        "listed_employee_deductions_byn": "80.00",
+        "after_listed_deductions_byn": "720.00",
+        "listed_employer_contributions_byn": "140.00",
+        "cost_including_listed_contributions_byn": "940.00",
+    }
+    assert len(summary["selection_digest"]) == 64
+    assert summary["coverage_verified"] is False
+    assert summary["posting_available"] is False
+    assert summary["statutory_payroll_certified"] is False
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": receipt["review_id"],
@@ -397,6 +416,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.get(
         f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
     )).status_code == 200
+    assert (await client.get(summary_url)).status_code == 200
     immutable_receipt = await db.get(PayrollWorkpaperReview, receipt["review_id"])
     immutable_receipt.reviewer_evidence = "Attempted edit of reviewed history"
     with pytest.raises(ValueError, match="immutable"):

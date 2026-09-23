@@ -23,7 +23,8 @@ The workpaper reports `gross_byn`, amounts for **listed** components,
 `after_listed_deductions_byn`, `cost_including_listed_contributions_byn` and a
 digest of the full calculation basis. These totals are not a statutory net
 salary or complete employer cost: unlisted components, eligibility, caps,
-exemptions, benefits and period aggregation are not calculated. Document
+exemptions and benefits are not calculated; this single-segment preview does
+not aggregate a period. Document
 digests and the rule-set source document are recorded as claims unless the
 caller selects both `contract_file_id` and `timesheet_file_id`. With those IDs,
 the workpaper verifies the private file bytes against server-calculated hashes,
@@ -67,3 +68,15 @@ New reviews are blocked when this or a later period is closed. The receipt
 records the bytes verified at review time but does not claim that files remain
 unchanged later, that their figures are true, or that statutory payroll is
 complete. It does not post to the ledger.
+
+`GET /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-arithmetic-summary`
+reads all immutable reviewed segments of one legal entity and month. It checks
+receipt hashes, scope, component arithmetic and correction chains, then sums
+only the latest revision of each non-overlapping work segment. The response
+lists selected receipt IDs and basis/snapshot hashes; `selection_digest` changes
+when a selected revision changes. Accountant/chief membership is required.
+This is an arithmetic summary of reviewed segments, including potentially
+incomplete coverage. It does not prove that every employee, date, payment,
+legal rule or rate is present. `coverage_verified`, `source_facts_verified`,
+`posting_available` and `statutory_payroll_certified` remain false. No ledger
+entry, payroll run or external form is created.
