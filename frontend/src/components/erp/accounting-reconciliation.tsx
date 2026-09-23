@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 type Difference = { account: string; dimensions: Record<string, string>; currency: string; off_balance: boolean; presence: string; fields: Record<string, { left: string | null; right: string | null; right_minus_left: string | null }> };
-type Protocol = { status: string; cutover_ready?: boolean; accepted_by_accountant?: boolean; eligibility_blockers?: string[]; receipt_id?: number; left: { from: string; to: string; sha256: string; status: string; pending_documents?: number }; right: { sha256: string; status: string; pending_documents?: number }; differences: Difference[] };
+type Protocol = { status: string; cutover_ready?: boolean; accepted_by_accountant?: boolean; erp_ledger_verified?: boolean; eligibility_blockers?: string[]; receipt_id?: number; left: { from: string; to: string; sha256: string; status: string; pending_documents?: number }; right: { sha256: string; status: string; pending_documents?: number }; differences: Difference[] };
 type Issue = { organization_id: number; issue_id: number; request_key: string; period_from: string; period_to: string; left_digest: string; right_digest: string; difference_count: number; eligibility_blockers: string[]; responsible: string; evidence: string; requires_fresh_comparison: boolean; accepted_by_accountant: boolean; cutover_ready: boolean; already_queued?: boolean; created_at?: string };
 type IssueItem = Difference & { item_id: number; item_key: string; digest: string };
 type IssuePage = { organization_id: number; rows: Issue[]; next_after_id: number | null };
@@ -21,7 +21,7 @@ async function encoded(file: File) {
 }
 
 const labels: Record<string, string> = { opening: "Начальное сальдо BYN", debit: "Дебет BYN", credit: "Кредит BYN", closing: "Конечное сальдо BYN", original_opening: "Начальное сальдо в валюте", original_debit: "Дебет в валюте", original_credit: "Кредит в валюте", original_closing: "Конечное сальдо в валюте", quantity_opening: "Начальное количество", quantity_debit: "Приход количества", quantity_credit: "Расход количества", quantity_closing: "Конечное количество" };
-const blockers: Record<string, string> = { numeric_differences: "числовые расхождения", reports_not_closed: "периоды не закрыты", pending_documents: "есть непроведённые документы" };
+const blockers: Record<string, string> = { numeric_differences: "числовые расхождения", reports_not_closed: "периоды не закрыты", pending_documents: "есть непроведённые документы", erp_snapshot_mismatch: "правая ОСВ не совпадает с текущими проводками ERP" };
 const reportStatus = (status: string) => status === "preliminary" ? "предварительные данные" : status === "closed_periods" ? "периоды закрыты" : "неизвестный статус";
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const failureDetail = (value: unknown, fallback: string) => isRecord(value) && typeof value.detail === "string" ? value.detail : fallback;
@@ -36,7 +36,7 @@ function displayBlockers(values: string[] | undefined) {
   return (values ?? []).map((value) => blockers[value] ?? value).join(", ");
 }
 
-export function AccountingReconciliation({ org }: { org: string }) {
+export function AccountingReconciliation({ org, start, end }: { org: string; start?: string; end?: string }) {
   const [left, setLeft] = useState<File | null>(null), [right, setRight] = useState<File | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [protocol, setProtocol] = useState<Protocol | null>(null);
@@ -154,7 +154,8 @@ export function AccountingReconciliation({ org }: { org: string }) {
   const locked = busy || confirmBusy || queueBusy || queueRetry || !org;
   return <section aria-label="Сверка ОСВ" className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Сверка двух ОСВ</h2>
-    <p>Выберите два CSV в формате выгрузки ERP для одного юрлица и периода. Выгрузку 1С сначала приведите к этому формату по утверждённому соответствию счетов и аналитики. До 2 МБ на файл. Файлы отправляются серверу для сравнения; проводки не создаются.</p>
+    <p>Выберите два CSV для одного юрлица и периода. Правую ОСВ скачайте из ERP; выгрузку 1С сначала приведите к этому формату по утверждённому соответствию счетов и аналитики. До 2 МБ на файл. Файлы отправляются серверу для сравнения; проводки не создаются.</p>
+    {org && start && end && <a className="text-accent underline" href={`/api/accounting/organizations/${encodeURIComponent(org)}/reconciliation/erp-osv.csv?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`} download>Скачать ОСВ ERP за выбранный период</a>}
     <p className="text-sm text-muted">Период берётся из файлов. Разница: правая ОСВ минус левая. Отсутствующие строки не считаются нулевыми. Совпадение не заменяет проверку бухгалтера и закрытие месяца.</p>
     <fieldset disabled={locked} className="space-y-3">
       <label className="block">Левая ОСВ<input className="block" type="file" accept=".csv,text/csv" onChange={(e) => { setLeft(e.target.files?.[0] ?? null); clear(); }} /></label>
@@ -164,6 +165,7 @@ export function AccountingReconciliation({ org }: { org: string }) {
     {!org && <p>Выберите юрлицо.</p>}{busy && <p role="status">Сравнение файлов…</p>}{error && <p role="alert">{error}</p>}
     {protocol && <>
       <p>{protocol.status === "no_numeric_differences" ? "Числовых расхождений не найдено." : `Строк с расхождениями: ${protocol.differences.length}.`}</p>
+      {protocol.erp_ledger_verified === false && <p role="status">Правая ОСВ не совпадает с текущим отчётом ERP. Скачайте новую ОСВ и повторите сверку.</p>}
       <p>{protocol.left.from} — {protocol.left.to} · Левая: {reportStatus(protocol.left.status)} · Правая: {reportStatus(protocol.right.status)}</p>
       {protocol.accepted_by_accountant ? <p role="status">Протокол принят бухгалтером{protocol.receipt_id ? ` · квитанция №${protocol.receipt_id}` : ""}. Повторная запись не создаётся.</p> : protocol.cutover_ready ? <div className="space-y-2 rounded border border-accent p-3"><p>ОСВ совпадают, оба отчёта закрыты и необработанных документов нет. Перед подтверждением проверьте протокол.</p><label className="block">Основание проверки<input aria-label="Основание принятия сверки" disabled={busy || confirmBusy || queueBusy} className="mt-1 block w-full rounded border border-line px-2 py-1" value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="Протокол сверки и подпись бухгалтера" /></label><Button disabled={confirmBusy || evidence.trim().length < 10} onClick={() => void confirm()}>{confirmBusy ? "Сохраняем…" : "Принять протокол бухгалтером"}</Button></div> : <div className="space-y-2 rounded border border-amber-300 p-3"><p className="text-sm">Подтверждение недоступно: {displayBlockers(protocol.eligibility_blockers) || "нужны закрытые отчёты без необработанных документов"}.</p><p className="text-sm text-muted">Сохраните расхождения в очередь с ответственным. Это не исправляет старую ОСВ и не делает её принятой: после исправления нужна новая выгрузка и сверка.</p><label className="block">Ответственный за исправление<input aria-label="Ответственный за исправление" disabled={queueBusy || queueRetry} className="mt-1 block w-full rounded border border-line px-2 py-1" value={responsible} onChange={(e) => setResponsible(e.target.value)} placeholder="Устойчивый ID сотрудника или подразделения" /></label><label className="block">Основание постановки в очередь<input aria-label="Основание постановки в очередь" disabled={queueBusy || queueRetry} className="mt-1 block w-full rounded border border-line px-2 py-1" value={queueEvidence} onChange={(e) => setQueueEvidence(e.target.value)} placeholder="Причина и первичный источник расхождения" /></label>{queueRetry && <p role="status" className="text-sm text-amber-700">Команда сохранена в неизменном виде. Изменение файлов или ответственного заблокировано до её повторения.</p>}<Button disabled={queueBusy || (!queueRetry && (!queueKey || !responsible.trim() || queueEvidence.trim().length < 10))} onClick={() => void queue()}>{queueBusy ? "Сохраняем…" : queueRetry ? "Повторить сохранение той же очереди" : "Сохранить очередь сверки"}</Button></div>}
       <Button variant="secondary" onClick={download}>Скачать протокол JSON</Button>

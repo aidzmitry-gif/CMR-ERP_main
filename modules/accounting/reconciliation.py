@@ -136,6 +136,53 @@ def compare_uploads(org_id: int, left_base64: str, right_base64: str):
     return _compare_uploads(org_id, left_base64, right_base64)[2]
 
 
+async def erp_snapshot(session, org_id: int, start: date, end: date) -> bytes:
+    """Render a normalized OSV from this book's current immutable ledger lines."""
+    from modules.accounting import reports
+
+    report = await reports.report(session, org_id, start, end)
+    if (report["organization_id"] != org_id or report["from"] != start.isoformat()
+            or report["to"] != end.isoformat()):
+        raise service.AccountingError("ERP report belongs to another book or period")
+    metadata = [str(org_id), start.isoformat(), end.isoformat(), report["status"],
+                str(report["pending_documents"])]
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, delimiter=";")
+    writer.writerow(HEADERS)
+    writer.writerow(["report", *metadata, *([""] * 17)])
+    for row in report["trial_balance"]:
+        title = str(row["title"])
+        if title.startswith(("=", "+", "-", "@", "\t", "\r")):
+            title = "'" + title
+        writer.writerow([
+            "balance", *metadata, row["account"], title,
+            json.dumps(row["dimensions"], ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            row["currency"], "Да" if row["off_balance"] else "Нет",
+            *(row[field] for field in FIELDS),
+        ])
+    raw = output.getvalue().encode("utf-8-sig")
+    if len(raw) > 2_000_000:
+        raise service.AccountingError("ERP OSV exceeds the 2 MB reconciliation limit")
+    # The same parser used for uploads catches an unsupported ledger shape.
+    parsed = parse_snapshot(raw)
+    if parsed["organization_id"] != str(org_id):
+        raise service.AccountingError("ERP OSV scope changed during export")
+    return raw
+
+
+async def verify_erp_snapshot(session, org_id: int, right_raw: bytes, protocol: dict) -> dict:
+    right = protocol["right"]
+    current = await erp_snapshot(session, org_id, date.fromisoformat(right["from"]),
+                                 date.fromisoformat(right["to"]))
+    verified = current == right_raw
+    blockers = list(protocol["eligibility_blockers"])
+    if not verified and "erp_snapshot_mismatch" not in blockers:
+        blockers.append("erp_snapshot_mismatch")
+    return {**protocol, "erp_ledger_verified": verified,
+            "erp_ledger_sha256": hashlib.sha256(current).hexdigest(),
+            "eligibility_blockers": blockers, "cutover_ready": not blockers}
+
+
 def prepare_queue_uploads(org_id: int, left_base64: str, right_base64: str) -> tuple[bytes, bytes, dict]:
     """Decode and compare a queue candidate before its async database write."""
     return _compare_uploads(org_id, left_base64, right_base64)
@@ -169,6 +216,7 @@ def _json_digest(value: object) -> str:
 
 
 def _receipt_result(receipt: ReconciliationReceipt) -> dict:
+    erp_verified = receipt.snapshot.get("erp_ledger_verified") is True
     return {
         "organization_id": receipt.organization_id,
         "receipt_id": receipt.id,
@@ -184,7 +232,8 @@ def _receipt_result(receipt: ReconciliationReceipt) -> dict:
         "actor": receipt.actor,
         "created_at": receipt.created_at,
         "accepted_by_accountant": True,
-        "cutover_ready": True,
+        "erp_ledger_verified": erp_verified,
+        "cutover_ready": erp_verified,
         "already_confirmed": False,
     }
 
@@ -193,9 +242,6 @@ async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: 
                           request_key: UUID, evidence: str, actor: str) -> dict:
     """Persist an eligible comparison without creating ledger movements."""
     left_raw, right_raw, protocol = _compare_uploads(org_id, left_base64, right_base64)
-    if not protocol["cutover_ready"]:
-        blockers = ", ".join(protocol["eligibility_blockers"])
-        raise ValueError(f"Сверка не готова к подтверждению: {blockers}")
     command_digest = _command_digest(left_raw, right_raw, evidence)
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(ReconciliationReceipt).where(
@@ -206,6 +252,10 @@ async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: 
         if existing.command_digest != command_digest:
             raise service.AccountingError("Ключ сверки уже использован с другим протоколом")
         return {**_receipt_result(existing), "already_confirmed": True}
+    protocol = await verify_erp_snapshot(session, org_id, right_raw, protocol)
+    if not protocol["cutover_ready"]:
+        blockers = ", ".join(protocol["eligibility_blockers"])
+        raise ValueError(f"Сверка не готова к подтверждению: {blockers}")
     duplicate = await session.scalar(select(ReconciliationReceipt).where(
         ReconciliationReceipt.organization_id == org_id,
         ReconciliationReceipt.command_digest == command_digest,
@@ -228,6 +278,8 @@ async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: 
         "right_rows": protocol["right_rows"],
         "difference_count": len(protocol["differences"]),
         "eligibility_blockers": protocol["eligibility_blockers"],
+        "erp_ledger_verified": protocol["erp_ledger_verified"],
+        "erp_ledger_sha256": protocol["erp_ledger_sha256"],
     }
     payload = {
         "organization_id": org_id,
@@ -283,6 +335,8 @@ def _issue_snapshot(protocol: dict) -> dict:
         "right_rows": protocol["right_rows"],
         "difference_count": len(protocol["differences"]),
         "eligibility_blockers": protocol["eligibility_blockers"],
+        "erp_ledger_verified": protocol["erp_ledger_verified"],
+        "erp_ledger_sha256": protocol["erp_ledger_sha256"],
     }
 
 
@@ -355,8 +409,6 @@ async def queue_uploads(session, org_id: int, left_base64: str, right_base64: st
     edited into an accepted reconciliation.
     """
     left_raw, right_raw, protocol = prepared or prepare_queue_uploads(org_id, left_base64, right_base64)
-    if protocol["cutover_ready"]:
-        raise ValueError("Совпадающую закрытую ОСВ не помещают в очередь; подтвердите протокол бухгалтером")
     command_digest = _queue_command_digest(left_raw, right_raw, responsible, evidence)
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(ReconciliationIssue).where(
@@ -367,6 +419,9 @@ async def queue_uploads(session, org_id: int, left_base64: str, right_base64: st
         if existing.command_digest != command_digest:
             raise service.AccountingError("Ключ очереди сверки уже использован с другими файлами или ответственным")
         return _issue_result(existing, already_queued=True)
+    protocol = await verify_erp_snapshot(session, org_id, right_raw, protocol)
+    if protocol["cutover_ready"]:
+        raise ValueError("Совпадающую закрытую ОСВ не помещают в очередь; подтвердите протокол бухгалтером")
     duplicate = await session.scalar(select(ReconciliationIssue).where(
         ReconciliationIssue.organization_id == org_id,
         ReconciliationIssue.command_digest == command_digest,

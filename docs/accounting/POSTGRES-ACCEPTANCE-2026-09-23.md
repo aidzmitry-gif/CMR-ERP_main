@@ -1,5 +1,20 @@
 # Local PostgreSQL acceptance checkpoint — 2026-09-23
 
+## New local G07 check — 2026-09-24
+
+Source head `0174` on an isolated PostgreSQL 18.4 container: five focused
+reconciliation/queue tests passed, including two concurrent writers for one
+immutable issue. The test fixture replayed the explicit migration tail through
+`0174`; this revision admits the `erp_snapshot_mismatch` blocker without
+weakening the existing difference-count and immutable-history guards. A
+separate disposable recovery rehearsal upgraded a fresh database to `0174`,
+checked `0173 → 0172 → 0174` for the work-schedule constraint, checked
+`0174 → 0173 → 0174` for the reconciliation guard, and restored a synthetic
+database receipt with its private file. Database-only restore and modified
+file bytes were rejected. Generated databases, container and scratch files
+were removed. None of this inspects the target database or proves that the
+left-hand OSV was exported from 1C.
+
 This checkpoint used a dedicated, disposable `postgres:18.4-alpine` container
 bound only to a loopback port. It did not connect to a running ERP, production
 database or user data. Source branch: `agent/crm-acc-prod009`; source Alembic

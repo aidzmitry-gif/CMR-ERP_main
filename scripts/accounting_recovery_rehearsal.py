@@ -114,6 +114,18 @@ def _assert_work_schedule_constraints(container: str, user: str, database: str,
             raise RehearsalError(f"{name} did not match the expected work-schedule migration state")
 
 
+def _assert_reconciliation_blocker(container: str, user: str, database: str,
+                                   password: str, *, present: bool) -> None:
+    result = _psql(container, user, database, """
+    SELECT CASE WHEN pg_get_functiondef(
+      'accounting.guard_reconciliation_issue_insert()'::regprocedure
+    ) LIKE '%erp_snapshot_mismatch%' THEN 'yes' ELSE 'no' END AS blocker
+    """, secret=password)
+    expected = "yes" if present else "no"
+    if not re.search(rf"(?m)^\s*{expected}\s*$", result.stdout):
+        raise RehearsalError("reconciliation guard did not match the expected migration state")
+
+
 def _cleanup_database(container: str, user: str, database: str, password: str) -> None:
     _assert_generated(database, DATABASE_PREFIX)
     _run(
@@ -216,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image", required=True, help="already-present local PostgreSQL Docker image")
     parser.add_argument("--check-work-schedule-migration", action="store_true",
                         help="rehearse 0173 downgrade/upgrade and verify both file constraints")
+    parser.add_argument("--check-reconciliation-migration", action="store_true",
+                        help="rehearse 0174 downgrade/upgrade and verify the ERP mismatch blocker")
     args = parser.parse_args(argv)
 
     token = uuid.uuid4().hex
@@ -288,8 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         expected_head = _alembic_head(python, migration_env, password)
         _run("upgrade generated source database", [*python, "-m", "alembic", "upgrade", "head"], timeout=180, env=migration_env, secret=password)
         if args.check_work_schedule_migration:
-            if expected_head != "0173":
-                raise RehearsalError("work-schedule migration check requires source head 0173")
+            if expected_head not in {"0173", "0174"}:
+                raise RehearsalError("work-schedule migration check requires source head 0173 or 0174")
             _assert_work_schedule_constraints(container, user, source_db, password, present=True)
             _run("downgrade generated source database to 0172",
                  [*python, "-m", "alembic", "downgrade", "0172"],
@@ -299,6 +313,18 @@ def main(argv: list[str] | None = None) -> int:
                  [*python, "-m", "alembic", "upgrade", "head"],
                  timeout=180, env=migration_env, secret=password)
             _assert_work_schedule_constraints(container, user, source_db, password, present=True)
+        if args.check_reconciliation_migration:
+            if expected_head != "0174":
+                raise RehearsalError("reconciliation migration check requires source head 0174")
+            _assert_reconciliation_blocker(container, user, source_db, password, present=True)
+            _run("downgrade generated source database to 0173",
+                 [*python, "-m", "alembic", "downgrade", "0173"],
+                 timeout=180, env=migration_env, secret=password)
+            _assert_reconciliation_blocker(container, user, source_db, password, present=False)
+            _run("reapply generated reconciliation migration",
+                 [*python, "-m", "alembic", "upgrade", "head"],
+                 timeout=180, env=migration_env, secret=password)
+            _assert_reconciliation_blocker(container, user, source_db, password, present=True)
 
         receipt_key = str(uuid.uuid4())
         digest_a, digest_b, command_digest, receipt_digest = ("a" * 64, "b" * 64, "c" * 64, "d" * 64)
@@ -365,7 +391,8 @@ FROM organization;
             raise RehearsalError("receipt update was rejected without the immutable reconciliation guard signal")
         print(f"recovery rehearsal passed: alembic_head={expected_head}; reconciliation_receipts=1; "
               "payroll_files=1; database_only_rejected=true; tamper_rejected=true; paired_restore_verified=true; "
-              f"work_schedule_migration_checked={str(args.check_work_schedule_migration).lower()}")
+              f"work_schedule_migration_checked={str(args.check_work_schedule_migration).lower()}; "
+              f"reconciliation_migration_checked={str(args.check_reconciliation_migration).lower()}")
         return 0
     except RehearsalError as exc:
         print(f"recovery rehearsal failed: {exc}", file=sys.stderr)

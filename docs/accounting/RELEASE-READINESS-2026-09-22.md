@@ -1,10 +1,13 @@
 # Accounting release readiness — source snapshot 2026-09-22
 
-Current isolated source head is `0173`. A local synthetic PostgreSQL 18.4
-rehearsal upgraded to `0173`, downgraded to `0172`, reapplied `0173` and
-checked that both payroll-file constraints include the new `work_schedule`
-kind only at `0173`. The same run completed paired database/private-file
-recovery and verified cleanup of its generated resources. This is local
+Current isolated source head is `0174`. A local synthetic PostgreSQL 18.4
+rehearsal checked both `0173 → 0172 → 0174` for the work-schedule file
+constraints and `0174 → 0173 → 0174` for the reconciliation issue blocker.
+The same run completed paired database/private-file recovery and verified
+cleanup of its generated resources. Five PostgreSQL reconciliation/queue
+tests passed, including a concurrent write. New reconciliation acceptance
+checks the uploaded right-hand OSV against current ERP ledger bytes; legacy
+receipts without that proof are not cutover-ready. This is local source and
 schema evidence, not a target-database or deployment receipt.
 
 Current local synthetic PostgreSQL upgrade/restore and payroll-guard evidence

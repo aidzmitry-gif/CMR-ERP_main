@@ -32,6 +32,24 @@ it("shows validation failures without a successful protocol", async () => {
   expect(screen.queryByText("Скачать протокол JSON")).not.toBeInTheDocument();
 });
 
+it("downloads the selected ERP period and blocks acceptance when uploaded right CSV differs from ledger", async () => {
+  const candidate = { status: "no_numeric_differences", cutover_ready: false, erp_ledger_verified: false,
+    eligibility_blockers: ["erp_snapshot_mismatch"],
+    left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" },
+    right: { sha256: "right", status: "closed_periods" }, differences: [] };
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => candidate }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingReconciliation org="7" start="2026-09-01" end="2026-09-30" />);
+  expect(screen.getByRole("link", { name: "Скачать ОСВ ERP за выбранный период" })).toHaveAttribute(
+    "href", "/api/accounting/organizations/7/reconciliation/erp-osv.csv?start=2026-09-01&end=2026-09-30",
+  );
+  selectFiles();
+  fireEvent.click(screen.getByText("Сравнить ОСВ"));
+  expect(await screen.findByText(/Правая ОСВ не совпадает с текущим отчётом ERP/)).toBeInTheDocument();
+  expect(screen.queryByText("Принять протокол бухгалтером")).not.toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 it("persists a scoped immutable queue for mismatches with the responsible owner", async () => {
   const candidate = { status: "differences", cutover_ready: false, eligibility_blockers: ["numeric_differences"], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods", pending_documents: 0 }, right: { sha256: "right", status: "closed_periods", pending_documents: 0 }, differences: [{ account: "001", currency: "USD", off_balance: false, dimensions: { sku: "A" }, presence: "both", fields: { debit: { left: "1.00", right: "2.00", right_minus_left: "1.00" } } }] };
   const queued = { organization_id: 7, issue_id: 18, request_key: "00000000-0000-4000-8000-000000000018", period_from: "2026-09-01", period_to: "2026-09-30", left_digest: "left", right_digest: "right", difference_count: 1, eligibility_blockers: ["numeric_differences"], responsible: "accountant:stock", evidence: "Расхождение передано по складскому источнику", requires_fresh_comparison: true, accepted_by_accountant: false, cutover_ready: false };

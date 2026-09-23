@@ -748,11 +748,27 @@ async def get_report(org_id: int, start: date, end: date, ctx=Depends(member)):
     return await reports.report(ctx[0], org_id, start, end)
 
 
+@router.get("/organizations/{org_id}/reconciliation/erp-osv.csv")
+async def export_erp_osv(org_id: int, start: date, end: date, ctx=Depends(member)):
+    try:
+        raw = await reconciliation.erp_snapshot(ctx[0], org_id, start, end)
+    except (ValueError, csv.Error, service.AccountingError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return Response(content=raw, media_type="text/csv; charset=utf-8", headers={
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f'attachment; filename="erp-osv-{org_id}-{start}-{end}.csv"',
+    })
+
+
 @router.post("/organizations/{org_id}/reconciliation")
 async def compare_reports(org_id: int, data: ReconciliationInput, ctx=Depends(member)):
     try:
-        return await run_in_threadpool(reconciliation.compare_uploads, org_id, data.left_base64, data.right_base64)
-    except (ValueError, csv.Error) as exc:
+        _, right_raw, protocol = await run_in_threadpool(
+            reconciliation.prepare_queue_uploads, org_id, data.left_base64, data.right_base64,
+        )
+        return await reconciliation.verify_erp_snapshot(ctx[0], org_id, right_raw, protocol)
+    except (ValueError, csv.Error, service.AccountingError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
 

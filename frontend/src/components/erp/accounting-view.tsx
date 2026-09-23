@@ -243,7 +243,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}
     {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organizations.find((row) => String(row.id) === org)} onBusyChange={setControlsBusy} />}
     {tab === "invoice-settlements" && <AccountingInvoiceSettlements org={org} onBusyChange={setControlsBusy} />}
-    {tab === "reconciliation" && <AccountingReconciliation key={org} org={org} />}
+    {tab === "reconciliation" && <AccountingReconciliation key={org} org={org} start={start} end={end} />}
     {tab === "input-vat" && <AccountingInputVat org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {tab === "output-vat" && <AccountingOutputVat org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {tab === "foreign-trade" && <AccountingForeignTrade org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
